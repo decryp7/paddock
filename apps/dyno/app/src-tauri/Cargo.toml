@@ -51,6 +51,8 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Report a problem: Dyno's own section beside paddock-diag's, the app's folders and the log handle the dialog's Logging section drives.
 paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
 paddock-env = { path = "../../../../crates/paddock-env" }
+# Report a problem: the time of a report written without the window.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 paddock-log = { path = "../../../../crates/paddock-log" }
 # Dyno's MCP tools: two reads and two actions behind the user's opt-in (ADR 0032, D7).
 paddock-mcp = { path = "../../../../crates/paddock-mcp" }
@@ -58,7 +60,7 @@ paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["ke
 # The shared launchd readers and the repair decision (a pending or running job is never stale).
 paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }
-paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
+paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri", "dialog"] }
 paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }
 # The per-machine hand-off's contract (which download `apply-update` accepts, its exit codes' sentences) and the installer lock
 # (ADR 0053 section 4); `paddock-updater` cannot depend on it, so the app wires it in (`per_machine`).
@@ -106,6 +108,8 @@ objc2-service-management = { version = "0.3", default-features = false, features
 # The capabilities are resolved through Tauri's own ACL in the tests.
 tauri-utils = "2.10"
 toml = "0.9"
+# Opens the bundle the report tests write.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # The shell plugin on Tauri's mock runtime (no window, no user folders).
 tauri = { version = "2.12.4", features = ["test"] }
 paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }

@@ -23,6 +23,7 @@ use paddock_ipc::endpoint::{Access, Listener};
 use paddock_ipc::AccountLimits;
 use paddock_jobs::time::SystemClock;
 use paddock_service::privileged::RealFiles;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -59,6 +60,27 @@ pub fn os_of(host: HelperHost) -> Os {
     }
 }
 
+/// The lifecycle file (macOS and Linux; there is none on Windows, where a standard user can make the folder and the Event Log says the
+/// same): `None` event reads how the last run ended, `Some` records one.
+fn note(paths: &HelperPaths, event: Option<&str>) {
+    let Some(path) = &paths.lifecycle else { return };
+    note_to(path, event, REMOVED.load(Ordering::SeqCst));
+}
+
+/// Set when the helper removed itself (an Uninstall request, the orphan watch): its files are gone and must stay gone.
+static REMOVED: AtomicBool = AtomicBool::new(false);
+
+fn note_to(path: &Path, event: Option<&str>, removed: bool) {
+    // After the helper removed itself its files are gone: a late `stopped` would bring the file (and, on Linux, its folder) back.
+    if removed && event.is_some() {
+        return;
+    }
+    match event {
+        None => crate::lifecycle::log_previous_run(path),
+        Some(event) => crate::lifecycle::record(path, event),
+    }
+}
+
 /// Opens the system endpoint and serves until `stop` is set. Before that it checks, by the facts of the open objects, that the
 /// program, the data folder and the configuration are protected (fail closed), reads the policy file (defaults and a note
 /// when it is not usable), starts the helper's log and the orphan watch. The endpoint is bound as the first instance in a
@@ -84,7 +106,13 @@ pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<Earl
     }
     let log_gate = log.install();
     log::info!(version = crate::VERSION, host = format!("{:?}", paths.host).as_str(); "Helper: starting");
+    note(paths, None);
+    note(paths, Some("starting"));
     let result = start(paths, stop, &log_gate, early);
+    match &result {
+        Ok(()) => note(paths, Some("stopped")),
+        Err(e) => note(paths, Some(&format!("refused:{:?}", e.failure))),
+    }
     // A refusal is written once, by `service_main`, with its cause chain, code and next step.
     result
 }
@@ -151,6 +179,7 @@ fn start(
         )
     })?;
     log::info!(endpoint = paths.endpoint.as_str(), owner = config.owner.to_arg().as_str(), version = crate::VERSION; "Helper: serving");
+    note(paths, Some("serving"));
     let remove = removal(paths.clone(), stop.clone(), "an Uninstall request from the app", os_log.clone());
     let orphan_remove = removal(paths.clone(), stop.clone(), "the app it serves has been gone for an hour", os_log);
     let _orphan = start_orphan_watch(config.app.clone(), orphan_remove);
@@ -211,6 +240,18 @@ fn lock_folders(trust: &crate::protect::TrustGuard, paths: &HelperPaths) -> Resu
     Ok(())
 }
 
+/// Runs the self-removal with `removed` raised first: the last step of the real removal (`systemctl disable --now`, `launchctl bootout`)
+/// sends this process SIGTERM, so a `stopped` note can be written before this function would have raised it. A removal that fails left
+/// the helper's files, so the flag goes down again.
+fn remove_self_with<T>(removed: &AtomicBool, uninstall: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    removed.store(true, Ordering::SeqCst);
+    let result = uninstall();
+    if result.is_err() {
+        removed.store(false, Ordering::SeqCst);
+    }
+    result
+}
+
 /// Removes the helper after a moment (the caller of `Uninstall` gets its answer first; the removal ends with the stop of this
 /// very job).
 fn removal(paths: HelperPaths, stop: Arc<AtomicBool>, why: &'static str, os_log: Option<EarlySink>) -> Arc<dyn Fn() + Send + Sync> {
@@ -226,7 +267,7 @@ fn removal(paths: HelperPaths, stop: Arc<AtomicBool>, why: &'static str, os_log:
         let (paths, stop) = (paths.clone(), stop.clone());
         let spawned = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));
-            if let Err(e) = crate::setup::uninstall_self(os_of(paths.host)) {
+            if let Err(e) = remove_self_with(&REMOVED, || crate::setup::uninstall_self(os_of(paths.host))) {
                 log::error!(error = e.as_str(); "Helper: removing itself failed");
             }
             stop.store(true, Ordering::SeqCst);
@@ -295,4 +336,39 @@ fn create_endpoint_dir(dir: &std::path::Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn create_endpoint_dir(dir: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn the_removed_flag_is_up_before_the_removal_can_stop_the_process_and_down_again_when_it_fails() {
+        let flag = AtomicBool::new(false);
+        let mut during = None;
+        let done = remove_self_with(&flag, || {
+            // The last step of the real removal (systemctl disable --now, launchctl bootout) sends this process SIGTERM: whatever
+            // runs next, `stopped` included, must already see the flag.
+            during = Some(flag.load(Ordering::SeqCst));
+            Ok(())
+        });
+        assert!(done.is_ok());
+        assert_eq!(during, Some(true), "the flag was not set while the removal ran");
+        assert!(flag.load(Ordering::SeqCst));
+        let failed = remove_self_with(&flag, || Err::<(), _>("the service manager refused".to_string()));
+        assert!(failed.is_err());
+        assert!(
+            !flag.load(Ordering::SeqCst),
+            "a removal that failed leaves the helper's files, so the stop note may be written"
+        );
+    }
+
+    #[test]
+    fn nothing_is_written_after_the_helper_removed_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lifecycle.log");
+        // The self-uninstall removed the file; the `stopped` note that follows serve's return must not bring it back.
+        note_to(&file, Some("stopped"), true);
+        assert!(!file.exists(), "the removed lifecycle file was recreated by the stop note");
+    }
 }

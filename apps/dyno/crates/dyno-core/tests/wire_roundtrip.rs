@@ -225,8 +225,7 @@ fn tag_request(v: &Request) -> &'static str {
         Request::Capture => "Capture",
         Request::RecorderSnapshots => "RecorderSnapshots",
         Request::RecorderSnapshot { .. } => "RecorderSnapshot",
-        Request::DiagnosticsPreview => "DiagnosticsPreview",
-        Request::SaveDiagnostics { .. } => "SaveDiagnostics",
+        Request::DiagnosticsFiles => "DiagnosticsFiles",
         Request::Network { .. } => "Network",
         Request::LookupIp { .. } => "LookupIp",
         Request::Benchmarks => "Benchmarks",
@@ -332,8 +331,7 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::Captured(_) => "Captured",
         Reply::RecorderSnapshots(_) => "RecorderSnapshots",
         Reply::RecorderSnapshot(_) => "RecorderSnapshot",
-        Reply::DiagnosticsPreview(_) => "DiagnosticsPreview",
-        Reply::DiagnosticsSaved(_) => "DiagnosticsSaved",
+        Reply::DiagnosticsFiles(_) => "DiagnosticsFiles",
         Reply::Url(_) => "Url",
         Reply::Network(_) => "Network",
         Reply::Benchmarks(_) => "Benchmarks",
@@ -603,8 +601,7 @@ fn request_samples() -> Vec<Request> {
         Request::Capture,
         Request::RecorderSnapshots,
         Request::RecorderSnapshot { id: 3 },
-        Request::DiagnosticsPreview,
-        Request::SaveDiagnostics { path: s("/d.zip") },
+        Request::DiagnosticsFiles,
         Request::Network { query: Default::default() },
         Request::LookupIp {
             ip: s("192.0.2.1"),
@@ -802,7 +799,7 @@ fn wire_job() -> paddock_jobs::wire::WireSnapshot {
 }
 
 fn reply_samples() -> Vec<Reply> {
-    use dyno_core::{counters, diagnostics, extras, issues, recorder, report, widgets};
+    use dyno_core::{counters, extras, issues, recorder, report, widgets};
     let index = dyno_core::disk::index::DiskIndex::new("r", dyno_core::disk::index::ScanLimits::default());
     vec![
         Reply::Ok,
@@ -839,12 +836,7 @@ fn reply_samples() -> Vec<Reply> {
             recorder::CaptureReason::Manual,
             vec![],
         ))),
-        Reply::DiagnosticsPreview(zero()),
-        Reply::DiagnosticsSaved(diagnostics::SavedDiagnostics {
-            path: "/x.zip".into(),
-            bytes: 1,
-            files: 1,
-        }),
+        Reply::DiagnosticsFiles(zero()),
         Reply::Url("https://example.com/".into()),
         Reply::Network(zero()),
         Reply::Benchmarks(zero()),

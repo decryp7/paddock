@@ -76,7 +76,7 @@ Every feature, with its state, is in [docs/features.md](docs/features.md). Built
    sleep, boot, GPU, inventory, find files (view only) and backup checks
    ([ADR 0020](docs/adr/0020-extras-backup-checks-and-taming-proof.md)).
 8. **Benchmarks on click,** network view, IP lookup, web and VirusTotal search (they only open your browser), the flight
-   recorder and the diagnostics bundle.
+   recorder and the problem report (a zip you look through and save yourself).
 9. **Tray** with a live metric and a compact dropdown; closing the window keeps Dyno measuring.
 10. **Native feel** ([ADR 0009](docs/adr/0009-native-feel.md)), light and dark themes, a colour-vision-checked palette
     ([ADR 0011](docs/adr/0011-design-system.md)).

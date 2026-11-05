@@ -18,6 +18,7 @@ pub mod cli;
 pub mod config;
 pub mod dispatch;
 pub mod elevate;
+pub mod lifecycle;
 pub mod logfile;
 pub mod orphan;
 pub mod paths;

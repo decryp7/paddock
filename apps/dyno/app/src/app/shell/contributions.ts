@@ -170,13 +170,6 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
       run: (ctx) => ctx.exportReport(),
     }),
     defineCommand<DynoContext>({
-      id: 'dy.save-diagnostics',
-      title: msg('dy.save-diagnostics', 'Save bundle…'),
-      category: msg('dy.category.diagnostics', 'Diagnostics'),
-      enabled: (ctx) => ctx.canSaveDiagnostics(),
-      run: (ctx) => ctx.saveDiagnostics(),
-    }),
-    defineCommand<DynoContext>({
       id: 'dy.add-alarm-rule',
       title: msg('dy.add-alarm-rule', 'Add rule…'),
       category: msg('dy.category.alarms', 'Alarms'),

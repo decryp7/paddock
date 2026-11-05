@@ -1412,7 +1412,7 @@ paddock_log::log_from_webview(window, level, message);               // the webv
 ```
 
 - Files: `<id>.<day>.log` (process `app`) or `<id>-<process>.<day>.log` in `AppDirs::logs()`; `LogSettings` = level, `max_file_mb`
-  (20; after it only errors, with a one-time notice) and `keep_files` (7 older days). An unusable folder never stops the app:
+  (20; after it only errors, with a one-time notice; Debug and Trace may use half of it) and `keep_files` (30 older days, and 100 MB in all per process: the oldest days go first). An unusable folder never stops the app:
   lines are dropped, `LogHandle::file_problem()` says why (for a health entry), the open is retried every 30 s.
 - Privacy: the default `Redactor` masks secret-like keys, replaces content-like keys (`Content`, `Body`, `Line`, `Text`,
   `Query`, `Prompt`, ...) by `<omitted: N characters>` and bounds every value; apps add `with_hook` rules (paths, user names);

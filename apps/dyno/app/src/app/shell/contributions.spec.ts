@@ -15,7 +15,6 @@ import { dynoContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { NAV } from './nav';
 import { ReportsStore } from '../state/reports.store';
-import { DiagnosticsStore } from '../state/diagnostics.store';
 import { SettingsStore } from '../state/settings.store';
 import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
@@ -82,7 +81,6 @@ describe('Dyno contributions', () => {
     const check = vi.spyOn(TestBed.inject(BackupStore), 'check');
     const run = vi.spyOn(TestBed.inject(DiagnosisStore), 'run');
     const exportReport = vi.spyOn(TestBed.inject(ReportsStore), 'export');
-    const save = vi.spyOn(TestBed.inject(DiagnosticsStore), 'save');
     await TestBed.inject(ShellContextHost).load();
     const cases: [string, string, { mock: { calls: unknown[][] } }][] = [
       ['dy.refresh-history', 'dy.dashboard', history],
@@ -91,7 +89,6 @@ describe('Dyno contributions', () => {
       ['dy.check-backup', 'dy.backup', check],
       ['dy.run-why-slow', 'dy.why-slow', run],
       ['dy.export-report', 'dy.reports', exportReport],
-      ['dy.save-diagnostics', 'dy.diagnostics', save],
     ];
     for (const [command, page, action] of cases) {
       go.mockClear();
@@ -147,7 +144,7 @@ describe('Dyno contributions', () => {
   it('title every palette command in sentence case, under a category', () => {
     const own = TestBed.inject(ContributionRegistry).commands().filter((c) => c.id.startsWith('dy.'));
     expect(own.map((c) => c.id)).toEqual([
-      'dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.export-issues', 'dy.check-backup', 'dy.run-why-slow', 'dy.export-report', 'dy.save-diagnostics', 'dy.add-alarm-rule',
+      'dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.export-issues', 'dy.check-backup', 'dy.run-why-slow', 'dy.export-report', 'dy.add-alarm-rule',
     ]);
     for (const c of own) {
       expect(c.category).toBeDefined();

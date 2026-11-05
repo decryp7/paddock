@@ -2,11 +2,10 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { InventoryFormat, SoftwareItem } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatAgo, plural } from '../../shared/format';
+import { fileName, formatAgo, plural } from '../../shared/format';
 import { injectNow } from '../../shared/now';
 import { Icon } from '../../shared/icon';
 import { ExtrasStore } from '../../state/extras.store';
-import { fileName } from '../../state/diagnostics.store';
 import { type Numbered, filterSoftware, hue, initial, numberKey, numbered } from './extras-model';
 import { EXTRAS_STYLES } from './extras-styles';
 import { MatButton } from '@angular/material/button';

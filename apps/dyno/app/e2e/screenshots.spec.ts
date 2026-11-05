@@ -218,7 +218,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     },
   },
   { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },
-  { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Save bundle/ })).toBeVisible()) },
+  { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Report a problem/ })).toBeVisible()) },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my computer slow?' })).toBeVisible()) },
   {
     name: 'throttling',

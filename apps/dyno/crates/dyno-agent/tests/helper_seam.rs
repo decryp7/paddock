@@ -346,8 +346,8 @@ fn any_other_account_gets_the_same_counters() {
 }
 
 fn bundle_file(rig: &Rig, path: &str) -> Option<String> {
-    let bundle = dyno_agent::diagnostics::collect(&rig.running.as_ref().unwrap().shared).unwrap();
-    bundle.files.iter().find(|f| f.path == path).map(|f| f.text.clone())
+    let bundle = dyno_agent::diagnostics::collect(&rig.running.as_ref().unwrap().shared);
+    bundle.files.iter().find(|f| f.name == path).map(|f| f.text.clone())
 }
 
 #[test]

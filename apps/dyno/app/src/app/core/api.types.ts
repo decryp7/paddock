@@ -1129,38 +1129,6 @@ export interface RecorderSnapshot {
   samples: RecorderSample[];
 }
 
-// ------------------------------------------------------------------------------------------------------ diagnostics
-// Agent requests: `diagnosticsPreview` -> BundlePreview (nothing is written), `saveDiagnostics {path}` -> SavedDiagnostics.
-// The path comes from the user's save dialog: absolute, ending in `.zip`, in an existing folder (the engine re-checks).
-
-export interface RedactionCounts {
-  homePaths: number;
-  profilePaths: number;
-  machineNames: number;
-  userNames: number;
-  emails: number;
-  ipAddresses: number;
-}
-
-export interface BundleFileInfo {
-  path: string;
-  description: string;
-  bytes: number;
-}
-
-export interface BundlePreview {
-  /** Every file with its size, the manifest included. */
-  files: BundleFileInfo[];
-  totalBytes: number;
-  redactions: RedactionCounts;
-}
-
-export interface SavedDiagnostics {
-  path: string;
-  bytes: number;
-  files: number;
-}
-
 // ------------------------------------------------------------------------------------------------------ benchmarks
 // Mirrors `dyno_core::bench`. Runs start only on a click; the engine answers `BenchOverview` and the UI polls it
 // while `running` is set.

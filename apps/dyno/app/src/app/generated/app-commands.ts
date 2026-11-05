@@ -13,7 +13,6 @@ export const APP_COMMANDS = {
   preview_widget_layout: { kind: 'query', windows: ['main'], limit: 262144 },
   run_widget_action: { kind: 'mutation', windows: ['main', 'tray'], limit: 262144 },
   save_benchmarks: { kind: 'mutation', windows: ['main'], limit: 262144 },
-  save_diagnostics: { kind: 'mutation', windows: ['main'], limit: 262144 },
   save_inventory_report: { kind: 'mutation', windows: ['main'], limit: 262144 },
   save_issues: { kind: 'mutation', windows: ['main'], limit: 262144 },
   save_report: { kind: 'mutation', windows: ['main'], limit: 262144 },

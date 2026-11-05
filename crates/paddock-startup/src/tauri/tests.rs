@@ -82,9 +82,20 @@ impl Asker<MockRuntime> for FakeAsker {
     }
 }
 
+/// The first design's timings (a reloaded page is asked about after one more `ready_timeout`, Keep Waiting does not lengthen the wait),
+/// so the flows below read in short times; the longer waits are tested on the watchdog itself.
+fn quick() -> Config {
+    Config {
+        ask_timeout: Config::default().ready_timeout,
+        max_doublings: 0,
+        ..Config::default()
+    }
+}
+
 fn builder(seen: &Shared) -> StartupBuilder<MockRuntime> {
     let (a, b, c, d) = (seen.clone(), seen.clone(), seen.clone(), seen.clone());
     Startup::builder()
+        .config(quick())
         .on_unresponsive(move |_app, label, on| lock(&a).unresponsive.push((label.to_string(), on)))
         .on_ready(move |webview, why| lock(&b).ready.push((webview.label().to_string(), why)))
         .safe_mode(move |_app, label| {
@@ -208,6 +219,145 @@ fn a_page_that_reports_ready_gets_a_plain_reply_and_the_hooks_hear_it() {
 }
 
 #[test]
+fn a_paused_process_is_said_in_the_log_and_does_not_start_a_question() {
+    let (app, seen) = app();
+    let w = window(&app, "w-paused");
+    let t0 = Instant::now();
+    page_started(&app, &w, t0);
+    tick(&app, t0, 0, 1_000);
+    // No tick for a minute: the process was suspended. The page's clock restarts instead of timing out at once.
+    startup(&app).tick(app.handle(), t0 + Duration::from_secs(60));
+    assert!(lock(&seen).asked.is_empty() && lock(&seen).unresponsive.is_empty());
+    assert!(
+        lock(&LOGGED)
+            .iter()
+            .any(|(l, _, m)| *l == log::Level::Warn && m.starts_with("process.paused")),
+        "the pause is in the log"
+    );
+    startup(&app).stop();
+}
+
+#[test]
+fn visibility_is_shown_and_not_minimised_and_unknown_counts_as_visible() {
+    assert!(visibility(Some(true), Some(false)));
+    assert!(!visibility(Some(false), Some(false)), "hidden");
+    assert!(!visibility(Some(true), Some(true)), "minimised");
+    assert!(
+        visibility(None, None),
+        "a window the OS cannot report on is treated as visible"
+    );
+}
+
+/// The wiring from the OS's answer to the question, with the default timings: a hidden window is reloaded but never asked about; a visible
+/// one is asked no earlier than 70 s. (The mock runtime reports every window visible, so the probe stands in for the OS.)
+#[test]
+fn a_hidden_window_is_never_asked_about_through_the_real_tick() {
+    let seen = Shared::default();
+    let configured = Startup::builder()
+        .asker(FakeAsker(seen.clone()))
+        .window_visibility(|w| w.label() != "w-hidden")
+        .build()
+        .unwrap();
+    let app = app_with(configured);
+    let hidden = window(&app, "w-hidden");
+    let shown = window(&app, "w-shown");
+    let t0 = Instant::now();
+    page_started(&app, &hidden, t0);
+    page_started(&app, &shown, t0);
+    tick(&app, t0, 0, 69_000);
+    assert!(
+        lock(&seen).asked.is_empty(),
+        "nothing is asked before 70 s: {:?}",
+        lock(&seen).asked.len()
+    );
+    tick(&app, t0, 69_500, 400_000);
+    let asked: Vec<String> = lock(&seen).asked.iter().map(|(l, _)| l.clone()).collect();
+    assert_eq!(asked, ["w-shown"], "only the visible window is asked about");
+    startup(&app).stop();
+}
+
+#[test]
+fn a_panic_in_the_report_hook_does_not_leave_the_question_open_for_ever() {
+    let seen = Shared::default();
+    let configured = Startup::builder()
+        .config(quick())
+        .asker(FakeAsker(seen.clone()))
+        .report(|_app, _label| -> Result<(), String> { panic!("the report hook panicked") })
+        .build()
+        .unwrap();
+    let app = app_with(configured);
+    let w = window(&app, "w-panics");
+    let t0 = Instant::now();
+    page_started(&app, &w, t0);
+    tick(&app, t0, 0, 20_000);
+    let answer = lock(&seen).answers.pop().unwrap();
+    answer(Choice::SaveReport);
+    // The hook panics on its own thread; the window must go back to waiting, bounded by a deadline (no sleep).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while startup(&app).with(|w| w.is_asking("w-panics") || w.is_question_open("w-panics")) {
+        assert!(
+            Instant::now() < deadline,
+            "the question stayed open after the hook panicked"
+        );
+        std::thread::yield_now();
+    }
+    startup(&app).stop();
+}
+
+#[test]
+fn the_question_offers_save_report_and_stays_closed_while_the_report_is_written() {
+    let seen = Shared::default();
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let (tx, released) = (Mutex::new(tx), Mutex::new(released));
+    let configured = Startup::builder()
+        .config(quick())
+        .asker(FakeAsker(seen.clone()))
+        .report(move |_app, label| {
+            let _ = lock(&tx).send(label.to_string());
+            // The save dialog is open until the test lets go.
+            let _ = lock(&released).recv();
+            Ok(())
+        })
+        .build()
+        .unwrap();
+    let app = app_with(configured);
+    let w = window(&app, "w-report");
+    let t0 = Instant::now();
+    page_started(&app, &w, t0);
+    tick(&app, t0, 0, 10_000);
+    tick(&app, t0, 10_500, 20_000);
+    let buttons = lock(&seen).asked[0].1.buttons.clone();
+    assert!(
+        buttons.contains(&crate::ask::SAVE_REPORT_LABEL),
+        "{buttons:?}"
+    );
+    let answer = lock(&seen).answers.pop().unwrap();
+    answer(Choice::SaveReport);
+    // The hook runs on its own thread: waited on by its signal (bounded), never by a sleep.
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(10)).unwrap(),
+        "w-report"
+    );
+    // The dialog is still open for minutes: the window is not asked again meanwhile.
+    tick(&app, t0, 20_500, 200_000);
+    assert_eq!(
+        lock(&seen).asked.len(),
+        1,
+        "no second question while the report is being saved"
+    );
+    assert!(startup(&app).with(|w| w.is_asking("w-report")));
+    release.send(()).unwrap();
+    let mut tries = 0;
+    while startup(&app).with(|w| w.is_asking("w-report")) {
+        tries += 1;
+        assert!(tries < 5_000_000, "the window never went back to waiting");
+        std::thread::yield_now();
+    }
+    startup(&app).stop();
+}
+
+#[test]
 fn a_silent_window_is_reloaded_once_then_the_user_is_asked_and_each_answer_is_applied() {
     let (app, seen) = app();
     let w = window(&app, "w-2");
@@ -279,6 +429,7 @@ fn a_failing_safe_mode_restart_is_logged_and_without_one_the_question_has_no_saf
     let seen2 = Shared::default();
     let app2 = app_with(
         Startup::builder()
+            .config(quick())
             .asker(FakeAsker(seen2.clone()))
             .build()
             .unwrap(),
@@ -298,7 +449,7 @@ fn a_failing_safe_mode_restart_is_logged_and_without_one_the_question_has_no_saf
 
 #[test]
 fn without_an_asker_the_question_is_logged_and_the_window_keeps_waiting() {
-    let app = app_with(Startup::builder().build().unwrap());
+    let app = app_with(Startup::builder().config(quick()).build().unwrap());
     let w = window(&app, "w-noask");
     let t0 = Instant::now();
     page_started(&app, &w, t0);
@@ -340,7 +491,7 @@ fn a_page_that_stops_answering_after_ready_is_marked_asked_about_and_recovers_on
     }
     assert!(
         log_of("w-3").iter().any(|(l, m)| *l == log::Level::Error
-            && m == "Window w-3 stopped responding; asking the user")
+            && m.starts_with("Window w-3 stopped responding"))
     );
     // It answers again (a late answer to its latest ping).
     let seq = *lock(&got).last().unwrap();

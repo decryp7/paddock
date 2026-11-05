@@ -335,12 +335,12 @@ impl NativeIcon {
                         h: s.height,
                     };
                     if let Err(e) = paddock_window::tauri::toggle_popover(tray.app_handle(), None, anchor) {
-                        logging::info(&format!("could not open the popover: {}", e.message));
+                        logging::warn(&format!("could not open the popover: {}", e.message));
                     }
                 }
             })
             .build(app)
-            .inspect_err(|e| logging::info(&format!("tray icon {}: could not be created: {e}", tray_id(&spec.id))))?;
+            .inspect_err(|e| logging::warn(&format!("tray icon {}: could not be created: {e}", tray_id(&spec.id))))?;
         Ok(NativeIcon {
             icon,
             _not_send: std::marker::PhantomData,

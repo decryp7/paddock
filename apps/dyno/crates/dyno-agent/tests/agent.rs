@@ -598,35 +598,22 @@ fn the_flight_recorder_captures_on_request_and_when_an_alarm_fires() {
 }
 
 #[test]
-fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
+fn the_agent_hands_over_its_data_files_for_the_report() {
     let h = Harness::start();
     let peer = h.client();
-    let Reply::DiagnosticsPreview(p) = ask_within(&peer, Request::DiagnosticsPreview, SLOW).unwrap() else {
-        panic!("preview")
+    let Reply::DiagnosticsFiles(f) = ask_within(&peer, Request::DiagnosticsFiles, SLOW).unwrap() else {
+        panic!("files")
     };
-    let names: Vec<&str> = p.files.iter().map(|f| f.path.as_str()).collect();
-    assert!(names.contains(&"system/inventory.json") && names.contains(&"settings.json") && names.contains(&"manifest.json"));
-    assert!(p.total_bytes > 0);
-    let dest = h._tmp.path().join("diag.zip");
-    let Reply::DiagnosticsSaved(saved) = ask(
-        &peer,
-        Request::SaveDiagnostics {
-            path: dest.to_string_lossy().into_owned(),
-        },
-    )
-    .unwrap() else {
-        panic!("saved")
-    };
-    assert_eq!(saved.files as usize, p.files.len());
-    assert!(std::fs::metadata(&dest).unwrap().len() == saved.bytes);
-    // Refused: relative path, wrong extension, missing folder.
-    for bad in [
-        "diag.zip".to_string(),
-        h._tmp.path().join("diag.txt").to_string_lossy().into_owned(),
-        h._tmp.path().join("nope").join("d.zip").to_string_lossy().into_owned(),
-    ] {
-        assert!(ask(&peer, Request::SaveDiagnostics { path: bad }).is_err());
-    }
+    let names: Vec<&str> = f.files.iter().map(|f| f.name.as_str()).collect();
+    assert!(
+        names.contains(&"system/inventory.json") && names.contains(&"alarms/open.json"),
+        "{names:?}"
+    );
+    assert!(names.iter().all(|n| !n.starts_with("logs/") && *n != "manifest.json"), "{names:?}");
+    assert!(f
+        .files
+        .iter()
+        .all(|f| !f.text.is_empty() && dyno_core::diagnostics::MAX_PATH_CHARS >= f.name.len()));
 }
 
 // ------------------------------------------------------------------------------------------------------- disk map

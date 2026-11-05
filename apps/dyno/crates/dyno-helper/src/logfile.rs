@@ -275,8 +275,22 @@ impl Log for HelperLog {
     fn flush(&self) {}
 }
 
-/// The last `n` lines of the log at `path`, oldest first, each cut at 400 characters. A missing log is no lines.
+/// The last `n` lines of the log at `path`, oldest first, each cut at 400 characters. A missing log is no lines. When the log was
+/// rotated a moment ago and holds fewer than `n` lines, the end of the rotated file (`<path>.1`) comes first, so a report taken
+/// right after a rotation still shows what led up to it.
 pub fn tail(path: &Path, n: usize) -> Vec<String> {
+    let mut lines = tail_of_file(path, n);
+    if lines.len() < n {
+        let mut rotated = path.as_os_str().to_owned();
+        rotated.push(".1");
+        let mut older = tail_of_file(Path::new(&rotated), n - lines.len());
+        older.append(&mut lines);
+        return older;
+    }
+    lines
+}
+
+fn tail_of_file(path: &Path, n: usize) -> Vec<String> {
     let Ok(mut file) = std::fs::File::open(path) else {
         return Vec::new();
     };
@@ -464,6 +478,26 @@ mod tests {
             assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
         }
         log.flush();
+    }
+
+    #[test]
+    fn a_fresh_log_after_a_rotation_continues_from_the_rotated_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helper.log");
+        std::fs::write(dir.path().join("helper.log.1"), "old-1\nold-2\nold-3\n").unwrap();
+        std::fs::write(&path, "new-1\nnew-2\n").unwrap();
+        assert_eq!(tail(&path, 4), ["old-2", "old-3", "new-1", "new-2"]);
+        assert_eq!(
+            tail(&path, 2),
+            ["new-1", "new-2"],
+            "no look at the rotated file when the log has enough"
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            tail(&path, 2),
+            ["old-2", "old-3"],
+            "a log not yet recreated still shows the rotated one"
+        );
     }
 
     #[test]

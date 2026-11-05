@@ -24,6 +24,35 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-setup`: `check-version`
 - New command `check-version --dir <install folder> --expect <version>` (exit 12 on a mismatch, `Exit::VersionMismatch`), `versioncheck`, and `native::fileversion::file_version` (also used by `apply-update`). The include's `PADDOCK_INSTALL_SETUP` runs it after the copy and only reports. `numeric_version` ignores a prerelease or build suffix, so `1.1.0-test.1` no longer gives a version resource of 0.0.0. `native::RealDirs` is public for the app's check of its own install folder.
 
+### Logs that explain: unclean exits, pauses, tool runs, update outcomes
+- New `paddock_startup::run_marker` (`begin`, `RunMarker::end`): for a process without a session to restore (a background agent, a tool), a marker file left by a run that never ended says "Previous run did not end cleanly" at the next start (warn). Dyno's app and agent use it; the helper reads the same fact from its lifecycle file.
+- `Watchdog::due` logs `process.paused` (warn, with the gap) when the app process was not running between two ticks, the case that explains a slow start or a missed ping.
+- `paddock_proc::run_bounded` logs `tool.run` for every run: the program name and argument count (never the arguments), the exit (code, signal, timeout, output cap), the time, and the last 200 characters of its error output when it failed (warn; a success is a debug line).
+- `paddock_updater` logs `update.check` (newer version, up to date, or why it failed) and `update.download` (started, verified, or why it failed). `log` is now a plain dependency of the crate.
+- `paddock_shell::logging` `Starting` also carries the seconds since boot and the names of the launch flags (never their values).
+- The 30-day `paddock-log` default (above) applies to every app that uses the shared log; the total cap keeps the disk use bounded, and an app that wants the old week sets `keep_files`.
+
+### `paddock-log`: a month of history, 100 MB per process in all
+- `LogSettings::default().keep_files` is 30 (was 7) for every app, and `DailyFiles` keeps at most `TOTAL_CAP_BYTES` (100 MB) of a process's daily files: the oldest days go first, today's file is never removed. Debug and Trace lines may use only half of a day's budget, so a Debug session cannot crowd out the Info, Warn and Error lines. The longer default is a plain improvement for all apps because the total cap bounds the disk; an app that wants the old week sets `keep_files`.
+
+### `paddock-diag`, `paddock-shell`: the report lists what the user did; every run starts with a line
+- `builtin::Trail` (added by `tauri::Setup::log`) writes `breadcrumbs.json`: the latest 100 breadcrumbs of the log (lines with an `Operation` property), oldest first.
+- `paddock_shell::logging::install` writes the first line of every run: `Starting <app>` with version, OS, architecture, process id and whether the install is portable.
+
+### `paddock-diag::export`, `paddock-startup`: a report without the window
+- A not-responding question is asked only about a window the user can see, after a longer wait (`Config::ask_timeout`, 60 s after the reload), and each Keep Waiting doubles the next wait (`Config::max_doublings`, up to 8 minutes; the same for the missed-ping count of a page that stopped answering); a window shown after a reload gets a fresh wait. `Config` gains `ask_timeout` and `max_doublings`, and `ConfigError::AskBeforeReload`. While a report is being written from the question it is not asked again.
+- `paddock-service`: `Sandbox::logs_dir` renders `LogsDirectory=` (0755), the one folder `ProtectSystem=strict` leaves a system service to write that everyone can read; Dyno's helper keeps its lifecycle file there.
+- `paddock_proc::run_bounded`'s `tool.run` replaces any word of the error output that looks like a path with `<path>` and warns once per program and exit.
+- New `paddock_diag::export` (`parse`, `resolve`, `write`): `<app> --export-diagnostics [<path.zip>] [--force]` writes the same redacted report as the dialog, with no window; it is the shared form of Debrief's `report/cli.rs` (Debrief migrates later).
+- `paddock_startup::Choice::SaveReport`, `ask::SAVE_REPORT_LABEL`, `Prompt::with_report` and `StartupBuilder::report(hook)`: when an app gives a report hook, the not-responding question offers "Save a problem report…" (a native dialog holds three buttons, so with Safe Mode offered closing the question is Keep Waiting). `Choice` gains a variant: a `match` on it handles `SaveReport`.
+
+### `paddock-diag`: more personal details and secrets are removed; a crash is reported once; a log that cannot be read is said
+- `Redactor::for_machine` also asks the OS for the machine's name (`gethostname`; a GUI app's environment has no `HOSTNAME`); `Redactor::for_machine_named` takes it as an argument (tests). A profile folder is replaced up to the next separator or quote (names with a space), in any case (`C:\USERS\`) and with doubled backslashes; MAC addresses become `<mac>` (counted under `ip_addresses`).
+- Secrets: `pass`, `pw`, `sig` and `signature` keys, `session-key`, URL credentials of any scheme, the rest of a `password:` line, PEM private key blocks, `ghp_...`, `AKIA...`, `pw_...` and `sk-...` tokens. A secret-named property of a CLEF log line is masked whatever its value type, and nested objects and arrays are walked.
+- `window::log_window_report` and `window::try_tail` say which log files could not be read and why; `builtin::Logs` adds a note, and an unreadable log folder no longer says "There are no log files yet". A log tail with no newline in it is kept (it was dropped).
+- `builtin::Crash` reads every `crash-<process>.json`, and the new `Section::reported` hook (called after a report is saved) clears the markers it reported; the old marker stayed for ever. `Section` gains the default method `reported`.
+- The Report a problem dialog says "Issue reports are public. Look through the zip first.", lists what is not in the report and says file names outside the home folder may remain.
+
 ### `paddock-service`: registrations are read back; `service_main` is the one service entry point (ADR 0054)
 - `Backend::register` and `replace_in_one_step` return the `Inspection` read back after the write; a read-back that disagrees is `RegisterError::NotAsWritten(Inspection)`, never `Ok`. A `LaunchdBundled` registration that reads back "needs approval" is now `RegisterError::NeedsApproval` at `register` (it was found at the next `inspect`). An implementation of `Backend` returns the inspection; a match on `RegisterError` handles `NotAsWritten`.
 - `Inspection` has `last_exit`, `restarts` and `unit`; `Job` has `Failed(LastExit)`. A stop by SIGHUP, SIGINT, SIGPIPE or SIGTERM, systemd's `Result=success` and a Windows service that has not started since boot (1077) are not failures.

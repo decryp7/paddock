@@ -10,7 +10,7 @@ publish = ["decryp7"]
 [features]
 # The Tauri adapter (`paddock_updater::tauri`: managed state, commands, the `paddock://updates` event, the automatic check
 # and the exit hook); the core never depends on Tauri.
-tauri = ["dep:tauri", "dep:log", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-download/tauri", "paddock-download/http"]
+tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-download/tauri", "paddock-download/http"]
 # The installer over `tauri-plugin-updater` (`paddock_updater::tauri::PluginInstaller`): the plugin verifies the signature
 # again and installs the platform's package. The app registers the plugin.
 install = ["tauri", "dep:tauri-plugin-updater", "dep:windows-sys"]
@@ -29,7 +29,7 @@ semver = "1"
 base64 = "0.22"
 minisign-verify = "0.3"
 tauri = { workspace = true, optional = true }
-log = { version = "0.4", features = ["kv"], optional = true }
+log = { version = "0.4", features = ["kv"] }
 # Without the `zip` feature (zip 4 has RUSTSEC-2026-0367/0368/0369; Tauri 2 updater packages are .exe/.msi, .app.tar.gz and
 # .AppImage, none zipped) and without `system-proxy` (the plugin downloads nothing here: `paddock-download` does).
 tauri-plugin-updater = { version = "2.14", optional = true, default-features = false, features = ["rustls-tls"] }

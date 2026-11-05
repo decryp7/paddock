@@ -29,16 +29,22 @@ pub enum Action {
     AskStartup(String),
     /// A liveness ping to a ready, visible window (`paddock://ping` with this sequence number).
     Ping { label: String, seq: u64 },
-    /// A ready window missed [`Config::missed_pings`] pings in a row: log it, let its dialog close by the OS close and ask
-    /// the user (Reload / Keep Waiting).
+    /// A ready window missed [`Config::missed_pings`] pings in a row: log it and let its dialog close by the OS close (no question
+    /// yet: a limiter that stops a page for a while is common and the page usually comes back).
     Unresponsive(String),
+    /// A window that has been unresponsive for the long wait ([`Config::ask_wait`]): ask the user (Reload / Keep Waiting). Never raised
+    /// while the window's previous question is unanswered.
+    AskHung(String),
 }
 
 impl Action {
     /// The window the action is for.
     pub fn label(&self) -> &str {
         match self {
-            Action::Reload(l) | Action::AskStartup(l) | Action::Unresponsive(l) => l,
+            Action::Reload(l)
+            | Action::AskStartup(l)
+            | Action::Unresponsive(l)
+            | Action::AskHung(l) => l,
             Action::Ping { label, .. } => label,
         }
     }
@@ -102,6 +108,16 @@ struct Entry {
     recovered: Option<Recovery>,
     visible: bool,
     live: Liveness,
+    /// Keep Waiting answers since the window was last ready: each doubles the next wait (up to [`Config::max_doublings`]).
+    asks: u8,
+    /// Questions raised about this ready page since it was last healthy for a long time: each doubles the next wait.
+    hangs: u8,
+    /// A question about this window is on screen and unanswered: no second one is raised.
+    question_open: bool,
+    /// Since when the page has been healthy (ready, or answering again); `None` while it is unresponsive.
+    healthy_since: Option<Instant>,
+    /// When the window was last hidden (`None` while visible).
+    hidden_at: Option<Instant>,
 }
 
 /// The per-window start-up and liveness state (pure: the caller passes the time).
@@ -148,6 +164,11 @@ impl Watchdog {
             recovered: None,
             visible: true,
             live: Liveness::default(),
+            asks: 0,
+            hangs: 0,
+            question_open: false,
+            healthy_since: None,
+            hidden_at: None,
         });
         e.phase = Phase::Waiting;
         e.since = now;
@@ -161,6 +182,8 @@ impl Watchdog {
         let e = self.windows.get_mut(label)?;
         e.phase = Phase::Ready;
         e.reloads = 0;
+        e.asks = 0;
+        e.healthy_since = Some(now);
         if e.visible {
             e.live.restart(now, &self.config);
         }
@@ -185,8 +208,9 @@ impl Watchdog {
         true
     }
 
-    /// The user chose Keep Waiting: a page still starting gets another full timeout before it is asked about again; an
-    /// unresponsive page gets [`Config::missed_pings`] more pings. Nothing for a window that recovered meanwhile.
+    /// The user chose Keep Waiting: a page still starting gets the next (doubled) wait before it is asked about again; an unresponsive
+    /// page gets [`Config::missed_pings`] more pings and, if it stays silent, the next (doubled) wait before the question. Nothing for a
+    /// window that recovered meanwhile.
     pub fn keep_waiting(&mut self, label: &str, now: Instant) {
         let config = self.config;
         if let Some(e) = self.windows.get_mut(label) {
@@ -194,13 +218,23 @@ impl Watchdog {
                 Phase::AskingStartup => {
                     e.phase = Phase::Waiting;
                     e.since = now;
+                    e.question_open = false;
+                    e.asks = e.asks.saturating_add(1).min(config.max_doublings);
                 }
                 Phase::Unresponsive => {
                     e.phase = Phase::Ready;
                     e.live.restart(now, &config);
+                    e.question_open = false;
                 }
                 Phase::Waiting | Phase::Ready => {}
             }
+        }
+    }
+
+    /// The user answered the question about `label` (any answer): it may be asked about again later.
+    pub fn question_answered(&mut self, label: &str) {
+        if let Some(e) = self.windows.get_mut(label) {
+            e.question_open = false;
         }
     }
 
@@ -219,6 +253,8 @@ impl Watchdog {
             e.phase = Phase::Ready;
             e.recovered = None;
             e.live.restart(now, &config);
+            // Healthy again, but not forgiven: the earlier questions still count until it has stayed healthy for a long time.
+            e.healthy_since = Some(now);
             return Pong::Recovered;
         }
         Pong::Alive
@@ -235,6 +271,19 @@ impl Watchdog {
             return;
         }
         e.visible = visible;
+        if visible {
+            // Time spent hidden after the reload does not count towards the question, and the time spent visible is not lost either: the
+            // wait moves forward by the hidden time, so a window that comes and goes is still asked about when it has been visible
+            // long enough.
+            match e.hidden_at.take() {
+                Some(hidden) if e.phase == Phase::Waiting && e.reloads > 0 => {
+                    e.since += now.saturating_duration_since(hidden.max(e.since));
+                }
+                _ => {}
+            }
+        } else {
+            e.hidden_at = Some(now);
+        }
         if !matches!(e.phase, Phase::Ready | Phase::Unresponsive) {
             return;
         }
@@ -276,6 +325,18 @@ impl Watchdog {
             .is_some_and(|e| matches!(e.phase, Phase::Ready | Phase::Unresponsive))
     }
 
+    /// Whether any question about window `label` is on screen and unanswered.
+    pub fn is_question_open(&self, label: &str) -> bool {
+        self.windows.get(label).is_some_and(|e| e.question_open)
+    }
+
+    /// Whether the start-up question about window `label` is open (it is not asked again until it is answered).
+    pub fn is_asking(&self, label: &str) -> bool {
+        self.windows
+            .get(label)
+            .is_some_and(|e| e.phase == Phase::AskingStartup)
+    }
+
     /// Whether window `label` is marked unresponsive.
     pub fn is_unresponsive(&self, label: &str) -> bool {
         self.windows
@@ -290,6 +351,16 @@ impl Watchdog {
         let paused = self
             .last_tick
             .is_some_and(|t| now.saturating_duration_since(t) > self.config.pause_gap);
+        if paused {
+            // The silent case that explains a "slow" start or a missed ping: the process itself was not running (ER-27).
+            let gap = self
+                .last_tick
+                .map_or(0, |t| now.saturating_duration_since(t).as_millis());
+            log::warn!(
+                GapMs = u64::try_from(gap).unwrap_or(u64::MAX), LimitMs = self.config.pause_gap.as_millis() as u64;
+                "process.paused: the app was not running between two watchdog ticks (suspended, stopped by a CPU limiter or the machine slept); start-up and liveness clocks restart"
+            );
+        }
         self.last_tick = Some(now);
         let config = self.config;
         let mut out = Vec::new();
@@ -299,16 +370,22 @@ impl Watchdog {
                 Phase::Waiting => {
                     if paused {
                         e.since = now;
-                    } else if now.saturating_duration_since(e.since) >= config.ready_timeout {
-                        if e.reloads == 0 {
+                    } else if e.reloads == 0 {
+                        if now.saturating_duration_since(e.since) >= config.ready_timeout {
                             e.reloads = 1;
                             e.since = now;
                             e.recovered = Some(Recovery::Unresponsive);
                             out.push(Action::Reload(label.clone()));
-                        } else {
-                            e.phase = Phase::AskingStartup;
-                            out.push(Action::AskStartup(label.clone()));
                         }
+                    } else if e.visible
+                        && !e.question_open
+                        && now.saturating_duration_since(e.since) >= config.ask_wait(e.asks)
+                    {
+                        // Only a window the user can see is asked about (a hidden one starts at login, its page may be paused by the
+                        // OS), and only after the longer wait; each Keep Waiting doubles it.
+                        e.phase = Phase::AskingStartup;
+                        e.question_open = true;
+                        out.push(Action::AskStartup(label.clone()));
                     }
                 }
                 Phase::Ready | Phase::Unresponsive => {
@@ -318,6 +395,13 @@ impl Watchdog {
                     if paused {
                         e.live.restart(now, &config);
                         continue;
+                    }
+                    if e.hangs > 0
+                        && e.phase == Phase::Ready
+                        && e.healthy_since
+                            .is_some_and(|t| now.saturating_duration_since(t) >= Config::MAX_WAIT)
+                    {
+                        e.hangs = 0;
                     }
                     // No ping scheduled yet: one is due now.
                     if now < e.live.next_at.unwrap_or(now) {
@@ -329,7 +413,18 @@ impl Watchdog {
                     if e.phase == Phase::Ready && e.live.misses >= config.missed_pings {
                         e.phase = Phase::Unresponsive;
                         e.recovered = Some(Recovery::Hung);
+                        e.healthy_since = None;
                         out.push(Action::Unresponsive(label.clone()));
+                    }
+                    // The question comes after the long wait, only one at a time, and counts even when the page recovers meanwhile.
+                    if e.phase == Phase::Unresponsive
+                        && !e.question_open
+                        && config.ping_interval.saturating_mul(e.live.misses)
+                            >= config.ask_wait(e.hangs)
+                    {
+                        e.question_open = true;
+                        e.hangs = e.hangs.saturating_add(1).min(config.max_doublings);
+                        out.push(Action::AskHung(label.clone()));
                     }
                     e.live.sent += 1;
                     e.live.next_at = Some(now + config.ping_interval);

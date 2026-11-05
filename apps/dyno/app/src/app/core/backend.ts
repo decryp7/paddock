@@ -8,11 +8,9 @@ import type {
   AlarmFilter,
   AlarmStats,
   Alert,
-  BundlePreview,
   HostName,
   RecorderSnapshot,
   RecorderSnapshotInfo,
-  SavedDiagnostics,
   ShelveFor,
   Anomaly,
   Diagnosis,
@@ -244,11 +242,6 @@ export interface DynoBackend {
   capture(): Promise<RecorderSnapshotInfo>;
   recorderSnapshots(): Promise<RecorderSnapshotInfo[]>;
   recorderSnapshot(id: number): Promise<RecorderSnapshot>;
-
-  // Diagnostics bundle: a redacted zip for a bug report. Nothing is written until the user picks a file.
-  diagnosticsPreview(): Promise<BundlePreview>;
-  /** Asks the user where to save (the OS save dialog) and writes the bundle there; resolves `null` when they cancel. */
-  saveDiagnostics(): Promise<SavedDiagnostics | null>;
 
   // Benchmarks: start only on a click; poll `benchmarks()` while a run is in progress.
   benchmarks(): Promise<BenchOverview>;

@@ -3,14 +3,8 @@
 # Rules: a kind that is advertised by `readings()` may not be listed; a listed kind that becomes wired must be deleted;
 # `until` is a release tag (dyno-vX.Y.Z) or a date at most 60 days ahead.
 
-# Plan 2026-11-04, D4 (accepted): both are wired in 1.1.0 (LogTail into the diagnostic bundle, WolState into Linux Wake-on-LAN
-# readiness). WP-INT deletes these two entries when the senders land.
-[[unwired]]
-wire = "agent-helper"
-kind = "LogTail"
-why = "D4: wired into the diagnostic bundle by its own package before the 1.1.0 tag"
-until = "dyno-v1.1.0"
-
+# Plan 2026-11-04, D4 (accepted): WolState is wired in 1.1.0 into Linux Wake-on-LAN readiness (WP-INT deletes its entry when the
+# sender lands). LogTail is wired: the agent sends it for the problem report (`diagnostics::HelperLog`), so its entry is gone.
 [[unwired]]
 wire = "agent-helper"
 kind = "WolState"

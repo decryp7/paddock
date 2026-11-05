@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Icon } from '../../shared/icon';
 import { JobProgressCard } from '../../shared/job-progress';
-import { fileName } from '../../state/diagnostics.store';
+import { fileName } from '../../shared/format';
 import { IssuesStore } from '../../state/issues.store';
 import { UnusualStore } from '../../state/unusual.store';
 import { IssuesView } from './issues-view';

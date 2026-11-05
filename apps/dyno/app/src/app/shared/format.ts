@@ -197,3 +197,8 @@ export function formatStamp(at: number, now: number = at): string {
   const sameYear = new Date(at).getFullYear() === new Date(now).getFullYear();
   return new Intl.DateTimeFormat(undefined, sameYear ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(at);
 }
+
+/** The last path segment of a saved file, whichever separator the OS uses. */
+export function fileName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}

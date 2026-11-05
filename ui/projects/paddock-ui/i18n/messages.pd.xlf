@@ -539,11 +539,26 @@
       <trans-unit id="pd.diag.lede" datatype="html">
         <source>Nothing is sent anywhere. This makes a file on your computer that you can look through, and attach to your report yourself.</source>
       </trans-unit>
+      <trans-unit id="pd.diag.may-remain" datatype="html">
+        <source>File names outside your home folder may remain, and so may other computers' names and text the app imported or showed.</source>
+      </trans-unit>
       <trans-unit id="pd.diag.no-preview" datatype="html">
         <source>The report could not be put together.</source>
       </trans-unit>
       <trans-unit id="pd.diag.no-preview-title" datatype="html">
         <source>The report could not be put together.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-in" datatype="html">
+        <source>Not in the report</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-in-contents" datatype="html">
+        <source>The contents of your documents and files.</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-in-personal" datatype="html">
+        <source>Your user name, home folder, machine name, e-mail addresses and IP addresses (they are replaced).</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.not-in-secrets" datatype="html">
+        <source>Passwords, tokens and keys (they are replaced where the app can recognise them).</source>
       </trans-unit>
       <trans-unit id="pd.diag.not-saved" datatype="html">
         <source>The report was not saved.</source>
@@ -553,6 +568,9 @@
       </trans-unit>
       <trans-unit id="pd.diag.open" datatype="html">
         <source>Report a problem…</source>
+      </trans-unit>
+      <trans-unit id="pd.diag.public" datatype="html">
+        <source>Issue reports are public. Look through the zip first.</source>
       </trans-unit>
       <trans-unit id="pd.diag.removed" datatype="html">
         <source>Removed from the files: <x id="list"/>.</source>

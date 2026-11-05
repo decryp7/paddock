@@ -119,7 +119,7 @@ pub fn main(args: Vec<String>) -> i32 {
             .and_then(|n| bench(n, who)),
         ["service", cmd] => service(cmd),
         ["--version"] | ["-V"] => {
-            println!("dyno-agent {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", version_line(env!("CARGO_PKG_VERSION"), option_env!("PADDOCK_BUILD_COMMIT")));
             Ok(())
         }
         _ => {
@@ -133,6 +133,15 @@ pub fn main(args: Vec<String>) -> i32 {
             eprintln!("dyno-agent: {e}");
             1
         }
+    }
+}
+
+/// `dyno-agent 1.1.0 (build abc1234)`: the version and the commit the build embeds (`PADDOCK_BUILD_COMMIT`), so a VM run or a
+/// bug report names the exact build; without a commit (a local build) only the version.
+pub fn version_line(version: &str, commit: Option<&str>) -> String {
+    match commit.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(c) => format!("dyno-agent {version} (build {c})"),
+        None => format!("dyno-agent {version}"),
     }
 }
 
@@ -250,7 +259,11 @@ fn run() -> Result<(), StartError> {
     spawn_signal_watch();
     let (platform, details) = platforms();
     // Takes the data folder's agent lock first: a second agent exits here, before it opens or writes anything.
+    let root = dirs.root().to_path_buf();
     let running = Running::start_os(dirs, platform, details, reveal())?;
+    // The lock is held, so this is the one agent: say whether the last one died, and leave this run's marker.
+    let (run_marker, _previous) =
+        paddock_startup::run_marker::begin(&root, "agent", std::process::id(), &paddock_startup::lifecycle::os_probe);
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
     log::info!(ElapsedMs = crate::logging::elapsed_ms(), Pid = running.discovery.pid; "Agent running");
     log_socket_view();
@@ -266,6 +279,7 @@ fn run() -> Result<(), StartError> {
     log::info!(Reason = reason; "Agent stopping");
     running.stop();
     STOPPED.store(true, Ordering::SeqCst);
+    run_marker.end();
     log::info!(ElapsedMs = crate::logging::elapsed_ms(); "Agent stopped");
     Ok(())
 }
@@ -440,6 +454,13 @@ fn tempfile_dir() -> Result<std::path::PathBuf, String> {
 mod tests {
     use super::*;
     use crate::instance::LockError;
+
+    #[test]
+    fn the_version_line_names_the_build_commit_when_there_is_one() {
+        assert_eq!(version_line("1.1.0", Some("abc1234")), "dyno-agent 1.1.0 (build abc1234)");
+        assert_eq!(version_line("1.1.0", Some(" ")), "dyno-agent 1.1.0");
+        assert_eq!(version_line("1.1.0", None), "dyno-agent 1.1.0");
+    }
 
     #[test]
     fn a_refused_second_agent_exits_with_its_own_code_and_other_failures_with_one() {

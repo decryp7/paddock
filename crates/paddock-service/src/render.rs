@@ -254,6 +254,11 @@ fn systemd_sandbox(o: &mut String, s: &Sandbox, unit: &str) {
          MemoryDenyWriteExecute=yes\nUMask=0077\n",
     );
     if let Some(d) = s.state_directory() {
+        // The logs folder (`LogsDirectory=`) is a bind mount inside the sandbox too, so it is removed by the same step after the stop.
+        let logs = s
+            .logs_directory()
+            .map(|l| format!(" /var/log/{l}"))
+            .unwrap_or_default();
         let _ = writeln!(o, "StateDirectory={d}\nStateDirectoryMode=0700");
         // `ProtectSystem=strict` leaves `/var/lib` read-only inside the service, so the service cannot remove its own state
         // folder when it removes itself (rmdir: "Read-only file system"), and during the stop the service's bind mount of the
@@ -271,11 +276,14 @@ fn systemd_sandbox(o: &mut String, s: &Sandbox, unit: &str) {
             o,
             "ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=DefaultDependencies=no \
              --property=After={unit} /bin/sh -c '/usr/bin/systemctl is-active --quiet {unit} || \
-             exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/{d}'"
+             exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/{d}{logs}'"
         );
     }
     if let Some(d) = s.runtime_directory() {
         let _ = writeln!(o, "RuntimeDirectory={d}\nRuntimeDirectoryMode=0755");
+    }
+    if let Some(d) = s.logs_directory() {
+        let _ = writeln!(o, "LogsDirectory={d}\nLogsDirectoryMode=0755");
     }
 }
 

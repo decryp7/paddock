@@ -28,7 +28,7 @@ use crate::{
 };
 use ::tauri::ipc::Invoke;
 use ::tauri::webview::{PageLoadEvent, PageLoadPayload};
-use ::tauri::{AppHandle, Emitter, Manager, Runtime, Webview};
+use ::tauri::{AppHandle, Emitter, Manager, Runtime, Webview, WebviewWindow};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -43,6 +43,13 @@ pub const DIALOG_BASE: &[&str] = &["window_ready", "window_boot_error", "window_
 /// OS close meanwhile (rule 19).
 pub type UnresponsiveHook<R> = dyn Fn(&AppHandle<R>, &str, bool) + Send + Sync;
 /// Restarts the app in Safe Mode for window `label` (the app's relaunch); an error is logged.
+/// Writes a problem report without the stuck window (`StartupBuilder::report`); it shows its own native save dialog, so it runs
+/// off the main thread. Returns what to tell the log.
+pub type ReportHook<R> = dyn Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync;
+/// Whether a window counts as visible to the watchdog (`StartupBuilder::window_visibility`); the default is [`visibility`] over the
+/// window's own answers. A seam for tests: the mock runtime reports every window visible.
+pub type VisibleProbe<R> = dyn Fn(&WebviewWindow<R>) -> bool + Send + Sync;
+/// Restarts in Safe Mode (`StartupBuilder::safe_mode`).
 pub type SafeModeHook<R> = dyn Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync;
 /// Restarts the whole app, keeping its session (the app's relaunch: `|app| app.restart()`, which does not return on
 /// success); an error is reported to the calling page and logged.
@@ -115,6 +122,8 @@ pub struct StartupBuilder<R: Runtime> {
     config: Config,
     watch: Box<WatchFilter>,
     safe_mode: Option<Box<SafeModeHook<R>>>,
+    report: Option<Arc<ReportHook<R>>>,
+    visible_probe: Option<Box<VisibleProbe<R>>>,
     relaunch: Option<Box<RelaunchHook<R>>>,
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
@@ -193,12 +202,33 @@ impl<R: Runtime> StartupBuilder<R> {
     }
 
     /// The state to install, or why the timings are inconsistent.
+    /// The app's way to write a problem report without the window: the questions then offer Save a problem report…, whose answer
+    /// calls `write` on its own thread (it asks where to save with a native dialog).
+    pub fn report(
+        mut self,
+        write: impl Fn(&AppHandle<R>, &str) -> Result<(), String> + Send + Sync + 'static,
+    ) -> Self {
+        self.report = Some(Arc::new(write));
+        self
+    }
+
+    /// Another way to decide whether a window is visible (tests; an app with windows the OS cannot report on).
+    pub fn window_visibility(
+        mut self,
+        probe: impl Fn(&WebviewWindow<R>) -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.visible_probe = Some(Box::new(probe));
+        self
+    }
+
     pub fn build(self) -> Result<Startup<R>, ConfigError> {
         Ok(Startup {
             dog: Mutex::new(Watchdog::new(self.config.checked()?)),
             checkpoints: Mutex::new(Checkpoints::default()),
             watch: self.watch,
             safe_mode: self.safe_mode,
+            report: self.report,
+            visible_probe: self.visible_probe,
             relaunch: self.relaunch,
             unresponsive: self.unresponsive,
             on_ready: self.on_ready,
@@ -217,6 +247,8 @@ pub struct Startup<R: Runtime> {
     checkpoints: Mutex<Checkpoints>,
     watch: Box<WatchFilter>,
     safe_mode: Option<Box<SafeModeHook<R>>>,
+    report: Option<Arc<ReportHook<R>>>,
+    visible_probe: Option<Box<VisibleProbe<R>>>,
     relaunch: Option<Box<RelaunchHook<R>>>,
     unresponsive: Option<Box<UnresponsiveHook<R>>>,
     on_ready: Option<Box<ReadyHook<R>>>,
@@ -240,6 +272,8 @@ impl<R: Runtime> Startup<R> {
             config: Config::default(),
             watch: Box::new(watched_by_default),
             safe_mode: None,
+            report: None,
+            visible_probe: None,
             relaunch: None,
             unresponsive: None,
             on_ready: None,
@@ -284,8 +318,10 @@ impl<R: Runtime> Startup<R> {
             match app.get_webview_window(&label) {
                 None => gone.push(label),
                 Some(window) => {
-                    let visible = window.is_visible().unwrap_or(true)
-                        && !window.is_minimized().unwrap_or(false);
+                    let visible = match &self.visible_probe {
+                        Some(probe) => probe(&window),
+                        None => visibility(window.is_visible().ok(), window.is_minimized().ok()),
+                    };
                     shown.push((label, visible));
                 }
             }
@@ -327,6 +363,10 @@ impl<R: Runtime> Startup<R> {
                 );
                 logged(sent, &label, "Could not ping the window");
             }
+            Action::AskHung(label) => {
+                log::error!(Window = label.as_str(); "Window {label} has not answered for a long time; asking the user");
+                self.ask(app, label, Question::Unresponsive);
+            }
             Action::Unresponsive(label) => {
                 let (n, every) = self.with(|w| {
                     (
@@ -334,9 +374,8 @@ impl<R: Runtime> Startup<R> {
                         w.config().ping_interval.as_millis() as u64,
                     )
                 });
-                log::error!(Window = label.as_str(), MissedPings = n, PingMs = every; "Window {label} stopped responding; asking the user");
+                log::error!(Window = label.as_str(), MissedPings = n, PingMs = every; "Window {label} stopped responding; the user is asked if it stays silent for a long time");
                 self.hook(app, &label, true);
-                self.ask(app, label, Question::Unresponsive);
             }
         }
     }
@@ -347,6 +386,11 @@ impl<R: Runtime> Startup<R> {
             return;
         };
         let prompt = Prompt::new(question, &app.package_info().name);
+        let prompt = if self.report.is_some() {
+            prompt.with_report()
+        } else {
+            prompt
+        };
         let answer_app = app.clone();
         let answer_label = label.clone();
         let answer: Box<dyn FnOnce(Choice) + Send> =
@@ -503,12 +547,21 @@ pub fn end_run<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// Whether a window is visible, from what the OS said: shown and not minimised. A window the OS cannot report on counts as visible (a
+/// question about a window that is perhaps hidden is better than none about a broken one).
+pub fn visibility(is_visible: Option<bool>, is_minimized: Option<bool>) -> bool {
+    is_visible.unwrap_or(true) && !is_minimized.unwrap_or(false)
+}
+
 /// The user's answer to the question about window `label`.
 fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
     log::info!(Window = label, Choice = format!("{choice:?}").as_str(); "Not-responding question answered");
     let Some(startup) = app.try_state::<Startup<R>>() else {
         return;
     };
+    if choice != Choice::SaveReport {
+        startup.with(|w| w.question_answered(label));
+    }
     match choice {
         Choice::Reload => {
             // Waiting again first: if the reload never starts a page, the watchdog still sees it.
@@ -524,6 +577,49 @@ fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, choice: Choice) {
             None => startup.with(|w| w.keep_waiting(label, Instant::now())),
         },
         Choice::Wait => startup.with(|w| w.keep_waiting(label, Instant::now())),
+        Choice::SaveReport => {
+            // The question stays open (the window is not asked again) while the report is written and its save dialog is up; only
+            // when the hook returns does the window go back to waiting, with the longer wait.
+            match startup.report.clone() {
+                Some(write) => {
+                    let (app, label) = (app.clone(), label.to_string());
+                    std::thread::spawn(move || {
+                        // Whatever the hook does, even panic, the window goes back to waiting (drop guard).
+                        let _done = ReportDone {
+                            app: app.clone(),
+                            label: label.clone(),
+                        };
+                        match write(&app, &label) {
+                            Ok(()) => {
+                                log::info!(Window = label.as_str(); "Problem report from the not-responding question finished")
+                            }
+                            Err(e) => {
+                                log::error!(Window = label.as_str(); "Problem report from the not-responding question failed: {e}")
+                            }
+                        }
+                    });
+                }
+                None => startup.with(|w| w.keep_waiting(label, Instant::now())),
+            }
+        }
+    }
+}
+
+/// Ends a question whose answer was Save a problem report… when the report's thread ends in any way: the question is closed and the
+/// window waits again.
+struct ReportDone<R: Runtime> {
+    app: AppHandle<R>,
+    label: String,
+}
+
+impl<R: Runtime> Drop for ReportDone<R> {
+    fn drop(&mut self) {
+        if let Some(startup) = self.app.try_state::<Startup<R>>() {
+            startup.with(|w| {
+                w.question_answered(&self.label);
+                w.keep_waiting(&self.label, Instant::now());
+            });
+        }
     }
 }
 

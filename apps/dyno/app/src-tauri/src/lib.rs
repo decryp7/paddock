@@ -7,6 +7,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod actions;
+pub mod breadcrumb;
 pub mod commands;
 pub mod crash_reports;
 pub mod dialogs;
@@ -22,6 +23,7 @@ pub mod mcp_readings;
 pub mod per_machine;
 pub mod popover;
 pub mod power_menu;
+pub mod report;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -67,8 +69,6 @@ paddock_commands::command_table! {
     /// Every engine request, forwarded to the agent (`invoke('dyno', { request })`): parsed into a typed request here,
     /// refused when it is one the window may not ask. The agent re-validates.
     Mutation [MAIN | TRAY | DIALOG] => commands::dyno,
-    /// "Save bundle...": the OS save dialog, then the agent writes the redacted diagnostics zip.
-    Mutation [MAIN] => commands::save_diagnostics,
     /// "Export" on the Benchmarks page: the OS save dialog, then the agent writes the chosen runs as JSON or CSV.
     Mutation [MAIN] => commands::save_benchmarks,
     /// "Export" on the Reports page: the OS save dialog, then the agent writes the week's report.
@@ -118,6 +118,37 @@ pub enum Place {
     },
 }
 
+/// The start-up watchdog with a visible question, for the installed app only (a test place has no real folders and no dialog: the shell's
+/// default watchdog has no asker, so nothing is ever shown). The question offers Save a problem report… (written without the stuck window).
+///
+/// When it can appear (it used to be only logged, so this is new). Only for a window the user can see (a hidden one, started at login, is
+/// never asked about). Two cases:
+/// - A page that never became ready: reloaded after `Config::ready_timeout` (10 s), and still silent `Config::ask_timeout` (60 s) after the
+///   reload, so never earlier than [`first_question_after`] (70 s) after it began loading; hidden time does not count.
+/// - A page that was ready and stopped answering pings (a content process stopped by a limiter while the app keeps ticking): marked after
+///   about 10 s for the dialog code, but asked about only after 60 s of silence, once at a time, and a question counts even when the page
+///   comes back before it is answered.
+///
+/// Each question doubles the next wait (120, 240, 480 s) until the page has been healthy for ten minutes. While a report is being written
+/// from the question it is not asked again. An app process that itself was paused is covered by `pause_gap` (clocks restart after a gap
+/// of more than 3 s between two ticks), a stopped content process by the long waits.
+fn watchdog<R: Runtime>(place: &Place) -> Option<Result<paddock_startup::tauri::Startup<R>, paddock_startup::ConfigError>> {
+    matches!(place, Place::Installed).then(|| {
+        paddock_startup::tauri::Startup::<R>::builder()
+            .native_dialogs()
+            .report(|app, _label| {
+                let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
+                report::save_report_from_question(app, &info)
+            })
+            .build()
+    })
+}
+
+/// The earliest a question can follow the start of a page load: the reload after the first timeout, then the longer wait.
+pub fn first_question_after(config: &paddock_startup::Config) -> std::time::Duration {
+    config.ready_timeout + config.ask_timeout
+}
+
 /// The shell plugin with Dyno's parts.
 pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn shell::TrayPixels<R>>) -> Builder<R> {
     let attach = hub.clone();
@@ -149,8 +180,14 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
     // Report a problem with the logs of both processes, working with the agent down (the shell registers the Logging settings
     // section on the log handle, so a support case can raise the level to Debug).
     // Installed only: a test never resolves the real folders (ER-14).
+    if let Some(startup) = watchdog::<R>(&place) {
+        match startup {
+            Ok(startup) => builder = builder.startup(startup),
+            Err(e) => log::error!("The start-up watchdog could not be configured: {e}"),
+        }
+    }
     if diagnostics_wanted(&place) {
-        builder = builder.diagnostics(|_app| diagnostics_setup());
+        builder = builder.diagnostics(|app| diagnostics_setup(app));
     }
     // AI access (ADR 0007, 0032 D7): Dyno's four tools, off until the user allows them in Settings > AI access. The tools ask the agent
     // through the shell's link; a test place keeps the settings in its folder and the keys in memory (ER-14).
@@ -184,13 +221,18 @@ fn diagnostics_wanted(place: &Place) -> bool {
 
 /// Report a problem's setup: paddock-diag's built-in sections (system facts, the shell's settings, the crash markers, the dated logs
 /// of both processes, which work with the agent down because they are read from disk); the log handle when the installed app has one.
-fn diagnostics_setup() -> Result<paddock_diag::tauri::Setup, Box<dyn std::error::Error + Send + Sync>> {
+fn diagnostics_setup<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<paddock_diag::tauri::Setup, Box<dyn std::error::Error + Send + Sync>> {
     let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
     let dirs = paddock_env::AppDirs::for_app(&id)?;
     let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
     let mut setup = paddock_diag::tauri::Setup::new(info, dirs)
         .settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE)
         .section(Arc::new(crash_reports::CrashReports::new(crash_reports::default_folders())));
+    for section in report::sections(app) {
+        setup = setup.section(section);
+    }
     if let Some(handle) = logging::handle() {
         setup = setup.log(handle);
     }
@@ -435,9 +477,9 @@ fn agent_setup<R: Runtime>(
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
         match login::platform_service().repair(&|| repair.connected()) {
-            Ok(true) => logging::info("registered the agent service again (a new version, or launchd refused the old registration)"),
+            Ok(true) => logging::warn("registered the agent service again (a new version, or launchd refused the old registration)"),
             Ok(false) => {}
-            Err(e) => logging::info(&format!("the agent service could not be registered again: {e}")),
+            Err(e) => logging::warn(&format!("the agent service could not be registered again: {e}")),
         }
     });
     Ok(())
@@ -470,12 +512,27 @@ fn on_ready(app: &tauri::AppHandle, asked_hidden: bool) {
     }
 }
 
+/// This run's clean-exit marker (written at Ready, removed at Exit).
+static RUN_MARKER: std::sync::OnceLock<paddock_startup::run_marker::RunMarker> = std::sync::OnceLock::new();
+
 /// Starts the app.
 pub fn run() {
     let _ = logging::uptime_ms();
+    // A window that failed to start can still be reported: `--export-diagnostics` writes the report and exits, with no window.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a.starts_with(paddock_diag::export::FLAG)) {
+        let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
+        let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
+        if let Some(code) = report::export_cli(&args, &info) {
+            std::process::exit(code);
+        }
+    }
     // First: the shared crates' log lines (the start's error among them) reach Dyno's daily log file (paddock-log); Dyno's
     // own lines stay in its agent-side log.
-    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
+    let _log = paddock_shell::logging::install_with_commit(
+        &AppIdentity::new(APP_ID, APP_NAME, VERSION),
+        option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""),
+    );
     if let Some(handle) = &_log {
         logging::set_handle(handle.clone());
     }
@@ -508,6 +565,40 @@ pub fn run() {
     // `Builder::run` is `build` then `run` with no callback; the callback is only for macOS's login-start decision.
     match builder.build(tauri::generate_context!()) {
         Ok(app) => app.run(move |_handle, _event| {
+            // The end of a run (ER-27): why it ends and how long it ran; the last repeated lines are written before the process goes.
+            match &_event {
+                // After the single-instance check (a second launch exits before Ready): say whether the last run died, leave a marker.
+                tauri::RunEvent::Ready => {
+                    let marker = paddock_env::AppId::new(APP_ID, APP_NAME)
+                        .and_then(|id| paddock_env::AppDirs::for_app(&id))
+                        .ok()
+                        .map(|dirs| {
+                            paddock_startup::run_marker::begin(
+                                dirs.data(),
+                                "app",
+                                std::process::id(),
+                                &paddock_startup::lifecycle::os_probe,
+                            )
+                            .0
+                        });
+                    if let Some(marker) = marker {
+                        let _ = RUN_MARKER.set(marker);
+                    }
+                }
+                tauri::RunEvent::ExitRequested { code, .. } => {
+                    log::info!(Code = code.unwrap_or(0), UptimeMs = logging::uptime_ms(); "Exit requested");
+                }
+                tauri::RunEvent::Exit => {
+                    if let Some(marker) = RUN_MARKER.get() {
+                        marker.end();
+                    }
+                    log::info!(UptimeMs = logging::uptime_ms(); "Exit");
+                    if let Some(handle) = logging::handle() {
+                        handle.flush_repeats();
+                    }
+                }
+                _ => {}
+            }
             #[cfg(target_os = "macos")]
             if matches!(_event, tauri::RunEvent::Ready) {
                 on_ready(_handle, asked_hidden);
@@ -519,6 +610,11 @@ pub fn run() {
             }
         }),
         Err(e) => {
+            // The log first (it is what a bug report holds), then standard error for a person at a terminal.
+            log::error!(Error = e.to_string().as_str(), UptimeMs = logging::uptime_ms(); "Dyno could not start; check the webview runtime and the app's folders, then start it again");
+            if let Some(handle) = logging::handle() {
+                handle.flush_repeats();
+            }
             eprintln!("Dyno could not start: {e}");
             std::process::exit(1);
         }
@@ -528,6 +624,27 @@ pub fn run() {
 #[cfg(test)]
 mod diagnostics_tests {
     use super::*;
+
+    #[test]
+    fn the_watchdog_question_exists_for_the_installed_app_only_and_never_before_seventy_seconds() {
+        let test = Place::Test {
+            dir: std::path::PathBuf::from("/nonexistent/dyno-test"),
+        };
+        assert!(
+            watchdog::<tauri::test::MockRuntime>(&test).is_none(),
+            "a test place shows no question"
+        );
+        assert!(watchdog::<tauri::test::MockRuntime>(&Place::Installed).is_some_and(|s| s.is_ok()));
+        let config = paddock_startup::Config::default();
+        assert!(
+            first_question_after(&config) >= std::time::Duration::from_secs(70),
+            "a healthy slow start that is ready within 70 s is never asked"
+        );
+        assert!(
+            config.pause_gap >= std::time::Duration::from_secs(3),
+            "a paused app restarts the clocks instead of asking"
+        );
+    }
 
     #[test]
     fn report_a_problem_is_set_up_for_the_installed_app_only() {

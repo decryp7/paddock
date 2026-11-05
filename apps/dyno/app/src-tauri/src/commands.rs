@@ -20,9 +20,13 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
         Request::Shutdown => Err(CommandError::bad("The window may not stop the agent.")),
         // A file is written only where the OS save dialog said (the `save_*` commands), never to a path the webview names:
         // `dyno` is reachable from the tray and dialog windows too.
-        Request::SaveInventoryReport { .. } | Request::SaveDiagnostics { .. } | Request::SaveReport { .. } | Request::SaveIssues { .. } => {
+        Request::SaveInventoryReport { .. } | Request::SaveReport { .. } | Request::SaveIssues { .. } => {
             Err(CommandError::bad("Use the Export or Save button: it asks where to save the file."))
         }
+        // The agent's report files are unredacted: only Report a problem reads them (Rust to Rust), redacts and previews them.
+        Request::DiagnosticsFiles => Err(CommandError::bad(
+            "Use Report a problem: it redacts the files and shows them before saving.",
+        )),
         // The widget layouts have their own commands (typed arguments, the popup's values are the app's own).
         Request::WidgetLayout { .. } | Request::EditWidgetLayout { .. } | Request::PopoverValues { .. } => {
             Err(CommandError::bad("Use the widget commands for layouts and the popup's values."))
@@ -31,6 +35,9 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
     }
 }
 
+/// The id of the next logged action (ties its line to the request).
+static NEXT_ACTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// Runs one request against the agent. A `Subscribe` is this window's wish for the live detail; everything else is
 /// forwarded. Blocking (it waits for the agent): call it off the async runtime's threads.
 pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -> Result<Value, CommandError> {
@@ -38,7 +45,29 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
         link.set_detail(window, detail)?;
         return Ok(Value::Null);
     }
-    let reply = link.call(request)?;
+    let action = crate::breadcrumb::describe(&request);
+    let (id, started) = (
+        NEXT_ACTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        std::time::Instant::now(),
+    );
+    let saved_keys = match (&action, &request) {
+        (Some(_), Request::SaveSettings { settings }) => {
+            crate::breadcrumb::settings_saved(serde_json::to_value(settings).unwrap_or_default())
+        }
+        _ => Vec::new(),
+    };
+    let reply = match link.call(request) {
+        Ok(reply) => reply,
+        Err(e) => {
+            if let Some(a) = &action {
+                crate::breadcrumb::log_end(a, id, started.elapsed().as_millis(), Err(&format!("{:?}", e.code)), &[]);
+            }
+            return Err(e);
+        }
+    };
+    if let Some(a) = &action {
+        crate::breadcrumb::log_end(a, id, started.elapsed().as_millis(), Ok(()), &saved_keys);
+    }
     if let Reply::Settings(s) = &reply {
         // Saved settings drive the tray style and the login items; a failed registration is reported to the user.
         shell
@@ -415,36 +444,6 @@ fn open_in_browser(app: &AppHandle, url: &str) -> Result<(), CommandError> {
     })
 }
 
-/// "Save bundle...": the OS save dialog (so the path is one the person chose, never one the webview supplied), then the
-/// agent writes the redacted zip there. `null` when they cancel.
-#[tauri::command]
-pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        use tauri_plugin_dialog::DialogExt;
-        let Some(chosen) = app
-            .dialog()
-            .file()
-            .set_title("Save the diagnostics bundle")
-            .set_file_name("dyno-diagnostics.zip")
-            .add_filter("Zip archive", &["zip"])
-            .blocking_save_file()
-        else {
-            return Ok(Value::Null);
-        };
-        let path = chosen
-            .into_path()
-            .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
-        let path = utf8_path(&path)?;
-        let reply = link.call(Request::SaveDiagnostics { path })?;
-        reply
-            .into_json()
-            .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
-}
-
 /// "Export" on the Benchmarks page: the OS save dialog (so the path is one the person chose, never one the webview supplied), then
 /// the agent writes the chosen runs there as JSON or CSV. `null` when they cancel.
 #[tauri::command]
@@ -586,7 +585,10 @@ mod tests {
         // The report is saved only through the dialog command.
         assert!(parse_request(json!({"saveInventoryReport": {"path": "/tmp/x.md", "format": "markdown"}})).is_err());
         // So are the bundle, the weekly report and the issues: `dyno` is reachable from the tray and dialog windows too.
-        assert!(parse_request(json!({"saveDiagnostics": {"path": "/tmp/x.zip"}})).is_err());
+        assert!(
+            parse_request(json!("diagnosticsFiles")).is_err(),
+            "the unredacted files are for Report a problem only"
+        );
         assert!(parse_request(json!({"saveReport": {"path": "/tmp/x.md", "format": "markdown", "weeksAgo": 0}})).is_err());
         assert!(parse_request(json!({"saveIssues": {"path": "/tmp/x.jsonl", "days": 7}})).is_err());
         // The finder's request parses, but `dyno` refuses a folder nobody picked.

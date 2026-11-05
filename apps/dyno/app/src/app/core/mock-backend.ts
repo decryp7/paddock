@@ -12,11 +12,9 @@ import type {
   AlarmChange,
   AlarmFilter,
   AlarmStats,
-  BundlePreview,
   HostName,
   RecorderSnapshot,
   RecorderSnapshotInfo,
-  SavedDiagnostics,
   ShelveFor,
   ActivityEntry,
   AgentStatus,
@@ -118,7 +116,7 @@ import {
   demoStartup,
   healthReasons,
 } from './mock/data';
-import { manyAlarms, demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
+import { manyAlarms, demoAlarms, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
 import { MockDiskMap } from './mock/disk-map';
 import { mockHostName, mockNetwork } from './mock/network';
@@ -352,7 +350,6 @@ export class MockBackend implements DynoBackend {
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
-  readonly savedBundles: SavedDiagnostics[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   /** The lists whose saved answer was already given once (`savedListsAgeMs`). */
   private readonly savedGiven = new Set<string>();
@@ -1097,19 +1094,6 @@ export class MockBackend implements DynoBackend {
       const info = this.snapshotRows().find((x) => x.id === id);
       if (!info) throw err('notFound', 'That snapshot was deleted.');
       return demoSnapshot(info);
-    });
-  }
-
-  diagnosticsPreview(): Promise<BundlePreview> {
-    return this.reply('diagnosticsPreview', () => demoBundlePreview());
-  }
-
-  saveDiagnostics(): Promise<SavedDiagnostics | null> {
-    return this.reply('saveDiagnostics', () => {
-      const p = demoBundlePreview();
-      const saved = { path: '/Users/me/dyno-diagnostics.zip', bytes: Math.round(p.totalBytes * 0.22), files: p.files.length };
-      this.savedBundles.push(saved);
-      return saved;
     });
   }
 

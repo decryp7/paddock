@@ -11,11 +11,9 @@ import type {
   AlarmFilter,
   AlarmStats,
   Alert,
-  BundlePreview,
   HostName,
   RecorderSnapshot,
   RecorderSnapshotInfo,
-  SavedDiagnostics,
   ShelveFor,
   Anomaly,
   Diagnosis,
@@ -501,15 +499,6 @@ export class TauriBackend implements DynoBackend {
 
   recorderSnapshot(id: number): Promise<RecorderSnapshot> {
     return this.request({ recorderSnapshot: { id } });
-  }
-
-  diagnosticsPreview(): Promise<BundlePreview> {
-    return this.request('diagnosticsPreview');
-  }
-
-  /** The shell shows the OS save dialog (the webview never sees a path it chose itself) and asks the agent to write there. */
-  saveDiagnostics(): Promise<SavedDiagnostics | null> {
-    return this.command<SavedDiagnostics | null>('save_diagnostics', undefined);
   }
 
   // ------------------------------------------------------------------------- search, hash search, startup filter
