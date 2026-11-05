@@ -90,3 +90,17 @@ export function withBuildStep(steps, step) {
   const i = steps.findIndex((s) => /^Install/.test(s.title));
   return [...steps.slice(0, i + 1), step, ...steps.slice(i + 1)];
 }
+
+/**
+ * The macOS base image must exist before a clone is tried (another agent may be rebuilding it): a missing base is a broken check with the reason, not a
+ * tool error and not a product failure. `listText` is `tart list --quiet`.
+ */
+export function preflightBase(listText, base) {
+  const have = String(listText ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const ok = have.includes(base);
+  return {
+    title: 'Preflight: the Tart base image exists', status: ok ? 'pass' : 'check-broken', cls: ok ? 'product' : 'check',
+    summary: ok ? `base ${base} exists` : `base ${base} does not exist at this moment (another agent may be rebuilding it); local VMs: ${have.join(', ') || 'none'}`,
+    checks: [{ ok, ...(ok ? {} : { kind: 'check' }), detail: ok ? `base ${base} exists` : `tart list has no VM named ${base}` }], evidence: have,
+  };
+}

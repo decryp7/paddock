@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { RELEASE_RUNS, finalizeRun, foundFromGrep, foundFromPs, judgeRelease, psHasCommit, resultFolder, sidecar, withBuildStep } from './report.mjs';
+import { RELEASE_RUNS, finalizeRun, foundFromGrep, foundFromPs, judgeRelease, psHasCommit, resultFolder, sidecar, withBuildStep, preflightBase } from './report.mjs';
 import { EXIT } from './verdict.mjs';
 
 const passing = (label, extra = {}) => ({ label, os: RELEASE_RUNS.find((r) => r.label === label).os, ciRun: '7', installerSha256: `h-${label.split('-')[0]}`, partial: false, verdict: 'PASS', missing: [], failed: [], broken: [], ...extra });
@@ -47,4 +47,11 @@ test('the build binding probes read found, not found and unreadable apart', () =
   assert.deepEqual(['True', 'False', 'unreadable', ''].map(foundFromPs), [true, false, null, null]);
   assert.match(psHasCommit('C:\\x\\dyno-app.exe', 'abcdef012345'), /Contains\('abcdef012345'\)/);
   assert.deepEqual(withBuildStep([{ title: 'Install' }, { title: 'Cold' }], { title: 'B' }).map((s) => s.title), ['Install', 'B', 'Cold']);
+});
+
+test('dead state: a missing macOS base is a broken check with the reason, never a pass or a product fail', () => {
+  const r = preflightBase('macos-tahoe-base\nother\n', 'vmgui-base-tahoe-4aaa751f');
+  assert.equal(r.status, 'check-broken');
+  assert.match(r.summary, /does not exist at this moment/);
+  assert.equal(preflightBase('vmgui-base-tahoe-4aaa751f\n', 'vmgui-base-tahoe-4aaa751f').status, 'pass');
 });

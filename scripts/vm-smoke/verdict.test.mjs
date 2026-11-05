@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EXIT, buildStep, deriveVerdict, exitCodeFor, makeResult, stepClass } from './verdict.mjs';
+import { EXIT, buildStep, classifyInstallFailure, deriveVerdict, exitCodeFor, makeResult, stepClass } from './verdict.mjs';
 import { renderResult } from './judge.mjs';
 import { requiredSteps } from './manifest.mjs';
 
@@ -97,4 +97,17 @@ test('a release run without --ui or --reboot-check is INCOMPLETE listing them (3
   const v = deriveVerdict({ steps, required: requiredSteps({ os: 'windows', ui: false, reboot: false, release: true }) });
   assert.equal(v.verdict, 'INCOMPLETE');
   assert.ok(v.missing.some((m) => /uninstall/.test(m.id)));
+});
+
+test('dead state: a failed install stops the run with one class; later steps (a vacuous "Second launch" pass) are dropped and reported not measured', () => {
+  const install = { title: 'Install (per-machine NSIS, silent, UAC over VNC)', status: 'fail', summary: 'exit 2', checks: [{ ok: false, kind: 'check', detail: 'precondition: a per-user Dyno is in this snapshot' }, { ok: false, detail: 'dyno-app.exe present' }] };
+  const steps = classifyInstallFailure([install, st('Second launch while running', 'pass')]);
+  assert.equal(steps.length, 1);
+  assert.equal(steps[0].status, 'check-broken');
+  const v = deriveVerdict({ steps, required: requiredSteps({ os: 'windows', ui: true }) });
+  assert.equal(v.verdict, 'INCOMPLETE');
+  assert.match(v.missing.find((m) => m.id === 'second-launch').why, /^not measured: the install did not succeed \(check/);
+  const product = classifyInstallFailure([{ ...install, checks: [{ ok: false, detail: 'installer exit code 5' }] }, st('Cold start', 'fail')]);
+  assert.equal(product.length, 1);
+  assert.equal(deriveVerdict({ steps: product, required: requiredSteps({ os: 'windows', ui: true }) }).verdict, 'FAIL');
 });

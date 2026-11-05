@@ -54,11 +54,29 @@ Log "start suite, installer=$Installer"
 # that UAC prompt over the VM's VNC when it sees uac-N.txt (run-win.mjs --vnc). Without the host's answer the install waits 5 minutes and fails.
 $s = New-Step 'Install (per-machine NSIS, silent, UAC over VNC)'
 Stop-All
+# Precondition: no per-user Dyno in this snapshot. A per-user leftover makes the per-machine installer's guard refuse (NSIS exit 2); it is a fault of the
+# test machine, not of the product, so it is reported as a broken check (kind 'check') before the installer runs.
+$pu = @()
+if (Test-Path (Join-Path $env:LOCALAPPDATA 'Dyno\dyno-app.exe')) { $pu += "$env:LOCALAPPDATA\Dyno\dyno-app.exe" }
+if (Test-Path 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Dyno') { $pu += 'HKCU Uninstall\Dyno' }
+if ((Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction SilentlyContinue).PSObject.Properties | Where-Object { $_.Value -like '*Dyno*' }) { $pu += 'HKCU Run value for Dyno' }
+[void]$s.checks.Add(@{ ok = ($pu.Count -eq 0); kind = $(if ($pu.Count) { 'check' } else { $null }); detail = $(if ($pu.Count) { "precondition: a per-user Dyno is in this snapshot ($($pu -join '; ')): the per-machine installer's guard refuses it" } else { 'precondition: no per-user Dyno in this snapshot' }) })
 Set-Content (Join-Path $Out 'uac-1.txt') 'install'
-$p = Start-Process $Installer -ArgumentList '/S' -PassThru
+$p = $null; $startErr = ''
+try { $p = Start-Process $Installer -ArgumentList '/S' -PassThru -ErrorAction Stop } catch { $startErr = "$($_.Exception.Message)" }
 $uk = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Dyno'
 $installed = Wait-Until { if ((Test-Path (Join-Path $prog 'dyno-app.exe')) -and (Test-Path $uk) -and -not (Get-Process -Id $p.Id -ErrorAction SilentlyContinue)) { $true } } 300 2000
 $code = try { $p.ExitCode } catch { 'unreadable' }
+# A UAC prompt that was cancelled (or answered wrongly) ends Start-Process with an error and no installer process; the host answered it, so say which it was.
+if ($startErr) { Check $s $false "the installer did not start: $startErr (a cancelled or refused UAC prompt)"; $s.checks[$s.checks.Count - 1].kind = 'check' }
+# Evidence of WHY an install ends the way it does, kept also when the folder is gone: setup.log (the installer's own log), the NSIS exit meaning, recent errors.
+$logs = @("$prog\updates\setup.log", "$env:TEMP\setup.log", "$env:LOCALAPPDATA\Dyno\setup.log", "$env:LOCALAPPDATA\Dyno\updates\setup.log") | Where-Object { Test-Path $_ }
+if ($logs) { foreach ($l in $logs) { Copy-Item $l (Join-Path $Out ('setup-log-' + ($l -replace '[^A-Za-z0-9]', '_') + '.txt')) -Force -ErrorAction SilentlyContinue; [void]$s.evidence.Add("--- $l (last 40 lines)"); Get-Content $l -Tail 40 | ForEach-Object { [void]$s.evidence.Add($_) } } }
+else { [void]$s.evidence.Add('--- no setup.log found in: C:\Program Files\Dyno\updates, %TEMP%, %LOCALAPPDATA%\Dyno (a guard refusal may log nowhere)') }
+$nsisReason = switch ("$code") { '0' { 'success' } '1' { 'installation aborted by the user (cancelled)' } '2' { 'installation aborted by the script (a guard such as the per-user check refused, or Abort was called)' } default { "exit code $code" } }
+[void]$s.evidence.Add("NSIS exit: $code = $nsisReason")
+Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 1,2; StartTime = (Get-Date).AddMinutes(-10) } -MaxEvents 8 -ErrorAction SilentlyContinue | ForEach-Object { [void]$s.evidence.Add("event $($_.TimeCreated.ToString('s')) $($_.ProviderName): $((($_.Message -split '\n')[0]))") }
+
 Check $s ([bool]$installed) $(if ($installed) { "installer ended (exit code $code)" } else { 'the installer did not finish in 300 s (no UAC answer?)' })
 if ($code -ne 'unreadable') { Check $s ($code -eq 0) "installer exit code $code" }
 foreach ($f in 'dyno-app.exe', 'dyno-agent.exe', 'dyno.exe') { Check $s (Test-Path (Join-Path $prog $f)) "$f present under $prog" }
@@ -73,6 +91,9 @@ Check $s ($ver -match '^\d+\.\d+\.\d+') "dyno-app.exe version $ver"
 [void]$s.evidence.Add("version $ver")
 Stop-All   # the installer starts the app for the desktop user when it ends; the cold start below begins from nothing
 Finish $s "installed $ver under Program Files after a real UAC prompt"
+# An install that failed stops the suite: every later step would measure an empty machine (the 7550 run passed "Second launch" with no app). The host reports
+# the rest as not measured, with this step's class (check: a precondition or the UAC answer; product: the installer itself).
+if ($steps[$steps.Count - 1].status -ne 'pass') { 'install failed' | Set-Content "$Out\done.txt"; exit 0 }
 
 # 2. Cold start: one app, one agent, the agent's parent is the app, the discovery file names the live agent.
 $s = New-Step 'Cold start, one instance'
@@ -101,6 +122,7 @@ $s = New-Step 'Second launch while running'
 $before = @(Procs | ForEach-Object { $_.ProcessId } | Sort-Object)
 Start-Process (Join-Path $prog 'dyno-app.exe'); Start-Sleep -Seconds 8
 $after = @(Procs | ForEach-Object { $_.ProcessId } | Sort-Object)
+Check $s ($before.Count -ge 2) "precondition: the app is running before the second launch ($($before.Count) Dyno process(es))"
 Check $s (($before -join ',') -eq ($after -join ',')) "processes before [$($before -join ',')] and after [$($after -join ',')]"
 Finish $s 'single instance: no new process'
 

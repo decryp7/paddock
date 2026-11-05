@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
 import { buildStep, expectedCommit } from './verdict.mjs';
 import { requiredSteps } from './manifest.mjs';
-import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } from './report.mjs';
+import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep, preflightBase } from './report.mjs';
 import { PowerChecks, runPowerSuite } from './power-checks.mjs';
 import { MacGui } from './mac-gui.mjs';
 import { MacIdleChecks } from './mac-idle.mjs';
@@ -204,6 +204,17 @@ async function main(argv) {
     if (base.startsWith('ghcr')) {
       const pulled = await tart(['pull', base], { timeoutMs: 3_600_000 });
       if (pulled.code !== 0) throw new Error(`pulling the base image failed: ${pulled.stderr.trim().slice(0, 200)}`);
+    }
+    if (!base.startsWith('ghcr')) {
+      const pf = preflightBase((await tart(['list', '--quiet'])).stdout, base);
+      if (pf.status !== 'pass') {
+        // Reported as a broken check (INCOMPLETE, exit 3) with the reason; nothing was cloned.
+        const startedPf = new Date().toISOString();
+        const reqPf = requiredSteps({ os: 'macos', suite: o.suite, reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
+        const done = finalizeRun({ out, started: startedPf, meta: { label: o.suite === 'start' ? 'macos-start' : o.suite === 'power' ? 'macos-power' : o.reboot ? 'macos-helper-restart' : 'macos-helper', os: 'macos', suite: o.suite, run: o.run ?? null }, run: { app: config.app, installer: source, installerSha256: sha256File(dmg), source, partial: o.partial, required: reqPf, guest: `Tart ${base} (missing)`, started: startedPf, steps: [pf] } });
+        log(`preflight: ${pf.summary}`); console.log(done.file);
+        return done.exit;
+      }
     }
     cloned = true; // before the clone: a signal during `tart clone` still deletes whatever it left
     const c = await tart(['clone', base, vm], { timeoutMs: 1_800_000 });

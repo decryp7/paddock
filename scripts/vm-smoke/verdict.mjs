@@ -33,12 +33,15 @@ export function stepClass(step) {
  * @returns {{verdict:'PASS'|'FAIL'|'INCOMPLETE', missing:{id:string, why:string}[], failed:object[], broken:object[]}}
  */
 export function deriveVerdict({ steps, required }) {
+  // An install that did not pass blocks every later step: they are "not measured: the install failed", never a FAIL of their own.
+  const install = steps.find((s) => /^Install/.test(s.title));
+  const blocked = install && install.status !== 'pass' ? `not measured: the install did not succeed (${stepClass(install)}: ${String(install.summary ?? install.status).slice(0, 100)})` : null;
   const failed = steps.filter((s) => s.status === 'fail' && stepClass(s) === 'product');
   const broken = steps.filter((s) => s.status === 'check-broken' || (s.status === 'fail' && stepClass(s) === 'check'));
   const missing = [];
   for (const r of required) {
     const found = steps.filter((s) => r.match.test(s.title));
-    if (!found.length) missing.push({ id: r.id, why: 'the step did not run' });
+    if (!found.length) missing.push({ id: r.id, why: blocked && r.id !== 'install' ? blocked : 'the step did not run' });
     else if (!found.some((s) => s.status === 'pass') && !found.some((s) => s.status === 'fail' && stepClass(s) === 'product')) {
       missing.push({ id: r.id, why: `the step ended ${found.map((s) => s.status).join('/')}${found[0].summary ? `: ${String(found[0].summary).slice(0, 120)}` : ''}` });
     }
@@ -47,6 +50,20 @@ export function deriveVerdict({ steps, required }) {
   if (!steps.length) missing.push({ id: 'steps', why: 'the run produced no steps' });
   const verdict = failed.length ? 'FAIL' : missing.length || broken.length ? 'INCOMPLETE' : 'PASS';
   return { verdict, missing, failed, broken };
+}
+
+/**
+ * A failed install is classified ONCE: when any failing check says the machine or the answer was at fault (a per-user leftover in the snapshot, a UAC prompt that
+ * was cancelled), the whole step is `check-broken`, else it stays a product FAIL. The steps that cannot have run after it are dropped, so a vacuous pass
+ * measured on an empty machine ("Second launch" with no app) cannot count.
+ */
+export function classifyInstallFailure(steps) {
+  const i = steps.findIndex((s) => /^Install/.test(s.title));
+  if (i < 0 || steps[i].status === 'pass') return steps;
+  const bad = (steps[i].checks ?? []).filter((c) => !c.ok);
+  const check = bad.some((c) => c.kind === 'check');
+  const install = check ? { ...steps[i], status: 'check-broken', cls: 'check' } : { ...steps[i], cls: 'product' };
+  return [...steps.slice(0, i), install];
 }
 
 export const exitCodeFor = (v) => EXIT[v.verdict];

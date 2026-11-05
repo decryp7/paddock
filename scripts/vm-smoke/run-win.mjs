@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildStep, expectedCommit } from './verdict.mjs';
+import { buildStep, classifyInstallFailure, expectedCommit } from './verdict.mjs';
 import { requiredSteps } from './manifest.mjs';
 import { commitOfRun, finalizeRun, foundFromPs, psHasCommit, sha256File, withBuildStep } from './report.mjs';
 import { runUiPhase } from './win-ui.mjs';
@@ -164,17 +164,20 @@ async function main(argv) {
       done = listing.includes('DONE');
       if (!done) await sleep(2000);
     }
+    // The suite ends early when the install failed (win-suite.ps1 writes "install failed" into done.txt): no UI, restart or build probe on an empty machine.
+    const blocked = done && /install failed/.test(clean(ssh(`Get-Content ${GUEST}\\out\\done.txt -ErrorAction SilentlyContinue`, 30_000).stdout));
+    if (blocked) log('the install failed: the UI and restart phases are skipped; dependent steps are not measured');
     // The build binding is read while the app is installed (the uninstall step removes it later).
     const expected = expectedCommit(o.expectCommit) ?? (o.run ? commitOfRun(o.run) : null);
-    const buildProbe = expected && done ? foundFromPs(clean(ssh(psHasCommit('C:\\Program Files\\Dyno\\dyno-app.exe', expected), 180_000).stdout)) : null;
+    const buildProbe = expected && done && !blocked ? foundFromPs(clean(ssh(psHasCommit('C:\\Program Files\\Dyno\\dyno-app.exe', expected), 180_000).stdout)) : null;
     let uiSteps = [];
-    if (o.ui && done) {
+    if (o.ui && done && !blocked) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
       log('UI phase: snap check, screenshot check on the WebView2 DOM, Quit (bounded)');
       process.env.PADDOCK_WIN_SHOTS = join(out, `${new Date().toISOString().replace(/[:.]/g, '-')}-win-dom-shots`);
       uiSteps = await runUiPhase({ log, extra: o.vnc ? helperSteps : [], after: o.vnc ? afterQuitSteps : [] });
     }
-    if (o.reboot && done) {
+    if (o.reboot && done && !blocked) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
       const waitConsole = async (tries = 90) => { for (let i = 0; i < tries; i++) { if (vm(['ssh', 'if ((query user) -match "console\\s+\\d+\\s+Active") {exit 0} else {exit 1}'], 30_000).code === 0) return true; if (i < tries - 1) await sleep(4000); } return false; };
       const launchDyno = () => {
@@ -189,7 +192,8 @@ async function main(argv) {
     const stepsFile = join(dest, 'steps.json');
     if (!existsSync(stepsFile)) throw new Error('the suite wrote no steps.json (see run.log: ' + (existsSync(join(dest, 'run.log')) ? readFileSync(join(dest, 'run.log'), 'utf8').slice(-300) : 'absent') + ')');
     const raw = JSON.parse(readFileSync(stepsFile, 'utf8').replace(/^\uFEFF/, ''));
-    const steps = (Array.isArray(raw) ? raw : [raw]).map((s) => ({ ...s, checks: s.checks ?? [], evidence: [].concat(s.evidence ?? []).map(String) }));
+    let steps = (Array.isArray(raw) ? raw : [raw]).map((s) => ({ ...s, checks: s.checks ?? [], evidence: [].concat(s.evidence ?? []).map(String) }));
+    steps = classifyInstallFailure(steps); // one class, and nothing after a failed install counts
     if (steps[0]) { steps[0].evidence.push(...uacNotes.map((u) => `UAC: ${u.detail}`)); const badUac = uacNotes.filter((u) => !u.ok); if (badUac.length) { steps[0].status = 'fail'; steps[0].checks.push(...badUac.map((u) => ({ ok: false, detail: u.detail }))); } }
     if (!done) steps.push({ title: 'Suite finished', status: 'fail', summary: 'the suite did not finish within 40 minutes', checks: [], evidence: [] });
     steps.push(...uiSteps);
