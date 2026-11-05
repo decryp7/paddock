@@ -148,10 +148,10 @@ const treeSel = [
   { l: 2, k: 'd', c: 'on', n: 'Service', t: 'Text log', s: ok('60'), z: '100 MiB', f: '60' },
   { l: 1, k: 'd', c: 'dis', n: 'Project', m: 1, t: 'Mixed', s: no('8,529'), r: 'Binary project data', z: '2.97 GiB', f: '8,529' },
   { l: 1, k: 'd', open: 1, c: 'off', n: 'System', t: 'Mixed', s: `${lim('5')}&nbsp;${er('1')}`, z: '3.41 GiB', f: '6' },
-  { l: 2, k: 'f', c: 'off', n: 'Event0.evtx', t: 'Windows event log', s: W.lim, r: 'Needs 22 GiB, limit 1 GiB', z: '1,011 MiB' },
-  { l: 2, k: 'f', c: 'off', n: 'Event1.evtx', t: 'Windows event log', s: W.lim, r: 'Needs 22 GiB, limit 1 GiB', z: '1,011 MiB' },
+  { l: 2, k: 'f', c: 'off', n: 'Event0.evtx', t: 'Windows event log', s: W.lim, r: 'Estimated over the 1 GiB limit', z: '1,011 MiB' },
+  { l: 2, k: 'f', c: 'off', n: 'Event1.evtx', t: 'Windows event log', s: W.lim, r: 'Estimated over the 1 GiB limit', z: '1,011 MiB' },
   { l: 2, k: 'f', c: 'dis', n: 'Event2.evtx', t: 'Windows event log', s: W.err, r: 'Locked by a program', z: '1,011 MiB' },
-  { l: 2, k: 'd', c: 'off', n: 'Exports', t: 'Text log', s: lim('3'), r: 'Needs 3.3 GiB each, limit 1.25 GiB', z: '458 MiB', f: '3' },
+  { l: 2, k: 'd', c: 'off', n: 'Exports', t: 'Text log', s: lim('3'), r: 'Estimated over the worker limit', z: '458 MiB', f: '3' },
   { l: 1, k: 'd', c: 'on', n: 'Dumps', t: 'Crash dump', s: ok('22'), z: '895 MiB', f: '22' },
   { l: 1, k: 'd', c: 'on', n: 'Archives', t: 'ZIP archive', s: ok('4'), z: '1 MiB', f: '4' },
 ];
