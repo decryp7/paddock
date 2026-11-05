@@ -83,6 +83,33 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, MEM-1: opening a capture no longer holds the file in the app (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base fb027b50d (the app reads the file, copies it for a helper thread and lends the copy) against the MEM-1 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-10 during the run; other agents running
+- **Build:** release; the profiling plugin in its own process (the `debrief-plugins` binary), this test process standing in for the app
+- **Corpus:** a generated folded-stacks file of 128 MB (invented stacks); synthetic
+- **Command:** `cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(app_holds_the_file) or test(file_is_lent_by_ranges)'`
+  (one process per test, so the peaks do not mix)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | MEM-1 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Peak resident memory of the app process opening a 128 MB capture (it was 13 MB before the open) | 395 MB | 140 MB | the file is not held | pass |
+  | Time to open | 1.9 s | 1.9 s | no slower | pass |
+  | The window's open captures during the import | locked for all of it | readable (`a_capture_is_imported_from_its_path_and_without_holding_the_store`) | readable | pass |
+
+- **Memory measure:** peak resident set of the process (`ru_maxrss`), not footprint
+- **Notes:** before, the app read the file (1 x), copied it to move it to a helper thread (2 x) and the plugin's process read
+  it again over IPC; now the importer is given the path and the plugin's process reads it by ranges, so the app holds none
+  of it (the 140 MB are the decoded capture and the baseline). The write lock of the window's captures was held for the
+  whole import (minutes for a large file); the import now runs with no lock, and the capture is added under a short one.
+  What stays: the plugin's own process still reads the file whole (the slice-based importers parse from a buffer; a streaming
+  importer SDK is a larger change, `serve.rs` `ImportProfile`), under its memory cap. Red run of the lock test: with the old
+  flow it fails ("the open captures were readable while the second one was imported").
+
 ### 2026-11-05, rule 51 for the name rebuild: side-by-side reads of cheaper searches (branch `debrief/p0-idle`)
 
 - **Commit:** A/B: base 7b0c2421e (NR1, one phrase search per look-alike name, one after the other) against the change on top of it
@@ -92,7 +119,7 @@ some fields; "n/s" means the source does not state them.
 - **Corpus:** a generated 64 MB `.evtx` (133,120 events, 38 catalogue names, 30 groups), imported through the Windows plugin
   into the store the app ships; synthetic (see the NR1 block)
 - **Command:** `DEBRIEF_EVTX_IDLE_S=20 cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
-- **Runs:** three runs on each side (the base ones are the NR1 runs: 2.81, 2.85 and 2.90 s); the READ lines are the mean of 3 reads in each run
+- **Runs:** the base side is the NR1 runs (2.81, 2.85, 2.90, 2.95 s); the change side one run; the READ lines are the mean of 3 reads, the same in both of the last two runs (19 and 20 ms)
 - **Numbers:**
 
   | Measure | Base | Change | Budget | Verdict |

@@ -5,6 +5,7 @@ mod common;
 #[path = "../../../debrief-plugin-windows/tests/it/support/synth_minidump.rs"]
 mod synth_minidump;
 
+mod capture_open;
 mod dumps;
 mod engine;
 mod evtx_corpus;
