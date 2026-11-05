@@ -901,3 +901,19 @@ status = "built"
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
+
+# ADR 0051 WP-0b: the line for the Pacenotes stage-1 landing. WP-0a adds the other copies of this mechanism (Dyno, Debrief).
+[[mechanism]]
+id = "tool-locate"
+title = "Finding an installed external tool (PATH, rustup component, known folders) and reporting how it was found"
+canonical = "paddock-tools"
+paths = ["crates/paddock-tools/src/**"]
+status = "planned"
+adr = "docs/adr/0051-paddock-tools-external-tool-manager.md"
+
+  [[mechanism.copy]]
+  paths = ["apps/pacenotes/crates/pacenotes-core/src/pack.rs"]
+  symbols = ["item:Detect"]
+  owner = "pacenotes"
+  delete_by = "pacenotes-v1.0.0"
+  note = "ServerPack detection (a program on PATH, a rustup component); moves onto paddock_tools::locate before the first release (ADR 0051 U9)."
