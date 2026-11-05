@@ -59,23 +59,30 @@ export function judgeKeychainOtherBuild(p) {
 }
 
 /**
- * Drives the measurement through guest primitives (the caller installs the builds): `createKeyInBuildA()`, `installBuildB()`, `openApp()`, `windowVisible()`
- * (boolean), `sheetVisible()` (boolean), `now()`, `sleep(ms)`. Any primitive that throws makes the step "check broken", never a result about the product.
+ * Drives the measurement through guest primitives (the caller installs the builds): `createKeyInBuildA()`, `reopenSameBuild()` (quit, open build A again),
+ * `installBuildB()`, `openApp()`, `windowVisible()` (boolean), `sheetVisible()` (boolean), `now()`, `sleep(ms)`.
+ * The POSITIVE CONTROL comes first (ER-33): build A, which made the key, is reopened and must show a window; if it does not, the probe or the key is broken and the
+ * step is "check broken", never a statement about build B. Any primitive that throws is also a broken check.
  */
 export async function keychainOtherBuildStep(p, guardMs = 45_000) {
+  const broken = (why) => ({ title: ROW_TITLES.keychainOtherBuild, status: 'not-measured', cls: 'check', summary: `not measured: ${String(why).slice(0, 180)} (check broken)`, checks: [{ ok: false, kind: 'check', detail: String(why).slice(0, 220) }], evidence: [] });
+  const waitWindow = async () => {
+    const t0 = p.now();
+    while (p.now() - t0 < guardMs) { if (await p.windowVisible()) return p.now() - t0; await p.sleep(1000); }
+    return null;
+  };
   try {
     await p.createKeyInBuildA();
+    await p.reopenSameBuild();
+    const control = await waitWindow();
+    if (control === null) return broken(`the positive control failed: build A did not show a window within ${guardMs / 1000} s with its own key, so the probe or the key cannot be trusted`);
     await p.installBuildB();
     await p.openApp();
-    const t0 = p.now();
-    let windowMs = null;
-    while (p.now() - t0 < guardMs) {
-      if (await p.windowVisible()) { windowMs = p.now() - t0; break; }
-      await p.sleep(1000);
-    }
-    return judgeKeychainOtherBuild({ windowSeen: windowMs !== null, windowMs, sheetSeen: await p.sheetVisible(), guardMs });
+    const windowMs = await waitWindow();
+    const r = judgeKeychainOtherBuild({ windowSeen: windowMs !== null, windowMs, sheetSeen: await p.sheetVisible(), guardMs });
+    return { ...r, summary: `${r.summary}; positive control: build A's own key gave a window after ${(control / 1000).toFixed(1)} s`, checks: [{ ok: true, info: true, detail: `positive control: build A reopened with its own key, window after ${(control / 1000).toFixed(1)} s` }, ...r.checks] };
   } catch (e) {
-    return { title: ROW_TITLES.keychainOtherBuild, status: 'not-measured', cls: 'check', summary: `not measured: ${String(e.message ?? e).slice(0, 160)} (check broken)`, checks: [{ ok: false, kind: 'check', detail: String(e.message ?? e).slice(0, 200) }], evidence: [] };
+    return broken(e.message ?? e);
   }
 }
 

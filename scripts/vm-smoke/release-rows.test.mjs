@@ -53,14 +53,23 @@ test('keychain other-build measurement: records the delay or the missing window,
   assert.ok(!/keychainOtherBuild|Measurement \(not a release row/.test(readFileSync(new URL('./manifest.mjs', import.meta.url), 'utf8')), 'not required by any run');
   assert.equal(deriveVerdict({ steps: [blocked], required: [] }).failed.length, 0);
 });
-test('keychain other-build driver: steps run in order, the window is polled, and a throwing primitive is a broken check, not a result', async () => {
-  let t = 0; const log = [];
-  const p = { now: () => t, sleep: async (ms) => { t += ms; }, createKeyInBuildA: async () => log.push('A'), installBuildB: async () => log.push('B'), openApp: async () => log.push('open'), windowVisible: async () => t >= 3000, sheetVisible: async () => false };
-  const s = await keychainOtherBuildStep(p);
-  assert.deepEqual(log, ['A', 'B', 'open']);
-  assert.match(s.summary, /window appeared after 3\.0 s/);
-  const never = await keychainOtherBuildStep({ ...p, windowVisible: async () => false, sheetVisible: async () => true }, 5000);
-  assert.match(never.summary, /no window within the 5 s guard/);
+test('keychain other-build driver: control first, then build B; a failed control or a throwing primitive is a broken check, not a result about B', async () => {
+  let t = 0; const log = []; let bInstalled = false;
+  const p = { now: () => t, sleep: async (ms) => { t += ms; }, createKeyInBuildA: async () => log.push('A-key'), reopenSameBuild: async () => { log.push('A-again'); t = 0; },
+    installBuildB: async () => { log.push('B'); bInstalled = true; }, openApp: async () => { log.push('open-B'); t = 0; },
+    windowVisible: async () => (bInstalled ? false : t >= 4000), sheetVisible: async () => true };
+  const s = await keychainOtherBuildStep(p, 10_000);
+  assert.deepEqual(log, ['A-key', 'A-again', 'B', 'open-B']);
+  assert.equal(s.status, 'not-measured');
+  assert.match(s.summary, /no window within the 10 s guard.*sheet WAS on screen.*positive control.*after 4\.0 s/);
+  const noControl = await keychainOtherBuildStep({ ...p, windowVisible: async () => false }, 5000);
+  assert.equal(noControl.checks[0].kind, 'check');
+  assert.match(noControl.summary, /positive control failed/);
+  assert.ok(!log.includes('x'));
+  bInstalled = false; t = 0;
+  const fixed = await keychainOtherBuildStep({ ...p, windowVisible: async () => true }, 5000);
+  assert.match(fixed.summary, /window appeared after 0\.0 s/);
+  bInstalled = false; t = 0;
   const broken = await keychainOtherBuildStep({ ...p, installBuildB: async () => { throw new Error('dmg missing'); } });
   assert.equal(broken.checks[0].kind, 'check');
   assert.match(broken.summary, /dmg missing/);

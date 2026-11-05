@@ -21,7 +21,7 @@ import { macDriver, readingSteps } from './helper-readings.mjs';
 import { macRebootCheck } from './mac-reboot.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep } from './mcp-judges.mjs';
-import { NOT_DRIVEN, ROW_TITLES, btmEnabled, judgeLifecycleLog, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
+import { NOT_DRIVEN, ROW_TITLES, btmEnabled, keychainOtherBuildStep, judgeLifecycleLog, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
 
@@ -43,6 +43,7 @@ export function parseArgs(argv) {
     const a = argv[i];
     if (a === '--app') o.app = take(i++, a);
     else if (a === '--installer') o.installer = take(i++, a);
+    else if (a === '--installer-before') o.installerBefore = take(i++, a);
     else if (a === '--run') o.run = take(i++, a);
     else if (a === '--artifact') o.artifact = take(i++, a);
     else if (a === '--out') o.out = take(i++, a);
@@ -58,6 +59,7 @@ export function parseArgs(argv) {
   if (!['start', 'power', 'helper'].includes(o.suite)) throw new Error(`--suite ${o.suite}: start (default), power or helper`);
   if (!o.app) throw new Error('--app <id> is needed (dyno, spotter, pitcrew, pitwall, debrief)');
   if (!/^[a-z][a-z-]*$/.test(o.app)) throw new Error(`--app ${o.app} is not an app id`);
+  if (o.installerBefore && o.suite !== 'power') throw new Error('--installer-before (the build that makes the key, for the keychain other-build measurement) needs --suite power');
   if (!o.installer === !o.run) throw new Error('give exactly one of --installer <file.dmg> or --run <CI run id>');
   if (o.run && !/^\d+$/.test(o.run)) throw new Error('--run takes a number');
   if (o.guest !== 'macos') throw new Error(`--guest ${o.guest}: only macos is scripted here. Windows guests: scripts/vm-win.sh on origin/tools/win-test-vm; Linux: tools/macos-vm-smoke.sh --guest linux (see README)`);
@@ -166,6 +168,10 @@ async function main(argv) {
     const stage = join(scratch, 'stage');
     mkdirSync(stage);
     cpSync(dmg, join(stage, 'installer.dmg'));
+    if (o.installerBefore) {
+      if (!existsSync(o.installerBefore) || !statSync(o.installerBefore).isFile()) throw new Error(`--installer-before ${o.installerBefore} is not a file`);
+      cpSync(resolve(o.installerBefore), join(stage, 'before.dmg'));
+    }
     if (o.suite === 'power' || o.suite === 'helper') {
       // The GUI driver (guest/axdrive.swift) is compiled on the host, never run there, and cached by the hash of its source; the image's own
       // copy predates `drag`. The guest installs it from the read-only share.
@@ -319,7 +325,18 @@ async function main(argv) {
             hung];
         };
         const rowFns = o.suite === 'power' ? [macRows] : [];
-        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
+        const suite = await runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
+        // The keychain other-build measurement (not in the manifest, never a pass or a fail): build A (--installer-before) makes a key through the app's own UI, build B
+        // (--installer) is installed over it. It runs last because it replaces the installed app.
+        if (o.installerBefore) {
+          const { macKeychainPrimitives } = await import('./mac-keychain-row.mjs');
+          const prim = macKeychainPrimitives({ guest, gui, check, share: SHARE, bundle: `/Applications/${config.bundle}`, log });
+          const km = await keychainOtherBuildStep(prim).catch((e) => ({ title: ROW_TITLES.keychainOtherBuild, status: 'not-measured', cls: 'check', summary: `not measured: ${e.message} (check broken)`, checks: [{ ok: false, kind: 'check', detail: String(e.message) }], evidence: [] }));
+          await prim.cleanup().catch(() => {});
+          log(`${km.status.toUpperCase()}  ${km.title}: ${km.summary}`);
+          suite.steps.push(km);
+        }
+        return suite;
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();

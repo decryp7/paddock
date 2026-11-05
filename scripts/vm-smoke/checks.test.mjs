@@ -190,6 +190,11 @@ test('the kill compares the start time recorded in the snapshot, not one read ju
   assert.equal(f.calls.filter((x) => x.startsWith('ps -o lstart=')).length, 0, 'no separate lstart read');
 });
 
+test('--installer-before names the build that makes the key and needs the power suite', () => {
+  assert.equal(parseArgs(['--app', 'dyno', '--installer', 'b.dmg', '--installer-before', 'a.dmg', '--suite', 'power']).installerBefore, 'a.dmg');
+  assert.throws(() => parseArgs(['--app', 'dyno', '--installer', 'b.dmg', '--installer-before', 'a.dmg']), /needs --suite power/);
+});
+
 test('arguments: one app, exactly one installer source, macOS only', () => {
   assert.equal(parseArgs(['--app', 'dyno', '--run', '7193']).run, '7193');
   assert.throws(() => parseArgs(['--run', '1']), /--app/);
