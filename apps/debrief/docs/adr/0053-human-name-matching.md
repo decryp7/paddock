@@ -95,7 +95,10 @@ Paddock rule 46 (no LLM for large jobs) and the research note
   older than the workspace; the job is keyed by the window, so one rebuild is queued or running at a time, and a
   request answers from the last table at once. The job first waits for the catalogue to be built, woken by the store's
   own signal (`catalogue_status` with the generation of the last answer blocks inside the store until the catalogue
-  commits or moves): no polling, and the whole-catalogue read never runs while sources are pending. The join compares
+  commits or moves): no polling, and the whole-catalogue read never runs while sources are pending. The events of the
+  look-alike names are read side by side (at most four reads at once) with a substring search, which stops at the
+  thirtieth hit (a phrase search through the full-text index took 1.07 s a read on 133,120 events, a substring 20 ms), and
+  only for names whose look-alikes could appear in the same event (a source in common, time ranges that meet). The join compares
   only groups that appear in the events read for the look-alikes, found through an index of their trigrams computed
   once, so it follows the number of those groups (a few hundred), not of all groups: `merge_cooccurring` over 8,000
   groups takes 7.5 ms against 43.5 s before (`names_perf::merge_scaling`, release build, Mac mini M4 Pro, 2026-11-05;

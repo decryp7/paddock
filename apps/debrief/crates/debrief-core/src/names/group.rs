@@ -304,6 +304,37 @@ pub fn look_alikes(groups: &[NameGroup], limit: usize) -> Vec<usize> {
     out
 }
 
+/// Whether two groups could appear in one event: the same scope and look-alike names, time ranges that overlap and, when
+/// both lists of sources are complete (shorter than [`MAX_SEEN_IN`](crate::catalogue::MAX_SEEN_IN)), a source in common.
+/// Unknown ranges and lists that were cut are taken as possible.
+fn could_share_events(a: &NameGroup, b: &NameGroup) -> bool {
+    let ranges_meet = match (a.first_ts, a.last_ts, b.first_ts, b.last_ts) {
+        (Some(af), Some(al), Some(bf), Some(bl)) => af <= bl && bf <= al,
+        _ => true,
+    };
+    let complete = |g: &NameGroup| !g.seen_in.is_empty() && g.seen_in.len() < crate::catalogue::MAX_SEEN_IN;
+    let sources_meet = !(complete(a) && complete(b)) || a.seen_in.iter().any(|s| b.seen_in.contains(s));
+    ranges_meet && sources_meet
+}
+
+/// [`look_alikes`] that also could appear together in an event ([`could_share_events`]): a name whose look-alikes are in
+/// other sources or at other times cannot join them, so its events need not be read.
+pub fn joinable_look_alikes(groups: &[NameGroup], limit: usize) -> Vec<usize> {
+    let top = &groups[..groups.len().min(limit)];
+    let grams: Vec<Gram> = top.iter().map(|g| Gram::of(&g.key)).collect();
+    let mut out = Vec::new();
+    for (i, a) in top.iter().enumerate() {
+        if top
+            .iter()
+            .enumerate()
+            .any(|(j, b)| i != j && a.scope == b.scope && grams[i].similar(&grams[j]) && could_share_events(a, b))
+        {
+            out.push(i);
+        }
+    }
+    out
+}
+
 fn together(a: &NameGroup, b: &NameGroup, cooc: &Cooccurrence, min: f64) -> bool {
     a.spellings
         .iter()
@@ -540,6 +571,45 @@ mod tests {
         let stats = merge_cooccurring_stats(&mut g, &cooc, 0.0);
         assert_eq!((stats.merged, stats.candidates, stats.comparisons), (0, 1, 0));
         assert_eq!(g.len(), 2);
+    }
+
+    #[test]
+    fn names_that_cannot_share_an_event_are_not_worth_reading() {
+        let mk = |name: &str, src: &[&str], span: (i64, i64)| {
+            let mut c = cand(name, 5);
+            c.seen_in = src.iter().map(|s| s.to_string()).collect();
+            c.first_ts = Some(span.0);
+            c.last_ts = Some(span.1);
+            c
+        };
+        let groups = group(
+            &[
+                mk("gfxbuilder.exe", &["a.log"], (0, 10)),
+                mk("gfx-bilder.exe", &["a.log"], (5, 20)),
+                mk("gfxbuilders.exe", &["b.log"], (5, 20)),
+                mk("gfxbuilder2.exe", &["a.log"], (50, 60)),
+                mk("tray.exe", &["a.log"], (0, 10)),
+            ],
+            &Vocabulary::builtin(),
+        );
+        let names = |ix: Vec<usize>| ix.into_iter().map(|i| groups[i].key.clone()).collect::<Vec<_>>();
+        let every = names(look_alikes(&groups, 50));
+        let joinable = names(joinable_look_alikes(&groups, 50));
+        assert!(joinable.len() < every.len(), "{every:?} against {joinable:?}");
+        assert!(!joinable.iter().any(|k| k == "tray"));
+        // Complete source lists with nothing in common: never joinable; a cut list or an unknown range always is.
+        let mut a = groups[0].clone();
+        let mut b = groups[0].clone();
+        a.seen_in = vec!["a.log".into()];
+        b.seen_in = vec!["b.log".into()];
+        assert!(!could_share_events(&a, &b));
+        b.seen_in = (0..crate::catalogue::MAX_SEEN_IN).map(|i| format!("s{i}")).collect();
+        assert!(could_share_events(&a, &b), "a cut list may hold the source");
+        b.seen_in = vec!["b.log".into()];
+        b.first_ts = None;
+        assert!(!could_share_events(&a, &b), "sources still differ");
+        a.seen_in = vec![];
+        assert!(could_share_events(&a, &b), "unknown sources");
     }
 
     #[test]

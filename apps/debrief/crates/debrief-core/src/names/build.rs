@@ -5,7 +5,7 @@
 use super::alias_job::{self, AliasJobConfig, AliasJobReport, AliasModel};
 use super::book::NameBook;
 use super::context::{Cooccurrence, SearchContext};
-use super::group::{group, look_alikes, merge_cooccurring, NameGroup};
+use super::group::{group, joinable_look_alikes, merge_cooccurring, NameGroup};
 use super::normalise::{file_name, strip_extension};
 use super::resolve::NameSettings;
 use super::segment::{split_raw, Vocabulary};
@@ -110,50 +110,112 @@ pub enum RebuildEnd {
     Cancelled,
 }
 
-/// Reads the events of the look-alike groups and joins the ones that appear together (best effort: a store that cannot
-/// answer leaves the groups as they are). Returns the number of merges, or none when cancelled.
-fn merge_by_cooccurrence(store: &(impl SearchSource + ?Sized), groups: &mut Vec<NameGroup>, ctl: &RebuildControl<'_>) -> Option<usize> {
-    let wanted = look_alikes(groups, MERGE_GROUPS);
-    if wanted.len() < 2 {
-        return Some(0);
-    }
-    let mut cooc = Cooccurrence::default();
-    let total = wanted.len() as u64;
-    for (n, i) in wanted.into_iter().enumerate() {
-        if (ctl.cancelled)() {
-            return None;
-        }
-        (ctl.progress)(RebuildProgress {
-            phase: RebuildPhase::Events,
-            done: n as u64,
-            total,
-        });
-        let Ok(page) = store.page(&PageQuery {
+/// The entities named by each of the first [`MERGE_EVENTS`] events that hold `name` as it is spelled, or none when the store
+/// cannot answer. A substring search stops at the thirtieth hit, where the phrase search through the full-text index
+/// checks every candidate event first (1,074 ms against 20 ms a read on 133,120 events: `docs/performance.md`).
+fn events_naming(store: &(impl SearchSource + Sync + ?Sized), name: &str) -> Option<Vec<Vec<String>>> {
+    let page = store
+        .page(&PageQuery {
             query: Filter {
-                text: format!("\"{}\"", groups[i].canonical().replace('"', " ")),
-                text_mode: TextMode::Words,
+                text: name.to_string(),
+                text_mode: TextMode::Substring,
                 ..Filter::default()
             },
             offset: 0,
             limit: MERGE_EVENTS,
             ..PageQuery::default()
-        }) else {
-            return Some(0);
-        };
-        for e in &page.rows {
-            let names: Vec<String> = crate::entities::extract(&[e.message.as_str()])
-                .entities
-                .into_iter()
-                .map(|x| x.name)
-                .collect();
-            cooc.add_event(&names);
-        }
+        })
+        .ok()?;
+    Some(
+        page.rows
+            .iter()
+            .map(|e| {
+                crate::entities::extract(&[e.message.as_str()])
+                    .entities
+                    .into_iter()
+                    .map(|x| x.name)
+                    .collect()
+            })
+            .collect(),
+    )
+}
+
+/// Reads for the look-alike names run side by side, this many at most: each is a search of the store (CPU), which
+/// answers them from its own connections. Bounded by the cores, and never more than four (rule 51).
+fn read_workers(reads: usize) -> usize {
+    crate::threads::threads(crate::threads::WorkKind::Cpu, None)
+        .clamp(1, 4)
+        .min(reads.max(1))
+}
+
+/// Reads the events of the look-alike groups that could appear together (see [`joinable_look_alikes`]), side by side,
+/// and joins the ones that do (best effort: a store that cannot answer leaves the groups as they are). Returns the number
+/// of merges, or none when cancelled. Events are counted in the groups' order whatever order the reads finish in.
+fn merge_by_cooccurrence(
+    store: &(impl SearchSource + Sync + ?Sized),
+    groups: &mut Vec<NameGroup>,
+    ctl: &RebuildControl<'_>,
+) -> Option<usize> {
+    let wanted = joinable_look_alikes(groups, MERGE_GROUPS);
+    if wanted.len() < 2 {
+        return Some(0);
     }
-    (ctl.progress)(RebuildProgress {
-        phase: RebuildPhase::Events,
-        done: total,
-        total,
+    let names: Vec<String> = wanted.iter().map(|i| groups[*i].canonical().to_string()).collect();
+    let total = names.len() as u64;
+    let report = |done: u64| {
+        (ctl.progress)(RebuildProgress {
+            phase: RebuildPhase::Events,
+            done,
+            total,
+        })
+    };
+    report(0);
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    let (tx, rx) = std::sync::mpsc::channel::<(usize, Option<Vec<Vec<String>>>)>();
+    let mut results: Vec<Option<Vec<Vec<String>>>> = vec![None; names.len()];
+    let mut failed = false;
+    let mut cancelled = false;
+    std::thread::scope(|scope| {
+        for _ in 0..read_workers(names.len()) {
+            let tx = tx.clone();
+            scope.spawn(|| {
+                let tx = tx;
+                loop {
+                    let n = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    if n >= names.len() || stop.load(std::sync::atomic::Ordering::SeqCst) {
+                        return;
+                    }
+                    if tx.send((n, events_naming(store, &names[n]))).is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(tx);
+        let mut done = 0u64;
+        for (n, rows) in rx {
+            done += 1;
+            failed |= rows.is_none();
+            results[n] = rows;
+            report(done);
+            if failed || (ctl.cancelled)() {
+                cancelled = !failed;
+                stop.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
     });
+    if cancelled {
+        return None;
+    }
+    if failed {
+        return Some(0);
+    }
+    let mut cooc = Cooccurrence::default();
+    for event in results.into_iter().flatten().flatten() {
+        cooc.add_event(&event);
+    }
+    report(total);
     if cooc.is_empty() {
         return Some(0);
     }
@@ -190,7 +252,7 @@ impl Names {
 
     /// Rebuilds the table from the store's catalogue (when it is built) and returns the number of groups; no progress,
     /// no cancel. For tools and tests: the app rebuilds through [`Names::rebuild`] in a job, never on a request.
-    pub fn refresh(&self, store: &(impl SearchSource + ?Sized)) -> StoreResult<usize> {
+    pub fn refresh(&self, store: &(impl SearchSource + Sync + ?Sized)) -> StoreResult<usize> {
         Ok(match self.rebuild(store, &RebuildControl::none())? {
             RebuildEnd::Built { groups } => groups,
             RebuildEnd::NotBuilt | RebuildEnd::Cancelled => self.read(|b, _| b.groups().len()),
@@ -201,7 +263,7 @@ impl Names {
     /// step when `ctl` says cancelled. The new table is built off the lock and swapped in at the end, so a search
     /// during a rebuild answers from the last table at once and a cancelled rebuild changes nothing. AI aliases and
     /// user facts are kept. It is the caller's job to run this off the request and UI threads.
-    pub fn rebuild(&self, store: &(impl SearchSource + ?Sized), ctl: &RebuildControl<'_>) -> StoreResult<RebuildEnd> {
+    pub fn rebuild(&self, store: &(impl SearchSource + Sync + ?Sized), ctl: &RebuildControl<'_>) -> StoreResult<RebuildEnd> {
         let report = |phase, done, total| (ctl.progress)(RebuildProgress { phase, done, total });
         report(RebuildPhase::Catalogue, 0, 0);
         // The cheap question first: the 50,000-name aggregate is never run while sources are still being catalogued.
@@ -531,6 +593,87 @@ mod tests {
         Together(vec![cand("gfxbuilder.exe", 9), cand("gfx-bilder.exe", 8), cand("tray.exe", 5)])
     }
 
+    /// [`Together`] that counts the event reads and the most that ran at once.
+    struct Counted {
+        inner: Together,
+        reads: std::sync::atomic::AtomicUsize,
+        live: std::sync::atomic::AtomicUsize,
+        most: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Counted {
+        fn of(cands: Vec<Candidate>) -> Counted {
+            Counted {
+                inner: Together(cands),
+                reads: Default::default(),
+                live: Default::default(),
+                most: Default::default(),
+            }
+        }
+    }
+
+    impl SearchSource for Counted {
+        fn summary(&self) -> StoreResult<crate::ports::SummaryReply> {
+            self.inner.summary()
+        }
+        fn page(&self, q: &crate::ports::PageQuery) -> StoreResult<crate::ports::PageReply> {
+            use std::sync::atomic::Ordering::SeqCst;
+            self.reads.fetch_add(1, SeqCst);
+            let now = self.live.fetch_add(1, SeqCst) + 1;
+            self.most.fetch_max(now, SeqCst);
+            let reply = self.inner.page(q);
+            self.live.fetch_sub(1, SeqCst);
+            reply
+        }
+        fn facet(&self, q: &crate::api::FacetRequest) -> StoreResult<crate::api::Facet> {
+            self.inner.facet(q)
+        }
+        fn exception_groups(&self) -> StoreResult<Vec<crate::exceptions::ExceptionGroup>> {
+            self.inner.exception_groups()
+        }
+        fn catalogue(&self, q: &CatalogueRequest) -> StoreResult<CatalogueReply> {
+            self.inner.catalogue(q)
+        }
+    }
+
+    fn in_source(name: &str, n: u64, source: &str) -> Candidate {
+        let mut c = cand(name, n);
+        c.seen_in = vec![source.to_string()];
+        c.first_ts = Some(0);
+        c.last_ts = Some(100);
+        c
+    }
+
+    #[test]
+    fn look_alikes_in_other_sources_are_never_read_and_the_others_are_read_side_by_side() {
+        // Two look-alikes in different sources cannot appear in one event: no read at all, nothing joins.
+        let apart = Counted::of(vec![
+            in_source("gfxbuilder.exe", 9, "a.log"),
+            in_source("gfx-bilder.exe", 8, "b.log"),
+        ]);
+        let names = Names::default();
+        assert_eq!(
+            names.rebuild(&apart, &RebuildControl::none()).unwrap(),
+            RebuildEnd::Built { groups: 2 }
+        );
+        assert_eq!(
+            apart.reads.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "no read for names that cannot meet"
+        );
+        // In one source they are read (once each), and join as before.
+        let same = Counted::of(vec![
+            in_source("gfxbuilder.exe", 9, "a.log"),
+            in_source("gfx-bilder.exe", 8, "a.log"),
+        ]);
+        assert_eq!(
+            names.rebuild(&same, &RebuildControl::none()).unwrap(),
+            RebuildEnd::Built { groups: 1 }
+        );
+        assert_eq!(same.reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+        assert!(same.most.load(std::sync::atomic::Ordering::SeqCst) <= read_workers(2));
+    }
+
     #[test]
     fn a_rebuild_reports_each_phase_in_order_and_never_goes_back() {
         let names = Names::default();
@@ -573,8 +716,8 @@ mod tests {
     /// A store whose catalogue is not built: counts the cheap status questions and the every-name aggregates.
     #[derive(Default)]
     struct Unbuilt {
-        status: std::cell::Cell<usize>,
-        all: std::cell::Cell<usize>,
+        status: std::sync::atomic::AtomicUsize,
+        all: std::sync::atomic::AtomicUsize,
     }
 
     impl SearchSource for Unbuilt {
@@ -592,12 +735,12 @@ mod tests {
         }
         fn catalogue(&self, req: &CatalogueRequest) -> StoreResult<CatalogueReply> {
             if req.all {
-                self.all.set(self.all.get() + 1);
+                self.all.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
             Ok(CatalogueReply::default())
         }
         fn catalogue_status(&self, _: &CatalogueStatusRequest) -> StoreResult<crate::catalogue::CatalogueStatus> {
-            self.status.set(self.status.get() + 1);
+            self.status.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(crate::catalogue::CatalogueStatus {
                 generation: 7,
                 built: false,
@@ -617,7 +760,14 @@ mod tests {
         for _ in 0..3 {
             assert_eq!(names.rebuild(&store, &ctl).unwrap(), RebuildEnd::NotBuilt);
         }
-        assert_eq!((store.status.get(), store.all.get()), (3, 0), "asked cheaply, never aggregated");
+        assert_eq!(
+            (
+                store.status.load(std::sync::atomic::Ordering::SeqCst),
+                store.all.load(std::sync::atomic::Ordering::SeqCst)
+            ),
+            (3, 0),
+            "asked cheaply, never aggregated"
+        );
         assert!(!names.is_built());
     }
 

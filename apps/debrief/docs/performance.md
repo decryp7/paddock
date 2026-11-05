@@ -83,6 +83,38 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, rule 51 for the name rebuild: side-by-side reads of cheaper searches (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 7b0c2421e (NR1, one phrase search per look-alike name, one after the other) against the change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-10 during the runs; other agents running
+- **Build:** release; libduckdb 2.0.0; the test processes' system allocator
+- **Corpus:** a generated 64 MB `.evtx` (133,120 events, 38 catalogue names, 30 groups), imported through the Windows plugin
+  into the store the app ships; synthetic (see the NR1 block)
+- **Command:** `DEBRIEF_EVTX_IDLE_S=20 cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
+- **Runs:** three runs on each side (the base ones are the NR1 runs: 2.81, 2.85 and 2.90 s); the READ lines are the mean of 3 reads in each run
+- **Numbers:**
+
+  | Measure | Base | Change | Budget | Verdict |
+  |---|---|---|---|---|
+  | Name table rebuild, 2 look-alike reads (`Names::refresh`) | 2.81-2.95 s wall, 3.1-3.3 CPU-s | 0.08 s wall, 0.32 CPU-s | at most 1 s (D7) | pass |
+  | One look-alike read, phrase search through the full-text index | 1,074-1,075 ms | not used any more | | |
+  | One look-alike read, substring search | | 19-20 ms | | |
+
+- **Memory measure:** not measured
+- **Notes:** the two questions of rule 51, answered. Cheaper: the rebuild read the first 30 events of each look-alike name
+  with a phrase search, which the store answers from the full-text index and then checks every candidate event for the
+  phrase (133,120 here, since every event holds the names), about 1.07 s a read; a substring search stops at the thirtieth
+  hit and costs 20 ms, a factor 53, and it also found events for a name the phrase search found none for (60 rows in 3
+  reads against 30). It matches the group's most frequent spelling as written, not the other separator variants of the
+  phrase search; the join counts events by the spellings in them, so a group is judged on the events of its own spelling.
+  More threads: the reads now run side by side (at most 4, never more than the cores minus one), which helps when there
+  are many look-alikes; on this sample there are two, so the gain shown is all from the cheaper search. Names whose
+  look-alikes cannot appear in the same event (no source in common when both lists of sources are complete, or time
+  ranges that do not meet) are not read at all (`joinable_look_alikes`; tested; the sample is one source, so it shows
+  nothing here). Not measured: a real export with thousands of names; the reads there are many and the search is
+  cheap, so the parallel part is what the next measurement should look at.
+
 ### 2026-11-05, NR1: the name join and the name watcher; idle after an event-log import (branch `debrief/p0-idle`)
 
 - **Commit:** A/B: base 919661e7f (N2 P2s, after P3) against the NR1 change on top of it
