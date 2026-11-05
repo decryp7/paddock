@@ -36,7 +36,9 @@ export function trayShown(windowsTsv, names) {
 /** From Dyno's log text (the JSON lines' messages): the last start signal, every tray check line and the count of blocked-host lines. */
 export function trayLogFacts(appLog) {
   const msgs = appLog.split('\n').map((l) => /"@m":"((?:[^"\\]|\\.)*)"/.exec(l)?.[1] ?? l).filter(Boolean);
+  const context = msgs.filter((m) => /^(tray (diagnose|sync):|crash report|crash reports:)/.test(m));
   return {
+    context,
     startSignal: msgs.filter((m) => /^start signal:/.test(m)).at(-1) ?? null,
     checks: msgs.filter((m) => /^tray check #\d+/.test(m)),
     lastSummary: msgs.filter((m) => /^tray check #\d+: \d+ wanted/.test(m)).at(-1) ?? null,
@@ -57,7 +59,7 @@ export function controlCenterFacts(ccLog) {
  * ControlCenter's pid and start time and its log about Dyno since the boot. Read-only on the guest.
  */
 async function loginDiag(g, label) {
-  const app = (await g.exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -E "autosave name|start signal:|tray check #|started hidden|Started in the tray|Main window built|starting \\(OS"')).stdout;
+  const app = (await g.exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -E "autosave name|start signal:|tray check #|tray diagnose:|tray sync:|crash report|tray icon .*: removing|started hidden|Started in the tray|Main window built|starting \\(OS"')).stdout;
   const names = autosaveNames(app);
   const windows = (await g.exec('/usr/local/bin/axdrive windows')).stdout;
   const shown = trayShown(windows, names);
@@ -74,6 +76,8 @@ async function loginDiag(g, label) {
       `--- ${label}: shown test (on-screen Control Center window named after each autosave name)`,
       ...(shown.length ? shown.map((s) => `${s.shown ? 'shown' : 'NOT shown'}\t${s.name}\t${s.owner ?? '-'}\t${s.bounds ?? '-'}${s.unnamed ? '\t(not named in the app log)' : ''}`) : ['(the app log names no autosave name)']),
       `--- ${label}: app start signal: ${facts.startSignal ?? '(none logged)'}`,
+      `--- ${label}: menu bar, ControlCenter start, diagnose summary, crash reports (the app's own context lines)`,
+      ...facts.context.slice(-40),
       `--- ${label}: tray checks (${facts.checks.length} line(s)); last summary: ${facts.lastSummary ?? '(none)'}`,
       ...facts.checks.slice(-40),
       `--- ${label}: ControlCenter pid and start time`,
