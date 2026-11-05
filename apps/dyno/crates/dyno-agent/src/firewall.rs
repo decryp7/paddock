@@ -207,6 +207,7 @@ impl FirewallCentre {
         }
         #[cfg(not(any(windows, target_os = "macos")))]
         {
+            let _: std::sync::Arc<dyn paddock_jobs::time::Clock> = clock;
             FirewallCentre::new(HelperHost::Linux, vec![], vec![RuleSource::Nftables])
         }
     }
