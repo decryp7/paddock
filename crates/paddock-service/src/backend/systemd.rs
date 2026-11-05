@@ -234,6 +234,7 @@ impl Backend for Systemd {
             last_exit,
             restarts: show.as_ref().and_then(|s| s.restarts),
             unit: show.as_ref().and_then(unit_file_of),
+            login_item: None,
         }
     }
 

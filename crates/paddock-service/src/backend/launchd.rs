@@ -11,9 +11,11 @@
 )]
 
 use super::{
-    Backend, Capabilities, Inspection, Job, LastExit, Mechanism, Registration, Target, UnitFile,
-    UnitFileState, UnitOrigin, UnregisterError, as_written, with_failure,
+    Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
+    Registration, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError, as_written,
+    with_failure,
 };
+use crate::stop::StopMechanism;
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};
 use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};
@@ -53,13 +55,35 @@ fn look_at(report: Option<JobReport>) -> (Job, Option<LastExit>, Option<u32>) {
     (job_of(report), last_exit, restarts)
 }
 
+/// What launchd's override database says about the label: listed disabled or enabled, not listed, or could not be read
+/// (the tool failed or timed out: that is not "switched on").
+fn disabled_mark(sys: &mut dyn System, domain: &str, label: &str) -> DisabledMark {
+    let out = match sys.run(LAUNCHCTL, &["print-disabled", domain]) {
+        Ok(out) if out.success() => out,
+        _ => return DisabledMark::Unreadable,
+    };
+    match parse_print_disabled(&out.stdout, label) {
+        Some(true) => DisabledMark::Disabled,
+        Some(false) => DisabledMark::Enabled,
+        None => DisabledMark::NotListed,
+    }
+}
+
 /// Whether launchd's override database marks the label disabled (`None`: not listed or not readable).
 fn disabled(sys: &mut dyn System, domain: &str, label: &str) -> Option<bool> {
-    let out = sys.run(LAUNCHCTL, &["print-disabled", domain]).ok()?;
-    if !out.success() {
-        return None;
-    }
-    parse_print_disabled(&out.stdout, label)
+    disabled_mark(sys, domain, label).as_option()
+}
+
+/// The launchd job a stop names, while launchd holds it.
+fn stop_of(sys: &mut dyn System, target: String) -> Option<StopMechanism> {
+    job_report(sys, &target)
+        .is_some_and(|r| r.found)
+        .then_some(StopMechanism::Launchd { target })
+}
+
+/// Whether launchd holds the job (a job that could not be asked about is not found).
+fn held(sys: &mut dyn System, target: &str) -> bool {
+    job_report(sys, target).is_some_and(|r| r.found)
 }
 
 fn gone(sys: &mut dyn System, target: &str) -> bool {
@@ -113,7 +137,8 @@ impl Backend for LaunchdBundled {
     fn inspect(&mut self) -> Inspection {
         let status = self.app.status();
         let domain = launchd_domain(self.spec.kind(), self.uid);
-        let off = disabled(self.sys.as_mut(), &domain, self.spec.label()) == Some(true);
+        let mark = disabled_mark(self.sys.as_mut(), &domain, self.spec.label());
+        let off = mark == DisabledMark::Disabled;
         let registration = match status {
             AppServiceStatus::RequiresApproval => Registration::NeedsApproval,
             _ if off => Registration::SwitchedOff,
@@ -130,6 +155,7 @@ impl Backend for LaunchdBundled {
             job,
             last_exit,
             restarts,
+            login_item: Some(LoginItemFacts { status, mark }),
             ..Inspection::absent()
         }
     }
@@ -163,6 +189,16 @@ impl Backend for LaunchdBundled {
     fn open_login_items(&mut self) -> bool {
         self.app.open_login_items();
         true
+    }
+
+    fn job_found(&mut self) -> bool {
+        let target = self.target();
+        held(self.sys.as_mut(), &target)
+    }
+
+    fn stop_mechanism(&mut self) -> Option<StopMechanism> {
+        let target = self.target();
+        stop_of(self.sys.as_mut(), target)
     }
 }
 
@@ -291,6 +327,7 @@ impl Backend for LaunchdFile {
                     UnitFileState::Enabled
                 },
             }),
+            login_item: None,
         }
     }
 
@@ -353,5 +390,15 @@ impl Backend for LaunchdFile {
 
     fn definition(&self) -> Option<String> {
         Some(Self::definition(self))
+    }
+
+    fn job_found(&mut self) -> bool {
+        let target = self.launchd_target();
+        held(self.sys.as_mut(), &target)
+    }
+
+    fn stop_mechanism(&mut self) -> Option<StopMechanism> {
+        let target = self.launchd_target();
+        stop_of(self.sys.as_mut(), target)
     }
 }

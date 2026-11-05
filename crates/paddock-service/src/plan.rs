@@ -13,7 +13,10 @@
 //! - **Never install unasked:** nothing registered stays unregistered until the user asks.
 //! - Where every change needs an OS prompt (a Windows service from the app), a repair is offered, never started.
 
-use crate::backend::{Capabilities, Inspection, Job, Registration};
+use crate::backend::{Capabilities, DisabledMark, Inspection, Job, Registration};
+#[cfg(test)]
+use crate::backend::LoginItemFacts;
+use crate::port::AppServiceStatus;
 use std::cmp::Ordering;
 
 /// Why the registration is replaced.
@@ -191,6 +194,65 @@ pub fn plan(f: &Facts<'_>) -> Plan {
         };
     }
     Plan::Leave(Hold::Healthy)
+}
+
+/// How the service comes back after "Quit and stop measuring" (a stop keeps the registration, so a job that launchd no
+/// longer holds is loaded again by registering).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResumePath {
+    /// Leave it: the user switched the item off in Login Items, the OS has no record of it, or what the user switched could
+    /// not be read. That switch is theirs.
+    Nothing,
+    /// Register the enabled item again (no removal first). Only while this version registered it: registering records the
+    /// version, so a version change must go through the full repair first, which is what notices it.
+    Light,
+    /// The full repair ([`Reason::Requested`]): the registration is replaced.
+    Repair,
+}
+
+/// Decides the path of a resume before anything is called (pure, like [`plan`]). What cannot be read is left alone.
+pub fn resume_path(
+    i: &Inspection,
+    recorded_version: Option<&str>,
+    current_version: &str,
+) -> ResumePath {
+    let (enabled, left_alone) = match &i.login_item {
+        Some(f) => (
+            f.status == AppServiceStatus::Enabled,
+            f.status == AppServiceStatus::NotFound
+                || f.mark == DisabledMark::Unreadable
+                || f.switched_off(),
+        ),
+        None => (
+            i.registration == Registration::Registered,
+            matches!(
+                i.registration,
+                Registration::SwitchedOff
+                    | Registration::NeedsApproval
+                    | Registration::Unavailable(_)
+            ),
+        ),
+    };
+    if left_alone {
+        ResumePath::Nothing
+    } else if recorded_version != Some(current_version) {
+        ResumePath::Repair
+    } else if enabled {
+        ResumePath::Light
+    } else {
+        ResumePath::Repair
+    }
+}
+
+/// Whether the OS starts the job now and restarts it (launchd `KeepAlive`, systemd `Restart`), so the app must wait for it
+/// instead of running its own: the item is registered and allowed, the user did not switch it off and the OS still holds the
+/// job. Anything less supervises nothing, and waiting for it would wait for a service that never comes.
+pub fn supervises(i: &Inspection) -> bool {
+    let allowed = match &i.login_item {
+        Some(f) => f.status == AppServiceStatus::Enabled && !f.switched_off(),
+        None => i.registration == Registration::Registered,
+    };
+    allowed && !matches!(i.job, Job::Absent | Job::Unknown)
 }
 
 #[cfg(test)]
@@ -424,5 +486,91 @@ mod tests {
         ] {
             assert!(!r.describe().is_empty());
         }
+    }
+
+    // ---- resume after a stop on request (ported from Dyno's service_repair.rs, blocker B4 and the 2026-11-05 Quit rules)
+
+    fn item(
+        status: AppServiceStatus,
+        mark: DisabledMark,
+        job: Job,
+    ) -> Inspection {
+        let registration = match status {
+            AppServiceStatus::RequiresApproval => Registration::NeedsApproval,
+            _ if mark == DisabledMark::Disabled => Registration::SwitchedOff,
+            AppServiceStatus::Enabled => Registration::Registered,
+            _ => Registration::Absent,
+        };
+        Inspection {
+            registration,
+            job,
+            login_item: Some(LoginItemFacts { status, mark }),
+            ..Inspection::absent()
+        }
+    }
+
+    #[test]
+    fn a_resume_never_touches_an_item_the_user_switched_off_or_cannot_be_read_and_never_hides_a_version_change() {
+        use AppServiceStatus as S;
+        use DisabledMark as D;
+        let path = |s, d, rec, cur| resume_path(&item(s, d, Job::Absent), rec, cur);
+        assert_eq!(path(S::RequiresApproval, D::NotListed, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(path(S::Enabled, D::Disabled, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(path(S::NotRegistered, D::Disabled, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(path(S::NotFound, D::Enabled, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(
+            path(S::Enabled, D::Unreadable, Some("1"), "1"),
+            ResumePath::Nothing,
+            "a failed look is not 'switched on'"
+        );
+        assert_eq!(path(S::Enabled, D::Enabled, Some("0"), "1"), ResumePath::Repair);
+        assert_eq!(path(S::Enabled, D::NotListed, None, "1"), ResumePath::Repair);
+        assert_eq!(path(S::Enabled, D::NotListed, Some("1"), "1"), ResumePath::Light);
+        assert_eq!(path(S::Enabled, D::Enabled, Some("1"), "1"), ResumePath::Light);
+        assert_eq!(path(S::NotRegistered, D::NotListed, Some("1"), "1"), ResumePath::Repair);
+    }
+
+    #[test]
+    fn a_resume_of_a_backend_without_login_item_facts_follows_the_registration() {
+        let with = |registration| Inspection {
+            registration,
+            ..Inspection::absent()
+        };
+        assert_eq!(resume_path(&with(Registration::Registered), Some("1"), "1"), ResumePath::Light);
+        assert_eq!(resume_path(&with(Registration::Registered), Some("0"), "1"), ResumePath::Repair);
+        assert_eq!(resume_path(&with(Registration::Absent), Some("1"), "1"), ResumePath::Repair);
+        for held in [
+            Registration::SwitchedOff,
+            Registration::NeedsApproval,
+            Registration::Unavailable("x".into()),
+        ] {
+            assert_eq!(resume_path(&with(held), Some("1"), "1"), ResumePath::Nothing);
+        }
+    }
+
+    #[test]
+    fn launchd_supervises_only_an_enabled_item_the_user_did_not_switch_off_whose_job_is_loaded() {
+        use AppServiceStatus as S;
+        use DisabledMark as D;
+        let loaded = Job::NotRunning;
+        assert!(supervises(&item(S::Enabled, D::NotListed, loaded)));
+        assert!(supervises(&item(S::Enabled, D::Enabled, loaded)));
+        assert!(supervises(&item(S::Enabled, D::Unreadable, Job::Running)));
+        // Enabled for SMAppService but off in Login Items (launchd's override database): nothing runs the agent.
+        assert!(!supervises(&item(S::Enabled, D::Disabled, loaded)));
+        // Waiting for approval, not registered, not found: launchd runs nothing.
+        assert!(!supervises(&item(S::RequiresApproval, D::NotListed, loaded)));
+        assert!(!supervises(&item(S::NotRegistered, D::NotListed, loaded)));
+        assert!(!supervises(&item(S::NotFound, D::NotListed, loaded)));
+        // Enabled, but launchd dropped the job (or `launchctl print` could not be read): it starts nothing.
+        assert!(!supervises(&item(S::Enabled, D::NotListed, Job::Absent)));
+        assert!(!supervises(&item(S::Enabled, D::NotListed, Job::Unknown)));
+        // Without macOS facts the registration decides.
+        let plain = Inspection {
+            registration: Registration::Registered,
+            job: Job::Running,
+            ..Inspection::absent()
+        };
+        assert!(supervises(&plain));
     }
 }

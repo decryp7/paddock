@@ -3,6 +3,8 @@
 //! bounded OS calls, so the app calls them from a background thread (rule 10) and reads the progress from
 //! [`Manager::tracker`] meanwhile.
 
+mod resume;
+
 use crate::backend::{Backend, Inspection, Mechanism};
 use crate::error::ServiceError;
 use crate::plan::{Facts, Hold, Plan, Reason, Refusal, plan};
@@ -35,6 +37,8 @@ fn unix_now() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
 }
+
+pub use resume::{LIGHT_LOOKS, LIGHT_POLL};
 
 /// The background service of an app.
 pub struct Manager {
