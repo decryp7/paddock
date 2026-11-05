@@ -223,6 +223,7 @@ describe('the Tauri backend', () => {
     keys: [{ id: 1, client: 'Pitwall', createdMs: 5, revoked: false }],
     maxKeys: 16,
     listener: { kind: 'unavailable' },
+    keysProblem: null,
   };
 
   it('names the engine’s commands and parses what comes back', async () => {
@@ -269,7 +270,11 @@ describe('parsing at the edge', () => {
     for (const bad of [null, [], { enabled: 'yes' }, { enabled: true, resources: true, disabledTools: [1], allowedActions: [] }]) expect(parseSettings(bad)).toBeNull();
     const tool = { name: 'a', title: 'A', description: 'd', action: true, exposed: false };
     const key = { id: 1, client: 'c', createdMs: 1, revoked: true };
-    const ok = { settings: { enabled: false, resources: true, disabledTools: [], allowedActions: [] }, tools: [tool], keys: [key], maxKeys: 4, listener: { kind: 'off' } };
+    const ok = { settings: { enabled: false, resources: true, disabledTools: [], allowedActions: [] }, tools: [tool], keys: [key], maxKeys: 4, listener: { kind: 'off' }, keysProblem: null };
+    expect(parseMcpView(ok)?.keysProblem).toBeNull();
+    expect(parseMcpView({ settings: ok.settings, tools: ok.tools, keys: ok.keys, maxKeys: 4 })?.keysProblem).toBeNull();
+    expect(parseMcpView({ ...ok, keysProblem: 'The key list could not be read.' })?.keysProblem).toBe('The key list could not be read.');
+    for (const bad of [3, '', {}]) expect(parseMcpView({ ...ok, keysProblem: bad })?.keysProblem).toBeNull();
     expect(parseMcpView(ok)).toEqual(ok);
     for (const l of [{ kind: 'noKey' }, { kind: 'listening', port: 49152, discoveryFile: 'mcp-listener.json' }, { kind: 'failed', message: 'x' }]) expect(parseMcpView({ ...ok, listener: l })?.listener).toEqual(l);
     for (const bad of [undefined, 3, { kind: 'listening', port: -1, discoveryFile: 'f' }, { kind: 'failed' }, { kind: 'weird' }]) expect(parseMcpView({ ...ok, listener: bad })?.listener).toEqual({ kind: 'unavailable' });

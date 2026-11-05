@@ -15,6 +15,8 @@ export interface MemoryMcpOptions {
   readonly tools?: readonly MemoryTool[];
   /** The settings at the start (default: switched off). */
   readonly settings?: McpSettings;
+  /** The reason the saved keys are not in use, as the engine words it (default none). */
+  readonly keysProblem?: string;
   /** `get` rejects this many times before it answers (to show the inline error and Retry). */
   readonly getFailures?: number;
   /** `save` rejects with this error. */
@@ -82,7 +84,7 @@ export class MemoryMcpBackend extends McpBackend {
 
   private view(): McpView {
     const tools: ToolInfo[] = this.tools.map((t) => ({ name: t.name, title: t.title ?? null, description: t.description, action: t.action === true, exposed: this.exposed(t) }));
-    return { settings: this.settings, tools, keys: this.keys.map((k) => ({ ...k })), maxKeys: MAX_KEYS, listener: this.listener() };
+    return { settings: this.settings, tools, keys: this.keys.map((k) => ({ ...k })), maxKeys: MAX_KEYS, listener: this.listener(), keysProblem: this.options.keysProblem ?? null };
   }
 
   private emit(): void {

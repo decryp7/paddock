@@ -6,20 +6,18 @@
 //! stays. The Keychain adapter is not even compiled on macOS (`dyno-platform`'s `Cargo.toml` enables `paddock-secrets`'s `keyring`
 //! feature only for other targets), so no macOS code path can construct it.
 
-use paddock_secrets::{FileSecrets, Secrets};
+#[cfg(target_os = "macos")]
+use paddock_secrets::FileSecrets;
+use paddock_secrets::Secrets;
 use std::path::Path;
 use std::sync::Arc;
-
-/// Passwords as owner-only files (0600 on Unix, written through a temporary file and renamed) in `dir`, created on the first write.
-/// A file that others can read is refused on read.
-pub fn file_store(dir: impl Into<std::path::PathBuf>) -> FileSecrets {
-    FileSecrets::new(dir)
-}
 
 /// The password store of the real machine: the file store in `dir` on macOS.
 #[cfg(target_os = "macos")]
 pub fn os_store(dir: &Path) -> Arc<dyn Secrets> {
-    Arc::new(file_store(dir))
+    // Owner-only files (0600 on Unix, written through a temporary file and renamed), one per password; a file others can read is
+    // refused on read. The folder is created on the first write.
+    Arc::new(FileSecrets::new(dir))
 }
 
 /// The password store of the real machine: the system's credential store (`dir` is not used).
@@ -31,13 +29,14 @@ pub fn os_store(dir: &Path) -> Arc<dyn Secrets> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
     use super::*;
-    use paddock_secrets::{Name, Secret, Secrets};
+    use paddock_secrets::{FileSecrets, Name, Secret, Secrets};
 
     #[test]
     fn the_password_store_is_an_owner_only_file_in_the_folder_it_is_given() {
         let dir = tempfile::tempdir().unwrap();
-        let store = file_store(dir.path().join("secrets"));
+        let store = FileSecrets::new(dir.path().join("secrets"));
         let name = Name::new("wol", "secure-on-7").unwrap();
         store.set(&name, &Secret::new("0a:0b:0c:0d:0e:0f").unwrap()).unwrap();
         assert_eq!(store.get(&name).unwrap().unwrap().expose(), "0a:0b:0c:0d:0e:0f");

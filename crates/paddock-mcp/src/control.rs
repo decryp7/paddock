@@ -2,7 +2,7 @@
 //! keys (issued once, only a hash kept in an owner-only file in the config folder, revocable), and the audit log. Pure Rust; the Tauri adapter
 //! ([`crate::tauri`]) maps its commands and event onto this.
 //!
-//! Every method is quick and bounded (a small file, one small file): none needs a job (rule 10). Nothing here ever returns
+//! Every method is quick and bounded (a small file): none needs a job (rule 10). Nothing here ever returns
 //! a key except [`McpControl::issue_key`], once.
 
 use crate::audit::{AuditEntry, AuditLog, Outcome};
@@ -160,6 +160,9 @@ pub struct McpView {
     pub max_keys: u32,
     /// Whether and where the loopback listener serves.
     pub listener: ListenerView,
+    /// Why the saved keys are not in use (the key file was damaged, unreadable, from a newer version or writable by others), with the
+    /// next step; `None` when the list is fine. While it is set every client is refused.
+    pub keys_problem: Option<String>,
 }
 
 /// The reply of `mcp_issue_key`: the key, shown once.
@@ -275,6 +278,7 @@ pub struct McpControl {
     keys: Arc<KeyStore>,
     store: Arc<dyn SettingsStore>,
     key_list: Arc<dyn KeyListStore>,
+    keys_problem: Mutex<Option<String>>,
     emit: Emit,
     now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
     write: Mutex<()>,
@@ -304,6 +308,7 @@ impl McpControl {
             keys,
             store,
             key_list,
+            keys_problem: Mutex::new(None),
             emit,
             now_ms,
             write: Mutex::new(()),
@@ -318,6 +323,7 @@ impl McpControl {
         // An unreadable or damaged list means no keys work until new ones are issued: failing closed. The store has already
         // emptied the list and worded the cause and the next step.
         let loaded = self.key_list.load();
+        *self.keys_problem.lock().unwrap_or_else(PoisonError::into_inner) = loaded.problem.clone();
         match &loaded.problem {
             Some(problem) => log::error!("mcp keys: {problem}"),
             None => log::info!("mcp keys: {} saved key(s) loaded", loaded.entries.len()),
@@ -326,7 +332,12 @@ impl McpControl {
     }
 
     fn persist_keys(&self) -> Result<(), McpError> {
-        self.key_list.save(&self.keys.export()).map_err(|e| {
+        let saved = self.key_list.save(&self.keys.export());
+        if saved.is_ok() {
+            // A saved list is the list in use now, whatever was wrong with the old file.
+            *self.keys_problem.lock().unwrap_or_else(PoisonError::into_inner) = None;
+        }
+        saved.map_err(|e| {
             McpError::new(
                 ErrorCode::StoreUnavailable,
                 format!("The client keys could not be saved: {e}. Check that the app's settings folder is writable, or update the app."),
@@ -397,6 +408,7 @@ impl McpControl {
                 .listener
                 .get()
                 .map_or(ListenerView::Unavailable, |l| l.view()),
+            keys_problem: self.keys_problem.lock().unwrap_or_else(PoisonError::into_inner).clone(),
             settings,
         }
     }

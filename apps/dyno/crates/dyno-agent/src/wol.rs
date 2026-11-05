@@ -42,16 +42,7 @@ pub fn prepare_password_folder(dirs: &crate::paths::Dirs) {
     if !cfg!(target_os = "macos") {
         return;
     }
-    let folder = dirs.secrets_folder();
-    let prepared = std::fs::create_dir_all(&folder).and_then(|()| {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700))?;
-        }
-        crate::cache::backup::exclude_from_backup(&folder).map(|_| ())
-    });
-    match prepared {
+    match prepare_folder(&dirs.secrets_folder()) {
         Ok(()) => {
             log::info!(target: "dyno_agent::wol", "SecureOn passwords: owner-only files in the data folder, out of backups, never the Keychain")
         }
@@ -59,6 +50,18 @@ pub fn prepare_password_folder(dirs: &crate::paths::Dirs) {
             log::warn!(target: "dyno_agent::wol", Cause = e.to_string(); "The password folder could not be prepared (private, out of backups); next step: check the data folder is writable")
         }
     }
+}
+
+/// Creates `folder` (and its parents) if needed, makes it owner-only (0700 on Unix, also when it existed with wider rights) and sets
+/// the backup exclusion where the OS has one. The steps of [`prepare_password_folder`], without the macOS-only gate.
+pub fn prepare_folder(folder: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(folder)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o700))?;
+    }
+    crate::cache::backup::exclude_from_backup(folder).map(|_| ())
 }
 
 fn secret_name(id: u64) -> Option<Name> {
@@ -260,7 +263,9 @@ impl WolCentre {
                 .map(Some)
                 .map_err(|_| "The stored SecureOn password is damaged; set it again.".to_string()),
             Ok(None) => Err("The SecureOn password for this computer is missing. Edit the computer in Wake devices and enter it again.".into()),
-            Err(e) => Err(format!("The SecureOn password could not be read from the password store: {e}. Edit the computer in Wake devices and enter it again.")),
+            Err(e) => Err(format!(
+                "The SecureOn password could not be read from the password store ({e}). If the store is only locked, unlock it and try again; otherwise edit the computer in Wake devices and enter the password again."
+            )),
         }
     }
 
@@ -294,8 +299,18 @@ impl WolCentre {
         }
     }
 
-    /// The wake job: plans the sends, runs them, saves how it ended (and a moved address), and logs the outcome.
+    /// The wake job: plans the sends, runs them, saves how it ended (and a moved address), and logs the outcome. A refusal before any
+    /// packet (the feature is off, the computer or its password is missing) is logged too (ER-27), so the cause is in the logs
+    /// and not only in the job's status.
     pub fn run(&self, shared: &Shared, ctx: &JobContext, id: u64, test: bool) -> Result<WolOutcome, JobError> {
+        let result = self.run_wake_job(shared, ctx, id, test);
+        if let Err(JobError::Failed(why)) = &result {
+            log::warn!(target: "dyno_agent::wol", "wake of device {id} (test={test}) failed before it ended: {why}");
+        }
+        result
+    }
+
+    fn run_wake_job(&self, shared: &Shared, ctx: &JobContext, id: u64, test: bool) -> Result<WolOutcome, JobError> {
         let started = Instant::now();
         // A phase label from the first moment (ER-18), before anything is read.
         ctx.phase(Phase::discovering("preparing", "Looking up the computer"));

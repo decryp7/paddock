@@ -101,6 +101,12 @@ import { MCP_STYLES } from './styles';
           <button matButton="filled" type="button" data-testid="mcp-add-client" [disabled]="store.atKeyLimit()" disabledInteractive [attr.aria-describedby]="store.atKeyLimit() ? 'pd-mc-limit' : null" (click)="addClient()">{{ t.add }}</button>
         </div>
         <p class="pd-mc__muted">{{ t.clientsLede }}</p>
+        @if (store.keysProblem(); as why) {
+          <div class="pd-mc__notice" role="alert" data-testid="mcp-keys-problem">
+            <strong>{{ t.keysProblemTitle }}</strong>
+            <span>{{ why }}</span>
+          </div>
+        }
         @if (store.atKeyLimit()) {
           <p id="pd-mc-limit" class="pd-mc__muted" data-testid="mcp-keys-limit">{{ limitText() }}</p>
         }
@@ -191,6 +197,7 @@ export class PdMcpPage {
     clientsLede: $localize`:@@pd.mcp.clients-lede:Each client has its own key. Revoke a key to cut that client off.`,
     add: $localize`:@@pd.mcp.add:Add a client…`,
     noClients: $localize`:@@pd.mcp.no-clients:No clients yet`,
+    keysProblemTitle: $localize`:@@pd.mcp.keys-problem-title:The saved keys are not in use, so no client can connect.`,
     noClientsText: $localize`:@@pd.mcp.no-clients-text:Add a client to get a key for it. Nothing can connect without one.`,
     colClient: $localize`:@@pd.mcp.col-client-name:Client`,
     colCreated: $localize`:@@pd.mcp.col-created:Added`,

@@ -198,7 +198,7 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
         builder = builder.diagnostics(|app| diagnostics_setup(app));
     }
     // AI access (ADR 0007, 0032 D7): Dyno's four tools, off until the user allows them in Settings > AI access. The tools ask the agent
-    // through the shell's link; a test place keeps the settings in its folder and the keys in memory (ER-14).
+    // through the shell's link; the settings and the key list live in the config folder (a test place has its own, ER-14).
     let mcp_dir = test_dir.clone();
     builder = builder.mcp(move |app, emit| {
         let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;

@@ -322,9 +322,9 @@ impl WakeCentre {
         }
         if !s.wake_devices.is_empty() {
             parts.push(if refused == 0 {
-                format!("woke {woken} computer(s)")
+                format!("started the wake of {woken} computer(s)")
             } else {
-                format!("woke {woken}, {refused} could not be woken")
+                format!("started the wake of {woken}, {refused} could not be woken")
             });
         }
         if let Some(job) = s.job {

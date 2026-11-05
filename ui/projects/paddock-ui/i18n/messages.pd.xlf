@@ -1178,6 +1178,9 @@
       <trans-unit id="pd.mcp.keys-limit" datatype="html">
         <source><x id="max"/> keys are in use, the most there can be. Revoke one you no longer need before adding another.</source>
       </trans-unit>
+      <trans-unit id="pd.mcp.keys-problem-title" datatype="html">
+        <source>The saved keys are not in use, so no client can connect.</source>
+      </trans-unit>
       <trans-unit id="pd.mcp.lede" datatype="html">
         <source>Lets a program on this computer, such as a local AI assistant, ask this app questions over the Model Context Protocol. It is off until you turn it on, it only works on this computer, and every call is logged below.</source>
       </trans-unit>

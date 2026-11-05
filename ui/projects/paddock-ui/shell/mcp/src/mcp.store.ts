@@ -35,6 +35,7 @@ export const McpStore = signalStore(
     keys: computed(() => view()?.keys ?? []),
     listener: computed(() => view()?.listener ?? null),
     maxKeys: computed(() => view()?.maxKeys ?? 0),
+    keysProblem: computed(() => view()?.keysProblem ?? null),
     atKeyLimit: computed(() => {
       const v = view();
       return v !== null && v.keys.filter((k) => !k.revoked).length >= v.maxKeys;

@@ -12,7 +12,7 @@ mod udp;
 pub use neighbours::OsNeighbours;
 pub use ping::OsProber;
 pub use readiness::OsReadiness;
-pub use secrets::{file_store, os_store};
+pub use secrets::os_store;
 pub use udp::{OsInterfaces, OsUdp};
 
 use crate::runner::{SystemRunner, ToolRunner};

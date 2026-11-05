@@ -133,6 +133,7 @@ pub struct VersionedFile<T> {
     max_bytes: u64,
     keep_corrupt: usize,
     private: bool,
+    restore: bool,
     clock: fn() -> u64,
     read_only: Mutex<Option<ReadOnly>>,
     _value: PhantomData<fn() -> T>,
@@ -148,6 +149,7 @@ impl<T: Serialize + DeserializeOwned + Default> VersionedFile<T> {
             max_bytes: DEFAULT_MAX_BYTES,
             keep_corrupt: DEFAULT_KEEP_CORRUPT,
             private: false,
+            restore: true,
             clock: unix_seconds,
             read_only: Mutex::new(None),
             _value: PhantomData,
@@ -180,6 +182,14 @@ impl<T: Serialize + DeserializeOwned + Default> VersionedFile<T> {
     #[must_use]
     pub fn private(mut self) -> Self {
         self.private = true;
+        self
+    }
+
+    /// A damaged file is never replaced by its `.bak` copy: it is moved aside and defaults are used, with nothing written back. For
+    /// files where an older copy could be wrong in a way that matters (a list of revoked keys).
+    #[must_use]
+    pub fn no_restore(mut self) -> Self {
+        self.restore = false;
         self
     }
 
@@ -386,7 +396,7 @@ impl<T: Serialize + DeserializeOwned + Default> VersionedFile<T> {
     fn damaged(&self, reason: String) -> Loaded<T> {
         let kept_as = self.keep_aside();
         let backup = match self.read(&self.backup_path()) {
-            Ok(Some(bytes)) => self.parse(&bytes).ok(),
+            Ok(Some(bytes)) if self.restore => self.parse(&bytes).ok(),
             _ => None,
         };
         let problem = |recovered_from_backup| Problem::Damaged {

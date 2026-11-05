@@ -51,7 +51,7 @@ Decided and built for 1.1.0:
   its byte bound is shortened to valid JSON that says it was cut; a mount point is only `/` or a drive letter and the user-name segment of
   paths in labels is replaced; alarm titles carry no port.
 - **SecureOn passwords in files on macOS (2026-11-05, D6 amended; user decision).** `dyno_platform::wol::os_store` returns
-  `FileSecrets` over `<data folder>/secrets` on macOS (0600 files, folder 0700 and marked out of backups by the agent at start), the
+  `FileSecrets` over `<data folder>/secrets` on macOS (0600 files, folder 0700, marked out of Time Machine backups only by the agent at start; other backup tools may still copy it), the
   OS credential store elsewhere. `paddock-secrets`'s `keyring` feature is enabled for non-macOS targets only, so the Keychain adapter
   is not in a macOS build at all (`cargo tree -i keyring --target aarch64-apple-darwin` finds nothing). The reason: a wake job
   reading the Keychain after an update waits behind a password dialog with no limit (measured at 15 minutes in a launchd agent), and a

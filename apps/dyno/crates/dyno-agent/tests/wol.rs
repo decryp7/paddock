@@ -438,3 +438,48 @@ fn readiness_is_what_the_platform_reads() {
     assert_eq!(r.items.len(), 1);
     assert_eq!(r.items[0].kind, ReadinessKind::Firmware);
 }
+
+#[cfg(unix)]
+fn mode(p: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+}
+
+#[cfg(unix)]
+#[test]
+fn the_password_folder_becomes_owner_only_even_when_it_existed_with_wider_rights() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tempfile::tempdir().unwrap();
+    let folder = t.path().join("secrets");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    dyno_agent::wol::prepare_folder(&folder).unwrap();
+    assert_eq!(mode(&folder), 0o700);
+    let nested = t.path().join("a").join("b");
+    dyno_agent::wol::prepare_folder(&nested).unwrap();
+    assert_eq!(mode(&nested), 0o700, "a missing folder is created owner-only");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_the_agent_prepares_its_password_folder_private_and_out_of_backups() {
+    let t = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(t.path().join("data"));
+    dyno_agent::wol::prepare_password_folder(&dirs);
+    let folder = dirs.secrets_folder();
+    assert_eq!(mode(&folder), 0o700);
+    assert_eq!(
+        dyno_agent::cache::backup::read_exclusion(&folder).as_deref(),
+        Some(&dyno_agent::cache::backup::exclusion_value()[..]),
+        "Time Machine skips the folder"
+    );
+}
+
+#[test]
+fn a_data_folder_that_is_a_file_does_not_stop_the_agent_from_starting() {
+    let t = tempfile::tempdir().unwrap();
+    let file = t.path().join("data");
+    std::fs::write(&file, "not a folder").unwrap();
+    dyno_agent::wol::prepare_password_folder(&Dirs::at(&file));
+    assert!(dyno_agent::wol::prepare_folder(&file.join("secrets")).is_err(), "the failure is reported, not hidden");
+}
