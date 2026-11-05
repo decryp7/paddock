@@ -1,6 +1,7 @@
 # 23. A full chat in the Playground: text, images, speech input and MCP tools
 
-- Status: Proposed (2026-11-05). Docs only: nothing here is built. Not yet independently reviewed.
+- Status: Proposed (2026-11-05). Docs only: nothing here is built. The user's decisions D2 to D8 are recorded below (2026-11-05).
+  Not yet independently reviewed. The revision of the work packages is not done: see "Not finished in this revision".
 - Date: 2026-11-05
 - Related: ADR 0001 (local only), 0003 (API surface), 0007 (security), 0018 (capability gating), 0019 (caching), 0020
   (llama.cpp is the only engine), 0006 (memory). Family: ADR 0007 (MCP across the family), ADR 0013 (workbench and
@@ -175,7 +176,7 @@ ADR 0020 stands.
 
 | Option | Licence | Size (publisher's) | Runs on | Delivery | Against it |
 |---|---|---|---|---|---|
-| **A. llama.cpp + Qwen3-ASR 0.6B** (recommended) | Apache-2.0 (Qwen's card) | Q8 805 MB, BF16 1.51 GB | whatever build Pitwall installed: Metal, CUDA, Vulkan, CPU | model library: HF hosts already allowed, SHA-256, GGUF check | larger than Whisper small; the server README calls multimodal experimental; streaming only with vLLM per the card; our speed unknown |
+| **A. llama.cpp + Qwen3-ASR 0.6B** (tried first, D4) | Apache-2.0 (Qwen's card) | Q8 805 MB, BF16 1.51 GB | whatever build Pitwall installed: Metal, CUDA, Vulkan, CPU | model library: HF hosts already allowed, SHA-256, GGUF check | larger than Whisper small; the server README calls multimodal experimental; streaming only with vLLM per the card; our speed unknown |
 | B. whisper.cpp `whisper-server` | MIT | tiny 75 MiB (~273 MB RAM), base 142 MiB (~388 MB), small 466 MiB (~852 MB), medium 1.5 GiB, large 2.9 GiB | Metal, Core ML, CUDA, Vulkan, CPU | a second pinned engine; `.bin` models fail today's GGUF check | undoes ADR 0020; v1.9.5 lists 2 assets, so macOS and Linux builds probably mean building our own (not fully verified) |
 | B2. `whisper-rs` in-process | not checked further | as B | as B | as B | C++ inside a Pitwall process breaks AGENTS.md's languages and containment rules |
 | C. sherpa-onnx in a small helper process | Apache-2.0 | by model | CPU first (judgement) | a crate that fetches or links prebuilt libraries, statically by default; new model layout | a new runtime, helper and model format; gives Whisper, Moonshine, Parakeet, SenseVoice in one API |
@@ -292,7 +293,7 @@ Every tool starts **off the model's list until connected and picked**. Then:
 | Kind | First call | Later calls |
 |---|---|---|
 | Read-only tool of a family server | ask: Allow once, Always allow, Deny | runs without asking, shown in the chat |
-| Action tool (`wake_device`, `keep_awake`) | ask, showing the exact arguments | **proposed: ask every call** (decision D2 below) |
+| Action tool (`wake_device`, `keep_awake`) | ask, showing the exact arguments | **ask every call** (decided, D2) |
 | Any tool of a user-added stdio server | as an action | as an action, until the user marks that tool "always allow" in Settings |
 
 - The **card is inline in the chat**, not a dialog: it belongs to the turn, the conversation stays usable, and Stop
@@ -435,20 +436,36 @@ switch and after the Dyno tag, or are additive
 The rest of the release (shell landing, Report a problem, ADRs 0052, 0053, 0054, VM rounds) is in the 1.1 readiness
 report, not here.
 
-## Decisions for the user
+## Decisions
 
-Each has a recommended default; nothing is built until they are answered.
+The user accepted D2 to D8 as recommended on 2026-11-05. The sections above follow them.
 
-| # | Question | Recommended |
+| # | Question | Decided |
 |---|---|---|
-| D1 | Dyno has no MCP listener. Add it to Dyno 1.1.0 now, or correct Dyno's guide and add it in the next Dyno? | Add it to 1.1.0 (1 to 1.5 days): the tools are in scope and useless without it, and its guide already promises it |
-| D2 | Action tools (`wake_device`, `keep_awake`): remember after the first yes, like read tools, or ask every call? | Ask every call. Your rule was made when Dyno's tools were thought read-only |
+| D2 | Action tools (`wake_device`, `keep_awake`): remember after the first yes, like read tools, or ask every call? | Ask every call |
 | D3 | Chats saved by default? | Yes, on this computer, with "Don't save this chat" and a default switch |
-| D4 | Speech engine: llama.cpp's own speech models (805 MB, no new engine), or whisper.cpp or sherpa-onnx? | llama.cpp first; a 1 to 2 day test on real hardware decides, and you see the numbers |
+| D4 | Speech engine: llama.cpp's own speech models (805 MB, no new engine), or whisper.cpp or sherpa-onnx? | llama.cpp first; a 1 to 2 day test on real hardware decides, and the user sees the numbers |
 | D5 | Speech in 1.1: push-to-talk that fills the composer, plus audio clips for models that hear; no live transcript, no spoken replies? | Yes |
 | D6 | Models without tool support: hide tools, or try a prompted fallback? | Disable tools with an explanation |
 | D7 | Third-party MCP servers in 1.1? | Family apps first. User-added stdio last and cuttable. Nothing remote |
 | D8 | Who may use MCP through Pitwall: only the Playground chat, or other apps' API requests too? | Only the chat in 1.1 |
+
+D1 (Dyno has no MCP listener) was not part of that acceptance and is overtaken: the listener was built for Dyno 1.1.0 (Dyno ADR 0032
+amendments, 2026-11-05, on `origin/dyno/wp-int`).
+
+Later, not open now: the user sees WP-6's result (D4), which may reopen the 805 MB model against a smaller engine.
+
+## Not finished in this revision
+
+Stopped on 2026-11-05 when Pitwall moved back in the release order. Still to do before the independent review:
+
+- **Decisions 6 and 7, the Dyno row of Context, and WP-8 and WP-13 are stale.** They describe `feat/dyno-mcp-readings` `791f26090`, where
+  nothing listened. `origin/dyno/wp-int` `76c662c36` has the listener, the discovery file and the `dyno mcp` bridge, and 10 read tools
+  (8 readings plus `power_state`, `wol_devices`). They have not been rewritten here.
+- **Work packages:** not re-checked or re-sized, and not marked as app-folder only or shared.
+- **Missing packages:** diagnostic bundle adoption, per-machine install, ADR 0052 checks, rule 71 rows, the six `pitwall-v1.1.0`
+  entries in `docs/known-copies.toml`.
+- **The base work list** (the "1.1 readiness report" named under Work packages) is not in the repo yet.
 
 ## Consequences
 
