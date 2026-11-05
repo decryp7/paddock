@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, stablePressPoint, test } from '@decryp7/paddock-e2e';
 import type { Locator, Page } from '@playwright/test';
 
 /**
@@ -13,28 +13,78 @@ const TRAY = '/?latency=0&lists=long#/tray';
 const scrollTop = (l: Locator): Promise<number> => l.evaluate((e) => e.scrollTop);
 const atEnd = (l: Locator): Promise<boolean> => l.evaluate((e) => e.scrollTop + e.clientHeight >= e.scrollHeight - 1);
 
-/** Puts the pointer over the middle of the list. */
-async function pointAt(page: Page, list: Locator): Promise<void> {
-  const b = await list.boundingBox();
-  if (!b) throw new Error('the list has no box');
-  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+const LIST_SELECTOR = 'ul, ol, [role="list"], cdk-virtual-scroll-viewport';
+
+/**
+ * Puts the pointer over the list, near its right edge, once the list has stopped moving (the page may still be settling). Not the
+ * middle: a row's text there opens a tooltip (dyFullText) that sits under the pointer and takes the wheel, found in WebKit by
+ * listing the elements under the pointer while the wheel did nothing.
+ */
+async function pointAt(page: Page, list: Locator): Promise<{ x: number; y: number }> {
+  const { y } = await stablePressPoint(page, list, LIST_SELECTOR);
+  const box = (await list.boundingBox())!;
+  const x = box.x + box.width - 14;
+  await page.mouse.move(x, y);
+  await assertListUnder(page, { x, y });
+  return { x, y };
 }
 
-/** One wheel step over the list, then a frame, so a virtual list has rendered what the step reached. */
-async function wheelStep(page: Page, dy: number): Promise<void> {
+/** Fails, naming what is there, when something other than the list is under the pointer (an overlay would swallow the wheel). */
+async function assertListUnder(page: Page, at: { x: number; y: number }): Promise<void> {
+  const under = await page.evaluate(({ x, y, sel }) => {
+    const el = document.elementFromPoint(x, y);
+    return el?.closest(sel) != null ? '' : `${el?.tagName}.${el?.className}`;
+  }, { ...at, sel: LIST_SELECTOR });
+  expect(under, 'the element under the pointer is not the list: it would take the wheel').toBe('');
+}
+
+/** The list's and the page's scroll positions, read in one step so they belong to the same moment (main is -1 where there is none). */
+interface Snap {
+  list: number;
+  main: number;
+  end: boolean;
+}
+const snap = (list: Locator): Promise<Snap> =>
+  list.evaluate((e) => ({ list: e.scrollTop, main: e.closest('main')?.scrollTop ?? -1, end: e.scrollTop + e.clientHeight >= e.scrollHeight - 1 }));
+
+/**
+ * One wheel, then waits on the condition: the list or the page has moved from `from`. A wheel the browser absorbed changes
+ * nothing, so the wait ends (bounded) and the caller sends it again; the next wheel never goes out before this one took effect.
+ */
+async function wheelAndSettle(page: Page, list: Locator, from: Snap, dy: number): Promise<void> {
   await page.mouse.wheel(0, dy);
-  await page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
+  const moved = async (): Promise<boolean> => {
+    const now = await snap(list);
+    return now.list !== from.list || now.main !== from.main;
+  };
+  await expect.poll(moved, { timeout: 3_000, intervals: [25] }).toBe(true).catch(() => undefined);
 }
 
-/** Wheels over the list until it is at its end (a bounded number of steps; the caller checks the outcome). */
-async function wheelToEnd(page: Page, list: Locator, onStep?: () => Promise<void>): Promise<void> {
-  await pointAt(page, list);
-  for (let i = 0; i < 120 && !(await atEnd(list)); i++) {
-    await wheelStep(page, 400);
-    if (onStep && !(await atEnd(list))) await onStep();
-  }
-  expect(await atEnd(list)).toBe(true);
+/**
+ * Wheels over the list until `done(snap)` holds. The wheel goes inside the poll, so a wheel the browser absorbed (WebKit under
+ * load) is sent again, and each state is read in one step after the wheel took effect (never a fixed frame).
+ */
+async function wheelUntil(page: Page, list: Locator, done: (s: Snap) => boolean, what: string, onState?: (s: Snap) => void): Promise<void> {
+  const at = await pointAt(page, list);
+  await expect
+    .poll(
+      async () => {
+        const s = await snap(list);
+        if (done(s)) return true;
+        // Checked only while the list still has to move: once it has reached its end, a wheel that carried on to the page (WebKit
+        // passes the rest of a step on) moves the list from under the still pointer, and that is not a swallowed wheel.
+        await assertListUnder(page, at);
+        onState?.(s);
+        await wheelAndSettle(page, list, s, 400);
+        return false;
+      },
+      { message: what, timeout: 30_000, intervals: [50] },
+    )
+    .toBe(true);
 }
+
+/** Wheels over the list until it is at its end; `whileMoving` is checked on every state in which the list is not yet at its end. */
+const wheelToEnd = (page: Page, list: Locator, whileMoving?: (s: Snap) => void): Promise<void> => wheelUntil(page, list, (s) => s.end, 'the list reaches its end', whileMoving);
 
 /** Whether the rows reach the bottom of the list's viewport: a viewport the CDK did not measure again leaves blank space below its last row. */
 async function drawnToBottom(list: Locator): Promise<boolean> {
@@ -82,13 +132,19 @@ test.describe('widget lists on the dashboard at 900 px', () => {
     const list = page.locator('dy-events-feed cdk-virtual-scroll-viewport');
     await centre(page, list);
     const main = page.locator('main');
+    await pointAt(page, list);
     const before = await scrollTop(main);
     // While the list is still moving, the dashboard stays where it is: the list takes the wheel.
-    await wheelToEnd(page, list, async () => expect(await scrollTop(main)).toBe(before));
+    await wheelToEnd(page, list, (s) => expect(s.main, 'the dashboard moved while the list could still scroll').toBe(before));
     expect(await scrollTop(list)).toBeGreaterThan(0);
-    // At its end the list lets the wheel through (it does not trap it): the dashboard scrolls.
-    await wheelStep(page, 300);
-    await expect.poll(() => scrollTop(main), { timeout: 15_000 }).toBeGreaterThan(before);
+    // At its end the list lets the wheel through (it does not trap it): the dashboard scrolls. A wheel that was absorbed is sent again.
+    await expect
+      .poll(async () => {
+        if ((await scrollTop(main)) > before) return true;
+        await page.mouse.wheel(0, 300);
+        return false;
+      }, { message: 'the dashboard scrolls once the list is at its end', timeout: 30_000, intervals: [50] })
+      .toBe(true);
   });
 
   test('Issues lists every issue, is reachable by keyboard and reaches the last one', async ({ page }) => {
@@ -121,11 +177,10 @@ test.describe('widget lists on the dashboard at 900 px', () => {
     const list = page.locator('dy-events-feed cdk-virtual-scroll-viewport');
     await centre(page, list);
     const cell = page.locator('[data-pd-cell]', { has: page.locator('dy-events-feed') });
-    const before = await cell.boundingBox();
-    const at = await list.boundingBox();
-    if (!before || !at) throw new Error('no box');
     // Sideways, over the middle of the list: the list must not take the pointer, and the page must not scroll under the drag.
-    const [x, y] = [at.x + at.width / 2, at.y + at.height / 2];
+    const { x, y } = await stablePressPoint(page, list, '[data-pd-cell]');
+    const before = await cell.boundingBox();
+    if (!before) throw new Error('no box');
     await page.mouse.move(x, y);
     await page.mouse.down();
     await page.mouse.move(x + 40, y, { steps: 5 });
@@ -151,11 +206,11 @@ test.describe('the viewport follows its size', () => {
     expect(await drawnToBottom(list)).toBe(true);
     const before = (await list.boundingBox())!.height;
     const grip = page.locator('[data-pd-cell]', { has: page.locator('dy-events-feed') }).locator('.pd-wg-h--se');
-    const g = (await grip.boundingBox())!;
-    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    const { x, y } = await stablePressPoint(page, grip, '.pd-wg-h--se');
+    await page.mouse.move(x, y);
     await page.mouse.down();
-    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2 + 40, { steps: 4 });
-    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2 + 320, { steps: 16 });
+    await page.mouse.move(x, y + 40, { steps: 4 });
+    await page.mouse.move(x, y + 320, { steps: 16 });
     await page.mouse.up();
     await expect.poll(async () => (await list.boundingBox())!.height, { timeout: 15_000 }).toBeGreaterThan(before + 150);
     await expect.poll(() => drawnToBottom(list), { timeout: 15_000 }).toBe(true);

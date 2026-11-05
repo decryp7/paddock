@@ -164,9 +164,9 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
       </ng-template>
       <ng-template pdWidget="cpu" [pdWidgetOf]="witness" let-x>
         <div class="wg-split">
-          <div class="wg-metric"><span class="wg-k" pdSkeleton>CPU</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.cpu ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton>@if (x) { <pd-sparkline [values]="cpuSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="CPU, last minute" /> }</span></div>
+          <div class="wg-metric"><span class="wg-k" pdSkeleton>CPU</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.cpu ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton>@if (x) { <pd-sparkline [values]="cpuSeries" [height]="24" [area]="true" scale="zero" [max]="100" label="CPU, last minute" /> }</span></div>
           <span class="wg-div"></span>
-          <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark wg-spark--mem" pdSkeleton>@if (x) { <pd-sparkline [values]="memSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="Memory, last minute" /> }</span></div>
+          <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark wg-spark--mem" pdSkeleton>@if (x) { <pd-sparkline [values]="memSeries" [height]="24" [area]="true" scale="zero" [max]="100" label="Memory, last minute" /> }</span></div>
         </div>
       </ng-template>
       <ng-template pdWidget="net" [pdWidgetOf]="witness" let-x>

@@ -681,6 +681,13 @@ kbd,
   --mat-tooltip-container-shape: 6px;
 }
 
+/* A full-text tip (dyFullText) never takes the pointer: Material's tooltip panel is hoverable, so one that opened under a still pointer
+   (a list scrolled beneath it) swallowed the wheel in WebKit. Its panel is the overlay pane that holds it. */
+.cdk-overlay-pane:has(.dy-full-text-tip),
+.dy-full-text-tip {
+  pointer-events: none;
+}
+
 /* The memory slot's tooltip: one fact per line. */
 .dy-slot-tip .mdc-tooltip__surface {
   max-width: 320px;

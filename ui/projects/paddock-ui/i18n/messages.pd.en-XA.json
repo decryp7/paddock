@@ -828,6 +828,7 @@
     "pd.ui.metric.up": "⟦ÛÛþ⟧",
     "pd.ui.retry": "⟦Ŕééţŕý⟧",
     "pd.ui.sparkline": "⟦Ţŕééñð⟧",
+    "pd.ui.sparkline.second": "⟦Šééçööñð ļîîñé⟧",
     "pd.ui.sunburst.error": "⟦Çööûûļð ñööţ ðŕáŵ ţĥéé çĥááŕţ⟧",
     "pd.ui.sunburst.share": "⟦{$percent} ööƒ {$parent}⟧",
     "pd.ui.sunburst.smaller-many": "⟦{$count} šɱááļļééŕ îîţéɱš⟧",

@@ -1,6 +1,8 @@
 import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { PD_ECHARTS, fakeEchartsLoader } from '@decryp7/paddock-ui/chart';
+import { FakeECharts } from '@decryp7/paddock-ui/testing';
 import { PdWidgetGrid } from '@decryp7/paddock-ui/widgets';
 import { BACKEND } from '../../core/backend';
 import { MockBackend, type MockOptions } from '../../core/mock-backend';
@@ -38,7 +40,7 @@ function body(kind: DashboardWidget['kind'], value: DyValue | null) {
 
 function env(options: MockOptions = {}) {
   const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000, ...options });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, provideRouter([])] });
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, provideRouter([]), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(new FakeECharts().init) }] });
   TestBed.inject(LiveStore).receive(mock.liveUpdate('summary'));
   return mock;
 }
@@ -158,11 +160,11 @@ describe('dy-widget', () => {
     env();
     const f = body('graph', given('graph', 'diskActivity', rd(null, 'ok', { reason: "The disk's busy time is not reported here." })));
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('dy-sparkline')).toBeNull();
+    expect(el.querySelector('pd-sparkline')).toBeNull();
     expect(el.querySelector('.note')?.textContent).toContain('not reported here');
     f.componentRef.setInput('value', given('graph', 'diskActivity', rd(40)));
     f.detectChanges();
-    expect(el.querySelector('dy-sparkline')).not.toBeNull();
+    expect(el.querySelector('pd-sparkline')).not.toBeNull();
     expect(el.querySelector('.note')).toBeNull();
   });
 
@@ -204,7 +206,13 @@ describe('dy-widget with a performance counter', () => {
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('.hero b')!.textContent).toMatch(/\d/);
-    expect(el.querySelector('dy-sparkline')).not.toBeNull();
+    expect(el.querySelector('pd-sparkline')).not.toBeNull();
+    // Wiring: a short history starts well right of the left edge (the box holds SPARK_CAPACITY samples) and has no padding.
+    const d = el.querySelector('pd-sparkline .pd-line')!.getAttribute('d')!;
+    expect(Number(/^M(\d+(\.\d+)?) /.exec(d)![1])).toBeGreaterThan(100);
+    expect(d).toContain('L120.0 ');
+    expect(el.querySelector('pd-sparkline .pd-dot')).toBeNull();
+    expect(el.querySelector('pd-sparkline svg')!.getAttribute('aria-label')).not.toMatch(/\.\d{3,}/);
 
     const gone = body('bigNumber', given('bigNumber', { perfCounter: '\\Nothing\\here' }));
     counters.track(['\\Nothing\\here']);
