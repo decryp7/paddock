@@ -567,6 +567,24 @@ describe('the dialogs', () => {
     expect(el.querySelector('[data-testid="updates-installer-running"]')?.textContent).toContain('An update is being installed');
   });
 
+  it('Updates offers Install again after a declined or failed hand-off, and it looks for the update and downloads it again', async () => {
+    const { updates } = bed('release', [], false, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: null });
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    const error = { kind: 'declined', message: 'Not installed: Windows permission was declined.', nextStep: 'Click Install again and choose Yes in the Windows prompt.', detail: null } as const;
+    (updates as unknown as { set: (p: UpdatePhase) => void }).set({ kind: 'failed', error, info: null });
+    await settle();
+    await fixture.whenStable();
+    expect(text(el)).toContain('Not installed: Windows permission was declined.');
+    button(el, 'Install again').click();
+    await settle();
+    await settle();
+    await fixture.whenStable();
+    expect(['downloading', 'ready']).toContain((await updates.status()).phase.kind);
+  });
+
   it('Updates shows a refused signature with its next step, and nothing to press without a key', async () => {
     bed('bad-signature');
     const fixture = createFramed(PdUpdatesDialog);

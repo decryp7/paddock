@@ -127,6 +127,7 @@ export class PdUpdatesDialog implements DialogContent {
     discard: $localize`:@@pd.updates.discard:Discard`,
     restart: $localize`:@@pd.updates.restart:Restart to update`,
     install: $localize`:@@pd.updates.install:Install`,
+    installAgain: $localize`:@@pd.updates.install-again:Install again`,
     checkAgain: $localize`:@@pd.updates.check-again:Check again`,
     checkNow: $localize`:@@pd.updates.check-now:Check now`,
     download: $localize`:@@pd.updates.download:Download`,
@@ -158,6 +159,9 @@ export class PdUpdatesDialog implements DialogContent {
       case 'available':
         return [run('check', this.t.checkAgain, 'secondary', () => this.store.check()), run('download', this.t.download, 'primary', () => this.store.download())];
       case 'failed':
+        if (s.phase.error.kind === 'notInstalled' || s.phase.error.kind === 'declined') {
+          return [run('install-again', this.t.installAgain, 'primary', () => this.store.installAgain())];
+        }
         return this.store.canDownload() ? [run('download', this.t.tryAgain, 'primary', () => this.store.download())] : [run('check', this.t.checkAgain, 'primary', () => this.store.check())];
       case 'idle':
       case 'upToDate':
