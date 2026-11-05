@@ -197,6 +197,18 @@ mod tests {
         p
     }
 
+    #[test]
+    fn read_tail_never_panics_on_hostile_log_files() {
+        let dir = temp("tail-hostile");
+        let file = dir.join("runner.log");
+        paddock_testkit::assert_never_panics(&[LOG.as_bytes(), b"\xff\xfe\0\r\n"], |bytes| {
+            std::fs::write(&file, bytes).unwrap();
+            read_tail(&file).map(|t| t.len())
+        });
+        assert!(read_tail(&dir.join("missing.log")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     const LOG: &str =
         "time=\"2026-10-22T12:10:00+00:00\" level=info msg=\"task started\"\ntime=\"2026-10-22T12:11:00+00:00\" level=info msg=\"done\"\n";
 

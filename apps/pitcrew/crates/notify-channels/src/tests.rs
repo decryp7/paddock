@@ -375,10 +375,11 @@ fn missing_secret_is_reported_without_a_request() {
 }
 
 #[test]
-fn connection_refused_is_an_error_not_a_panic() {
-    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+fn a_server_that_resets_the_connection_is_an_error_not_a_panic() {
+    // A held port: the port of a dropped listener may belong to another test's server by the time we connect (C39).
+    let held = paddock_testkit::net::HeldPort::reset();
     let d = Dispatcher::new(Settings {
-        channels: vec![cfg("w", webhook(&format!("http://127.0.0.1:{port}"), None))],
+        channels: vec![cfg("w", webhook(&held.url(), None))],
     });
     assert!(matches!(
         one(d.dispatch(&msg("diskLow", Severity::Info), &MemorySecrets::new())),
@@ -449,12 +450,12 @@ fn email_without_password_in_keychain_fails_clearly() {
 }
 
 #[test]
-fn email_to_unreachable_server_is_a_connect_error() {
-    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+fn email_to_a_server_that_hangs_up_is_an_error() {
+    let held = paddock_testkit::net::HeldPort::hang_up();
     let mut t = email(vec!["a@b.co"]);
     if let Transport::Email { host, port: p, .. } = &mut t {
         *host = "127.0.0.1".into();
-        *p = port;
+        *p = held.port();
     }
     let d = Dispatcher::new(Settings {
         channels: vec![cfg("m", t)],
