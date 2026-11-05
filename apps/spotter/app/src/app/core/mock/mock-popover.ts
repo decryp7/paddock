@@ -61,6 +61,12 @@ export class MockPopover {
       catalogue: { surface: { id: 'popover', noun: 'popup', columns: 2, maxPlacements: MAX, minPlacements: 0, maxUserPresets: 0 }, kinds: KINDS },
       builtinPresets: [],
       notes: [],
+      // A flow surface has no free-size arrangements or moves, no redo and no outcome of its own (the engine's view says so).
+      revision: 0,
+      arrangements: [],
+      moves: [],
+      canRedo: false,
+      outcome: null,
       canUndo: this.previous !== null,
       editable: true,
     };
@@ -72,6 +78,9 @@ export class MockPopover {
       if (!this.previous) throw refused('There is nothing to undo.');
       this.placements = this.previous;
       this.previous = null;
+    } else if (edit === 'redo') {
+      // The mock keeps one level of undo and no redo; the engine's refusal for an empty redo is the same words.
+      throw refused('There is nothing to redo.');
     } else if (edit === 'resetToDefaults') {
       this.previous = list;
       this.placements = DEFAULTS.map(([span, w]) => place(w, span));

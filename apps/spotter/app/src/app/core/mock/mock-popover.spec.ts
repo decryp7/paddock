@@ -42,6 +42,17 @@ describe('MockPopover (the mock of the engine layout, for browser development an
     expect(() => p.edit({ add: { widget: 'quietHours', span: null, at: null } })).toThrow();
   });
 
+  it('refuses a redo, since the mock keeps one level of undo only', () => {
+    const p = new MockPopover();
+    let thrown: unknown;
+    try {
+      p.edit('redo');
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toMatchObject({ code: 'badRequest', message: 'There is nothing to redo.' });
+  });
+
   it('resets to the defaults, with undo', () => {
     const p = new MockPopover();
     p.edit({ remove: { id: 'failures' } });

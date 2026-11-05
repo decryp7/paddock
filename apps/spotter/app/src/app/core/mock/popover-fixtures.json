@@ -469,7 +469,9 @@
     }
   ],
   "view": {
+    "arrangements": [],
     "builtinPresets": [],
+    "canRedo": false,
     "canUndo": false,
     "catalogue": {
       "kinds": [
@@ -478,9 +480,13 @@
           "kind": "watchedSites",
           "maxInstances": 1,
           "refresh": "onChange",
-          "spans": [
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                2
+              ]
+            }
+          },
           "summary": "Your watches and how each one is doing",
           "title": "Watched sites"
         },
@@ -489,9 +495,13 @@
           "kind": "recentChanges",
           "maxInstances": 1,
           "refresh": "onChange",
-          "spans": [
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                2
+              ]
+            }
+          },
           "summary": "The newest releases Spotter found",
           "title": "Recent changes"
         },
@@ -500,10 +510,14 @@
           "kind": "nextCheck",
           "maxInstances": 1,
           "refresh": "onChange",
-          "spans": [
-            1,
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                1,
+                2
+              ]
+            }
+          },
           "summary": "Which watch is checked next, and when",
           "title": "Next check"
         },
@@ -512,10 +526,14 @@
           "kind": "quietHours",
           "maxInstances": 1,
           "refresh": "onChange",
-          "spans": [
-            1,
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                1,
+                2
+              ]
+            }
+          },
           "summary": "When notifications wait",
           "title": "Quiet hours"
         },
@@ -524,9 +542,13 @@
           "kind": "failures",
           "maxInstances": 1,
           "refresh": "onChange",
-          "spans": [
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                2
+              ]
+            }
+          },
           "summary": "Watches that could not be checked, with Retry",
           "title": "Failures"
         },
@@ -535,10 +557,14 @@
           "kind": "notifications",
           "maxInstances": 1,
           "refresh": "onChange",
-          "spans": [
-            1,
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                1,
+                2
+              ]
+            }
+          },
           "summary": "Whether notifications are on, paused or off",
           "title": "Notifications"
         }
@@ -574,6 +600,9 @@
       "presets": [],
       "version": 1
     },
-    "notes": []
+    "moves": [],
+    "notes": [],
+    "outcome": null,
+    "revision": 1
   }
 }
