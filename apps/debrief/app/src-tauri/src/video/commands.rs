@@ -487,8 +487,8 @@ pub async fn video_describe<R: Runtime>(app: AppHandle<R>, win: CurrentWindow, r
             let r = st.edit(|| folder.load(&key)).map_err(cmd)?;
             let path = folder.frame_path(&r, *i).map_err(cmd)?;
             let ms = r.frames[*i].video_ms;
-            let described = load_frame(&path).and_then(|img| describe_frame(&a, &img, &r.name, *i + 1, r.frames.len(), ms));
-            match described {
+            let outcome = load_frame(&path).and_then(|img| describe_frame(&a, &img, &r.name, *i + 1, r.frames.len(), ms));
+            match outcome {
                 Ok(text) => {
                     edit_record(&st, &folder, &key, |r| {
                         if let Some(f) = r.frames.get_mut(*i).filter(|f| f.video_ms == ms) {
