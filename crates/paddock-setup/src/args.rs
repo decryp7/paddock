@@ -71,6 +71,14 @@ pub enum Command {
         /// A folder (or a path inside one) below `updates\` that stays.
         keep: Option<String>,
     },
+    /// `note --dir <install folder> --text <text>`: appends one line to `setup.log` (the installer include writes why it refused,
+    /// through the same checked, protected log as every other step, never to a path the elevated installer could be steered to).
+    Note {
+        /// `$INSTDIR`.
+        dir: String,
+        /// The text, at most [`MAX_ARG`] bytes; the log cuts it to one clean line.
+        text: String,
+    },
     /// `apply-update --file <download> --signature <base64 signature text> --version <v> [--size <bytes>] --restart`.
     ApplyUpdate {
         /// The download (untrusted), a plain local drive-letter path.
@@ -251,6 +259,10 @@ pub fn parse(args: &[String]) -> Result<Command, UsageError> {
             };
             Command::CleanRun { dir, scope }
         }
+        "note" => Command::Note {
+            dir: o.required("--dir")?,
+            text: o.required("--text")?,
+        },
         "clean-staging" => Command::CleanStaging {
             dir: o.required("--dir")?,
             keep: o.optional("--keep")?,
@@ -358,6 +370,33 @@ mod tests {
                 restart: false
             })
         );
+    }
+
+    #[test]
+    fn note_takes_a_folder_and_a_bounded_text() {
+        assert_eq!(
+            p("note|--dir|D|--text|refused: older copy"),
+            Ok(Command::Note {
+                dir: "D".into(),
+                text: "refused: older copy".into()
+            })
+        );
+        assert_eq!(p("note|--dir|D"), Err(UsageError::Missing("--text")));
+        assert_eq!(p("note|--text|t"), Err(UsageError::Missing("--dir")));
+        let long = "x".repeat(MAX_ARG + 1);
+        assert!(matches!(
+            parse(&[
+                "note".into(),
+                "--dir".into(),
+                "D".into(),
+                "--text".into(),
+                long
+            ]),
+            Err(UsageError::Invalid {
+                option: "argument",
+                ..
+            })
+        ));
     }
 
     #[test]

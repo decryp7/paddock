@@ -303,27 +303,39 @@ fn clean_staging_is_told_the_installers_own_folder() {
     assert!(t.contains(r#"clean-staging --dir "$R5" --keep "$R4""#));
 }
 
-/// A silent run must tell a refusal from NSIS's own endings (1 cancelled, 2 aborted), and the reason must outlive the folder.
+/// A silent run must tell a refusal from NSIS's own endings (1 cancelled, 2 aborted) and from apply-update's codes (20 up), and
+/// the reason must reach the protected log without the elevated installer writing a path of its own.
 #[test]
-fn refusals_have_their_own_exit_levels_and_a_log_that_survives() {
+fn refusals_have_their_own_exit_levels_and_note_into_the_protected_log() {
     let t = canonical_include();
+    let lines: Vec<&str> = t.lines().map(str::trim_end).collect();
     for (name, n) in [
-        ("PER_USER", 20),
-        ("BAD_DIR", 21),
-        ("STILL_RUNNING", 22),
-        ("TOOL_FAILED", 23),
+        ("PER_USER", 40),
+        ("BAD_DIR", 41),
+        ("STILL_RUNNING", 42),
+        ("TOOL_FAILED", 43),
     ] {
+        let want = format!("!define PADDOCK_LEVEL_{name} {n}");
         assert!(
-            t.contains(&format!("!define PADDOCK_LEVEL_{name} {n}\n")),
-            "{name} is {n}"
+            lines.contains(&want.as_str()),
+            "{name} is {n} (compared over lines, CRLF or not)"
         );
     }
     assert!(
-        t.contains(r#"$TEMP\${PRODUCTNAME}-setup-refused.log"#),
-        "the reason is written to %TEMP%"
+        t.contains(" note --dir "),
+        "the reason goes through paddock-setup note"
+    );
+    // The only FileOpen is the test harness's log line (compiled only with PADDOCK_TEST_HARNESS).
+    let opens: Vec<usize> = t.match_indices("FileOpen").map(|(i, _)| i).collect();
+    assert_eq!(opens.len(), 1, "one FileOpen");
+    let before = &t[..opens[0]];
+    let macro_start = before.rfind("!macro").unwrap();
+    assert!(
+        before[macro_start..].contains("!ifdef PADDOCK_TEST_HARNESS"),
+        "and it is the harness's"
     );
     assert!(
-        t.contains("Why it stopped is also written to"),
-        "the details say where"
+        !t.contains("$TEMP"),
+        "nothing is written under %TEMP% while elevated"
     );
 }

@@ -206,6 +206,15 @@ fn run(command: Command) -> Exit {
                 },
             )
         }
+        Command::Note { dir, text } => {
+            // Through the checked log only: a folder that fails `check-dir` gets no file (the include then has the message and
+            // the exit level only).
+            let Ok((_, mut log)) = checked(&dir) else {
+                return Exit::BadDir;
+            };
+            log.line("refused", &text);
+            finish(&mut log, Exit::Ok)
+        }
         Command::CleanStaging { dir, keep } => {
             let Ok((proof, mut log)) = checked(&dir) else {
                 return Exit::BadDir;
