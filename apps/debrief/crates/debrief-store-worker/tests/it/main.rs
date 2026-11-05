@@ -4,3 +4,4 @@
 mod parity;
 mod rpath;
 mod worker;
+mod folder_open;

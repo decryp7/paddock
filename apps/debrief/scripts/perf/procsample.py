@@ -41,6 +41,16 @@ def children(pid):
     return [arr[i] for i in range(max(0, n))]
 
 
+def tree(root):
+    """The process and all its descendants (the store worker's plugin processes are grandchildren of the CLI)."""
+    found, stack = [], [root]
+    while stack:
+        pid = stack.pop()
+        found.append(pid)
+        stack.extend(children(pid))
+    return found
+
+
 def name(pid):
     b = ctypes.create_string_buffer(256)
     lib.proc_name(pid, b, 256)
@@ -58,7 +68,7 @@ def main():
             except OSError:
                 break
             now = int(time.time() * 1000)
-            for pid in [root] + children(root):
+            for pid in tree(root):
                 u = usage(pid)
                 if u is None:
                     continue

@@ -83,6 +83,32 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, opening a 7.6 GiB diagnostic-bundle folder (branch `docs/debrief-folder-repro`)
+
+- Machine and load: Mac mini, load 5 to 14, other agents building; release builds; d7 USB SSD.
+- Corpus: invented with `scripts/perf/bundle/gen_bundle.py` from an anonymous manifest of a real bundle's file facts
+  (`bundle_manifest.py`; the manifest and data are not committed). 14,255 files, 8,171,319,343 bytes: 3 EVTX (largest
+  1,534,136,320 bytes), 3 minidumps of about 296 MiB, a 460,690,618-byte UTF-16 registry export, 3 semicolon text
+  exports (230, 157, 98 MB), 6,833 invented opaque binaries, deep folders and rolled logs. Binary content is invented.
+- Command: `crates/debrief-cli/examples/folder_repro.rs` (the app's default launch values, `RemoteStore::open` on the
+  folder, progress polled) under `procsample.py`; v1.1.1 through `debrief import`. Worker cap 2,048 MB unless stated.
+- Default caps, full folder: the worker is stopped over its cap after 4.6 s on v1.1.1 (`debrief-v1.1.1`) and 4.1 s on
+  `debrief/1.2-int` 852b35ac0; nothing is imported. Also on `debrief/stream-text` 3168b6145 (0.5 s).
+- One file alone at default caps on 1.2-int: the 1.43 GiB EVTX stops the worker (2,914 MB: the whole file read, then
+  copied for the guarded call); the 230 MB semicolon export stops it (CSV adapter, about 13 MB of worker per MB); the
+  registry export crashes its plugin (contained); the three 296 MiB dumps pass at 1,923 MB.
+- Without the 3 EVTX, the registry export, the 230 MB export and the 3 large dumps: passes on 1.2-int (14,247 files,
+  6,463,829 events, worker peak 1,830 MB, 29 s to search ready); fails on v1.1.1 (worker stopped at 12.6 s).
+- Caps raised (worker 32 GiB): the folder opens in 36 s (import 20 s, index 15 s), worker peak 11,075 MB, store 1.1 GB,
+  8,516,259 events; the EVTX files and the registry export still fail in their plugins (plugin cap at most 4 GiB).
+- `debrief/stream-text`: the 230 MB export alone peaks at 820 MB (was 3,102 MB).
+- Throwaway experiment on stream-text (memory-mapped binary files, no guard copy, plugin cap limit 40 GiB; not
+  committed): the 1.43 GiB EVTX imports 3,043,170 events in 62 s with the plugin at 16,013 MB and the worker at
+  13,140 MB; the registry export imports 7,864,047 events with the plugin at 10,088 MB and the worker at 9,453 MB.
+  At default caps the full folder still stops the worker (2 of 2 runs), and passes without the EVTX or without the
+  registry export (1 run each).
+- Handles: at most 152 per process. File count: 14,251 files considered (the profile leaves out 4 `.exe`/`.dll`).
+
 ### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
 
 - **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`

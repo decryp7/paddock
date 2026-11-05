@@ -148,7 +148,7 @@ thread_local! {
 /// plugins' sockets (`debrief-plugin-*`, made before the handshake); they go with the folder instead of staying in a
 /// shared one (see `debrief_ipc::testing`).
 #[cfg(unix)]
-fn confined(exe: &str) -> WorkerConfig {
+pub(super) fn confined(exe: &str) -> WorkerConfig {
     let mut cfg = WorkerConfig::new(exe);
     let dir = debrief_ipc::testing::confined_tmp();
     cfg.env.extend(dir.env());
