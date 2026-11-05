@@ -91,7 +91,7 @@ for (const platform of PLATFORMS) {
       const found = await rows.evaluateAll((lis) =>
         lis.map((li) => {
           const body = li.querySelector('.pd-wc-body') ?? li;
-          const parts = [...body.children].filter((c) => !c.matches('.pd-wc-lead, .pd-wc-grip, .pd-wc-kicon, .cdk-drag-placeholder, .pd-wc-placeholder')) as HTMLElement[];
+          const parts = [...body.children].filter((c) => !c.matches('.pd-wc-lead, .pd-wc-grip, .pd-wc-kicon, .cdk-drag-placeholder')) as HTMLElement[];
           const txt = li.querySelector('.pd-wc-txt')!.getBoundingClientRect();
           const more = li.querySelector('.pd-wc-more')!.getBoundingClientRect();
           const mid = (r: DOMRect) => r.top + r.height / 2;

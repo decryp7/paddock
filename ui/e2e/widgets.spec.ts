@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, stablePressPoint, test, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -168,9 +168,7 @@ test('Widgets: the drag ghost is the row, at its width and sizes, without the ki
   await open(page, 'dark');
   const row = chooser(page).locator('li.pd-wc-item').first();
   const rowBox = await row.boundingBox();
-  const grip = await grips(page).nth(0).boundingBox();
-  const [x, y] = [(grip?.x ?? 0) + (grip?.width ?? 0) / 2, (grip?.y ?? 0) + (grip?.height ?? 0) / 2];
-  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.pd-wc-grip') != null, { x, y }), 'the pointer is over the grip').toBe(true);
+  const { x, y } = await stablePressPoint(page, grips(page).nth(0), '.pd-wc-grip');
   await page.mouse.move(x, y);
   await page.mouse.down();
   await page.mouse.move(x + 6, y + 10, { steps: 4 });
@@ -183,6 +181,24 @@ test('Widgets: the drag ghost is the row, at its width and sizes, without the ki
   const biggest = await ghost.evaluate((e) => Math.max(0, ...[...e.querySelectorAll('svg')].map((v) => v.getBoundingClientRect().width)));
   expect(biggest, 'a symbol in the ghost is drawn huge').toBeLessThanOrEqual(32);
   await page.mouse.up();
+});
+
+test('Widgets: an inert widget dims its controls but not a checkbox\'s invisible native input', async ({ page }) => {
+  await open(page, 'dark');
+  const opacities = await page.locator('.pd-widget-frame').first().evaluate((frame) => {
+    frame.setAttribute('inert', '');
+    const host = document.createElement('div');
+    host.innerHTML =
+      '<div class="mat-mdc-checkbox"><input type="checkbox" class="mdc-checkbox__native-control"></div>' +
+      '<div class="mat-mdc-form-field"><input class="mat-mdc-input-element"></div>';
+    frame.appendChild(host);
+    const op = (sel: string): string => getComputedStyle(host.querySelector(sel)!).opacity;
+    const out = [op('.mat-mdc-checkbox'), op('.mdc-checkbox__native-control'), op('.mat-mdc-form-field')];
+    host.remove();
+    frame.removeAttribute('inert');
+    return out;
+  });
+  expect(opacities, "checkbox and form field dimmed, the checkbox's native input not dimmed").toEqual(['0.7', '1', '0.7']);
 });
 
 test('Widgets: the row menu opens beside its button and never covers its focus ring', async ({ page }) => {

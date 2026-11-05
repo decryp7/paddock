@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { dialogWindowUrl } from '@decryp7/paddock-e2e';
-import type { Locator, Page } from '@playwright/test';
+import { dialogWindowUrl, stablePressPoint } from '@decryp7/paddock-e2e';
+import type { Locator } from '@playwright/test';
 
 /**
  * Settings > Menu bar items and Popup widgets: while a row is dragged, the ghost under the pointer is the whole row (title,
@@ -9,30 +9,6 @@ import type { Locator, Page } from '@playwright/test';
  * layout drag moves the real widget and draws no clone. Waits are on conditions, never sleeps; a press first checks that the
  * pointer is over the element it means to grab. WIDGET_GHOST_SHOTS=<dir> writes mid-drag screenshots (review evidence).
  */
-
-/** Waits until the element's box is the same on two animation frames, then returns the point to press and checks what is under it. */
-async function pressPoint(page: Page, el: Locator, within: string, dy?: number): Promise<{ x: number; y: number }> {
-  const box = async (): Promise<string> =>
-    el.evaluate(
-      (e) =>
-        new Promise<string>((done) =>
-          requestAnimationFrame(() => {
-            const r = e.getBoundingClientRect();
-            requestAnimationFrame(() => {
-              const s = e.getBoundingClientRect();
-              done(r.x === s.x && r.y === s.y && r.width === s.width && r.height === s.height ? `${s.x},${s.y},${s.width},${s.height}` : '');
-            });
-          }),
-        ),
-    );
-  await expect.poll(box, { message: 'the element to grab keeps still', timeout: 10_000 }).not.toBe('');
-  const b = (await el.boundingBox())!;
-  const x = b.x + b.width / 2;
-  const y = dy === undefined ? b.y + b.height / 2 : b.y + dy;
-  const hit = await page.evaluate(({ x, y, within }) => document.elementFromPoint(x, y)?.closest(within) != null, { x, y, within });
-  expect(hit, `the pointer at ${x},${y} is not over ${within}: the element moved before the press`).toBe(true);
-  return { x, y };
-}
 
 /** Where the grip, title, first control and "more" sit from the row's corner; null for a part the row does not have. */
 const offsets = (el: Locator): Promise<(number[] | null)[]> =>
@@ -68,8 +44,10 @@ for (const size of SIZES) {
         await expect(row).toBeVisible();
         const title = (await row.locator('.pd-wc-txt b').innerText()).trim();
         await row.locator('.pd-wc-grip').scrollIntoViewIfNeeded();
-        const { x, y } = await pressPoint(page, row.locator('.pd-wc-grip'), '.pd-wc-grip');
+        const { x, y } = await stablePressPoint(page, row.locator('.pd-wc-grip'), '.pd-wc-grip');
         const rowBox = (await row.boundingBox())!;
+        // ER-33: the dialog-size case only counts if the row really wrapped (a one-line row is about 48 px).
+        if (size.name === 'dialog' && which === 'first') expect(rowBox.height, 'the row did not wrap at the dialog size').toBeGreaterThan(60);
         const inRow = await offsets(row);
         if (which === 'first') expect(inRow[2], 'the Menu bar items row has a control').not.toBeNull();
         await page.mouse.move(x, y);
@@ -123,7 +101,7 @@ for (const scheme of ['light', 'dark'] as const) {
       expect(await native.first().evaluate((e) => getComputedStyle(e).opacity), 'a checkbox native control is visible while editing').toBe('0');
       const cell = page.locator('[data-pd-cell]', { has: page.locator('dy-events-feed') });
       await cell.evaluate((e) => e.scrollIntoView({ block: 'center' }));
-      const { x, y } = await pressPoint(page, cell, '[data-pd-cell]', 20);
+      const { x, y } = await stablePressPoint(page, cell, '[data-pd-cell]', 20);
       const before = (await cell.boundingBox())!;
       await page.mouse.move(x, y);
       await page.mouse.down();

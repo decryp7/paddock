@@ -8,6 +8,7 @@
 export { test, expect, type PaddockFixtures } from './fixtures.ts';
 export type { Page, Locator, BrowserContext } from '@playwright/test';
 export { e2ePort } from './env.ts';
+export { stablePressPoint } from './press.ts';
 export { clickShape, hoverShape, pointInShape, type PagePoint } from './svg.ts';
 export { assertChromeForTesting, browserProblems, isInstalledBrowser, pinnedChrome, CHROME_ENV, CHROMIUM_TEST_ENV, INSTALLED_CHANNELS, type BrowserUse, type GuardedConfig } from './browser.ts';
 export { paddockConfig, isOn, SCREENSHOT_SPECS, DOC_SCREEN_VIEWPORT, type PaddockConfigOptions } from './config.ts';
