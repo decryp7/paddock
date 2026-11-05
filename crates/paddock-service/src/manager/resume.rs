@@ -7,12 +7,12 @@
 //! full repair (the pinned build identity is new); and it never opens System Settings, whatever the repair meets.
 
 use super::{Manager, outcome_result, refusal};
-use crate::backend::DisabledMark;
+use crate::backend::{DisabledMark, Job};
 use crate::error::ServiceError;
 use crate::manager::Started;
 use crate::plan::{ResumePath, installed, request, resume_path, supervises};
 use crate::port::RegisterError;
-use crate::repair::{RepairOutcome, Timings};
+use crate::repair::RepairOutcome;
 use crate::stop::StopMechanism;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -128,6 +128,30 @@ impl Manager {
         }
     }
 
+    /// Waits up to `start_wait` for a registration this version made earlier to come up (the service answers or the OS
+    /// runs the job), removing nothing. `true`: it did. `false`: it did not in time, or the OS now refuses the job or the
+    /// wait was cancelled, so it is to be replaced.
+    pub(super) fn await_start(&mut self, cancel: &AtomicBool) -> bool {
+        let mut waited = Duration::ZERO;
+        loop {
+            if (self.answers)() {
+                return true;
+            }
+            match self.backend.inspect().job {
+                Job::Running => return true,
+                Job::Refused => return false,
+                _ => {}
+            }
+            if waited >= self.timings.start_wait
+                || cancel.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                return false;
+            }
+            self.backend.pause(self.timings.start_poll);
+            waited += self.timings.start_poll;
+        }
+    }
+
     /// [`Manager::on_start`] that waits for another registration or repair to finish (`Busy`) up to `tries` looks, `pause`
     /// apart, instead of giving up on the first one: a start that gave up leaves no record, and the next start would
     /// replace a registration that was fine.
@@ -149,6 +173,37 @@ impl Manager {
         started
     }
 
+    /// [`Manager::install`] (or, `quiet`, [`Manager::install_unattended`]) that waits for another registration or repair
+    /// to finish: a first run that lost the lock would otherwise end with nothing registered and no record of having tried.
+    ///
+    /// # Errors
+    /// [`ServiceError`], as [`Manager::install`]; [`ServiceError::Busy`] after `tries` more looks.
+    pub fn install_patient(
+        &mut self,
+        cancel: &AtomicBool,
+        quiet: bool,
+        tries: u32,
+        pause: Duration,
+    ) -> Result<RepairOutcome, ServiceError> {
+        let mut result = if quiet {
+            self.install_unattended(cancel)
+        } else {
+            self.install(cancel)
+        };
+        for _ in 0..tries {
+            if !matches!(result, Err(ServiceError::Busy)) {
+                break;
+            }
+            self.backend.pause(pause);
+            result = if quiet {
+                self.install_unattended(cancel)
+            } else {
+                self.install(cancel)
+            };
+        }
+        result
+    }
+
     /// [`Manager::install`] for a start nobody asked for (first run): the same registration, but System Settings is
     /// never opened for a switch or an approval the user has to give.
     ///
@@ -163,18 +218,6 @@ impl Manager {
         match self.run_replace(reason, cancel) {
             None => Err(ServiceError::Busy),
             Some(outcome) => outcome_result(outcome),
-        }
-    }
-}
-
-impl Timings {
-    /// The same waits, but a registration the OS accepted is not waited on for the service to answer: for a caller that
-    /// must return at once (the Settings switch) and watches the service by other means.
-    #[must_use]
-    pub fn without_start_wait(self) -> Timings {
-        Timings {
-            start_wait: Duration::ZERO,
-            ..self
         }
     }
 }

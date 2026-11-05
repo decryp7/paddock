@@ -62,6 +62,8 @@ pub enum Hold {
     Unavailable(String),
     /// A newer version registered it.
     NewerOwner(String),
+    /// This version registered it this many times and the service never answered: held, not replaced again.
+    Unanswered(u32),
 }
 
 /// What to do.
@@ -73,6 +75,9 @@ pub enum Plan {
     MarkCurrent,
     /// Replace the registration now (unregister, evict, wait until gone, register).
     Replace(Reason),
+    /// This version already registered it and the service has not answered yet: give it time without removing anything,
+    /// and replace only if it never comes (the reason is why it was registered).
+    Await(Reason),
     /// A replacement is needed but needs an OS prompt: offer Repair.
     Offer(Reason),
 }
@@ -90,7 +95,21 @@ pub struct Facts<'a> {
     pub current_version: &'a str,
     /// What the backend allows.
     pub caps: Capabilities,
+    /// The version that registered it without the service answering afterwards, and how often.
+    pub attempted: Option<Attempt<'a>>,
 }
+
+/// A registration the OS accepted that the service never answered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Attempt<'a> {
+    /// The app version that registered it.
+    pub version: &'a str,
+    /// How many times it did.
+    pub count: u32,
+}
+
+/// How many registrations of one version that never answer are tried before the service is held.
+pub const MAX_ATTEMPTS: u32 = 3;
 
 /// Compares two versions (`1.2.3`, `1.2.3-beta.1`, a leading `v`): numeric parts first, a pre-release is older than
 /// its release. `None` when either is not a version.
@@ -204,6 +223,17 @@ pub fn plan(f: &Facts<'_>) -> Plan {
         return fix(Reason::Moved);
     }
     if f.recorded_version != Some(f.current_version) {
+        if let Some(a) = f.attempted.filter(|a| a.version == f.current_version) {
+            // This version registered it already: removing a job that runs, or that is only slow to start, would replace a
+            // working service (and announce it again). Settled when it runs; given time otherwise; held after a few tries.
+            if f.answers || i.job == Job::Running {
+                return Plan::MarkCurrent;
+            }
+            if a.count >= MAX_ATTEMPTS {
+                return Plan::Leave(Hold::Unanswered(a.count));
+            }
+            return Plan::Await(Reason::VersionChanged);
+        }
         let current =
             i.definition_current == Some(true) && i.registration == Registration::Registered;
         return if !f.caps.pinned_identity && current {
@@ -324,6 +354,7 @@ mod tests {
             recorded_version: recorded,
             current_version: "1.0.4",
             caps,
+            attempted: None,
         }
     }
 
@@ -692,6 +723,7 @@ mod tests {
                 recorded_version: rec,
                 current_version: "1.1.0",
                 caps: MAC,
+                attempted: None,
             }
         }
         // (a) not registered, `launchctl print` timed out, no record: not installed.
@@ -739,6 +771,69 @@ mod tests {
         assert_eq!(
             plan(&facts(&healthy, MAC, Some("1.2.0"))),
             Plan::Replace(Reason::VersionChanged)
+        );
+    }
+
+    #[test]
+    fn a_version_that_registered_it_already_is_given_time_not_replaced_and_held_after_a_few_tries()
+    {
+        let healthy = |job| Inspection {
+            registration: Registration::Registered,
+            job,
+            ..Inspection::absent()
+        };
+        let with = |i: &Inspection, answers, version, count| {
+            let a = Attempt { version, count };
+            plan(&Facts {
+                inspection: i,
+                answers,
+                recorded_version: Some("1.0.0"),
+                current_version: "1.0.4",
+                caps: MAC,
+                attempted: Some(a),
+            })
+        };
+        // It runs, or answers: settled, nothing removed.
+        assert_eq!(
+            with(&healthy(Job::Running), false, "1.0.4", 1),
+            Plan::MarkCurrent
+        );
+        assert_eq!(
+            with(&healthy(Job::NotRunning), true, "1.0.4", 2),
+            Plan::MarkCurrent
+        );
+        // Not up yet: wait, no removal; after MAX_ATTEMPTS: held.
+        assert_eq!(
+            with(&healthy(Job::NotRunning), false, "1.0.4", 1),
+            Plan::Await(Reason::VersionChanged)
+        );
+        assert_eq!(
+            with(&healthy(Job::Absent), false, "1.0.4", MAX_ATTEMPTS - 1),
+            Plan::Await(Reason::VersionChanged)
+        );
+        assert_eq!(
+            with(&healthy(Job::NotRunning), false, "1.0.4", MAX_ATTEMPTS),
+            Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS))
+        );
+        // Another version's attempts do not count; a refusal is always replaced.
+        assert_eq!(
+            with(&healthy(Job::NotRunning), false, "1.0.3", 9),
+            Plan::Replace(Reason::VersionChanged)
+        );
+        assert_eq!(
+            with(&healthy(Job::Refused), false, "1.0.4", 9),
+            Plan::Replace(Reason::Refused)
+        );
+    }
+
+    #[test]
+    fn a_newer_record_with_the_program_unknown_and_the_registration_elsewhere_is_taken_over() {
+        let mut i = registered(Job::Running);
+        i.points_here = Some(false);
+        i.program_exists = None;
+        assert_eq!(
+            plan(&facts(&i, MAC, Some("1.1.0"))),
+            Plan::Replace(Reason::Moved)
         );
     }
 }

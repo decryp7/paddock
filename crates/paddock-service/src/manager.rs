@@ -7,7 +7,7 @@ mod resume;
 
 use crate::backend::{Backend, Inspection, Mechanism};
 use crate::error::ServiceError;
-use crate::plan::{Facts, Hold, Plan, Reason, Refusal, plan};
+use crate::plan::{Attempt, Facts, Hold, Plan, Reason, Refusal, plan};
 use crate::record::{RecordFile, Recorded};
 use crate::repair::{RepairOutcome, Timings, replace};
 use crate::status::{Seen, ServiceStatus, compose};
@@ -136,6 +136,13 @@ impl Manager {
             recorded_version: recorded.registered_version.as_deref(),
             current_version: &self.version,
             caps: self.backend.capabilities(),
+            attempted: recorded
+                .attempted_version
+                .as_deref()
+                .map(|version| Attempt {
+                    version,
+                    count: recorded.attempts,
+                }),
         });
         (inspection, answers, p)
     }
@@ -191,9 +198,15 @@ impl Manager {
         if matches!(outcome, RepairOutcome::Recovered) {
             self.remember();
         } else if outcome.registered() {
-            log::warn!(
-                "the service was registered but did not answer; the version is not remembered, so the next start looks again"
-            );
+            match self.record.attempt(&self.version) {
+                Ok(count) => log::warn!(
+                    count = count;
+                    "the service was registered but did not answer; the version is not remembered as done, so the next start gives it time and looks again"
+                ),
+                Err(e) => {
+                    log::warn!(error:% = e; "the unanswered registration could not be remembered")
+                }
+            }
         }
         Some(outcome)
     }
@@ -211,17 +224,33 @@ impl Manager {
             job:? = inspection.job,
             login_item:? = inspection.login_item,
             answers = answers,
-            recorded:? = self.record.load().registered_version,
+            recorded:? = self.record.load(),
             current = self.version.as_str();
             "service start: what the OS and the record show, and the plan"
         );
         match p {
-            Plan::Leave(h) => Started::Left(h),
+            Plan::Leave(h) => {
+                if let Hold::Unanswered(n) = &h {
+                    log::warn!(count = *n; "this version registered the service {n} times and it never answered; it is held, not replaced again. Repair or a restart of the computer may help");
+                }
+                Started::Left(h)
+            }
             Plan::MarkCurrent => {
                 self.remember();
                 Started::Marked
             }
             Plan::Offer(r) => Started::Offered(r),
+            Plan::Await(r) => {
+                // This version registered it already: give the service the time a start takes before removing anything.
+                if self.await_start(cancel) {
+                    self.remember();
+                    return Started::Marked;
+                }
+                match self.run_replace(r, cancel) {
+                    Some(o) => Started::Repaired(r, o),
+                    None => Started::Busy,
+                }
+            }
             Plan::Replace(r) => match self.run_replace(r, cancel) {
                 Some(o) => Started::Repaired(r, o),
                 None => Started::Busy,

@@ -31,6 +31,13 @@ pub struct Recorded {
     pub registered_version: Option<String>,
     /// The program it registered (when the mechanism has one).
     pub registered_program: Option<String>,
+    /// The app version that last registered it without the service answering afterwards (the OS accepted the
+    /// registration; the service did not come up in time). Optional, so format 1 files without it still load.
+    #[serde(default)]
+    pub attempted_version: Option<String>,
+    /// How many times `attempted_version` registered it that way.
+    #[serde(default)]
+    pub attempts: u32,
 }
 
 /// The state file of one service.
@@ -62,7 +69,23 @@ impl RecordFile {
         self.write(&Recorded {
             registered_version: Some(version.to_string()),
             registered_program: program.map(str::to_string),
+            ..Recorded::default()
         })
+    }
+
+    /// Remembers that `version` registered the service but it did not answer (the registered version stays as it was).
+    /// Returns how many times that now is for this version.
+    pub fn attempt(&self, version: &str) -> Result<u32, ServiceError> {
+        let mut now = self.load();
+        let count = if now.attempted_version.as_deref() == Some(version) {
+            now.attempts.saturating_add(1)
+        } else {
+            1
+        };
+        now.attempted_version = Some(version.to_string());
+        now.attempts = count;
+        self.write(&now)?;
+        Ok(count)
     }
 
     /// Forgets the registration (after an uninstall).
@@ -187,5 +210,38 @@ mod tests {
         // A data folder that cannot hold the lock does not block the repair.
         let missing = RecordFile::new(&d.path().join("no/such/folder"), "net.a.b");
         assert!(missing.lock(5).is_some());
+    }
+
+    #[test]
+    fn an_attempt_is_counted_per_version_and_cleared_by_a_success() {
+        let d = tempfile::tempdir().unwrap();
+        let r = RecordFile::new(d.path(), "net.a.b");
+        r.save("1.0.0", None).unwrap();
+        assert_eq!(r.attempt("1.1.0").unwrap(), 1);
+        assert_eq!(r.attempt("1.1.0").unwrap(), 2);
+        let now = r.load();
+        assert_eq!(
+            now.registered_version.as_deref(),
+            Some("1.0.0"),
+            "the registered version is not touched"
+        );
+        assert_eq!(
+            (now.attempted_version.as_deref(), now.attempts),
+            (Some("1.1.0"), 2)
+        );
+        assert_eq!(
+            r.attempt("1.2.0").unwrap(),
+            1,
+            "another version starts again"
+        );
+        r.save("1.2.0", None).unwrap();
+        assert_eq!((r.load().attempted_version, r.load().attempts), (None, 0));
+        // A format-1 file written before the field existed still loads.
+        std::fs::write(
+            d.path().join("service-net.a.b.json"),
+            r#"{"version": 1, "registeredVersion": "1.0.0"}"#,
+        )
+        .unwrap();
+        assert_eq!(r.load().registered_version.as_deref(), Some("1.0.0"));
     }
 }

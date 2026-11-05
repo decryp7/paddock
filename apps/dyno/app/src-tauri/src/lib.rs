@@ -458,7 +458,12 @@ fn agent_setup<R: Runtime>(
         link.before_first_launch(Box::new(move || {
             // An agent stopped on request ("Quit and stop measuring") comes back now: the log says it was a request, and the service
             // starts again when nothing supervises it, so the link finds it and starts no second agent.
-            quit::resume_at_start(first_link.dirs.root(), &*login::service_probe(), login::platform_service().as_mut());
+            quit::resume_at_start(
+                first_link.dirs.root(),
+                &*login::service_probe(),
+                login::current_location(),
+                login::platform_service().as_mut(),
+            );
             login::run_first_run(&first_app, &first_link, false);
         }));
         // Asked before the link starts an agent of its own: none beside one the login service supervises.

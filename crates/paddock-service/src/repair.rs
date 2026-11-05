@@ -43,6 +43,16 @@ impl Default for Timings {
 }
 
 impl Timings {
+    /// The same waits, but a registration the OS accepted is not waited on for the service to answer: for a caller that
+    /// must return at once (the Settings switch) and watches the service by other means.
+    #[must_use]
+    pub fn without_start_wait(self) -> Timings {
+        Timings {
+            start_wait: Duration::ZERO,
+            ..self
+        }
+    }
+
     /// The longest a repair can wait in total (the bound the tests check).
     pub fn worst_case(&self) -> Duration {
         let cycles = self.max_cycles + 1;

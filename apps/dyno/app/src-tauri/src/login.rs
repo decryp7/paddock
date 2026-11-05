@@ -351,6 +351,67 @@ pub fn ensure_app_entry(start_at_login: bool, autostart: &mut dyn Autostart) -> 
     Ok(true)
 }
 
+// ------------------------------------------------------------------------------- the macOS service's decisions (pure)
+
+/// What a failed registration tells the user. `opened`: System Settings was opened for them.
+#[cfg(any(target_os = "macos", test))]
+fn registration_words(e: &paddock_service::ServiceError, opened: bool) -> String {
+    use paddock_service::ServiceError;
+    let shown = if opened { " (opened for you)" } else { "" };
+    match e {
+        ServiceError::NeedsApproval => {
+            format!("macOS needs your approval: allow Dyno in System Settings > General > Login Items{shown}")
+        }
+        ServiceError::SwitchedOff => {
+            format!("Dyno is switched off in System Settings > General > Login Items{shown}: switch it on there")
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Whether a registration is made without opening System Settings: the first run (nobody asked), once Login Items has been
+/// opened for it before.
+#[cfg(any(target_os = "macos", test))]
+fn install_is_quiet(first_run: bool, marker_exists: bool) -> bool {
+    first_run && marker_exists
+}
+
+/// Whether the first run records that it opened Login Items: it did (not quiet) and there was something for the user to do.
+#[cfg(any(target_os = "macos", test))]
+fn marker_wanted(first_run: bool, quiet: bool, result: &Result<paddock_service::RepairOutcome, paddock_service::ServiceError>) -> bool {
+    use paddock_service::ServiceError;
+    first_run && !quiet && matches!(result, Err(ServiceError::NeedsApproval | ServiceError::SwitchedOff))
+}
+
+/// The waits of the Settings switch's registration: it returns at once (the link waits for the agent and falls back to one of
+/// its own), so it does not wait for the service to answer.
+#[cfg(any(target_os = "macos", test))]
+fn install_timings() -> paddock_service::Timings {
+    paddock_service::Timings::default().without_start_wait()
+}
+
+/// What the repair at start tells the caller: `Ok(true)` the registration was replaced and the service runs, `Ok(false)` nothing
+/// was needed, an error when it was registered but never answered, another repair kept the lock, or it failed.
+#[cfg(any(target_os = "macos", test))]
+fn repair_result(started: paddock_service::manager::Started) -> Result<bool, String> {
+    use paddock_service::manager::Started;
+    use paddock_service::{RepairOutcome, ServiceError};
+    match started {
+        Started::Repaired(_, outcome) => match outcome {
+            RepairOutcome::Recovered => Ok(true),
+            RepairOutcome::Registered => {
+                Err("the agent service was registered again but did not answer; it is tried again at the next start".into())
+            }
+            RepairOutcome::Cancelled => Ok(false),
+            RepairOutcome::NeedsApproval => Err(registration_words(&ServiceError::NeedsApproval, false)),
+            RepairOutcome::Failed(why) | RepairOutcome::Unavailable(why) => Err(why),
+            RepairOutcome::NeedsElevation | RepairOutcome::Declined => Err("the agent service could not be registered again".into()),
+        },
+        Started::Busy => Err("another registration or repair kept running; it is tried again at the next start".into()),
+        Started::Left(_) | Started::Marked | Started::Offered(_) => Ok(false),
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------- macOS
 
 #[cfg(target_os = "macos")]
@@ -367,8 +428,8 @@ mod mac {
     use dyno_agent::service::LABEL;
     use paddock_service::login::{LoginService, MainAppItem};
     use paddock_service::manager::Started;
-    use paddock_service::repair::{RepairOutcome, Timings};
-    use paddock_service::{Manager, ServiceError, ServiceSpec};
+    use paddock_service::repair::Timings;
+    use paddock_service::{Manager, ServiceSpec};
     use std::sync::atomic::AtomicBool;
 
     /// The bundled launch agent. `first_run` is the unasked registration at the first sight of the settings: it opens System
@@ -425,7 +486,6 @@ mod mac {
             Box::new(system()),
         );
         let dirs = dyno_agent::paths::Dirs::current();
-        forget_old_version_file(dirs.root());
         Ok(Manager::new(
             "Dyno",
             Box::new(backend),
@@ -441,20 +501,6 @@ mod mac {
     /// A manager that is only asked what it sees or told to stop or resume: nothing waits for an agent.
     fn quiet_manager() -> Result<Manager, String> {
         manager(std::sync::Arc::new(|| false), Timings::default())
-    }
-
-    /// What a failed registration tells the user. `opened`: System Settings was opened for them.
-    fn registration_words(e: &ServiceError, opened: bool) -> String {
-        let shown = if opened { " (opened for you)" } else { "" };
-        match e {
-            ServiceError::NeedsApproval => {
-                format!("macOS needs your approval: allow Dyno in System Settings > General > Login Items{shown}")
-            }
-            ServiceError::SwitchedOff => {
-                format!("Dyno is switched off in System Settings > General > Login Items{shown}: switch it on there")
-            }
-            other => other.to_string(),
-        }
     }
 
     /// Moves a start-at-login the old route (`tauri-plugin-autostart`) wrote to `SMAppService.mainApp` ([`super::migrate_legacy_login`]).
@@ -474,16 +520,17 @@ mod mac {
         /// Registers the agent and returns at once: the link waits for it and falls back to an agent of its own (the switch
         /// must not block for the two minutes a service may need to start).
         fn install(&mut self) -> Result<(), String> {
-            let mut m = manager(std::sync::Arc::new(|| false), Timings::default().without_start_wait())?;
-            let quiet = self.first_run && opened_marker().exists();
-            let result = if quiet {
-                m.install_unattended(&never())
-            } else {
-                m.install(&never())
-            };
-            let needs_user = matches!(result, Err(ServiceError::NeedsApproval | ServiceError::SwitchedOff));
-            if self.first_run && needs_user && !quiet {
-                if let Err(e) = std::fs::write(opened_marker(), "opened\n") {
+            let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
+            let quiet = install_is_quiet(self.first_run, opened_marker().exists());
+            // A first run that lost the lock to another registration waits for it instead of leaving nothing registered.
+            let result = m.install_patient(&never(), quiet, 6, std::time::Duration::from_secs(5));
+            if marker_wanted(self.first_run, quiet, &result) {
+                let marker = opened_marker();
+                let written = marker
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| std::fs::write(&marker, "opened\n"));
+                if let Err(e) = written {
                     crate::logging::warn(&format!("the Login Items marker could not be written: {e}"));
                 }
             }
@@ -514,27 +561,14 @@ mod mac {
             // From a disk image or a translocated path the bundle cannot register the agent: replacing would remove a job
             // that runs and fail to put it back.
             super::current_location()?;
+            forget_old_version_file(dyno_agent::paths::Dirs::current().root());
             let mut m = manager(agent_answers, Timings::default())?;
             // Another registration or repair (the first run, a second copy) may hold the lock: wait for it a while.
-            match m.on_start_patient(&never(), 6, std::time::Duration::from_secs(5)) {
-                Started::Repaired(reason, outcome) => {
-                    crate::logging::info(&format!("agent service: replaced the registration ({reason:?}): {outcome:?}"));
-                    match outcome {
-                        RepairOutcome::Recovered => Ok(true),
-                        RepairOutcome::Registered => {
-                            Err("the agent service was registered again but did not answer; it is tried again at the next start".into())
-                        }
-                        RepairOutcome::Cancelled => Ok(false),
-                        RepairOutcome::NeedsApproval => Err(registration_words(&ServiceError::NeedsApproval, false)),
-                        RepairOutcome::Failed(why) | RepairOutcome::Unavailable(why) => Err(why),
-                        RepairOutcome::NeedsElevation | RepairOutcome::Declined => {
-                            Err("the agent service could not be registered again".into())
-                        }
-                    }
-                }
-                Started::Busy => Err("another registration or repair kept running; it is tried again at the next start".into()),
-                Started::Left(_) | Started::Marked | Started::Offered(_) => Ok(false),
+            let started = m.on_start_patient(&never(), 6, std::time::Duration::from_secs(5));
+            if let Started::Repaired(reason, outcome) = &started {
+                crate::logging::info(&format!("agent service: replaced the registration ({reason:?}): {outcome:?}"));
             }
+            repair_result(started)
         }
 
         /// The launchd job `gui/<uid>/net.decryptology.dyno.agent`, while launchd holds it. The `SMAppService` registration is
@@ -549,7 +583,6 @@ mod mac {
         /// an enabled item of this version is registered again without removal, which macOS would announce as a new item).
         /// Returns whether launchd holds the job afterwards (found, not necessarily running yet).
         fn resume(&mut self) -> Result<bool, String> {
-            super::current_location()?;
             quiet_manager()?
                 .resume(&never(), &mut |step| crate::logging::info(&format!("agent service: {step}")))
                 .map_err(|e| registration_words(&e, false))
@@ -649,6 +682,56 @@ impl Autostart for NoAutostart {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_first_run_is_quiet_only_once_login_items_has_been_opened_for_it() {
+        assert!(!install_is_quiet(false, true), "the Settings switch always opens it");
+        assert!(!install_is_quiet(true, false));
+        assert!(install_is_quiet(true, true));
+    }
+
+    #[test]
+    fn the_marker_is_written_only_by_a_first_run_that_opened_login_items_for_the_user() {
+        use paddock_service::{RepairOutcome, ServiceError};
+        let needs = Err(ServiceError::SwitchedOff);
+        assert!(marker_wanted(true, false, &needs));
+        assert!(marker_wanted(true, false, &Err(ServiceError::NeedsApproval)));
+        assert!(!marker_wanted(false, false, &needs), "the Settings switch does not mark");
+        assert!(!marker_wanted(true, true, &needs), "a quiet install opened nothing");
+        assert!(!marker_wanted(true, false, &Err(ServiceError::Busy)));
+        assert!(!marker_wanted(true, false, &Ok(RepairOutcome::Recovered)));
+    }
+
+    #[test]
+    fn the_settings_switch_registers_without_waiting_for_the_service_to_answer() {
+        assert_eq!(install_timings().start_wait, std::time::Duration::ZERO);
+        assert!(
+            install_timings().gone_wait > std::time::Duration::ZERO,
+            "the removal is still waited for"
+        );
+    }
+
+    #[test]
+    fn the_repair_at_start_reports_what_happened_to_the_caller() {
+        use paddock_service::manager::Started;
+        use paddock_service::{Hold, Reason, RepairOutcome};
+        let repaired = |o| repair_result(Started::Repaired(Reason::VersionChanged, o));
+        assert_eq!(repaired(RepairOutcome::Recovered), Ok(true));
+        assert!(repaired(RepairOutcome::Registered).unwrap_err().contains("did not answer"));
+        assert!(repaired(RepairOutcome::NeedsApproval).unwrap_err().contains("Login Items"));
+        assert_eq!(repaired(RepairOutcome::Failed("why".into())), Err("why".into()));
+        assert_eq!(repaired(RepairOutcome::Cancelled), Ok(false));
+        assert!(repair_result(Started::Busy).unwrap_err().contains("next start"));
+        assert_eq!(repair_result(Started::Left(Hold::Healthy)), Ok(false));
+        assert_eq!(repair_result(Started::Marked), Ok(false));
+    }
+
+    #[test]
+    fn a_failed_registration_names_the_login_items_page_and_says_whether_it_was_opened() {
+        use paddock_service::ServiceError;
+        assert!(registration_words(&ServiceError::NeedsApproval, true).ends_with("(opened for you)"));
+        assert!(!registration_words(&ServiceError::SwitchedOff, false).contains("opened for you"));
+    }
+
     #[test]
     fn the_agent_override_from_the_environment_counts_only_in_a_development_build() {
         let v = std::ffi::OsString::from("/tmp/other-agent");

@@ -630,10 +630,11 @@ fn a_registration_that_never_answers_is_not_remembered_so_the_next_start_looks_a
     assert!(!calls(&sim).is_empty(), "the second start repairs again");
     // Once it answers (the job runs), the version is remembered and the third start leaves it alone.
     sim.lock().unwrap().job_after_asks = Some(0);
-    assert!(matches!(
+    assert_eq!(
         m.on_start(&never()),
-        Started::Repaired(_, RepairOutcome::Recovered)
-    ));
+        Started::Marked,
+        "up now: settled without a removal"
+    );
     assert_eq!(m.recorded().registered_version.as_deref(), Some("1.1.0"));
     assert_eq!(m.on_start(&never()), Started::Left(Hold::Healthy));
 }
@@ -818,4 +819,178 @@ fn an_unattended_install_never_opens_login_items_and_the_asked_one_does() {
         Err(ServiceError::SwitchedOff)
     ));
     assert_eq!(calls(&sim), ["openLoginItems"]);
+}
+
+// ---- second review round: a registration the OS accepted is not replaced again while it is only slow
+
+fn count(sim: &Sim, what: &str) -> usize {
+    calls(sim).iter().filter(|c| *c == what).count()
+}
+
+fn unanswered(dir: &Path, version: &str) -> (Sim, FakeSystem, Manager) {
+    let sim = world(
+        AppServiceStatus::NotRegistered,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
+    let sys = FakeSystem::new();
+    let m = manager(&sim, &sys, dir, version);
+    (sim, sys, m)
+}
+
+#[test]
+fn the_settings_switch_then_the_next_start_registers_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let sim = world(
+        AppServiceStatus::NotRegistered,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
+    sim.lock().unwrap().job_after_asks = Some(2);
+    let sys = FakeSystem::new();
+    // The switch: returns at once (nothing answers yet) ...
+    wire(&sim, &sys);
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
+    let running = sim.clone();
+    let mut m = Manager::new(
+        "Dyno",
+        Box::new(backend),
+        dir.path(),
+        LABEL,
+        "1.1.0",
+        move || running.lock().unwrap().job == Held::Running,
+    )
+    .with_timings(Timings::default().without_start_wait());
+    assert!(m.install(&never()).is_ok());
+    assert_eq!(calls(&sim), ["unregister", "bootout", "register"]);
+    // ... and the next start, with launchd's agent running, removes nothing and records the version.
+    let mut next = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert_eq!(next.on_start(&never()), Started::Marked);
+    assert_eq!(count(&sim, "register"), 1, "{:?}", calls(&sim));
+    assert_eq!(count(&sim, "unregister"), 1);
+    assert_eq!(next.recorded().registered_version.as_deref(), Some("1.1.0"));
+}
+
+#[test]
+fn a_first_run_then_the_start_repair_waits_for_a_slow_job_and_registers_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sim, _sys, mut m) = unanswered(dir.path(), "1.1.0");
+    sim.lock().unwrap().job_after_asks = Some(2);
+    let first = m.install_unattended(&never());
+    assert!(
+        matches!(
+            first,
+            Ok(RepairOutcome::Recovered | RepairOutcome::Registered)
+        ),
+        "{first:?}"
+    );
+    let before = count(&sim, "register");
+    assert_eq!(before, 1);
+    assert_eq!(
+        m.on_start_patient(&never(), 3, Duration::from_secs(5)),
+        Started::Marked
+    );
+    assert_eq!(
+        count(&sim, "register"),
+        1,
+        "no second register: {:?}",
+        calls(&sim)
+    );
+    assert_eq!(count(&sim, "unregister"), 1);
+}
+
+#[test]
+fn a_registration_that_is_slow_but_healthy_settles_without_any_removal() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sim, sys, mut m) = unanswered(dir.path(), "1.1.0");
+    RecordFile::new(dir.path(), LABEL).attempt("1.1.0").unwrap();
+    {
+        let mut w = sim.lock().unwrap();
+        w.status = AppServiceStatus::Enabled;
+        w.job_after_asks = Some(2);
+        w.asks_since_register = 0;
+    }
+    assert_eq!(m.on_start(&never()), Started::Marked);
+    assert!(calls(&sim).is_empty(), "{:?}", calls(&sim));
+    assert!(no_changes(&sys));
+    assert!(sys.now() > Duration::ZERO, "it waited, it did not replace");
+}
+
+#[test]
+fn a_registration_that_never_comes_up_is_tried_a_few_times_per_version_and_then_held() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
+    sim.lock().unwrap().job_after_asks = None;
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    for start in 1..=3 {
+        let started = m.on_start(&never());
+        assert!(
+            matches!(
+                started,
+                Started::Repaired(Reason::VersionChanged, RepairOutcome::Registered)
+            ),
+            "{start}: {started:?}"
+        );
+    }
+    assert_eq!(count(&sim, "register"), 3);
+    assert_eq!(m.on_start(&never()), Started::Left(Hold::Unanswered(3)));
+    assert_eq!(m.on_start(&never()), Started::Left(Hold::Unanswered(3)));
+    assert_eq!(
+        count(&sim, "register"),
+        3,
+        "held: nothing more is registered"
+    );
+    // A newer version starts again.
+    let mut next = manager(&sim, &sys, dir.path(), "1.2.0");
+    assert!(matches!(
+        next.on_start(&never()),
+        Started::Repaired(Reason::VersionChanged, _)
+    ));
+}
+
+#[test]
+fn a_refused_job_is_still_replaced_when_this_version_already_tried() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    RecordFile::new(dir.path(), LABEL).attempt("1.1.0").unwrap();
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Refused,
+    );
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert!(matches!(
+        m.on_start(&never()),
+        Started::Repaired(Reason::Refused, _)
+    ));
+}
+
+#[test]
+fn a_first_run_that_loses_the_lock_waits_and_then_registers() {
+    let dir = tempfile::tempdir().unwrap();
+    let (sim, sys, mut m) = unanswered(dir.path(), "1.1.0");
+    let held = RecordFile::new(dir.path(), LABEL)
+        .lock(crate::manager::unix_now_for_tests())
+        .unwrap();
+    let r = m.install_patient(&never(), true, 3, Duration::from_secs(5));
+    assert!(matches!(r, Err(ServiceError::Busy)));
+    assert!(sys.now() >= Duration::from_secs(15), "{:?}", sys.now());
+    assert!(calls(&sim).is_empty());
+    drop(held);
+    assert!(
+        m.install_patient(&never(), true, 3, Duration::from_secs(5))
+            .is_ok()
+    );
 }

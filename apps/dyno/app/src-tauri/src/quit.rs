@@ -163,7 +163,12 @@ pub enum StartOutcome {
 
 /// At the start, before the link decides anything: tells the log when the agent had been stopped on request (so it is not read as
 /// a crash), and starts the service again when it is installed and nothing supervises it. The marker is read once.
-pub fn resume_at_start(root: &Path, probe: &dyn Fn() -> ServiceState, service: &mut dyn crate::login::AgentService) -> StartOutcome {
+pub fn resume_at_start(
+    root: &Path,
+    probe: &dyn Fn() -> ServiceState,
+    location: Result<(), String>,
+    service: &mut dyn crate::login::AgentService,
+) -> StartOutcome {
     let Some(at) = take_marker(root) else {
         return StartOutcome::NoMarker;
     };
@@ -175,6 +180,15 @@ pub fn resume_at_start(root: &Path, probe: &dyn Fn() -> ServiceState, service: &
             StartOutcome::StoppedOnRequest
         }
         Resume::StartService => {
+            // From a place the bundle cannot register from (a disk image, a translocated copy) nothing is started, and the
+            // stop marker stays for the start from the right place.
+            if let Err(e) = location {
+                if let Err(w) = write_marker(root, at) {
+                    log::warn!(Error = w.to_string().as_str(); "The stop marker could not be written back");
+                }
+                log::warn!(Error = e.as_str(); "After a stop on request: the service is not started again from here; the marker is kept");
+                return StartOutcome::Resumed(Err(e));
+            }
             let began = std::time::Instant::now();
             let result = service.resume();
             let ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -615,16 +629,35 @@ mod tests {
         write_marker(&dir, 5).unwrap();
         let mut svc = Svc::default();
         assert_eq!(
-            resume_at_start(&dir, &|| STOPPED_SERVICE, &mut svc),
+            resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
             StartOutcome::Resumed(Ok(true))
         );
         assert_eq!(svc.resumed, 1);
         assert_eq!(
-            resume_at_start(&dir, &|| STOPPED_SERVICE, &mut svc),
+            resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
             StartOutcome::NoMarker,
             "the marker is read once"
         );
         assert_eq!(svc.resumed, 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refused_location_starts_nothing_and_keeps_the_stop_marker_for_the_right_place() {
+        let dir = temp("location");
+        write_marker(&dir, 5).unwrap();
+        let mut svc = Svc::default();
+        let from_a_disk_image = || Err("move Dyno to Applications".to_string());
+        assert_eq!(
+            resume_at_start(&dir, &|| STOPPED_SERVICE, from_a_disk_image(), &mut svc),
+            StartOutcome::Resumed(Err("move Dyno to Applications".into()))
+        );
+        assert_eq!(svc.resumed, 0);
+        assert_eq!(
+            resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
+            StartOutcome::Resumed(Ok(true)),
+            "the next start from a good place still resumes"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -637,7 +670,7 @@ mod tests {
             ..Svc::default()
         };
         assert_eq!(
-            resume_at_start(&dir, &|| STOPPED_SERVICE, &mut svc),
+            resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
             StartOutcome::Resumed(Err("launchd refused".into()))
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -648,10 +681,13 @@ mod tests {
         let dir = temp("nosecond");
         write_marker(&dir, 5).unwrap();
         let mut svc = Svc::default();
-        assert_eq!(resume_at_start(&dir, &|| SUPERVISED, &mut svc), StartOutcome::StoppedOnRequest);
-        assert_eq!(resume_at_start(&dir, &|| STOPPED_SERVICE, &mut svc), StartOutcome::NoMarker);
+        assert_eq!(
+            resume_at_start(&dir, &|| SUPERVISED, Ok(()), &mut svc),
+            StartOutcome::StoppedOnRequest
+        );
+        assert_eq!(resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc), StartOutcome::NoMarker);
         write_marker(&dir, 6).unwrap();
-        assert_eq!(resume_at_start(&dir, &|| NONE, &mut svc), StartOutcome::StoppedOnRequest);
+        assert_eq!(resume_at_start(&dir, &|| NONE, Ok(()), &mut svc), StartOutcome::StoppedOnRequest);
         assert_eq!(svc.resumed, 0, "the service was never started in these three");
         std::fs::remove_dir_all(&dir).unwrap();
     }
