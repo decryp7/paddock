@@ -1358,6 +1358,12 @@
       <trans-unit id="pd.notifications.select-all-label" datatype="html">
         <source>Select all</source>
       </trans-unit>
+      <trans-unit id="pd.notifications.select-mode" datatype="html">
+        <source>Select</source>
+      </trans-unit>
+      <trans-unit id="pd.notifications.select-mode-done" datatype="html">
+        <source>Done</source>
+      </trans-unit>
       <trans-unit id="pd.notifications.show" datatype="html">
         <source>Show in Notifications</source>
       </trans-unit>
