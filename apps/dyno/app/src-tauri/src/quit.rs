@@ -196,37 +196,57 @@ pub fn resume_at_start(root: &Path, probe: &dyn Fn() -> ServiceState, service: &
 pub struct LiveAgent {
     dirs: dyno_agent::paths::Dirs,
     target: Option<paddock_proc::ProcessId>,
+    /// How long a held lock with no usable discovery file is waited on (an agent that is already exiting) before it is an error.
+    wait: Duration,
 }
 
 impl LiveAgent {
     /// The agent of `dirs`, not yet asked.
     pub fn new(dirs: dyno_agent::paths::Dirs) -> LiveAgent {
-        LiveAgent { dirs, target: None }
+        LiveAgent {
+            dirs,
+            target: None,
+            wait: StopTimings::default().gone_wait,
+        }
+    }
+
+    /// No usable discovery file (missing, unreadable, or naming a process that is gone): what the lock says. An agent that is
+    /// already exiting has removed its file and may hold the lock a little longer, so a held lock is waited on for `wait` first.
+    fn without_a_named_agent(&self, file_present: bool) -> Result<bool, String> {
+        use paddock_proc::HeldState;
+        let began = std::time::Instant::now();
+        loop {
+            match dyno_agent::instance::held_state(&self.dirs) {
+                HeldState::Free => {
+                    log::info!(FilePresent = file_present; "No agent found: no process is named by the discovery file and the data folder's lock is free");
+                    return Ok(false);
+                }
+                HeldState::Unknown => {
+                    return Err("The agent's lock in Dyno's data folder could not be looked at, so Dyno cannot tell whether an agent runs. Check that the folder is readable, then end dyno-agent in Activity Monitor or Task Manager if it runs.".into());
+                }
+                HeldState::Held if began.elapsed() >= self.wait => {
+                    return Err("An agent holds this data folder, but the discovery file that names it is missing or unreadable, so Dyno cannot ask it to exit. End dyno-agent in Activity Monitor or Task Manager.".into());
+                }
+                HeldState::Held => std::thread::sleep(Duration::from_millis(100)),
+            }
+        }
+    }
+
+    /// The same with another wait for a lock that is held while no discovery file names the agent.
+    #[must_use]
+    pub fn with_wait(mut self, wait: Duration) -> LiveAgent {
+        self.wait = wait;
+        self
     }
 }
 
 impl DirectAgent for LiveAgent {
     fn ask_to_exit(&mut self) -> Result<bool, String> {
         // The discovery file is only a hint (rule 53): the lock the agent holds says whether one runs here at all.
-        let held = dyno_agent::instance::is_held(&self.dirs);
-        let hidden = || {
-            "An agent holds this data folder, but the discovery file that names it is missing or unreadable, so Dyno cannot ask it to exit. \
-             End dyno-agent in Activity Monitor or Task Manager."
-                .to_string()
-        };
-        let Some(found) = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()) else {
-            if held {
-                return Err(hidden());
-            }
-            log::info!("No agent found: no readable discovery file and the data folder's lock is free");
-            return Ok(false);
-        };
-        let Some(id) = paddock_proc::ProcessId::of_recorded(found.pid, found.started) else {
-            if held {
-                return Err(hidden());
-            }
-            log::info!(Pid = found.pid; "No agent found: the discovery file names a process that is gone and the lock is free");
-            return Ok(false);
+        let file = dyno_agent::discovery::Discovery::read(&self.dirs.discovery());
+        let id = file.as_ref().and_then(|f| paddock_proc::ProcessId::of_recorded(f.pid, f.started));
+        let Some(id) = id else {
+            return self.without_a_named_agent(file.is_some());
         };
         let (peer, _) = dyno_agent::cli::connect(&self.dirs).map_err(|e| {
             format!("The agent ({id}) is running but does not answer: {e} End dyno-agent in Activity Monitor or Task Manager.")
@@ -725,16 +745,22 @@ mod tests {
         let dirs = dyno_agent::paths::Dirs::at(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(
-            LiveAgent::new(dirs.clone()).ask_to_exit(),
+            LiveAgent::new(dirs.clone()).with_wait(Duration::from_millis(100)).ask_to_exit(),
             Ok(false),
             "nothing holds the lock: none found"
         );
         let _agent = dyno_agent::instance::InstanceLock::acquire(&dirs).expect("the test takes the lock like an agent");
-        let e = LiveAgent::new(dirs.clone()).ask_to_exit().unwrap_err();
+        let e = LiveAgent::new(dirs.clone())
+            .with_wait(Duration::from_millis(100))
+            .ask_to_exit()
+            .unwrap_err();
         assert!(e.contains("holds this data folder") && e.contains("Activity Monitor"), "{e}");
         std::fs::write(dirs.discovery(), "not json").unwrap();
         assert!(
-            LiveAgent::new(dirs.clone()).ask_to_exit().is_err(),
+            LiveAgent::new(dirs.clone())
+                .with_wait(Duration::from_millis(100))
+                .ask_to_exit()
+                .is_err(),
             "an unreadable file is no reason to call it gone"
         );
         let mut live = LiveAgent::new(dirs);
@@ -758,5 +784,43 @@ mod tests {
             "the shell runs it with no window open"
         );
         assert!(lib.contains("id == quit::QUIT_STOP_ID"), "the tray menu runs it");
+    }
+
+    #[test]
+    fn an_agent_that_is_already_exiting_is_waited_for_before_the_hidden_agent_error() {
+        let dir = temp("exiting");
+        let dirs = dyno_agent::paths::Dirs::at(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // the agent removed its discovery file and still holds the lock for a moment, longer than the lock check's own 400 ms
+        let held = dyno_agent::instance::InstanceLock::acquire(&dirs).unwrap();
+        let ender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(900));
+            drop(held);
+        });
+        let mut live = LiveAgent::new(dirs.clone()).with_wait(Duration::from_secs(10));
+        assert_eq!(live.ask_to_exit(), Ok(false), "it left while waited for: none found");
+        ender.join().unwrap();
+        // one that stays is the error
+        let _stays = dyno_agent::instance::InstanceLock::acquire(&dirs).unwrap();
+        let e = LiveAgent::new(dirs.clone())
+            .with_wait(Duration::from_millis(300))
+            .ask_to_exit()
+            .unwrap_err();
+        assert!(e.contains("holds this data folder"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_lock_that_cannot_be_looked_at_is_not_taken_for_free() {
+        let dir = temp("unknownlock");
+        std::fs::create_dir_all(&dir).unwrap();
+        let blocker = dir.join("data");
+        std::fs::write(&blocker, "a file where the data folder should be").unwrap();
+        let e = LiveAgent::new(dyno_agent::paths::Dirs::at(&blocker))
+            .with_wait(Duration::from_millis(100))
+            .ask_to_exit()
+            .unwrap_err();
+        assert!(e.contains("could not be looked at"), "{e}");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

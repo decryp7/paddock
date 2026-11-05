@@ -369,8 +369,9 @@ mod mac {
     use super::*;
     use crate::login_item::OpenEvent;
     use crate::service_repair::{
-        keep_registered, launchctl_output, parse_print_disabled, plan, record_registered_version, registered_version, resume_path,
-        service_supervises, JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, ResumePath, REGISTERED_VERSION_FILE,
+        keep_registered, launchctl_output, parse_print_disabled, plan, record_registered_version, registered_version, run_resume,
+        service_supervises, DisabledMark, JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, ResumeOps,
+        REGISTERED_VERSION_FILE,
     };
     use dyno_agent::service::LABEL;
     use objc2_foundation::NSString;
@@ -580,6 +581,48 @@ mod mac {
         launchctl_output(&mut system(), args)
     }
 
+    /// What `launchctl print-disabled` says: listed, not listed, or could not be read (a failed look is not "switched on").
+    fn launchd_disabled_mark() -> DisabledMark {
+        let Some(domain) = gui_domain() else {
+            return DisabledMark::Unreadable;
+        };
+        match launchctl(&["print-disabled", &domain]) {
+            None => DisabledMark::Unreadable,
+            Some(report) => match parse_print_disabled(&report, LABEL) {
+                Some(true) => DisabledMark::Disabled,
+                Some(false) => DisabledMark::Enabled,
+                None => DisabledMark::NotListed,
+            },
+        }
+    }
+
+    /// [`ResumeOps`] over `SMAppService` and `launchctl`.
+    struct MacResume;
+
+    impl ResumeOps for MacResume {
+        fn status(&mut self) -> RegistrationStatus {
+            registration_status()
+        }
+        fn disabled(&mut self) -> DisabledMark {
+            launchd_disabled_mark()
+        }
+        fn registered_version(&mut self) -> Option<String> {
+            registered_version(&version_file())
+        }
+        fn register(&mut self) -> Result<(), String> {
+            register(false).map_err(|e| format!("{e:?}"))
+        }
+        fn job_found(&mut self) -> bool {
+            job_report().found
+        }
+        fn pause(&mut self) {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        fn repair(&mut self) -> Result<bool, String> {
+            repair_as(&|| false, true)
+        }
+    }
+
     /// The repair plan for the observed state, run; `requested` makes it replace the registration whatever launchd reports.
     fn repair_as(agent_answers: &dyn Fn() -> bool, requested: bool) -> Result<bool, String> {
         let registered = registered_version(&version_file());
@@ -677,43 +720,14 @@ mod mac {
                 .then_some(paddock_service::stop::StopMechanism::Launchd { target })
         }
 
-        /// After a stop on request launchd holds no job and `RunAtLoad` fires only when a job is loaded. What comes back is decided
-        /// first and purely ([`resume_path`]): an item the user switched off in Login Items is left alone; a version change goes
-        /// through the full repair (which records the version); otherwise an enabled item is registered again without removing it
-        /// (a removal and a new registration is what makes macOS announce a new background item). Only when launchd still holds
-        /// no job after a wait, the full repair (remove the job, wait until it is gone, register, check) runs.
+        /// After a stop on request launchd holds no job and `RunAtLoad` fires only when a job is loaded: [`run_resume`] decides and
+        /// runs it (an item switched off or a list that cannot be read is left alone; a version change goes through the full repair;
+        /// an enabled item of this version is registered again without removal, which macOS would announce as a new item).
         /// Returns whether launchd holds the job afterwards (found, not necessarily running yet).
         fn resume(&mut self) -> Result<bool, String> {
-            let registered = registered_version(&version_file());
-            let path = resume_path(
-                registration_status(),
-                launchd_disabled(),
-                registered.as_deref(),
-                env!("CARGO_PKG_VERSION"),
-            );
-            match path {
-                ResumePath::Nothing => {
-                    crate::logging::info("agent service: switched off in Login Items or missing; it stays as it is");
-                    return Ok(false);
-                }
-                ResumePath::Light => match register(false) {
-                    Ok(()) => {
-                        for _ in 0..20 {
-                            if job_report().found {
-                                crate::logging::info("agent service: launchd holds the job again after registering the enabled item");
-                                return Ok(true);
-                            }
-                            std::thread::sleep(Duration::from_millis(500));
-                        }
-                        crate::logging::info("agent service: registering the enabled item loaded no job; running the full repair");
-                    }
-                    Err(e) => crate::logging::info(&format!(
-                        "agent service: registering the enabled item failed ({e:?}); running the full repair"
-                    )),
-                },
-                ResumePath::Repair => {}
-            }
-            repair_as(&|| false, true)
+            run_resume(&mut MacResume, env!("CARGO_PKG_VERSION"), &mut |step| {
+                crate::logging::info(&format!("agent service: {step}"))
+            })
         }
     }
 }

@@ -146,14 +146,35 @@ pub enum ResumePath {
     Repair,
 }
 
-/// Decides the path of a resume, before anything is called (pure, like [`plan`]).
-pub fn resume_path(
-    status: RegistrationStatus,
-    launchd_disabled: Option<bool>,
-    registered_version: Option<&str>,
-    current_version: &str,
-) -> ResumePath {
-    if status == RegistrationStatus::NotFound || disabled_in_login_items(status, launchd_disabled) {
+/// What `launchctl print-disabled` said about the item. "Could not read" is not "not listed": a slow or failed look at a
+/// switched-off item must not read as switched on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisabledMark {
+    /// Listed as disabled (the user's switch is off).
+    Disabled,
+    /// Listed as enabled.
+    Enabled,
+    /// The list was read and the item is not in it.
+    NotListed,
+    /// The list could not be read (the tool failed or timed out).
+    Unreadable,
+}
+
+impl DisabledMark {
+    /// The view [`plan`] and [`disabled_in_login_items`] take: `None` for both "not listed" and "unreadable" (a repair after a
+    /// failed look is the existing behaviour; only a resume, which would switch the item on, is stricter).
+    pub fn as_option(self) -> Option<bool> {
+        match self {
+            DisabledMark::Disabled => Some(true),
+            DisabledMark::Enabled => Some(false),
+            DisabledMark::NotListed | DisabledMark::Unreadable => None,
+        }
+    }
+}
+
+/// Decides the path of a resume, before anything is called (pure, like [`plan`]). What cannot be read is left alone.
+pub fn resume_path(status: RegistrationStatus, mark: DisabledMark, registered_version: Option<&str>, current_version: &str) -> ResumePath {
+    if status == RegistrationStatus::NotFound || mark == DisabledMark::Unreadable || disabled_in_login_items(status, mark.as_option()) {
         ResumePath::Nothing
     } else if registered_version != Some(current_version) {
         ResumePath::Repair
@@ -162,6 +183,61 @@ pub fn resume_path(
     } else {
         ResumePath::Repair
     }
+}
+
+/// What a resume needs from the system (macOS: `SMAppService` and `launchctl`); the sequence is [`run_resume`], tested over fakes.
+pub trait ResumeOps {
+    /// `SMAppService.status`.
+    fn status(&mut self) -> RegistrationStatus;
+    /// `launchctl print-disabled`.
+    fn disabled(&mut self) -> DisabledMark;
+    /// The app version that registered the service, if recorded.
+    fn registered_version(&mut self) -> Option<String>;
+    /// Registers the (enabled) item again without removing it.
+    fn register(&mut self) -> Result<(), String>;
+    /// Whether launchd holds the job.
+    fn job_found(&mut self) -> bool;
+    /// Waits a moment.
+    fn pause(&mut self);
+    /// The full repair with a request.
+    fn repair(&mut self) -> Result<bool, String>;
+}
+
+/// How often the light path asks launchd for the job before it gives up on it.
+pub const LIGHT_LOOKS: u32 = 20;
+
+/// The resume after a stop on request: the path is decided first ([`resume_path`]); an item the user switched off, a missing launch
+/// agent and a list that cannot be read are left alone (`Ok(false)`); a version change and a failed or fruitless light path go through
+/// the full repair; an enabled item of this version is registered again and waited for. Returns whether launchd holds the job.
+pub fn run_resume(ops: &mut dyn ResumeOps, current_version: &str, say: &mut dyn FnMut(&str)) -> Result<bool, String> {
+    let status = ops.status();
+    let mark = ops.disabled();
+    let registered = ops.registered_version();
+    match resume_path(status, mark, registered.as_deref(), current_version) {
+        ResumePath::Nothing => {
+            say(if mark == DisabledMark::Unreadable {
+                "the list of switched-off items could not be read; the service stays as it is"
+            } else {
+                "switched off in Login Items or missing; the service stays as it is"
+            });
+            return Ok(false);
+        }
+        ResumePath::Repair => {}
+        ResumePath::Light => match ops.register() {
+            Ok(()) => {
+                for _ in 0..LIGHT_LOOKS {
+                    if ops.job_found() {
+                        say("launchd holds the job again after registering the enabled item");
+                        return Ok(true);
+                    }
+                    ops.pause();
+                }
+                say("registering the enabled item loaded no job; running the full repair");
+            }
+            Err(e) => say(&format!("registering the enabled item failed ({e}); running the full repair")),
+        },
+    }
+    ops.repair()
 }
 
 /// Why registering failed.
@@ -710,19 +786,120 @@ mod tests {
     }
 
     #[test]
-    fn a_resume_never_touches_an_item_the_user_switched_off_and_never_hides_a_version_change() {
-        use RegistrationStatus::*;
-        // switched off in Login Items (either view): nothing is called, not even the light path
-        assert_eq!(resume_path(RequiresApproval, None, Some("1"), "1"), ResumePath::Nothing);
-        assert_eq!(resume_path(Enabled, Some(true), Some("1"), "1"), ResumePath::Nothing);
-        assert_eq!(resume_path(NotRegistered, Some(true), Some("1"), "1"), ResumePath::Nothing);
-        assert_eq!(resume_path(NotFound, None, Some("1"), "1"), ResumePath::Nothing);
-        // a version change goes through the repair, which records the version itself
-        assert_eq!(resume_path(Enabled, Some(false), Some("0"), "1"), ResumePath::Repair);
-        assert_eq!(resume_path(Enabled, None, None, "1"), ResumePath::Repair);
-        // the same version, enabled: the light way
-        assert_eq!(resume_path(Enabled, Some(false), Some("1"), "1"), ResumePath::Light);
-        // not enabled and not switched off: the repair decides
-        assert_eq!(resume_path(NotRegistered, None, Some("1"), "1"), ResumePath::Repair);
+    fn a_resume_never_touches_an_item_the_user_switched_off_or_cannot_be_read_and_never_hides_a_version_change() {
+        use DisabledMark as D;
+        use RegistrationStatus as R;
+        assert_eq!(resume_path(R::RequiresApproval, D::NotListed, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(resume_path(R::Enabled, D::Disabled, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(resume_path(R::NotRegistered, D::Disabled, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(resume_path(R::NotFound, D::Enabled, Some("1"), "1"), ResumePath::Nothing);
+        assert_eq!(
+            resume_path(R::Enabled, D::Unreadable, Some("1"), "1"),
+            ResumePath::Nothing,
+            "a failed look is not 'switched on'"
+        );
+        assert_eq!(resume_path(R::Enabled, D::Enabled, Some("0"), "1"), ResumePath::Repair);
+        assert_eq!(resume_path(R::Enabled, D::NotListed, None, "1"), ResumePath::Repair);
+        assert_eq!(resume_path(R::Enabled, D::NotListed, Some("1"), "1"), ResumePath::Light);
+        assert_eq!(resume_path(R::Enabled, D::Enabled, Some("1"), "1"), ResumePath::Light);
+        assert_eq!(resume_path(R::NotRegistered, D::NotListed, Some("1"), "1"), ResumePath::Repair);
+    }
+
+    /// A scripted system: what it says, and what the resume asked of it.
+    struct FakeResume {
+        status: RegistrationStatus,
+        mark: DisabledMark,
+        version: Option<&'static str>,
+        register: Result<(), String>,
+        job_after: Option<u32>,
+        calls: Vec<String>,
+        looks: u32,
+    }
+
+    impl FakeResume {
+        fn new(status: RegistrationStatus, mark: DisabledMark, version: Option<&'static str>) -> FakeResume {
+            FakeResume {
+                status,
+                mark,
+                version,
+                register: Ok(()),
+                job_after: Some(1),
+                calls: Vec::new(),
+                looks: 0,
+            }
+        }
+    }
+
+    impl ResumeOps for FakeResume {
+        fn status(&mut self) -> RegistrationStatus {
+            self.status
+        }
+        fn disabled(&mut self) -> DisabledMark {
+            self.mark
+        }
+        fn registered_version(&mut self) -> Option<String> {
+            self.version.map(str::to_string)
+        }
+        fn register(&mut self) -> Result<(), String> {
+            self.calls.push("register".into());
+            self.register.clone()
+        }
+        fn job_found(&mut self) -> bool {
+            self.looks += 1;
+            self.job_after.is_some_and(|n| self.looks >= n)
+        }
+        fn pause(&mut self) {}
+        fn repair(&mut self) -> Result<bool, String> {
+            self.calls.push("repair".into());
+            Ok(true)
+        }
+    }
+
+    fn resume(f: &mut FakeResume) -> (Result<bool, String>, Vec<String>) {
+        let mut said = Vec::new();
+        let r = run_resume(f, "1", &mut |m| said.push(m.to_string()));
+        (r, said)
+    }
+
+    #[test]
+    fn a_resume_calls_nothing_for_a_switched_off_or_unreadable_item() {
+        for mark in [DisabledMark::Disabled, DisabledMark::Unreadable] {
+            let mut f = FakeResume::new(RegistrationStatus::Enabled, mark, Some("1"));
+            let (r, said) = resume(&mut f);
+            assert_eq!(r, Ok(false));
+            assert!(f.calls.is_empty(), "{mark:?}: {:?}", f.calls);
+            assert!(said[0].contains("stays as it is"));
+        }
+    }
+
+    #[test]
+    fn a_resume_of_the_same_version_registers_the_enabled_item_and_waits_for_the_job() {
+        let mut f = FakeResume::new(RegistrationStatus::Enabled, DisabledMark::NotListed, Some("1"));
+        f.job_after = Some(3);
+        assert_eq!(resume(&mut f).0, Ok(true));
+        assert_eq!(f.calls, ["register"], "no repair when the job came back");
+        assert_eq!(f.looks, 3);
+    }
+
+    #[test]
+    fn a_version_change_goes_to_the_repair_and_never_the_light_path() {
+        let mut f = FakeResume::new(RegistrationStatus::Enabled, DisabledMark::Enabled, Some("0"));
+        assert_eq!(resume(&mut f).0, Ok(true));
+        assert_eq!(f.calls, ["repair"]);
+    }
+
+    #[test]
+    fn a_failed_or_fruitless_light_path_falls_back_to_the_repair_and_says_why() {
+        let mut f = FakeResume::new(RegistrationStatus::Enabled, DisabledMark::NotListed, Some("1"));
+        f.register = Err("denied".into());
+        let (r, said) = resume(&mut f);
+        assert_eq!((r, f.calls.clone()), (Ok(true), vec!["register".to_string(), "repair".to_string()]));
+        assert!(said[0].contains("failed (denied)"), "{said:?}");
+        let mut f = FakeResume::new(RegistrationStatus::Enabled, DisabledMark::NotListed, Some("1"));
+        f.job_after = None;
+        let (_, said) = resume(&mut f);
+        assert_eq!(f.calls, ["register", "repair"]);
+        assert_eq!(f.looks, LIGHT_LOOKS);
+        assert!(said[0].contains("loaded no job"));
     }
 }
