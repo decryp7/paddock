@@ -8,6 +8,7 @@
 
 pub mod actions;
 pub mod commands;
+pub mod crash_reports;
 pub mod dialogs;
 pub mod dto;
 pub mod first_data;
@@ -28,8 +29,10 @@ pub mod tray_host;
 pub mod tray_identity;
 pub mod tray_look;
 pub mod tray_model;
+pub mod tray_platform;
 #[cfg(target_os = "macos")]
 pub mod tray_position;
+pub mod tray_shown;
 #[cfg(target_os = "macos")]
 pub mod tray_text;
 pub mod wol_menu;
@@ -183,7 +186,9 @@ fn diagnostics_setup() -> Result<paddock_diag::tauri::Setup, Box<dyn std::error:
     let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
     let dirs = paddock_env::AppDirs::for_app(&id)?;
     let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
-    let mut setup = paddock_diag::tauri::Setup::new(info, dirs).settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE);
+    let mut setup = paddock_diag::tauri::Setup::new(info, dirs)
+        .settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE)
+        .section(Arc::new(crash_reports::CrashReports::new(crash_reports::default_folders())));
     if let Some(handle) = logging::handle() {
         setup = setup.log(handle);
     }
@@ -434,6 +439,12 @@ pub fn run() {
     if let Some(handle) = &_log {
         logging::set_handle(handle.clone());
     }
+    crash_reports::log_at_start_in_background(
+        crash_reports::default_folders(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX)),
+    );
     let cwd = std::env::current_dir().ok();
     #[allow(unused_mut)]
     let mut launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);

@@ -34,8 +34,10 @@ pub fn debug(message: &str) {
     log::debug!(target: "dyno", "{message}");
 }
 
+/// The lines the tests of any module logged (one global capture: the `log` crate allows one logger). Assert on lines with a
+/// unique id of your own, since tests run in parallel.
 #[cfg(test)]
-mod tests {
+pub(crate) mod testlog {
     use std::sync::{Mutex, OnceLock};
 
     struct Capture(Mutex<Vec<String>>);
@@ -60,6 +62,14 @@ mod tests {
         })
     }
 
+    /// Every line logged so far, as `LEVEL target: message`.
+    pub fn lines() -> Vec<String> {
+        capture().0.lock().unwrap().clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
     #[test]
     fn uptime_counts_from_the_first_call_and_never_goes_back() {
         let a = super::uptime_ms();
@@ -69,9 +79,8 @@ mod tests {
 
     #[test]
     fn dynos_lines_go_to_the_shared_log_not_to_a_file_of_their_own() {
-        let c = capture();
         super::info("connected to the agent");
-        let lines = c.0.lock().unwrap();
+        let lines = super::testlog::lines();
         assert!(lines.iter().any(|l| l == "INFO dyno: connected to the agent"), "{lines:?}");
     }
 }

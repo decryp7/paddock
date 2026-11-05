@@ -1,5 +1,5 @@
---- a/src/lib.rs
-+++ b/src/lib.rs
+--- a/src/lib.rs	2026-11-05 08:38:52
++++ b/src/lib.rs	2026-11-05 08:38:52
 @@ -417,6 +417,13 @@
      /// See [`TrayIcon::new`] for more info.
      pub fn with_id<I: Into<TrayIconId>>(id: I, attrs: TrayIconAttributes) -> Result<Self> {
@@ -14,12 +14,10 @@
          Ok(Self {
              tray: Rc::new(RefCell::new(platform_impl::TrayIcon::new(
                  id.clone(),
-@@ -424,6 +431,18 @@
-             )?)),
-             id,
+@@ -426,6 +433,31 @@
          })
-+    }
-+
+     }
+ 
 +    /// Paddock patch: what became of the GUID this icon asked for.
 +    pub fn guid_status(&self) -> GuidStatus {
 +        #[cfg(windows)]
@@ -30,10 +28,25 @@
 +        {
 +            GuidStatus::NotRequested
 +        }
-     }
- 
++    }
++
++    /// Paddock patch: whether the OS holds this icon now. Windows: the shell accepted the last add (it refuses while Explorer's
++    /// notification area is not ready, and the icon is added again on `TaskbarCreated`). Elsewhere always true.
++    pub fn is_added(&self) -> bool {
++        #[cfg(windows)]
++        {
++            self.tray.borrow().is_added()
++        }
++        #[cfg(not(windows))]
++        {
++            true
++        }
++    }
++
      /// Returns the id associated with this tray icon.
-@@ -706,6 +725,32 @@
+     pub fn id(&self) -> &TrayIconId {
+         &self.id
+@@ -706,6 +738,32 @@
  
  /// A reciever that could be used to listen to tray events.
  pub type TrayIconEventReceiver = Receiver<TrayIconEvent>;
@@ -66,9 +79,18 @@
  type TrayIconEventHandler = Box<dyn Fn(TrayIconEvent) + Send + Sync + 'static>;
  
  static TRAY_CHANNEL: Lazy<(Sender<TrayIconEvent>, TrayIconEventReceiver)> = Lazy::new(unbounded);
---- a/src/platform_impl/windows/mod.rs
-+++ b/src/platform_impl/windows/mod.rs
-@@ -90,6 +90,7 @@
+--- a/src/platform_impl/windows/mod.rs	2026-11-05 08:38:52
++++ b/src/platform_impl/windows/mod.rs	2026-11-05 08:38:52
+@@ -66,6 +66,8 @@
+     menu_on_left_click: bool,
+     menu_on_right_click: bool,
+     visible: bool,
++    /// Paddock patch: whether the shell accepted the last add (false when Explorer's notification area was not ready).
++    added: bool,
+ }
+ 
+ impl TrayUserData {
+@@ -90,6 +92,7 @@
      menu: Option<Box<dyn menu::ContextMenu>>,
      internal_id: u32,
      guid: Option<GUID>,
@@ -76,7 +98,15 @@
  }
  
  impl TrayIcon {
-@@ -156,9 +157,16 @@
+@@ -123,6 +126,7 @@
+                 menu_on_left_click: attrs.menu_on_left_click,
+                 menu_on_right_click: attrs.menu_on_right_click,
+                 visible: true,
++                added: false,
+             };
+ 
+             let hwnd = CreateWindowExW(
+@@ -156,9 +160,17 @@
  
              let hicon = attrs.icon.as_ref().map(|i| i.inner.as_raw_handle());
  
@@ -88,15 +118,16 @@
 +            let mut guid = guid;
 +            let guid_status =
 +                register_with_guid_recovery(hwnd, internal_id, &mut guid, &hicon, &attrs.tooltip, true);
-+            if guid.is_none() && attrs.guid.is_some() {
-+                let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
-+                if !userdata.is_null() {
++            let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
++            if !userdata.is_null() {
++                if guid.is_none() && attrs.guid.is_some() {
 +                    (*userdata).guid = None;
 +                }
++                (*userdata).added = guid_status != crate::GuidStatus::NotAdded;
              }
  
              if let Some(menu) = &attrs.menu {
-@@ -169,11 +177,16 @@
+@@ -169,11 +181,25 @@
                  hwnd,
                  internal_id,
                  guid,
@@ -110,16 +141,25 @@
 +        self.guid_status
 +    }
 +
++    /// Paddock patch: whether the shell holds this icon now: the last add (the first, or the re-add after `TaskbarCreated`)
++    /// was accepted. False while Explorer's notification area was not ready, which nothing else reports.
++    pub fn is_added(&self) -> bool {
++        unsafe {
++            let userdata = util::get_window_long(self.hwnd, GWL_USERDATA) as *const TrayUserData;
++            !userdata.is_null() && (*userdata).added
++        }
++    }
++
      pub fn set_icon(&mut self, icon: Option<Icon>) -> crate::Result<()> {
          unsafe {
              let mut nid = NOTIFYICONDATAW {
-@@ -370,10 +383,11 @@
+@@ -370,14 +396,16 @@
          }
          _ if msg == *S_U_TASKBAR_RESTART => {
              remove_tray_icon(userdata.hwnd, userdata.internal_id, userdata.guid);
 -            register_tray_icon(
 +            // Paddock patch: the same GUID recovery as the first add (a first add that failed because Explorer was not up gets here).
-+            register_with_guid_recovery(
++            let status = register_with_guid_recovery(
                  userdata.hwnd,
                  userdata.internal_id,
 -                userdata.guid,
@@ -127,7 +167,12 @@
                  &userdata.icon.as_ref().map(|i| i.inner.as_raw_handle()),
                  &userdata.tooltip,
                  userdata.visible,
-@@ -565,6 +579,34 @@
+             );
++            userdata.added = status != crate::GuidStatus::NotAdded;
+         }
+         WM_USER_SHOW_MENU_ON_LEFT_CLICK => {
+             userdata.menu_on_left_click = wparam != 0;
+@@ -565,6 +593,34 @@
      // The shell docs recommend posting a benign message after TrackPopupMenu
      // for notification area menus so the task switch is finalized correctly.
      PostMessageW(hwnd, WM_NULL, 0, 0);
