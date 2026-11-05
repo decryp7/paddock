@@ -1146,10 +1146,10 @@ fn all_eight_reading_tools_answer_over_a_real_loopback_socket() {
         serde_json::from_str(r.text()).unwrap()
     };
     assert_eq!(body(10)["cpu"]["percent"], 37.5);
-    assert_eq!(body(11)["cpu"]["perCore"].as_array().map(Vec::len), Some(4));
+    assert_eq!(body(11)["cpu"]["perCorePercent"].as_array().map(Vec::len), Some(4));
     assert_eq!(body(12)["volumes"][0]["freeBytes"], 125_000_000_000u64);
-    assert_eq!(body(13)["processes"][0]["name"], "Editor");
-    assert_eq!(body(14)["interfaces"].as_array().is_some(), true);
+    assert_eq!(body(13)["processes"][0]["name"], "Safari");
+    assert!(body(14)["interfaces"].as_array().is_some());
     assert_eq!(body(15)["activeCount"], 1);
     assert!(body(16)["points"].as_array().unwrap().len() <= 120);
     assert_eq!(body(17)["fans"]["readings"][0]["rpm"], 1800);
