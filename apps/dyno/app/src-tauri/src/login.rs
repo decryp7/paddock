@@ -681,6 +681,19 @@ mod mac {
         /// replaced the way a repair does (remove the job, wait until it is gone, register, check): the same proven path.
         /// What the user switched off in Login Items stays off ([`plan`]).
         fn resume(&mut self) -> Result<bool, String> {
+            // First the light way: registering an item that is already enabled loads its job again without removing the login item
+            // (a removal and a new registration is what makes macOS announce a new background item). Only when launchd still holds
+            // no job after a wait, the full repair runs.
+            if status() == SMAppServiceStatus::Enabled && register(false).is_ok() {
+                for _ in 0..20 {
+                    if job_report().found {
+                        crate::logging::info("agent service: loaded again by registering the enabled item");
+                        return Ok(true);
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+                crate::logging::info("agent service: registering the enabled item loaded no job; running the full repair");
+            }
             repair_as(&|| false, true)
         }
     }

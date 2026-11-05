@@ -505,7 +505,9 @@ fn an_apps_menu_action_without_a_window_runs_instead_of_reopening() {
     let seen = ran.clone();
     let action: Arc<MenuQuit<MockRuntime>> = Arc::new(move |_| *seen.lock().unwrap() += 1);
     let actions = vec![("app.stop".to_string(), action)];
-    menu_without_window_with(plain.handle(), "app.stop", None, &actions, |_| unreachable!("not a quit"));
+    menu_without_window_with(plain.handle(), "app.stop", None, &actions, |_| {
+        unreachable!("not a quit")
+    });
     assert_eq!(*ran.lock().unwrap(), 1);
     menu_without_window_with(plain.handle(), "pd.app.quit", None, &actions, |_| ());
     assert_eq!(*ran.lock().unwrap(), 1, "Quit is not the app's action");

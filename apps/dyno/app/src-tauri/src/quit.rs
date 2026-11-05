@@ -11,8 +11,11 @@ use paddock_service::System;
 use std::path::Path;
 use std::time::Duration;
 
-/// The id of the "Quit and stop measuring" entry in the tray menu and the menu bar.
+/// The id of the "Quit and stop measuring" entry in the tray menu.
 pub const QUIT_STOP_ID: &str = "dyno.quit-stop";
+
+/// The command id of the same entry in the menu bar (the UI's contribution, `paddock-manifest.json`).
+pub const QUIT_STOP_COMMAND: &str = "dy.quit-stop";
 
 /// The menu entry that stops the agent too.
 pub const QUIT_STOP_LABEL: &str = "Quit and stop measuring";
@@ -124,6 +127,29 @@ pub fn stop_measuring(
     Ok(StopReport { service, asked })
 }
 
+/// The first claim wins: a second click, or the menu and the tray together, starts one stop.
+pub struct OnceFlag(std::sync::atomic::AtomicBool);
+
+impl OnceFlag {
+    /// A flag nobody has claimed.
+    pub const fn new() -> OnceFlag {
+        OnceFlag(std::sync::atomic::AtomicBool::new(false))
+    }
+
+    /// Whether this call is the first.
+    pub fn claim(&self) -> bool {
+        !self.0.swap(true, std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Default for OnceFlag {
+    fn default() -> Self {
+        OnceFlag::new()
+    }
+}
+
+static STOP_BEGUN: OnceFlag = OnceFlag::new();
+
 /// What the start did about a stop on request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartOutcome {
@@ -153,7 +179,8 @@ pub fn resume_at_start(root: &Path, probe: &dyn Fn() -> ServiceState, service: &
             let result = service.resume();
             let ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
             match &result {
-                Ok(started) => log::info!(Started = *started, Ms = ms; "After a stop on request: the agent service was started again"),
+                Ok(true) => log::info!(Ms = ms; "After a stop on request: the agent service was started again"),
+                Ok(false) => log::info!(Ms = ms; "After a stop on request: there is no service to start; Dyno starts an agent of its own"),
                 Err(e) => {
                     log::warn!(Error = e.as_str(), Ms = ms; "After a stop on request: the agent service could not be started again; Dyno starts an agent of its own")
                 }
@@ -163,33 +190,44 @@ pub fn resume_at_start(root: &Path, probe: &dyn Fn() -> ServiceState, service: &
     }
 }
 
-/// The agent in Dyno's data folder, asked through its own connection (what `dyno-agent stop` does) and read back from the
-/// discovery file.
-pub struct LiveAgent(pub dyno_agent::paths::Dirs);
+/// The agent in Dyno's data folder, asked through its own connection (what `dyno-agent stop` does). Which process it is comes from
+/// the discovery file's pid and start time ([`paddock_proc::ProcessId`], rule 53): a pid that was handed on is not the agent, and an
+/// agent that is alive but does not answer is an error, never "gone".
+pub struct LiveAgent {
+    dirs: dyno_agent::paths::Dirs,
+    target: Option<paddock_proc::ProcessId>,
+}
+
+impl LiveAgent {
+    /// The agent of `dirs`, not yet asked.
+    pub fn new(dirs: dyno_agent::paths::Dirs) -> LiveAgent {
+        LiveAgent { dirs, target: None }
+    }
+}
 
 impl DirectAgent for LiveAgent {
     fn ask_to_exit(&mut self) -> Result<bool, String> {
-        if !self.0.discovery().exists() {
+        let Some(found) = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()) else {
             return Ok(false);
-        }
-        let (peer, found) = match dyno_agent::cli::connect(&self.0) {
-            Ok(c) => c,
-            Err(e) => {
-                // A file left by an agent that died: nothing answers, so nothing is left to stop.
-                log::info!(Error = e.as_str(); "The discovery file names no live agent");
-                return Ok(false);
-            }
         };
-        log::info!(Pid = found.pid; "Asking the agent to exit (Quit and stop measuring)");
-        // The agent may end the connection as it exits, so a missing reply is not a failure: the discovery file is the read-back.
+        let Some(id) = paddock_proc::ProcessId::of_recorded(found.pid, found.started) else {
+            log::info!(Pid = found.pid; "The discovery file names a process that is gone");
+            return Ok(false);
+        };
+        let (peer, _) = dyno_agent::cli::connect(&self.dirs).map_err(|e| {
+            format!("The agent ({id}) is running but does not answer: {e} End dyno-agent in Activity Monitor or Task Manager.")
+        })?;
+        self.target = Some(id);
+        log::info!(Pid = id.pid(); "Asking the agent to exit (Quit and stop measuring)");
+        // The agent may end the connection as it exits, so a missing reply is not a failure: the process itself is the read-back.
         if let Err(e) = dyno_agent::cli::ask(&peer, dyno_core::protocol::Request::Shutdown) {
-            log::info!(Error = e.as_str(); "No reply to the shutdown request; reading the discovery file instead");
+            log::info!(Error = e.as_str(); "No reply to the shutdown request; reading the process instead");
         }
         Ok(true)
     }
 
     fn gone(&mut self) -> bool {
-        !self.0.discovery().exists()
+        self.target.is_none_or(|id| !id.is_alive())
     }
 }
 
@@ -198,6 +236,10 @@ impl DirectAgent for LiveAgent {
 /// with the next step in a message and the app still quits (as a plain Quit would).
 pub fn quit_and_stop<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     use tauri::Manager;
+    if !STOP_BEGUN.claim() {
+        log::info!("Quit and stop measuring: already under way");
+        return;
+    }
     let app = app.clone();
     let spawned = std::thread::Builder::new().name("dyno-quit-stop".into()).spawn(move || {
         let began = std::time::Instant::now();
@@ -213,7 +255,7 @@ pub fn quit_and_stop<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         }
         link.quit();
         let mut sys = paddock_service::RealSystem::new().with_timeout(Duration::from_secs(10));
-        let result = stop_measuring(&mut sys, mechanism.as_ref(), &mut LiveAgent(link.dirs.clone()), StopTimings::default());
+        let result = stop_measuring(&mut sys, mechanism.as_ref(), &mut LiveAgent::new(link.dirs.clone()), StopTimings::default());
         let ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
         match result {
             Ok(report) => {
@@ -567,8 +609,51 @@ mod tests {
     #[test]
     fn the_live_agent_is_nothing_to_stop_when_no_discovery_file_exists() {
         let dir = temp("live");
-        let mut live = LiveAgent(dyno_agent::paths::Dirs::at(&dir));
+        let mut live = LiveAgent::new(dyno_agent::paths::Dirs::at(&dir));
         assert_eq!(live.ask_to_exit(), Ok(false));
         assert!(live.gone());
+    }
+
+    fn write_discovery(dirs: &dyno_agent::paths::Dirs, pid: u32, started: i64) {
+        let d = dyno_agent::discovery::Discovery {
+            endpoint: "dyno-test-none".into(),
+            token: "00".repeat(32),
+            pid,
+            started,
+            version: "0".into(),
+            protocol: 0,
+        };
+        std::fs::create_dir_all(dirs.root()).unwrap();
+        d.write(&dirs.discovery()).unwrap();
+    }
+
+    #[test]
+    fn a_live_agent_that_does_not_answer_is_an_error_not_gone_and_a_stale_file_is_nothing_to_stop() {
+        let dir = temp("alive");
+        let dirs = dyno_agent::paths::Dirs::at(&dir);
+        // this very process, written now (so it started before): alive, but nothing listens on the endpoint
+        let now = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+        )
+        .unwrap();
+        write_discovery(&dirs, std::process::id(), now);
+        let mut live = LiveAgent::new(dirs.clone());
+        let e = live.ask_to_exit().unwrap_err();
+        assert!(e.contains("is running but does not answer"), "{e}");
+        assert!(!live.gone() || live.target.is_none());
+        // a file written long before its holder started (a handed-on pid) is stale
+        write_discovery(&dirs, std::process::id(), 1_000);
+        assert_eq!(LiveAgent::new(dirs).ask_to_exit(), Ok(false));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn only_the_first_stop_begins() {
+        let flag = OnceFlag::default();
+        assert!(flag.claim());
+        assert!(!flag.claim());
     }
 }

@@ -100,7 +100,7 @@ paddock_commands::command_table! {
     /// The page or Settings section a widget asked the main window to open (once).
     Mutation [MAIN] => commands::take_navigation,
     /// Whether the agent keeps measuring after a plain Quit (a login service supervises it): the words of Quit.
-    Query [MAIN | TRAY | DIALOG] => commands::quit_keeps_measuring,
+    Query [MAIN | TRAY] => commands::quit_keeps_measuring,
     /// Quit and stop measuring: stops the agent (service job or the agent itself), checks it is gone, quits the app.
     Mutation [MAIN | TRAY] => commands::quit_and_stop_measuring,
 }
@@ -128,6 +128,8 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
         Place::Test { dir } => dyno_agent::paths::Dirs::at(dir.join("data")),
     };
     let mut builder = Builder::new(AppIdentity::new(APP_ID, APP_NAME, VERSION))
+        // "Quit and stop measuring" from the macOS menu bar with no window open does its work (the shell would only reopen the window).
+        .menu_action_without_window(quit::QUIT_STOP_COMMAND, |app| quit::quit_and_stop(app))
         .app_commands(&COMMANDS)
         .dialogs(&[&dialogs::DIALOGS])
         .health(hub.services())
