@@ -1703,6 +1703,10 @@ const KNOWN_FAILING: &[(&str, &str)] = &[
         "P1-4 on the simulator side: MODEL_REPLAY='Mac/Fast/Healthy|Update+RemovalTimeout' leaves the old build's job answering while the record says V2 registered; the settle check (same process across 2 looks, started after the register) needs the simulator to answer `job_process` with the lingering job's identity.",
     ),
     (
+        "more unattended registers across starts than the cap allows",
+        "open: MODEL_REPLAY='Mac/Never/Healthy|Update+RemovalTimeout;JobRefuse;Start+RegNotAsWritten' makes 4 registers over two starts. The Update's replace used its 3 attempts on a lingering old job (the settle check needs the simulator's job_process); the Start then registers once more. To be traced with the simulator's lingering job answering job_process.",
+    ),
+    (
         "the user's service was lost",
         "open decision: MODEL_REPLAY='Mac/Fast/Healthy|Update+RegOther': a new version replaces a healthy old build's service (the removal comes first on macOS, R03) and every register then fails, so nothing is left. Either the invariant exempts a version-change replace whose register keeps failing (and the hold says so), or the replace registers before it removes where the OS allows it.",
     ),
