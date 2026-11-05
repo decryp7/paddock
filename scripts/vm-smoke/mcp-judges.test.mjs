@@ -61,3 +61,8 @@ test('both rows are required steps of every OS release run', () => {
     assert.ok(ids.includes('mcp') && ids.includes('quit-stop'), os);
   }
 });
+
+test('dead state: a dyno CLI that cannot run (exit 127) is a broken check, not a product failure', async () => {
+  const r = await mcpStep({ enable: async () => 'pmk_x', mcp: async () => ({ code: 127, out: 'dyno: not found' }) });
+  assert.equal(r.status, 'check-broken');
+});

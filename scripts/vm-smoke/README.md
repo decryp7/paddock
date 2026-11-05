@@ -173,3 +173,22 @@ About page shows the commit, but no CLI prints it: see "What the checks need fro
 macos-start, macos-power, macos-helper and macos-helper-restart (hold the host's VM lock around it). Results go to a stable folder
 `<folder>/run-<id>/` (a `.md` and a `.json` per run, screenshots in `evidence/`); `release-verdict.mjs <folder>` prints the release verdict:
 PASS only with all seven runs present, not partial, passed, of the same CI run and one installer per OS.
+
+## Rule 71 and release rows (Dyno 1.1.0)
+
+- **MCP from outside the app** (`mcp-judges.mjs`, `mcp-guest.mjs`; guest only). Seeded where the product reads it, no flag: the versioned `mcp.json` in the app's
+  config folder (`enabled: true`) and ONE credential-store entry, service `Dyno`, account `mcp:keys`, holding `[{id, client, sha256, created_ms, revoked}]` (a key is
+  `pmk_` + 64 hex; only its SHA-256 is stored). The app reads both at start, so it is stopped, seeded and started. Then `DYNO_MCP_KEY=<key> dyno mcp` gets `initialize`,
+  `tools/list` (the 10 tools; actions only when allowed) and `tools/call system_summary` (cpu 0 to 100, memory used below total, uptime above 0); the agent is killed and the
+  call must be an error naming it; the app is quit and `dyno mcp` must say "isn't open" with exit 1 and `mcp-listener.json` gone or failing pid verification. The
+  per-OS credential commands (`security`, `secret-tool`, `cmdkey`) are unverified until a run shows the app accepting the key.
+- **Quit and stop measuring**: Linux is driven (File menu over AT-SPI, 60 s of no Dyno process, reopen brings it back); the reboot half is not tried in that step, so
+  the row stays "check broken" until it is. macOS and Windows: not driven (see below).
+- **Release rows** (`release-rows.mjs`): macOS reads `helper-lifecycle.log` as a standard user (`sudo -u nobody`), Linux lists `/var/log/dyno-helper` after the uninstall.
+  Not driven yet, each a NOT MEASURED step with its reason, so the run is INCOMPLETE: reinstall over a leftover `uninstall.exe`, the first uninstall after boot, macOS
+  Quit-and-stop then reopen (Background Items, Login Items stays off), a hung or paused page, a second user's session, killing the installer, install again.
+- **Windows snapshot**: `make-no-dyno-snapshot.sh` makes `gui-session-tools-no-dyno` from `gui-session-tools` with no Dyno (a per-user Dyno makes the per-machine
+  installer refuse, exit 2); `chain-release.sh` uses it (`PADDOCK_WIN_SNAPSHOT` overrides) and stops if it does not exist.
+
+**The one command for the full round of a CI run:** `scripts/vm-smoke/chain-release.sh <ci run id>` (needs `GITEA_TOKEN` for the run's commit, or add
+`--expect-commit <12 hex>`; each VM takes the host lock).

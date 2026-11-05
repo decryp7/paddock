@@ -17,6 +17,9 @@ import { readingSteps } from './helper-readings.mjs';
 import { trayHostChecks } from './linux-tray-host.mjs';
 import { judgeCard, judgeLoginSwitch, parseSwitchState } from './linux-judges.mjs';
 import { makeResult } from './verdict.mjs';
+import { makeMcpGuest } from './mcp-guest.mjs';
+import { mcpStep, quitStopStep } from './mcp-judges.mjs';
+import { NOT_DRIVEN, ROW_TITLES, judgeLinuxHelperLogDir, notDriven, rowStep } from './release-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -197,6 +200,21 @@ async function main(argv) {
     const driver = { openPage: async (page, tab) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); } };
     for (const fn of readingSteps('linux', async () => driver)) push(await fn({}));
 
+    // Rule 71: Dyno's MCP from outside the app (guest only). The key and mcp.json are seeded where the product reads them (mcp-guest.mjs), then the app is restarted.
+    {
+      const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-mcp${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
+      const mg = makeMcpGuest({
+        os: 'linux', dyno: '/usr/bin/dyno', sh: async (c) => { const r = ses(c); return { code: r.code, stdout: r.stdout }; },
+        configDir: async () => { const d = ses('dirname "$(find "$HOME/.config" "$HOME/.local/share" -maxdepth 3 -name settings.json -path "*yno*" 2>/dev/null | head -1)"').stdout.trim(); return d && d !== '.' ? d : null; },
+        stopApp: async () => { g('pkill -x dyno-app; true'); await sleep(4000); }, startApp,
+        killAgent: async () => { g('sudo systemctl --user -M admin@ stop dyno-agent 2>/dev/null; pkill -9 -x dyno-agent; true'); },
+        agentAlive: async () => g('pgrep -x dyno-agent >/dev/null').code === 0,
+        quitApp: async () => { g('pkill -x dyno-app; true'); await sleep(4000); },
+        pidAlive: async (pid) => g(`kill -0 ${pid} 2>/dev/null`).code === 0,
+      });
+      push(await mcpStep(mg));
+      await startApp(); // the app is needed again below (helper Turn off, readings)
+    }
     // 6. Turn off: the service and data are gone.
     press('^Dyno$');
     checks = [{ ok: press('Turn off administrator readings'), detail: 'pressed "Turn off administrator readings"' }];
@@ -233,6 +251,23 @@ async function main(argv) {
     const survivors = leftLines.filter(isSupervisedAgent);
     push(result('Quit (File > Quit) leaves only the supervised agent', [{ ok: others.length === 0, detail: others.length === 0 ? 'no Dyno process other than the supervised agent 40 s after Quit' : `${others.length} Dyno process(es) still running 40 s after Quit (pid ppid seconds args below)` }, ...(supervised ? [{ ok: survivors.length === 1, detail: survivors.length === 1 ? `the supervised agent survived Quit: pid ${sysUserPid}, unit dyno-agent active` : `the login service is active (MainPID ${sysUserPid}) but no matching dyno-agent run survived Quit` }] : [])], leftList ? ['pid ppid age-s args', ...leftLines] : [], 'only the supervised agent is left'));
 
+    // Rule 71: Quit and stop measuring (menu click over AT-SPI, no product flag), observed for 60 s, then reopened.
+    {
+      const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-qs${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
+      const count = async () => Number(g('ps -eo comm= | grep -cE "^dyno-(app|agent)$"').stdout.trim()) || 0;
+      push(await quitStopStep({
+        now: () => Date.now(), sleep,
+        trigger: async () => { await startApp(); press('^File$', 'menu item'); await sleep(1000); if (!press('^Quit and stop measuring', 'menu item')) throw new Error('no "Quit and stop measuring" menu item under File (AT-SPI)'); await sleep(5000); },
+        count, reopen: async () => { await startApp(); return count(); }, reboot: async () => null, // the reboot is covered by the Restart check rows; not tried here
+      }));
+    }
+    // Release rows: the Linux uninstall must leave the helper's log folder; the rest are not driven here.
+    {
+      g('sudo apt-get remove -y -qq dyno >/dev/null 2>&1; true', 300_000);
+      const ls = g('ls /var/log/dyno-helper 2>&1');
+      push(rowStep(ROW_TITLES.linuxLogDir, judgeLinuxHelperLogDir({ code: ls.code, out: ls.stdout }), 'the helper log folder survives the uninstall'));
+      push(notDriven(ROW_TITLES.hungPage, NOT_DRIVEN.hungPage));
+    }
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();
     // The build binding: the installed dyno-app holds the 12-digit commit CI built it from (build-env, option_env!).

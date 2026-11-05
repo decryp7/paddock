@@ -74,6 +74,7 @@ export async function runUiPhase({ log = console.error, extra = [], after = [] }
     await browser.close().catch(() => {});
     // After Quit: steps that need the app gone (the same-version update, the uninstall).
     for (const fn of after) steps.push(await fn());
+    if (after.length) { const { winUndrivenRows } = await import('./win-helper.mjs'); steps.push(...winUndrivenRows()); }
   } catch (e) {
     steps.push(result('Windows: UI phase', [{ ok: false, detail: e.message }]));
   } finally { t.close(); await actor.send('quit', 5000).catch(() => {}); }

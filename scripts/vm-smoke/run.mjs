@@ -19,6 +19,9 @@ import { MacGui } from './mac-gui.mjs';
 import { MacIdleChecks } from './mac-idle.mjs';
 import { macDriver, readingSteps } from './helper-readings.mjs';
 import { macRebootCheck } from './mac-reboot.mjs';
+import { makeMcpGuest } from './mcp-guest.mjs';
+import { mcpStep } from './mcp-judges.mjs';
+import { NOT_DRIVEN, ROW_TITLES, judgeLifecycleLog, notDriven, rowStep } from './release-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -269,7 +272,31 @@ async function main(argv) {
         const tour = new MacTour(guest, gui, await loadRules(), { log, check });
         const waitReady = async () => { for (let i = 0; i < 75; i++) { if ((await tart(['exec', vm, 'true'], { timeoutMs: 20_000 })).code === 0 && (await guest.exec('/usr/local/bin/axdrive windows | grep -c Dock')).stdout.trim() !== '0') return true; await sleepMs(4000); } return false; };
         const readings = o.reboot ? [macRebootCheck({ waitReady })] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
-        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: readings, post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
+        // Release rows of the power suite (rule 71 MCP, the lifecycle log) and the rows not driven yet, with their reasons.
+        const bundle = `/Applications/${config.bundle}`;
+        const macRows = async () => {
+          const cfg = '$HOME/Library/Application Support/Dyno';
+          const mg = makeMcpGuest({
+            os: 'macos', dyno: `${bundle}/Contents/MacOS/dyno`, sh: async (c) => { const r = await exec(c); return { code: r.code, stdout: r.stdout }; },
+            configDir: async () => ((await exec(`cd "${cfg}" 2>/dev/null && pwd`)).stdout.trim() || null),
+            stopApp: async () => { await exec(`osascript -e 'quit app "Dyno"' ; pkill -x dyno-app; true`); await sleepMs(4000); },
+            startApp: async () => { await exec(`open -a ${bundle}`); for (let i = 0; i < 30; i++) { if ((await exec(`${bundle}/Contents/MacOS/dyno-agent status >/dev/null 2>&1`)).code === 0) break; await sleepMs(4000); } await sleepMs(8000); },
+            killAgent: async () => { await exec('pkill -9 -x dyno-agent; true'); },
+            agentAlive: async () => (await exec('pgrep -x dyno-agent >/dev/null')).code === 0,
+            quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; true`); await sleepMs(4000); },
+            pidAlive: async (pid) => (await exec(`kill -0 ${pid} 2>/dev/null`)).code === 0,
+          });
+          const mcp = await mcpStep(mg);
+          const lg = await exec(`sudo -u nobody head -5 '/Library/Application Support/Dyno/helper-lifecycle.log' 2>&1; echo "EXIT=$?"`);
+          const m = /EXIT=(\d+)\s*$/.exec(lg.stdout);
+          return [mcp,
+            notDriven('Rule 71: Quit and stop measuring stops the agent and it comes back', NOT_DRIVEN.macReopen),
+            notDriven(ROW_TITLES.macReopen, NOT_DRIVEN.macReopen),
+            rowStep(ROW_TITLES.macLifecycleLog, judgeLifecycleLog({ code: m ? Number(m[1]) : null, out: lg.stdout.replace(/EXIT=\d+\s*$/, '') }), 'a standard user reads the lifecycle log'),
+            notDriven(ROW_TITLES.hungPage, NOT_DRIVEN.hungPage)];
+        };
+        const rowFns = o.suite === 'power' ? [macRows] : [];
+        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();

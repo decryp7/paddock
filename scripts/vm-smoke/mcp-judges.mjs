@@ -107,6 +107,7 @@ export async function mcpStep(g) {
   try { key = await g.enable(); } catch (e) { return makeResult(title, [chk(false, `could not enable AI access and seed a key in the guest: ${e.message}`, 'check')]); }
   if (!key) return makeResult(title, [chk(false, 'no key was seeded in the guest, so dyno mcp cannot authenticate', 'check')]);
   const first = await g.mcp(key, mcpInput());
+  if (first.code === 127 || first.code === null) return makeResult(title, [chk(false, `dyno mcp could not be run in the guest (exit ${first.code}: ${String(first.out ?? '').slice(0, 100)}): the CLI path or the shell is wrong, not the product`, 'check')]);
   const r1 = parseResponses(first.out);
   checks.push(...judgeToolsList(r1.get(2)), ...judgeSystemSummary(r1.get(3)));
   await g.killAgent();

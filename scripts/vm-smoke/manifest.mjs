@@ -10,6 +10,11 @@ const readings = (os) => READINGS.filter((r) => r.os.includes(os)).map((r) => ro
 const BUILD = row('build-binding', /^Build binding:/);
 // Rule 71 rows (mcp-judges.mjs): required on the final candidate of every OS; a runner that does not supply them leaves the run INCOMPLETE.
 const RULE71 = [row('mcp', /^Rule 71: Dyno MCP from outside/), row('quit-stop', /^Rule 71: Quit and stop measuring/)];
+// Release rows collected for 1.1.0 (release-rows.mjs): a row nobody drives is a not-measured step with its reason, so the run is INCOMPLETE, never PASS.
+const hung = row('hung-page', /^Release row: a hung or paused visible page/);
+const ROWS_WIN = [row('win-reinstall', /^Release row: reinstall over a leftover/), row('win-first-uninstall', /^Release row: the first uninstall after boot/), hung, row('second-user', /^Release row: a second user/), row('kill-installer', /^Release row: killing the installer/), row('install-again', /^Release row: install again works/)];
+const ROWS_MAC = [row('mac-reopen', /^Release row: macOS Quit and stop measuring, then reopen/), row('mac-lifecycle-log', /^Release row: a standard user reads helper-lifecycle/), hung];
+const ROWS_LINUX = [row('linux-log-dir', /^Release row: Linux uninstall leaves/), hung];
 
 const MAC_START = [
   row('install', /^Install$/), BUILD,
@@ -68,13 +73,13 @@ export function requiredSteps({ os, suite = 'start', ui = false, reboot = false,
   if (os === 'windows') {
     const rebootRun = reboot && !ui;
     if (rebootRun) return [...WIN_BASE, ...WIN_REBOOT];
-    return [...WIN_BASE, ...WIN_FULL, ...(ui || full ? [...WIN_UI, ...RULE71] : [])];
+    return [...WIN_BASE, ...WIN_FULL, ...(ui || full ? [...WIN_UI, ...RULE71, ...ROWS_WIN] : [])];
   }
-  if (os === 'linux') return [...LINUX, ...RULE71, ...(reboot || full ? LINUX_REBOOT : []), ...(trayHost ? LINUX_TRAY : [])];
+  if (os === 'linux') return [...LINUX, ...RULE71, ...ROWS_LINUX, ...(reboot || full ? LINUX_REBOOT : []), ...(trayHost ? LINUX_TRAY : [])];
   if (os === 'macos') {
     const base = suite === 'power' ? MAC_POWER : suite === 'helper' ? MAC_HELPER : MAC_START;
     if (suite === 'start') return base;
-    return [...base, ...(suite === 'power' ? RULE71 : []), ...(reboot ? [row('restart-menu-bar', /^Restart check: menu-bar icons after the restart/)] : readings('macos'))];
+    return [...base, ...(suite === 'power' ? [...RULE71, ...ROWS_MAC] : []), ...(reboot ? [row('restart-menu-bar', /^Restart check: menu-bar icons after the restart/)] : readings('macos'))];
   }
   throw new Error(`no manifest for ${os}`);
 }

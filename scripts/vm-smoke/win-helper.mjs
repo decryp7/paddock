@@ -8,6 +8,9 @@ import { randomBytes } from 'node:crypto';
 import { Vnc } from './win-vnc.mjs';
 import { evidenceFile } from './evidence.mjs';
 import { makeResult } from './verdict.mjs';
+import { makeMcpGuest } from './mcp-guest.mjs';
+import { mcpStep } from './mcp-judges.mjs';
+import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
 import { attemptProbe, judgeControl, judgeExploitPrecondition, judgeInstallOutcome, judgeRefusal, judgeServed, judgeTrayCount, judgeWear } from './win-judges.mjs';
 
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
@@ -343,6 +346,31 @@ export function servedCounts() {
 /** RequestKind names of the helper's `served:` line (dyno-helper server.rs `ServedCounts::summary`, `Kind=count` for every kind) that this suite's readings go through: Processes, Traffic (per program), Smart (Lifespan), Extras (wake requests and backup versions). */
 export const SERVED_KINDS = { windows: ['Processes', 'Traffic', 'Smart', 'Extras'] };
 
+/** Rule 71 MCP row on the Windows guest (guest only, over the test user's SSH; the app is started in the console session through a scheduled task). */
+export async function winMcpStep() {
+  const sh = async (c) => { const out = ssh(`${c}; "RC=$(if ($?) { 0 } else { 1 })"`); const m = /RC=(\d)\s*$/.exec(out); return { code: m ? Number(m[1]) : null, stdout: out.replace(/RC=\d\s*$/, '') }; };
+  const startApp = async () => {
+    ssh('Set-Content C:\\paddock-test\\vmcheck\\launch-mcp.ps1 \'Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe" -ArgumentList "--hidden"\'; schtasks /create /tn DynoMcpLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch-mcp.ps1" | Out-Null; schtasks /run /tn DynoMcpLaunch | Out-Null');
+    for (let i = 0; i < 30; i++) { await sleep(4000); if (ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" status 2>&1 | Out-String; "EXIT=$LASTEXITCODE"').includes('EXIT=0')) break; }
+    await sleep(8000);
+  };
+  const mg = makeMcpGuest({
+    os: 'windows', dyno: 'C:\\Program Files\\Dyno\\dyno.exe', sh,
+    configDir: async () => ssh('foreach ($d in "$env:LOCALAPPDATA\\Dyno", "$env:APPDATA\\Dyno") { if (Test-Path "$d\\settings.json") { $d; break } }').trim() || null,
+    stopApp: async () => { ssh('Get-Process dyno-app -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(3000); }, startApp,
+    killAgent: async () => { ssh('Get-Process dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force'); },
+    agentAlive: async () => ssh('[bool](Get-Process dyno-agent -ErrorAction SilentlyContinue)') === 'True',
+    quitApp: async () => { ssh('Get-Process dyno-app -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(3000); },
+    pidAlive: async (pid) => ssh(`[bool](Get-Process -Id ${pid} -ErrorAction SilentlyContinue)`) === 'True',
+  });
+  const r = await mcpStep(mg);
+  await startApp(); // the later steps need the app (and its DevTools port is gone: they reconnect or report)
+  return r;
+}
+
+/** The release rows the Windows suite cannot drive yet, as not-measured steps with their reasons. */
+export const winUndrivenRows = () => [['winReinstall'], ['winFirstUninstall'], ['hungPage'], ['secondUser'], ['killInstaller'], ['installAgain']].map(([k]) => notDriven(ROW_TITLES[k], NOT_DRIVEN[k]));
+
 export const helperSteps = [
   async ({ browser }) => {
     const planted = plantJunction();
@@ -364,4 +392,6 @@ export const helperSteps = [
   () => servedCounts(),
   ({ browser }) => helperRepair(browser),
   ({ browser }) => helperOff(browser),
+  () => winMcpStep(),
+  () => notDriven('Rule 71: Quit and stop measuring stops the agent and it comes back', 'a menu click over CDP ends the app that the later steps (File > Exit, the uninstall) need; it is driven in its own run once the order is agreed'),
 ];
