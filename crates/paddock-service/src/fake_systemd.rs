@@ -78,7 +78,7 @@ impl FakeSystemd {
                 last_failure: None,
                 session: true,
                 linger: false,
-                                start_loops: false,
+                start_loops: false,
             })),
         };
         let handle = this.clone();
