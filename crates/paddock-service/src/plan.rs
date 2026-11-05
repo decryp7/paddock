@@ -215,7 +215,9 @@ pub fn plan(f: &Facts<'_>) -> Plan {
             Plan::Offer(Reason::Unwanted)
         }
     };
-    if matches!(f.state, State::Removing) {
+    // An unfinished removal is finished unless the app says the switch is on again (it was taken back); an app that does not
+    // say (`wanted` unknown) finishes it.
+    if matches!(f.state, State::Removing) && f.wanted != Some(true) {
         return remove();
     }
     if !f.location_ok {
@@ -251,9 +253,13 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     let accepted = matches!(
         phase,
         Some(Phase::Registering | Phase::Awaiting | Phase::RemovingOld { ours: true })
-    );
+    ) && i.definition_current != Some(false); // another build's registration is not the one this version made
     let fix = |r: Reason| {
-        if !f.caps.automatic {
+        if f.wanted.is_none() {
+            Plan::Leave(Hold::Unavailable(
+                "the Start-at-login setting could not be read, so nothing is registered or replaced until it can".to_string(),
+            ))
+        } else if !f.caps.automatic {
             Plan::Offer(r)
         } else if capped {
             Plan::Leave(held())

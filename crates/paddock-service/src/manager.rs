@@ -56,6 +56,8 @@ pub struct Manager {
     answers: Box<dyn FnMut() -> bool + Send>,
     cover: Box<dyn FnMut() -> bool + Send>,
     wanted: Box<dyn FnMut() -> Option<bool> + Send>,
+    /// The app said what its switch is ([`Manager::with_app_state`]).
+    app_state: bool,
     first_run_done: Box<dyn FnMut() -> bool + Send>,
     location_ok: Box<dyn FnMut() -> bool + Send>,
 }
@@ -83,6 +85,7 @@ impl Manager {
             answers: Box::new(answers),
             cover: Box::new(|| false),
             wanted: Box::new(|| Some(true)),
+            app_state: false,
             first_run_done: Box::new(|| false),
             location_ok: Box::new(|| true),
         }
@@ -114,6 +117,7 @@ impl Manager {
         location_ok: impl FnMut() -> bool + Send + 'static,
     ) -> Self {
         self.wanted = Box::new(wanted);
+        self.app_state = true;
         self.first_run_done = Box::new(first_run_done);
         self.location_ok = Box::new(location_ok);
         self
@@ -171,7 +175,12 @@ impl Manager {
             caps: self.backend.capabilities(),
             waited,
             resuming,
-            wanted: (self.wanted)(),
+            // An app that does not say what its switch is has no word on an unfinished removal: it is finished.
+            wanted: if self.app_state || !matches!(recorded.state, State::Removing) {
+                (self.wanted)()
+            } else {
+                None
+            },
             first_run_done: (self.first_run_done)(),
             location_ok: (self.location_ok)(),
             record_damaged,
@@ -317,10 +326,8 @@ impl Manager {
                     })
                 {
                     log::warn!(error:% = e; "the service repair's step could not be recorded");
-                    // No OS call that changes anything without a durable write; what the user asked for goes on, loudly.
-                    if !requested {
-                        abort.store(true, Ordering::Relaxed);
-                    }
+                    // No OS call that changes anything without a durable write.
+                    abort.store(true, Ordering::Relaxed);
                 }
             },
         );
@@ -459,7 +466,10 @@ impl Manager {
             return Err(ServiceError::Busy);
         };
         match self.run_replace_locked(reason, true, cancel) {
-            Ran::Busy | Ran::Unrecorded(_) => Err(ServiceError::Busy),
+            Ran::Busy => Err(ServiceError::Busy),
+            Ran::Unrecorded(why) => Err(ServiceError::Failed(format!(
+                "Nothing was changed, because the service state cannot be saved: {why}"
+            ))),
             Ran::Outcome(o) => outcome_result(o).map_err(|e| self.opened(e)),
         }
     }

@@ -120,6 +120,11 @@ impl Manager {
             }
             ResumePath::Repair => {}
             ResumePath::Light => {
+                // Registering again is an OS call: the record must be writable first (no OS call without a durable write).
+                if let Err(e) = self.record.set_state(recorded.state.clone()) {
+                    say(&format!("the service state cannot be written, so nothing is registered: {e}"));
+                    return Err(e);
+                }
                 // A register that reads back wrong may only be the OS lagging: look for the job before replacing anything
                 // (a removal and a second registration would announce the item again).
                 let registered = match self.backend.register() {
@@ -253,8 +258,8 @@ impl Manager {
                 recorded.phase_of(&self.version),
                 Some(Phase::Registering | Phase::Awaiting)
             );
-        let present = inspection.registration != crate::backend::Registration::Absent
-            || !matches!(inspection.job, Job::Absent | Job::Unknown);
+        // A job that lingers with no registration is not a registration: it is registered (and the job replaced).
+        let present = inspection.registration != crate::backend::Registration::Absent;
         if present {
             // Something is registered: a first run removes nothing. Up (and this version's): remembered; otherwise the
             // start's plan decides what the registration needs.

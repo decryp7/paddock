@@ -1588,56 +1588,8 @@ fn configs() -> &'static [(Caps, Resp)] {
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
 const KNOWN_FAILING: &[(&str, &str)] = &[
     (
-        "pending() is true in a state with no way forward",
-        "plan.rs plan(), Absent branch: RemovingOld/Registering gives Replace(Interrupted) even at the cap; manager.rs run_replace_locked refuses (allowed == 0). Plan.",
-    ),
-    (
-        "the user's service was lost",
-        "same cause: a crash in a requested replace at the cap leaves Replace(Interrupted) that nothing runs (plan.rs plan(), Absent branch).",
-    ),
-    (
-        "more unattended registers of one version than its attempts allow",
-        "manager/resume.rs install_unattended calls run_replace_locked(requested = true), so the first run goes past the cap. Executor.",
-    ),
-    (
-        "an OS call without a durable record of it",
-        "manager.rs run_replace_locked: a failed step write only warns; install_unattended runs with an unwritable record. Executor.",
-    ),
-    (
-        "an unasked prompt",
-        "manager/resume.rs install_unattended ignores caps.automatic. Executor.",
-    ),
-    (
-        "changed the OS unattended where every change needs a prompt",
-        "same cause as the unasked prompt (ADR 0056 section 4 wants Offer).",
-    ),
-    (
-        "registered unattended although the user's switch could not be read",
-        "manager/resume.rs resume() only checks wanted == Some(false); None must not register (R3). Resume area.",
-    ),
-    (
-        "a held job is supervised",
-        "plan.rs supervises() ignores the hold (WP 5).",
-    ),
-    (
-        "a resume completed and its marker is still pending",
-        "nothing sets or clears resume_pending yet (author's rewrite).",
-    ),
-    (
-        "registered again a service that answers",
-        "manager/resume.rs install_unattended judges `here` from the record only. Executor.",
-    ),
-    (
-        "removed a service that answers",
-        "same cause as registering again a service that answers.",
-    ),
-    (
         "the record says this version is registered but the OS holds another registration",
         "plan.rs plan(): `accepted` trusts an older Attempting of this version after another version registered.",
-    ),
-    (
-        "finished a removal the user took back",
-        "plan.rs plan(): State::Removing wins over wanted == Some(true); install_unattended clears it with a write whose failure is ignored (manager/resume.rs ~line 200).",
     ),
 ];
 

@@ -449,9 +449,8 @@ fn nothing_is_installed_unasked_and_install_registers_and_remembers() {
     assert_eq!(
         changes(&sys),
         [
-            "unregister",
-            &format!("/bin/launchctl bootout {TARGET}"),
-            "register"
+            // Nothing was registered, so nothing is removed first.
+        "register"
         ]
     );
     assert!(sim.lock().unwrap().healthy());
@@ -673,10 +672,7 @@ fn a_systemd_user_unit_is_written_reloaded_and_enabled() {
     assert_eq!(
         changes(&sys),
         [
-            "systemctl --user disable --now pitwall.service".to_string(),
-            format!("remove {}", unit_path().display()),
-            "systemctl --user daemon-reload".to_string(),
-            "systemctl --user stop pitwall.service".to_string(),
+            // Nothing was registered, so nothing is stopped, disabled or removed first.
             format!("write {}", unit_path().display()),
             "systemctl --user daemon-reload".to_string(),
             "systemctl --user enable --now pitwall.service".to_string(),
@@ -1657,7 +1653,7 @@ fn manager_contract_details() {
         Started::Left(Hold::RecordUnavailable(_))
     ));
     // The user's own request goes on (loudly) without a record.
-    assert!(matches!(m.repair(&no_cancel()), Ok(RepairOutcome::Recovered)));
+    assert!(matches!(m.repair(&no_cancel()), Err(ServiceError::Failed(_))), "an unwritable record changes nothing");
     assert!(
         std::fs::read_to_string(d.path().join(format!("service-{LABEL}.json")))
             .unwrap()
