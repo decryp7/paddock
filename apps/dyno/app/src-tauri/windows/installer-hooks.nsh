@@ -40,11 +40,19 @@
   ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Services\DynoHelper" "ImagePath"
   ${If} $0 != ""
     DetailPrint "dyno-helper refresh"
-    nsExec::ExecToLog '"$INSTDIR\dyno-helper.exe" refresh'
+    ; Two minutes at most: a hung refresh must not hold the update. "timeout" is what nsExec answers when the time runs out.
+    nsExec::ExecToLog /TIMEOUT=120000 '"$INSTDIR\dyno-helper.exe" refresh'
     Pop $0
     DetailPrint "dyno-helper refresh: exit code $0"
     ${If} $0 != 0
       DetailPrint "NOTE the helper was not refreshed (code $0); Settings > Helper offers Update the helper"
+      ; And in setup.log, where the rest of an update's story is (the helper's own reason is in its audit log).
+      FileOpen $R6 "$INSTDIR\updates\setup.log" a
+      ${IfNot} ${Errors}
+        FileSeek $R6 0 END
+        FileWrite $R6 "NOTE dyno-helper refresh did not finish (code $0); the helper keeps its older version$\r$\n"
+        FileClose $R6
+      ${EndIf}
     ${EndIf}
   ${EndIf}
 !macroend

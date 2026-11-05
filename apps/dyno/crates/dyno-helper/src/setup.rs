@@ -54,6 +54,12 @@ fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
 /// # Errors
 /// What went wrong, with the next step.
 pub fn install(owner: HelperUser) -> Result<Report, String> {
+    install_recorded(owner, crate::VERSION)
+}
+
+/// [`install`], recording `recorded` as the version in `config.json` until the install has succeeded (a refresh passes the
+/// version it replaces, so a failed refresh is tried again at the next update; a first install passes its own).
+fn install_recorded(owner: HelperUser, recorded: &str) -> Result<Report, String> {
     #[cfg(unix)]
     if !crate::sys::is_elevated() {
         return Err("Installing the helper needs administrator rights; turn it on from Dyno (Settings > Helper).".into());
@@ -76,10 +82,43 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
     crate::protect::TrustGuard::system(host, &paths.data_dir)
         .prepare_folders(&paths.data_dir, crate::protect::OnUntrusted::Purge)
         .map_err(|e| e.to_string())?;
-    let config = HelperConfig::new(owner, crate::VERSION).with_app(crate::orphan::app_location(&source));
-    write_config(&paths, &config, &mut files)?;
-    let report =
-        install_in_place(os_of(host), &roots, &source, &mut files, &mut RealTrust, &verifier, &system).map_err(|e| e.to_string())?;
+    let app = crate::orphan::app_location(&source);
+    let make = |version: &str| HelperConfig::new(owner.clone(), version).with_app(app.clone());
+    // The configuration goes in before the service is registered (its first start finds it).
+    let files = std::cell::RefCell::new(files);
+    install_sequence(
+        recorded,
+        &make,
+        &mut |c| write_config(&paths, c, &mut *files.borrow_mut()),
+        &mut || {
+            install_in_place(
+                os_of(host),
+                &roots,
+                &source,
+                &mut *files.borrow_mut(),
+                &mut RealTrust,
+                &verifier,
+                &system,
+            )
+            .map_err(|e| e.to_string())
+        },
+    )
+}
+
+/// The order of an install: the configuration naming `recorded` first, then the install, and only after it succeeded the
+/// configuration naming this program's version. A failed install leaves the old version recorded, so the next refresh
+/// retries instead of believing the helper is current.
+fn install_sequence(
+    recorded: &str,
+    make: &dyn Fn(&str) -> HelperConfig,
+    write: &mut dyn FnMut(&HelperConfig) -> Result<(), String>,
+    do_install: &mut dyn FnMut() -> Result<Report, String>,
+) -> Result<Report, String> {
+    write(&make(recorded))?;
+    let report = do_install()?;
+    if recorded != crate::VERSION {
+        write(&make(crate::VERSION))?;
+    }
     Ok(report)
 }
 
@@ -116,7 +155,38 @@ pub fn refresh_decision(recorded: Option<&str>, this: &str) -> Refresh {
 /// What went wrong, with the next step; the installer logs it and carries on (a failed refresh never fails the update).
 pub fn refresh() -> Result<Report, String> {
     let paths = helper_paths();
-    let recorded = match HelperConfig::load(&paths.config) {
+    let host = this_host();
+    // Like the daemon at start (serve.rs `lock_folders`): the data root must be protected before `config.json` is read. On
+    // Windows `%ProgramData%` lets any user create folders, and a planted `config.json` would name its own owner.
+    let trusted = || -> Result<(), String> {
+        if host != dyno_core::helper::HelperHost::Windows {
+            return Ok(());
+        }
+        crate::protect::TrustGuard::system(host, &paths.data_dir)
+            .ensure_root(&paths.data_dir, crate::protect::OnUntrusted::Refuse)
+            .map_err(|e| e.to_string())
+    };
+    refresh_with(&trusted, &|| HelperConfig::load(&paths.config), &mut |owner, from| {
+        install_recorded(owner, from)
+    })
+}
+
+/// [`refresh`] over its three steps, so each can be replaced in a test: the trust check of the data folder, the read of
+/// `config.json` (only after the check passed), and the install.
+///
+/// # Errors
+/// As [`refresh`].
+pub fn refresh_with(
+    trusted: &dyn Fn() -> Result<(), String>,
+    load: &dyn Fn() -> Result<HelperConfig, crate::config::ConfigError>,
+    install: &mut dyn FnMut(HelperUser, &str) -> Result<Report, String>,
+) -> Result<Report, String> {
+    if let Err(why) = trusted() {
+        // Not an error of the update: the helper is left exactly as it is, and Settings keeps offering "Update the helper".
+        log::warn!(why = why.as_str(); "refresh: the helper's data folder is not protected, so config.json was not read and nothing was changed");
+        return Ok(Report::default());
+    }
+    let recorded = match load() {
         Ok(c) => Some(c),
         Err(crate::config::ConfigError::Unreadable(why)) => {
             log::info!(why = why.as_str(); "refresh: no helper configuration, nothing to refresh");
@@ -137,7 +207,7 @@ pub fn refresh() -> Result<Report, String> {
         Refresh::Refresh { from } => {
             let owner = recorded.map(|c| c.owner).ok_or("The helper's owner is not recorded.")?;
             log::warn!(from = from.as_str(), to = crate::VERSION; "refresh: replacing the installed helper");
-            install(owner)
+            install(owner, &from)
         }
     }
 }
@@ -577,5 +647,84 @@ mod refresh_tests {
     #[test]
     fn a_newer_recorded_version_is_not_downgraded() {
         assert_eq!(refresh_decision(Some("1.2.0"), "1.1.0"), Refresh::Current);
+    }
+}
+
+#[cfg(test)]
+mod refresh_flow_tests {
+    use super::*;
+    use crate::config::ConfigError;
+    use std::cell::{Cell, RefCell};
+
+    fn config(version: &str) -> HelperConfig {
+        HelperConfig::new(HelperUser::Uid(501), version)
+    }
+
+    #[test]
+    fn a_config_in_an_untrusted_folder_is_never_read_and_nothing_is_installed() {
+        let loaded = Cell::new(false);
+        let installed = Cell::new(false);
+        let r = refresh_with(
+            &|| Err("the data folder is not protected".to_string()),
+            &|| {
+                loaded.set(true);
+                Ok(config("0.0.1"))
+            },
+            &mut |_, _| {
+                installed.set(true);
+                Ok(Report::default())
+            },
+        );
+        assert_eq!(r, Ok(Report::default()), "not an error: the helper is left as it is");
+        assert!(!loaded.get(), "a planted config.json is not even read");
+        assert!(!installed.get(), "a planted owner never becomes the helper's owner");
+    }
+
+    #[test]
+    fn a_trusted_older_helper_is_refreshed_for_the_recorded_owner() {
+        let seen = RefCell::new(None);
+        let r = refresh_with(&|| Ok(()), &|| Ok(config("0.0.1")), &mut |o, from| {
+            *seen.borrow_mut() = Some((o, from.to_string()));
+            Ok(Report::default())
+        });
+        assert!(r.is_ok());
+        assert_eq!(seen.into_inner(), Some((HelperUser::Uid(501), "0.0.1".to_string())));
+    }
+
+    #[test]
+    fn no_configuration_or_a_current_one_installs_nothing_and_a_damaged_one_is_reported() {
+        let installed = Cell::new(0);
+        let mut count = |_: HelperUser, _: &str| {
+            installed.set(installed.get() + 1);
+            Ok(Report::default())
+        };
+        assert!(refresh_with(&|| Ok(()), &|| Err(ConfigError::Unreadable("missing".into())), &mut count).is_ok());
+        assert!(refresh_with(&|| Ok(()), &|| Ok(config(crate::VERSION)), &mut count).is_ok());
+        let e = refresh_with(&|| Ok(()), &|| Err(ConfigError::Invalid("damaged".into())), &mut count).unwrap_err();
+        assert!(e.contains("damaged") && e.contains("Settings"), "{e}");
+        assert_eq!(installed.get(), 0);
+    }
+
+    #[test]
+    fn the_new_version_is_recorded_only_after_the_install_succeeded() {
+        let writes = RefCell::new(Vec::new());
+        let mut write = |c: &HelperConfig| {
+            writes.borrow_mut().push(c.version.clone());
+            Ok(())
+        };
+        let make = |v: &str| config(v);
+        // A refresh over 0.0.1: the old version stays on disk until the install is done.
+        let ok = install_sequence("0.0.1", &make, &mut write, &mut || Ok(Report::default()));
+        assert!(ok.is_ok());
+        assert_eq!(*writes.borrow(), ["0.0.1".to_string(), crate::VERSION.to_string()]);
+        // A failed install leaves the old version recorded, so the next update refreshes again.
+        writes.borrow_mut().clear();
+        let bad = install_sequence("0.0.1", &make, &mut write, &mut || Err("locked".to_string()));
+        assert_eq!(bad, Err("locked".to_string()));
+        assert_eq!(*writes.borrow(), ["0.0.1".to_string()]);
+        // A first install records its own version once.
+        writes.borrow_mut().clear();
+        install_sequence(crate::VERSION, &make, &mut write, &mut || Ok(Report::default())).unwrap();
+        assert_eq!(*writes.borrow(), [crate::VERSION.to_string()]);
     }
 }
