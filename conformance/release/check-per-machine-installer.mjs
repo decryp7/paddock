@@ -80,6 +80,26 @@ export function checkSignatureName({ sig, file, product, version }) {
   return named === file ? [] : [`${file}.sig's trusted comment names ${named}, expected ${file}: every update would be refused`];
 }
 
+/** The Subsystem of a PE file's optional header (2 GUI, 3 console); throws a message that says what is wrong. */
+export function subsystemOf(bytes) {
+  const b = Buffer.from(bytes);
+  if (b.length < 0x40 || b.readUInt16LE(0) !== 0x5a4d) throw new Error('not a Windows program (no MZ header)');
+  const pe = b.readUInt32LE(0x3c);
+  if (pe + 24 + 70 > b.length || b.readUInt32LE(pe) !== 0x4550) throw new Error('not a Windows program (no PE header)');
+  return b.readUInt16LE(pe + 24 + 68);
+}
+
+/** paddock-setup.exe is started by the installer on every user's PC: a console-subsystem build opens a command prompt. */
+export function checkSetupSubsystem({ bytes, name }) {
+  if (!bytes) return [`${name}: paddock-setup.exe could not be extracted to check its subsystem`];
+  try {
+    const s = subsystemOf(bytes);
+    return s === 2 ? [] : [`${name}: paddock-setup.exe has PE subsystem ${s}, expected 2 (GUI): a console program shows a command prompt window during install, update and uninstall`];
+  } catch (e) {
+    return [`${name}: paddock-setup.exe is ${e.message}`];
+  }
+}
+
 /** What the embedded program's `self-test` must say: the app's identifier, and `stop_all=present` (a build without the stopper
  * would fail `stop-all` at install time). */
 export function checkSelfTest({ stdout, status, identifier, name }) {
@@ -138,12 +158,20 @@ function main(argv) {
       if (!o['no-sig']) problems.push(`${name}.sig is missing: the release is signed by the bundle step`);
     }
     problems.push(...checkInstaller({ bytes: readFileSync(path), files, expectVersion, name }));
-    if (process.platform === 'win32' && files) {
+    if (files) {
       const tmp = mkdtempSync(join(tmpdir(), 'pm-gate-'));
-      const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
-      const run = ex.status === 0 ? spawnSync(join(tmp, 'paddock-setup.exe'), ['self-test'], { encoding: 'utf8', timeout: 60000 }) : null;
-      rmSync(tmp, { recursive: true, force: true });
-      problems.push(...checkSelfTest({ stdout: run?.stdout, status: run?.status, identifier: conf.identifier, name }));
+      try {
+        const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
+        const exe = join(tmp, 'paddock-setup.exe');
+        problems.push(...checkSetupSubsystem({ bytes: ex.status === 0 ? readFileSync(exe) : null, name }));
+        // Running it needs Windows. Its output is read through pipes: a GUI-subsystem program still writes to inherited handles.
+        if (process.platform === 'win32' && ex.status === 0) {
+          const run = spawnSync(exe, ['self-test'], { encoding: 'utf8', timeout: 60000 });
+          problems.push(...checkSelfTest({ stdout: run.stdout, status: run.status, identifier: conf.identifier, name }));
+        }
+      } finally {
+        rmSync(tmp, { recursive: true, force: true });
+      }
     }
     for (const p of problems) console.error(`::error::${p}`);
     if (problems.length === 0) console.log(`${name}: administrator level, paddock-setup.exe inside, include version ${expectVersion}`);

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkInstaller, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
+import { checkInstaller, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -86,4 +86,23 @@ test('self-test names the identifier and says stop-all is present', () => {
   assert.match(checkSelfTest({ stdout: out, status: 0, identifier: 'other', name: 'a-setup.exe' }).join(), /does not name other/);
   assert.match(checkSelfTest({ stdout: '', status: 1, identifier: 'x', name: 'a-setup.exe' }).join(), /self-test/);
   assert.match(checkSelfTest({ stdout: undefined, status: undefined, identifier: 'x', name: 'n' }).join(), /did not run/);
+});
+
+/** A minimal PE32+ header with the given optional-header Subsystem. */
+const pe = (subsystem) => {
+  const b = Buffer.alloc(0x200);
+  b.writeUInt16LE(0x5a4d, 0);
+  b.writeUInt32LE(0x80, 0x3c);
+  b.writeUInt32LE(0x4550, 0x80);
+  b.writeUInt16LE(0x20b, 0x80 + 24);
+  b.writeUInt16LE(subsystem, 0x80 + 24 + 68);
+  return b;
+};
+
+test('paddock-setup.exe must be a GUI-subsystem program: a console one flashes a command prompt during install', () => {
+  assert.equal(subsystemOf(pe(2)), 2);
+  assert.deepEqual(checkSetupSubsystem({ bytes: pe(2), name: 'a-setup.exe' }), []);
+  assert.match(checkSetupSubsystem({ bytes: pe(3), name: 'a-setup.exe' }).join(), /subsystem 3.*command prompt/s);
+  assert.match(checkSetupSubsystem({ bytes: Buffer.from('MZ'), name: 'a-setup.exe' }).join(), /not a Windows program/);
+  assert.match(checkSetupSubsystem({ bytes: null, name: 'a-setup.exe' }).join(), /could not be extracted/);
 });
