@@ -1,12 +1,11 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
-import { PdPathText } from '@decryp7/paddock-ui';
+import { PdPathText, SuSparkline } from '@decryp7/paddock-ui';
 import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { Consumer } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
 import { formatBytes, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { SEVERITY_LABEL } from '../../shared/labels';
-import { Sparkline } from '../../shared/sparkline';
 import { ReportsStore } from '../../state/reports.store';
 import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports-model';
 import { MatButton } from '@angular/material/button';
@@ -18,7 +17,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
  */
 @Component({
   selector: 'dy-reports-page',
-  imports: [AsyncState, Icon, PdPathText, Sparkline, PdTable, PdSelect, MatButton],
+  imports: [AsyncState, Icon, PdPathText, SuSparkline, PdTable, PdSelect, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -76,7 +75,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
             @if (r.scoreTrend.length > 1) {
               <section class="card" aria-label="Health score trend">
                 <div class="card-head"><h2><dy-icon name="health" /> Health score</h2></div>
-                <div class="spark"><dy-sparkline [values]="trend()" [max]="100" [capacity]="trend().length" [zoom]="true" label="Health score over the week" /></div>
+                <div class="spark"><pd-sparkline [values]="trend()" [max]="100" [capacity]="trend().length" [zoom]="true" [area]="true" [pad]="0" [dot]="false" [height]="72" color="var(--text-3)" label="Health score over the week" /></div>
               </section>
             }
             @if (r.topApps.length) {
@@ -155,7 +154,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .plain { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4) var(--sp-8); display: grid; gap: var(--sp-1); font-size: var(--fs-base); }
     .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--sp-4); align-items: start; }
     .cols > .card { min-width: 0; }
-    .spark { padding: var(--sp-3) var(--sp-4) var(--sp-4); --spark-h: 72px; }
+    .spark { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
     .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
     .tablewrap { margin-top: var(--sp-2); }
     /* One grid for the whole list so the numbers and the forecast line up in columns; the path takes what is left and shortens in the middle. */

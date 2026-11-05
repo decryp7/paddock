@@ -158,11 +158,11 @@ describe('dy-widget', () => {
     env();
     const f = body('graph', given('graph', 'diskActivity', rd(null, 'ok', { reason: "The disk's busy time is not reported here." })));
     const el = f.nativeElement as HTMLElement;
-    expect(el.querySelector('dy-sparkline')).toBeNull();
+    expect(el.querySelector('pd-sparkline')).toBeNull();
     expect(el.querySelector('.note')?.textContent).toContain('not reported here');
     f.componentRef.setInput('value', given('graph', 'diskActivity', rd(40)));
     f.detectChanges();
-    expect(el.querySelector('dy-sparkline')).not.toBeNull();
+    expect(el.querySelector('pd-sparkline')).not.toBeNull();
     expect(el.querySelector('.note')).toBeNull();
   });
 
@@ -204,7 +204,7 @@ describe('dy-widget with a performance counter', () => {
     f.detectChanges();
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('.hero b')!.textContent).toMatch(/\d/);
-    expect(el.querySelector('dy-sparkline')).not.toBeNull();
+    expect(el.querySelector('pd-sparkline')).not.toBeNull();
 
     const gone = body('bigNumber', given('bigNumber', { perfCounter: '\\Nothing\\here' }));
     counters.track(['\\Nothing\\here']);

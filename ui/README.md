@@ -91,7 +91,7 @@ import { SuCard, SuMetric, SuSparkline, SuStatusPill } from '@decryp7/paddock-ui
 | Card / tile | `pd-card` | slots `icon`, `status`, hero (default), `sparkline`, `caption`; `interactive` makes it a button; `flat` inside bordered surfaces |
 | Status pill | `pd-status-pill` | icon shape per status + the word + tint; never colour alone |
 | Metric | `pd-metric` | tabular, unit as muted sibling, delta with arrow, sign and spoken text; colour only when `goodDirection` is set |
-| Sparkline | `pd-sparkline` | inline SVG, 1.5 px, 4 px end dot, gaps break the line, shared `min`/`max` for rows |
+| Sparkline | `pd-sparkline` | inline SVG, 1.5 px, 4 px end dot, gaps break the line, shared `min`/`max` for rows; optional second line, `capacity`, `fromZero`, `zoom` |
 | Empty / error state | `pd-empty-state`, `pd-error-state` | error has Retry (`busy` disables it) and an optional secondary action |
 | Skeleton | `pd-skeleton` | text, block, circle; shimmer 1.6 s, static under reduced motion |
 | Segmented control | `pd-segmented-control` | radio group, arrows/Home/End, `[(value)]` |

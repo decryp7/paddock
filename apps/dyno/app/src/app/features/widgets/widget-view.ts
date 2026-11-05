@@ -1,4 +1,5 @@
 import { MatTooltip } from '@angular/material/tooltip';
+import { SuSparkline } from '@decryp7/paddock-ui';
 import { PdSkeleton } from '@decryp7/paddock-ui/widgets';
 import { FullTextTip } from '../../shared/full-text-tip';
 import type { Measured } from '../../core/api.types';
@@ -9,7 +10,6 @@ import { formatBytes, formatPercent } from '../../shared/format';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { coreHeat } from '../../shared/heat';
 import { Ring } from '../../shared/ring';
-import { Sparkline } from '../../shared/sparkline';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
@@ -45,7 +45,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
  */
 @Component({
   selector: 'dy-widget',
-  imports: [FullTextTip, MatTooltip, ReadingSource, PdSkeleton, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [FullTextTip, MatTooltip, ReadingSource, PdSkeleton, Icon, Ring, SuSparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.data-kind]': 'kind()', '[style.--wv-rows]': 'rows()' },
   template: `
@@ -69,7 +69,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
         @if (reading().reason; as why) {
           <p class="note"><span>Not available. {{ why }}</span></p>
         } @else if (series(); as s) {
-          <dy-sparkline [values]="s.values" [values2]="s.values2" [max]="percent() ? 100 : null" [zoom]="zoomed() && percent()" [fill]="widget().options.fill" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" style="--spark-h: 48px" />
+          <pd-sparkline [values]="s.values" [values2]="s.values2" [fromZero]="true" [max]="percent() ? 100 : undefined" [zoom]="zoomed() && percent()" [area]="widget().options.fill" [capacity]="60" [pad]="0" [dot]="false" [height]="48" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" />
         } @else {
           <p class="note">No live history is kept for this metric.</p>
         }

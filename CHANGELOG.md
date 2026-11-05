@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: `pd-sparkline` second series, capacity, scales, colours (Dyno's copy removed)
+- New optional inputs on `pd-sparkline` (`SuSparkline`), all off by default, so every other use draws as before: `values2` (a second, dashed line on a scale shared with the first), `capacity` (a short series is drawn right-aligned, so the line grows in from the right), `fromZero` (scale from 0 to `max`, or to the peak of both series plus 15% headroom, 1 when all are zero), `zoom` (the scale follows the first series' range inside 0..`max`, 100 when omitted; for levels that barely move), `pad` (default 3 px; 0 runs edge to edge), `dot` (the end dot, default on) and `color`/`color2`. With `fromZero` or `zoom` values are clamped into the scale.
+- `sparklineGeometry` takes a seventh argument `{ capacity?, clamp? }`; one point no longer returns a degenerate area (`''`). New exports `sparklineScale`, `zoomRange`, `headroomMax`, `SparklineOptions` and `SparklineScale`. `zoomRange` ignores NaN.
+- Dyno's own `dy-sparkline` is deleted and its tiles, tray popover, widgets and Reports page use `pd-sparkline`; the paths are the same lines (a golden test records Dyno's former output). The accessible name is now "label: latest x, peak y".
+
 ### `@decryp7/paddock-ui`: `pd-table` `height` (`fit`, `fill`, `window`)
 - New input `height` on `pd-table`, also exported as the type `PdTableHeight`. `fit` (default, unchanged): the body is as tall as its rows up to `maxHeight`, so no other app's table changes. `fill`: the table takes the height its container gives it (a flex column or a grid cell with `min-height: 0`), never less than 240 px; for the one main table of a page that fills the window. `window`: as tall as its rows up to the height of the nearest scrolling ancestor less the table's own toolbar and header, measured with a ResizeObserver and updated live (the window's height when nothing scrolls, `maxHeight` until measured); for a page that scrolls once and stacks tables; the wheel passes to the ancestor at the end of the rows.
 - `window` needs a scrolling ancestor whose height does not depend on its content (a content-sized one grows with the table and the table with it). Only a `window` table with no scrolling ancestor listens to the window's resize; no other table does.
