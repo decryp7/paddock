@@ -114,9 +114,19 @@ Closing the window destroys it; the tray and the agent stay; opening builds a fr
 
 ![Service registration](../diagrams/svg/uml-state-service.svg)
 
-The record `service-<label>.json` holds one state (ADR 0056, `docs/adr/0056-service-repair-one-declared-state-machine.md`):
-Idle, Attempting (which phase: removing the old registration, registering, awaiting an answer, register failed) or
-Removing. The phase is written before each OS step, so a crash leaves what is safe next. After three unattended registers
-of one version the start holds (unanswered, refused or register failed) and says why; Repair or Install, a newer version
-or the service answering ends the hold. Every entry point (start, install, repair, resume, uninstall) goes through one
-transition function; a start never installs one unasked.
+The record `service-<label>.json` holds one state (ADR 0056): Idle, Attempting (version, attempts, and a phase: Removing
+old, Registering, Awaiting answer, Register failed) or Removing (uninstall). The phase is written before each OS step, so
+a crash leaves what is safe next: after a crash in Removing old, still there means replace, gone means just register; in
+Registering, absent means just register, there means wait.
+
+- Idle goes to Removing old on a new version (macOS; elsewhere only when the definition differs) or on Repair, and to
+  Registering on a first install or the switch turned on (nothing is removed).
+- Registering goes to Awaiting answer when the OS accepted it, and to Register failed on `Other` or `NotAsWritten`; Register
+  failed retries while attempts are under 3. Declined, cancelled, needs approval or elevation and unavailable return to the
+  state before.
+- Awaiting answer goes back to Removing old with no answer while attempts are under 3, and to Held at 3. Held ends on
+  "Answers" (back to Idle), on a new version or on Repair.
+- Uninstall or the switch turned off, from any state, writes Removing and then returns to Idle.
+
+Every entry point (start, install, repair, resume, uninstall) goes through one transition function; a start never installs
+one unasked.
