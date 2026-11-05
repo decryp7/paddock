@@ -201,7 +201,7 @@ Pitwall is the AI hub, never a dependency. Every app's core works without it:
 - **Icon set**: one icon per app, per platform, and the Paddock mark itself: pit garages on a slab striped in the seven app hues ([`icons/`](../icons/README.md)).
 - **Shared Rust crates** on the Gitea cargo registry: the app shell, jobs, logs, Report a problem, services, secrets, processes, folders, knowledge packs, IPC and `paddock-pitwall`, among others; the rest of the plugin platform, `paddock-mcp` and `paddock-testplan` are planned ([`crates/`](../crates/README.md)).
 - **Conformance checks**: `@decryp7/paddock-conformance`, the shared checks every app runs in CI ([`conformance/`](../conformance/)).
-- **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script. Apple notarization and Windows code signing are deferred until the releases settle (2026-10-23); every app's release notes carry a "First launch" note (macOS Open Anyway, Windows More info > Run anyway).
+- **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script. The apps are not signed or notarized: updates are protected by the family update key, and paid certificates would be needed to remove the OS warnings (decision 2026-11-05); every app's release notes carry a "First launch" note (macOS Open Anyway, Windows More info > Run anyway).
 - **Lessons**: what Debrief and Pitcrew taught about build, windows, services, native feel and tests ([lessons](lessons.md)).
 
 ## Glossary: why these names
