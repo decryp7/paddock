@@ -16,7 +16,7 @@
 //! newer than the CLI knows. The optional local web API (`Settings.webApi`) is a separate, opt-in adapter that maps
 //! HTTP onto these same requests; it is not a second protocol.
 
-use crate::agent::{lock, JobSlot, ScanSlot, Shared, Sub, VolumesSlot};
+use crate::agent::{lock, JobSlot, ScanSlot, Shared, Sub, VolumesSlot, WolSlot};
 use crate::discovery::Discovery;
 use crate::handlers::{handle, Conn};
 use dyno_core::protocol::{AgentError, ErrorCode, Message, PROTOCOL_VERSION};
@@ -97,6 +97,7 @@ fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Mess
     let peer = BodyPeer::start(conn, BodyOptions::new("the app").serve(handler).calls(4, 64))?;
     let scans = Arc::new(ScanSlot::default());
     let volumes = Arc::new(VolumesSlot::default());
+    let wol = Arc::new(WolSlot::default());
     let jobs = Arc::new(JobSlot::default());
     lock(&shared.subs).push(Sub {
         id,
@@ -104,6 +105,7 @@ fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Mess
         tx,
         scans: scans.clone(),
         volumes: volumes.clone(),
+        wol: wol.clone(),
         jobs: jobs.clone(),
     });
     // One thread per connection drains its queue; it ends when the app goes away or the Sub is dropped.
@@ -117,6 +119,7 @@ fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Mess
                 &Slots {
                     scans: &scans,
                     volumes: &volumes,
+                    wol: &wol,
                     jobs: &jobs,
                 },
                 |m| p.push(m).is_ok(),
@@ -131,16 +134,26 @@ fn connect(shared: &Arc<Shared>, conn: Connection) -> Result<(u64, BodyPeer<Mess
 pub(crate) struct Slots<'a> {
     pub scans: &'a ScanSlot,
     pub volumes: &'a VolumesSlot,
+    pub wol: &'a WolSlot,
     pub jobs: &'a JobSlot,
 }
 
 /// Sends a connection's frames until the app goes away (`send` returns false) or the queue is closed. Disk scan statuses, the
-/// volume list and job statuses do not travel through the queue: their messages there only wake this loop, and after every
+/// volume list, job statuses and the wake list do not travel through the queue: their messages there only wake this loop, and after every
 /// message the newest of each is taken from its slot and sent.
 pub(crate) fn pump(rx: &Receiver<Message>, slots: &Slots<'_>, mut send: impl FnMut(Message) -> bool) {
     while let Ok(m) = rx.recv() {
-        if !matches!(m, Message::DiskScan(_) | Message::DiskVolumes(_) | Message::Job(_)) && !send(m) {
+        if !matches!(
+            m,
+            Message::DiskScan(_) | Message::DiskVolumes(_) | Message::Job(_) | Message::WolChanged(_)
+        ) && !send(m)
+        {
             return;
+        }
+        if let Some(v) = slots.wol.take() {
+            if !send(Message::WolChanged(Box::new(v))) {
+                return;
+            }
         }
         if let Some(v) = slots.volumes.take() {
             if !send(Message::DiskVolumes(v)) {
@@ -224,6 +237,7 @@ mod tests {
             &Slots {
                 scans: &slot,
                 volumes: &VolumesSlot::default(),
+                wol: &WolSlot::default(),
                 jobs: &JobSlot::default(),
             },
             |m| {
@@ -243,6 +257,49 @@ mod tests {
             .collect();
         assert_eq!(scans, vec![(7, 4), (8, 1)], "the newest event of each scan, once");
         assert_eq!(got.len(), QUEUE + 2, "the other frames are all there too");
+    }
+
+    /// A slow app: its queue is full of other frames when the wake list changes twice. The newest list must still arrive, once (a lost
+    /// push left the Wake devices page showing an old list; Linux CI lost it about once in 20 runs).
+    #[test]
+    fn a_wake_list_survives_a_full_queue() {
+        let (tx, rx) = sync_channel::<Message>(QUEUE);
+        let slot = WolSlot::default();
+        for _ in 0..QUEUE {
+            tx.send(Message::Request(Box::new(dyno_core::protocol::Request::Health))).unwrap();
+        }
+        let list = |enabled| dyno_core::wol::WolView {
+            enabled,
+            devices: vec![],
+            can_send: dyno_core::power::Capability::default(),
+        };
+        for enabled in [false, true] {
+            slot.put(list(enabled));
+            assert!(
+                tx.try_send(Message::WolChanged(Box::new(list(enabled)))).is_err(),
+                "the queue is full"
+            );
+        }
+        drop(tx);
+        let mut got = Vec::new();
+        pump(
+            &rx,
+            &Slots {
+                scans: &ScanSlot::default(),
+                volumes: &VolumesSlot::default(),
+                wol: &slot,
+                jobs: &JobSlot::default(),
+            },
+            |m| {
+                got.push(m);
+                true
+            },
+        );
+        let lists: Vec<bool> = got
+            .iter()
+            .filter_map(|m| if let Message::WolChanged(v) = m { Some(v.enabled) } else { None })
+            .collect();
+        assert_eq!(lists, [true], "the newest wake list, once");
     }
 
     #[test]
@@ -268,6 +325,7 @@ mod tests {
             &Slots {
                 scans: &slot,
                 volumes: &VolumesSlot::default(),
+                wol: &WolSlot::default(),
                 jobs: &JobSlot::default(),
             },
             |_| false,
@@ -281,6 +339,7 @@ mod tests {
             &Slots {
                 scans: &slot,
                 volumes: &VolumesSlot::default(),
+                wol: &WolSlot::default(),
                 jobs: &JobSlot::default(),
             },
             |_| {
@@ -325,6 +384,7 @@ mod tests {
             &Slots {
                 scans: &scans,
                 volumes: &volumes,
+                wol: &WolSlot::default(),
                 jobs: &JobSlot::default(),
             },
             |m| {
@@ -382,6 +442,7 @@ mod tests {
             &Slots {
                 scans: &ScanSlot::default(),
                 volumes: &VolumesSlot::default(),
+                wol: &WolSlot::default(),
                 jobs: &jobs,
             },
             |m| {

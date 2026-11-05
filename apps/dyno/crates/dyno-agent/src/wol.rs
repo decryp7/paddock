@@ -8,7 +8,7 @@
 
 use crate::agent::{lock, now, Shared};
 use dyno_core::power::Capability;
-use dyno_core::protocol::{AgentError, ErrorCode, Message};
+use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::wol::plan::plan_sends;
 use dyno_core::wol::wake::{run_wake, Pacer, WakePhase, WakePorts, WakeRequest, WolOutcome};
 use dyno_core::wol::WolClock;
@@ -231,7 +231,7 @@ impl WolCentre {
     /// The list after a change, pushed to every connected app (the tray's Wake submenu follows it).
     fn changed(&self, shared: &Shared) -> Result<WolView, AgentError> {
         let view = self.view(shared)?;
-        shared.broadcast(&Message::WolChanged(Box::new(view.clone())));
+        shared.broadcast_wol(&view);
         Ok(view)
     }
 

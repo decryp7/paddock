@@ -109,6 +109,23 @@ impl VolumesSlot {
     }
 }
 
+/// The Wake-on-LAN list, newest only: it is the whole list, so the newest replaces the older, and it is never dropped for a full queue
+/// (a lost push left the Wake devices page showing an old list until it asked again).
+#[derive(Default)]
+pub struct WolSlot(Mutex<Option<dyno_core::wol::WolView>>);
+
+impl WolSlot {
+    /// Keeps `view` as the list waiting, replacing an older one.
+    pub fn put(&self, view: dyno_core::wol::WolView) {
+        *lock(&self.0) = Some(view);
+    }
+
+    /// The list waiting, if any; the slot is empty afterwards.
+    pub fn take(&self) -> Option<dyno_core::wol::WolView> {
+        lock(&self.0).take()
+    }
+}
+
 /// The value [`Sub::detail`] holds for `detail` (0 is "not subscribed yet").
 pub fn detail_code(detail: LiveDetail) -> u8 {
     match detail {
@@ -132,6 +149,8 @@ pub struct Sub {
     pub volumes: Arc<VolumesSlot>,
     /// Job statuses, latest per job, same reason.
     pub jobs: Arc<JobSlot>,
+    /// The wake list, newest only, same reason.
+    pub wol: Arc<WolSlot>,
 }
 
 impl Sub {
@@ -720,6 +739,15 @@ impl Shared {
         for s in lock(&self.subs).iter() {
             s.volumes.put(ticket, volumes.to_vec());
             let _ = s.tx.try_send(Message::DiskVolumes(Vec::new()));
+        }
+    }
+
+    /// Hands the wake list to every connected app: it replaces an older one that has not been sent yet, and the message only wakes the
+    /// connection's push thread, so a full queue cannot lose it.
+    pub fn broadcast_wol(&self, view: &dyno_core::wol::WolView) {
+        for s in lock(&self.subs).iter() {
+            s.wol.put(view.clone());
+            let _ = s.tx.try_send(Message::WolChanged(Box::new(view.clone())));
         }
     }
 
