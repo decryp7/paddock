@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { DISMISSED, provideContributions, SHELL_IDLE, SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import { assertContributionsValid, createFramed } from '@decryp7/paddock-ui/shell/testing';
 import { MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
-import type { AboutInfo, UpdateStatus, WhatsNew } from '../generated/about';
+import type { AboutInfo, UpdatePhase, UpdateStatus, WhatsNew } from '../generated/about';
 import { ABOUT_COMMANDS } from '../generated/about-commands';
 import { FILES_COMMANDS } from '../../files/generated/files-commands';
 import {
@@ -53,11 +53,11 @@ async function settle(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
 }
 
-function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main = false) {
+function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main = false, install?: MemoryUpdatesOptions['install']) {
   const notices: ShellNotice[] = [];
   const opened: string[] = [];
   const about = new MemoryAboutBackend(INFO, { notices: '# Third-party notices\n\nlong list', mit: 'MIT License' }, NOTES, 'show');
-  const updates = new MemoryUpdatesBackend({ currentVersion: INFO.version, server, release: RELEASE, channels: [{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }] });
+  const updates = new MemoryUpdatesBackend({ currentVersion: INFO.version, server, release: RELEASE, channels: [{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }], install });
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
@@ -90,11 +90,12 @@ describe('the wire', () => {
     channels: [],
     endpointHost: null,
     releasesPage: null,
+    install: { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null },
   };
 
   it('accepts what the engine sends and refuses anything else', () => {
     expect(parseUpdateStatus(status)).toBe(status);
-    for (const bad of [null, [], {}, { ...status, phase: { kind: 'exploded' } }, { ...status, phase: null }, { ...status, channels: 3 }, { ...status, phase: { kind: 1 } }]) {
+    for (const bad of [null, [], {}, { ...status, phase: { kind: 'exploded' } }, { ...status, phase: null }, { ...status, channels: 3 }, { ...status, phase: { kind: 1 } }, { ...status, install: null }, { ...status, install: { scope: 'elsewhere', installOnQuitAvailable: true } }]) {
       expect(parseUpdateStatus(bad)).toBeNull();
     }
     expect(parseAboutInfo(INFO)).toBe(INFO);
@@ -540,6 +541,48 @@ describe('the dialogs', () => {
     await fixture.whenStable();
     expect((await updates.status()).channel).toBe('beta');
     expect(text(el)).toContain('Not checked yet.');
+  });
+
+  it('Updates for a per-machine copy has an Install button, the administrator text, no install on quit, and waits while an installer runs', async () => {
+    const notice = 'An administrator must install this update. Windows will ask for an administrator\'s name and password.';
+    const { updates } = bed('release', [], false, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: notice });
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    button(el, 'Check now').click();
+    await settle();
+    await fixture.whenStable();
+    button(el, 'Download').click();
+    await settle();
+    await fixture.whenStable();
+    expect(text(el)).toContain('downloaded and its signature verified');
+    expect(el.querySelector('[data-testid="updates-administrator"]')?.textContent).toBe(notice);
+    expect(text(el)).not.toContain('Install when the app quits');
+    expect(button(el, 'Install')).toBeTruthy();
+    expect(text(el)).not.toContain('Restart to update');
+    (updates as unknown as { set: (p: UpdatePhase) => void }).set({ kind: 'installerRunning', version: '1.5.0' });
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('[data-testid="updates-installer-running"]')?.textContent).toContain('An update is being installed');
+  });
+
+  it('Updates offers Install again after a declined or failed hand-off, and it looks for the update and downloads it again', async () => {
+    const { updates } = bed('release', [], false, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: null });
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    const error = { kind: 'declined', message: 'Not installed: Windows permission was declined.', nextStep: 'Click Install again and choose Yes in the Windows prompt.', detail: null } as const;
+    (updates as unknown as { set: (p: UpdatePhase) => void }).set({ kind: 'failed', error, info: null });
+    await settle();
+    await fixture.whenStable();
+    expect(text(el)).toContain('Not installed: Windows permission was declined.');
+    button(el, 'Install again').click();
+    await settle();
+    await settle();
+    await fixture.whenStable();
+    expect(['downloading', 'ready']).toContain((await updates.status()).phase.kind);
   });
 
   it('Updates shows a refused signature with its next step, and nothing to press without a key', async () => {

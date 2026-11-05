@@ -79,7 +79,9 @@ pub fn to_res(info: &VersionInfo) -> Vec<u8> {
 
 /// `FILEVERSION` words from `major.minor.patch` text (zeros when it is not numeric).
 fn numeric_version(text: &str) -> (u32, u32) {
-    let parts: Vec<Option<u16>> = text.split('.').take(3).map(|p| p.parse().ok()).collect();
+    // A prerelease or build suffix (`1.1.0-test.1`, `1.1.0+5`) is not part of the numeric words.
+    let core = text.split(['-', '+']).next().unwrap_or(text);
+    let parts: Vec<Option<u16>> = core.split('.').take(3).map(|p| p.parse().ok()).collect();
     match parts.as_slice() {
         [Some(a), Some(b), Some(c)] => ((u32::from(*a) << 16) | u32::from(*b), u32::from(*c) << 16),
         _ => (0, 0),
@@ -200,6 +202,13 @@ mod tests {
         let at2 = find(&r2, &0xFEEF04BDu32.to_le_bytes()).unwrap();
         assert_eq!(u32_at(&r2, at2 + 8), (2 << 16) | 10);
         assert_eq!(u32_at(&r2, at2 + 12), 3 << 16);
+    }
+
+    #[test]
+    fn a_prerelease_or_build_suffix_does_not_zero_the_numbers() {
+        assert_eq!(numeric_version("1.1.0-test.1"), numeric_version("1.1.0"));
+        assert_eq!(numeric_version("1.1.0+build.5"), numeric_version("1.1.0"));
+        assert_ne!(numeric_version("1.1.0-test.1"), (0, 0));
     }
 
     #[test]

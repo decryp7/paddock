@@ -18,6 +18,11 @@ pub const AGENT: &str = "dy.agent";
 /// it clears by itself when a host appears.
 pub const TRAY: &str = "dy.tray";
 
+/// The installer's helper program `paddock-setup.exe` (per-machine Windows installs, ADR 0053): a line on the chip when it is not
+/// the version of this Dyno, which means the installer could not replace it while it ran. Nothing to retry; running the
+/// installer again clears it at the next start.
+pub const SETUP: &str = "dy.setup";
+
 /// How long a repair waits for the link to come back before it says it did not.
 const REPAIR_WAIT: Duration = Duration::from_secs(8);
 
@@ -87,6 +92,31 @@ pub fn tray_problem(availability: &dyno_core::tray_host::TrayAvailability) -> Op
     }
 }
 
+/// The line for a `paddock-setup.exe` of another version, or `None` when it matches.
+pub fn setup_problem(check: &paddock_setup::versioncheck::VersionCheck) -> Option<Cause> {
+    check.is_problem().then(|| {
+        Cause::new(check.sentence())
+            .hint("Run the Dyno installer again.")
+            .code("dy.setup.version")
+    })
+}
+
+/// Checks the installed `paddock-setup.exe` against this Dyno's version (Windows, at start) and reports a mismatch.
+#[cfg(windows)]
+pub fn check_setup_version<R: Runtime>(app: &AppHandle<R>, install_dir: &std::path::Path) {
+    let expected = paddock_setup::versioncheck::Version::parse(env!("CARGO_PKG_VERSION")).ok();
+    let found = paddock_setup::native::fileversion::file_version(&install_dir.join("paddock-setup.exe"));
+    if let Err(why) = &found {
+        crate::logging::info(&format!("paddock-setup.exe: the version could not be read: {why}"));
+    }
+    let Some(expected) = expected else { return };
+    let check = paddock_setup::versioncheck::compare(found.as_ref().ok(), &expected);
+    crate::logging::info(&format!("paddock-setup.exe version check: {}", check.sentence()));
+    if let (Some(cause), Some(health)) = (setup_problem(&check), app.try_state::<Arc<Health>>()) {
+        health.down(SETUP, cause, None);
+    }
+}
+
 /// Reports the tray's availability to the chip: the line while no host shows the icons, cleared when one does.
 pub fn report_tray<R: Runtime>(app: &AppHandle<R>, availability: &dyno_core::tray_host::TrayAvailability) {
     let Some(health) = app.try_state::<Arc<Health>>().map(|h| h.inner().clone()) else {
@@ -133,10 +163,15 @@ impl<R: Runtime> Hub<R> {
     /// The services, in the order the status bar lists them.
     pub fn services(&self) -> Vec<ServiceSpec> {
         let hub = self.clone();
-        vec![
+        #[allow(unused_mut)]
+        let mut specs = vec![
             ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect()),
             ServiceSpec::new(TRAY, "the tray icons"),
-        ]
+        ];
+        // The installer program exists in the per-machine Windows install only.
+        #[cfg(windows)]
+        specs.push(ServiceSpec::new(SETUP, "the installer program"));
+        specs
     }
 
     /// The repair: the link reconnects with backoff on its own, so this waits (bounded) for it and says what it found.
@@ -194,6 +229,20 @@ impl<R: Runtime> Hub<R> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_setup_program_of_another_version_is_a_line_with_the_next_step() {
+        use paddock_setup::versioncheck::{compare, Version};
+        let new = Version::new(1, 1, 0);
+        assert!(super::setup_problem(&compare(Some(&new), &new)).is_none());
+        let cause = super::setup_problem(&compare(Some(&Version::new(1, 0, 0)), &new)).expect("a mismatch is reported");
+        let text = format!("{cause:?}");
+        assert!(text.contains("1.0.0") && text.contains("Run the Dyno installer again"), "{text}");
+        assert!(
+            super::setup_problem(&compare(None, &new)).is_some(),
+            "an unreadable version is reported too"
+        );
+    }
+
     use super::*;
 
     fn status(state: AgentState, message: Option<&str>) -> AgentStatus {

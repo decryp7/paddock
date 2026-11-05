@@ -60,6 +60,9 @@ paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }
 paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }
+# The per-machine hand-off's contract (which download `apply-update` accepts, its exit codes' sentences) and the installer lock
+# (ADR 0053 section 4); `paddock-updater` cannot depend on it, so the app wires it in (`per_machine`).
+paddock-setup = { path = "../../../../crates/paddock-setup" }
 paddock-download = { path = "../../../../crates/paddock-download", features = ["tauri"] }
 paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
 log = { version = "0.4", features = ["kv"] }

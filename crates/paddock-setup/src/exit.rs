@@ -19,6 +19,8 @@ pub enum Exit {
     Failed,
     /// `stop-all`: a listed program still runs (ADR section 3, exit 11).
     StillRunning,
+    /// `check-version`: the installed `paddock-setup.exe` has another version than expected (only reported).
+    VersionMismatch,
     /// `apply-update` refused.
     Refused(Refusal),
 }
@@ -34,6 +36,7 @@ impl Exit {
             Exit::Usage => 4,
             Exit::Failed => 5,
             Exit::StillRunning => 11,
+            Exit::VersionMismatch => 12,
             Exit::Refused(r) => r.code(),
         }
     }
@@ -48,6 +51,7 @@ impl Exit {
             Exit::Usage,
             Exit::Failed,
             Exit::StillRunning,
+            Exit::VersionMismatch,
         ]
         .into_iter()
         .find(|e| e.code() == code)
@@ -64,6 +68,7 @@ impl Exit {
             Exit::Usage => "the setup program was started with wrong arguments",
             Exit::Failed => "the setup program failed; the reason is in setup.log",
             Exit::StillRunning => "a program of the app is still running for another user",
+            Exit::VersionMismatch => "paddock-setup.exe is not the version being installed",
             Exit::Refused(r) => r.sentence(),
         }
     }
@@ -100,6 +105,7 @@ mod tests {
             Exit::Usage,
             Exit::Failed,
             Exit::StillRunning,
+            Exit::VersionMismatch,
         ];
         v.extend(Refusal::ALL.into_iter().map(Exit::Refused));
         v

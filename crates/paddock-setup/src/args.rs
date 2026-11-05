@@ -89,6 +89,14 @@ pub enum Command {
         /// `$INSTDIR`, for the log.
         dir: Option<String>,
     },
+    /// `check-version --dir <install folder> --expect <version>`: compares the installed `paddock-setup.exe`'s `FileVersion` with
+    /// the version the installer installs; exit 12 on a mismatch (the include only reports it).
+    CheckVersion {
+        /// `$INSTDIR`.
+        dir: String,
+        /// The version expected.
+        expect: Version,
+    },
     /// `self-test`: prints the baked identifier, product and the update key's fingerprint (the ADR 0039 gate).
     SelfTest,
 }
@@ -306,6 +314,13 @@ pub fn parse(args: &[String]) -> Result<Command, UsageError> {
         "hold-installing" => Command::HoldInstalling {
             dir: o.optional("--dir")?,
         },
+        "check-version" => Command::CheckVersion {
+            dir: o.required("--dir")?,
+            expect: Version::parse(&o.required("--expect")?).map_err(|_| UsageError::Invalid {
+                option: "--expect",
+                reason: "not a semantic version",
+            })?,
+        },
         "self-test" => Command::SelfTest,
         other => return Err(UsageError::UnknownCommand(other.to_string())),
     };
@@ -324,6 +339,19 @@ mod tests {
             .map(String::from)
             .collect();
         parse(&v)
+    }
+
+    #[test]
+    fn check_version_takes_a_folder_and_a_version() {
+        assert_eq!(
+            p(r"check-version|--dir|C:\Program Files\X|--expect|1.1.0").unwrap(),
+            Command::CheckVersion {
+                dir: r"C:\Program Files\X".into(),
+                expect: Version::new(1, 1, 0)
+            }
+        );
+        assert!(p(r"check-version|--dir|C:\x|--expect|soon").is_err());
+        assert!(p(r"check-version|--dir|C:\x").is_err());
     }
 
     #[test]

@@ -3995,6 +3995,7 @@ dependencies = [
  "tauri-plugin-updater",
  "tempfile",
  "ts-rs",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

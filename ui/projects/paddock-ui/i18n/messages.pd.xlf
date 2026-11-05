@@ -881,6 +881,9 @@
       <trans-unit id="pd.health.state.repairing" datatype="html">
         <source>repairing</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.setup-version" datatype="html">
+        <source>out of date</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.still-starting" datatype="html">
         <source>still starting</source>
       </trans-unit>
@@ -2567,8 +2570,17 @@
       <trans-unit id="pd.updates.idle" datatype="html">
         <source>Not checked yet.</source>
       </trans-unit>
+      <trans-unit id="pd.updates.install" datatype="html">
+        <source>Install</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.install-again" datatype="html">
+        <source>Install again</source>
+      </trans-unit>
       <trans-unit id="pd.updates.install-on-quit" datatype="html">
         <source>Install when the app quits</source>
+      </trans-unit>
+      <trans-unit id="pd.updates.installer-running" datatype="html">
+        <source>An update is being installed. This window updates when the installer is done.</source>
       </trans-unit>
       <trans-unit id="pd.updates.installing" datatype="html">
         <source>Installing version <x id="version"/>…</source>

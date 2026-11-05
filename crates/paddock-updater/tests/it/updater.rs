@@ -112,12 +112,8 @@ struct FakeInstaller {
 }
 
 impl Installer for FakeInstaller {
-    fn install(
-        &self,
-        file: &Path,
-        manifest: &serde_json::Value,
-        relaunch: bool,
-    ) -> Result<(), UpdateError> {
+    fn install(&self, pkg: &Package<'_>, relaunch: bool) -> Result<(), UpdateError> {
+        let (file, manifest) = (pkg.file, pkg.manifest);
         assert_eq!(
             std::fs::read(file).unwrap(),
             package(),

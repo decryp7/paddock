@@ -30,9 +30,38 @@
   !insertmacro PADDOCK_STOP_ALL
 !macroend
 
+; H1 (Dyno ADR 0027 amendment): an update refreshes the protected helper, under three conditions. (1) Only when the DynoHelper
+; service is installed: `refresh` does nothing when the helper is not installed or is current, so a fresh install never turns the
+; helper on. (2) It runs from the newly installed copy in $INSTDIR, keeping the recorded owner, the policy file and the data.
+; (3) A failure never fails the install: it is printed here and the helper's own audit log has the reason; Settings then shows
+; "Outdated" with "Update the helper". POSTINSTALL runs before .onInstSuccess starts Dyno again, so the restarted app finds the
+; refreshed helper serving.
+!macro _DYNO_REFRESH_HELPER
+  ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Services\DynoHelper" "ImagePath"
+  ${If} $0 != ""
+    DetailPrint "dyno-helper refresh"
+    ; Two minutes at most: a hung refresh must not hold the update. "timeout" is what nsExec answers when the time runs out.
+    nsExec::ExecToLog /TIMEOUT=120000 '"$INSTDIR\dyno-helper.exe" refresh'
+    Pop $0
+    DetailPrint "dyno-helper refresh: exit code $0"
+    ${If} $0 != 0
+      DetailPrint "NOTE the helper was not refreshed (code $0); Settings > Helper offers Update the helper"
+      ; And in setup.log, where the rest of an update's story is (the helper's own reason is in its audit log).
+      ClearErrors
+      FileOpen $R6 "$INSTDIR\updates\setup.log" a
+      ${IfNot} ${Errors}
+        FileSeek $R6 0 END
+        FileWrite $R6 "NOTE dyno-helper refresh did not finish (code $0); the helper keeps its older version$\r$\n"
+        FileClose $R6
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   !insertmacro PADDOCK_INSTALL_SETUP
   !insertmacro PADDOCK_CLEAN_RUN_VALUES
+  !insertmacro _DYNO_REFRESH_HELPER
   !insertmacro PADDOCK_FINISH_INSTALL
 !macroend
 

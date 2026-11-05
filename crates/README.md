@@ -799,7 +799,16 @@ Updates, About and What's New. With the `tauri` feature (and `install` for the i
 .run(|app, e| if let tauri::RunEvent::Exit = e { paddock_updater::tauri::on_exit(app); })
 ```
 
-The release address is `plugins.updater.endpoints[0]` (the `stable` channel) unless the builder names channels. Checks
+The release address is `plugins.updater.endpoints[0]` (the `stable` channel) unless the builder names channels.
+
+**Per-machine Windows install (ADR 0053).** `Installer::install(&Package, relaunch)`; the app declares
+`UpdatesBuilder::install_scope(InstallScope::PerMachine, Some(install_dir), Some(is_administrator))`, sets the installer to
+`ElevatedHandoff::new(install_dir, Arc::new(ShellElevator), contract)?` (an `Err` means no hand-off: nothing is elevated from a
+folder that fails the contract) and `installer_lock(..)`. `SetupContract` and `InstallerLock` are implemented by the app over
+`paddock-setup` (which depends on this crate): `check_install_dir` (the `check-dir` rule), `check_download` (a plain local path, no
+link above it), `sentence` (`apply-update`'s own exit codes only; any other code is an unknown outcome). A per-machine copy
+refuses install on quit, records a hand-off before it installs, never relaunches itself, and at the next start waits for a
+running installer (phase `InstallerRunning`, `settle_handoff`) and then shows "The installer stopped before it finished". Checks
 and downloads are jobs on the app's `paddock-jobs` registry and use the app's `paddock-download` downloader; the UI is
 `@decryp7/paddock-ui/shell/about`.
 
@@ -1626,7 +1635,9 @@ resource `PADDOCK_SETUP_PRODUCT` and `PADDOCK_SETUP_VERSION`: `FileDescription` 
   `has_proc_installed`), so `--workspace --all-features` builds before and after plan S1 merges.
 - **Windows tests** (`tests/vm`): every test is `#[ignore]` and refuses to run without `PADDOCK_SETUP_VM=1`; they create folders
   under Program Files and HKLM values and run only on the Windows test VM (ER-14), never in CI.
-- **App side:** `paddock_setup::installer_probe` / `wait_for_installer` (Windows) and `handoff::still_installing`.
+- **App side:** `paddock_setup::installer_probe` / `wait_for_installer` (Windows), `handoff::still_installing`, `checkdir::check`
+  with `native::RealDirs` for the app's own install folder, and `versioncheck::compare` with `native::fileversion::file_version`
+  for the start-up check of `paddock-setup.exe`'s `FileVersion` (`check-version` is the installer's).
 - **Used by:** the apps' installer hooks (S4) and `paddock-updater`'s `ElevatedHandoff` (S5); the app also calls
   `guard::per_user_copy`.
 

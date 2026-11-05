@@ -27,11 +27,14 @@
 mod native;
 #[cfg(feature = "install")]
 pub use native::PluginInstaller;
+#[cfg(all(windows, feature = "install"))]
+pub use native::{ShellElevator, is_administrator};
 
 #[cfg(doc)]
 use crate::UpdatePhase;
 use crate::{
-    About, AboutInfo, CancelOutcome, Channel, ExitAction, Installer, Preferences, RecordStore,
+    About, AboutInfo, CancelOutcome, Channel, ExitAction, INSTALLER_WAIT_BOUND,
+    INSTALLER_WAIT_SLICE, InstallScope, Installer, InstallerLock, Preferences, RecordStore,
     STATUS_EVENT, ServiceHooks, ServicesOutcome, Target, UpdateError, UpdateErrorDto, UpdateKey,
     UpdateStatus, Updater, UpdaterConfig, WhatsNew, WhatsNewDecision,
 };
@@ -133,6 +136,10 @@ pub struct UpdatesBuilder {
     hooks: Option<Arc<dyn ServiceHooks>>,
     installer: Option<Arc<dyn Installer>>,
     installer_kind: Option<String>,
+    scope: InstallScope,
+    install_dir: Option<PathBuf>,
+    administrator: Option<bool>,
+    installer_lock: Option<Arc<dyn InstallerLock>>,
     max_download_bytes: Option<u64>,
     auto_check_delay_secs: Option<u64>,
     downloader: Option<Arc<Downloader>>,
@@ -155,6 +162,10 @@ impl UpdatesBuilder {
             hooks: None,
             installer: None,
             installer_kind: None,
+            scope: InstallScope::PerUser,
+            install_dir: None,
+            administrator: None,
+            installer_lock: None,
             max_download_bytes: None,
             auto_check_delay_secs: None,
             downloader: None,
@@ -212,6 +223,27 @@ impl UpdatesBuilder {
 
     pub fn installer(mut self, installer: Arc<dyn Installer>) -> Self {
         self.installer = Some(installer);
+        self
+    }
+
+    /// Where the app is installed (default per user). A per-machine app (ADR 0053): updates install only when the user clicks
+    /// Install (the installer is the app's [`ElevatedHandoff`]), `install_dir` is its folder (the texts name its
+    /// `updates\setup.log`), `administrator` says whether this account may approve the prompt itself.
+    pub fn install_scope(
+        mut self,
+        scope: InstallScope,
+        install_dir: Option<PathBuf>,
+        administrator: Option<bool>,
+    ) -> Self {
+        self.scope = scope;
+        self.install_dir = install_dir;
+        self.administrator = administrator;
+        self
+    }
+
+    /// The installer lock of a per-machine app: at start the updater waits on it, bounded, while another user's install runs.
+    pub fn installer_lock(mut self, lock: Arc<dyn InstallerLock>) -> Self {
+        self.installer_lock = Some(lock);
         self
     }
 
@@ -335,6 +367,9 @@ pub fn install<R: Runtime>(
     if let Some(delay) = b.auto_check_delay_secs {
         config.auto_check_delay_secs = delay;
     }
+    config.scope = b.scope;
+    config.install_dir = b.install_dir.clone();
+    config.administrator = b.administrator;
     let handle = app.clone();
     let mut updater = Updater::new(
         config,
@@ -349,6 +384,9 @@ pub fn install<R: Runtime>(
     }
     if let Some(h) = b.hooks {
         updater = updater.with_service_hooks(h);
+    }
+    if let Some(l) = b.installer_lock {
+        updater = updater.with_installer_lock(l);
     }
     let available = updater.available();
     let mut about = About::new(&b.app_name, &version, records)
@@ -381,8 +419,22 @@ pub fn install<R: Runtime>(
     Ok(updates)
 }
 
-/// The start-up work off the main thread: the services' hook once per version change, then the automatic check whenever
-/// it is due (looked at every `poll`) until [`Updates::stop`].
+/// One more wait slice: the time waited so far and whether a whole [`INSTALLER_WAIT_BOUND`] has now passed (then the count
+/// starts again and one line is logged). A slice that returned at once still counts a tenth of a slice, so a lock that cannot
+/// wait never spins without the line coming.
+fn advance_wait(waited: Duration, took: Duration) -> (Duration, bool) {
+    let next = waited + took.max(INSTALLER_WAIT_SLICE / 10);
+    if next >= INSTALLER_WAIT_BOUND {
+        (Duration::ZERO, true)
+    } else {
+        (next, false)
+    }
+}
+
+/// The start-up work off the main thread: the services' hook once per version change, then, until [`Updates::stop`], either the
+/// wait for an installer that is running (in slices of [`INSTALLER_WAIT_SLICE`], so a stop is noticed; each
+/// [`INSTALLER_WAIT_BOUND`] that passes is logged and the wait goes on) or the automatic check whenever it is due (looked at
+/// every `poll`).
 pub fn background(updates: Arc<Updates>, poll: Duration) -> Option<std::thread::JoinHandle<()>> {
     let spawned = std::thread::Builder::new().name("paddock-updates".into()).spawn(move || {
         match updates.updater.on_start() {
@@ -394,7 +446,26 @@ pub fn background(updates: Arc<Updates>, poll: Duration) -> Option<std::thread::
                 log::error!("Registering the services for this version failed (retried at the next start): {e}")
             }
         }
+        let (mut waited, since) = (Duration::ZERO, std::time::Instant::now());
         while !updates.stopped.load(Ordering::SeqCst) {
+            // While another user's installer runs, nothing else starts (ADR 0053 section 4.1 step 4). The wait is bounded
+            // per slice, never forever in one call; what a bound that passes means is logged (ER-27).
+            if updates.updater.installer_running() {
+                let slice_began = std::time::Instant::now();
+                if updates.updater.settle_handoff(INSTALLER_WAIT_SLICE) {
+                    log::warn!(Ms = u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX); "The installer of a newer version stopped before it finished; shown in the Updates dialog");
+                    continue;
+                }
+                let (now_waited, bound_passed) = advance_wait(waited, slice_began.elapsed());
+                waited = now_waited;
+                if bound_passed {
+                    log::warn!(Seconds = since.elapsed().as_secs(); "The installer of a newer version is still running; still waiting (the Updates dialog says so)");
+                }
+                if slice_began.elapsed() < INSTALLER_WAIT_SLICE / 10 {
+                    std::thread::park_timeout(poll);
+                }
+                continue;
+            }
             if updates.updater.auto_check_due() {
                 let _ = updates.start_check();
             }

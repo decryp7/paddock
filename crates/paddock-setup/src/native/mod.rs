@@ -4,6 +4,7 @@
 
 mod apply;
 mod facts;
+pub mod fileversion;
 mod folders;
 mod handle;
 mod hold;
@@ -20,7 +21,8 @@ use crate::checkdir::{self, CheckedDir};
 use crate::exit::Exit;
 use crate::log::{Clock, NoLog, SetupLog, Sink};
 use crate::{BAKED, guard, runvalues, samefolder, selftest, staging, stop};
-use facts::{Machine, RealDirs};
+use facts::Machine;
+pub use facts::RealDirs;
 use logfs::{FileLog, SystemClock};
 use registry::{Root, View};
 use std::path::PathBuf;
@@ -205,6 +207,28 @@ fn run(command: Command) -> Exit {
                     Exit::Ok
                 },
             )
+        }
+        Command::CheckVersion { dir, expect } => {
+            let Ok((proof, mut log)) = checked(&dir) else {
+                return Exit::BadDir;
+            };
+            let installed =
+                fileversion::file_version(&PathBuf::from(proof.path()).join("paddock-setup.exe"));
+            if let Err(why) = &installed {
+                log.line(
+                    "check-version",
+                    &format!("the version could not be read: {why}"),
+                );
+            }
+            let check = crate::versioncheck::compare(installed.as_ref().ok(), &expect);
+            log.line("check-version", &check.sentence());
+            say(&check.sentence());
+            let exit = if check.is_problem() {
+                Exit::VersionMismatch
+            } else {
+                Exit::Ok
+            };
+            finish(&mut log, exit)
         }
         Command::CleanStaging { dir, keep } => {
             let Ok((proof, mut log)) = checked(&dir) else {
