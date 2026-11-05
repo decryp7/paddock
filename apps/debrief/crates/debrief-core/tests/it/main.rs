@@ -19,6 +19,7 @@ mod known_issues_incident_playbooks;
 mod live_session;
 mod logstore_forwarders;
 mod mixed_sources;
+mod offset_before_comma;
 mod names_eval;
 mod names_perf;
 mod names_search;

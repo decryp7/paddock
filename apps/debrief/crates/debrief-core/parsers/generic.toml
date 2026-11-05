@@ -58,6 +58,12 @@ regexes = [
   '^(?P<timestamp>\d{4}-\d{2}-\d{2}[ T,]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?: ?(?:Z|[+-]\d{2}:?\d{2}))?)\s+\[(?P<Thread>[^\]]+)\]\s+(?P<level>[A-Za-z]+)\s+(?P<Logger>\S+)\s+(?:\[?(?P<Ndc>[^\]\s]*)\]?\s+)?-\s(?P<message>.*)$',
   # Python logging: %(asctime)s - %(name)s - %(levelname)s - %(message)s
   '^(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:[.,]\d{1,6})?) - (?P<Logger>\S+) - (?P<level>[A-Za-z]+) - (?P<message>.*)$',
+  # A timestamp with an offset straight followed by a comma ("2026/10/25 02:30:00 +02:00,message", comma separated
+  # message histories). The generic regex below wants white space after the timestamp, so it would backtrack, drop the
+  # offset from the timestamp and leave it in the message. The date and time are not comma separated here (that is the
+  # log4net CSV parser's `date,time+offset`, which has its own parser). Same tail as the generic regex; it must stay in front of it
+  # (the first of equally good regexes wins).
+  '^\[?(?P<timestamp>\d{4}[-/.]\d{2}[-/.]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})? ?(?:Z|[+-]\d{2}:?\d{2}))(?:\],?\s*|,\s*|\s+)(?:-\s+)?(?:(?:\d+\s+)?\[?(?P<level>(?i:VRB|DBG|INF|WRN|ERR|FTL|TRACE|DEBUG|INFO|NOTICE|NOTE|WARN|WARNING|ERROR|FATAL|CRITICAL|VERBOSE|INFORMATION))\s*(?:\][:|-]?\s*|[:|-]?\s+))?(?P<message>.*)$',
   # Generic: a timestamp, maybe in brackets or followed by "," or " - " (log4j, Kafka, Elasticsearch,
   # ZooKeeper, CBS), then maybe a thread or process number and a level in any case (MySQL, OpenStack), then
   # the message.
