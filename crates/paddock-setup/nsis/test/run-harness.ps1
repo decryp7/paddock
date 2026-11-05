@@ -81,33 +81,37 @@ Remove-Item $key -ErrorAction SilentlyContinue
 # B: check-dir refused
 $b = Join-Path $base 'b'
 $r = Run $installer "/S /D=$b" @{ PADDOCK_STUB_EXIT_CHECK_DIR = '3' }
-Check 'B check-dir refusal exit 3' ($r.Code -eq 3) "code $($r.Code)"
+Check 'B check-dir refusal exit 21 (its own code, not NSIS cancel)' ($r.Code -eq 21) "code $($r.Code)"
 Check 'B empty folder removed' (-not (Test-Path $b)) 'folder left'
-Check 'B message' ($r.Lines -match 'ABORT level 3: Install PaddockHarness in Program Files') ($r.Lines -join '|')
+Check 'B message' ($r.Lines -match 'ABORT level 21: Install PaddockHarness in Program Files') ($r.Lines -join '|')
 Check 'B nothing after the refusal' (-not ($r.Lines -match '^stop-all')) ($r.Lines -join '|')
 
 # C: guard blocked, update with /R: starts the old copy as the desktop user
 $c = Join-Path $base 'c'
 $msg = "Uninstall the older PaddockHarness first (Settings > Apps), then run this installer again."
+Remove-Item (Join-Path $env:TEMP 'PaddockHarness-setup-refused.log') -ErrorAction SilentlyContinue
 $r = Run $installer "/S /UPDATE /R /D=$c" @{ PADDOCK_STUB_EXIT_GUARD = '2'; PADDOCK_STUB_OUT_GUARD = "$msg`r`nRESTART:C:\old copy\app.exe`r`n" }
-Check 'C guard exit 2' ($r.Code -eq 2) "code $($r.Code)"
+Check 'C guard exit 20 (its own code: NSIS uses 2 for a cancelled install)' ($r.Code -eq 20) "code $($r.Code)"
 Check 'C guard args carry update and restart' ($r.Lines -match '^guard --product "PaddockHarness" --main "harness.exe" --dir ".*" --update --restart$') ($r.Lines -join '|')
 Check 'C old copy started again' ($r.Lines -contains 'RunAsUser C:\old copy\app.exe') ($r.Lines -join '|')
-Check 'C message without the restart line' ($r.Lines -contains "ABORT level 2: $msg") ($r.Lines -join '|')
+Check 'C message without the restart line' ($r.Lines -contains "ABORT level 20: $msg") ($r.Lines -join '|')
 Check 'C empty folder removed' (-not (Test-Path $c)) 'folder left'
+# C3: the refusal is written where it survives (the folder is gone), and the details name that file
+$refusal = Join-Path $env:TEMP 'PaddockHarness-setup-refused.log'
+Check 'C3 refusal log in %TEMP%: the reason and where the details are' ((Test-Path $refusal) -and ((Get-Content $refusal -Raw) -match 'level 20: Uninstall the older PaddockHarness first') -and ((Get-Content $refusal -Raw) -match 'updates.setup.log')) ((Get-Content $refusal -Raw -ErrorAction SilentlyContinue))
 # C2: the same without /UPDATE: nothing started
 $r = Run $installer "/S /D=$c" @{ PADDOCK_STUB_EXIT_GUARD = '2'; PADDOCK_STUB_OUT_GUARD = "$msg`r`nRESTART:C:\old copy\app.exe" }
-Check 'C2 no restart without /UPDATE' ((-not ($r.Lines -match '^RunAsUser')) -and $r.Code -eq 2) ($r.Lines -join '|')
+Check 'C2 no restart without /UPDATE' ((-not ($r.Lines -match '^RunAsUser')) -and $r.Code -eq 20) ($r.Lines -join '|')
 
 # D: a listed program still runs
 $d = Join-Path $base 'd'
 $r = Run $installer "/S /D=$d" @{ PADDOCK_STUB_EXIT_STOP_ALL = '11' }
-Check 'D still running exit 4' ($r.Code -eq 4) "code $($r.Code)"
-Check 'D message' ($r.Lines -match 'ABORT level 4: PaddockHarness could not be closed for every signed-in user') ($r.Lines -join '|')
+Check 'D still running exit 22' ($r.Code -eq 22) "code $($r.Code)"
+Check 'D message' ($r.Lines -match 'ABORT level 22: PaddockHarness could not be closed for every signed-in user') ($r.Lines -join '|')
 Check 'D folder removed' (-not (Test-Path $d)) 'folder left'
 # D2: the tool itself failed
 $r = Run $installer "/S /D=$d" @{ PADDOCK_STUB_EXIT_STOP_ALL = '5' }
-Check 'D2 tool failure exit 5' ($r.Code -eq 5) "code $($r.Code)"
+Check 'D2 tool failure exit 23' ($r.Code -eq 23) "code $($r.Code)"
 
 Remove-Item $key -ErrorAction SilentlyContinue
 if ($fail -eq 0) { 'ALL PASS' } else { "FAILURES: $fail"; exit 1 }

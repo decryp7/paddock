@@ -302,3 +302,28 @@ fn clean_staging_is_told_the_installers_own_folder() {
     let t = canonical_include();
     assert!(t.contains(r#"clean-staging --dir "$R5" --keep "$R4""#));
 }
+
+/// A silent run must tell a refusal from NSIS's own endings (1 cancelled, 2 aborted), and the reason must outlive the folder.
+#[test]
+fn refusals_have_their_own_exit_levels_and_a_log_that_survives() {
+    let t = canonical_include();
+    for (name, n) in [
+        ("PER_USER", 20),
+        ("BAD_DIR", 21),
+        ("STILL_RUNNING", 22),
+        ("TOOL_FAILED", 23),
+    ] {
+        assert!(
+            t.contains(&format!("!define PADDOCK_LEVEL_{name} {n}\n")),
+            "{name} is {n}"
+        );
+    }
+    assert!(
+        t.contains(r#"$TEMP\${PRODUCTNAME}-setup-refused.log"#),
+        "the reason is written to %TEMP%"
+    );
+    assert!(
+        t.contains("Why it stopped is also written to"),
+        "the details say where"
+    );
+}

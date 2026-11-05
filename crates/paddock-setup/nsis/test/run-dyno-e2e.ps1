@@ -24,7 +24,7 @@ Remove-Item -Recurse -Force $inst -ErrorAction SilentlyContinue; Remove-Item $ke
 # 2 (first, on a fresh machine): the guard blocks; the real template's SetOutPath made the folder, the include removed it again
 $msg = 'Uninstall the older Dyno first (Settings > Apps), then run this installer again.'
 $r = Run $Installer '/S' @{ PADDOCK_STUB_EXIT_GUARD = '2'; PADDOCK_STUB_OUT_GUARD = "$msg`r`n" }
-Check 'guard blocks: exit code 2' ($r.Code -eq 2) "code $($r.Code)"
+Check 'guard blocks: exit code 20' ($r.Code -eq 20) "code $($r.Code)"
 Check 'guard blocks: the folder is gone' (-not (Test-Path $inst)) (Get-ChildItem $inst -Name -ErrorAction SilentlyContinue)
 Check 'guard blocks: nothing after it' (-not ($r.Lines -match '^stop-all|^clean')) ($r.Lines -join '|')
 Check 'guard blocks: no uninstall key' (-not (Test-Path $key)) 'key exists'
@@ -58,7 +58,7 @@ Cleanup
 # guard with /UPDATE /R: the old per-user copy is started again as the desktop user
 Remove-Item -Recurse -Force $inst, $key -ErrorAction SilentlyContinue
 $r = Run $Installer '/S /UPDATE /R' @{ PADDOCK_STUB_EXIT_GUARD = '2'; PADDOCK_STUB_OUT_GUARD = "$msg`r`nRESTART:$Root\old-copy.exe`r`n" }
-Check 'guard+restart: exit 2' ($r.Code -eq 2) "code $($r.Code)"
+Check 'guard+restart: exit 20' ($r.Code -eq 20) "code $($r.Code)"
 Check 'guard+restart: folder removed' (-not (Test-Path $inst)) 'folder left'
 
 # reinstall for the next cases

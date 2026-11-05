@@ -66,11 +66,13 @@
   !error "paddock-per-machine.generated.nsh must !define PADDOCK_STOP_IMAGES (comma-separated file names); run PADDOCK_WRITE_TS=1 cargo test -p paddock-service --lib per_machine"
 !endif
 
-; Error levels of a refusal ($INSTDIR\updates\setup.log has the detail).
-!define PADDOCK_LEVEL_PER_USER 2
-!define PADDOCK_LEVEL_BAD_DIR 3
-!define PADDOCK_LEVEL_STILL_RUNNING 4
-!define PADDOCK_LEVEL_TOOL_FAILED 5
+; Error levels of a refusal. The reason is also in %TEMP%\<product>-setup-refused.log; the tool's phases are in
+; $INSTDIR\updates\setup.log.
+; Their own numbers: NSIS itself ends with 1 (cancelled) and 2 (aborted or failed), so a silent /S run can tell the causes apart.
+!define PADDOCK_LEVEL_PER_USER 20
+!define PADDOCK_LEVEL_BAD_DIR 21
+!define PADDOCK_LEVEL_STILL_RUNNING 22
+!define PADDOCK_LEVEL_TOOL_FAILED 23
 
 !define PADDOCK_SETUP "$PLUGINSDIR\paddock-setup.exe"
 
@@ -308,6 +310,14 @@ Var PaddockHaveSetup
 ;   _RESTART  the full path of a program to start again as the desktop user, or "" (only used with /UPDATE and /R)
 !macro PADDOCK_ABORT _MSG _LEVEL _RESTART
   DetailPrint "${PRODUCTNAME}: ${_MSG}"
+  ; The reason survives the installer (a refused fresh install removes its folder): appended to a file in %TEMP%, named in the
+  ; details and the message. $INSTDIR\updates\setup.log holds the tool's own phases when it was written.
+  StrCpy $R7 "$TEMP\${PRODUCTNAME}-setup-refused.log"
+  FileOpen $R6 $R7 a
+  FileSeek $R6 0 END
+  FileWrite $R6 "level ${_LEVEL}: ${_MSG}$\r$\ndetails, when the tool ran: $INSTDIR\updates\setup.log$\r$\n"
+  FileClose $R6
+  DetailPrint "Why it stopped is also written to $R7"
   !insertmacro _PADDOCK_TEST_LOG "ABORT level ${_LEVEL}: ${_MSG}"
   !ifndef __UNINSTALL__
     ; A refusal during a fresh install removes the empty folder (not recursive; the setup.log stays on purpose).
@@ -329,7 +339,7 @@ Var PaddockHaveSetup
     ${EndIf}
   !endif
   IfSilent +2 0
-    MessageBox MB_ICONSTOP|MB_OK "${_MSG}"
+    MessageBox MB_ICONSTOP|MB_OK "${_MSG}$\r$\n$\r$\nDetails: $R7"
   SetErrorLevel ${_LEVEL}
   Quit
 !macroend
