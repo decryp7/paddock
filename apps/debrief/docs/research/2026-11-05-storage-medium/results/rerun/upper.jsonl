@@ -1,0 +1,53 @@
+{"step": "begin-shape", "t": "21:51:39", "load": 10.9}
+{"step": "shape", "segments": ["672,85254733,5258,128557.0,131072"], "sources": ["14255,14255"], "histogram": ["6362281"], "fields": ["1344"], "ord": ["85254733"], "promoted": ["36"], "cat_bytes": 401616896, "seg_bytes": 4323980875, "seg_files": 672, "index_bytes": 1193, "t": "21:51:43", "load": 10.3}
+{"step": "columns", "cols": ["15"], "sources_per_file": ["21.0,67"], "t": "21:51:44", "load": 10.3}
+{"step": "end-shape", "t": "21:51:44", "load": 10.3}
+{"step": "begin-zone", "t": "21:51:44", "load": 10.3}
+{"step": "zone-build", "runs": [], "peak_mib": 160, "rss_mib": 181, "wall": 0.54, "t": "21:51:44", "load": 10.3}
+{"step": "file-spans", "files": 672, "span_ms": 5167115872, "median_file_span_share": 0.08664864560637435, "p90": 0.7426697316378664, "rgs": ["1339,192646396.0"], "t": "21:51:44", "load": 10.3}
+{"step": "gate-window-1/5000", "files": 672, "minmax_median": 186.5, "minmax_p90": 281.0, "minmax_median_pct": 27.75, "rowgroups_median": 239.5, "rowgroups_p90": 398.1, "hist_files_median": 46.5, "hist_files_p90": 74.0, "hist_median_pct": 6.92, "rows_minmax": 23505406.0, "rows_hist": 5748101.0, "rows_in_window": 9560.5, "t": "21:51:46", "load": 10.0}
+{"step": "gate-window-1/500", "files": 672, "minmax_median": 188.5, "minmax_p90": 282.0, "minmax_median_pct": 28.05, "rowgroups_median": 241.0, "rowgroups_p90": 401.0, "hist_files_median": 65.0, "hist_files_p90": 100.0, "hist_median_pct": 9.67, "rows_minmax": 23707646.0, "rows_hist": 8079248.5, "rows_in_window": 144979.0, "t": "21:51:47", "load": 10.0}
+{"step": "gate-window-1/50", "files": 672, "minmax_median": 194.0, "minmax_p90": 298.1, "minmax_median_pct": 28.87, "rowgroups_median": 260.0, "rowgroups_p90": 434.40000000000003, "hist_files_median": 119.0, "hist_files_p90": 186.20000000000002, "hist_median_pct": 17.71, "rows_minmax": 24470218.5, "rows_hist": 15083782.5, "rows_in_window": 1865733.5, "t": "21:51:51", "load": 9.5}
+{"step": "gate-source", "files": 672, "row": ["7.0,8.0,1.0,1.0"], "t": "21:51:51", "load": 9.5}
+{"step": "gate-level", "files": 672, "row": ["1,672,672,25580279", "2,672,672,46883540", "3,672,672,8526650", "4,672,672,4264264"], "t": "21:51:51", "load": 9.5}
+{"step": "end-zone", "t": "21:51:51", "load": 9.5}
+{"step": "begin-seq", "t": "21:51:51", "load": 9.5}
+{"step": "picked", "n": 85254733, "source": "8966", "level": "2", "count": 99064, "lo": 1782421320000, "hi": 1782431640000, "t": "21:51:51", "load": 9.5}
+{"step": "ctx-sources", "runs": [0.001, 0.0], "peak_mib": 14, "rss_mib": 32, "wall": 0.03, "t": "21:51:51", "load": 9.5}
+{"step": "ctx-promoted", "runs": [0.0, 0.0], "peak_mib": 14, "rss_mib": 31, "wall": 0.03, "t": "21:51:51", "load": 9.5}
+{"step": "ctx-fields", "runs": [0.0, 0.0], "peak_mib": 13, "rss_mib": 31, "wall": 0.03, "t": "21:51:51", "load": 9.5}
+{"step": "rows-by-id-file-list", "runs": [0.0, 0.0], "peak_mib": 14, "rss_mib": 31, "wall": 0.03, "t": "21:51:52", "load": 9.5}
+{"step": "view-bind", "runs": [0.019, 0.009], "peak_mib": 48, "rss_mib": 66, "wall": 0.06, "t": "21:51:52", "load": 9.5}
+{"step": "u-count-ord", "runs": [0.002, 0.0], "peak_mib": 14, "rss_mib": 32, "wall": 0.03, "t": "21:51:52", "load": 9.5}
+{"step": "u-ids-ord", "runs": [0.024, 0.001], "peak_mib": 15, "rss_mib": 34, "wall": 0.05, "t": "21:51:52", "load": 9.5}
+{"step": "u-rows-files", "files": 32, "t": "21:51:52", "load": 9.5}
+{"step": "u-rows", "runs": [0.081, 0.064], "peak_mib": 111, "rss_mib": 131, "wall": 0.17, "t": "21:51:52", "load": 9.5}
+{"step": "f-source-level-count", "runs": [0.099, 0.052], "peak_mib": 61, "rss_mib": 81, "wall": 0.18, "t": "21:51:52", "load": 9.5}
+{"step": "f-source-level-ids", "runs": [0.077, 0.069], "peak_mib": 73, "rss_mib": 93, "wall": 0.18, "t": "21:51:52", "load": 9.5}
+{"step": "f-source-level-rows-files", "files": 1, "t": "21:51:52", "load": 9.5}
+{"step": "f-source-level-rows", "runs": [0.011, 0.01], "peak_mib": 33, "rss_mib": 53, "wall": 0.05, "t": "21:51:52", "load": 9.5}
+{"step": "f-level-count", "runs": [0.194, 0.158], "peak_mib": 62, "rss_mib": 82, "wall": 0.38, "t": "21:51:53", "load": 9.5}
+{"step": "f-level-ids", "runs": [0.683, 0.686], "peak_mib": 108, "rss_mib": 129, "wall": 1.4, "t": "21:51:54", "load": 9.5}
+{"step": "f-window-count", "runs": [0.132, 0.119], "peak_mib": 84, "rss_mib": 105, "wall": 0.28, "t": "21:51:55", "load": 9.5}
+{"step": "f-window-ids", "runs": [0.147, 0.15], "peak_mib": 106, "rss_mib": 127, "wall": 0.33, "t": "21:51:55", "load": 9.8}
+{"step": "f-level-ids-deep", "runs": [6.456, 8.222], "peak_mib": 388, "rss_mib": 409, "wall": 14.71, "t": "21:52:10", "load": 8.7}
+{"step": "i-count", "runs": [0.167, 0.146], "peak_mib": 60, "rss_mib": 80, "wall": 0.34, "t": "21:52:10", "load": 9.1}
+{"step": "i-ids-first", "runs": [0.692, 0.655], "peak_mib": 102, "rss_mib": 122, "wall": 1.38, "t": "21:52:11", "load": 9.1}
+{"step": "i-ids-mid", "runs": [11.827, 11.524], "peak_mib": 393, "rss_mib": 424, "wall": 23.39, "t": "21:52:35", "load": 7.5}
+{"step": "window-files", "minmax": 283, "hist": 98, "t": "21:52:35", "load": 7.5}
+{"step": "p-window-minmax", "runs": [0.103, 0.103], "peak_mib": 73, "rss_mib": 94, "wall": 0.23, "t": "21:52:36", "load": 7.5}
+{"step": "p-window-hist", "runs": [0.051, 0.049], "peak_mib": 56, "rss_mib": 76, "wall": 0.13, "t": "21:52:36", "load": 7.5}
+{"step": "source-level-files", "hist": 2, "t": "21:52:36", "load": 7.5}
+{"step": "p-source-level-hist", "runs": [0.006, 0.004], "peak_mib": 35, "rss_mib": 55, "wall": 0.04, "t": "21:52:36", "load": 7.5}
+{"step": "count-from-histogram", "runs": [0.002, 0.0], "peak_mib": 14, "rss_mib": 32, "wall": 0.03, "t": "21:52:36", "load": 7.5}
+{"step": "t-text-scan-view", "runs": [1.866, 1.858], "peak_mib": 110, "rss_mib": 130, "wall": 3.75, "t": "21:52:40", "load": 7.5}
+{"step": "end-seq", "t": "21:52:40", "load": 7.5}
+{"step": "begin-cli", "t": "21:52:40", "load": 7.5}
+{"step": "cli-query-all", "wall": 5.28, "worker_rss_mib": 539, "rc": 0, "tail": "", "err": "", "t": "21:52:45", "load": 7.8}
+{"step": "cli-query-source-level", "wall": 3.1, "worker_rss_mib": 1318, "rc": 1, "tail": "s 46883540 events, more than the 2000000 the query language evaluates; narrow it (time range, levels, a filter) first\"}\n", "err": "debrief: the query matches 46883540 events, more than the 2000000 the query language evaluates; narrow it (time range, levels, a filter) first\n", "t": "21:52:48", "load": 7.8}
+{"step": "end-cli", "t": "21:52:48", "load": 7.8}
+{"step": "begin-shape", "t": "21:53:26", "load": 8.5}
+{"step": "shape", "segments": ["672,85254733,5258,128557.0,131072"], "sources": ["14255,14255"], "histogram": ["6362281"], "fields": ["1344"], "ord": ["85254733"], "promoted": ["36"], "cat_bytes": 401616896, "seg_bytes": 4323980875, "seg_files": 672, "index_bytes": 28539513, "t": "21:53:26", "load": 8.5}
+{"step": "file-minute", "rows": ["2751637"], "file_source": ["14721"], "t": "21:53:27", "load": 8.5}
+{"step": "columns", "cols": ["15"], "sources_per_file": ["21.0,67"], "t": "21:53:27", "load": 8.5}
+{"step": "end-shape", "t": "21:53:27", "load": 8.5}

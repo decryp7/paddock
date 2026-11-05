@@ -1,0 +1,47 @@
+{"step": "begin-shape", "t": "21:47:51", "load": 13.0}
+{"step": "shape", "segments": ["53,5585341,736,125617.0,131010"], "sources": ["2732,2732"], "histogram": ["378555"], "fields": ["162"], "ord": ["5585341"], "promoted": ["49"], "cat_bytes": 20983808, "seg_bytes": 548184091, "seg_files": 53, "index_bytes": 1193, "t": "21:47:51", "load": 13.0}
+{"step": "columns", "cols": ["16"], "sources_per_file": ["28.0,303"], "t": "21:47:51", "load": 13.0}
+{"step": "end-shape", "t": "21:47:51", "load": 13.0}
+{"step": "begin-zone", "t": "21:47:51", "load": 13.0}
+{"step": "zone-build", "runs": [], "peak_mib": 62, "rss_mib": 83, "wall": 0.07, "t": "21:47:51", "load": 13.0}
+{"step": "file-spans", "files": 53, "span_ms": 4996130507, "median_file_span_share": 0.9384532676700152, "p90": 0.9880880369484711, "rgs": ["96,4177867360.5"], "t": "21:47:51", "load": 13.0}
+{"step": "gate-window-1/5000", "files": 53, "minmax_median": 52.0, "minmax_p90": 53.0, "minmax_median_pct": 98.11, "rowgroups_median": 85.5, "rowgroups_p90": 92.0, "hist_files_median": 2.0, "hist_files_p90": 4.0, "hist_median_pct": 3.77, "rows_minmax": 5584605.0, "rows_hist": 253169.0, "rows_in_window": 1191.5, "t": "21:47:52", "load": 13.0}
+{"step": "gate-window-1/500", "files": 53, "minmax_median": 52.0, "minmax_p90": 53.0, "minmax_median_pct": 98.11, "rowgroups_median": 86.0, "rowgroups_p90": 92.0, "hist_files_median": 6.0, "hist_files_p90": 9.0, "hist_median_pct": 11.32, "rows_minmax": 5584605.0, "rows_hist": 706193.0, "rows_in_window": 12946.0, "t": "21:47:52", "load": 13.0}
+{"step": "gate-window-1/50", "files": 53, "minmax_median": 52.5, "minmax_p90": 53.0, "minmax_median_pct": 99.06, "rowgroups_median": 87.0, "rowgroups_p90": 92.0, "hist_files_median": 27.5, "hist_files_p90": 31.0, "hist_median_pct": 51.89, "rows_minmax": 5584973.0, "rows_hist": 2966812.5, "rows_in_window": 111700.5, "t": "21:47:52", "load": 13.0}
+{"step": "gate-source", "files": 53, "row": ["7.0,7.0,1.0,1.0"], "t": "21:47:52", "load": 13.0}
+{"step": "gate-level", "files": 53, "row": ["1,53,53,924980", "2,53,53,2813835", "3,53,53,923207", "4,53,53,923319"], "t": "21:47:52", "load": 13.0}
+{"step": "end-zone", "t": "21:47:52", "load": 13.0}
+{"step": "begin-seq", "t": "21:47:52", "load": 13.0}
+{"step": "picked", "n": 5585341, "source": "1707", "level": "2", "count": 29054, "lo": 1774738260000, "hi": 1774748220000, "t": "21:47:52", "load": 13.0}
+{"step": "ctx-sources", "runs": [0.001, 0.0], "peak_mib": 13, "rss_mib": 31, "wall": 0.03, "t": "21:47:52", "load": 13.0}
+{"step": "ctx-promoted", "runs": [0.0, 0.0], "peak_mib": 13, "rss_mib": 30, "wall": 0.03, "t": "21:47:52", "load": 13.0}
+{"step": "ctx-fields", "runs": [0.0, 0.0], "peak_mib": 13, "rss_mib": 30, "wall": 0.03, "t": "21:47:52", "load": 13.0}
+{"step": "rows-by-id-file-list", "runs": [0.0, 0.0], "peak_mib": 13, "rss_mib": 30, "wall": 0.03, "t": "21:47:52", "load": 13.0}
+{"step": "view-bind", "runs": [0.002, 0.001], "peak_mib": 15, "rss_mib": 33, "wall": 0.03, "t": "21:47:52", "load": 13.0}
+{"step": "u-count-ord", "runs": [0.001, 0.0], "peak_mib": 13, "rss_mib": 30, "wall": 0.03, "t": "21:47:52", "load": 13.0}
+{"step": "u-ids-ord", "runs": [0.002, 0.001], "peak_mib": 13, "rss_mib": 32, "wall": 0.03, "t": "21:47:52", "load": 13.0}
+{"step": "u-rows-files", "files": 2, "t": "21:47:52", "load": 13.0}
+{"step": "u-rows", "runs": [0.021, 0.02], "peak_mib": 60, "rss_mib": 80, "wall": 0.07, "t": "21:47:52", "load": 13.0}
+{"step": "f-source-level-count", "runs": [0.008, 0.005], "peak_mib": 19, "rss_mib": 39, "wall": 0.04, "t": "21:47:52", "load": 13.0}
+{"step": "f-source-level-ids", "runs": [0.009, 0.007], "peak_mib": 25, "rss_mib": 45, "wall": 0.04, "t": "21:47:53", "load": 13.0}
+{"step": "f-source-level-rows-files", "files": 1, "t": "21:47:53", "load": 13.0}
+{"step": "f-source-level-rows", "runs": [0.017, 0.016], "peak_mib": 49, "rss_mib": 69, "wall": 0.06, "t": "21:47:53", "load": 13.0}
+{"step": "f-level-count", "runs": [0.016, 0.013], "peak_mib": 20, "rss_mib": 41, "wall": 0.05, "t": "21:47:53", "load": 13.0}
+{"step": "f-level-ids", "runs": [0.05, 0.048], "peak_mib": 47, "rss_mib": 67, "wall": 0.12, "t": "21:47:53", "load": 13.0}
+{"step": "f-window-count", "runs": [0.021, 0.018], "peak_mib": 37, "rss_mib": 57, "wall": 0.06, "t": "21:47:53", "load": 13.0}
+{"step": "f-window-ids", "runs": [0.023, 0.02], "peak_mib": 47, "rss_mib": 68, "wall": 0.07, "t": "21:47:53", "load": 13.0}
+{"step": "f-level-ids-deep", "runs": [0.094, 0.093], "peak_mib": 122, "rss_mib": 143, "wall": 0.21, "t": "21:47:53", "load": 13.0}
+{"step": "i-count", "runs": [0.015, 0.012], "peak_mib": 20, "rss_mib": 40, "wall": 0.05, "t": "21:47:53", "load": 13.0}
+{"step": "i-ids-first", "runs": [0.054, 0.051], "peak_mib": 46, "rss_mib": 66, "wall": 0.13, "t": "21:47:53", "load": 13.0}
+{"step": "i-ids-mid", "runs": [0.156, 0.15], "peak_mib": 214, "rss_mib": 234, "wall": 0.33, "t": "21:47:54", "load": 13.0}
+{"step": "window-files", "minmax": 53, "hist": 6, "t": "21:47:54", "load": 13.0}
+{"step": "p-window-minmax", "runs": [0.021, 0.019], "peak_mib": 44, "rss_mib": 64, "wall": 0.07, "t": "21:47:54", "load": 13.0}
+{"step": "p-window-hist", "runs": [0.006, 0.004], "peak_mib": 36, "rss_mib": 56, "wall": 0.04, "t": "21:47:54", "load": 13.0}
+{"step": "source-level-files", "hist": 1, "t": "21:47:54", "load": 13.0}
+{"step": "p-source-level-hist", "runs": [0.005, 0.003], "peak_mib": 19, "rss_mib": 39, "wall": 0.03, "t": "21:47:54", "load": 13.0}
+{"step": "count-from-histogram", "runs": [0.002, 0.0], "peak_mib": 13, "rss_mib": 32, "wall": 0.03, "t": "21:47:54", "load": 13.0}
+{"step": "end-seq", "t": "21:47:54", "load": 13.0}
+{"step": "begin-cli", "t": "21:47:54", "load": 13.0}
+{"step": "cli-query-all", "wall": 1.32, "worker_rss_mib": 533, "rc": 0, "tail": "", "err": "", "t": "21:47:55", "load": 13.0}
+{"step": "cli-query-source-level", "wall": 2.81, "worker_rss_mib": 1622, "rc": 1, "tail": "es 2813835 events, more than the 2000000 the query language evaluates; narrow it (time range, levels, a filter) first\"}\n", "err": "debrief: the query matches 2813835 events, more than the 2000000 the query language evaluates; narrow it (time range, levels, a filter) first\n", "t": "21:47:58", "load": 13.0}
+{"step": "end-cli", "t": "21:47:58", "load": 13.0}

@@ -83,29 +83,33 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
-### 2026-11-05, storage medium at 1M to 1B events (branch `docs/debrief-storage-medium`)
+### 2026-11-05, storage medium: real segments and same-window rerun (branch `docs/debrief-storage-medium`)
 
-- **Commit:** none of the product's; a probe of the store's read paths, base 87c9b8449. Note: [research/2026-11-05-storage-medium.md](research/2026-11-05-storage-medium.md).
+Replaces this branch's first block (`bc477a4b3`), whose "view today" compared different queries and was not the product's path. Note: [research/2026-11-05-storage-medium.md](research/2026-11-05-storage-medium.md).
+
+- **Commit:** product binary `debrief/1.2-int` `852b35ac0` (plus an example-only dependency); note on `main` `87c9b8449`.
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2.
-- **Load:** 1-minute load 5 to 14, other agents' jobs running; heavy steps through the machine's lock.
-- **Build:** DuckDB 2.0.0 CLI (`d54cbbe3df`); `memory_limit` 192 MB for queries, 768 MB for the ordering, 4 threads, 4 async threads; DuckLake 1.1 extension with a DuckDB catalogue.
-- **Corpus:** generated, 64 sources, 13 event columns, no promoted columns, written by DuckDB (zstd, 65,536-row groups, 2 per file): 1M, 10M, 100M, 1B events; 25 GB and 7,630 files at 1B, about 25 bytes an event against the product's about 50.
-- **Command:** `python3 -I harness/probe.py <rows> <label> gen catalog ord hist queries lake` (and `mgmt`); captures: `cooked gen|lookup|bfs|scan|validate`, `harness/run2.sh`.
-- **Runs:** single; each query twice in one process, the second reported; OS cache warm throughout.
-- **Numbers:**
+- **Load:** 1-minute load 7 to 13, other agents' jobs running; heavy steps through the machine's lock.
+- **Build:** release; DuckDB 2.0.0 (CLI and `libduckdb`); query settings 192 MB, 4 threads, 4 async threads.
+- **Corpus:** generated. `real`: the parsable text under 48 MiB of an invented same-shape bundle, 5,422 files, 5,585,341 events, 53 segments, 2,732 sources. `upper`: `gen_mixed.py`, 14,255 files, 64 families, 7.61 GiB, 85,254,733 events, 672 segments, 14,255 sources. Both through `debrief import`.
+- **Command:** `harness/runm.sh <label>`, then `python3 -I harness/real.py <label> <store> --shape --zone --seq --cli`.
+- **Runs:** single; each query twice in one process, second reported. OS cache warm.
+- **Numbers (85M, warm, CLI footprint):**
 
-  | Measure at 1B | View today | Files pruned | DuckLake | Budget | Verdict |
-  |---|---|---|---|---|---|
-  | Bind, peak footprint | 340 MB | | 23 MB | 300 MB | view **fail** |
-  | Page in a time window | 10,550 ms, 474 MB | 102 ms, 77 MB | 98 ms, 76 MB | 0.5 s, 300 MB | view **fail**, others pass |
-  | Filtered page | 877 ms, 456 MB | 196 ms, 83 MB | 205 ms, 89 MB | 0.5 s, 300 MB | view **fail**, others pass |
-  | First page, no filter | 26,220 ms, 476 MB | | | 0.5 s | **fail** |
-  | 1000-bucket timeline, `histogram` | 70 ms, 82 MB | | | 0.5 s | pass |
-  | `ord` rebuild | 912 s, 1,567 MB, catalogue 4.27 GB | | | 768 MB | **fail** |
+  | Measure | Today | Histogram-pruned | Budget | Verdict |
+  |---|---|---|---|---|
+  | Files, 1/500 window | min/max 28% (`real` 98%) | 9.7% (`real` 11%) | gate 15% | min/max **fail**, histogram pass |
+  | Unfiltered page | 65 ms, 111 MiB | | 0.5 s cold | within warm; cold not measured |
+  | Source + level page | 131 ms, 73 MiB | ids 4 ms, 35 MiB | 0.5 s cold | within warm; cold not measured |
+  | Time window, count + ids | 269 ms, 106 MiB | ids 49 ms, 56 MiB | 0.5 s cold | within warm; cold not measured |
+  | Level only, count + ids | 844 ms, 108 MiB | no pruning | 0.5 s cold | **over** |
+  | Level only, `OFFSET` 5% | 8,380 ms, 388 MiB | no pruning | 0.5 s cold | **over** |
+  | Importing, mid-data | 11,670 ms, 393 MiB | | 0.5 s cold | **over** |
+  | 1B on the real mix, same-window at 7,630 files | not measured | not measured | | |
 
-  Captures at `limits.rs`' caps (20M objects, 100M references): one object's references 50 ns with arrays against 10 to 47 ms with Parquet; reachability 1.18 s, 84 MB against 19.2 s, 1,230 MB; 20M samples 400 MB against 111 MB; hotspots 19 ms against 47 to 79 ms.
-- **Memory measure:** peak footprint (`/usr/bin/time -l`), of the CLI process.
-- **Notes:** Not the product path: no arrow-rs writers, Tantivy or promoted columns, so use ratios, not absolute times. Nothing here is a cold read. Raw output: [research/2026-11-05-storage-medium/results/](research/2026-11-05-storage-medium/results/).
+  From the first run, uniform corpus, kept: `ord` rebuild 20.7 s and 905 MiB at 100M, 912 s and 1,567 MiB at 1B (budget 768 MB: **fail** at both), 4.27 GB catalogue. Captures at `limits.rs`' caps, no budget: one object's references 50 ns against 10 to 47 ms; reachability 1.18 s, 84 MB against out of memory at 768 MB after 22 s (`clang -O2 harness/cooked.c`; the first block's 19.2 s reached one object and is withdrawn); 20M samples 400 MB against 111 MB; hotspots 19 ms against 47 to 79 ms.
+- **Memory measure:** peak footprint of the CLI process in MiB, not worker RSS; the worker budget is not measured.
+- **Notes:** The full-text index was not built. Raw output: [research/2026-11-05-storage-medium/results/rerun/](research/2026-11-05-storage-medium/results/rerun/).
 
 ### 2026-10-30, `debrief report` under CPU contention: QoS background against utility (branch `fix/debrief-cli-report-hang`)
 

@@ -1,0 +1,20 @@
+┌───────────┬─────────────┐
+│   edges   │ out_of_root │
+│   int64   │    int64    │
+├───────────┼─────────────┤
+│ 100018920 │           0 │
+└───────────┴─────────────┘
+src,c
+2,10
+3,9
+7,9
+Run Time (s): real 0.001 user 0.000563 sys 0.000475
+│            1 │
+Run Time (s): real 8.848 user 4.638281 sys 0.354609
+        8.89 real         4.65 user         0.37 sys
+          1228719424  peak memory footprint
+Run Time (s): real 0.000 user 0.000381 sys 0.000326
+Out of Memory Error: failed to allocate data of size 2.0 GiB (17.2 MiB/732.4 MiB used)
+Run Time (s): real 22.208 user 8.612678 sys 0.703621
+       22.24 real         8.63 user         0.72 sys
+          1285014920  peak memory footprint

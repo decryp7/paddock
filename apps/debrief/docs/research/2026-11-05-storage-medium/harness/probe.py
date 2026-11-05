@@ -50,7 +50,7 @@ def catalog():
     if os.path.exists(CAT): os.remove(CAT)
     fs = files()
     fq = plist(fs).replace("union_by_name = true", "union_by_name = false")
-    sql = IMPORT + f"""CREATE TABLE sources(id UINTEGER PRIMARY KEY, ready BOOLEAN); INSERT INTO sources SELECT i, true FROM range(64) r(i);
+    sql = IMPORT + f"""CREATE TABLE sources(id UINTEGER PRIMARY KEY, name VARCHAR, ready BOOLEAN); INSERT INTO sources SELECT i, 'source-'||i, true FROM range(64) r(i);
 CREATE TABLE ord (pos UBIGINT NOT NULL, id UBIGINT NOT NULL);
 CREATE TABLE segments AS SELECT file_name AS file,
  min(try_cast(stats_min_value AS BIGINT)) FILTER (path_in_schema='id') first_id, max(try_cast(stats_max_value AS BIGINT)) FILTER (path_in_schema='id') last_id,
@@ -59,7 +59,7 @@ CREATE TABLE segments AS SELECT file_name AS file,
  FROM parquet_metadata('{SEG}/*.parquet') GROUP BY file_name;
 """
     run("catalog-segments", sql)
-    view = f"CREATE OR REPLACE VIEW events AS SELECT * FROM {plist(fs)} WHERE source IN (SELECT id FROM sources WHERE ready);\n"
+    view = f"CREATE OR REPLACE VIEW events AS SELECT * FROM {plist(fs)} WHERE source IN (SELECT id FROM sources WHERE ready);\nCREATE OR REPLACE VIEW events_wide AS SELECT * FROM {plist(fs)} WHERE source IN (SELECT id FROM sources WHERE ready);\n"
     log(step="view-sql-bytes", bytes=len(view))
     run("view-create-first", QUERY + view)
     run("view-replace-again", QUERY + view + view)
@@ -101,6 +101,24 @@ def queries():
     pf = re.findall(r"^.*\.parquet$", pf, re.M); log(step="source-files", files=len(pf))
     twice("q-filtered-page-pruned-list", f"SELECT id, ts, message FROM {plist(pf)} WHERE level=5 AND source=3 ORDER BY {KEY} LIMIT 200;")
     twice("q-top-first-page-view", f"SELECT id, ts, message FROM events ORDER BY {KEY} LIMIT 200;")
+TK = "coalesce(e.ts, 9223372036854775807), e.source, e.line, e.id"
+FROM_ = "events_wide e JOIN sources s ON s.id = e.source"
+def same():
+    # P1-1: one window on every side; the old unbounded query is kept to show what the earlier 100x compared.
+    mid = T0 + SPAN // 2; hi = mid + SPAN // 500; cols = "id, ts, level, source, message"
+    twice("s-view-no-upper-bound", f"SELECT {cols} FROM events WHERE ts >= {mid} ORDER BY {KEY} LIMIT 200;")
+    twice("s-view-same-window", f"SELECT {cols} FROM events WHERE ts >= {mid} AND ts <= {hi} ORDER BY {KEY} LIMIT 200;")
+    pf = run("x", QUERY + f"SELECT file FROM segments WHERE ts_max >= {mid} AND ts_min <= {hi};", readonly=True, record=False)
+    pf = re.findall(r"^.*\.parquet$", pf, re.M); log(step="s-window-files", files=len(pf), of=len(files()))
+    twice("s-pruned-same-window", f"SELECT {cols} FROM {plist(pf)} WHERE ts >= {mid} AND ts <= {hi} ORDER BY {KEY} LIMIT 200;")
+    # The product's sequences (read.rs): filtered page, then the page while importing (no ord).
+    w = "e.level = 5 AND e.source = 3"
+    twice("s-real-filtered-count", f"SELECT count(*) FROM {FROM_} WHERE {w};")
+    twice("s-real-filtered-ids-off0", f"SELECT e.id FROM {FROM_} WHERE {w} ORDER BY {TK} LIMIT 200 OFFSET 0;")
+    twice("s-real-filtered-ids-off-deep", f"SELECT e.id FROM {FROM_} WHERE {w} ORDER BY {TK} LIMIT 200 OFFSET 50000;")
+    twice("s-real-importing-count", f"SELECT count(*) FROM {FROM_};")
+    twice("s-real-importing-ids-off0", f"SELECT e.id FROM {FROM_} ORDER BY {TK} LIMIT 200 OFFSET 0;")
+    twice("s-real-importing-ids-mid", f"SELECT e.id FROM {FROM_} ORDER BY {TK} LIMIT 200 OFFSET {N//2};")
 def lake():
     L = f"{D}/lake"; shutil.rmtree(L, ignore_errors=True); os.makedirs(L); ext = f"{ROOT}/ext"
     pre = IMPORT + f"SET extension_directory='{ext}'; LOAD ducklake; ATTACH 'ducklake:{L}/cat.ducklake' AS lake (DATA_PATH '{L}/data', READ_ONLY false);\n"
@@ -169,5 +187,5 @@ def mgmt():
     shutil.rmtree(L, ignore_errors=True)
 for s in STEPS:
     t = time.time(); log(step=f"begin-{s}")
-    {"gen": gen, "catalog": catalog, "ord": ord_, "hist": hist, "queries": queries, "lake": lake, "mgmt": mgmt}[s]()
+    {"gen": gen, "catalog": catalog, "ord": ord_, "hist": hist, "queries": queries, "lake": lake, "mgmt": mgmt, "same": same}[s]()
     log(step=f"end-{s}", secs=round(time.time() - t, 1))

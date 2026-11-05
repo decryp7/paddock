@@ -1,0 +1,23 @@
+{"step": "begin-gen", "t": "21:19:41", "load": 9.34423828125}
+{"step": "gen", "wall": 1.0, "runs": [0.002, 0.812], "peak_mb": 73, "rss_mb": 91, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "gen-size", "files": 8, "bytes": 20686155, "footer": 3809, "t": "21:19:42", "load": 9.34423828125}
+{"step": "end-gen", "secs": 1.0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "begin-catalog", "t": "21:19:42", "load": 9.34423828125}
+{"step": "catalog-segments", "wall": 0.05, "runs": [0.011, 0.0, 0.011], "peak_mb": 25, "rss_mb": 45, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "view-sql-bytes", "bytes": 1689, "t": "21:19:42", "load": 9.34423828125}
+{"step": "view-create-first", "wall": 0.03, "runs": [0.001, 0.003, 0.001], "peak_mb": 12, "rss_mb": 30, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "view-replace-again", "wall": 0.03, "runs": [0.001, 0.001, 0.001], "peak_mb": 12, "rss_mb": 30, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "catalog-size", "bytes": 1060864, "t": "21:19:42", "load": 9.34423828125}
+{"step": "end-catalog", "secs": 0.1, "t": "21:19:42", "load": 9.34423828125}
+{"step": "begin-same", "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-view-no-upper-bound", "wall": 0.07, "runs": [0.001, 0.029, 0.016], "peak_mb": 58, "rss_mb": 78, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-view-same-window", "wall": 0.05, "runs": [0.001, 0.016, 0.013], "peak_mb": 53, "rss_mb": 73, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-window-files", "files": 8, "of": 8, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-pruned-same-window", "wall": 0.05, "runs": [0.001, 0.014, 0.012], "peak_mb": 50, "rss_mb": 69, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-real-filtered-count", "wall": 0.03, "runs": [0.001, 0.006, 0.002], "peak_mb": 15, "rss_mb": 36, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-real-filtered-ids-off0", "wall": 0.03, "runs": [0.001, 0.004, 0.002], "peak_mb": 19, "rss_mb": 40, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-real-filtered-ids-off-deep", "wall": 0.04, "runs": [0.005, 0.007, 0.003], "peak_mb": 20, "rss_mb": 41, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-real-importing-count", "wall": 0.03, "runs": [0.001, 0.004, 0.003], "peak_mb": 16, "rss_mb": 36, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-real-importing-ids-off0", "wall": 0.04, "runs": [0.001, 0.01, 0.008], "peak_mb": 38, "rss_mb": 58, "rc": 0, "t": "21:19:42", "load": 9.34423828125}
+{"step": "s-real-importing-ids-mid", "wall": 0.08, "runs": [0.001, 0.027, 0.025], "peak_mb": 65, "rss_mb": 86, "rc": 0, "t": "21:19:43", "load": 9.34423828125}
+{"step": "end-same", "secs": 0.5, "t": "21:19:43", "load": 9.34423828125}
