@@ -8,11 +8,11 @@
 - Licence: `MIT OR Apache-2.0` (kept: `LICENSE-MIT`, `LICENSE-APACHE`, `LICENSE.spdx`, and `license` in its `Cargo.toml`).
   cargo-deny sees it as a path dependency with that licence; the notices generator reads it from `cargo metadata` like any
   other package.
-- Four patches on the copy, nothing else, applied in this order to the pristine crate (`patch -p1` inside a copy of the `.crate`'s contents):
+- Five patches on the copy, nothing else, applied in this order to the pristine crate (`patch -p1` inside a copy of the `.crate`'s contents):
   [`tray-icon-guid-provider.patch`](tray-icon-guid-provider.patch) (Windows: the GUID provider, `guid_status`, and `is_added`),
   [`tray-icon-image-reps.patch`](tray-icon-image-reps.patch) (macOS), [`tray-icon-windows-tooltip.patch`](tray-icon-windows-tooltip.patch)
   (Windows) and [`tray-icon-autosave-name.patch`](tray-icon-autosave-name.patch) (macOS autosave name and the Windows `TaskbarCreated`
-  read-out). Check after a change: unpack tray-icon 0.25.1, apply the four in that order, and `diff -r -x Cargo.lock -x .cargo_vcs_info.json -x .cargo-ok`
+  read-out) and [`tray-icon-recovery-trace.patch`](tray-icon-recovery-trace.patch) (Windows: the steps of the add ladder with `GetLastError`). Check after a change: unpack tray-icon 0.25.1, apply the five in that order, and `diff -r -x Cargo.lock -x .cargo_vcs_info.json -x .cargo-ok`
   against `vendor/tray-icon` prints nothing (done 2026-11-05). The GUID patch (which also carries `TrayIcon::is_added` and the `added` flag the shell's answer sets): `src/lib.rs`: `set_guid_provider` and its
   use in `TrayIcon::with_id`, and `GuidStatus` with `TrayIcon::guid_status`. `src/platform_impl/windows/mod.rs`: when the shell
   refuses a GUID (`NIM_ADD` fails), delete the GUID's registration (`NIM_DELETE` by GUID) and add again; if that fails too, add
@@ -72,3 +72,15 @@ Apply with `patch -p1 -d vendor/tray-icon < vendor/tray-icon-autosave-name.patch
   whose icons are missing at logon shows whether Explorer's taskbar was created after the add. Elsewhere `(0, None)`.
 - Removal: when upstream lets a builder set the autosave name before the item connects, delete the macOS part; the Windows read-out goes
   with the GUID patch.
+
+### tray-icon-recovery-trace.patch (Windows)
+
+- `src/platform_impl/windows/mod.rs`: `register_with_guid_recovery` records each step of the add ladder (add with GUID, delete the GUID's
+  registration, add with GUID again, add without GUID; and the delete before a `TaskbarCreated` re-add) and the `GetLastError` of each one that
+  failed, read at once after the call. The steps are kept per icon (the first add, then each `TaskbarCreated` re-add, the last 700 bytes) and
+  read with `TrayIcon::recovery_trace()` (`src/lib.rs`; empty elsewhere). `remove_tray_icon` now returns the error code of a failed delete and
+  still prints its line. The ladder's behaviour is unchanged; nothing else reads the trace except Dyno's log (`GUID ...: <status> (steps: ...)`
+  on the icon-created line and in `tray diagnose:`).
+- Why: a Windows diagnostic bundle must show which step of the ladder the shell refused and with what code (the shell sometimes leaves 0).
+- Not run on Windows: compiled and linted with `cargo xwin clippy` only.
+- Removal: with the GUID patch, when Tauri exposes a GUID builder.

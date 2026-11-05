@@ -458,6 +458,18 @@ impl TrayIcon {
         }
     }
 
+    /// Paddock patch: the add and recovery steps with the `GetLastError` of each failed one. Elsewhere empty.
+    pub fn recovery_trace(&self) -> String {
+        #[cfg(windows)]
+        {
+            self.tray.borrow().recovery_trace()
+        }
+        #[cfg(not(windows))]
+        {
+            String::new()
+        }
+    }
+
     /// Paddock patch: how many `TaskbarCreated` messages this icon saw (Explorer restarted or finished creating its taskbar) and the
     /// outcome of the last re-add. Elsewhere `(0, None)`.
     pub fn taskbar_restarts(&self) -> (u32, Option<GuidStatus>) {
