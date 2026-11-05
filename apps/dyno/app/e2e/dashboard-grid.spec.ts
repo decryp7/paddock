@@ -22,7 +22,7 @@ async function open(page: Page, width = 1280, height = 900): Promise<void> {
 /** The live graphs have a line to draw (a reviewer's shot of one sample shows empty cards): wait on the samples, not on time. */
 async function graphsHaveALine(page: Page): Promise<void> {
   await expect
-    .poll(() => page.locator('dy-widget dy-sparkline path').first().getAttribute('d').then((d) => (d?.match(/L/g) ?? []).length), { timeout: 60_000 })
+    .poll(() => page.locator('dy-widget pd-sparkline path').first().getAttribute('d').then((d) => (d?.match(/L/g) ?? []).length), { timeout: 60_000 })
     .toBeGreaterThan(8);
   // The history, consumers and disk charts draw after their data (a dark shot once caught them empty): wait until each has a drawn surface.
   await expect

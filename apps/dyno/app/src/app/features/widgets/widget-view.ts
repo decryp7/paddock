@@ -1,18 +1,19 @@
 import { MatTooltip } from '@angular/material/tooltip';
+import { SuSparkline } from '@decryp7/paddock-ui';
+import { formatNumber } from '@decryp7/paddock-ui/format';
 import { PdSkeleton } from '@decryp7/paddock-ui/widgets';
 import { FullTextTip } from '../../shared/full-text-tip';
 import type { Measured } from '../../core/api.types';
 import { showMeasured } from '../../core/measured';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Icon } from '../../shared/icon';
-import { formatBytes, formatPercent } from '../../shared/format';
+import { formatBytes, formatPercent, formatRate } from '../../shared/format';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { coreHeat } from '../../shared/heat';
 import { Ring } from '../../shared/ring';
-import { Sparkline } from '../../shared/sparkline';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
-import { LiveStore } from '../../state/live.store';
+import { LiveStore, SPARK_CAPACITY } from '../../state/live.store';
 import { ANOMALY_ICON, ANOMALY_LABEL } from '../../shared/labels';
 import type { Cells, DashboardKind, DashboardWidget, MetricReading, Placement } from '../../core/generated/widgets';
 import { ReadingSource } from '../../core/reading-source';
@@ -45,7 +46,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
  */
 @Component({
   selector: 'dy-widget',
-  imports: [FullTextTip, MatTooltip, ReadingSource, PdSkeleton, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [FullTextTip, MatTooltip, ReadingSource, PdSkeleton, Icon, Ring, SuSparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.data-kind]': 'kind()', '[style.--wv-rows]': 'rows()' },
   template: `
@@ -69,7 +70,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
         @if (reading().reason; as why) {
           <p class="note"><span>Not available. {{ why }}</span></p>
         } @else if (series(); as s) {
-          <dy-sparkline [values]="s.values" [values2]="s.values2" [max]="percent() ? 100 : null" [zoom]="zoomed() && percent()" [fill]="widget().options.fill" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" style="--spark-h: 48px" />
+          <pd-sparkline [values]="s.values" [values2]="s.values2" [scale]="sparkScale()" [max]="percent() ? 100 : undefined" [area]="widget().options.fill" [capacity]="sparkCapacity" [formatValue]="sparkFormat()" [pad]="0" [dot]="false" [height]="48" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" />
         } @else {
           <p class="note">No live history is kept for this metric.</p>
         }
@@ -244,6 +245,16 @@ export class WidgetView {
   protected readonly grade = computed(() => (this.health.report() ? GRADE_LABEL[this.health.report()!.grade] : ''));
   protected readonly gradeTone = computed(() => (this.health.report() ? GRADE_TONE[this.health.report()!.grade] : 'accent'));
   protected readonly pct = formatPercent;
+  protected readonly sparkCapacity = SPARK_CAPACITY;
+  protected readonly sparkScale = computed(() => (this.zoomed() && this.percent() ? 'zoom' : 'zero') as 'zoom' | 'zero');
+  /** The graph's values in words for its accessible name: a percentage, a rate, or a number with the reading's unit. */
+  protected readonly sparkFormat = computed<(v: number) => string>(() => {
+    if (this.percent()) return formatPercent;
+    const m = this.widget().metric;
+    if (m === 'networkDown' || m === 'networkUp') return formatRate;
+    const unit = this.reading().unit;
+    return (v) => `${formatNumber(v)} ${unit}`.trim();
+  });
   protected readonly round = (v: number) => Math.round(v).toString();
   protected readonly label = (k: keyof typeof ANOMALY_LABEL) => ANOMALY_LABEL[k];
   protected readonly anomalyIcon = (k: keyof typeof ANOMALY_ICON) => ANOMALY_ICON[k];

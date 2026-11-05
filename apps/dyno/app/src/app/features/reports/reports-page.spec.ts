@@ -45,7 +45,7 @@ describe('dy-reports-page', () => {
     expect(stats).toContain('Health score');
     expect(stats).toContain('+3 against the week before');
     expect(el.querySelectorAll('[aria-label="Highlights"] li').length).toBeGreaterThan(0);
-    expect(el.querySelector('[aria-label="Health score trend"] dy-sparkline')).not.toBeNull();
+    expect(el.querySelector('[aria-label="Health score trend"] pd-sparkline')).not.toBeNull();
     expect(el.querySelectorAll('[aria-label="Busiest apps"] [role="row"][data-key]')).toHaveLength(5);
     expect(el.querySelector('[aria-label="Disks"]')!.textContent).toContain('Full in ~41 days');
     expect(el.querySelector('[aria-label="Issues"]')!.textContent).toContain('Drive is getting full');

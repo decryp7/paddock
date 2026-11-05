@@ -752,11 +752,6 @@ paths = ["ui/projects/paddock-ui/src/lib/sparkline.ts"]
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/dyno/app/src/app/shared/sparkline.ts"]
-  owner = "dyno"
-  delete_by = "dyno-v1.1.0"
-
-  [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src/app/shared/ui/sparkline.ts"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
@@ -766,6 +761,20 @@ status = "built"
   owner = "pitwall"
   delete_by = "pitwall-v1.1.0"
   note = "Pitwall 1.1 deletes it."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src/app/share/dashboard/dashboard-tile.ts"]
+  symbols = ["item:sparkPoints"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "sparkPoints draws a polyline for the dashboard tile; Debrief 1.2 uses pd-sparkline."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitcrew/app/src/app/shared/geometry.ts"]
+  symbols = ["item:sparkPaths"]
+  owner = "pitcrew"
+  delete_by = "pitcrew-v1.1.0"
+  note = "sparkPaths is the geometry of Pitcrew's sparkline copy above; it goes with it. runners/usage-chart.ts (line 93) uses sparkPaths too and moves to pd-sparkline with it."
 
 [[mechanism]]
 id = "schedule-editors"

@@ -2480,6 +2480,9 @@
       <trans-unit id="pd.ui.sparkline" datatype="html">
         <source>Trend</source>
       </trans-unit>
+      <trans-unit id="pd.ui.sparkline.second" datatype="html">
+        <source>Second line</source>
+      </trans-unit>
       <trans-unit id="pd.ui.sunburst.error" datatype="html">
         <source>Could not draw the chart</source>
       </trans-unit>

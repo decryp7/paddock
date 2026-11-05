@@ -1,13 +1,14 @@
 import { PdViewportFollowsSize } from '@decryp7/paddock-ui/table';
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from '@angular/cdk/scrolling';
 import { ChangeDetectionStrategy, Component, ViewEncapsulation, input, output, viewChildren } from '@angular/core';
+import { SuSparkline } from '@decryp7/paddock-ui';
 import { PdSkeleton, PdWidget, relativeAgo } from '@decryp7/paddock-ui/widgets';
 import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
 import type { AlarmRow, AppRow, BackupValue, CounterRow, IssueValue, Level, Page, PopoverValue, VolumeRow, WidgetActionId } from '../../../core/generated/widgets';
 import { FullTextTip } from '../../../shared/full-text-tip';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../../shared/format';
-import { Sparkline } from '../../../shared/sparkline';
 import { formatCounter } from '../../counters/counters-model';
+import { SPARK_CAPACITY } from '../../../state/live.store';
 
 type Value<K extends string> = Extract<PopoverValue, Record<K, unknown>>[K];
 
@@ -31,7 +32,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
   selector: 'dy-popover-widgets',
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
-  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, Sparkline, FullTextTip, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, PdViewportFollowsSize],
+  imports: [PdWidget, PdSkeleton, PdGlyph, PdStatusGlyph, SuSparkline, FullTextTip, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, PdViewportFollowsSize],
   template: `
     <ng-template pdWidget="activeAlarms" [pdWidgetOf]="witness" let-value>
       @let a = alarms(value);
@@ -75,7 +76,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
         <div class="dy-pw-half" [attr.data-tone]="c?.cpuTone ?? 'ok'">
           <span class="dy-pw-muted" pdSkeleton>CPU</span>
           <span class="dy-pw-big" pdSkeleton>{{ big(c?.cpuPercent ?? 0) }}<small>%</small></span>
-          <dy-sparkline [values]="c?.cpuMinute ?? []" [max]="100" color="var(--accent)" label="CPU over the last minute" style="--spark-h: 24px" />
+          <pd-sparkline [values]="c?.cpuMinute ?? []" scale="zero" [area]="true" [max]="100" [capacity]="sparkCapacity" [formatValue]="pct" [pad]="0" [dot]="false" [height]="24" color="var(--accent)" label="CPU over the last minute" />
         </div>
         <div class="dy-pw-half dy-pw-half--next" [attr.data-tone]="c?.memoryTone ?? 'ok'">
           <span class="dy-pw-muted" pdSkeleton>Memory {{ memText(c) }}</span>
@@ -90,7 +91,7 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       <button type="button" class="dy-pw-plain" (click)="open('network')">
         <span class="dy-pw-big" pdSkeleton>↓ {{ rate(n?.rxBps ?? 0)[0] }}<small>{{ rate(n?.rxBps ?? 0)[1] }}</small></span>
         <span class="dy-pw-muted" pdSkeleton>↑ {{ rate(n?.txBps ?? 0).join(' ') }}</span>
-        <dy-sparkline [values]="n?.rxMinute ?? []" [values2]="n?.txMinute ?? null" color2="var(--text-3)" label="Network over the last minute" style="--spark-h: 28px" />
+        <pd-sparkline [values]="n?.rxMinute ?? []" [values2]="n?.txMinute ?? null" scale="zero" [area]="true" [capacity]="sparkCapacity" [formatValue]="rateText" [pad]="0" [dot]="false" [height]="28" color="var(--text-3)" color2="var(--text-3)" label="Download over the last minute" label2="Upload" />
       </button>
     </ng-template>
 
@@ -203,6 +204,8 @@ export class DynoPopoverWidgets {
   protected readonly skBackup = SK_BACKUP;
 
   protected readonly pct = formatPercent;
+  protected readonly rateText = formatRate;
+  protected readonly sparkCapacity = SPARK_CAPACITY;
   protected readonly bytes = formatBytes;
   protected status(l: Level): PdStatus {
     return LEVEL_STATUS[l];
