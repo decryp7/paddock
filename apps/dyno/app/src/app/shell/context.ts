@@ -6,7 +6,6 @@ import { BACKEND } from '../core/backend';
 import { Notifier } from '../shared/notifier';
 import { BackupStore } from '../state/backup.store';
 import { DiagnosisStore } from '../state/diagnosis.store';
-import { DiagnosticsStore } from '../state/diagnostics.store';
 import { HistoryStore } from '../state/history.store';
 import { IssuesStore } from '../state/issues.store';
 import { ReportsStore } from '../state/reports.store';
@@ -38,9 +37,6 @@ export interface DynoContext {
   /** Reports: saves the shown week as Markdown. */
   exportReport(): Promise<void>;
   canExportReport(): boolean;
-  /** Diagnostics: saves the bundle. */
-  saveDiagnostics(): Promise<void>;
-  canSaveDiagnostics(): boolean;
   /** Alarms: opens the new-rule window (reads the settings first when they are not loaded yet). */
   addAlarmRule(): Promise<void>;
 }
@@ -58,7 +54,6 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
   const backup = inject(BackupStore);
   const diagnosis = inject(DiagnosisStore);
   const reports = inject(ReportsStore);
-  const diagnostics = inject(DiagnosticsStore);
   const settings = inject(SettingsStore);
 
   return {
@@ -104,11 +99,6 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
       await reports.export('markdown');
     },
     canExportReport: () => reports.exporting() === null,
-    saveDiagnostics: async () => {
-      await pages.goAndFocus('dy.diagnostics');
-      await diagnostics.save();
-    },
-    canSaveDiagnostics: () => !diagnostics.saving(),
     addAlarmRule: async () => {
       await pages.goAndFocus('dy.alarms');
       if (!settings.settings()) await settings.load();

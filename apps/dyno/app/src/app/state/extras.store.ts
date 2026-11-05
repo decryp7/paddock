@@ -22,9 +22,8 @@ import { JobStarter, progressOf, type JobRun } from '../core/job-starter';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import { DEFAULT_MIN_MIB, mibToBytes } from '../features/extras/files-model';
 import type { ExtrasTab } from '../features/extras/extras-model';
-import { formatBytes } from '../shared/format';
+import { fileName, formatBytes } from '../shared/format';
 import { Notifier } from '../shared/notifier';
-import { fileName } from './diagnostics.store';
 import { SettingsStore } from './settings.store';
 
 /** One tab's data: nothing until it is first opened, then the engine's answer or its error (with Retry). */

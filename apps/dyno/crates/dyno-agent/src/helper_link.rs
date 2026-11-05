@@ -180,7 +180,11 @@ impl<T: HelperTransport> HelperLink<T> {
             Err(TransportError::Remote { code, .. }) => log::warn!(Request = kind, Ms = ms, Code = code.as_str(); "Helper call refused"),
             Err(e) => {
                 self.faults.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                log::warn!(Request = kind, Ms = ms, State = format!("{e:?}").split(['(', ' ']).next().unwrap_or(""); "Helper not reachable")
+                log::warn!(
+                    Request = kind, Ms = ms, State = format!("{e:?}").split(['(', ' ']).next().unwrap_or(""),
+                    Why = format!("{e:?}").chars().take(300).collect::<String>().as_str();
+                    "Helper not reachable"
+                )
             }
         }
         out
@@ -225,7 +229,11 @@ impl<T: HelperTransport> HelperLink<T> {
         if *last == Some(status.state) {
             log::debug!(State = format!("{:?}", status.state).as_str(); "Helper state unchanged");
         } else {
-            log::info!(State = format!("{:?}", status.state).as_str(); "Helper state");
+            log::info!(
+                State = format!("{:?}", status.state).as_str(), Why = status.message.as_str(),
+                Detail = status.detail.as_deref().unwrap_or(""), Error = status.error.as_deref().unwrap_or("");
+                "Helper state"
+            );
             *last = Some(status.state);
         }
         status

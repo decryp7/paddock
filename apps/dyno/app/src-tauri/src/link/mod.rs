@@ -63,7 +63,8 @@ pub const EXTRAS_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long to wait for the agent's answer to `request`.
 pub fn timeout_for(request: &Request) -> Duration {
     match request {
-        Request::SaveInventoryReport { .. } => EXTRAS_TIMEOUT,
+        // The agent's report files include the first inventory read, which runs the package and hardware tools.
+        Request::SaveInventoryReport { .. } | Request::DiagnosticsFiles => EXTRAS_TIMEOUT,
         _ => REQUEST_TIMEOUT,
     }
 }

@@ -232,14 +232,9 @@ pub enum Request {
         /// Its id.
         id: u64,
     },
-    /// What a diagnostics bundle would contain, with sizes and what was redacted; nothing is written. Appended.
-    DiagnosticsPreview,
-    /// Write the diagnostics bundle to this path (chosen by the user in a save dialog: absolute, ending in `.zip`,
-    /// in an existing folder). Appended.
-    SaveDiagnostics {
-        /// The destination.
-        path: String,
-    },
+    /// The agent's data files for a problem report (inventory, alarms, sockets, activity, alerts, the recorder, the helper's
+    /// log), as plain text; the app's report redacts, previews and zips them. Appended.
+    DiagnosticsFiles,
     /// Open ports and connections per process, filtered (observe-only). Appended.
     Network {
         /// What to show.
@@ -858,10 +853,8 @@ pub enum Reply {
     RecorderSnapshots(Vec<crate::recorder::RecorderSnapshotInfo>),
     /// A flight recorder snapshot with its samples. Appended.
     RecorderSnapshot(Box<crate::recorder::RecorderSnapshot>),
-    /// The bundle's listing. Appended.
-    DiagnosticsPreview(Box<crate::diagnostics::BundlePreview>),
-    /// The bundle was written. Appended.
-    DiagnosticsSaved(crate::diagnostics::SavedDiagnostics),
+    /// The agent's data files for a problem report. Appended.
+    DiagnosticsFiles(Box<crate::diagnostics::DiagnosticsFiles>),
     /// A web address for the shell to open in the browser (https only). Appended.
     Url(String),
     /// Open ports and connections. Appended.
@@ -1022,8 +1015,7 @@ impl Reply {
             Reply::Captured(x) => v(x),
             Reply::RecorderSnapshots(x) => v(x),
             Reply::RecorderSnapshot(x) => v(x),
-            Reply::DiagnosticsPreview(x) => v(x),
-            Reply::DiagnosticsSaved(x) => v(x),
+            Reply::DiagnosticsFiles(x) => v(x),
             Reply::Url(x) => v(x),
             Reply::Network(x) => v(x),
             Reply::Benchmarks(x) => v(x),
@@ -1551,11 +1543,7 @@ mod tests {
                 bytes: 1,
                 count: 1,
             }),
-            Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {
-                path: "/x.zip".into(),
-                bytes: 1,
-                files: 1,
-            }),
+            Reply::DiagnosticsFiles(Box::default()),
             Reply::RecorderSnapshot(Box::new(crate::recorder::RecorderSnapshot::new(
                 Timestamp(0),
                 crate::recorder::CaptureReason::Manual,

@@ -64,6 +64,10 @@ pub struct HelperPaths {
     pub policy: PathBuf,
     /// The helper's own log (`helper.log`), read back by `LogTail`.
     pub log: PathBuf,
+    /// The helper's lifecycle file (`helper-lifecycle.log`): when it started, served and stopped, and why. World-readable and
+    /// free of user content, because `helper.log` is root's (0600) and a standard user's report could not show why a helper
+    /// is down. It sits beside the protected data folder, never inside it.
+    pub lifecycle: PathBuf,
     /// The socket path or pipe name clients connect to.
     pub endpoint: String,
     /// The folder the endpoint's socket lives in (Unix), created by the service manager or the installer.
@@ -94,6 +98,7 @@ impl HelperPaths {
                     audit,
                     policy: PathBuf::from("/etc/dyno/helper.toml"),
                     log: join_unix(&data_dir, "helper.log"),
+                    lifecycle: PathBuf::from("/Library/Application Support/Dyno/helper-lifecycle.log"),
                     endpoint: "/var/run/dyno-helper/helper.sock".into(),
                     endpoint_dir: Some(PathBuf::from("/var/run/dyno-helper")),
                     registration: Some(PathBuf::from(format!("/Library/LaunchDaemons/{MAC_LABEL}.plist"))),
@@ -110,6 +115,7 @@ impl HelperPaths {
                     audit,
                     policy: PathBuf::from("/etc/dyno/helper.toml"),
                     log: join_unix(&data_dir, "helper.log"),
+                    lifecycle: PathBuf::from("/var/log/dyno-helper-lifecycle.log"),
                     endpoint: "/run/dyno-helper/helper.sock".into(),
                     endpoint_dir: Some(PathBuf::from("/run/dyno-helper")),
                     registration: Some(PathBuf::from(format!("/usr/lib/systemd/system/{LINUX_UNIT}"))),
@@ -126,6 +132,7 @@ impl HelperPaths {
                     audit,
                     policy: join_windows(&data_dir, "policy.toml"),
                     log: join_windows(&data_dir, "helper.log"),
+                    lifecycle: join_windows(&join_windows(&windows.program_data, "Dyno"), "helper-lifecycle.log"),
                     endpoint: WINDOWS_PIPE.into(),
                     endpoint_dir: None,
                     registration: None,

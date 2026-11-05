@@ -330,75 +330,28 @@ fn a_time_machine_folder_name_is_read_as_local_time() {
 }
 
 #[test]
-fn the_diagnostics_bundle_names_the_zone_in_use() {
+fn the_agents_report_files_name_the_zone_in_use() {
     let h = Harness::start(None);
-    let bundle = dyno_agent::diagnostics::collect(&h.shared()).unwrap();
+    let bundle = dyno_agent::diagnostics::collect(&h.shared());
     let zone = bundle
         .files
         .iter()
-        .find(|f| f.path == "system/time-zone.json")
+        .find(|f| f.name == "system/time-zone.json")
         .expect("the time zone file");
     assert!(zone.text.contains("UTC+08:00"), "{}", zone.text);
 }
 
+/// The logs of both processes are the report's own `Logs` section (read from the app's log folder, redacted with the rest); the
+/// agent's files hold none, so a harness can never copy a machine's real logs into a report (ER-14).
 #[test]
-fn the_diagnostics_bundle_holds_the_recent_logs_of_both_processes() {
+fn the_agents_report_files_hold_no_logs() {
     let h = Harness::start(None);
-    let logs = tempfile::tempdir().unwrap();
-    std::fs::write(logs.path().join("dyno.2026-10-31.log"), "app line\n").unwrap();
-    std::fs::write(logs.path().join("dyno-agent.2026-10-31.log"), "agent line\n").unwrap();
-    let bundle = dyno_agent::diagnostics::collect_with_logs(&h.shared(), logs.path()).unwrap();
-    for (name, text) in [
-        ("logs/dyno.2026-10-31.log", "app line"),
-        ("logs/dyno-agent.2026-10-31.log", "agent line"),
-    ] {
-        let f = bundle
-            .files
-            .iter()
-            .find(|f| f.path == name)
-            .unwrap_or_else(|| panic!("{name} in the bundle"));
-        assert!(f.text.contains(text), "{}", f.text);
-    }
-}
-
-/// ER-14: a harness on a temporary folder never copies the machine's real Dyno logs into a bundle. A fake HOME holds a planted log
-/// in the place an install reads; the bundle of a harness holds its own folder's logs only.
-#[test]
-fn the_diagnostics_bundle_never_reads_logs_outside_the_given_folders() {
-    let h = Harness::start(None);
-    let home = tempfile::tempdir().unwrap();
-    let old = (
-        std::env::var_os("HOME"),
-        std::env::var_os("XDG_STATE_HOME"),
-        std::env::var_os("XDG_DATA_HOME"),
-    );
-    std::env::set_var("HOME", home.path());
-    std::env::remove_var("XDG_STATE_HOME");
-    std::env::remove_var("XDG_DATA_HOME");
-    let real = paddock_env::AppId::new(dyno_agent::logging::APP_ID, dyno_agent::logging::APP_NAME)
-        .ok()
-        .and_then(|a| paddock_env::AppDirs::for_app(&a).ok())
-        .map(|d| d.logs().to_path_buf())
-        .expect("the install's log folder");
-    std::fs::create_dir_all(&real).unwrap();
-    std::fs::write(real.join("dyno.2026-10-31.log"), "REAL-MACHINE-LOG\n").unwrap();
     let own = h.shared().dirs.logs();
     std::fs::create_dir_all(&own).unwrap();
     std::fs::write(own.join("dyno-agent.2026-10-31.log"), "harness line\n").unwrap();
     let bundle = dyno_agent::diagnostics::collect(&h.shared());
-    for (k, v) in [("HOME", old.0), ("XDG_STATE_HOME", old.1), ("XDG_DATA_HOME", old.2)] {
-        match v {
-            Some(v) => std::env::set_var(k, v),
-            None => std::env::remove_var(k),
-        }
-    }
-    let bundle = bundle.unwrap();
-    let logs: Vec<&str> = bundle
+    assert!(bundle
         .files
         .iter()
-        .filter(|f| f.path.starts_with("logs/"))
-        .map(|f| f.path.as_str())
-        .collect();
-    assert_eq!(logs, ["logs/dyno-agent.2026-10-31.log"], "only the harness folder's logs");
-    assert!(bundle.files.iter().all(|f| !f.text.contains("REAL-MACHINE-LOG")));
+        .all(|f| !f.name.starts_with("logs/") && !f.text.contains("harness line")));
 }

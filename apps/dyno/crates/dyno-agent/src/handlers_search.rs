@@ -37,13 +37,32 @@ pub fn hash_path(shared: &Arc<Shared>, source: HashSource) -> Result<String, Age
     }
 }
 
+/// The shared redactor as the search seed wants it: the text with private details replaced and what was removed, by kind.
+fn seed_redact(redactor: &paddock_diag::Redactor) -> impl Fn(&str) -> (String, dyno_core::weblinks::Removed) + '_ {
+    move |text| {
+        let (out, c) = redactor.text(text);
+        (
+            out,
+            dyno_core::weblinks::Removed {
+                home_paths: c.home_paths + c.profile_paths,
+                user_names: c.user_names,
+                machine_names: c.machine_names,
+                emails: c.emails,
+                ip_addresses: c.ip_addresses,
+            },
+        )
+    }
+}
+
 /// Answers a search, hash or startup-filter request.
 pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentError> {
     match request {
         Request::SearchSeed { text } => {
             let input: String = text.chars().take(MAX_SEED_INPUT).collect();
-            let redactor = crate::diagnostics::local_identity(sysinfo::System::host_name());
-            Ok(Reply::SearchSeed(search_seed(&input, &redactor)))
+            let host = sysinfo::System::host_name();
+            let redactor = paddock_diag::Redactor::for_machine_named(&paddock_env::ProcessVars, host.as_deref());
+            let redact = seed_redact(&redactor);
+            Ok(Reply::SearchSeed(search_seed(&input, &redact)))
         }
         Request::WebSearch { query } => search_url(&query).map(Reply::Url).map_err(|e| bad(e.to_string())),
         Request::VirusTotalUrl { sha256 } => virustotal_url(&sha256).map(Reply::Url).map_err(|e| bad(e.to_string())),
@@ -59,5 +78,18 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
             Ok(Reply::StartupOverview(Box::new(overview)))
         }
         other => Err(bad(format!("{other:?} is not a search request."))),
+    }
+}
+
+#[cfg(test)]
+mod seed_tests {
+    use super::*;
+
+    #[test]
+    fn a_seed_loses_someone_elses_profile_and_the_machine_name_with_the_shared_redactor() {
+        let r = paddock_diag::Redactor::for_machine_named(&paddock_env::MapVars::new(), Some("Dana-PC.local"));
+        let s = search_seed("crash in C:\\Users\\Dana Lee\\AppData\\x.exe on Dana-PC", &seed_redact(&r));
+        assert!(!s.text.contains("Dana") && !s.text.contains("Lee"), "{}", s.text);
+        assert_eq!(s.removed, vec!["1 home folder", "1 computer name"]);
     }
 }

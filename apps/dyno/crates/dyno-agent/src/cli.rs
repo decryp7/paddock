@@ -119,7 +119,7 @@ pub fn main(args: Vec<String>) -> i32 {
             .and_then(|n| bench(n, who)),
         ["service", cmd] => service(cmd),
         ["--version"] | ["-V"] => {
-            println!("dyno-agent {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", version_line(env!("CARGO_PKG_VERSION"), option_env!("PADDOCK_BUILD_COMMIT")));
             Ok(())
         }
         _ => {
@@ -133,6 +133,15 @@ pub fn main(args: Vec<String>) -> i32 {
             eprintln!("dyno-agent: {e}");
             1
         }
+    }
+}
+
+/// `dyno-agent 1.1.0 (build abc1234)`: the version and the commit the build embeds (`PADDOCK_BUILD_COMMIT`), so a VM run or a
+/// bug report names the exact build; without a commit (a local build) only the version.
+pub fn version_line(version: &str, commit: Option<&str>) -> String {
+    match commit.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(c) => format!("dyno-agent {version} (build {c})"),
+        None => format!("dyno-agent {version}"),
     }
 }
 
@@ -440,6 +449,13 @@ fn tempfile_dir() -> Result<std::path::PathBuf, String> {
 mod tests {
     use super::*;
     use crate::instance::LockError;
+
+    #[test]
+    fn the_version_line_names_the_build_commit_when_there_is_one() {
+        assert_eq!(version_line("1.1.0", Some("abc1234")), "dyno-agent 1.1.0 (build abc1234)");
+        assert_eq!(version_line("1.1.0", Some(" ")), "dyno-agent 1.1.0");
+        assert_eq!(version_line("1.1.0", None), "dyno-agent 1.1.0");
+    }
 
     #[test]
     fn a_refused_second_agent_exits_with_its_own_code_and_other_failures_with_one() {

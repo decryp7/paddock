@@ -84,7 +84,12 @@ pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<Earl
     }
     let log_gate = log.install();
     log::info!(version = crate::VERSION, host = format!("{:?}", paths.host).as_str(); "Helper: starting");
+    crate::lifecycle::record(&paths.lifecycle, "starting");
     let result = start(paths, stop, &log_gate, early);
+    match &result {
+        Ok(()) => crate::lifecycle::record(&paths.lifecycle, "stopped"),
+        Err(e) => crate::lifecycle::record(&paths.lifecycle, &format!("refused:{:?}", e.failure)),
+    }
     // A refusal is written once, by `service_main`, with its cause chain, code and next step.
     result
 }
@@ -151,6 +156,7 @@ fn start(
         )
     })?;
     log::info!(endpoint = paths.endpoint.as_str(), owner = config.owner.to_arg().as_str(), version = crate::VERSION; "Helper: serving");
+    crate::lifecycle::record(&paths.lifecycle, "serving");
     let remove = removal(paths.clone(), stop.clone(), "an Uninstall request from the app", os_log.clone());
     let orphan_remove = removal(paths.clone(), stop.clone(), "the app it serves has been gone for an hour", os_log);
     let _orphan = start_orphan_watch(config.app.clone(), orphan_remove);

@@ -387,15 +387,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             .map_err(internal)?
             .map(|s| Reply::RecorderSnapshot(Box::new(s)))
             .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That capture no longer exists.")),
-        Request::DiagnosticsPreview => {
-            let bundle = crate::diagnostics::collect(shared).map_err(internal)?;
-            Ok(Reply::DiagnosticsPreview(Box::new(dyno_core::diagnostics::preview(&bundle))))
-        }
-        Request::SaveDiagnostics { path } => {
-            let dest = dyno_core::diagnostics::validate_destination(&path).map_err(|e| bad(e.to_string()))?;
-            let bundle = crate::diagnostics::collect(shared).map_err(internal)?;
-            crate::diagnostics::write_zip(&dest, &bundle).map(Reply::DiagnosticsSaved)
-        }
+        Request::DiagnosticsFiles => Ok(Reply::DiagnosticsFiles(Box::new(crate::diagnostics::collect(shared)))),
         Request::AlarmHistory { alarm_id, limit } => Ok(Reply::AlarmChanges(
             lock(&shared.core).store.alarm_events(alarm_id, limit).map_err(internal)?,
         )),

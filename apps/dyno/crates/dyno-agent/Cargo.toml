@@ -44,8 +44,8 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-# The diagnostics bundle (MIT; the same build as Debrief's: deflate via the Rust zlib-rs, no C code).
-zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# The one redactor (the search seed removes personal details with it); the report's zip is the app's, not the agent's.
+paddock-diag = { path = "../../../../crates/paddock-diag" }
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Content hashes for the duplicate file finder (MIT OR Apache-2.0; already in the tree through other dependencies).
 sha2 = "0.10"

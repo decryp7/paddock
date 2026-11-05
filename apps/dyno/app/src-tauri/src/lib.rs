@@ -7,6 +7,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod actions;
+pub mod breadcrumb;
 pub mod commands;
 pub mod dialogs;
 pub mod dto;
@@ -19,6 +20,7 @@ pub mod login_item;
 pub mod mcp;
 pub mod popover;
 pub mod power_menu;
+pub mod report;
 pub mod service_repair;
 pub mod shell;
 pub mod supervise;
@@ -62,8 +64,6 @@ paddock_commands::command_table! {
     /// Every engine request, forwarded to the agent (`invoke('dyno', { request })`): parsed into a typed request here,
     /// refused when it is one the window may not ask. The agent re-validates.
     Mutation [MAIN | TRAY | DIALOG] => commands::dyno,
-    /// "Save bundle...": the OS save dialog, then the agent writes the redacted diagnostics zip.
-    Mutation [MAIN] => commands::save_diagnostics,
     /// "Export" on the Benchmarks page: the OS save dialog, then the agent writes the chosen runs as JSON or CSV.
     Mutation [MAIN] => commands::save_benchmarks,
     /// "Export" on the Reports page: the OS save dialog, then the agent writes the week's report.
@@ -118,6 +118,14 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
     let attach = hub.clone();
     let agent_hub = hub.clone();
     let installed = matches!(place, Place::Installed);
+    // The watchdog's question offers Save a problem report… (written without the stuck window); a test place has no real folders.
+    let startup = paddock_startup::tauri::Startup::<R>::builder()
+        .native_dialogs()
+        .report(|app, _label| {
+            let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
+            report::save_report_from_question(app, &info)
+        })
+        .build();
     let dirs = match &place {
         Place::Installed => dyno_agent::paths::Dirs::current(),
         Place::Test { dir } => dyno_agent::paths::Dirs::at(dir.join("data")),
@@ -144,8 +152,14 @@ pub fn shell<R: Runtime>(place: Place, hub: &health::Hub<R>, pixels: Arc<dyn she
     // Report a problem with the logs of both processes, working with the agent down (the shell registers the Logging settings
     // section on the log handle, so a support case can raise the level to Debug).
     // Installed only: a test never resolves the real folders (ER-14).
+    if installed {
+        match startup {
+            Ok(startup) => builder = builder.startup(startup),
+            Err(e) => log::error!("The start-up watchdog could not be configured: {e}"),
+        }
+    }
     if diagnostics_wanted(&place) {
-        builder = builder.diagnostics(|_app| diagnostics_setup());
+        builder = builder.diagnostics(|app| diagnostics_setup(app));
     }
     // AI access (ADR 0007, 0032 D7): Dyno's four tools, off until the user allows them in Settings > AI access. The tools ask the agent
     // through the shell's link; a test place keeps the settings in its folder and the keys in memory (ER-14).
@@ -179,11 +193,16 @@ fn diagnostics_wanted(place: &Place) -> bool {
 
 /// Report a problem's setup: paddock-diag's built-in sections (system facts, the shell's settings, the crash markers, the dated logs
 /// of both processes, which work with the agent down because they are read from disk); the log handle when the installed app has one.
-fn diagnostics_setup() -> Result<paddock_diag::tauri::Setup, Box<dyn std::error::Error + Send + Sync>> {
+fn diagnostics_setup<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+) -> Result<paddock_diag::tauri::Setup, Box<dyn std::error::Error + Send + Sync>> {
     let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
     let dirs = paddock_env::AppDirs::for_app(&id)?;
     let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
     let mut setup = paddock_diag::tauri::Setup::new(info, dirs).settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE);
+    for section in report::sections(app) {
+        setup = setup.section(section);
+    }
     if let Some(handle) = logging::handle() {
         setup = setup.log(handle);
     }
@@ -428,9 +447,21 @@ fn on_ready(app: &tauri::AppHandle, asked_hidden: bool) {
 /// Starts the app.
 pub fn run() {
     let _ = logging::uptime_ms();
+    // A window that failed to start can still be reported: `--export-diagnostics` writes the report and exits, with no window.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|a| a.starts_with(paddock_diag::export::FLAG)) {
+        let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
+        let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
+        if let Some(code) = report::export_cli(&args, &info) {
+            std::process::exit(code);
+        }
+    }
     // First: the shared crates' log lines (the start's error among them) reach Dyno's daily log file (paddock-log); Dyno's
     // own lines stay in its agent-side log.
-    let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
+    let _log = paddock_shell::logging::install_with_commit(
+        &AppIdentity::new(APP_ID, APP_NAME, VERSION),
+        option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""),
+    );
     if let Some(handle) = &_log {
         logging::set_handle(handle.clone());
     }
@@ -457,6 +488,19 @@ pub fn run() {
     // `Builder::run` is `build` then `run` with no callback; the callback is only for macOS's login-start decision.
     match builder.build(tauri::generate_context!()) {
         Ok(app) => app.run(move |_handle, _event| {
+            // The end of a run (ER-27): why it ends and how long it ran; the last repeated lines are written before the process goes.
+            match &_event {
+                tauri::RunEvent::ExitRequested { code, .. } => {
+                    log::info!(Code = code.unwrap_or(0), UptimeMs = logging::uptime_ms(); "Exit requested");
+                }
+                tauri::RunEvent::Exit => {
+                    log::info!(UptimeMs = logging::uptime_ms(); "Exit");
+                    if let Some(handle) = logging::handle() {
+                        handle.flush_repeats();
+                    }
+                }
+                _ => {}
+            }
             #[cfg(target_os = "macos")]
             if matches!(_event, tauri::RunEvent::Ready) {
                 on_ready(_handle, asked_hidden);
@@ -468,6 +512,11 @@ pub fn run() {
             }
         }),
         Err(e) => {
+            // The log first (it is what a bug report holds), then standard error for a person at a terminal.
+            log::error!(Error = e.to_string().as_str(), UptimeMs = logging::uptime_ms(); "Dyno could not start; check the webview runtime and the app's folders, then start it again");
+            if let Some(handle) = logging::handle() {
+                handle.flush_repeats();
+            }
             eprintln!("Dyno could not start: {e}");
             std::process::exit(1);
         }

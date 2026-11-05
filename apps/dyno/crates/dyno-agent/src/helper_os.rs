@@ -168,6 +168,11 @@ fn windows_roots() -> WindowsRoots {
     dyno_helper_service::windows_roots(&paddock_service::privileged::OsKnownFolders)
 }
 
+/// Where this machine's helper keeps its files (the lifecycle file the report reads, the binary, the endpoint).
+pub fn helper_paths() -> HelperPaths {
+    HelperPaths::for_host(host(), &windows_roots())
+}
+
 /// The connection to this machine's helper (also what the VM test sends requests through).
 pub fn transport() -> PeerTransport {
     let host = host();

@@ -1267,6 +1267,7 @@ dependencies = [
  "log",
  "maxminddb",
  "paddock-bench",
+ "paddock-diag",
  "paddock-download",
  "paddock-env",
  "paddock-ipc",
@@ -1290,13 +1291,13 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
- "zip",
 ]
 
 [[package]]
 name = "dyno-app"
 version = "1.1.0"
 dependencies = [
+ "chrono",
  "dyno-agent",
  "dyno-core",
  "dyno-platform",
@@ -1347,6 +1348,7 @@ dependencies = [
  "windows-sys 0.61.2",
  "winreg",
  "zbus",
+ "zip",
 ]
 
 [[package]]
@@ -3923,6 +3925,7 @@ name = "paddock-diag"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "libc",
  "log",
  "paddock-commands",
  "paddock-dialogs",
