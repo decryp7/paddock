@@ -93,31 +93,27 @@ pub fn stop(
     if held(sys, m) == Some(false) {
         return Ok(Stopped::AlreadyStopped);
     }
-    match m {
-        StopMechanism::Launchd { target } => {
-            bootout(sys, target).map_err(|e| StopError(format!("{e}. {}", next_step(m))))?
-        }
+    // A command that failed or timed out may still have done its work (launchd's exit grace is longer than a command's
+    // timeout): the read-back decides, and the command's own words stay in the message if it does not confirm.
+    let issued: Result<(), String> = match m {
+        StopMechanism::Launchd { target } => bootout(sys, target),
         StopMechanism::SystemdUser { unit } => {
-            let out = sys
-                .run(SYSTEMCTL, &["--user", "stop", unit])
-                .map_err(|e| StopError(format!("systemctl stop {e}. {}", next_step(m))))?;
-            if !out.success() {
-                return Err(StopError(format!(
-                    "systemctl stop: {}. {}",
-                    out.reason(),
-                    next_step(m)
-                )));
+            match sys.run(SYSTEMCTL, &["--user", "stop", unit]) {
+                Ok(out) if out.success() => Ok(()),
+                Ok(out) => Err(format!("systemctl stop: {}", out.reason())),
+                Err(e) => Err(format!("systemctl stop {e}")),
             }
         }
-    }
+    };
     let mut waited = Duration::ZERO;
     loop {
         if held(sys, m) == Some(false) {
             return Ok(Stopped::Stopped);
         }
         if waited >= timings.gone_wait {
+            let cause = issued.err().map(|e| format!(" ({e})")).unwrap_or_default();
             return Err(StopError(format!(
-                "The operating system still reports the agent after {} s. {}",
+                "The operating system still reports the agent after {} s{cause}. {}",
                 waited.as_secs(),
                 next_step(m)
             )));
@@ -234,6 +230,39 @@ mod tests {
             Err(RunError::TimedOut("launchctl".into()))
         });
         assert!(stop(&mut sys.clone(), &launchd(), FAST).is_err());
+    }
+
+    #[test]
+    fn a_stop_command_that_timed_out_still_gets_its_read_back() {
+        // launchd needs longer than the command's own timeout to end the job: the read-back decides, not the timeout.
+        let sys = FakeSystem::new();
+        let up = Arc::new(Mutex::new(true));
+        let (a, b) = (up.clone(), up);
+        sys.on("/bin/launchctl print", move |_, _| {
+            Ok(if *a.lock().unwrap() {
+                Output::ok("state = running\n")
+            } else {
+                Output::code(113)
+            })
+        });
+        sys.on("/bin/launchctl bootout", move |_, _| {
+            *b.lock().unwrap() = false;
+            Err(RunError::TimedOut("launchctl".into()))
+        });
+        assert_eq!(
+            stop(&mut sys.clone(), &launchd(), FAST),
+            Ok(Stopped::Stopped)
+        );
+        let sys = FakeSystem::new();
+        sys.answer("systemctl --user is-active", Output::ok("active\n"));
+        sys.on("systemctl --user stop", |_, _| {
+            Err(RunError::TimedOut("systemctl".into()))
+        });
+        let e = stop(&mut sys.clone(), &systemd(), FAST).unwrap_err();
+        assert!(
+            e.0.contains("did not finish in time"),
+            "the cause stays in the message: {e}"
+        );
     }
 
     #[test]
