@@ -16029,84 +16029,84 @@
         <source>Queued</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">31</context>
+          <context context-type="linenumber">33</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.running" datatype="html">
         <source>Running</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">33</context>
+          <context context-type="linenumber">35</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.done" datatype="html">
         <source>Done</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">35</context>
+          <context context-type="linenumber">37</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.failed" datatype="html">
         <source>Failed</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">37</context>
+          <context context-type="linenumber">39</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.cancelled" datatype="html">
         <source>Cancelled</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">39</context>
+          <context context-type="linenumber">41</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.state.interrupted" datatype="html">
         <source>Interrupted</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">41</context>
+          <context context-type="linenumber">43</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.link.event" datatype="html">
         <source>event <x id="id" equiv-text="link.recordId"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">50</context>
+          <context context-type="linenumber">52</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.link.range" datatype="html">
         <source>a time range</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">52</context>
+          <context context-type="linenumber">54</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.link.query" datatype="html">
         <source>query <x id="ql" equiv-text="link.ql"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">54</context>
+          <context context-type="linenumber">56</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.link.chat" datatype="html">
         <source>a chat</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">58</context>
+          <context context-type="linenumber">60</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.queued.plain" datatype="html">
         <source>Queued</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">66</context>
+          <context context-type="linenumber">68</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.queued.position" datatype="html">
         <source>Queued (position <x id="position" equiv-text="position"/>)</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
-          <context context-type="linenumber">66</context>
+          <context context-type="linenumber">68</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.store.failed" datatype="html">

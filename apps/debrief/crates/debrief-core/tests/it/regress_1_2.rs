@@ -3,7 +3,7 @@
 //! Each test is written to fail today and is `#[ignore]`d with the failure it shows, until the work package that fixes
 //! it removes the marker (3.5 for the CSV, which streams). The inputs are generated at test time into a temp folder
 //! (invented rows, never committed, never real data) and are big, so the tests only run when asked for:
-//! `cargo test --release -p debrief-core --test regress_1_2 -- --ignored` (the nightly/bench workflow does that).
+//! `cargo test --release -p debrief-core --test it regress_1_2:: -- --ignored` (the nightly/bench workflow does that).
 
 use debrief_core::batch::{PendingBatch, SourceId};
 use debrief_core::ingest::{self, BatchSink, ImportEnv, NewSource, SourceReport};

@@ -3,10 +3,9 @@
 //! Each test is written to fail today and is `#[ignore]`d with the failure it shows, until the work package that fixes
 //! it removes the marker (3.5 for the `.gz`, 4.2 for the exception groups, P3 for the 1.6 M-row catalogue). The inputs are generated at test time into
 //! a temp folder (invented rows, never committed, never real data) and the big one is slow, so the tests only run when
-//! asked for: `cargo test --release -p debrief-store-duck --test regress_1_2 -- --ignored` (nightly/bench workflow).
+//! asked for: `cargo test --release -p debrief-store-duck --test it regress_1_2:: -- --ignored` (nightly/bench workflow).
 
-mod common;
-
+use crate::common;
 use common::rss::Sampler;
 use common::TempDir;
 use debrief_core::api::QueryRequest;

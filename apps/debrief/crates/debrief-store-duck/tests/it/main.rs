@@ -22,6 +22,7 @@ mod outliers;
 mod projects;
 mod qlang;
 mod redacted_copy;
+mod regress_1_2;
 mod runtime_lib;
 mod search;
 mod segments;
