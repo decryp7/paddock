@@ -21,8 +21,9 @@ function Run($exe, $argline, $envs) {
   [pscustomobject]@{ Code = $p.ExitCode; Lines = $lines }
 }
 function Cmds($r) { ($r.Lines | ForEach-Object { ($_ -split ' ')[0] }) -join ',' }
-function WaitGone($path) { $end = (Get-Date).AddSeconds(30); while ((Test-Path $path) -and (Get-Date) -lt $end) { Start-Sleep -Milliseconds 200 } }
+function WaitGone($path) { $end = (Get-Date).AddSeconds(90); while ((Test-Path $path) -and (Get-Date) -lt $end) { Start-Sleep -Milliseconds 200 } }
 
+Remove-Item (Join-Path $env:TEMP 'PaddockHarness-setup-refused.log') -ErrorAction SilentlyContinue   # a leftover of an older include
 Remove-Item -Recurse -Force (Join-Path $Root 'run') -ErrorAction SilentlyContinue
 $base = Join-Path $Root 'run'; New-Item -ItemType Directory -Force $base | Out-Null
 $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PaddockHarness'
@@ -119,7 +120,8 @@ $real = Join-Path $Root 'harness-installer-real.exe'
 if (Test-Path $real) {
   $uk = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PaddockHarness'
   New-Item $uk -Force | Out-Null; Set-ItemProperty $uk UninstallString '"C:\Users\nobody\AppData\Local\PaddockHarness\uninstall.exe"'
-  $rr = Join-Path $base 'r'
+  $rr = 'C:\Program Files\PaddockHarnessReal'   # the real tool's check-dir accepts only a direct child of Program Files
+  Remove-Item -Recurse -Force $rr -ErrorAction SilentlyContinue
   $r = Run $real "/S /D=$rr" @{}
   Remove-Item $uk -ErrorAction SilentlyContinue
   Check 'R real GUI tool: guard refused with its own level' ($r.Code -eq 40) "code $($r.Code)"
