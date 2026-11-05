@@ -39,7 +39,7 @@ pub use elevate::{ShellElevator, is_administrator};
 /// The Windows glue of the per-machine hand-off: one platform call each, no decisions (they are in `install.rs`).
 #[cfg(all(windows, feature = "install"))]
 mod elevate {
-    use crate::install::{ElevatedOutcome, Elevator, quote_arg};
+    use crate::install::{ElevatedOutcome, Elevator, on_worker_thread, quote_arg};
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
     use std::time::Duration;
@@ -70,6 +70,18 @@ mod elevate {
 
     impl Elevator for ShellElevator {
         fn run(&self, program: &Path, args: &[String], patience: Duration) -> ElevatedOutcome {
+            // On a thread of its own (see `on_worker_thread`): from the exit hook the prompt never returned.
+            let (program, args) = (program.to_path_buf(), args.to_vec());
+            on_worker_thread("paddock-elevate", move || {
+                run_here(&program, &args, patience)
+            })
+            .unwrap_or_else(ElevatedOutcome::Failed)
+        }
+    }
+
+    /// The prompt and the wait, on the calling thread.
+    fn run_here(program: &Path, args: &[String], patience: Duration) -> ElevatedOutcome {
+        {
             let file = wide(&program.to_string_lossy());
             let verb = wide("runas");
             let params = wide(

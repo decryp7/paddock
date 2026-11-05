@@ -263,6 +263,25 @@ impl Installer for ElevatedHandoff {
     }
 }
 
+/// Runs `f` on a new thread of its own and waits for its value. The UAC prompt is requested from the exit hook, on the thread that
+/// ran the app's event loop; measured on a Windows 11 VM (2026-11-05), a prompt requested there never returned (the app stayed
+/// frozen after the prompt was declined, and an elevated program that was approved stayed suspended). The same call from a plain
+/// program, or from a thread of its own, returned and ran. A panic on the worker is an `Err`, never a second panic.
+///
+/// # Errors
+/// The thread could not be started, or it panicked.
+pub fn on_worker_thread<T: Send + 'static>(
+    name: &str,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(f)
+        .map_err(|e| format!("the {name} thread could not be started ({e})"))?
+        .join()
+        .map_err(|_| format!("the {name} thread stopped unexpectedly"))
+}
+
 fn log_line(line: String) {
     // The core has no logger of its own: the line is logged when the adapter (the `tauri` feature, which has `log`) is built, and
     // dropped otherwise.
@@ -513,5 +532,22 @@ mod tests {
         let s = installer_stopped(Some(Path::new(r"C:\Program Files\Dyno")));
         assert!(s.contains("updates") && s.contains("setup.log"), "{s}");
         assert!(installer_stopped(None).contains("setup.log"));
+    }
+
+    #[test]
+    fn elevation_runs_on_its_own_thread_and_gives_back_its_value() {
+        // The hand-off asks Windows for the UAC prompt from the exit hook, on the thread that ran the event loop. A prompt requested
+        // there was measured never to return (Windows 11 VM, 2026-11-05), so the call runs on a fresh thread of its own.
+        let here = std::thread::current().id();
+        let (there, value) =
+            on_worker_thread("paddock-elevate", || (std::thread::current().id(), 7)).unwrap();
+        assert_ne!(here, there);
+        assert_eq!(value, 7);
+    }
+
+    #[test]
+    fn a_panic_on_the_worker_is_a_failure_not_a_second_panic() {
+        let e = on_worker_thread::<()>("paddock-elevate", || panic!("boom")).unwrap_err();
+        assert!(e.contains("stopped"), "{e}");
     }
 }
