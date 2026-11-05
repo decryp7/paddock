@@ -161,23 +161,23 @@ impl HardwareReaders {
     }
 }
 
-/// The ports for the current OS.
-pub fn platform() -> Platform {
+/// The ports for the current OS. `secrets_dir` is where the macOS build keeps Wake-on-LAN passwords (see [`wol::os_store`]).
+pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     #[cfg(windows)]
     {
-        windows::platform()
+        windows::platform(secrets_dir)
     }
     #[cfg(target_os = "macos")]
     {
-        macos::platform()
+        macos::platform(secrets_dir)
     }
     #[cfg(target_os = "linux")]
     {
-        linux::platform()
+        linux::platform(secrets_dir)
     }
     #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
-        other::platform()
+        other::platform(secrets_dir)
     }
 }
 

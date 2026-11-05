@@ -36,6 +36,31 @@ fn internal(m: impl Into<String>) -> AgentError {
     AgentError::new(ErrorCode::Internal, m)
 }
 
+/// The real machine's password folder (macOS: the owner-only files of [`dyno_platform::wol::os_store`]): created private and kept out
+/// of backups, so a copied backup does not carry the SecureOn passwords. Best effort and logged; elsewhere nothing is done.
+pub fn prepare_password_folder(dirs: &crate::paths::Dirs) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let folder = dirs.secrets_folder();
+    let prepared = std::fs::create_dir_all(&folder).and_then(|()| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700))?;
+        }
+        crate::cache::backup::exclude_from_backup(&folder).map(|_| ())
+    });
+    match prepared {
+        Ok(()) => {
+            log::info!(target: "dyno_agent::wol", "SecureOn passwords: owner-only files in the data folder, out of backups, never the Keychain")
+        }
+        Err(e) => {
+            log::warn!(target: "dyno_agent::wol", Cause = e.to_string(); "The password folder could not be prepared (private, out of backups); next step: check the data folder is writable")
+        }
+    }
+}
+
 fn secret_name(id: u64) -> Option<Name> {
     Name::new("wol", &format!("secure-on-{id}")).ok()
 }
@@ -213,7 +238,7 @@ impl WolCentre {
         self.ports.secrets.set(&name, &secret).map_err(|e| {
             AgentError::new(
                 ErrorCode::AccessDenied,
-                format!("The password could not be stored in the system's credential store: {e}"),
+                format!("The password could not be stored in the password store: {e}. Check that Dyno's data folder is writable."),
             )
         })
     }
@@ -223,7 +248,7 @@ impl WolCentre {
         self.ports.secrets.delete(&name).map_err(|e| {
             AgentError::new(
                 ErrorCode::AccessDenied,
-                format!("The password could not be removed from the system's credential store: {e}"),
+                format!("The password could not be removed from the password store: {e}"),
             )
         })
     }
@@ -234,8 +259,8 @@ impl WolCentre {
             Ok(Some(s)) => SecureOn::parse(s.expose())
                 .map(Some)
                 .map_err(|_| "The stored SecureOn password is damaged; set it again.".to_string()),
-            Ok(None) => Ok(None),
-            Err(e) => Err(format!("The SecureOn password could not be read from the credential store: {e}")),
+            Ok(None) => Err("The SecureOn password for this computer is missing. Edit the computer in Wake devices and enter it again.".into()),
+            Err(e) => Err(format!("The SecureOn password could not be read from the password store: {e}. Edit the computer in Wake devices and enter it again.")),
         }
     }
 

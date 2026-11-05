@@ -272,6 +272,36 @@ fn a_secureon_password_is_appended_to_the_packet() {
 }
 
 #[test]
+fn a_device_whose_password_is_gone_is_not_woken_without_it_and_the_job_says_what_to_do() {
+    // After an update that moves the password store (or a deleted file) the device still says "has a password": a wake without it
+    // would silently fail to wake the computer, so the job refuses and names the next step.
+    let h = Harness::start();
+    let (_w, _lists, jobs) = h.watcher();
+    let c = h.client();
+    let mut d = input("NAS", MAC);
+    d.secure_on = SecureOnEdit::Set {
+        password: "0a:0b:0c:0d:0e:0f".into(),
+    };
+    save(&c, d).unwrap();
+    h.secrets.delete(&Name::new("wol", "secure-on-1").unwrap()).unwrap();
+    let Reply::Job(started) = ask(&c, Request::WolWake { id: 1, test: false }).unwrap() else {
+        panic!("a job")
+    };
+    let snapshot = loop {
+        let s = jobs.recv_timeout(HANG_GUARD).expect("the job ends");
+        if s.id == started.id && s.is_terminal() {
+            break s;
+        }
+    };
+    let text = format!("{snapshot:?}");
+    assert!(
+        text.contains("password") && text.contains("enter it again"),
+        "the job says the SecureOn password is missing and how to fix it: {text}"
+    );
+    assert!(h.udp.sent().is_empty(), "nothing is sent without the password");
+}
+
+#[test]
 fn a_test_wake_waits_for_the_answer_and_saves_a_moved_address() {
     // No answer to the first look, then the computer shows up reachable at a new address.
     let h = Harness::start_with(Scripts {

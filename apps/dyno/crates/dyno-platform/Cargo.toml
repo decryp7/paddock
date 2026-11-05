@@ -25,7 +25,12 @@ paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 sha2 = "0.10"
 # Keep awake and sleep/wake notifications (ADR 0032, D3); the fakes are what tests use.
 paddock-power = { path = "../../../../crates/paddock-power" }
-# The SecureOn password of a Wake-on-LAN device lives in the OS credential store, never in the database or the logs (ADR 0032, D6).
+# The SecureOn password of a Wake-on-LAN device is never in the database or the logs (ADR 0032, D6): an owner-only file on macOS, the
+# OS credential store elsewhere. The `keyring` feature is enabled for other targets only, so the Keychain adapter does not exist in a
+# macOS build (a Keychain read waits behind a password dialog after every update).
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
 paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
 
 [target.'cfg(windows)'.dependencies]

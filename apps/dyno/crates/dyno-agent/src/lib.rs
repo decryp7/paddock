@@ -125,6 +125,7 @@ impl Running {
         details: Box<dyn dyno_core::ports::ProcessSource>,
         reveal: agent::Reveal,
     ) -> Result<Running, StartError> {
+        wol::prepare_password_folder(&dirs);
         Running::start_with(dirs, platform, details, reveal, disk::DiskPorts::os())
     }
 

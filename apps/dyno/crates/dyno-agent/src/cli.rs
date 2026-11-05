@@ -220,9 +220,10 @@ fn reveal() -> crate::agent::Reveal {
 }
 
 /// The OS ports, and a second process source for on-demand details.
-fn platforms() -> (dyno_platform::Platform, Box<dyn dyno_core::ports::ProcessSource>) {
-    let platform = dyno_platform::platform();
-    let details = dyno_platform::platform().processes;
+fn platforms(dirs: &Dirs) -> (dyno_platform::Platform, Box<dyn dyno_core::ports::ProcessSource>) {
+    let secrets = dirs.secrets_folder();
+    let platform = dyno_platform::platform(&secrets);
+    let details = dyno_platform::platform(&secrets).processes;
     (platform, details)
 }
 
@@ -257,7 +258,7 @@ fn run() -> Result<(), StartError> {
     );
     install_signal_handlers();
     spawn_signal_watch();
-    let (platform, details) = platforms();
+    let (platform, details) = platforms(&dirs);
     // Takes the data folder's agent lock first: a second agent exits here, before it opens or writes anything.
     let root = dirs.root().to_path_buf();
     let running = Running::start_os(dirs, platform, details, reveal())?;
@@ -341,7 +342,7 @@ fn view() -> Result<(), String> {
 }
 
 fn once() -> Result<(), String> {
-    let mut p = dyno_platform::platform();
+    let mut p = dyno_platform::platform(&std::env::temp_dir());
     let t = crate::agent::now();
     p.sensors.sample(t);
     std::thread::sleep(Duration::from_millis(1_000));
@@ -391,7 +392,7 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
     let tmp = tempfile_dir()?;
     let dirs = Dirs::at(tmp.join("data"));
-    let (platform, details) = platforms();
+    let (platform, details) = platforms(&dirs);
     let running = Running::start_os(dirs.clone(), platform, details, Box::new(|_| Ok(())))?;
     let (peer, _) = connect(&dirs)?;
     let seen = Arc::new(Mutex::new((0u64, 0f32, 0u64)));

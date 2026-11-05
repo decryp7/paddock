@@ -19,7 +19,7 @@ use dyno_core::ports::PlatformError;
 use std::path::{Path, PathBuf};
 
 /// The ports for Windows.
-pub fn platform() -> Platform {
+pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     let fake = crate::fake::Fake::new();
     let f = fake.platform();
     Platform {
@@ -33,7 +33,7 @@ pub fn platform() -> Platform {
         network: crate::NetworkPorts::os(),
         hardware: crate::HardwareReaders::os(),
         power: crate::PowerPorts::os(),
-        wol: crate::wol::WolPorts::os(),
+        wol: crate::wol::WolPorts::os(secrets_dir),
         ..f
     }
 }
