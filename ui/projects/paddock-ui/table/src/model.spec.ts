@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PD_TABLE_FILL_MIN,
+  scrollParent,
+  windowBodyMax,
   actionColumnWidth,
   parentIndex,
   treePlaces,
@@ -242,5 +245,31 @@ describe('tree rows', () => {
     expect(parentIndex(levels, 5, level)).toBe(4);
     expect(parentIndex(levels, 4, level)).toBe(-1);
     expect(parentIndex(levels, 0, level)).toBe(-1);
+  });
+});
+
+describe('table height modes', () => {
+  it('caps a window-sized body at the scroll area minus the table chrome, never below the minimum', () => {
+    expect(windowBodyMax(800, 100)).toBe(700);
+    expect(windowBodyMax(800.7, 100.2)).toBe(700);
+    expect(windowBodyMax(300, 100)).toBe(PD_TABLE_FILL_MIN);
+    expect(windowBodyMax(0, 0)).toBe(PD_TABLE_FILL_MIN);
+  });
+
+  it('finds the nearest ancestor that scrolls vertically, or null', () => {
+    const outer = document.createElement('div');
+    outer.style.overflowY = 'auto';
+    const hidden = document.createElement('div');
+    hidden.style.overflowY = 'hidden';
+    const inner = document.createElement('div');
+    outer.append(hidden);
+    hidden.append(inner);
+    document.body.append(outer);
+    expect(scrollParent(inner)).toBe(outer);
+    const solo = document.createElement('div');
+    document.body.append(solo);
+    expect(scrollParent(solo)).toBeNull();
+    outer.remove();
+    solo.remove();
   });
 });

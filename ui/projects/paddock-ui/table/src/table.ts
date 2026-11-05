@@ -45,7 +45,10 @@ import {
   nextIndex,
   parentIndex,
   PD_HEADER_HEIGHT,
+  PD_TABLE_FILL_MIN,
   rowHeightFor,
+  scrollParent,
+  windowBodyMax,
   PD_FOLD_EXTRA,
   shownColumns,
   sortRows,
@@ -85,6 +88,9 @@ function readDensity(): number {
 }
 
 const NO_ACTIONS = (): readonly PdRowAction[] => [];
+
+/** How tall a table is: see the `height` input of {@link PdTable}. */
+export type PdTableHeight = 'fit' | 'fill' | 'window';
 
 /** Above this many lines only the rows in view are drawn (`virtual="auto"`). */
 export const PD_TABLE_VIRTUAL_FROM = 100;
@@ -155,7 +161,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     PdGlyph,
     PdMiddleText,
   ],
-  host: { '[attr.data-fit-width]': 'width()', '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
+  host: { '[attr.data-height]': 'height()', '(window:resize)': 'onWindowResize()', '[attr.data-fit-width]': 'width()', '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
   template: `
     @if (toolbar()) {
     <div class="pd-toolbar">
@@ -186,6 +192,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     <!-- eslint-disable-next-line @angular-eslint/template/interactive-supports-focus -- the grid only receives keydown bubbling from its rows and sort headers, which are the focus stops (roving tabindex) -->
     <div
       class="pd-grid"
+      [class.pd-fill]="fills()"
       [attr.role]="groupBy() || tree() ? 'treegrid' : 'grid'"
       [style.--pd-cols]="gridTemplate()"
       [style.--pd-gutter.px]="gutter()"
@@ -217,7 +224,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
         }
         <mat-header-row *matHeaderRowDef="displayed()" class="pd-header" aria-rowindex="1" />
       </mat-table>
-      <cdk-virtual-scroll-viewport class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
+      <cdk-virtual-scroll-viewport class="pd-body" [itemSize]="rowPx()" [minBufferPx]="bufferPx()" [maxBufferPx]="bufferPx() * 2" [style.height.px]="bodyHeight()" [style.min-height.px]="fillMin()" [attr.data-testid]="state() === 'loading' ? 'table-loading' : null">
         <!-- A row group only while it has rows anyone can read: not when empty (the state is said below) or loading (placeholders are hidden). -->
         <mat-table class="pd-body-table" [attr.role]="state() === 'ready' && lines().length ? 'rowgroup' : null" [dataSource]="lines()" [trackBy]="trackLine" (contentChanged)="onRowsDrawn()">
           @for (c of columns2(); track c.key; let k = $index) {
@@ -376,6 +383,13 @@ const VIRTUAL_BUFFER_ROWS = 8;
     @container (max-width: 400px) { .pd-tool-text, .pd-count { display: none; } .pd-tool { padding: 0 var(--pd-space-2); } }
     /* Its own stacking context: the table's layers stay local and never compete with the page's. */
     .pd-grid { position: relative; isolation: isolate; min-width: 0; overflow: hidden; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
+    /* fill: the grid takes what the container leaves; the body is the part that grows, never shorter than its minimum (set as min-height on the body). */
+    :host([data-height='fill']) { flex: 1 1 0; height: 100%; }
+    .pd-grid.pd-fill { display: flex; flex-direction: column; flex: 1 1 0; }
+    .pd-grid.pd-fill > .pd-head-table { flex: none; }
+    .pd-grid.pd-fill > .pd-body { flex: 1 1 0; }
+    /* window: the wheel passes to the page at the end of the rows (the default, said here so no one adds contain). */
+    :host([data-height='window']) .pd-body { overscroll-behavior-y: auto; }
     .pd-body { display: block; min-width: 0; overflow-x: hidden; overflow-y: auto; }
     .pd-grid .pd-head-table, .pd-grid .pd-body-table { display: block; min-width: 0; }
     /* Every line is a CSS grid over the same tracks (--pd-cols), so the header and the rows share their columns. */
@@ -467,8 +481,15 @@ export class PdTable<T> {
   readonly errorText = input('');
   /** Retry was pressed in the error state. */
   readonly retry = output<void>();
-  /** The tallest the table body grows before it scrolls. */
+  /** The tallest the table body grows before it scrolls (`fit` mode, and `window` mode until the scroll area is measured). */
   readonly maxHeight = input(480);
+  /**
+   * How tall the table is. `fit` (default): as tall as its rows, up to `maxHeight`. `fill`: the height its container gives it (a flex
+   * column or a grid cell with `min-height: 0`, like a page that fills the window), at least {@link PD_TABLE_FILL_MIN}; for the one main
+   * table of a page. `window`: as tall as its rows, up to the height of the nearest scrolling ancestor less the table's own chrome,
+   * updated live; for a page that scrolls once and stacks tables. The wheel passes to that ancestor at the end of the rows.
+   */
+  readonly height = input<PdTableHeight>('fit');
   /** Draw only the rows in view (virtual scroll): `auto` from {@link PD_TABLE_VIRTUAL_FROM} lines; `false` draws every row. */
   readonly virtual = input<boolean | 'auto'>('auto');
   /** The column rows are grouped by (its text), or null. */
@@ -613,8 +634,21 @@ export class PdTable<T> {
     return place;
   });
   protected readonly isVirtual = computed(() => (this.virtual() === 'auto' ? this.items().length > PD_TABLE_VIRTUAL_FROM : this.virtual()));
-  /** The scrolling body: as tall as the lines, up to `maxHeight`. */
-  protected readonly bodyHeight = computed(() => Math.min(this.lines().length * this.rowPx(), this.maxHeight()));
+  /** The scroll area of a `window` table: its height, measured; 0 until it is. */
+  private readonly areaHeight = signal(0);
+  /** The table's height without its body (toolbar, header, gaps), measured while in `window` mode. */
+  private readonly chrome = signal(0);
+  /** A `fill` table with rows: the body takes what the container leaves. */
+  protected readonly fills = computed(() => this.height() === 'fill' && this.lines().length > 0);
+  /** The body's least height when it fills. */
+  protected readonly fillMin = computed(() => (this.fills() ? PD_TABLE_FILL_MIN : null));
+  /** The scrolling body: as tall as the lines, up to `maxHeight` (`fit`) or the scroll area (`window`); `fill` leaves it to CSS. */
+  protected readonly bodyHeight = computed(() => {
+    const mode = this.height();
+    if (mode === 'fill') return this.lines().length > 0 ? null : 0;
+    const max = mode === 'window' && this.areaHeight() > 0 ? windowBodyMax(this.areaHeight(), this.chrome()) : this.maxHeight();
+    return Math.min(this.lines().length * this.rowPx(), max);
+  });
   /** Virtual: a few rows beyond the visible ones; otherwise a buffer that covers every row, so all are drawn. */
   protected readonly bufferPx = computed(() => (this.isVirtual() ? VIRTUAL_BUFFER_ROWS * this.rowPx() : (this.lines().length + 1) * this.rowPx()));
   /** "N rows" (thousands separated by the locale), "M of N rows" when filtered; empty while loading or when there are no rows (nothing to count). */
@@ -644,6 +678,7 @@ export class PdTable<T> {
     // and the rest of the body stays blank.
     const bodyObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
       this.measureGutter();
+      this.measureChrome();
       this.viewport().checkViewportSize();
     });
     afterNextRender(() => {
@@ -671,11 +706,58 @@ export class PdTable<T> {
         );
       });
     });
+    // `window` mode follows the nearest scrolling ancestor (the page area); with none, the window.
+    let areaObserver: ResizeObserver | null = null;
+    effect(() => {
+      const follows = this.height() === 'window';
+      untracked(() => {
+        areaObserver?.disconnect();
+        areaObserver = null;
+        if (!follows) return;
+        afterNextRender(
+          () => {
+            const area = scrollParent(this.host);
+            this.area = area;
+            this.measureArea();
+            if (area && typeof ResizeObserver !== 'undefined') {
+              areaObserver = new ResizeObserver(() => this.measureArea());
+              areaObserver.observe(area);
+            }
+          },
+          { injector: this.injector },
+        );
+      });
+    });
     inject(DestroyRef).onDestroy(() => {
+      areaObserver?.disconnect();
       observer?.disconnect();
       mutation?.disconnect();
       bodyObserver?.disconnect();
     });
+  }
+
+  /** The scrolling ancestor a `window` table follows (null: the window). */
+  private area: HTMLElement | null = null;
+
+  /** Measures the scroll area (or the window) and the table's chrome for `window` mode. */
+  private measureArea(): void {
+    if (this.height() !== 'window') return;
+    this.areaHeight.set(Math.round(this.area ? this.area.clientHeight : window.innerHeight));
+    this.measureChrome();
+  }
+  /** What is not the body: the table's height less the body's, so the whole table fits the area. */
+  private measureChrome(): void {
+    if (this.height() !== 'window') return;
+    const body = this.host.querySelector<HTMLElement>('.pd-body');
+    if (body) this.chrome.set(Math.max(0, Math.round(this.host.getBoundingClientRect().height - body.getBoundingClientRect().height)));
+  }
+  protected onWindowResize(): void {
+    if (!this.area) this.measureArea();
+  }
+
+  /** The height of the body now: the set one, or in `fill` mode what the container gave it (the viewport's measured size, at least the minimum). */
+  private visibleBody(): number {
+    return this.bodyHeight() ?? Math.max(this.viewport().getViewportSize(), PD_TABLE_FILL_MIN);
   }
 
   /** Remembers the row that has the focus, to focus it again once the rows are drawn again. */
@@ -899,7 +981,7 @@ export class PdTable<T> {
       e.preventDefault();
       return;
     }
-    const page = Math.max(1, Math.floor(this.bodyHeight() / this.rowPx()) - 1);
+    const page = Math.max(1, Math.floor(this.visibleBody() / this.rowPx()) - 1);
     const to = nextIndex(this.items().length, index, e.key, page);
     if (to === null) return;
     e.preventDefault();
@@ -1006,7 +1088,7 @@ export class PdTable<T> {
     const viewport = this.viewport();
     const top = index * this.rowPx();
     const offset = viewport.measureScrollOffset('top');
-    const visible = this.bodyHeight();
+    const visible = this.visibleBody();
     if (top < offset) viewport.scrollToOffset(top);
     else if (top + this.rowPx() > offset + visible) viewport.scrollToOffset(top + this.rowPx() - visible);
     const line = this.lines()[index];
