@@ -890,6 +890,9 @@ struct StubLauncher {
     finished: AtomicUsize,
     after_launch: Child,
     state: Mutex<Child>,
+    /// Held by a test to keep a launch from happening (the launcher thread blocks on it), so the window between the machine
+    /// asking for a launch and the process existing can be looked at as long as the test wants.
+    gate: Mutex<()>,
 }
 
 impl StubLauncher {
@@ -899,6 +902,7 @@ impl StubLauncher {
             finished: AtomicUsize::new(0),
             after_launch,
             state: Mutex::new(Child::None),
+            gate: Mutex::new(()),
         })
     }
 
@@ -912,6 +916,7 @@ struct StubShared(Arc<StubLauncher>);
 impl Launcher for StubShared {
     fn launch(&self) -> Result<(), String> {
         let me = &self.0;
+        drop(lock(&me.gate));
         if matches!(*lock(&me.state), Child::Running { .. }) {
             return Ok(());
         }
@@ -1037,6 +1042,33 @@ fn an_agent_that_never_answers_is_reported_with_retry_and_retry_ends_that_proces
     r.link.quit();
     handle.join().unwrap();
     assert_eq!(r.launcher.launches(), 2);
+}
+
+/// After Retry ends the agent, the launcher still reports that process as exited until the next launch has really happened.
+/// A look in that window must not be read as the new agent having exited (the retry then backed off and launched a third).
+#[test]
+fn a_look_between_retry_asking_for_a_launch_and_the_launch_does_not_judge_the_new_agent_by_the_old_ones_exit() {
+    let r = stub_rig(Child::Running { pid: 4242 });
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "a stall for an agent that never wrote its discovery file", |s| {
+        s.stall.is_some()
+    });
+    // The second launch is held back: the machine has asked for it, the process does not exist yet.
+    let hold = lock(&r.launcher.gate);
+    r.link.retry();
+    wait_state(&r.link, "the second launch is asked for", |s| s.child == Some(2));
+    let_it_look(&r.link, 8);
+    let seen = r.link.transitions().current();
+    assert_eq!(
+        (seen.child, matches!(seen.phase, Phase::Starting { child: 2 })),
+        (Some(2), true),
+        "looks while the launch was held back took the old agent's exit for the new one's: {seen:?}"
+    );
+    drop(hold);
+    until(HANG_GUARD, || r.launcher.launches() == 2);
+    assert_eq!(r.launcher.launches(), 2);
+    r.link.quit();
+    handle.join().unwrap();
 }
 
 #[test]
