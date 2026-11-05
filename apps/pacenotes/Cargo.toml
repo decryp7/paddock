@@ -2,6 +2,8 @@
 # release plan holds pure crates only under crates/ (no Tauri, no UI, no process spawning); the app comes in stage 2.
 [workspace]
 members = ["crates/*", "tests/trap"]
+# crates/pacenotes-diagram holds only the DG1 round-trip fixtures until the crate lands (stage 2, ADR 0011); remove this line with it.
+exclude = ["crates/pacenotes-diagram"]
 resolver = "3"
 
 [workspace.package]
