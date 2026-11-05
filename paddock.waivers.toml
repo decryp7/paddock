@@ -41,12 +41,6 @@ expires = "2026-12-31"
 # C39 (ADR 0023): the apps' ports read off dropped listeners, one waiver per file so a new one in an app is still caught.
 [[waiver]]
 check = "C39"
-path = "apps/pitcrew/crates/notify-channels/src/tests.rs"
-reason = "Pitcrew: two refused-connection tests on freed ports; to use HeldPort::reset or a mapping test"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
 path = "apps/pitwall/app/src-tauri/src/server_client.rs"
 reason = "Pitwall: a not-running test on a freed port; to use a refusing connector"
 expires = "2026-12-31"
