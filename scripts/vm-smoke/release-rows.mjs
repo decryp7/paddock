@@ -74,3 +74,16 @@ export function btmEnabled(text) {
   }
   return null;
 }
+
+/**
+ * Measurements for the macOS round of refactor/dyno-service-shared (prepared, NOT in the manifest: each answers a question the branch left open, and a measurement is recorded,
+ * not judged, until its owner names the expected value). `how` is the guest method; `record` what the result file must contain.
+ */
+export const MAC_SERVICE_MEASUREMENTS = [
+  { id: 'toggle-on-timing', question: 'How long does "Start at login" take to switch on with the app\'s own agent?', how: 'press the switch over AX, poll `launchctl print gui/<uid>/net.decryptology.dyno.agent` every 250 ms', record: 'ms from the press to state = running, and to the card reading On' },
+  { id: 'banner-count-update', question: 'How many "Background Items Added" banners follow a real 1.0.0 to 1.1.0 update, and a light resume?', how: 'install 1.0.0, register, update to 1.1.0 by the in-app updater, `log show` for the notice since the update; repeat after a lid-close style resume (`pmset sleepnow` is not available in a VM: use a forced `launchctl kickstart`)', record: 'count per case and the log lines' },
+  { id: 'downgrade-spawn-78', question: 'Does a real downgrade give `spawn failed` with exit 78?', how: 'install 1.1.0, register, replace the bundle with 1.0.0, bootstrap the job, read `launchctl print` last exit code and `log show`', record: 'last exit code, whether 78 appears, the log lines' },
+  { id: 'status-from-dmg', question: 'What does SMAppService.status report from a DMG or translocated copy while the installed job runs?', how: 'open the DMG copy and a quarantined copy, call the app\'s status command (or the helper tool `smappservice status`) while the installed job runs', record: 'status per copy' },
+  { id: 'status-lag-register', question: 'How long is the status stale right after `register`?', how: 'register, poll status every 100 ms until it changes', record: 'ms until the first changed status, and the sequence of statuses' },
+  { id: 'unregister-never-registered', question: 'What does `unregister` do on a never-registered item?', how: 'call unregister on a fresh clone before any register', record: 'return value, error text, exit code' },
+];

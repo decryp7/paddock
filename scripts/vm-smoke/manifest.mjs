@@ -12,7 +12,7 @@ const BUILD = row('build-binding', /^Build binding:/);
 const RULE71 = [row('mcp', /^Rule 71: Dyno MCP from outside/), row('quit-stop', /^Rule 71: Quit and stop measuring/)];
 // Release rows collected for 1.1.0 (release-rows.mjs): a row nobody drives is a not-measured step with its reason, so the run is INCOMPLETE, never PASS.
 const hung = row('hung-page', /^Release row: a hung or paused visible page/);
-const ROWS_WIN = [row('win-reinstall', /^Release row: reinstall over a leftover/), row('win-first-uninstall', /^Release row: the first uninstall after boot/), hung, row('second-user', /^Release row: a second user/), row('kill-installer', /^Release row: killing the installer/), row('install-again', /^Release row: install again works/)];
+const ROWS_WIN = [row('win-reinstall', /^Release row: reinstall over a leftover/), hung, row('second-user', /^Release row: a second user/), row('kill-installer', /^Release row: killing the installer/), row('install-again', /^Release row: install again works/)];
 const ROWS_MAC = [row('mac-reopen', /^Release row: macOS Quit and stop measuring, then reopen/), row('mac-lifecycle-log', /^Release row: a standard user reads helper-lifecycle/), hung];
 const ROWS_LINUX = [row('linux-log-dir', /^Release row: Linux uninstall leaves/), hung];
 
@@ -61,7 +61,7 @@ const WIN_UI = [
 const WIN_REBOOT = [
   row('helper-on', /^Windows: admin helper Turn on/), row('restart-before', /^Windows restart: helper, Launch at login and tray before the restart/),
   row('restart-quit', /^Windows restart: the helper after Dyno is quit/), row('restart-autostart', /^Windows restart: auto start with Launch at login (ON|switched ON)/),
-  row('restart-tray', /^Windows restart: tray icons after the restart/), row('restart-helper', /^Windows restart: the helper works after a real restart/),
+  row('restart-tray', /^Windows restart: tray icons after the restart/), row('restart-helper', /^Windows restart: the helper works after a real restart/), row('win-first-uninstall', /^Release row: the first uninstall after boot/),
 ];
 
 /**

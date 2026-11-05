@@ -204,3 +204,22 @@ export function judgeTrayClick({ logBefore, logAfter, menuItems }) {
   if (menuItems === 0) return [chk(true, 'the app logged "tray click: Right Up"'), chk(false, 'the click arrived but UI Automation sees no menu: either the menu did not open or this probe cannot see a native menu; see the screenshot taken while it was open', 'check')];
   return [chk(true, 'the app logged "tray click: Right Up"'), chk(true, `the right click opened a menu (${menuItems} item(s) read)`)];
 }
+
+/**
+ * The first uninstall after a boot (fix/uninstall-cold-leftover, b48df1818: the shared include retries the uninstall.exe delete for up to 5 s while XtaCache still reads it).
+ * Pass: the install folder is gone. A folder that stays is accepted ONLY as the noted fallback: just uninstall.exe is left, the lock past 5 s was logged, and a reinstall works.
+ * @param {{folder:'yes'|'no'|'unreadable', onlyUninstallExe:boolean|null, noteLogged:boolean, reinstallOk:boolean|null}} f
+ */
+export function judgeColdUninstall(f) {
+  if (f.folder === 'unreadable') return [chk(false, 'the install folder could not be read after the uninstall', 'check')];
+  if (f.folder === 'no') return [chk(true, 'the install folder is gone after the first uninstall (the retries removed uninstall.exe)')];
+  const checks = [chk(false, `the install folder is still there after the first uninstall${f.onlyUninstallExe ? ' (only uninstall.exe)' : ' (more than uninstall.exe)'}`)];
+  if (f.onlyUninstallExe) {
+    checks.push(chk(f.noteLogged, f.noteLogged ? 'the lock past 5 s was reported with its note' : 'the leftover was not reported with a note'));
+    checks.push(f.reinstallOk === null ? chk(false, 'a reinstall over the leftover was not tried', 'check') : chk(f.reinstallOk, f.reinstallOk ? 'a reinstall over the leftover works' : 'a reinstall over the leftover failed'));
+  }
+  return checks;
+}
+
+/** The fallback is a pass only when every check of it holds: gone, or (only uninstall.exe, noted, reinstall works). */
+export const coldUninstallAccepted = (f) => f.folder === 'no' || (f.folder === 'yes' && f.onlyUninstallExe === true && f.noteLogged && f.reinstallOk === true);

@@ -279,4 +279,6 @@ async function runRebootSteps(ctx, steps) {
     } else steps.push(result('Windows restart (Launch at login on): the guest did not come back', [{ ok: false, detail: 'no console session after the second restart' }]));
   }
   ssh(`[Environment]::SetEnvironmentVariable('${CDP_ENV}', $null, 'User')`);
+  // The first uninstall after this boot (fix/uninstall-cold-leftover): the guest has just restarted.
+  { const { coldUninstallStep } = await import('./win-machine.mjs'); steps.push(await coldUninstallStep()); }
 }

@@ -7,7 +7,7 @@ import { quitStopStep } from './mcp-judges.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { Actor } from './win-act.mjs';
 import { APP_LOG_PS } from './win-tray-icons.mjs';
-import { judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
+import { judgeColdUninstall, coldUninstallAccepted, judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
 import { makeResult } from './verdict.mjs';
 import { judgeUninstall as judgeUninstallFacts, triState } from './win-judges.mjs';
@@ -139,7 +139,22 @@ export async function installRows() {
   return steps;
 }
 
-export const notDrivenWinRows = () => [notDriven(ROW_TITLES.winFirstUninstall, 'its definition (gone, or the noted reboot fallback) lands with fix/uninstall-cold-leftover, which is not pushed yet'), notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
+/** The first uninstall after a boot (run at the end of the restart run, when the guest has just come up): see judgeColdUninstall. Accepts what fix/uninstall-cold-leftover defines. */
+export async function coldUninstallStep() {
+  ssh('Get-Process dyno-app,dyno-agent,dyno-bench -ErrorAction SilentlyContinue | Stop-Process -Force', { admin: true });
+  ssh(`Start-Process '${PROG}\\uninstall.exe' -ArgumentList '/S'`, { admin: true });
+  let folder = 'unreadable';
+  for (let i = 0; i < 20; i++) { await sleep(3000); folder = triState(ssh(`Test-Path '${PROG}'`, { admin: true })); if (folder === 'no') break; }
+  const names = ssh(`(Get-ChildItem '${PROG}' -Force -Name -ErrorAction SilentlyContinue) -join ','`, { admin: true }).split(',').filter(Boolean);
+  const log = ssh(`Get-Content '${PROG}\\updates\\setup.log' -Tail 40 -ErrorAction SilentlyContinue`, { admin: true });
+  const f = { folder, onlyUninstallExe: folder === 'yes' ? names.filter((n) => !/^(uninstall\.exe|updates)$/i.test(n)).length === 0 : null, noteLogged: /uninstall.*(left|leftover|holder|lock)|XtaCache/i.test(log), reinstallOk: null };
+  if (f.folder === 'yes' && f.onlyUninstallExe && f.noteLogged) { const r = await installOnce('cold-uninstall-reinstall'); f.reinstallOk = r.exit === 0 && facts().app === 'yes'; }
+  const checks = judgeColdUninstall(f);
+  const res = result(ROW_TITLES.winFirstUninstall, checks, [JSON.stringify(f), `left: ${names.join(', ') || '(nothing)'}`, ...log.split('\n').slice(-12)], 'gone after the retries, or the noted fallback with a working reinstall');
+  return coldUninstallAccepted(f) ? { ...res, status: 'pass', summary: 'the first uninstall after boot left nothing, or only the noted leftover and a reinstall works' } : res;
+}
+
+export const notDrivenWinRows = () => [notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
 
 const NT = `Add-Type -Namespace N -Name P -MemberDefinition '[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h); [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr h);'; `;
 const renderers = `$ids = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -match '--type=renderer' -and $_.CommandLine -match 'dyno' } | ForEach-Object { $_.ProcessId }); `;

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from "./win-judges.mjs";
+import { judgeColdUninstall, coldUninstallAccepted, rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from "./win-judges.mjs";
 import { makeResult } from './verdict.mjs';
 
 const BOOT = '2026-11-05T10:00:00';
@@ -137,4 +137,14 @@ test('dead state: a right click with no log line, or a log line with no menu, is
   const blind = judgeTrayClick({ logBefore: 1, logAfter: 2, menuItems: 0 });
   assert.equal(blind.find((c) => !c.ok).kind, 'check');
   assert.equal(bad(judgeTrayClick({ logBefore: 1, logAfter: 2, menuItems: 4 })).length, 0);
+});
+
+test('first uninstall after boot: gone passes; a leftover passes only as the noted fallback with a working reinstall', () => {
+  assert.equal(coldUninstallAccepted({ folder: 'no' }), true);
+  assert.equal(coldUninstallAccepted({ folder: 'yes', onlyUninstallExe: true, noteLogged: true, reinstallOk: true }), true);
+  assert.equal(coldUninstallAccepted({ folder: 'yes', onlyUninstallExe: true, noteLogged: false, reinstallOk: true }), false);
+  assert.equal(coldUninstallAccepted({ folder: 'yes', onlyUninstallExe: false, noteLogged: true, reinstallOk: true }), false);
+  assert.equal(judgeColdUninstall({ folder: 'unreadable' })[0].kind, 'check');
+  assert.equal(judgeColdUninstall({ folder: 'yes', onlyUninstallExe: true, noteLogged: true, reinstallOk: null }).at(-1).kind, 'check');
+  assert.ok(bad(judgeColdUninstall({ folder: 'yes', onlyUninstallExe: true, noteLogged: true, reinstallOk: true })).length === 1, 'the leftover itself is still reported');
 });
