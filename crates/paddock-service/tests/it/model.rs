@@ -1617,7 +1617,24 @@ fn configs() -> &'static [(Caps, Resp)] {
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
-const KNOWN_FAILING: &[(&str, &str)] = &[];
+const KNOWN_FAILING: &[(&str, &str)] = &[
+    (
+        "more unattended registers of one version than its attempts allow",
+        "open, from the review's P1-1 change (RemovingOld with nothing to remove is a free finish): MODEL_REPLAY='Mac/Fast/Healthy|Install@CrashAfter(4);Start+RegOther' makes 4 registers against a budget of 3. The free finish is not counted as an attempt but is a register call; the invariant or the finish needs to agree (count the finish when the crashed register call had landed).",
+    ),
+    (
+        "pending() is true in a state with no way forward",
+        "open: MODEL_REPLAY='Mac/Fast/OldRefused|NewerRecord' gives plan Replace(Refused) while pending() is true and nothing changes; pending() now counts a Replace the start will make (review P2-1), so a replace that cannot start (the record says a newer version owns it) must not count.",
+    ),
+    (
+        "the record says this version is registered but the OS holds another registration",
+        "open: MODEL_REPLAY='Mac/RefusedAlways/Fresh|CopyOlder;Start@CrashBefore(6);FirstRun' ends with the older copy's registration while the record says this version registered it; the plan's identity check (definition_current) does not hold in this configuration.",
+    ),
+    (
+        "the user's service was lost",
+        "open, from the review's P1-1 change: MODEL_REPLAY='Mac/Fast/Healthy|Install+RegOther' ends with nothing registered and plan Leave(RegisterFailed(3)); a replace that fails every register at the cap must keep the previous registration or finish with a free register.",
+    ),
+];
 
 #[test]
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {

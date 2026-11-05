@@ -507,8 +507,8 @@ fn registration_words(e: &paddock_service::ServiceError, opened: bool) -> String
 /// Whether a registration is made without opening System Settings: the first run (nobody asked), once Login Items has been
 /// opened for it before.
 #[cfg(any(target_os = "macos", test))]
-fn install_is_quiet(first_run: bool, marker_exists: bool) -> bool {
-    first_run && marker_exists
+fn install_is_quiet(first_run: bool) -> bool {
+    first_run
 }
 
 /// Whether the first run records that it opened Login Items: it did (not quiet) and there was something for the user to do.
@@ -787,6 +787,14 @@ pub fn platform_service() -> Box<dyn AgentService> {
 #[cfg(windows)]
 pub fn platform_service() -> Box<dyn AgentService> {
     Box::new(CliService)
+}
+
+/// Asks the service's repair, registration and waits to stop at their next step (Quit and stop measuring).
+pub fn cancel_service_work() {
+    #[cfg(target_os = "macos")]
+    mac::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(target_os = "linux")]
+    dyno_agent::service::linux::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
 }
 
 /// Whether the app is waiting for a registration it made (see [`AgentService::pending`]).
