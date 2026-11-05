@@ -1437,3 +1437,13 @@ the red run of the hostile table is the audit's own probe log (20 of the lines l
 ## sysinfo's macOS available memory includes active pages, so "used" read 17 % for 54 % (2026-11-05, Dyno 1.1.0, macOS)
 
 Dyno computed used as total minus `available_memory()`. On macOS sysinfo 0.39 defines available as active + inactive + free pages (`unix/apple/system.rs`), which counts memory apps are using, so used came out as roughly wired + compressed (4.3 + 6.2 of 64 GB) where Activity Monitor said 34.8 GB. sysinfo's `used_memory()` there is internal - purgeable + wired + compressor, which is what Activity Monitor shows. Fix: `split_memory` in `dyno-platform/src/sensors.rs` takes used from `used_memory()` on macOS and keeps total minus available elsewhere (Linux reads `MemAvailable`, Windows available physical memory: both right). Class: a library's "available" is not "not used" on every OS; check what a cross-platform figure means on each OS before subtracting. Other users of `available_memory()` (Debrief, Pitwall, `paddock-metrics`) have the same macOS reading; not changed here.
+
+## A first import of an external package can time out whichever test is running (2026-11-06, Dyno 1.1.0, Mac)
+
+Symptom: Dyno's `opens the shared chooser` spec reported "Test timed out in 5000ms" at 5569 ms and 6228 ms on a busy machine, then passed on repeat runs. First hypothesis: a real hang in the chooser or side sheet. The `vi.waitFor` limits (1 s each) and the late timeout refuted a pending promise, and CPU profiles of a failing run showed about 7.1 s of 8.1 s in the module loader's file reads.
+
+Root cause: `dy-chart` runs `import('./echarts-setup')` on first render. The Angular test builder keeps packages external, so Node reads about 688 ECharts files (6.5 MB) synchronously in one event-loop turn, inside the running test. A slow disk or a starved CPU stretches that past the test timeout. The spec's `PD_ECHARTS` fake did not help, because `dy-chart` does not use that token.
+
+Fix: `src/test-setup.ts` imports `echarts-setup`, so the read happens before any test starts. `chart.spec.ts` fails if a test run reads a module for that import.
+
+Logs: the run output showed only the timeout, and the one clue was a duration well past 5000 ms. Class: lazy imports in specs are blocking disk reads, so preload heavy ones in setup. `PD_ECHARTS`'s default `import('echarts')` in `ui/projects/paddock-ui/chart` has the same exposure wherever a spec has no fake.
