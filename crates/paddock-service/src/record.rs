@@ -143,6 +143,9 @@ pub struct Memory {
     fail_writes: AtomicBool,
     /// Writes still allowed before every write fails (negative: no limit).
     writes_left: std::sync::atomic::AtomicI64,
+    /// The record is there but cannot be used (what a damaged or newer-format file is): [`RecordFile::peek`] says so until a
+    /// write replaces it.
+    damaged: AtomicBool,
 }
 
 impl Default for Memory {
@@ -152,6 +155,7 @@ impl Default for Memory {
             held: AtomicBool::new(false),
             fail_writes: AtomicBool::new(false),
             writes_left: std::sync::atomic::AtomicI64::new(-1),
+            damaged: AtomicBool::new(false),
         }
     }
 }
@@ -160,6 +164,11 @@ impl Memory {
     /// Makes every write fail (a full disk, a read-only folder).
     pub fn fail_writes(&self, fail: bool) {
         self.fail_writes.store(fail, Ordering::SeqCst);
+    }
+
+    /// Makes [`RecordFile::peek`] report a record that cannot be used (a damaged file), until the next write.
+    pub fn set_damaged(&self, damaged: bool) {
+        self.damaged.store(damaged, Ordering::SeqCst);
     }
 
     /// Lets `n` more writes through, then fails every write (a disk that fills up part-way).
@@ -241,7 +250,7 @@ impl RecordFile {
     /// the caller adopts a service that answers instead of replacing it.
     pub fn peek(&self) -> (Recorded, bool) {
         match &self.store {
-            Store::Memory(_) => (self.load(), false),
+            Store::Memory(m) => (self.load(), m.damaged.load(Ordering::SeqCst)),
             Store::File { file, .. } => {
                 let bytes = match std::fs::read(file.path()) {
                     Ok(b) => b,
@@ -293,6 +302,7 @@ impl RecordFile {
                     ));
                 }
                 *m.value.lock().unwrap_or_else(|e| e.into_inner()) = r.clone();
+                m.damaged.store(false, Ordering::SeqCst);
                 Ok(())
             }
         }

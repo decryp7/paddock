@@ -513,8 +513,11 @@ impl Manager {
             return Err(ServiceError::Busy);
         }
         let before = self.record.load().state;
+        // No OS call without a durable write, for the user's own removal too.
         if let Err(e) = self.write_state(State::Removing) {
-            log::warn!(error:% = e; "the removal goes on without a durable record, because it was asked for");
+            return Err(ServiceError::Failed(format!(
+                "Nothing was changed, because the service state cannot be saved: {e}"
+            )));
         }
         let unregistered = self.backend.unregister();
         if let Err(e) = self.backend.evict() {

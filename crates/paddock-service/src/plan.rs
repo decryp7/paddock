@@ -357,7 +357,8 @@ pub fn plan(f: &Facts<'_>) -> Plan {
         if accepted && f.caps.pinned_identity && f.caps.automatic {
             // This version registered it already: removing a job that is only slow to start would replace a working
             // service (and announce it again). Given time first; replaced only if the wait ran out, and held at the cap.
-            return if f.waited {
+            // With the switch unreadable nothing is registered or replaced, so there is nothing to wait for either: `fix` holds.
+            return if f.waited || f.wanted.is_none() {
                 fix(Reason::VersionChanged)
             } else {
                 Plan::Await(Reason::VersionChanged)
