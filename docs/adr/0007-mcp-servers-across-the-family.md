@@ -77,3 +77,13 @@ which apps serve MCP and the rules they share; `paddock-mcp` is where `McpTool` 
 
 1. Stdio only for the first server (Debrief), with loopback added when Pitwall hosts remote-process servers? Proposed: yes.
 2. Do the audit logs get a shared viewer in `@decryp7/paddock-ui`? Proposed: yes, after the second server.
+
+## Amendments
+
+- **2026-11-05, Dyno's read tools (user decision).** Dyno 1.1.0 serves eight read-only reading tools (system summary, CPU and
+  memory, disks, top processes, network summary, alarms, history of one metric, sensors) beside its power tools, so that
+  Pitwall's MCP client and any local MCP client can read what its pages show. Rules 1 to 8 apply unchanged: off by default, one
+  switch per tool on Settings > AI access, every call audited and logged without its output, bounded rows and bytes. For any
+  server whose answer goes to an AI client: process rows hold a name, a process id and numbers only (no command line, user name or
+  path), and host names, network addresses and free-text details that can carry paths are left out unless a tool says otherwise.
+  Details: Dyno ADR 0032 amendments.

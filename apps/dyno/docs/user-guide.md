@@ -143,6 +143,37 @@ page says about how long the run takes and the most it writes to each drive.
 
 Settings are versioned and saved with a backup; a damaged file falls back to the backup and then to the defaults.
 
+## AI access (Dyno 1.1)
+
+**Settings > AI access** lets a program on this computer that speaks MCP (the Model Context Protocol), such as Pitwall or another
+AI client, ask Dyno about this computer. It is off until you turn it on, it listens only on this computer, and a client needs a
+key that you issue there and can revoke. Every tool has its own switch, and the page lists every call a client made (the time,
+the client, the tool, the choices it passed and how big the answer was, never the answer itself).
+
+The reading tools only read. They ask Dyno's agent the same questions the pages ask, so a reading Dyno cannot get comes back with
+its reason ("Turn on Administrator readings in Settings so the helper can read this", "Not on this operating system") and never as
+an empty answer.
+
+| Tool | What the client gets |
+| --- | --- |
+| System summary | Operating system, uptime, CPU load, memory use and swap |
+| CPU and memory | CPU load (and each core if asked), frequency, memory total, used and available, swap, commit and memory pressure |
+| Disks | Each volume's size, free and used space, the disk read and write speed, and each solid-state drive's health forecast |
+| Top processes | The busiest programs by CPU or memory (1 to 50): name, main process id, process count, CPU percent and memory bytes |
+| Network summary | Bytes per second received and sent in total and per interface, and how many ports listen and connections are open |
+| Alarms | The active alarms and the latest changes (1 to 50 of each) |
+| History | One metric over the last hour, day, week or month, as at most 120 points |
+| Sensors | Temperatures, fan speeds, the battery and the graphics card, where the computer has them |
+| Power state, Wake-on-LAN computers | Whether Dyno is keeping the computer awake, and the computers saved for Wake-on-LAN |
+
+What a client never gets from these tools: command lines, user names, program paths, the computer's name, network addresses,
+or the details of an alarm. Programs are given by name and process id with numbers only, and every answer is cut to a fixed
+number of rows and bytes.
+
+Two more tools change something, and each stays hidden and refused until you allow it by name on the same page: **Wake a
+computer** (one saved computer, by its name) and **Keep the computer awake** (1 minute to 12 hours). There is no tool to sleep,
+shut down or end a program.
+
 ## Command line
 
 `dyno-agent` ships with the app (next to it, or in `Dyno.app/Contents/MacOS` on macOS):
