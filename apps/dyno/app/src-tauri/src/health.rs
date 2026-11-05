@@ -163,11 +163,15 @@ impl<R: Runtime> Hub<R> {
     /// The services, in the order the status bar lists them.
     pub fn services(&self) -> Vec<ServiceSpec> {
         let hub = self.clone();
-        vec![
+        #[allow(unused_mut)]
+        let mut specs = vec![
             ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect()),
             ServiceSpec::new(TRAY, "the tray icons"),
-            ServiceSpec::new(SETUP, "the installer program"),
-        ]
+        ];
+        // The installer program exists in the per-machine Windows install only.
+        #[cfg(windows)]
+        specs.push(ServiceSpec::new(SETUP, "the installer program"));
+        specs
     }
 
     /// The repair: the link reconnects with backoff on its own, so this waits (bounded) for it and says what it found.

@@ -234,13 +234,26 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
 fn install_with<R: Runtime>(b: UpdatesBuilder, app: &tauri::AppHandle<R>, _key: &str) -> UpdatesBuilder {
     use paddock_updater::{ElevatedHandoff, InstallScope};
     let dir = per_machine::install_dir();
-    let handoff = ElevatedHandoff::new(
-        dir.clone().unwrap_or_default(),
-        Arc::new(paddock_updater::tauri::ShellElevator),
-        Arc::new(per_machine::SetupFacts),
-    );
-    b.installer(Arc::new(handoff))
-        .install_scope(InstallScope::PerMachine, dir, Some(per_machine::administrator()))
+    // No hand-off (and so no way to install from the app) unless the folder passes the Program Files rule: the elevated program is
+    // never found through a relative name or a folder an ordinary user can change.
+    let handoff = dir
+        .clone()
+        .ok_or_else(|| "the folder of the running program is unknown".to_string())
+        .and_then(|d| {
+            ElevatedHandoff::new(
+                d,
+                Arc::new(paddock_updater::tauri::ShellElevator),
+                Arc::new(per_machine::SetupFacts),
+            )
+        });
+    let b = match handoff {
+        Ok(h) => b.installer(Arc::new(h)),
+        Err(why) => {
+            logging::info(&format!("updates cannot be installed from this copy: {why}"));
+            b
+        }
+    };
+    b.install_scope(InstallScope::PerMachine, dir, Some(per_machine::administrator()))
         .installer_lock(Arc::new(per_machine::SetupLock::new(&app.config().identifier)))
 }
 

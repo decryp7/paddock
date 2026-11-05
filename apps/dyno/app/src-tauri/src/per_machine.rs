@@ -8,15 +8,68 @@ use paddock_updater::SetupContract;
 /// What `paddock-setup` says about the download and its exit codes.
 pub struct SetupFacts;
 
+/// The folders of `dir` above the file, nearest last, as `C:\a`, `C:\a\b`: the ones a junction could be hiding in.
+fn folders_above(file: &str) -> Vec<String> {
+    paddock_setup::checkdir::ancestors(file)
+}
+
+/// Refuses a download that has a link or junction anywhere above it (the elevated program refuses it too; saying so before
+/// the Windows prompt saves a prompt that can only end in a refusal). `is_reparse` is the platform's look at one folder.
+pub fn reparse_above(file: &str, is_reparse: &dyn Fn(&str) -> bool) -> Result<(), String> {
+    match folders_above(file).iter().find(|f| is_reparse(f)) {
+        Some(_) => Err("a folder above the download is a link or junction".into()),
+        None => Ok(()),
+    }
+}
+
+/// The platform's look at one folder: a reparse point (a junction or symbolic link).
+#[cfg(windows)]
+fn is_reparse_point(folder: &str) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    std::fs::symlink_metadata(folder).is_ok_and(|m| m.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(folder: &str) -> bool {
+    std::fs::symlink_metadata(folder).is_ok_and(|m| m.file_type().is_symlink())
+}
+
+/// Whether `dir` is a folder the elevated program may be run from, over the facts of the machine: the same rule as the installer's
+/// `check-dir` (a direct child of Program Files, no link above it, owned and protected by administrators).
+pub fn install_dir_ok(facts: &dyn paddock_setup::checkdir::DirFacts, dir: &str) -> Result<(), String> {
+    if paddock_setup::localpath::LocalPath::parse(dir).is_err() {
+        return Err("the install folder is not an absolute drive-letter path".into());
+    }
+    paddock_setup::checkdir::check(facts, dir).map(|_| ()).map_err(|e| e.to_string())
+}
+
 impl SetupContract for SetupFacts {
-    fn check_download(&self, path: &str) -> Result<(), String> {
-        paddock_setup::localpath::LocalPath::parse(path)
-            .map(|_| ())
-            .map_err(|e| e.to_string())
+    #[cfg(windows)]
+    fn check_install_dir(&self, dir: &str) -> Result<(), String> {
+        install_dir_ok(&paddock_setup::native::RealDirs, dir)
     }
 
+    #[cfg(not(windows))]
+    fn check_install_dir(&self, _dir: &str) -> Result<(), String> {
+        Err("per-machine installs exist on Windows only".into())
+    }
+
+    fn check_download(&self, path: &str) -> Result<(), String> {
+        paddock_setup::localpath::LocalPath::parse(path).map_err(|e| e.to_string())?;
+        reparse_above(path, &is_reparse_point)
+    }
+
+    /// Only `apply-update`'s own codes: usage (4), failed (5) and its refusals (20 to 31). Other codes belong to other commands
+    /// of the same program or to the installer's error levels (2 to 5 overlap), so an `apply-update` that returns one of them
+    /// has an unknown outcome and the next start settles it.
     fn sentence(&self, code: i32) -> Option<String> {
-        let exit = paddock_setup::exit::Exit::from_code(code).filter(|e| *e != paddock_setup::exit::Exit::Ok)?;
+        use paddock_setup::exit::Exit;
+        let exit = match code {
+            4 => Exit::Usage,
+            5 => Exit::Failed,
+            c => Exit::Refused(paddock_setup::apply::Refusal::from_code(c)?),
+        };
         Some(as_sentence(exit.sentence()))
     }
 }
@@ -99,15 +152,79 @@ mod tests {
     }
 
     #[test]
-    fn the_tool_codes_read_as_sentences_too() {
+    fn only_apply_updates_own_codes_have_sentences_the_others_are_unknown() {
         assert_eq!(
-            SetupFacts.sentence(2).unwrap(),
-            "An older copy installed for one user must be uninstalled first."
+            SetupFacts.sentence(4).unwrap(),
+            "The setup program was started with wrong arguments."
         );
         assert_eq!(
-            SetupFacts.sentence(11).unwrap(),
-            "A program of the app is still running for another user."
+            SetupFacts.sentence(5).unwrap(),
+            "The setup program failed; the reason is in setup.log."
         );
+        // 2, 3, 11 and 12 belong to guard, check-dir, stop-all and check-version, and 2 to 5 are also the installer's error levels.
+        for code in [1, 2, 3, 11, 12, 32, -1] {
+            assert_eq!(SetupFacts.sentence(code), None, "exit {code}");
+        }
+    }
+
+    struct Facts {
+        roots: Vec<String>,
+        canonical: String,
+        reparse: bool,
+        protection: Result<(), String>,
+    }
+
+    impl paddock_setup::checkdir::DirFacts for Facts {
+        fn program_files(&self) -> Vec<String> {
+            self.roots.clone()
+        }
+        fn inspect(&self, _dir: &str) -> Result<paddock_setup::checkdir::DirInspect, String> {
+            Ok(paddock_setup::checkdir::DirInspect {
+                canonical: self.canonical.clone(),
+                exists: true,
+                reparse_component: self.reparse,
+                owner_sid: Some("S-1-5-32-544".into()),
+            })
+        }
+        fn protection(&self, _i: &paddock_setup::checkdir::DirInspect) -> Result<(), String> {
+            self.protection.clone()
+        }
+    }
+
+    fn facts(canonical: &str) -> Facts {
+        Facts {
+            roots: vec![r"C:\Program Files".into()],
+            canonical: canonical.into(),
+            reparse: false,
+            protection: Ok(()),
+        }
+    }
+
+    #[test]
+    fn the_install_folder_must_pass_the_program_files_rule_before_any_prompt() {
+        assert!(install_dir_ok(&facts(r"C:\Program Files\Dyno"), r"C:\Program Files\Dyno").is_ok());
+        // No folder, a relative name (what `unwrap_or_default` used to make of "no install dir"), or another place.
+        for dir in ["", "Dyno", r"relative\Dyno", r"\\server\share\Dyno"] {
+            assert!(install_dir_ok(&facts(r"C:\Program Files\Dyno"), dir).is_err(), "`{dir}`");
+        }
+        assert!(install_dir_ok(&facts(r"C:\Users\Ann\Dyno"), r"C:\Users\Ann\Dyno").is_err());
+        let mut linked = facts(r"C:\Program Files\Dyno");
+        linked.reparse = true;
+        assert!(install_dir_ok(&linked, r"C:\Program Files\Dyno").is_err());
+        let mut loose = facts(r"C:\Program Files\Dyno");
+        loose.protection = Err("Users can change it".into());
+        assert!(install_dir_ok(&loose, r"C:\Program Files\Dyno")
+            .unwrap_err()
+            .contains("Users can change it"));
+    }
+
+    #[test]
+    fn a_junction_anywhere_above_the_download_is_refused_before_the_prompt() {
+        let file = r"C:\Users\Ann\AppData\Local\net.test.dyno\updates\update-1.1.0-x-setup.exe";
+        assert!(reparse_above(file, &|_| false).is_ok());
+        let e = reparse_above(file, &|f| f == r"C:\Users\Ann\AppData").unwrap_err();
+        assert!(e.contains("link or junction"), "{e}");
+        assert!(reparse_above(file, &|f| f == r"C:\Users").is_err(), "also high up");
     }
 
     #[test]
