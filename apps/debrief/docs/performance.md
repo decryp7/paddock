@@ -83,6 +83,163 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, NR1: the name join and the name watcher; idle after an event-log import (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 919661e7f (N2 P2s, after P3) against the NR1 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-13 during the runs; Dyno release jobs and other agents running (the runs queued behind them)
+- **Build:** release; libduckdb 2.0.0; the test processes' system allocator
+- **Corpus:** `merge_scaling`: 50,000 invented executable names, the first 8,000 groups, 200 of them in the events;
+  `idle_after_an_event_log_import`: a generated 64 MB `.evtx` (133,120 events: the MIT/Apache-2.0 sample chunk repeated,
+  see `evtx_memory.rs`), imported through the Windows plugin into the store the app ships; synthetic
+- **Command:** `cargo nextest run -p debrief-core --release --no-capture -E 'test(merge_scaling)'` and
+  `cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(idle_after_an_event_log_import)'`
+  (`DEBRIEF_EVTX_IDLE_MB` 64, `DEBRIEF_EVTX_IDLE_S` 60)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | NR1 | Budget | Verdict |
+  |---|---|---|---|---|
+  | `merge_cooccurring` over 500 / 1,000 / 2,000 / 4,000 / 8,000 groups | 0.17 / 0.65 / 2.6 / 10.5 / 43.5 s | 6.8 / 6.7 / 7.0 / 7.2 / 7.5 ms | 8,000 groups under 0.5 s | pass |
+  | Event-log import, in-process CPU (the plugin's process not counted) | 1.16 CPU-s in 2.2 s | 1.19 CPU-s in 2.3 s | n/a | same |
+  | Catalogue and index built | 6.65 CPU-s in 2.7 s | 6.86 CPU-s in 2.9 s | n/a | same |
+  | Name table rebuild (`Names::refresh`, 38 catalogue names, 30 groups) | 3.16 CPU-s in 2.95 s | 3.16 CPU-s in 2.94 s | rebuild at most 1 s (D7) | not met, see notes |
+  | Idle store, 60 s after all of the above: statements | 0 | 0 | 0 | pass |
+  | Idle store, 60 s: CPU time of the process | 0.010 s (0.017 % of a core) | 0.012 s (0.020 % of a core) | at most 0.5 % of a core | pass |
+
+- **Memory measure:** not measured
+- **Notes:** the generated log has only 38 distinct names (one chunk repeated), so the sample cannot show what a real
+  550 MB Event Viewer export does to the name table; the 8,000-group row is the measurement of that part, and on the
+  sample the two sides are equal because there is nothing to join. What the user saw (1-2 cores for minutes after the
+  import) came from the app: the name watcher read the whole catalogue every 500 ms while the catalogue was built
+  (P3's test: 20 whole reads in 20 refreshes, now 0), and the quadratic join ran inside it. The watcher is now a quiet job
+  ("Updating names") that blocks inside the store on `catalogue_status` until the catalogue commits, with no timer. It is
+  covered by app tests with a store double (one wait, woken once, never reading names while unbuilt), not by this
+  engine-level run, which does not start the app. The 3.1 CPU-s the rebuild takes on 30 groups is the
+  "Comparing look-alike names" phase: 2.89 of its 2.90 s is the page query that reads the events of each look-alike
+  name (full-text search over 133,120 events; the join itself compares 0 pairs). It is the same on both sides. Rule 51's two
+  questions are open for it (queries in parallel, and fewer or cheaper ones: for example one batched read, or none for a
+  name whose look-alikes cannot join); the D7 budget of 1 s is not met on this sample until then. A second run of the
+  scenario with the phases printed (20 s idle window): import 1.19 CPU-s, catalogue and index 6.66, rebuild 3.11, idle 0 statements and 0.004 CPU-s.
+  The 60 s idle window shows the store itself is quiet after an import; the 60 s base wait of the loops did not hide a
+  burn at the store level (0.010 s CPU, 0 statements in the base), so the idle cost the user saw was the app's watcher.
+
+### 2026-11-05, P3: bounded catalogue read and catalogue status (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base ee2a13899 (D-0) against the P3 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 9-10 during the run; other agents running
+- **Build:** release; libduckdb 2.0.0; the store's default 192 MB memory limit
+- **Corpus:** `/samples` imported (38 sources), then its catalogue replaced by 1,600,000 invented rows (42,105 path-like
+  names over the 38 sources); synthetic
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --no-capture -E 'test(a_1_6_million_row_catalogue)'`
+- **Runs:** one run per side (the base failure was recorded with the P0 tests, debug build, the same message in a debug run)
+- **Numbers:**
+
+  | Measure | Base | P3 | Budget | Verdict |
+  |---|---|---|---|---|
+  | `catalogue(all)` over 1.6 M rows at the 192 MB limit | Out of Memory (183.0/183.1 MiB used) | 42,106 names in 0.88 s | answers within the limit | pass |
+  | Reads of the whole catalogue in 20 refreshes while it is not built | 20 | 0 | 0 | pass |
+  | A status call with `after` set, with the catalogue being built again | n/a (new) | returns at the first commit, in under 10 s of a 10 s wait | wakes on commit | pass |
+
+- **Memory measure:** DuckDB's own limit (the query fails or not); RSS not measured
+- **Notes:** the query now totals every name with sums and a time range only, keeps the top 50,000, and lists each
+  kept name's sources from the same rows afterwards, so no hash table holds a source list per name. The research's
+  estimate of a stored per-source `catalogue_totals` table was not needed for this size; at much larger catalogues the
+  hash table of the totals would grow again (it holds about 100 bytes per name) and that table is the next step. The
+  base of the status call is `Names::refresh`, which asks `catalogue_status` before it reads the names, so the
+  watcher's 500 ms ticks are one small statement while an import is catalogued. The watcher itself (`names.rs`) still
+  ticks every 500 ms; making it block on the status call belongs to NR1, which owns that file.
+
+### 2026-11-05, D-0: the catalogue's unsaved rows (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base c0642f80c (P2) against the D-0 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 5-13 during the runs; other agents running
+- **Build:** release; libduckdb 2.0.0; DuckDB's allocator (no mimalloc in the test process)
+- **Corpus:** `common::corpus` of 300,000 events (346 sources), generated from the invented samples; synthetic
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --no-capture -E 'test(building_the_catalogue)'`
+  (polls `duckdb_memory()` for the `IN_MEMORY_TABLE` tag every few ms while the catalogue builds, in steps of 4 MB)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | D-0 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Most memory held by committed, not yet checkpointed catalogue rows while the catalogue builds | 56 MB | 8 MB | 16 MB | pass |
+
+- **Memory measure:** DuckDB's own accounting (`duckdb_memory()`, tag `IN_MEMORY_TABLE`), not RSS
+- **Cause (ER-28):** the store sets `checkpoint_threshold` to 1 GB (`open_db`), and the catalogue loop checkpointed only
+  once it ran out of sources, so each commit's rows (about 60 bytes per name or trigram row) stayed in memory, counted
+  against the 192 MB limit (64 MB in `analysis_memory`), until the whole build ended. The 1M-event corpus of
+  `analysis_memory` has 1,137 sources; at the point of its measurements the catalogue had written 153 of them and held
+  25 MB (`IN_MEMORY_TABLE`, measured with the D-0 probe of `wt/debrief-d0-catalogue`) beside 61 MB of limit. The fix checkpoints
+  after 100,000 rows. With it removed the red test fails again (56 MB); with it, 8 MB.
+- **Not measured:** the Linux CI numbers the plan quotes (338 MB against 315, and `compare` out of memory at 64 MB):
+  `analysis_memory` passes on this Mac (anomalies +79 MB, moment +3 MB, compare +7 MB) before and after, so the
+  step's `continue-on-error` (`debrief.yml:228`) stays until a Linux run (CI or a local container) shows it passing. The 7.6 GB
+  catalogue itself is not measured.
+
+### 2026-11-05, P2: store loops without polling (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 9a444d0a6 (the P0 tests on `debrief/1.2-int` 852b35ac0) against the P2 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 12-17 during the runs; Dyno release jobs and other agents running
+- **Build:** release; mimalloc not set in the test (the test process's system allocator); libduckdb 2.0.0
+- **Corpus:** the invented `/samples` log folders (about 38 sources), imported once; catalogue and index built
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --run-ignored only --no-capture -E 'test(an_idle_store)'`
+  (`an_idle_store_statements_and_cpu`; `DEBRIEF_IDLE_S` = 130 s, two turns of the loops' 60 s backstop)
+- **Runs:** one run per side (A then B); the 100-turn counts below are deterministic
+- **Numbers:**
+
+  | Measure | Base | P2 | Budget | Verdict |
+  |---|---|---|---|---|
+  | Statements in 130 s of an idle store (DuckDB QueryLog, all connections) | 18 | 0 | 0 | pass |
+  | CPU time of the process in those 130 s | 0.009 s | under 0.001 s | idle at most 0.5 % of a core | pass (both) |
+  | Statements in 100 idle catalogue turns (`catalogue::tests::a_hundred_idle_turns_run_no_statement`) | 500 | 0 | 0 | pass |
+  | Statements in 100 idle index turns (`fts::tests::a_hundred_idle_turns_run_no_statement`) | 400 | 0 | 0 | pass |
+
+- **Memory measure:** not measured (not the question)
+- **Notes:** the base already waits 60 s between idle turns (the `wip/debrief-1.2-lean-2026-11-04` loops), so the CPU
+  difference is small: what P2 removes is the last statement run on a timer, three deletes and a query in the
+  catalogue loop and one in the index loop, every minute. Both loops now look at the database only after a wake-up,
+  or after the store's generation moved (every import, removal, refresh and live-follow step bumps it), or when a
+  turn has to be tried again. The 1.1.1 figure of 500 ms polling is not re-measured here. The names watcher (H2) and
+  the per-pid memory probes (H1, `paddock-proc`) are other idle costs, in P3 and P1.
+
+### 2026-11-05, Debrief 1.2 wave 0: the failing performance and memory tests (branch `debrief/p0-idle`)
+
+- **Commit:** base `debrief/1.2-int` 852b35ac0; the tests are the P0 and 0.3 commit of `debrief/p0-idle`
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 12-17 during the runs (shared with the Dyno release and other agents)
+- **Build:** release for `merge_scaling`, the CSV, the `.gz`, the exception groups and the `.evtx` runs; debug for the idle
+  turns, the catalogue read and the jobs test (their numbers are counts and errors, not timings); libduckdb 2.0.0
+- **Corpus:** all generated by the tests into a temp folder (invented rows): a 3 GiB CSV, a `.gz` of 1.5 GB
+  uncompressed (17,960,344 lines), 50,000 exception types, a catalogue of 1,600,000 rows over the 38 sources of
+  `/samples`, the repeated sample `.evtx` chunk
+- **Command:** `cargo nextest run -p <crate> [--release] --run-ignored only --no-capture -E 'test(<name>)'`, one test per run
+- **Runs:** single; each test fails today, which is the point (ER-11)
+- **Numbers:**
+
+  | Test (package that fixes it) | Measure | Today | Required |
+  |---|---|---|---|
+  | `catalogue::tests::a_hundred_idle_turns_run_no_statement` (P2) | statements in 100 idle catalogue turns | 500 | 0 |
+  | `fts::tests::a_hundred_idle_turns_run_no_statement` (P2) | statements in 100 idle index turns | 400 | 0 |
+  | `names_perf::merge_scaling` (NR1) | `merge_cooccurring` over 8,000 groups (500 / 1,000 / 2,000 / 4,000 groups: 0.17 / 0.65 / 2.6 / 10.5 s) | 43.5 s | under 0.5 s |
+  | `names_perf::a_refresh_while_the_catalogue_is_not_built_reads_no_names` (P3) | reads of the whole catalogue in 20 refreshes of an unbuilt one | 20 | 0 |
+  | `regress_1_2::a_1_6_million_row_catalogue_is_read_within_the_query_budget` (P3) | `catalogue(all)` over 1.6 M rows | Out of Memory at 183.0/183.1 MiB | answers within 192 MB |
+  | `jobs::tests::two_identical_requests_give_one_job` (J1) | job ids for two identical submits | 2 | 1 |
+  | `regress_1_2::a_3_gib_csv_imports_under_the_worker_cap` (3.5) | peak RSS importing a 3 GiB CSV | 17,399 MB | 768 MB |
+  | `regress_1_2::a_gz_of_1_5_gb_uncompressed_imports_under_the_import_budget` (3.5) | lines imported from the `.gz` | 0 of 17,960,344 | all, under 768 MB |
+  | `regress_1_2::an_exceptions_view_with_50_000_groups_...` (4.2) | groups returned | 50,000 | at most 5,000, with `truncated` |
+  | `evtx_memory::a_256_mb_event_log_imports_within_the_default_plugin_cap` (PH4) | plugin peak against the 1,024 MB cap | stopped at the cap (peak 1,062-1,079 MB) | imports within it |
+  | `evtx_memory::a_plugin_stopped_at_its_cap_says_so_instead_of_crashed` (PH2b) | error text of a cap stop | "crashed ... closed the connection" | names the cap |
+
+- **Memory measure:** RSS (sampled in the test process; the plugin's peak is its own process)
+- **Notes:** each test is `#[ignore]`d with its failure text until its package removes the marker. The CSV run took 88 s
+  and 17 GB of RAM: do not repeat it casually on a shared machine. The `.evtx` runs retry once under nextest and fail
+  both times. The 1.6 M-row catalogue is invented, spread over the samples' 38 sources with path-like names; the
+  research's 7.6 GB figure (1.58 M rows) is the shape, not a measurement of the same data.
+
 ### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
 
 - **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`

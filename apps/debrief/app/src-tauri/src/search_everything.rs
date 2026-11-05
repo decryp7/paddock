@@ -6,6 +6,7 @@
 //! window cancels the older one at its next step (it answers `null`), so typing never queues up searches.
 
 use crate::error::{CmdError, ErrorCode};
+use crate::names::Freshness;
 use crate::windows::{CurrentWindow, WindowState};
 use crate::CmdResult;
 use debrief_core::batch::EventId;
@@ -145,10 +146,10 @@ pub(crate) async fn search_with<R: Runtime>(
 
 /// The values and entities the logs hold that the search box's words refer to (`CompanyA.Graphic.Builder.exe` for
 /// "graphic builder"), best first, each with how and why it matched, its spellings and evidence, and a clarifying
-/// question when two things match equally. Rebuilds the window's name table when its catalogue is ready; nothing else
-/// changes.
+/// question when two things match equally. Answers from the window's last name table at once and queues the table's
+/// rebuild job when it is out of date; nothing else changes.
 #[tauri::command]
-pub async fn find_values<R: Runtime>(_app: AppHandle<R>, state: CurrentWindow, request: FindValuesRequest) -> CmdResult<Resolved> {
+pub async fn find_values<R: Runtime>(app: AppHandle<R>, state: CurrentWindow, request: FindValuesRequest) -> CmdResult<Resolved> {
     if request.text.chars().count() > search_all::MAX_TEXT_CHARS {
         return Err(CmdError::new(
             ErrorCode::Invalid,
@@ -157,10 +158,14 @@ pub async fn find_values<R: Runtime>(_app: AppHandle<R>, state: CurrentWindow, r
     }
     let store = state.engine.store()?;
     let win = state.arc().clone();
-    let (found, _) = crate::sync::blocking("find values", move || {
+    let (found, fresh) = crate::sync::blocking("find values", move || {
         win.names.search(store.as_ref(), &request.text, request.limit)
     })
     .await?;
+    // The answer came from the last table at once; an out-of-date table is rebuilt by a job (at most one).
+    if fresh == Freshness::Stale {
+        crate::names::schedule_rebuild(&app, state.label());
+    }
     Ok(found)
 }
 

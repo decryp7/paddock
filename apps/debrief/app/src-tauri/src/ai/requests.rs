@@ -470,9 +470,11 @@ pub(crate) fn start_turn_with_images<R: Runtime>(
         emit: emit.clone(),
     };
     let browser = crate::browser::TurnBrowser::begin(app, win.label(), sid);
-    let (w, session) = (win.clone(), sid.to_string());
+    let (w, session, handle) = (win.clone(), sid.to_string(), app.clone());
     let work = move |_: &JobCtx| -> AiResult<Done<()>> {
         let mut pending = pending;
+        // The turn uses the last name table; an out-of-date one is rebuilt by its own job, never inside the turn.
+        crate::names::queue_if_stale(&handle, &w);
         let Some(turn) = pending.turn.take() else {
             return Err(AiCmdError::invalid("the turn already ended"));
         };

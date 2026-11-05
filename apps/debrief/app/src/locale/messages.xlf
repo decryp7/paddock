@@ -16018,6 +16018,13 @@
           <context context-type="linenumber">24</context>
         </context-group>
       </trans-unit>
+      <trans-unit id="jobs.kind.names" datatype="html">
+        <source>Names</source>
+        <context-group purpose="location">
+          <context context-type="sourcefile">src/app/jobs/jobs-text.ts</context>
+          <context context-type="linenumber">26</context>
+        </context-group>
+      </trans-unit>
       <trans-unit id="jobs.state.queued" datatype="html">
         <source>Queued</source>
         <context-group purpose="location">

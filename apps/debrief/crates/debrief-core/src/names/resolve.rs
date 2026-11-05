@@ -53,7 +53,7 @@ pub enum How {
     Prefix,
     /// An alias a local model suggested.
     Alias,
-    /// Letters of the name's words, in order (`gfxbldr` for `graphic builder`).
+    /// Letters of the name's words, in order (`rptbldr` for `report builder`).
     Abbreviation,
     /// Close in spelling.
     Typo,
@@ -281,7 +281,8 @@ impl Resolver<'_> {
                 }
             }
         }
-        if is_abbreviation(q, &p.tokens) {
+        // A word the logs and the vocabulary know is that word, not letters of some name.
+        if !self.vocab.knows(q) && is_abbreviation(q, &p.tokens) {
             return Some((How::Abbreviation, format!("abbreviation: letters of {}", p.tokens.join(" "))));
         }
         // A typo has a word nobody knows; "grape builder" is two real words, so it is another thing.
@@ -631,6 +632,28 @@ mod tests {
         assert!(
             r.matches[0].score < 0.8 && r.matches[0].score > How::Typo.base(),
             "below prefix and alias, above a typo"
+        );
+    }
+
+    #[test]
+    fn a_word_the_vocabulary_knows_is_not_taken_for_an_abbreviation() {
+        let b = book();
+        // `trayagnt` is only letters of "tray agent" until the vocabulary knows it as a word of its own.
+        let mut vocab = Vocabulary::builtin();
+        let ask = |vocab: &Vocabulary| {
+            Resolver {
+                book: &b,
+                vocab,
+                ctx: &SearchContext::default(),
+                settings: NameSettings::default(),
+            }
+            .resolve("trayagnt", 5, None)
+        };
+        assert_eq!(ask(&vocab).matches[0].how, How::Abbreviation);
+        vocab.add("trayagnt", 5);
+        assert!(
+            ask(&vocab).matches.iter().all(|m| m.how != How::Abbreviation),
+            "a known word is no abbreviation"
         );
     }
 

@@ -13,7 +13,7 @@
 //!   remove and refresh. A source built with another [`VERSION`] is built again.
 //! - Bounds: see [`debrief_core::catalogue`]; one thread, one source in memory at a time.
 
-use crate::turns::{wait_after, Turn};
+use crate::turns::{wait_after, Gate, Turn};
 use crate::{engine, lock};
 use anyhow::Result;
 use debrief_core::catalogue::*;
@@ -99,16 +99,22 @@ SELECT k, v, n FROM r WHERE rk <= {MAX_VALUES_PER_FIELD} ORDER BY k, rk",
     Ok((tally.finish(), dropped, guids))
 }
 
-/// Writes the rows of a source (replacing older ones) if it is still ready; false when it is not.
-fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids: u64) -> Result<bool> {
+/// Rows (names and trigrams) committed since the last checkpoint that end a run of builds early: the store's own
+/// checkpoint threshold is 1 GB (`open_db`), so without this every row of a long build stayed in memory, counted against
+/// DuckDB's memory limit, until the build ended (about 60 bytes a row: 56 MB for 346 sources, over 190 MB at 7.6 GB).
+const CHECKPOINT_AFTER_ROWS: u64 = 100_000;
+
+/// Writes the rows of a source (replacing older ones) if it is still ready; the rows written, or `None` when it is not.
+fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids: u64) -> Result<Option<u64>> {
     let ready: bool = conn.query_row("SELECT count(*) > 0 FROM sources WHERE id = ? AND ready", params![source], |r| {
         r.get(0)
     })?;
     if !ready {
-        return Ok(false);
+        return Ok(None);
     }
     conn.execute_batch("BEGIN TRANSACTION")?;
-    let written = (|| -> Result<()> {
+    let written = (|| -> Result<u64> {
+        let mut rows = entries.len() as u64;
         for sql in DELETE_SQL {
             conn.execute(sql, params![source])?;
         }
@@ -131,6 +137,7 @@ fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids
         for e in entries {
             for t in trigram_keys(&squash(&e.name)) {
                 app.append_row(params![source, t, e.scope.encode(), e.name])?;
+                rows += 1;
             }
         }
         app.flush()?;
@@ -138,17 +145,51 @@ fn commit(conn: &Connection, source: u32, entries: &[Entry], dropped: u64, guids
             "INSERT INTO catalogue_sources VALUES (?, ?, ?, ?, ?)",
             params![source, entries.len() as u64, dropped, guids, VERSION],
         )?;
-        Ok(())
+        Ok(rows)
     })();
     match written {
-        Ok(()) => {
+        Ok(rows) => {
             conn.execute_batch("COMMIT")?;
-            Ok(true)
+            Ok(Some(rows))
         }
         Err(e) => {
             let _ = conn.execute_batch("ROLLBACK");
             Err(e)
         }
+    }
+}
+
+/// A counter that moves whenever the catalogue's state may have changed (news, a commit, a checkpoint), and that callers
+/// can block on: [`crate::Inner::catalogue_status`] waits here instead of being asked again and again.
+struct Changes {
+    count: Mutex<u64>,
+    moved: Condvar,
+}
+
+impl Changes {
+    fn new() -> Changes {
+        Changes {
+            count: Mutex::new(0),
+            moved: Condvar::new(),
+        }
+    }
+
+    fn bump(&self) {
+        *lock(&self.count) += 1;
+        self.moved.notify_all();
+    }
+
+    fn get(&self) -> u64 {
+        *lock(&self.count)
+    }
+
+    /// Waits until the counter plus the store's `generation` is not `seen` any more, at most `max`.
+    fn wait_past(&self, seen: u64, max: Duration, generation: &AtomicU64) {
+        let guard = lock(&self.count);
+        let _ = self
+            .moved
+            .wait_timeout_while(guard, max, |n| *n + generation.load(Ordering::SeqCst) == seen)
+            .unwrap_or_else(|p| p.into_inner());
     }
 }
 
@@ -161,8 +202,14 @@ struct Shared {
     failed: Mutex<HashSet<u32>>,
     /// Rows committed since the last checkpoint (see [`settle`]); the catalogue counts as built only once they are saved.
     unsaved: AtomicBool,
+    /// How many rows they are ([`CHECKPOINT_AFTER_ROWS`]).
+    unsaved_rows: AtomicU64,
     /// The store's lock of heavy DuckDB work (`Inner::heavy`).
     heavy: Arc<Mutex<()>>,
+    /// Whether anything changed since the last look; without news a turn runs no statement.
+    gate: Gate,
+    /// What status callers wait on.
+    changes: Changes,
 }
 
 /// The catalogue thread of a store; stopped and joined on drop.
@@ -172,14 +219,22 @@ pub(crate) struct CatalogueService {
 }
 
 impl CatalogueService {
-    pub(crate) fn start(conn: Connection, write_lock: Arc<Mutex<()>>, heavy: Arc<Mutex<()>>) -> Result<CatalogueService> {
+    pub(crate) fn start(
+        conn: Connection,
+        write_lock: Arc<Mutex<()>>,
+        heavy: Arc<Mutex<()>>,
+        generation: Arc<AtomicU64>,
+    ) -> Result<CatalogueService> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             wake: (Mutex::new(true), Condvar::new()),
             pending: AtomicU64::new(0),
             failed: Mutex::new(HashSet::new()),
             unsaved: AtomicBool::new(false),
+            unsaved_rows: AtomicU64::new(0),
             heavy,
+            gate: Gate::new(generation),
+            changes: Changes::new(),
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
@@ -197,7 +252,20 @@ impl CatalogueService {
         self.shared.unsaved.load(Ordering::SeqCst)
     }
 
+    /// The counter [`crate::Inner::catalogue_status`] answers with.
+    pub(crate) fn generation(&self) -> u64 {
+        self.shared.changes.get()
+    }
+
+    /// Waits until the catalogue's state, or the store's data (`generation`), changed after `seen`, at most `max`. A
+    /// change of the data alone does not wake the wait (the loops are told by [`wake`](Self::wake)); the next call sees it.
+    pub(crate) fn wait_for_change(&self, seen: u64, max: Duration, generation: &AtomicU64) {
+        self.shared.changes.wait_past(seen, max, generation);
+    }
+
     pub(crate) fn wake(&self) {
+        self.shared.gate.news();
+        self.shared.changes.bump();
         *lock(&self.shared.wake.0) = true;
         self.shared.wake.1.notify_all();
     }
@@ -219,8 +287,13 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     let Some(_running) = crate::shutdown::Active::enter() else {
         return Ok(Turn::Idle);
     };
+    // Nothing changed since the last look: nothing to tidy and nothing new to build (and no statement to run).
+    if !s.gate.take() {
+        return Ok(Turn::Idle);
+    }
     let todo = {
         let Ok(_writing) = write_lock.try_lock() else {
+            s.gate.news();
             return Ok(Turn::Blocked);
         };
         conn.execute_batch(
@@ -244,15 +317,25 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     };
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
-    let Ok(_writing) = write_lock.try_lock() else {
+    let Ok(writing) = write_lock.try_lock() else {
+        s.gate.news();
         return Ok(Turn::Blocked);
     };
     s.unsaved.store(true, Ordering::SeqCst);
     if crate::shutdown::down() {
         return Ok(Turn::Idle);
     }
-    commit(conn, source, &entries, dropped, guids)?;
+    let written = commit(conn, source, &entries, dropped, guids)?;
+    drop(writing);
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
+    s.changes.bump();
+    // A long run of builds does not keep its rows in memory until it ends.
+    let unsaved = s.unsaved_rows.fetch_add(written.unwrap_or(0), Ordering::SeqCst) + written.unwrap_or(0);
+    if unsaved >= CHECKPOINT_AFTER_ROWS && settle(conn, write_lock) {
+        s.unsaved_rows.store(0, Ordering::SeqCst);
+        s.unsaved.store(false, Ordering::SeqCst);
+        s.changes.bump();
+    }
     Ok(Turn::Worked)
 }
 
@@ -265,9 +348,12 @@ fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
                 Turn::Blocked
             }
         };
+        s.gate.after(turn);
         let Some(wait) = wait_after(turn) else { continue };
         if s.unsaved.load(Ordering::SeqCst) && settle(conn, write_lock) {
             s.unsaved.store(false, Ordering::SeqCst);
+            s.unsaved_rows.store(0, Ordering::SeqCst);
+            s.changes.bump();
         }
         let mut woken = lock(&s.wake.0);
         if !*woken {
@@ -292,6 +378,24 @@ fn settle(conn: &Connection, write_lock: &Mutex<()>) -> bool {
 }
 
 impl crate::Inner {
+    /// How far the catalogue is, waiting for news when `req` asks to (see [`CatalogueStatusRequest`]).
+    pub(crate) fn catalogue_status(&self, req: &CatalogueStatusRequest) -> StoreResult<CatalogueStatus> {
+        if let (Some(after), Some(c)) = (req.after, self.catalogue.as_ref()) {
+            c.wait_for_change(after, Duration::from_millis(req.wait_ms.min(MAX_STATUS_WAIT_MS)), &self.generation);
+        }
+        // Moves with the catalogue's own changes and with every change of the store's data (a removal, a refresh, a
+        // live-follow step), so a table built from it is stale exactly when the workspace changed. Read before the
+        // state: a change after it makes the next call return at once.
+        let generation = self.catalogue.as_ref().map_or(0, |c| c.generation()) + self.generation.load(Ordering::SeqCst);
+        let conn = self.conn()?;
+        let pending = pending(&conn).map_err(|e| engine(format!("{e:#}")))?.len() as u64;
+        Ok(CatalogueStatus {
+            built: pending == 0 && !self.catalogue.as_ref().is_some_and(|c| c.saving()),
+            pending,
+            generation,
+        })
+    }
+
     /// Names that look like `req.text`, from the catalogue.
     pub(crate) fn catalogue(&self, req: &CatalogueRequest) -> StoreResult<CatalogueReply> {
         let conn = self.conn()?;
@@ -309,10 +413,16 @@ impl crate::Inner {
         }
         let (sql, args): (String, Vec<String>) = if req.all {
             (
+                // The totals first, with nothing but numbers per name (a hash table of up to a million names must fit the
+                // query budget); only the names that make the cut get their sources listed, from the same rows.
                 format!(
-                    "SELECT e.scope, e.name, sum(e.n), min(e.first_ts), max(e.last_ts), list(DISTINCT s.name)
-                     FROM catalogue e JOIN sources s ON s.id = e.source AND s.ready
-                     GROUP BY e.scope, e.name ORDER BY sum(e.n) DESC, e.name LIMIT {}",
+                    "WITH t AS (SELECT e.scope, e.name, sum(e.n) AS n, min(e.first_ts) AS f, max(e.last_ts) AS l
+                         FROM catalogue e JOIN sources s ON s.id = e.source AND s.ready
+                         GROUP BY e.scope, e.name ORDER BY n DESC, e.name LIMIT {})
+                     SELECT t.scope, t.name, t.n, t.f, t.l, list(DISTINCT s.name)
+                     FROM t JOIN catalogue e ON e.scope = t.scope AND e.name = t.name
+                     JOIN sources s ON s.id = e.source AND s.ready
+                     GROUP BY t.scope, t.name, t.n, t.f, t.l ORDER BY t.n DESC, t.name",
                     debrief_core::catalogue::MAX_NAMES
                 ),
                 Vec::new(),
@@ -389,5 +499,94 @@ impl crate::DuckStore {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::turns::statement_log;
+    use crate::DuckStore;
+    use debrief_core::ports::Ingest;
+    use debrief_core::{PluginRegistry, Profile};
+
+    /// H6 (docs/research/2026-10-28-cpu-memory.md): a catalogue loop with nothing to do and no news ran three deletes and
+    /// a query every turn. An idle turn runs no statement at all.
+    #[test]
+    fn a_hundred_idle_turns_run_no_statement() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        let shared = Shared {
+            stop: AtomicBool::new(false),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(0),
+            failed: Mutex::new(HashSet::new()),
+            unsaved: AtomicBool::new(false),
+            unsaved_rows: AtomicU64::new(0),
+            heavy: Arc::new(Mutex::new(())),
+            gate: Gate::new(Arc::new(AtomicU64::new(0))),
+            changes: Changes::new(),
+        };
+        let write_lock = Mutex::new(());
+        // The first turn looks (it has never looked); after it the store is idle.
+        assert_eq!(step(&shared, &conn, &write_lock).unwrap(), Turn::Idle);
+        statement_log::start(&conn);
+        for _ in 0..100 {
+            assert_eq!(step(&shared, &conn, &write_lock).unwrap(), Turn::Idle);
+        }
+        let ran = statement_log::count(&conn);
+        assert!(
+            ran.is_empty(),
+            "100 idle catalogue turns ran {} statements, the first: {:?}",
+            ran.len(),
+            ran.first()
+        );
+    }
+
+    /// P3: a status call that asks for news returns when the catalogue commits, not when its wait is over.
+    #[test]
+    fn a_status_call_wakes_when_the_catalogue_commits() {
+        let dir = std::env::temp_dir().join(format!("debrief-catalogue-status-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let samples = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../samples");
+        let store = DuckStore::create(&dir, Profile::default_profile(), PluginRegistry::new()).unwrap();
+        store
+            .open(&[samples.join("serilog-text"), samples.join("serilog-clef")])
+            .unwrap()
+            .wait()
+            .unwrap();
+        assert!(store.wait_for_catalogue(Duration::from_secs(60)).unwrap());
+        // Heavy work holds the catalogue back while its rows are forgotten: it has to be built again.
+        let held = lock(&store.inner.heavy);
+        forget(&store.inner.conn().unwrap(), None).unwrap();
+        store.inner.catalogue.as_ref().unwrap().wake();
+        let first = store.inner.catalogue_status(&CatalogueStatusRequest::default()).unwrap();
+        assert!(!first.built && first.pending > 0, "the catalogue has to be built again: {first:?}");
+        let inner = store.inner.clone();
+        let waiter = std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let mut seen = first.generation;
+            loop {
+                let status = inner
+                    .catalogue_status(&CatalogueStatusRequest {
+                        after: Some(seen),
+                        wait_ms: MAX_STATUS_WAIT_MS,
+                    })
+                    .unwrap();
+                if status.built {
+                    return started.elapsed();
+                }
+                seen = status.generation;
+            }
+        });
+        drop(held);
+        let waited = waiter.join().unwrap();
+        assert!(
+            waited < Duration::from_millis(MAX_STATUS_WAIT_MS),
+            "the status call waited {waited:?}, a whole wait; a commit has to wake it"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -9,9 +9,13 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 - **Names:** Searching for an abbreviation of a program name now finds it: "rptbldr" finds Report Builder and "netmon" finds Network Monitor, with the reason "abbreviation: letters of report builder", without any AI model
 
+### Fixed
+
+- **Names:** The name table is now rebuilt in a background job ("Updating names" in Jobs, with phases and Cancel) instead of inside a search or an AI chat turn, and only after the catalogue is built. A search always answers at once from the last table, and joining look-alike names no longer compares every pair of names (8,000 names: 7.5 ms instead of 43 s)
+
 ### Removed
 
-- **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them
+- **Names:** Debrief no longer asks the AI model for human names in the background. "Learning human names" after an import, and the Settings ▸ AI switch "AI aliases for names", are gone, so opening logs no longer loads or runs a model. Aliases an earlier version already learned stay, labelled AI-generated, and you can still remove any of them If you had switched "AI aliases for names" off, aliases an earlier version learned now count again in name matching; each is labelled and removable.
 
 ### Changed
 

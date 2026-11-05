@@ -655,7 +655,7 @@ fn evaluation() {
         let s = score(&qs, layered(&plain, no_ai, false), &k);
         assert!(Score::pct(s.top1, s.n) >= 95.0, "layer 1 {kind}: {s:?}");
     }
-    // Abbreviations are layer 1 (the letters-of-the-words rule, ADR 0053 amendment): 23 of 24 on this set without any
+    // Abbreviations are layer 1 (the letters-of-the-words rule, ADR 0053 amendment): 22 of 24 on this set without any
     // model, and never a wrong entity. Synonyms need an AI alias (or the user): without it they find nothing.
     let abbreviations = score(&qs, layered(&plain, no_ai, false), &["abbreviation"]);
     assert_eq!(abbreviations.false_suggestions, 0, "{abbreviations:?}");
