@@ -271,7 +271,9 @@ impl Redactor {
     ) -> Map<String, Value> {
         let mut out = Map::new();
         for (key, v) in map {
-            let v = if is_secret_name(&key) && v != Value::from(paddock_log::SECRET) && !v.is_null()
+            let v = if is_secret_name(&key)
+                && v.as_str() != Some(paddock_log::SECRET)
+                && !v.is_null()
             {
                 counts.fields += 1;
                 Value::from(paddock_log::SECRET)

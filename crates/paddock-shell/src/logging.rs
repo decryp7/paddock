@@ -30,15 +30,29 @@ pub(crate) fn shell_settings_path_for(identity: &AppIdentity) -> Option<PathBuf>
 /// Installs the app's log into its folders ([`AppDirs::for_app`]); `None` (said on standard error) when the folders are
 /// unknown or a log is installed already. Call it first in `run`.
 pub fn install(identity: &AppIdentity) -> Option<LogHandle> {
+    install_with_commit(identity, "")
+}
+
+/// [`install`] that also puts the build's commit on every line (`Commit`), so a log, a report and a VM run bind to one build.
+pub fn install_with_commit(identity: &AppIdentity, commit: &str) -> Option<LogHandle> {
     let dirs = AppId::new(&identity.id, &identity.name)
         .and_then(|id| AppDirs::for_app(&id))
         .map_err(|e| eprintln!("{}: the log could not start ({e})", identity.name))
         .ok()?;
-    install_in(identity, &dirs, true)
+    install_in_with(identity, &dirs, true, commit)
 }
 
 /// [`install`] into `dirs` (tests: a temporary folder, never the real one), with or without the panic hook.
 pub fn install_in(identity: &AppIdentity, dirs: &AppDirs, panic_hook: bool) -> Option<LogHandle> {
+    install_in_with(identity, dirs, panic_hook, "")
+}
+
+fn install_in_with(
+    identity: &AppIdentity,
+    dirs: &AppDirs,
+    panic_hook: bool,
+    commit: &str,
+) -> Option<LogHandle> {
     let installed = AppId::new(&identity.id, &identity.name)
         .map_err(|e| e.to_string())
         .and_then(|id| {
@@ -46,7 +60,8 @@ pub fn install_in(identity: &AppIdentity, dirs: &AppDirs, panic_hook: bool) -> O
             let config = LogConfig::new(&id, "app", &identity.version)
                 .with_dirs(dirs)
                 .with_settings(saved)
-                .with_panic_hook(panic_hook);
+                .with_panic_hook(panic_hook)
+                .with_commit(commit);
             Logging::new(config).install().map_err(|e| e.to_string())
         });
     let handle = installed
@@ -56,7 +71,7 @@ pub fn install_in(identity: &AppIdentity, dirs: &AppDirs, panic_hook: bool) -> O
         // The first line of every run: which build, on what, installed how (ER-27). Why it started (login, by hand, a relaunch) and
         // the phases up to ready are the app's and the start-up contract's lines that follow.
         log::info!(
-            Version = identity.version.as_str(), Os = std::env::consts::OS, Arch = std::env::consts::ARCH, Pid = std::process::id(),
+            Version = identity.version.as_str(), Commit = commit, Os = std::env::consts::OS, Arch = std::env::consts::ARCH, Pid = std::process::id(),
             Portable = dirs.source() == paddock_env::Source::Portable;
             "Starting {}", identity.name
         );

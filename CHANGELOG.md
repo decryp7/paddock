@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-log`: a month of history, 100 MB per process in all
+- `LogSettings::default().keep_files` is 30 (was 7) for every app, and `DailyFiles` keeps at most `TOTAL_CAP_BYTES` (100 MB) of a process's daily files: the oldest days go first, today's file is never removed. Debug and Trace lines may use only half of a day's budget, so a Debug session cannot crowd out the Info, Warn and Error lines. The longer default is a plain improvement for all apps because the total cap bounds the disk; an app that wants the old week sets `keep_files`.
+
 ### `paddock-diag`, `paddock-shell`: the report lists what the user did; every run starts with a line
 - `builtin::Trail` (added by `tauri::Setup::log`) writes `breadcrumbs.json`: the latest 100 breadcrumbs of the log (lines with an `Operation` property), oldest first.
 - `paddock_shell::logging::install` writes the first line of every run: `Starting <app>` with version, OS, architecture, process id and whether the install is portable.
