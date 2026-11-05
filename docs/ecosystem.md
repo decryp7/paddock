@@ -1,10 +1,10 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=e862b089" alt="Paddock: eight apps and a tool. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps; the planned tool Scrutineer signs every app's installers" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=bbf5ff4b" alt="Paddock: eight apps. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps." width="100%">
 </picture>
 
-Eight desktop apps and one tool for people who keep systems running, built on one shared foundation. Each is useful alone and better with
+Eight desktop apps for people who keep systems running, built on one shared foundation. Each is useful alone and better with
 the others. All run on Windows, macOS and Linux, are written in Rust with a Tauri 2 shell and an Angular UI, and are local
 only: no cloud, no account, no telemetry.
 
@@ -16,7 +16,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=d92fe0d8) and [dark](images/paddock-ecosystem-dark.png?v=55edf0ea), integrations
+hero [light](images/paddock-ecosystem-light.png?v=66869804) and [dark](images/paddock-ecosystem-dark.png?v=386413ff), integrations
 [light](images/paddock-integrations-light.png?v=a9a7c6fa) and [dark](images/paddock-integrations-dark.png?v=38cb6fd5), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
@@ -47,7 +47,6 @@ the profile README when `PADDOCK_PROFILE` points at its checkout. It is idempote
 | Sighter | Planned |
 | Pacenotes (understands code in any language) | Planned |
 | Recce (searches the whole PC) | Planned (placeholder page, draft plan) |
-| Scrutineer (tool: code-signing certificates) | Planned (placeholder page, draft plan) |
 
 ## The apps
 
@@ -142,13 +141,6 @@ Status: **planned**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/bra
 
 Status: **planned**, last in the order of 2026-11-04, after Dyno 1.1.0, Spotter 1.0, Pitwall 1.1, Pitcrew 1.1, Debrief 1.2, Pacenotes and Sighter. Page (a placeholder): [docs/planned/recce](planned/recce/README.md); the draft plan is on the branch `docs/pc-search-app-plan`.
 
-### Scrutineer (a planned tool)
-**Purpose.** Generates, signs, verifies and installs code-signing certificates. Scrutineering is the technical inspection that certifies a car before it may race.
-It serves every app: it makes a private CA and code-signing certificates, signs each app's installers, and installs and
-verifies the certificate. The hero shows it under the foundation's Tools, not as an app.
-
-Status: **planned**; a draft plan is on the branch `docs/code-signing-plan`; Pitwall 1.1 is planned as the first release signed through it. Page (a placeholder): [tools/scrutineer](../tools/scrutineer/README.md).
-
 ## Integration architecture
 
 <picture>
@@ -174,7 +166,6 @@ The apps never depend on each other to do their own job. They meet in a few well
 | **Newer version** | Spotter to Pacenotes | Spotter tells Pacenotes when a newer version of a dependency is available. |
 | **Smoke tests** (later) | Spotter to Sighter | A new release found by Spotter triggers a Sighter smoke test. |
 | **CI** | Pitcrew to every repo | Pitcrew keeps the runners that build and test all of these apps alive, updated and clean. |
-| **Code signing** (planned) | Scrutineer to every app | Scrutineer makes a private CA and code-signing certificates, signs every app's installers, and installs and verifies the certificate; Pitwall 1.1 is planned as the first release signed through it. |
 | **Plugin platform** (planned) | Debrief, Pacenotes, later Dyno's tier-3 plugins | Debrief's plugin host, IPC and API (the ADR 0017 model) extracted into shared crates: out-of-process, Rust-only plugins. |
 | **`paddock-pitwall`** | shared crate in each app | One client for discovery, pairing, keychain keys, retries, priorities, cache headers and capability checks, so no app re-implements Pitwall access. Built (extracted from Debrief 1.1's client); Debrief, Pacenotes and Sighter use it, Spotter and Dyno later. |
 

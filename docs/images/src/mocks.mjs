@@ -1,4 +1,4 @@
-// Stylised mock screens for apps that have no screenshots yet (Sighter, Pacenotes, Recce, Scrutineer) or whose screenshots are out of date (Dyno). Drawn in the Paddock design language
+// Stylised mock screens for apps that have no screenshots yet (Sighter, Pacenotes, Recce) or whose screenshots are out of date (Dyno). Drawn in the Paddock design language
 // with theme variables, in a fixed design size: hero 960x600, panel 672x280. They are concepts, not product screens.
 const r = (x, y, w, h, c = 'mc', rx = 8) => `<rect class="${c}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}"/>`;
 const t = (x, y, s, c = 'mt', a = '') => `<text class="${c}" x="${x}" y="${y}"${a ? ` text-anchor="${a}"` : ''}>${s}</text>`;
@@ -98,7 +98,6 @@ export function hero(app) {
       r(232, 506, 696, 48, 'mc', 12) + glyphDot(256, 530) + t(276, 535, 'Find “the Save button”', 'mt') + t(912, 535, 'box 412, 288  ·  0.97  ·  detector', 'mm', 'end');
   }
   if (app === 'recce') return recceHero();
-  if (app === 'scrutineer') return scrutineerHero();
   // pacenotes
   return sidebar(['Map', 'Search', 'Review', 'Diagrams', 'Requirements', 'MCP'], 0) +
     t(232, 52, 'Repository map', 'mh') + t(232, 70, 'Read-only index, nothing is executed', 'mm') +
@@ -163,43 +162,6 @@ function reccePanel(kind) {
       return (i === 0 ? r(144, y - 4, 384, 34, 'mact', 8) : '') + r(160, y + 2, 22, 22, i === 0 ? 'maccf' : 'mfield', 6) + t(171, y + 17.5, g, i === 0 ? 'mtw' : 'mm', 'middle') + t(196, y + 18, s, 'mt') + t(512, y + 18, k, 'mm', 'end'); }).join('');
 }
 
-// ---- Scrutineer (planned code-signing certificate tool): certificates with their state, a chain, sign, verify, install ----
-const CERTS = [
-  ['Release signing', 'Code signing · RSA 3072', 'Expires 2027-11-04', 'Trusted', true],
-  ['Nightly builds', 'Code signing · ECDSA P-256', 'Expires in 20 days', 'Renew soon', false],
-  ['Test root', 'Root · self-signed', 'Expires 2031-01-01', 'Installed', true],
-];
-const stateChip = (x, y, s, ok) => r(x, y, s.length * 7.4 + 22, 22, ok ? 'mact' : 'mfield', 11) + t(x + 11, y + 15.5, s, ok ? 'mta' : 'mm');
-const chain = (x, y, names) => names.map((n, i) => r(x + i * 14, y + i * 52, 196 - i * 14, 40, i === names.length - 1 ? 'mcon' : 'mfield', 8) + t(x + 14 + i * 14, y + 25 + i * 52, n, 'mt') +
-  (i ? `<path class="medge" d="M${x + 4 + i * 14} ${y + i * 52 - 12} L${x + 4 + i * 14} ${y + i * 52}"/>` : '')).join('');
-function scrutineerHero() {
-  return sidebar(['Certificates', 'Sign', 'Verify', 'Install', 'Settings'], 0) +
-    t(232, 52, 'Certificates', 'mh') + t(232, 70, 'Keys stay on this machine', 'mm') + r(812, 34, 116, 32, 'maccf', 8) + t(870, 55, 'Generate', 'mtw', 'middle') +
-    r(232, 84, 440, 470, 'mc', 10) +
-    CERTS.map(([n, k, e, st, ok], i) => { const y = 102 + i * 96; return (i === 0 ? r(240, y - 10, 424, 88, 'mact', 8) : '') + t(256, y + 16, n, 'mt') + t(256, y + 38, k, 'mm') + t(256, y + 58, e, 'mm') + stateChip(560, y + 2, st, ok); }).join('') +
-    r(692, 84, 236, 470, 'mc', 10) + t(710, 114, 'Chain', 'mt') + chain(710, 132, ['Test root', 'Signing CA', 'Release signing']) +
-    r(710, 304, 200, 1, 'mrule', 0) + t(710, 332, 'Uses', 'mm') + stateChip(710, 344, 'Code signing', true) + stateChip(710, 374, 'Timestamping', true) +
-    r(710, 420, 200, 1, 'mrule', 0) + t(710, 448, 'Last signed', 'mm') + t(710, 470, 'installer.msi · verified', 'mt');
-}
-function scrutineerPanel(kind) {
-  if (kind === 'generate') {
-    const field = (y, label, value) => t(60, y + 4, label, 'mm') + r(200, y - 16, 412, 32, 'mfield', 8) + t(214, y + 5, value, 'mt');
-    return r(40, 24, 592, 232, 'mc', 12) + field(64, 'Name', 'Release signing') + field(110, 'Key', 'RSA 3072') + field(156, 'Uses', 'Code signing, timestamping') + field(202, 'Valid for', '2 years');
-  }
-  if (kind === 'sign') {
-    return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'Sign', 'mt') + ['installer.msi', 'app.exe', 'Recce.app'].map((f, i) => r(60, 76 + i * 42, 360, 32, 'mfield', 8) + t(74, 97 + i * 42, f, 'mt') + stateChip(440, 81 + i * 42, i < 2 ? 'Signed' : 'Waiting', i < 2)).join('') +
-      t(60, 222, 'with Release signing · timestamped', 'mm');
-  }
-  if (kind === 'verify') {
-    return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'installer.msi', 'mt') + stateChip(500, 42, 'Valid', true) + chain(60, 78, ['Test root', 'Signing CA', 'Release signing']) +
-      t(300, 110, 'Signature matches the file', 'mm') + t(300, 140, 'Chain ends at a trusted root', 'mm') + t(300, 170, 'Signed before expiry', 'mm');
-  }
-  // install
-  return r(40, 24, 592, 232, 'mc', 12) + t(60, 58, 'Install Test root', 'mt') +
-    [['This user', 'Trusted for code signing', true], ['This machine', 'Needs an administrator', false], ['Build agent', 'Through its settings', false]].map(([w, n, on], i) =>
-      r(60, 76 + i * 50, 552, 40, on ? 'mcon' : 'mfield', 8) + t(78, 101 + i * 50, w, 'mt') + t(596, 101 + i * 50, n, 'mm', 'end')).join('');
-}
-
 const glyphDot = (x, y) => `<circle class="maccf" cx="${x}" cy="${y}" r="7"/>`;
 function graph(x, y, w, h) {
   const n = [[0.2, 0.18, 'main'], [0.62, 0.14, 'load_config'], [0.35, 0.42, 'Client::send'], [0.78, 0.45, 'retry_policy'], [0.18, 0.72, 'parse_args'], [0.56, 0.78, 'backoff'], [0.86, 0.8, 'Timer']];
@@ -216,7 +178,6 @@ export function panel(app, kind) {
   const k = `${app}:${kind}`;
   if (app === 'dyno') return base + dynoPanel(kind);
   if (app === 'recce') return base + reccePanel(kind);
-  if (app === 'scrutineer') return base + scrutineerPanel(kind);
   let g = '';
   if (k === 'sighter:record') {
     g = r(40, 36, 592, 150, 'mc', 12) + `<circle class="mrec" cx="68" cy="62" r="7"/>` + t(86, 67, 'Recording  00:42', 'mt') + t(612, 67, 'Checkout, window capture', 'mm', 'end') +

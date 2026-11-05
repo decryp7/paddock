@@ -1,11 +1,9 @@
-// Placeholder icons for the two planned family members (2026-11-04). The user called the brand work a PLACEHOLDER: the real icons
-// come later, so each has one option, masters and the 128 and 60 frames only (no hand-tuned small sizes), drawn with the family's
+// Placeholder icon for the planned family member Recce (2026-11-04). The user called the brand work a PLACEHOLDER: the real icon
+// comes later, so it has one option, masters and the 128 and 60 frames only (no hand-tuned small sizes), drawn with the family's
 // shared helpers (tools/iso.mjs):
 //
 // - Recce (planned app, PC-wide search): a stage map folded in three, in dark ink on a light jade tile (STYLE.md section 3, as
 //   Spotter and Sighter), with a magnifier resting on its ridges, its lens enlarging the stage route (the jade accent).
-// - Scrutineer (planned tool, code-signing certificates; scrutineering is the technical inspection that certifies a car): a
-//   certificate with an inspection stamp standing on it and the stamp's mark beside it (the accent), white on a deep berry tile.
 //
 // tools/placeholder-icons.mjs builds them; nothing here is wired into the family (APPS, iso-family.mjs).
 import {
@@ -196,67 +194,7 @@ export function cylinderT(kit, name, [s, d], r, t0, t1, tone) {
   return { side, grad: kit.lin(name, [a[0], 0], [b[0], 0], stops), fill: `url(#${kit.id(name)})` };
 }
 
-// ---------------------------------------------------------------- Scrutineer: a certificate and the inspection stamp
-
-/** The certificate (iso units): a sheet SxD, `th` thick; the stamp standing on it and its mark beside it. */
-export const CERT = { S: 400, D: 300, th: 12, stamp: { s: 286, d: 180, pad: 92, stem: 30, knob: 54, h: [12, 26, 74, 140, 176] }, mark: { s: 112, d: 96, r: 58 } };
-
-export function certificateArt({ simple = false, weight = 0.7, dx = -4, dy = 14 } = {}) {
-  const { S, D, th, stamp: st, mark } = CERT, [t0, tPad, tBody, tStem, tKnob] = st.h;
-  const V = tintedValues(PALETTE.scrutineer.deep, 0.12), accent = PALETTE.scrutineer.top;
-  const white = x => ramp([[0, V.shade[1]], [0.3, V.shade[0]], [0.55, V.litLight[0]], [0.78, V.top[1]], [1, '#FFFFFF']], x);
-  const outline = [[0, 0, 0], [S, 0, 0], [S, D, 0], [0, D, 0], [0, D, th], [st.s - st.knob, st.d, tKnob + st.knob], [st.s + st.knob, st.d, tKnob + st.knob]];
-  const fit = fitBox(outline, { weight, dx, dy });
-  return uid => {
-    const kit = defsKit(`${uid}c`);
-    const defs = [], out = [];
-    // The sheet: white top, lit front edge, shaded end.
-    const b = box(0, S, 0, D, 0, th);
-    defs.push(kit.lin('ct', P(0, D, th), P(S, 0, th), [[0, V.top[0]], [1, V.top[1]]]), kit.lin('cf', P(0, 0, th), P(S, 0, 0), [[0, V.lit[0]], [1, V.lit[1]]]), kit.lin('ce', P(S, 0, th), P(S, D, 0), [[0, V.shade[0]], [1, V.shade[1]]]));
-    out.push(`<path d="${b.front}" fill="url(#${kit.id('cf')})"/><path d="${b.end}" fill="url(#${kit.id('ce')})"/><path d="${b.top}" fill="url(#${kit.id('ct')})"/>`);
-    defs.push(`<clipPath id="${kit.id('top')}"><path d="${b.top}"/></clipPath>`);
-    // Printed matter on the sheet: a border, a title bar and text lines (fine repeats: full size only), in a light grey.
-    const ink = V.lower[1], onTop = (s0, s1, d0, d1) => poly(P(s0, d0, th), P(s1, d0, th), P(s1, d1, th), P(s0, d1, th));
-    out.push(`<path d="${onTop(18, S - 18, 18, D - 18)}" fill="none" stroke="${V.edge[0]}" stroke-width="${simple ? 5 : 3}"/>`);
-    out.push(`<path d="${onTop(40, 60, 40, D - 40)}" fill="${V.edge[0]}"/>`);
-    if (!simple) for (let i = 0; i < 4; i++) out.push(`<path d="${onTop(84 + i * 26, 92 + i * 26, 170, D - 40)}" fill="${ink}"/>`);
-    // The stamp's mark (the accent): a ring with a tick, printed on the sheet.
-    const mc = [mark.s, mark.d, th + 0.5];
-    out.push(`<path d="${disc(mc, X3, Y3, mark.r)}${disc(mc, X3, Y3, mark.r - (simple ? 16 : 12))}" fill="${accent}" fill-rule="evenodd"/>`);
-    // The tick drawn in screen terms (a short stroke down, a long one up to the right), laid onto the sheet's plane.
-    const flatP = ([x, y]) => P(mark.s + (x / C + 2 * y) / 2, mark.d + (x / C - 2 * y) / 2, th + 0.5);
-    out.push(`<path d="${pathOf([[-26, -2], [-8, 14], [26, -18]].map(flatP))}" fill="none" stroke="${accent}" stroke-width="${simple ? 16 : 12}" stroke-linecap="round" stroke-linejoin="round"/>`);
-    // The stamp's cast shadow on the sheet.
-    out.push(occlusion(kit, 'top', disc([st.s + 34, st.d + 22, th], X3, Y3, st.pad + 10), 0.4));
-    // The stamp: a dark rubber pad, the white body, the stem and the round knob.
-    const pad = cylinderT(kit, 'pad', [st.s, st.d], st.pad - 4, t0, tPad, x => tint(PALETTE.scrutineer.deep, '#000000', 0.3 - x * 0.2));
-    const body = cylinderT(kit, 'body', [st.s, st.d], st.pad, tPad, tBody, white);
-    const stem = cylinderT(kit, 'stem', [st.s, st.d], st.stem, tBody, tStem, white);
-    defs.push(pad.grad, body.grad, stem.grad);
-    out.push(`<path d="${pad.side}" fill="${pad.fill}"/><path d="${body.side}" fill="${body.fill}"/>`);
-    // The accent band round the body (the stamp is the tool's colour), then the stem and the knob.
-    out.push(`<path d="${Zp(hull([...ring([st.s, st.d, tPad + 6], X3, Y3, st.pad + 0.5), ...ring([st.s, st.d, tPad + 13], X3, Y3, st.pad + 0.5)]))}" fill="${accent}" opacity="0.9"/>`);
-    defs.push(kit.lin('bt', P(st.s - st.pad, st.d + st.pad, tBody), P(st.s + st.pad, st.d - st.pad, tBody), [[0, V.top[0]], [1, V.lower[0]]]));
-    out.push(`<path d="${disc([st.s, st.d, tBody], X3, Y3, st.pad)}" fill="url(#${kit.id('bt')})"/>`);
-    defs.push(`<clipPath id="${kit.id('btc')}"><path d="${disc([st.s, st.d, tBody], X3, Y3, st.pad)}"/></clipPath>`);
-    out.push(occlusion(kit, 'btc', disc([st.s + 14, st.d + 8, tBody], X3, Y3, st.stem + 8), 0.45));
-    out.push(`<path d="${stem.side}" fill="${stem.fill}"/>`);
-    out.push(occlusion(kit, 'btc', disc([st.s, st.d, tBody], X3, Y3, st.stem + 4), 0.3));
-    const kc = Pv([st.s, st.d, tKnob]), R = st.knob;
-    defs.push(`<radialGradient id="${kit.id('kn')}" gradientUnits="userSpaceOnUse" cx="${f(kc[0] - R * 0.35)}" cy="${f(kc[1] - R * 0.4)}" r="${f(R * 1.7)}"><stop offset="0" stop-color="#FFFFFF"/><stop offset="0.35" stop-color="${V.top[1]}"/><stop offset="0.7" stop-color="${V.lit[1]}"/><stop offset="1" stop-color="${V.shade[1]}"/></radialGradient>`);
-    out.push(`<circle cx="${kc[0]}" cy="${kc[1]}" r="${R}" fill="url(#${kit.id('kn')})"/>`);
-    const sp = fadeStroke(kit, 'ksp', Array.from({ length: 20 }, (_, i) => { const q = Math.PI * (1.05 + (i / 19) * 0.4); return [f(kc[0] + (R - 7) * Math.cos(q)), f(kc[1] + (R - 7) * Math.sin(q))]; }), simple ? 6 : 4, '#FFFFFF', 0.9);
-    defs.push(sp.def);
-    out.push(sp.el);
-    // The topmost front edge highlight on the sheet.
-    out.push(`<path d="${pathOf([P(4, 0, th), P(S - 4, 0, th)])}" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/>`);
-    const shade = [longShadow(kit, [P(0, 0, 0), P(S, 0, 0), P(S, D, 0), P(0, D, 0)], undefined, longOpacity(PALETTE.scrutineer.base)), contactShadow(kit, poly(P(4, -3, 0), P(S + 4, -3, 0), P(S + 4, D - 6, 0), P(S, D - 6, 0), P(S, 0, 0), P(4, 0, 0)))];
-    return wrap(kit, defs.join(''), fit.transform, shade.join(''), out.join(''));
-  };
-}
-
 /** The placeholder art per family member: its tile (a PALETTE key) and its art function. */
 export const PLACEHOLDERS = {
   recce: { kind: 'app', art: lensArt },
-  scrutineer: { kind: 'tool', art: certificateArt },
 };

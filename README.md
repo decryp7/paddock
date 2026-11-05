@@ -3,12 +3,12 @@
 <h1 align="center">Paddock</h1>
 
 <p align="center">
-  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=e862b089" alt="Paddock: eight apps and a tool. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps; the planned tool Scrutineer signs every app's installers" width="100%"></a>
+  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=bbf5ff4b" alt="Paddock: eight apps. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps." width="100%"></a>
 </p>
 
 <p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>
 
-Paddock is a family of eight desktop apps and one tool for people who keep software and the machines it runs on healthy, and the
+Paddock is a family of eight desktop apps for people who keep software and the machines it runs on healthy, and the
 foundation they share. Each app does one job well and is useful alone. Together they cover the loop from an incident in
 production, through understanding the code and writing a test, to running it on CI. Everything runs on your computer: no
 cloud, no account, no telemetry. Optional local AI, served by one app, makes each of them smarter without sending a byte
@@ -16,7 +16,7 @@ anywhere.
 
 ## The apps
 
-Seven of the eight apps live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only a placeholder page so far (plan: branch `docs/pc-search-app-plan`). Scrutineer, a tool rather than an app, is listed in the same table. The old per-app repositories are archived (read-only); their past releases stay downloadable there.
+Seven of the eight apps live in this repository under [`apps/`](apps/); Recce, the eighth, is planned and has only a placeholder page so far (plan: branch `docs/pc-search-app-plan`). The old per-app repositories are archived (read-only); their past releases stay downloadable there.
 
 | App&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | What it does | Status |
 |---|---|---|
@@ -28,7 +28,6 @@ Seven of the eight apps live in this repository under [`apps/`](apps/); Recce, t
 | <img src="icons/sighter/small/sighter-48.svg?v=232dd5be" width="40" height="40" align="absmiddle" alt=""> **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned |
 | <img src="icons/pacenotes/small/pacenotes-48.svg?v=38a41979" width="40" height="40" align="absmiddle" alt=""> **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned |
 | <img src="docs/images/src/icons/recce-placeholder.svg?v=927fe524" width="40" height="40" align="absmiddle" alt=""> **[Recce](docs/planned/recce/README.md)** | One search box for the whole PC: files, documents, email and SharePoint, by name or by meaning, with answers that cite their sources. | Planned (placeholder page, draft plan) |
-| <img src="docs/images/src/icons/scrutineer-placeholder.svg?v=0009a2de" width="40" height="40" align="absmiddle" alt=""> **[Scrutineer](tools/scrutineer/README.md)** | A tool, not an app: generates, signs, verifies and installs your own code-signing certificates, so your apps show you as the publisher. Pitwall 1.1 is planned as the first release signed through it. | Planned (placeholder page, draft plan) |
 
 Per-app detail, audience and standout features: [docs/ecosystem.md](docs/ecosystem.md).
 
@@ -132,7 +131,7 @@ The order of work (2026-11-04):
 
 1. Dyno 1.1.0, in progress: the administrator helper's readings, per-machine Windows installs and OS lifecycle checks.
 2. Spotter 1.0.
-3. Pitwall 1.1, the first release signed through Scrutineer (draft plan).
+3. Pitwall 1.1.
 4. Pitcrew 1.1.
 5. Debrief 1.2.
 6. Pacenotes and Sighter.

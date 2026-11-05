@@ -13,7 +13,6 @@ One row per image under `docs/images` that passed an independent review. A chang
 | src/icons/sighter.svg | ab71dc5d8983205f54a7f231a115a591b413b44004aaf8d7308cb2b12a73bc9e | small-icons poster review (Opus) | 2026-11-03 |
 | src/icons/spotter.svg | bb7619dff9eae64b84759fa336724dab6e71c1a8237c61b2815f8b22f48adadf | small-icons poster review (Opus) | 2026-11-03 |
 | src/icons/recce-placeholder.svg | 927fe52447104f6b7d0af72fdd53e2c96ff5cd90c217e80862a24f4bfb7ba415 | placeholder review only, not a final icon (Opus) | 2026-11-04 |
-| src/icons/scrutineer-placeholder.svg | 0009a2de15fe1b2feaeff80fb7ec58b3d8ad9c958240dd78d74798fdb42a25af | placeholder review only, not a final icon (Opus) | 2026-11-04 |
 | paddock-ecosystem.svg | e862b089796d733f184ea7d462e1101f9a7c4b422c77d547dea144e88fd5c78b | independent family-diagrams review 2 (Opus) | 2026-11-04 |
 | paddock-ecosystem-light.png | d92fe0d807d7f719cdc47356fcf6757a22c2b3eff2f097d10b383d3561b46b4e | independent family-diagrams review 2 (Opus) | 2026-11-04 |
 | paddock-ecosystem-dark.png | 55edf0ea57a047067766eb7225f512e8c108a1079ae039682bb7ef202f30992e | independent family-diagrams review 2 (Opus) | 2026-11-04 |
