@@ -1,6 +1,5 @@
 //! Failure and edge paths of the engine that the flow tests do not reach: a check that is already running, products
 //! whose source did not change, a migrated configuration, the digest, the wizard's pattern helper and the scheduler.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::notify::DigestMode;
 use spotter_core::source::SourceConfig;

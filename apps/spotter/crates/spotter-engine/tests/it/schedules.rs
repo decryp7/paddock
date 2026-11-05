@@ -1,6 +1,5 @@
 //! Schedules in the engine: the three modes drive `next_check`, a machine that slept gets one catch-up check, daylight
 //! saving follows the machine's zone, an edited schedule counts from the last check, and the preview is a query.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::calendar::Weekday;
 use spotter_core::schedule::Schedule;

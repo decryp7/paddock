@@ -1,5 +1,4 @@
 //! The polite fetcher against a scripted local server: redirects, loops, bearer challenges, validators, caps.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::source::{HttpRequest, SourceError};
 use spotter_engine::fetch::{FetchConfig, FetchOptions, Fetched, PoliteFetcher, Validators};

@@ -1,5 +1,4 @@
 //! Failure and edge paths of the adapters: odd tokens, ignored ranges, bad checksums and sources, folders.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::checksum::Sha256Digest;
 use spotter_core::release::Release;

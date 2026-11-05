@@ -1,9 +1,7 @@
 //! The installer's phases, progress and cancel: Downloading, Unpacking and Testing each on their own scale, the
 //! checksum taken while downloading (the archive is not read again to hash it), and Cancel in every phase.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod support;
-
+use crate::support::{serve, Reply};
 use spotter_core::job::{Cancel, Job, Phase, Progress, Unit};
 use spotter_render::discover::Os;
 use spotter_render::install::{download, extract, install_pinned, sha256_file};
@@ -13,7 +11,6 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use support::{serve, Reply};
 
 const BIG: usize = 6 << 20;
 

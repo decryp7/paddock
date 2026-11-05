@@ -2,7 +2,6 @@
 //! body, a redirect loop, bad webhooks, a soak over simulated weeks, rendered pages with a fake renderer, DNS
 //! rebinding, avatars (cached, expired, offline, hostile) and the e-mail channel. Temporary folders only; nothing leaves
 //! the machine.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::avatar::ImageKind;
 use spotter_core::notify::{ChannelKind, NotificationChannel, SmtpSecurity, SmtpSettings};

@@ -1,6 +1,5 @@
 //! The HTTP adapter and downloads against a small local server: forge answers, registry tokens, status mapping,
 //! bounded bodies, resume, checksum verification and refusal.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::checksum::Sha256Digest;
 use spotter_core::release::Release;
@@ -158,9 +157,9 @@ async fn statuses_sizes_and_connection_failures_map_to_errors() {
     assert!(matches!(get("/missing", 1024).await, Err(SourceError::NotFound(_))));
     assert!(matches!(get("/big", 1024).await, Err(SourceError::InvalidResponse(m)) if m.contains("at most")));
     assert_eq!(get("/big", 8192).await.unwrap().len(), 4096);
-    let closed = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let dead = format!("http://{}/x", closed.local_addr().unwrap());
-    drop(closed);
+    // A held port that resets each connection (a freed port may be another test's server): a failed transfer is unreachable.
+    let reset = paddock_testkit::net::HeldPort::reset();
+    let dead = format!("{}/x", reset.url());
     let e = http
         .get(&spotter_core::source::HttpRequest::get(dead), None, 1024)
         .await

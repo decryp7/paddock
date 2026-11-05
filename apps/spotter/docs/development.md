@@ -61,7 +61,7 @@ node --test scripts/pin-chromium.test.mjs scripts/install-test-browser.test.mjs 
 
 ## Real-browser tests
 
-The renderer tests (`crates/spotter-render/tests/real_browser.rs`) launch a browser, but never an installed Chrome, Edge
+The renderer tests (`crates/spotter-render/tests/it/real_browser.rs`) launch a browser, but never an installed Chrome, Edge
 or Chromium: killing a launched system Chrome left a code-sign clone of the whole app behind on macOS (hundreds of GB).
 They use only the pinned Chrome for Testing of the renderer's own manifest (ADR 0004), installed once with
 `node scripts/install-test-browser.mjs` into `~/.cache/spotter-test-browser` (or `$SPOTTER_TEST_BROWSER_DIR`), or an

@@ -1,17 +1,15 @@
 //! Runs the dedicated test browser (pinned Chrome for Testing; skipped cleanly when absent, never the system Chrome) against a local server.
 //! Profiles live in temp folders; nothing touches a user profile or a real host.
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::await_holding_lock)] // the lock is what serialises the tests
+#![allow(clippy::await_holding_lock)] // the lock is what serialises the tests
 
-mod support;
-
+use crate::support::net_log::NetLog;
+use crate::support::{serve, Reply};
 use spotter_render::discover::{find_for_tests, test_browser_flags, Browser};
 use spotter_render::launch::{Chromium, EndedBy, LaunchOptions, Mode};
 use spotter_render::process::processes_mentioning;
 use spotter_render::{ChromiumRenderer, PageRenderer, RenderError};
 use std::path::Path;
 use std::time::{Duration, Instant};
-use support::net_log::NetLog;
-use support::{serve, Reply};
 
 const PAGE: &str = "<!doctype html><html><head><title>Rendered</title></head><body><div id=v>loading</div><ul id=r></ul>\
 <script>setTimeout(()=>{document.getElementById('v').textContent='version 1.2.3';\

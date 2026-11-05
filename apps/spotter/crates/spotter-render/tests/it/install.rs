@@ -1,15 +1,12 @@
 //! The download-and-verify mechanism against a local server with a fake archive.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod support;
-
+use crate::support::{serve, Reply};
 use spotter_core::job::{Cancel, Job};
 use spotter_render::discover::Os;
 use spotter_render::install::{install_pinned, sha256_file};
 use spotter_render::manifest::Pinned;
 use std::io::Write;
 use std::path::Path;
-use support::{serve, Reply};
 
 fn fake_zip(dir: &Path) -> (Vec<u8>, String) {
     let p = dir.join("fake.zip");

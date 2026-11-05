@@ -1,6 +1,5 @@
 //! E-mail delivery against a fake SMTP server on a local port: the message, sign-in, and every failure a user can hit.
 //! No real mail is ever sent; nothing here leaves the machine.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use base64::Engine as _;
 use spotter_core::notify::{SmtpSecurity, SmtpSettings};

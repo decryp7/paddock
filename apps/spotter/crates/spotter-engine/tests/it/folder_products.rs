@@ -1,6 +1,5 @@
 //! A folder watch end to end: one watch tracks several products, each with its own latest version, "new" state and
 //! notification; files of one build join into one release; extraction previews run in Rust. Folders are temporary.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::release::LatestBy;
 use spotter_core::source::SourceConfig;

@@ -22,12 +22,12 @@ slow-timeout = { period = "30s", terminate-after = 2 }
 [profile.ci.junit]
 path = "junit.xml"
 
-# The real-browser tests (spotter-render's tests/real_browser.rs) take turns: started side by side, Chrome instances starve
+# The real-browser tests (spotter-render's tests/it/real_browser.rs, the `real_browser::` tests of the `it` binary) take turns: started side by side, Chrome instances starve
 # each other on a small runner. In one `cargo test` process a static Mutex serialised them; nextest gives every test its
 # own process, so the group does it here.
 [test-groups]
 real-browser = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = "package(spotter-render) & binary(real_browser)"
+filter = "package(spotter-render) & binary(it) & test(/^real_browser::/)"
 test-group = "real-browser"

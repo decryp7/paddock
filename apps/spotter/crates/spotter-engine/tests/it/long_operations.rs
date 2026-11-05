@@ -1,6 +1,5 @@
 //! Long operations through the engine: "n of m" for checking everything, a live count while a folder is listed,
 //! and Cancel that is heard in the middle of a settle wait.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::job::{Cancel, Job, Phase, Progress, Unit};
 use spotter_core::source::SourceConfig;

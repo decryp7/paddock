@@ -1,6 +1,5 @@
 //! Last failure paths of the engine: a journal that refuses the record of a failed delivery, and servers that answer
 //! "not modified" to a feed discovery or a source test.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::source::SourceConfig;
 use spotter_core::time::Timestamp;

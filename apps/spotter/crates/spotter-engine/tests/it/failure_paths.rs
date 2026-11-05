@@ -1,7 +1,6 @@
 //! A damaged history database or an unwritable configuration must come back as errors the user can act on, never
 //! as a panic and never as a half-applied change that poisons later work. The failures are real: tables are dropped
 //! under the running engine and the configuration file is replaced by a folder.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::notify::DigestMode;
 use spotter_core::source::SourceConfig;

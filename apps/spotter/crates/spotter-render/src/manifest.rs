@@ -110,6 +110,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_never_panics_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[EMBEDDED.as_bytes()], |bytes| Manifest::parse(&String::from_utf8_lossy(bytes)));
+    }
+
+    #[test]
     fn the_embedded_manifest_pins_every_platform_to_its_versioned_https_url() {
         let m = Manifest::embedded();
         assert!(

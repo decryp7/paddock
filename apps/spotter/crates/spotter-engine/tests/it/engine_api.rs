@@ -1,6 +1,5 @@
 //! The engine facade and the scheduler against a scripted local server: commands, queries, notifications, channels,
 //! the digest and the failure paths. Everything lives in temporary folders; nothing leaves the machine.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::action::Action;
 use spotter_core::notify::{ChannelKind, DigestMode, NotificationChannel};

@@ -1,6 +1,5 @@
 //! The engine against a local mock server: first check baselines, a new release notifies, 304 keeps state, the SSRF
 //! guard refuses loopback unless the watch opts in.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::source::SourceConfig;
 use spotter_core::watch::WatchSpec;

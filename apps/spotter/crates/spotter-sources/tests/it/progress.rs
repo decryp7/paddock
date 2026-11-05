@@ -1,6 +1,5 @@
 //! Progress and cancel of downloads and copies: bytes from the first one, one scale per phase, the checksum
 //! computed while writing, no second read pass, and Cancel in every phase.
-#![allow(clippy::unwrap_used, clippy::expect_used, missing_docs)]
 
 use spotter_core::checksum::Sha256Digest;
 use spotter_core::job::{Cancel, Job, Phase, Progress, Unit, CANCELLED};
