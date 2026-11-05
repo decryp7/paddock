@@ -114,5 +114,9 @@ Closing the window destroys it; the tray and the agent stay; opening builds a fr
 
 ![Service registration](../diagrams/svg/uml-state-service.svg)
 
-Not installed, or installed with two flags: running and pointing at this executable. `ensure` repairs a stale
-registration and never installs one unasked.
+The record `service-<label>.json` holds one state (ADR 0056, `docs/adr/0056-service-repair-one-declared-state-machine.md`):
+Idle, Attempting (which phase: removing the old registration, registering, awaiting an answer, register failed) or
+Removing. The phase is written before each OS step, so a crash leaves what is safe next. After three unattended registers
+of one version the start holds (unanswered, refused or register failed) and says why; Repair or Install, a newer version
+or the service answering ends the hold. Every entry point (start, install, repair, resume, uninstall) goes through one
+transition function; a start never installs one unasked.

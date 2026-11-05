@@ -4,25 +4,37 @@ const st = (d, id, x, y, w, h, name, desc) => d.node(id, x, y, w, h, 'accent', {
 const E = (d, a, sa, ta, b, sb, tb, via = [], o = {}) => d.edge(a, b, d.port(a, sa, ta), d.port(b, sb, tb), { via, ...o });
 
 // ---------- service registration ----------
+// ADR 0056: the record holds one state; a hold is derived from the attempts, never stored.
 {
-  const d = P({ title: 'Service registration', kind: 'UML · State machine', w: 1344,
-    desc: 'Status as dyno_agent::service reports it: not installed, or installed with two flags (running, points at this executable). ensure repairs a stale registration but never installs one unasked.' });
-  const W = 232, H = 104, G = 144, X0 = 96, cx = (i) => X0 + i * (W + G), R0 = 216, R1 = R0 + H + 88;
+  const d = P({ title: 'Service registration', kind: 'UML · State machine', w: 1344, date: '2026-11-05',
+    desc: 'The record holds one state: Idle, Attempting (phase: removing the old one, registering, awaiting an answer, register failed) or Removing. After 3 unattended registers of one version the start holds; the user\'s Repair or Install goes on.' });
+  const W = 208, H = 104, G = 112, X0 = 96, cx = (i) => X0 + i * (W + G), R0 = 216, R1 = R0 + H + 104;
   dot(d, 'ini', 48, R0 + H / 2 - 8, 'start');
-  st(d, 'none', cx(0), R0, W, H, 'Not installed', 'No plist, unit or Run value.');
-  st(d, 'run', cx(1), R0, W, H, 'Registered, running', 'Points at the current executable.');
-  st(d, 'stale', cx(2), R0, W, H, 'Registered, stale', 'Names another executable, as after an update.');
-  st(d, 'stop', cx(1), R1, W, H, 'Registered, not running', 'Points at the current executable.');
-  E(d, 'ini', 'R', 0.5, 'none', 'L', 0.5);
-  pair(d, 'none', 'run', 'Install', 'Uninstall');
-  pair(d, 'run', 'stale', 'App update', 'Ensure');
-  const x1 = Math.round(cx(1) + W * 0.3), x2 = Math.round(cx(1) + W * 0.7);
-  d.edge('run', 'stop', [x1, R0 + H], [x1, R1], {}); d.lbl('Crash or stop', x1, (R0 + H + R1) / 2, 'l');
-  d.edge('stop', 'run', [x2, R1], [x2, R0 + H], {}); d.lbl('OS restarts it', x2, (R0 + H + R1) / 2, 'r');
-  E(d, 'stop', 'L', 0.5, 'none', 'B', 0.5, [[Math.round(cx(0) + W / 2), R1 + H / 2]]);
-  d.lbl('Uninstall', cx(0) + W / 2 + 8, R1 + H / 2 - 4, 'ar', { maxw: 120 });
-  const ny = R1 + H + 56;
-  d.note('n', cx(0), ny, 3 * W + 2 * G, 'macOS: launchctl bootout then bootstrap on every install. Linux: systemctl --user enable --now. Windows: an HKCU Run value; no manager restarts a crashed agent, the app or the next logon does.');
+  st(d, 'idle', cx(0), R0, W, H, 'Idle', 'The last version that saw the service answer is recorded.');
+  st(d, 'old', cx(1), R0, W, H, 'Removing old', 'Recorded before the first removal; a crash here replaces again.');
+  st(d, 'reg', cx(2), R0, W, H, 'Registering', 'Recorded before register; a crash here only finishes it.');
+  st(d, 'await', cx(3), R0, W, H, 'Awaiting answer', 'The OS accepted it; the lock is free while we wait.');
+  st(d, 'fail', cx(2), R1, W, H, 'Register failed', 'The call failed; retried only under 3 attempts.');
+  st(d, 'held', cx(3), R1, W, H, 'Held', 'Derived: unanswered, refused or register failed 3 times.');
+  st(d, 'unin', cx(0), R1, W, H, 'Removing', 'An uninstall began; the switch went off.');
+  E(d, 'ini', 'R', 0.5, 'idle', 'L', 0.5);
+  link(d, 'idle', 'R', 'old', 'L', { label: 'New version' });
+  link(d, 'old', 'R', 'reg', 'L', { label: 'Gone' });
+  link(d, 'reg', 'R', 'await', 'L', { label: 'OS accepted' });
+  const xr = Math.round(cx(2) + W * 0.3), xf = Math.round(cx(2) + W * 0.7);
+  d.edge('reg', 'fail', [xr, R0 + H], [xr, R1], {}); d.lbl('Register fails', xr, (R0 + H + R1) / 2, 'l');
+  d.edge('fail', 'reg', [xf, R1], [xf, R0 + H], {}); d.lbl('Retry', xf, (R0 + H + R1) / 2, 'r');
+  link(d, 'await', 'B', 'held', 'T', { label: 'No answer, 3 tries' });
+  link(d, 'fail', 'R', 'held', 'L', { label: 'Fails 3 times' });
+  E(d, 'await', 'T', 0.5, 'idle', 'T', 0.5, [[Math.round(cx(3) + W / 2), R0 - 40], [Math.round(cx(0) + W / 2), R0 - 40]]);
+  d.lbl('Answers', Math.round((cx(0) + cx(3) + W) / 2), R0 - 48, 'a', { maxw: 120 });
+  E(d, 'held', 'B', 0.5, 'old', 'B', 0.5, [[Math.round(cx(3) + W / 2), R1 + H + 40], [Math.round(cx(1) + W / 2), R1 + H + 40]]);
+  d.lbl('Repair or Install', Math.round((cx(1) + cx(3) + W) / 2), R1 + H + 36, 'a', { maxw: 160 });
+  const xi = Math.round(cx(0) + W * 0.3), xu = Math.round(cx(0) + W * 0.7);
+  d.edge('idle', 'unin', [xi, R0 + H], [xi, R1], {}); d.lbl('Switched off', xi, (R0 + H + R1) / 2, 'l');
+  d.edge('unin', 'idle', [xu, R1], [xu, R0 + H], {}); d.lbl('Removed', xu, (R0 + H + R1) / 2, 'r');
+  const ny = R1 + H + 96;
+  d.note('n', cx(0), ny, 4 * W + 3 * G, 'Every start, install, repair, resume and uninstall passes one transition function and writes the record before each OS step. A hold ends when the service answers, the version changes, or the user presses Repair. macOS and Linux share this; Windows Dyno has no agent service.');
   d.legend([{ kind: 'accent', label: 'State' }, { kind: 'line', label: 'Event' }]);
   save('uml-state-service', d, ny + d.rect.n[3]);
 }
