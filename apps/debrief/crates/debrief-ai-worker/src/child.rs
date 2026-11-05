@@ -173,6 +173,7 @@ mod job {
 /// A free port on 127.0.0.1 (another process may still take it before llama-server binds it; the
 /// start is retried on a new port in that case).
 pub fn free_port() -> std::io::Result<u16> {
+    // conformance: freed-port — llama-server takes its port as a number (no documented port 0), and the start retries on a new port if this one was taken
     Ok(TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?.local_addr()?.port())
 }
 

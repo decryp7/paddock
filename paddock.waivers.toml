@@ -41,12 +41,6 @@ expires = "2026-12-31"
 # C39 (ADR 0023): the apps' ports read off dropped listeners, one waiver per file so a new one in an app is still caught.
 [[waiver]]
 check = "C39"
-path = "apps/debrief/crates/debrief-ai-worker/src/child.rs"
-reason = "Debrief: free_port() picks a port for llama-server and retries on a taken one; to get an inline freed-port waiver"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
 path = "apps/pitcrew/crates/notify-channels/src/tests.rs"
 reason = "Pitcrew: two refused-connection tests on freed ports; to use HeldPort::reset or a mapping test"
 expires = "2026-12-31"

@@ -128,7 +128,9 @@ impl ExitNote {
 /// The OS process behind a [`ChildProcess`]: started by the standard library, or (a contained child on Windows) in
 /// an AppContainer by [`crate::contain`].
 enum OsChild {
-    /// The child and, read right after the spawn (while no one could have reaped it), its identity.
+    /// The child and, read right after the spawn (while no one could have reaped it), its identity. Only Unix reads it
+    /// (to end the leader's group); Windows children end with their job object.
+    #[cfg_attr(not(unix), allow(dead_code))]
     Std(Child, Option<paddock_proc::ProcessId>),
     #[cfg(windows)]
     Contained(crate::contain::Contained),
