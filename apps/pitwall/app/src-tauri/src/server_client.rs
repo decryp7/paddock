@@ -485,18 +485,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_server_that_is_not_running_is_unavailable_with_a_next_step() {
-        // A port nobody listens on (bound then dropped).
-        let port = {
-            let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
-            l.local_addr().unwrap().port()
-        };
-        let (_d, c) = client_for(port, "k");
+    async fn a_server_that_hangs_up_is_unavailable_with_a_retry_hint() {
+        // A held port (a freed one may be another test's server). A refused connect (`Connect`, "Repair service") is the
+        // mapping tested in `transport_failures_become_typed_errors_with_a_next_step`.
+        let held = paddock_testkit::net::HeldPort::hang_up();
+        let (_d, c) = client_for(held.port(), "k");
         // Hermetic: an installed Pitwall may listen on the well-known port, so only the discovery port is tried.
         let c = c.discovery_port_only();
         let e = c.call("overview", Value::Null, Duration::from_secs(5)).await.unwrap_err();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
-        assert!(e.message.contains("Repair service"));
+        assert!(e.message.contains("restart the service"), "{}", e.message);
         let e = c.open_stream("/mgmt/v1/live", None, Duration::from_secs(5)).await.err().unwrap();
         assert_eq!(e.code, ErrorCode::ServerUnavailable);
     }

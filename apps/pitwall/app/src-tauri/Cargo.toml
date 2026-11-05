@@ -61,6 +61,7 @@ objc2-service-management = { version = "0.3", default-features = false, features
 workspace = true
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
 tauri = { version = "2.12.4", features = ["test"] }

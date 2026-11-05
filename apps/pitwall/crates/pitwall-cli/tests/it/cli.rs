@@ -1,8 +1,6 @@
 //! Runs the built `pitwall` binary against a tiny fake of Pitwall's local API on an ephemeral 127.0.0.1 port (never the
 //! production port, never the user's data folder or credential store: the data folder is a temp dir and the admin key
 //! comes from the environment).
-// Tests start the built binary directly (no console window concerns; each run is short and bounded).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -94,6 +92,10 @@ fn rpc(m: &str) -> String {
 }
 
 /// The CLI with an empty environment, except what Windows sockets need to start (without SystemRoot every connect fails).
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a test starts the built binary directly (no console window concerns; each run is short and bounded)"
+)]
 fn bare(args: &[&str]) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_pitwall"));
     c.args(args).env_clear();
@@ -268,11 +270,12 @@ fn exit_codes() {
     assert!(!text(&out.stderr).contains("abc "));
     assert_eq!(pitwall(h.path(), &["--help"]).status.code(), Some(0));
     assert!(text(&pitwall(h.path(), &["--version"]).stdout).starts_with("pitwall "));
-    // nothing listening: a port that was just free
-    let free = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port().to_string();
-    let out = pitwall(h.path(), &["status", "--port", &free]);
-    assert_eq!(out.status.code(), Some(3));
-    assert!(text(&out.stderr).contains("Start the Pitwall app"));
+    // something on the port that answers nothing (a held port: a freed one may be another test's server). "Not running" (3,
+    // "Start the Pitwall app") is the mapping of a refused connect, tested in `exit.rs`.
+    let held = paddock_testkit::net::HeldPort::hang_up();
+    let out = pitwall(h.path(), &["status", "--port", &held.port().to_string()]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(text(&out.stderr).contains("Is something else using port"), "{}", text(&out.stderr));
     // no admin key anywhere readable: an unusable --key-file
     let out = pitwall(h.path(), &["status", "--port", &port, "--key-file", "/nonexistent/key"]);
     assert_eq!(out.status.code(), Some(1));

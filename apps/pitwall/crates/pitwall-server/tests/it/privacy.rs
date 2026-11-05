@@ -1,5 +1,4 @@
 //! ADR 0001 in code: the request path has no way to reach the network.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::path::Path;
 

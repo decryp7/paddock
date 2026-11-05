@@ -1,10 +1,8 @@
 //! Engine version pins, rollback and capability gating end to end (ADR 0018) over the fake llama-server and
 //! hand-made installed builds: the gate's typed errors in all three API families, selection order, the busy-model
 //! rule, persistence and damage.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
-use common::{harness_in, Harness};
+use crate::common::{harness_in, Harness};
 use pitwall_core::runtimes::BuildId;
 use serde_json::{json, Value};
 
@@ -115,7 +113,7 @@ async fn json_schema_vision_and_embeddings_are_gated_too() {
 
     let emb = h.dir.path().join("models/e/m");
     std::fs::create_dir_all(&emb).unwrap();
-    std::fs::write(emb.join("embed-Q8_0.gguf"), common::gguf("bert")).unwrap();
+    std::fs::write(emb.join("embed-Q8_0.gguf"), crate::common::gguf("bert")).unwrap();
     let r = h
         .call(
             "POST",
@@ -166,7 +164,7 @@ async fn the_model_list_and_capability_selection_leave_out_what_the_build_cannot
     let key = key(&h).await;
     let emb = h.dir.path().join("models/e/m");
     std::fs::create_dir_all(&emb).unwrap();
-    std::fs::write(emb.join("embed-Q8_0.gguf"), common::gguf("bert")).unwrap();
+    std::fs::write(emb.join("embed-Q8_0.gguf"), crate::common::gguf("bert")).unwrap();
     install(&h, "cpu", "b1900", "passed");
     let models = h.call("GET", "/x/v1/models", Some(&key), None, &[]).await.json();
     let e = models["models"]

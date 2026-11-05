@@ -22,35 +22,11 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C37"
-path = "apps/pitwall/*"
-reason = "Pitwall's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C37"
 path = "apps/spotter/*"
 reason = "Spotter's integration tests are still one binary per file (pre-monorepo); moving them into tests/it is a follow-up"
 expires = "2026-12-31"
 
 # C39 (ADR 0023): the apps' ports read off dropped listeners, one waiver per file so a new one in an app is still caught.
-[[waiver]]
-check = "C39"
-path = "apps/pitwall/app/src-tauri/src/server_client.rs"
-reason = "Pitwall: a not-running test on a freed port; to use a refusing connector"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/pitwall/crates/pitwall-cli/tests/cli.rs"
-reason = "Pitwall: a status test on a freed port; to use HeldPort::reset"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/pitwall/crates/pitwall-loopback/src/lib.rs"
-reason = "Pitwall: a refused-connection test on a freed port; to use a refusing connector"
-expires = "2026-12-31"
-
 [[waiver]]
 check = "C39"
 path = "apps/spotter/crates/spotter-sources/tests/http_sources.rs"

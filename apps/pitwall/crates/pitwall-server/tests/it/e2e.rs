@@ -1,9 +1,7 @@
 //! End-to-end API tests over a fake llama-server: auth, provenance, the three API families, permissions, pairing,
 //! load on first use, release and refusal paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
-use common::harness;
+use crate::common::harness;
 use serde_json::json;
 use std::sync::atomic::Ordering;
 
@@ -357,7 +355,7 @@ async fn embeddings_need_an_embedding_model() {
     assert_eq!(r.status, 404, "{}", r.body);
     let emb = h.dir.path().join("models/e/m");
     std::fs::create_dir_all(&emb).unwrap();
-    std::fs::write(emb.join("embed-Q8_0.gguf"), common::gguf("bert")).unwrap();
+    std::fs::write(emb.join("embed-Q8_0.gguf"), crate::common::gguf("bert")).unwrap();
     let r = h
         .call(
             "POST",
@@ -387,7 +385,7 @@ async fn the_llama_cpp_page_lists_only_llama_cpp_and_offers_to_remove_a_leftover
     let old = dir.path().join("engines/pack-llamafile");
     std::fs::create_dir_all(&old).unwrap();
     std::fs::write(old.join("llamafile"), vec![0u8; 2048]).unwrap();
-    let h = common::harness_in(dir, false).await;
+    let h = crate::common::harness_in(dir, false).await;
     let engines = h.rpc("engines", json!({})).await.json();
     let list = engines.as_array().unwrap();
     assert_eq!(list.len(), 1);
@@ -496,7 +494,7 @@ async fn a_model_that_cannot_fit_is_refused_with_a_typed_error_and_nothing_start
     // A sparse 4 TiB "model": parses as GGUF but can never fit in memory.
     let p = h.dir.path().join("models/big/m/huge-Q4_K_M.gguf");
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-    let mut b = common::gguf("llama");
+    let mut b = crate::common::gguf("llama");
     b.truncate(70_000);
     std::fs::write(&p, &b).unwrap();
     if !make_sparse_huge(&p) {
@@ -594,7 +592,7 @@ async fn benchmarks_are_kept_and_models_report_their_engine() {
     assert_eq!(h.rpc("benchmarks", json!({})).await.json().as_array().unwrap().len(), 1);
 }
 
-async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&common::Harness) -> bool) {
+async fn tick_until(h: &crate::common::Harness, what: &str, mut done: impl FnMut(&crate::common::Harness) -> bool) {
     // Generous: loaded CI runners are slow (docs/suite-lessons.md).
     for _ in 0..900 {
         h.st.serving.tick();
@@ -609,11 +607,11 @@ async fn tick_until(h: &common::Harness, what: &str, mut done: impl FnMut(&commo
 #[tokio::test]
 async fn a_crashing_engine_is_restarted_with_backoff_then_given_up_on_until_retry() {
     let dir = tempfile::tempdir().unwrap();
-    let exe = common::runnable_server(dir.path());
-    let h = common::harness_with(
+    let exe = crate::common::runnable_server(dir.path());
+    let h = crate::common::harness_with(
         dir,
         false,
-        Some(std::sync::Arc::new(common::ChildEngine {
+        Some(std::sync::Arc::new(crate::common::ChildEngine {
             exe,
             die_after_ms: 900,
             pids: Default::default(),
@@ -761,7 +759,7 @@ async fn request_content_is_kept_only_when_asked_redacted_bounded_and_local() {
 #[tokio::test]
 async fn benchmark_results_survive_a_restart_and_tolerate_damage() {
     let dir = tempfile::tempdir().unwrap();
-    let h = common::harness_in(dir, false).await;
+    let h = crate::common::harness_in(dir, false).await;
     let b = h.rpc("run_benchmark", json!({"modelId": "tiny-q4_k_m"})).await;
     assert_eq!(b.status, 200, "{}", b.body);
     assert!(h.dir.path().join("benchmarks.json").exists(), "written to disk");
@@ -769,7 +767,7 @@ async fn benchmark_results_survive_a_restart_and_tolerate_damage() {
     // A new server over the same folder reads it back.
     let dir = h.dir;
     drop(h.st);
-    let again = common::harness_in(dir, false).await;
+    let again = crate::common::harness_in(dir, false).await;
     let list = again.rpc("benchmarks", json!({})).await.json();
     assert_eq!(list.as_array().unwrap().len(), 1);
     assert_eq!(list[0]["modelId"], "tiny-q4_k_m");
@@ -778,21 +776,21 @@ async fn benchmark_results_survive_a_restart_and_tolerate_damage() {
     std::fs::write(again.dir.path().join("benchmarks.json"), "{ not json").unwrap();
     let dir = again.dir;
     drop(again.st);
-    let third = common::harness_in(dir, false).await;
+    let third = crate::common::harness_in(dir, false).await;
     assert!(third.rpc("benchmarks", json!({})).await.json().as_array().unwrap().len() <= 1);
 }
 
 #[tokio::test]
 async fn stopping_serving_unloads_every_model_ends_the_engine_processes_and_resuming_serves_again() {
     let dir = tempfile::tempdir().unwrap();
-    let exe = common::runnable_server(dir.path());
+    let exe = crate::common::runnable_server(dir.path());
     let pids: std::sync::Arc<std::sync::Mutex<Vec<u32>>> = Default::default();
-    let engine = common::ChildEngine {
+    let engine = crate::common::ChildEngine {
         exe,
         die_after_ms: 600_000,
         pids: pids.clone(),
     };
-    let h = common::harness_with(dir, false, Some(std::sync::Arc::new(engine))).await;
+    let h = crate::common::harness_with(dir, false, Some(std::sync::Arc::new(engine))).await;
     let key = h.make_key("Quit Test").await;
     let r = h
         .call("POST", "/v1/chat/completions", Some(&key), Some(chat("tiny-q4_k_m", false)), &[])

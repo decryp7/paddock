@@ -1,9 +1,7 @@
 //! Per-app usage over time and the extended limits, end to end over the fake llama-server: recording, the series and
 //! detail calls, 80% warnings, refusals at the boundary, and persistence that survives damage.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
-use common::{harness, harness_in, Harness};
+use crate::common::{harness, harness_in, Harness};
 use serde_json::{json, Value};
 
 fn chat() -> Value {
@@ -27,7 +25,7 @@ async fn app_with_limits(h: &Harness, limits: Value) -> (String, String) {
     (id, key)
 }
 
-async fn ask(h: &Harness, key: &str) -> common::Reply {
+async fn ask(h: &Harness, key: &str) -> crate::common::Reply {
     h.call("POST", "/v1/chat/completions", Some(key), Some(chat()), &[]).await
 }
 

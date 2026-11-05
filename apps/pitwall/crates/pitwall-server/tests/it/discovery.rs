@@ -1,12 +1,10 @@
 //! The discovery file's `serving` flag (ADR 0009): written true on start, rewritten false (not deleted) on a clean
 //! stop, tolerant of old files, and a stale pid reads as installed-not-running.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
-use common::harness_in;
+use crate::common::harness_in;
 use pitwall_core::discovery::{Discovery, Standing};
 
-fn read(h: &common::Harness) -> Discovery {
+fn read(h: &crate::common::Harness) -> Discovery {
     Discovery::parse(&std::fs::read_to_string(h.st.dirs.discovery()).unwrap()).unwrap()
 }
 

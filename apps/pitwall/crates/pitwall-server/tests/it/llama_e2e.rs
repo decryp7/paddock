@@ -2,8 +2,6 @@
 //! endpoint once. Off by default and in CI: it downloads files from the allow-listed hosts (GitHub releases and Hugging
 //! Face), which the user asked for by setting `PITWALL_LLAMA_E2E=1`. Everything lives in a temp folder that is removed
 //! when the test ends; no engine process outlives it.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
-mod common;
 
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -16,7 +14,7 @@ fn enabled() -> bool {
 }
 
 /// Polls `downloads` until every job has ended (an install shows as the archive's file name); panics when one failed.
-async fn wait_downloads(h: &common::Harness, what: &str, limit: Duration) {
+async fn wait_downloads(h: &crate::common::Harness, what: &str, limit: Duration) {
     let start = Instant::now();
     loop {
         let d = h.rpc("downloads", json!({})).await.json();
@@ -38,7 +36,7 @@ async fn the_real_engine_answers_one_chat_request() {
         eprintln!("skipped: set PITWALL_LLAMA_E2E=1 to download llama.cpp and a tiny model and run a real request");
         return;
     }
-    let h = common::real_harness(tempfile::tempdir().unwrap()).await;
+    let h = crate::common::real_harness(tempfile::tempdir().unwrap()).await;
 
     // The pinned CPU build where there is one (Apple Silicon ships only Metal): checksummed and self-tested by the installer.
     let engines = h.rpc("engines", json!({})).await.json();

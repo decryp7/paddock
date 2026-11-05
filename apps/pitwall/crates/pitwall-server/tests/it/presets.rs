@@ -1,10 +1,8 @@
 //! Model presets and aliases end to end over the fake llama-server (ADR 0014): listing, resolution in the three API
 //! families, defaults and the system prompt, provenance, validation, a removed target model, shadowing, and
 //! persistence that survives damage.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
-use common::{harness_in, Harness};
+use crate::common::{harness_in, Harness};
 use serde_json::{json, Value};
 
 /// A server with two models: `tiny-q4_k_m` and `big-q4_k_m`.
@@ -12,8 +10,8 @@ async fn two_models() -> Harness {
     let dir = tempfile::tempdir().unwrap();
     let m = dir.path().join("models/o/r");
     std::fs::create_dir_all(&m).unwrap();
-    std::fs::write(m.join("tiny-Q4_K_M.gguf"), common::gguf("llama")).unwrap();
-    std::fs::write(m.join("big-Q4_K_M.gguf"), common::gguf("llama")).unwrap();
+    std::fs::write(m.join("tiny-Q4_K_M.gguf"), crate::common::gguf("llama")).unwrap();
+    std::fs::write(m.join("big-Q4_K_M.gguf"), crate::common::gguf("llama")).unwrap();
     harness_in(dir, false).await
 }
 
@@ -21,7 +19,7 @@ fn draft(alias: &str, target: &str) -> Value {
     json!({"alias": alias, "target": target})
 }
 
-async fn create(h: &Harness, d: Value) -> common::Reply {
+async fn create(h: &Harness, d: Value) -> crate::common::Reply {
     h.rpc("create_preset", json!({"preset": d})).await
 }
 
@@ -203,7 +201,7 @@ async fn context_applies_when_the_model_loads() {
 async fn invalid_presets_are_refused_with_what_to_fix() {
     let h = two_models().await;
     assert_eq!(create(&h, draft("ok-one", "tiny-q4_k_m")).await.status, 200);
-    let refused = |r: common::Reply, status: u16, word: &str| {
+    let refused = |r: crate::common::Reply, status: u16, word: &str| {
         assert_eq!(r.status, status, "{}", r.body);
         let m = r.json()["message"].as_str().unwrap().to_lowercase();
         assert!(m.contains(word), "{m} should mention {word}");
@@ -343,9 +341,9 @@ async fn a_model_that_later_takes_an_alias_name_wins_and_the_preset_is_flagged()
     let mut d = draft("late-model", "tiny-q4_k_m");
     d["systemPrompt"] = json!("From the preset.");
     assert_eq!(create(&h, d).await.status, 200);
-    std::fs::write(h.dir.path().join("models/o/r/late-model-Q4_K_M.gguf"), common::gguf("llama")).unwrap();
+    std::fs::write(h.dir.path().join("models/o/r/late-model-Q4_K_M.gguf"), crate::common::gguf("llama")).unwrap();
     // The alias is not the model's id (it has the quant suffix); now install one that is exactly the name.
-    std::fs::write(h.dir.path().join("models/o/r/late-model.gguf"), common::gguf("llama")).unwrap();
+    std::fs::write(h.dir.path().join("models/o/r/late-model.gguf"), crate::common::gguf("llama")).unwrap();
     let r = h
         .call("POST", "/v1/chat/completions", Some(&key), Some(chat("late-model")), &[])
         .await;

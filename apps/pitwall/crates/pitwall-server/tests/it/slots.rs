@@ -1,9 +1,7 @@
 //! Parallel slots per model end to end over the fake llama-server (ADR 0015): launch arguments, the queue beyond the
 //! slots, the fit table, validation, persistence across restarts and damage, and a busy model never being touched.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
-use common::{harness_in, Harness};
+use crate::common::{harness_in, Harness};
 use pitwall_core::ids::ModelId;
 use pitwall_core::memory::System;
 use serde_json::{json, Value};
@@ -24,7 +22,7 @@ async fn fresh() -> Harness {
     harness_in(tempfile::tempdir().unwrap(), false).await
 }
 
-async fn set_slots(h: &Harness, slots: Value) -> common::Reply {
+async fn set_slots(h: &Harness, slots: Value) -> crate::common::Reply {
     h.rpc("set_model_slots", json!({"id": TINY, "slots": slots})).await
 }
 

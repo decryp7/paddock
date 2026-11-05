@@ -310,16 +310,16 @@ mod tests {
             evil.send("GET", "/", None, Duration::from_secs(1)).await,
             Err(LoopbackError::Invalid(_))
         ));
-        // A free port: nothing listens.
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let free = LoopbackPort::new(l.local_addr().unwrap().port()).unwrap();
-        drop(l);
-        let e = Client::new(free, None)
+        // A port that hangs up (held: a freed port may be another test's server) is an error that is not a timeout; a refused
+        // connect is `Connect` (the display is checked here, the mapping to the user's message in the app and the CLI).
+        let held = paddock_testkit::net::HeldPort::hang_up();
+        let e = Client::new(LoopbackPort::new(held.port()).unwrap(), None)
             .send("GET", "/", None, Duration::from_secs(1))
             .await
             .err()
             .unwrap();
-        assert!(matches!(e, LoopbackError::Connect(..)), "{e}");
+        assert!(!matches!(e, LoopbackError::Timeout(_)), "{e}");
+        assert!(LoopbackError::Connect(11435, "refused".into()).to_string().contains("11435"));
         // A server that accepts but never answers: timeout.
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = LoopbackPort::new(l.local_addr().unwrap().port()).unwrap();
