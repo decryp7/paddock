@@ -534,6 +534,175 @@ pub fn replace_bounded(
 
 #[cfg(test)]
 mod tests {
+    // ---- the stepper: every decision of a replace without an OS (ADR 0056)
+
+    fn through_removal(s: &mut Stepper) -> Next {
+        s.next(OsResult::Unregistered(Ok(())));
+        s.next(OsResult::Evicted(Ok(())))
+    }
+
+    fn settled(job: Job, answers: bool) -> OsResult {
+        OsResult::Settled {
+            job,
+            answers,
+            cancelled: false,
+        }
+    }
+
+    fn looked(answers: bool, job: Job, secs: u64) -> OsResult {
+        OsResult::Looked {
+            answers,
+            job,
+            elapsed: Duration::from_secs(secs),
+            cancelled: false,
+        }
+    }
+
+    #[test]
+    fn a_replace_that_works_goes_remove_wait_register_settle_look_and_says_each_phase() {
+        let t = Timings::default();
+        let mut s = Stepper::new(&t, 4);
+        let first = s.start();
+        assert_eq!(first.action, Action::Unregister);
+        assert_eq!(first.say, [Step::Cycle(0), Step::Removing]);
+        assert_eq!(s.next(OsResult::Unregistered(Ok(()))).action, Action::Evict);
+        let wait = s.next(OsResult::Evicted(Ok(())));
+        assert_eq!((wait.action, wait.say), (Action::WaitGone, vec![Step::WaitingForRemoval]));
+        let reg = s.next(OsResult::Gone { timed_out: false });
+        assert_eq!((reg.action, reg.say), (Action::Register, vec![Step::Registering]));
+        assert_eq!(s.next(OsResult::RegisterOk).action, Action::Settle { ask: false });
+        let look = s.next(settled(Job::NotRunning, false));
+        assert_eq!((look.action, look.say), (Action::Look, vec![Step::WaitingForStart]));
+        let up = s.next(looked(true, Job::Running, 1));
+        assert_eq!(up.action, Action::Done(RepairOutcome::Recovered));
+        assert_eq!(up.say, [Step::Answers]);
+    }
+
+    #[test]
+    fn a_failed_unregister_or_evict_is_said_and_the_replace_goes_on() {
+        let mut s = Stepper::new(&Timings::default(), 4);
+        s.start();
+        let evict = s.next(OsResult::Unregistered(Err("busy".into())));
+        assert_eq!(evict.action, Action::Evict);
+        assert!(matches!(&evict.say[0], Step::Note(n) if n.contains("Unregister did not succeed") && n.contains("busy")));
+        let wait = s.next(OsResult::Evicted(Err("no".into())));
+        assert!(matches!(&wait.say[0], Step::Note(n) if n.contains("Removing the job did not succeed")));
+        assert_eq!(wait.action, Action::WaitGone);
+        let timed_out = s.next(OsResult::Gone { timed_out: true });
+        assert_eq!(timed_out.say[0], Step::RemovalTimedOut);
+        assert_eq!(timed_out.action, Action::Register, "registers anyway");
+    }
+
+    #[test]
+    fn a_refusal_starts_the_next_cycle_with_a_backoff_until_the_cycles_are_used_up() {
+        let t = Timings::default();
+        let mut s = Stepper::new(&t, 2);
+        s.start();
+        through_removal(&mut s);
+        s.next(OsResult::Gone { timed_out: false });
+        s.next(OsResult::RegisterOk);
+        let again = s.next(settled(Job::Refused, false));
+        assert_eq!(again.action, Action::Unregister);
+        assert_eq!(again.say, [Step::Cycle(1), Step::Removing]);
+        through_removal(&mut s);
+        let backoff = s.next(OsResult::Gone { timed_out: false });
+        assert_eq!(backoff.action, Action::Pause(t.backoff), "waits longer each cycle");
+        assert_eq!(s.next(OsResult::Paused).action, Action::Register);
+        s.next(OsResult::RegisterOk);
+        let over = s.next(settled(Job::Refused, false));
+        let Action::Done(RepairOutcome::Failed(why)) = over.action else {
+            panic!("{over:?}")
+        };
+        assert!(why.contains("after 2 full re-registrations") && why.contains("refuses to start it"), "{why}");
+    }
+
+    #[test]
+    fn a_register_that_failed_is_said_retried_and_ends_with_its_reason() {
+        let mut s = Stepper::new(&Timings::default(), 1);
+        s.start();
+        through_removal(&mut s);
+        s.next(OsResult::Gone { timed_out: false });
+        let failed = s.next(OsResult::RegisterErr(RegisterError::Other("denied".into())));
+        assert_eq!(failed.action, Action::Settle { ask: true });
+        assert_eq!(failed.say, [Step::RegisterFailed("denied".into())]);
+        // Nothing was registered (the job is gone): the cycle failed, and with no cycle left the repair says why.
+        let over = s.next(settled(Job::Absent, false));
+        let Action::Done(RepairOutcome::Failed(why)) = over.action else {
+            panic!("{over:?}")
+        };
+        assert!(why.contains("Registering failed 1 times (denied)"), "{why}");
+    }
+
+    #[test]
+    fn what_retrying_cannot_help_ends_the_replace_with_its_own_outcome() {
+        for (error, outcome) in [
+            (RegisterError::NeedsApproval, RepairOutcome::NeedsApproval),
+            (RegisterError::NeedsElevation, RepairOutcome::NeedsElevation),
+            (RegisterError::Declined, RepairOutcome::Declined),
+            (RegisterError::Unavailable("w".into()), RepairOutcome::Unavailable("w".into())),
+        ] {
+            let mut s = Stepper::new(&Timings::default(), 4);
+            s.start();
+            through_removal(&mut s);
+            s.next(OsResult::Gone { timed_out: false });
+            assert_eq!(s.next(OsResult::RegisterErr(error)).action, Action::Done(outcome));
+        }
+    }
+
+    #[test]
+    fn the_wait_for_the_service_is_bounded_cancellable_and_notices_a_refusal() {
+        let t = Timings::default();
+        let to_wait = || {
+            let mut s = Stepper::new(&t, 4);
+            s.start();
+            through_removal(&mut s);
+            s.next(OsResult::Gone { timed_out: false });
+            s.next(OsResult::RegisterOk);
+            s.next(settled(Job::NotRunning, false));
+            s
+        };
+        // It polls, then gives up with the seconds it waited.
+        let mut s = to_wait();
+        assert_eq!(s.next(looked(false, Job::NotRunning, 0)).action, Action::Pause(t.start_poll));
+        assert_eq!(s.next(OsResult::Paused).action, Action::Look);
+        let late = s.next(looked(false, Job::NotRunning, t.start_wait.as_secs()));
+        assert_eq!(late.action, Action::Done(RepairOutcome::Registered));
+        assert!(matches!(&late.say[0], Step::Note(n) if n.contains("did not answer within 120 seconds")), "{:?}", late.say);
+        // Real time counts as much as the polls: a slow OS call cannot stretch the wait.
+        let mut s = to_wait();
+        let slow = s.next(looked(false, Job::NotRunning, 500));
+        assert_eq!(slow.action, Action::Done(RepairOutcome::Registered));
+        // A cancel ends the wait (the registration stays).
+        let mut s = to_wait();
+        let cancelled = s.next(OsResult::Looked {
+            answers: false,
+            job: Job::NotRunning,
+            elapsed: Duration::ZERO,
+            cancelled: true,
+        });
+        assert_eq!(cancelled.action, Action::Done(RepairOutcome::Registered));
+        // A refusal seen during the wait is another cycle, not a longer wait.
+        let mut s = to_wait();
+        assert_eq!(s.next(looked(false, Job::Refused, 3)).action, Action::Unregister);
+        // A cancel at the cycle boundary leaves nothing half removed.
+        let mut s = to_wait();
+        let over = s.next(OsResult::Looked {
+            answers: false,
+            job: Job::Refused,
+            elapsed: Duration::ZERO,
+            cancelled: true,
+        });
+        assert_eq!(over.action, Action::Done(RepairOutcome::Cancelled));
+    }
+
+    #[test]
+    fn a_step_out_of_order_is_a_failure_not_a_panic() {
+        let mut s = Stepper::new(&Timings::default(), 1);
+        s.start();
+        let odd = s.next(OsResult::Paused);
+        assert!(matches!(odd.action, Action::Done(RepairOutcome::Failed(_))));
+    }
+
     use super::*;
     use crate::backend::{Capabilities, Inspection, Mechanism};
 

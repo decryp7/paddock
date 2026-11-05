@@ -118,6 +118,58 @@ pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
     settings.unwrap_or_default().launch_at_login
 }
 
+/// Applying the Start-at-login switch takes seconds (a registration can wait for the lock another registration holds, and each
+/// cycle waits for the OS), so the save returns at once and one worker does it (ER-17); it reports as a job, which the shell's
+/// Jobs view and notices already show (`paddock://jobs`). A second change while one runs is refused with a message.
+#[derive(Default)]
+pub struct SwitchWorker {
+    busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Clears the busy flag when the worker ends, however it ends.
+struct Clear(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for Clear {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl SwitchWorker {
+    /// Runs `work` on a worker thread and returns at once. `report` is told `Running`, then `Done` or `Failed` with the
+    /// message `work` returned.
+    ///
+    /// # Errors
+    /// A message when the previous change has not finished, or no worker could be started.
+    pub fn start(
+        &self,
+        report: std::sync::Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync>,
+        work: impl FnOnce() -> Result<(), String> + Send + 'static,
+    ) -> Result<(), String> {
+        if self.busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err("Start at login is still being changed. Try again in a moment.".into());
+        }
+        let clear = Clear(self.busy.clone());
+        let spawned = std::thread::Builder::new().name("dyno-login-switch".into()).spawn(move || {
+            let _clear = clear;
+            report(paddock_jobs::JobState::Running {
+                phase: Some(paddock_jobs::PhaseProgress {
+                    phase: paddock_jobs::Phase::discovering("service", "Setting up the background service"),
+                    done: 0,
+                }),
+            });
+            match work() {
+                Ok(()) => report(paddock_jobs::JobState::Done),
+                Err(message) => report(paddock_jobs::JobState::Failed { message }),
+            }
+        });
+        spawned.map(drop).map_err(|e| {
+            self.busy.store(false, std::sync::atomic::Ordering::SeqCst);
+            format!("Start at login could not be changed: {e}")
+        })
+    }
+}
+
 /// The user's switch as the service manager needs it (ADR 0056): the settings file's `launchAtLogin`; a missing file is a fresh
 /// install (the default, on); a file that cannot be read is `None`, so nothing is registered unattended until it can.
 pub fn wanted_setting(settings_file: &std::path::Path) -> Option<bool> {
@@ -726,6 +778,43 @@ impl Autostart for NoAutostart {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_switch_returns_at_once_while_the_os_step_is_blocked_and_reports_as_a_job() {
+        use paddock_jobs::JobState;
+        use std::sync::{mpsc, Arc, Mutex};
+        let worker = SwitchWorker::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (release, blocked) = mpsc::channel::<()>();
+        let (reported, wake) = mpsc::channel::<()>();
+        let report: Arc<dyn Fn(JobState) + Send + Sync> = {
+            let seen = seen.clone();
+            Arc::new(move |s| {
+                seen.lock().unwrap().push(s);
+                reported.send(()).unwrap();
+            })
+        };
+        let began = std::time::Instant::now();
+        // The OS step (a registration waiting for a lock) blocks until the test lets it go.
+        worker
+            .start(report.clone(), move || blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
+            .unwrap();
+        assert!(began.elapsed() < std::time::Duration::from_secs(2), "the save did not wait for the OS step");
+        wake.recv().unwrap();
+        assert!(matches!(seen.lock().unwrap()[0], JobState::Running { .. }), "running is reported while blocked");
+        assert!(worker.start(report.clone(), || Ok(())).is_err(), "a second change waits for the first");
+        release.send(()).unwrap();
+        wake.recv().unwrap();
+        assert_eq!(seen.lock().unwrap()[1], JobState::Done);
+        // Free again; a failure carries its message.
+        while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        worker.start(report, || Err("needs approval".into())).unwrap();
+        wake.recv().unwrap();
+        wake.recv().unwrap();
+        assert_eq!(seen.lock().unwrap()[3], JobState::Failed { message: "needs approval".into() });
+    }
+
     #[test]
     fn the_switch_as_the_service_manager_reads_it_missing_is_on_damaged_is_unknown() {
         let dir = std::env::temp_dir().join(format!("dyno-wanted-{}", std::process::id()));
