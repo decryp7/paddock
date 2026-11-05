@@ -12,6 +12,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 ### Fixed
 
 - **Search:** Closing a log store while its word-search index was still merging could leave the index's background merges writing into the store's folder after it was closed or deleted. Closing now waits for them to end
+- **Memory:** Opening a large profile or heap snapshot no longer reads the whole file into Debrief itself first: the reader process is lent the file by ranges. A 128 MB capture took 395 MB of Debrief's memory to open and now 140 MB. While a capture opens, the captures you already have open stay usable instead of waiting for it
 - **Names:** The name table is now rebuilt in a background job ("Updating names" in Jobs, with phases and Cancel) instead of inside a search or an AI chat turn, and only after the catalogue is built. A search always answers at once from the last table, and joining look-alike names no longer compares every pair of names (8,000 names: 7.5 ms instead of 43 s)
 
 ### Removed

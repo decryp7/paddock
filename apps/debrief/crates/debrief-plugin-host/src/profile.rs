@@ -2,7 +2,7 @@
 //! parsed in the plugin's process, under its memory cap, and crosses as bytes that `debrief_profile::wire` decodes and
 //! checks against the limits. Registered on `debrief_profile::IMPORTERS_POINT` like in-process importers.
 
-use crate::process::{Lent, PluginProcess};
+use crate::process::{Lent, PluginProcess, RangeSource};
 use debrief_core::guard::{CallKind, Health};
 use debrief_core::PluginRegistry;
 use debrief_ipc::{IpcError, Json};
@@ -37,6 +37,70 @@ impl RemoteCaptureImporter {
     }
 }
 
+impl RemoteCaptureImporter {
+    fn run_import(&self, file_name: &str, lent: &Lent<'_>, limits: &Limits) -> debrief_profile::Result<Capture> {
+        let cap = limits.max_input_bytes.saturating_mul(ENCODED_FACTOR).max(1 << 20);
+        let limits_json = serde_json::to_value(limits).map_err(|e| ProfileError::invalid(e.to_string()))?;
+        let mut encoded: Vec<u8> = Vec::new();
+        let budget = self.health.budgets().get(CallKind::Import).map(crate::remote::deadline_for);
+        let (importer, name) = (self.cap.id.clone(), file_name.to_string());
+        let done: ProfileDone = self
+            .process
+            .call_lending(
+                |refs, _| PluginRequest::ImportProfile {
+                    importer,
+                    file_name: name,
+                    content: refs[0],
+                    limits: Json(limits_json),
+                },
+                lent,
+                budget,
+                |piece| {
+                    if encoded.len() as u64 + piece.len() as u64 > cap {
+                        return Err(IpcError::Protocol(format!("the capture is larger than {cap} bytes")));
+                    }
+                    encoded.extend_from_slice(&piece);
+                    Ok(())
+                },
+            )
+            .map_err(|e| self.failed(e))?;
+        if done.bytes != encoded.len() as u64 {
+            return Err(ProfileError::malformed("plugin capture", "the capture arrived incomplete"));
+        }
+        debrief_profile::wire::decode_result(&encoded, limits)
+    }
+}
+
+/// A file on disk read by positions for the plugin (ranges, never the whole file).
+struct FileRanges {
+    file: std::fs::File,
+    len: u64,
+}
+
+impl RangeSource for FileRanges {
+    fn len(&self) -> u64 {
+        self.len
+    }
+
+    fn read_at(&self, offset: u64, len: usize) -> std::io::Result<Vec<u8>> {
+        let want = usize::try_from(self.len.saturating_sub(offset)).unwrap_or(usize::MAX).min(len);
+        let mut buf = vec![0u8; want];
+        let mut done = 0;
+        while done < want {
+            #[cfg(unix)]
+            let n = std::os::unix::fs::FileExt::read_at(&self.file, &mut buf[done..], offset + done as u64)?;
+            #[cfg(windows)]
+            let n = std::os::windows::fs::FileExt::seek_read(&self.file, &mut buf[done..], offset + done as u64)?;
+            if n == 0 {
+                break;
+            }
+            done += n;
+        }
+        buf.truncate(done);
+        Ok(buf)
+    }
+}
+
 impl CaptureImporter for RemoteCaptureImporter {
     fn id(&self) -> &str {
         &self.cap.id
@@ -56,39 +120,38 @@ impl CaptureImporter for RemoteCaptureImporter {
     }
 
     fn import(&self, file_name: &str, bytes: &[u8], limits: &Limits) -> debrief_profile::Result<Capture> {
-        let cap = limits.max_input_bytes.saturating_mul(ENCODED_FACTOR).max(1 << 20);
-        let limits_json = serde_json::to_value(limits).map_err(|e| ProfileError::invalid(e.to_string()))?;
-        let mut encoded: Vec<u8> = Vec::new();
         let lent = Lent {
             files: vec![bytes],
             ..Lent::default()
         };
-        let budget = self.health.budgets().get(CallKind::Import).map(crate::remote::deadline_for);
-        let (importer, name) = (self.cap.id.clone(), file_name.to_string());
-        let done: ProfileDone = self
-            .process
-            .call_lending(
-                |refs, _| PluginRequest::ImportProfile {
-                    importer,
-                    file_name: name,
-                    content: refs[0],
-                    limits: Json(limits_json),
-                },
-                &lent,
-                budget,
-                |piece| {
-                    if encoded.len() as u64 + piece.len() as u64 > cap {
-                        return Err(IpcError::Protocol(format!("the capture is larger than {cap} bytes")));
-                    }
-                    encoded.extend_from_slice(&piece);
-                    Ok(())
-                },
-            )
-            .map_err(|e| self.failed(e))?;
-        if done.bytes != encoded.len() as u64 {
-            return Err(ProfileError::malformed("plugin capture", "the capture arrived incomplete"));
+        self.run_import(file_name, &lent, limits)
+    }
+
+    /// The file is lent to the plugin by ranges: this process never holds a copy of it.
+    fn import_file(&self, file_name: &str, path: &std::path::Path, limits: &Limits) -> debrief_profile::Result<Capture> {
+        let io = |what: &str, e: std::io::Error| ProfileError::Remote {
+            code: if e.kind() == std::io::ErrorKind::NotFound {
+                debrief_profile::error::ErrorCode::NotFound
+            } else {
+                debrief_profile::error::ErrorCode::Io
+            },
+            message: format!("cannot {what} {}: {e}", path.display()),
+        };
+        let file = std::fs::File::open(path).map_err(|e| io("open", e))?;
+        let len = file.metadata().map_err(|e| io("open", e))?.len();
+        if len > limits.max_input_bytes {
+            return Err(ProfileError::LimitExceeded {
+                what: "file size",
+                limit: limits.max_input_bytes,
+                hint: "open a smaller capture",
+            });
         }
-        debrief_profile::wire::decode_result(&encoded, limits)
+        let source = FileRanges { file, len };
+        let lent = Lent {
+            ranges: vec![&source as &dyn RangeSource],
+            ..Lent::default()
+        };
+        self.run_import(file_name, &lent, limits)
     }
 
     fn produces(&self) -> CaptureKind {

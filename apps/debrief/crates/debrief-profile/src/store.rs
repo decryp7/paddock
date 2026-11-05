@@ -27,6 +27,15 @@ pub trait CaptureCatalog: Send + Sync {
     /// Imports a capture file (bytes read by the caller from a path the user chose).
     fn open(&mut self, file_name: &str, path: Option<&str>, bytes: &[u8]) -> Result<CaptureSummary>;
     fn list(&self) -> Vec<CaptureSummary>;
+    /// The importer that recognises a file from its name and first bytes, to import it outside the store (an import can
+    /// take minutes and must not hold the store: see [`CaptureCatalog::adopt`]).
+    fn pick_importer(&self, file_name: &str, head: &[u8]) -> Option<Arc<dyn CaptureImporter>>;
+    /// The error for a file no importer recognises (it names the formats that are supported).
+    fn not_recognised(&self, file_name: &str) -> ProfileError;
+    /// Whether another capture can be added now (checked before a long import, so it is not wasted).
+    fn check_room(&self) -> Result<()>;
+    /// Adds a capture imported outside the store (named like [`CaptureCatalog::open`] names its captures).
+    fn adopt(&mut self, file_name: &str, capture: Capture, path: Option<&str>) -> Result<CaptureSummary>;
     /// Forgets a capture; false when it was not open.
     fn close(&mut self, id: u32) -> bool;
     /// Wall-clock spans of the captures, to line them up with logs.
@@ -240,7 +249,42 @@ impl CaptureCatalog for Captures {
                 hint: "close a capture first",
             });
         }
-        let mut capture = import_with(&self.importer_refs(), file_name, bytes, &self.limits)?;
+        let capture = import_with(&self.importer_refs(), file_name, bytes, &self.limits)?;
+        self.adopt(file_name, capture, path)
+    }
+
+    fn not_recognised(&self, file_name: &str) -> ProfileError {
+        ProfileError::Unrecognised(
+            file_name.to_string(),
+            self.importers.iter().map(|i| i.name()).collect::<Vec<_>>().join(", "),
+        )
+    }
+
+    fn check_room(&self) -> Result<()> {
+        if self.entries.len() >= MAX_OPEN {
+            return Err(ProfileError::LimitExceeded {
+                what: "open captures",
+                limit: MAX_OPEN as u64,
+                hint: "close a capture first",
+            });
+        }
+        Ok(())
+    }
+
+    fn pick_importer(&self, file_name: &str, head: &[u8]) -> Option<Arc<dyn CaptureImporter>> {
+        let head = &head[..head.len().min(crate::import::SNIFF_BYTES)];
+        self.importers
+            .iter()
+            .map(|i| (i.sniff(file_name, head).min(100), i))
+            .filter(|(s, _)| *s > 0)
+            .fold(None, |best: Option<(u8, &Arc<dyn CaptureImporter>)>, (s, i)| match best {
+                Some((bs, _)) if bs >= s => best,
+                _ => Some((s, i)),
+            })
+            .map(|(_, i)| i.clone())
+    }
+
+    fn adopt(&mut self, file_name: &str, mut capture: Capture, path: Option<&str>) -> Result<CaptureSummary> {
         let base = crate::frames::basename(file_name).to_string();
         match &mut capture {
             Capture::Profile(p) if p.name.is_empty() || p.name == p.source => p.name = base,

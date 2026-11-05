@@ -120,6 +120,22 @@ impl CaptureImporter for GuardedImporter {
         }
     }
 
+    /// Under the same guard and budget as [`import`](CaptureImporter::import), but the file is not read here: the
+    /// importer gets the path (a plugin's process is lent the file by ranges).
+    fn import_file(&self, file_name: &str, path: &Path, limits: &Limits) -> debrief_profile::Result<Capture> {
+        let (name, path, limits) = (file_name.to_string(), path.to_path_buf(), *limits);
+        match self
+            .service
+            .call_detached_within(self.budget, move |i| i.import_file(&name, &path, &limits))
+        {
+            Ok(result) => result,
+            Err(e) => Err(ProfileError::Importer {
+                importer: self.id.clone(),
+                message: format!("{e:#}"),
+            }),
+        }
+    }
+
     fn produces(&self) -> CaptureKind {
         self.produces
     }
@@ -178,8 +194,9 @@ fn canonical_file(path: &str) -> ProfResult<(std::path::PathBuf, std::fs::Metada
     Ok((canonical, meta))
 }
 
-/// Reads a capture the user chose: canonical path, a regular file, within the size limit.
-fn read_capture(path: &str) -> ProfResult<(String, String, Vec<u8>)> {
+/// A capture the user chose, checked but not read: its file name, its canonical path and its size. The file is read
+/// by the importer (a plugin's process is lent it by ranges); the app holds none of it.
+fn checked_capture(path: &str) -> ProfResult<(String, std::path::PathBuf)> {
     let (canonical, meta) = canonical_file(path)?;
     let max = Limits::default().max_input_bytes;
     if meta.len() > max {
@@ -193,9 +210,32 @@ fn read_capture(path: &str) -> ProfResult<(String, String, Vec<u8>)> {
             ),
         )));
     }
-    let bytes = std::fs::read(&canonical).map_err(|e| io_error("read", &canonical, &e))?;
     let name = canonical.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    Ok((name, canonical.to_string_lossy().into_owned(), bytes))
+    Ok((name, canonical))
+}
+
+/// Opens the capture at `canonical` into `store` the way a window does: the importer is picked under a read lock, the
+/// import (which can take minutes) runs with no lock held, so the captures already open stay usable meanwhile, and the
+/// result is added under a short write lock.
+pub(crate) fn open_capture(store: &RwLock<Box<dyn ProfileStore>>, name: &str, canonical: &Path) -> debrief_profile::Result<CaptureSummary> {
+    let head = read_head_of(canonical).map_err(|e| ProfileError::Remote {
+        code: debrief_profile::error::ErrorCode::Io,
+        message: format!("cannot read {}: {e}", canonical.display()),
+    })?;
+    let picked = {
+        let s = crate::sync::read(store);
+        s.check_room()?;
+        s.pick_importer(name, &head).ok_or_else(|| s.not_recognised(name))
+    };
+    let importer = picked?;
+    let capture = importer.import_file(name, canonical, &Limits::default())?;
+    crate::sync::write(store).adopt(name, capture, Some(&canonical.to_string_lossy()))
+}
+
+fn read_head_of(path: &Path) -> std::io::Result<Vec<u8>> {
+    let mut head = Vec::with_capacity(SNIFF_BYTES);
+    std::fs::File::open(path)?.take(SNIFF_BYTES as u64).read_to_end(&mut head)?;
+    Ok(head)
 }
 
 /// File name and first bytes of a path, for sniffing; `None` when it is not a readable file.
@@ -256,16 +296,19 @@ pub async fn profiling_open<R: tauri::Runtime>(
     // An entry of the recent captures was chosen before: it is granted again now.
     let listed = crate::recent::recents(&app).has_capture(&path);
     let recorded = path.clone();
-    let (name, canonical, bytes) = tauri::async_runtime::spawn_blocking(move || {
+    let store = state.profiling.store.clone();
+    let summary = tauri::async_runtime::spawn_blocking(move || {
         canonical_file(&path)?;
         grants
             .read_or_listed(&path, &[], |_| listed)
             .map_err(|e| ProfilingErrorDto::new(ErrorCode::Invalid, e.message))?;
-        read_capture(&path)
+        let (name, canonical) = checked_capture(&path)?;
+        open_capture(&store, &name, &canonical)
+            .map_err(ProfilingErrorDto::from)
+            .map_err(crate::CmdError::from)
     })
     .await
     .map_err(join_error)??;
-    let summary = write(&state, move |s| s.open(&name, Some(&canonical), &bytes)).await?;
     crate::recent::opened_capture(&app, &recorded);
     Ok(summary)
 }
@@ -727,6 +770,94 @@ mod tests {
         let e = hasty.import("orders.folded", &folded, &Limits::default()).unwrap_err();
         assert!(e.to_string().contains("did not finish within"), "{e}");
         assert_eq!(e.code(), ErrorCode::Invalid);
+    }
+
+    /// MEM-1: opening a capture reads none of it in this process (the importer is given the path and, for a plugin's
+    /// process, lends the file by ranges) and holds no lock on the window's captures while it imports (an import can take
+    /// minutes), so the captures already open stay usable.
+    #[test]
+    fn a_capture_is_imported_from_its_path_and_without_holding_the_store() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::mpsc;
+        struct Gated {
+            started: mpsc::Sender<()>,
+            release: std::sync::Mutex<mpsc::Receiver<()>>,
+            by_path: AtomicBool,
+            by_bytes: AtomicBool,
+        }
+        impl CaptureImporter for Gated {
+            fn id(&self) -> &'static str {
+                "gated"
+            }
+            fn name(&self) -> &'static str {
+                "Gated"
+            }
+            fn sniff(&self, file_name: &str, _: &[u8]) -> u8 {
+                if file_name.starts_with("second") {
+                    101
+                } else {
+                    0
+                }
+            }
+            fn import(&self, f: &str, b: &[u8], l: &Limits) -> debrief_profile::Result<Capture> {
+                self.by_bytes.store(true, Ordering::SeqCst);
+                debrief_plugin_profiling::folded::FoldedImporter.import(f, b, l)
+            }
+            fn import_file(&self, f: &str, path: &Path, l: &Limits) -> debrief_profile::Result<Capture> {
+                self.by_path.store(true, Ordering::SeqCst);
+                let _ = self.started.send(());
+                let _ = self.release.lock().unwrap().recv();
+                let bytes = std::fs::read(path).unwrap();
+                debrief_plugin_profiling::folded::FoldedImporter.import(f, &bytes, l)
+            }
+        }
+        let (started_tx, started) = mpsc::channel();
+        let (release_tx, release) = mpsc::channel();
+        let gated = Arc::new(Gated {
+            started: started_tx,
+            release: std::sync::Mutex::new(release),
+            by_path: AtomicBool::new(false),
+            by_bytes: AtomicBool::new(false),
+        });
+        let importers: Vec<Arc<dyn CaptureImporter>> = vec![gated.clone(), Arc::new(debrief_plugin_profiling::folded::FoldedImporter)];
+        let slot = Arc::new(ProfilingSlot::new(importers));
+        // A capture that is open already.
+        let dir = TempDir::new("profiling-lock");
+        let first = dir.0.join("first.folded");
+        std::fs::copy(sample("orders.folded"), &first).unwrap();
+        let first_summary = {
+            let mut w = slot.store.write().unwrap();
+            w.open("first.folded", Some(&first.to_string_lossy()), &std::fs::read(&first).unwrap())
+                .unwrap()
+        };
+        let second = dir.0.join("second.folded");
+        std::fs::copy(sample("orders.folded"), &second).unwrap();
+        let (s2, p2) = (slot.clone(), second.clone());
+        let opening = std::thread::spawn(move || open_capture(&s2.store, "second.folded", &p2));
+        // The import has started and waits.
+        started.recv().unwrap();
+        let during = slot.store.try_read().map(|s| s.list().len());
+        release_tx.send(()).unwrap();
+        let opened = opening.join().unwrap();
+        assert_eq!(
+            during.ok(),
+            Some(1),
+            "the open captures were readable while the second one was imported"
+        );
+        assert!(opened.is_ok(), "{opened:?}");
+        assert!(gated.by_path.load(Ordering::SeqCst), "the importer was given the path");
+        assert!(!gated.by_bytes.load(Ordering::SeqCst), "the app read no bytes for it");
+        let list = slot.store.read().unwrap().list();
+        assert_eq!(list.len(), 2);
+        assert!(
+            matches!(&list[0], CaptureSummary::Profile(p) if p.id == match &first_summary { CaptureSummary::Profile(f) => f.id, _ => 0 })
+        );
+        // Nobody recognises it: the error names the formats; nothing is added.
+        let junk = dir.0.join("junk.bin");
+        std::fs::write(&junk, b"definitely not a profile").unwrap();
+        let e = open_capture(&slot.store, "junk.bin", &junk).unwrap_err();
+        assert!(e.to_string().contains("not a recognised"), "{e}");
+        assert_eq!(slot.store.read().unwrap().list().len(), 2);
     }
 
     /// A crashing importer contributed by a plugin is contained: the open fails with its id, Debrief goes on.
