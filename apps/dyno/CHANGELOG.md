@@ -28,6 +28,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - Notifications: select messages and delete them, or delete all after a confirmation. Deleted messages stay gone after a restart.
 - Expand all and Collapse all buttons in Network, Processes, What changed and Files.
 - Dyno starts when you log in. This is on by default and can be turned off in Settings.
+- Quit tells you what it does. With Launch at login on, the agent keeps measuring after you quit, and the menu, the tray menu and the tray popup now say "Quit Dyno (keeps measuring)". The new **Quit and stop measuring** closes Dyno and stops the agent (macOS and Linux: the login service is stopped, not removed; Windows: the agent is asked to exit) until you open Dyno again or log in next time. Dyno checks with the system that the agent is gone, and says what to do when it is not. The next start logs that the agent was stopped on request. The administrator helper is not touched.
 - Linux: when no tray is available (for example GNOME without the AppIndicator extension), Dyno tells you so and opens its window at login instead of hiding it with no way back.
 - Dialogs (About, What's new, Updates and the confirmations) fit their content, grow or shrink when the content arrives late, keep the size you gave them and follow a change of display scale.
 

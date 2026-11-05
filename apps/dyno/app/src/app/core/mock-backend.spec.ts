@@ -470,6 +470,13 @@ describe('reports, settings, plugins, tray', () => {
     await expect(b.fitTray(300)).resolves.toBeUndefined();
     await expect(b.quitApp()).resolves.toBeUndefined();
   });
+  it('quit says whether the agent keeps measuring and can quit and stop it', async () => {
+    const b = make();
+    await expect(b.quitKeepsMeasuring()).resolves.toBe(false);
+    b.keepsMeasuring = true;
+    await expect(b.quitKeepsMeasuring()).resolves.toBe(true);
+    await expect(b.quitAndStopAgent()).resolves.toBeUndefined();
+  });
 });
 
 describe('mock CPU layout', () => {

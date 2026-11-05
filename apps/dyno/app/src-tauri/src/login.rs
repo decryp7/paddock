@@ -29,6 +29,15 @@ pub trait AgentService: Send {
     /// Registers it again when the OS cannot start what is registered, and on macOS once after every version change
     /// (an update). `agent_answers` asks whether the agent answers now. Returns whether it registered again.
     fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String>;
+    /// The service job a stop can name (launchd job, systemd user unit), when the OS supervises the agent now; `None` where
+    /// there is none to stop (Windows, or nothing supervises). Quit and stop measuring stops it without removing the registration.
+    fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
+        None
+    }
+    /// Starts the service again after it was stopped on request (the next start). Returns whether it started something.
+    fn resume(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
 }
 
 pub use paddock_service::login::Autostart;
@@ -290,6 +299,32 @@ impl AgentService for CliService {
         }
         s.ensure()
     }
+
+    /// Linux: the systemd user unit, while it is supervising. Windows has no service job (the app's `Run` entry starts the agent).
+    fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
+        if cfg!(target_os = "linux") && self.supervises() {
+            Some(paddock_service::stop::StopMechanism::SystemdUser {
+                unit: "dyno-agent.service".into(),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Linux: `systemctl --user start` of the unit that was stopped (never `enable`: Launch at login was not changed).
+    fn resume(&mut self) -> Result<bool, String> {
+        if !cfg!(target_os = "linux") || !self.installed() {
+            return Ok(false);
+        }
+        let mut sys = paddock_service::RealSystem::new().with_timeout(std::time::Duration::from_secs(10));
+        let out = paddock_service::System::run(&mut sys, "systemctl", &["--user", "start", "dyno-agent.service"])
+            .map_err(|e| format!("systemctl start {e}"))?;
+        if out.success() {
+            Ok(true)
+        } else {
+            Err(format!("systemctl --user start dyno-agent.service: {}", out.reason()))
+        }
+    }
 }
 
 /// Dyno 1.0.0 on Windows replaced the app's logon entry (`Dyno` = `dyno-app.exe --hidden`) with the agent's (`Dyno` =
@@ -334,8 +369,9 @@ mod mac {
     use super::*;
     use crate::login_item::OpenEvent;
     use crate::service_repair::{
-        keep_registered, launchctl_output, parse_print_disabled, plan, record_registered_version, registered_version, service_supervises,
-        JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, REGISTERED_VERSION_FILE,
+        keep_registered, launchctl_output, parse_print_disabled, plan, record_registered_version, registered_version, run_resume,
+        service_supervises, DisabledMark, JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, ResumeOps,
+        REGISTERED_VERSION_FILE,
     };
     use dyno_agent::service::LABEL;
     use objc2_foundation::NSString;
@@ -545,6 +581,68 @@ mod mac {
         launchctl_output(&mut system(), args)
     }
 
+    /// What `launchctl print-disabled` says: listed, not listed, or could not be read (a failed look is not "switched on").
+    fn launchd_disabled_mark() -> DisabledMark {
+        let Some(domain) = gui_domain() else {
+            return DisabledMark::Unreadable;
+        };
+        match launchctl(&["print-disabled", &domain]) {
+            None => DisabledMark::Unreadable,
+            Some(report) => match parse_print_disabled(&report, LABEL) {
+                Some(true) => DisabledMark::Disabled,
+                Some(false) => DisabledMark::Enabled,
+                None => DisabledMark::NotListed,
+            },
+        }
+    }
+
+    /// [`ResumeOps`] over `SMAppService` and `launchctl`.
+    struct MacResume;
+
+    impl ResumeOps for MacResume {
+        fn status(&mut self) -> RegistrationStatus {
+            registration_status()
+        }
+        fn disabled(&mut self) -> DisabledMark {
+            launchd_disabled_mark()
+        }
+        fn registered_version(&mut self) -> Option<String> {
+            registered_version(&version_file())
+        }
+        fn register(&mut self) -> Result<(), String> {
+            register(false).map_err(|e| format!("{e:?}"))
+        }
+        fn job_found(&mut self) -> bool {
+            job_report().found
+        }
+        fn pause(&mut self) {
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        fn repair(&mut self) -> Result<bool, String> {
+            repair_as(&|| false, true)
+        }
+    }
+
+    /// The repair plan for the observed state, run; `requested` makes it replace the registration whatever launchd reports.
+    fn repair_as(agent_answers: &dyn Fn() -> bool, requested: bool) -> Result<bool, String> {
+        let registered = registered_version(&version_file());
+        let observed = Observed {
+            status: registration_status(),
+            launchd_disabled: launchd_disabled(),
+            answers: agent_answers(),
+            job: job_report(),
+            registered_version: registered.as_deref(),
+            current_version: env!("CARGO_PKG_VERSION"),
+            requested,
+        };
+        keep_registered(
+            plan(&observed),
+            &mut MacOps { answers: agent_answers },
+            &mut record_version,
+            &mut |step| crate::logging::info(&format!("agent service: {step}")),
+        )
+    }
+
     /// [`RepairOps`] over `SMAppService` and `launchctl`.
     struct MacOps<'a> {
         answers: &'a dyn Fn() -> bool,
@@ -609,22 +707,27 @@ mod mac {
         /// not answer, and once after every version change ([`crate::service_repair`]). What the user switched off in
         /// Login Items is left alone, and nothing is registered that the user never turned on.
         fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
-            let registered = registered_version(&version_file());
-            let observed = Observed {
-                status: registration_status(),
-                launchd_disabled: launchd_disabled(),
-                answers: agent_answers(),
-                job: job_report(),
-                registered_version: registered.as_deref(),
-                current_version: env!("CARGO_PKG_VERSION"),
-                requested: false,
-            };
-            keep_registered(
-                plan(&observed),
-                &mut MacOps { answers: agent_answers },
-                &mut record_version,
-                &mut |step| crate::logging::info(&format!("agent service: {step}")),
-            )
+            repair_as(agent_answers, false)
+        }
+
+        /// The launchd job `gui/<uid>/net.decryptology.dyno.agent`, while launchd holds it. The `SMAppService` registration is
+        /// not touched: `launchctl bootout` takes the job out of launchd (so `KeepAlive` cannot restart it) and the registration
+        /// loads it again at the next login.
+        fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
+            let target = target()?;
+            job_report()
+                .found
+                .then_some(paddock_service::stop::StopMechanism::Launchd { target })
+        }
+
+        /// After a stop on request launchd holds no job and `RunAtLoad` fires only when a job is loaded: [`run_resume`] decides and
+        /// runs it (an item switched off or a list that cannot be read is left alone; a version change goes through the full repair;
+        /// an enabled item of this version is registered again without removal, which macOS would announce as a new item).
+        /// Returns whether launchd holds the job afterwards (found, not necessarily running yet).
+        fn resume(&mut self) -> Result<bool, String> {
+            run_resume(&mut MacResume, env!("CARGO_PKG_VERSION"), &mut |step| {
+                crate::logging::info(&format!("agent service: {step}"))
+            })
         }
     }
 }

@@ -45,6 +45,8 @@ pub struct TrayState {
     wanted: Mutex<BTreeMap<String, (ItemSpec, Option<Frame>)>>,
     /// Whether the follow-up checks of [`schedule_verify`] have been started.
     verify_started: AtomicBool,
+    /// The agent keeps measuring after a plain Quit (a login service supervises it): the words of Quit in every icon's menu.
+    keeps_measuring: AtomicBool,
 }
 
 /// What one item last showed: the tooltip and the picture sent, and how many frames were drawn.
@@ -138,8 +140,34 @@ fn build_menu(app: &AppHandle<Wry>) -> tauri::Result<Menu<Wry>> {
         menu.append(&sub)?;
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, QUIT_ID, "Quit Dyno", true, None::<&str>)?)?;
+    let keeps = app
+        .try_state::<TrayState>()
+        .is_some_and(|s| s.keeps_measuring.load(Ordering::Relaxed));
+    menu.append(&MenuItem::with_id(
+        app,
+        QUIT_ID,
+        crate::quit::quit_label(keeps),
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        crate::quit::QUIT_STOP_ID,
+        crate::quit::QUIT_STOP_LABEL,
+        true,
+        None::<&str>,
+    )?)?;
     Ok(menu)
+}
+
+/// Whether the agent keeps measuring after a plain Quit changed: every icon's menu says so (rebuilt only when it changed).
+pub fn set_keeps_measuring(app: &AppHandle<Wry>, keeps: bool) {
+    if app.try_state::<TrayState>().is_none() {
+        app.manage(TrayState::default());
+    }
+    if app.state::<TrayState>().keeps_measuring.swap(keeps, Ordering::Relaxed) != keeps {
+        rebuild_menus(app);
+    }
 }
 
 /// The Keep awake entries changed: every icon's menu is rebuilt (`None`: the menu has none).
@@ -1103,7 +1131,15 @@ impl TrayBackend<Wry> for DynoTray {
 
 /// What the shell draws for the tray's menu: Open and Quit, both the shell's own actions.
 pub fn view() -> TrayView {
-    TrayView::new("Dyno", vec![item(SHOW_ID, "Open Dyno"), item(QUIT_ID, "Quit Dyno")], "static")
+    TrayView::new(
+        "Dyno",
+        vec![
+            item(SHOW_ID, "Open Dyno"),
+            item(QUIT_ID, "Quit Dyno"),
+            item(crate::quit::QUIT_STOP_ID, crate::quit::QUIT_STOP_LABEL),
+        ],
+        "static",
+    )
 }
 
 /// The route of the popup page (the UI's `#/tray`).
@@ -1632,7 +1668,7 @@ mod tests {
     #[test]
     fn the_menu_is_the_shells_open_and_quit() {
         let v = view();
-        assert_eq!(v.menu.len(), 2);
+        assert_eq!(v.menu.len(), 3);
         assert!(paddock_window::tray::validate(&v.menu).is_ok());
     }
 }

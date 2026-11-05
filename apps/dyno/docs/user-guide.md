@@ -36,7 +36,9 @@ one; **Launch at login** is on by default: the first time Dyno runs it registers
   directory, modules, connections, signer), what is locking a file, and **Open location**. Take a snapshot and compare it with a
   later one. Dyno cannot end, suspend or change a process; use your system's own task manager for that.
 - **Tray.** The icon shows the metric you chose; its dropdown is a compact dashboard. Closing the window keeps Dyno in the
-  tray and the agent measuring; **Quit** closes the app (the agent keeps measuring until you stop it).
+  tray and the agent measuring. **Quit Dyno** closes the app; when Launch at login is on, the menu says **Quit Dyno (keeps measuring)**
+  because the background agent keeps running. **Quit and stop measuring** closes the app and stops the agent until you open Dyno
+  again or log in next time; it does not turn off Launch at login, and it leaves the administrator helper alone.
 - **Why slow** explains the likeliest cause of a slow PC: what was measured, which apps are behind it, where to look closer.
   **Run again** checks anew; **Copy as text** puts the result on the clipboard.
 - **Reports** shows a summary of the week (pick the week at the top): health score and trend, the busiest apps, disk space and
