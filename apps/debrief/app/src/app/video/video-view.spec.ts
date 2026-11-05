@@ -170,7 +170,7 @@ describe('VideoView with videos', () => {
     const spy = vi.spyOn(store, 'describe');
     await click(fixture, 'video-describe-all');
     const shown = dialogs.stack().at(-1)!;
-    expect(JSON.stringify(shown.inputs ?? {})).toContain(String(undescribed));
+    expect(JSON.stringify(shown.options.inputs ?? {})).toContain(String(undescribed));
     expect(spy).not.toHaveBeenCalled();
     await answer(fixture, dialogs, false);
     expect(spy).not.toHaveBeenCalled();
@@ -180,11 +180,11 @@ describe('VideoView with videos', () => {
   it('names the time in the confirmation only once earlier runs measured it', async () => {
     const { fixture, t, dialogs } = await mount({ open: both.slice(0, 1) });
     await click(fixture, 'video-describe-all');
-    expect(JSON.stringify(dialogs.stack().at(-1)!.inputs)).not.toContain(' min ');
+    expect(JSON.stringify(dialogs.stack().at(-1)!.options.inputs)).not.toContain(' min ');
     await answer(fixture, dialogs, false);
     (t.backend as MockVideoBackend).describeSeconds = 120;
     await click(fixture, 'video-describe-all');
-    expect(JSON.stringify(dialogs.stack().at(-1)!.inputs)).toContain(' min ');
+    expect(JSON.stringify(dialogs.stack().at(-1)!.options.inputs)).toContain(' min ');
     await answer(fixture, dialogs, false);
   });
 
