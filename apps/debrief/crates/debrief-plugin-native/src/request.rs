@@ -131,6 +131,13 @@ impl CaptureRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn symbol_path_never_panics_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[b"/srv/symbols;/opt/symbols", b"C:\\symbols;D:\\more", b""], |bytes| {
+            SymbolOptions::parse(&String::from_utf8_lossy(bytes), true)
+        });
+    }
     use serde_json::json;
 
     #[test]

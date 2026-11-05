@@ -89,6 +89,17 @@ pub fn run(args: &[String], stop: &AtomicBool) -> Result<()> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn never_panics_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[b"10m", b"1500ms", b"2h", b"30"], |bytes| {
+            parse_duration(&String::from_utf8_lossy(bytes))
+        });
+        paddock_testkit::assert_never_panics(&[b"--config monitor.json --out out --duration 10m"], |bytes| {
+            let args: Vec<String> = String::from_utf8_lossy(bytes).split(' ').map(str::to_owned).collect();
+            parse_args(&args)
+        });
+    }
+
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|s| s.to_string()).collect()
     }

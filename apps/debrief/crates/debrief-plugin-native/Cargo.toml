@@ -36,6 +36,7 @@ default = ["symbol-server"]
 symbol-server = ["debrief-symbols/server"]
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 proptest.workspace = true
 tempfile.workspace = true
 

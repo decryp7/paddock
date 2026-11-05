@@ -23,4 +23,5 @@ semver.workspace = true
 toml.workspace = true
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true

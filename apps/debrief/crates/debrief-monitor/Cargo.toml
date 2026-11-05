@@ -20,6 +20,7 @@ ctrlc.workspace = true
 windows = { workspace = true, features = ["Win32_System_Performance", "Win32_System_Diagnostics_ToolHelp"] }
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true
 
 [[bin]]

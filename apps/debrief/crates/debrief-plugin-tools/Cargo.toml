@@ -22,3 +22,6 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 
 [target.'cfg(windows)'.dependencies]
 windows.workspace = true
+
+[dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }

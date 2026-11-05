@@ -499,4 +499,10 @@ Counters:             \\Process(*)\\Private Bytes
         );
         assert_eq!(expand_env("a%%b"), "a%%b");
     }
+
+    #[test]
+    fn query_listing_never_panics_on_hostile_text() {
+        let seed = b"Name:                 Debrief\nStatus:               Running\nRoot Path:            C:\\PerfLogs\\Debrief\nOutput Location:      C:\\PerfLogs\\Debrief\\out.blg\n";
+        paddock_testkit::assert_never_panics(&[seed], |bytes| parse_query("Debrief", &String::from_utf8_lossy(bytes)));
+    }
 }

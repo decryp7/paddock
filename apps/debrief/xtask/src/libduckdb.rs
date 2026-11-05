@@ -274,6 +274,11 @@ pub fn run(root: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn pins_never_panic_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[SCRIPT.as_bytes()], |bytes| Pins::parse(&String::from_utf8_lossy(bytes)));
+    }
+
     const SCRIPT: &str = "set -eu\n\nVERSION=1.5.6\nCACHE=x\n\
         case x in\n  MINGW*-x86_64)\n    ASSET=libduckdb-windows-amd64.zip; SHA=44cf59583f9951d2cb09b1bf115a63ecb2d8901e363903029d86c7d8683fe96a ;;\n\
           Linux-aarch64)\n    ASSET=libduckdb-linux-arm64.zip; SHA=B72ED9F05003F5E9D2015F7CEADA6416B377D9DD33169CDDE3C9E33897856EEE ;;\n\

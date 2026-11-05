@@ -17,4 +17,5 @@ ureq = { version = "3", default-features = false, features = ["rustls", "platfor
 zip.workspace = true
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../crates/paddock-testkit" }
 tempfile.workspace = true
