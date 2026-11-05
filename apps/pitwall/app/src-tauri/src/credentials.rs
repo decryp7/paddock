@@ -137,6 +137,11 @@ impl AdminKeys for StaticKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_key_never_panics_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[b"abc123_key", b" key \n"], |bytes| parse_key(&String::from_utf8_lossy(bytes)));
+    }
     use std::sync::Arc;
 
     #[derive(Default, Clone)]

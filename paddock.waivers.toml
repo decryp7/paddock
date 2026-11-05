@@ -43,18 +43,6 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C53"
-path = "apps/pitwall/crates/pitwall-cli/tests/cli.rs"
-reason = "ADR 0033 WP-7 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
-path = "apps/pitwall/crates/pitwall-server/src/system.rs"
-reason = "ADR 0033 WP-7: sysinfo kill of an unreaped child by pid (safe today: the child is not reaped); go through paddock_proc"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C53"
 path = "tools/paddock-dev/tests/it/cli.rs"
 reason = "ADR 0033 WP-9 (test): a file-wide allow of disallowed_methods; allow it on the items that start programs"
 expires = "2026-12-31"

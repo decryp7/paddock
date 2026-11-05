@@ -775,6 +775,13 @@ pub fn parse_choice(s: &str) -> BuildChoice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_choice_never_panics_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[b"auto", b"cpu", b"vulkan", b"metal"], |bytes| {
+            parse_choice(&String::from_utf8_lossy(bytes))
+        });
+    }
     use std::io::Write;
 
     fn dirs() -> (tempfile::TempDir, Dirs) {

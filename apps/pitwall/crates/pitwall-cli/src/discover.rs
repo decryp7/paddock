@@ -167,6 +167,11 @@ impl Sources for RealSources {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_key_never_panics_on_hostile_text() {
+        paddock_testkit::assert_never_panics(&[b"abc123_key", b" key \n"], |bytes| parse_key(&String::from_utf8_lossy(bytes)));
+    }
     use std::collections::HashMap;
 
     struct Fake {

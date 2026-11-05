@@ -90,20 +90,13 @@ pub fn rss(pid: u32) -> u64 {
     s.process(p).map_or(0, sysinfo::Process::memory)
 }
 
-/// Asks a process to end (SIGTERM; `force`: kills it). Only ever used on engine processes this server started. Where the
-/// platform has no such signal the process is killed.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "ADR 0033 WP-7: sysinfo kill of an unreaped child by pid (safe today); go through paddock_proc"
-)]
-pub fn terminate(pid: u32, force: bool) {
-    let mut s = sysinfo::System::new();
-    let p = sysinfo::Pid::from_u32(pid);
-    s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), false);
-    if let Some(proc_) = s.process(p) {
-        if force || proc_.kill_with(sysinfo::Signal::Term).is_none() {
-            proc_.kill();
-        }
+/// Asks an engine process to end (SIGTERM; `force`: kills it). Only ever used on engine processes this server started, named
+/// by identity (pid plus start time, read while the child was not yet reaped): a pid handed on since is left alone (ADR 0033).
+pub fn terminate(id: paddock_proc::ProcessId, force: bool) {
+    if force {
+        let _ = paddock_proc::end(id);
+    } else {
+        let _ = paddock_proc::ask(id);
     }
 }
 
@@ -131,5 +124,27 @@ mod tests {
         assert!(pid_alive(std::process::id()));
         assert!(rss(std::process::id()) > 0);
         let _ = free_disk(std::path::Path::new("."));
+    }
+
+    /// An engine is asked, then ended, by identity; one whose pid belongs to another process is left alone.
+    #[cfg(unix)]
+    #[test]
+    fn terminate_asks_then_ends_by_identity() {
+        use std::os::unix::process::ExitStatusExt;
+        #[allow(clippy::disallowed_methods, reason = "a test starts a stand-in engine")]
+        let mut c = std::process::Command::new("sleep");
+        let mut child = c.arg("60").spawn().unwrap();
+        let id = paddock_proc::ProcessId::of(child.id()).unwrap();
+        terminate(id, false);
+        assert_eq!(child.wait().unwrap().signal(), Some(15), "asked (SIGTERM)");
+        #[allow(clippy::disallowed_methods, reason = "a test starts a stand-in engine")]
+        let mut c = std::process::Command::new("sleep");
+        let mut child = c.arg("60").spawn().unwrap();
+        // The child's pid with another process's start time (a pid handed on): nothing happens to the child.
+        let started_elsewhere = paddock_proc::ProcessId::of(std::process::id()).unwrap().started();
+        terminate(paddock_proc::ProcessId::new(child.id(), started_elsewhere), true);
+        assert!(child.try_wait().unwrap().is_none());
+        terminate(paddock_proc::ProcessId::of(child.id()).unwrap(), true);
+        assert_eq!(child.wait().unwrap().signal(), Some(9), "ended (SIGKILL)");
     }
 }

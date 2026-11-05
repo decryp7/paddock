@@ -18,6 +18,8 @@ name = "pitwall-server"
 path = "src/main.rs"
 
 [dependencies]
+# Identity-checked process control (pid plus start time), never a bare pid (ADR 0033).
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 pitwall-core.workspace = true
 pitwall-loopback = { path = "../pitwall-loopback" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
@@ -52,6 +54,7 @@ windows = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "process", "fs", "io-util", "sync", "signal"] }
 
