@@ -12,6 +12,7 @@ use dyno_agent::helper_link::{HelperLink, HelperTransport, TransportError};
 use dyno_core::btm::{LoginItemsReader, LoginItemsReply};
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_counters::{CounterAnswer, CounterReader, CounterValue};
+use dyno_core::helper_extras::{BackupVersion, ExtrasReader, WakeRequest};
 use dyno_core::helper_memory::MemoryReader;
 use dyno_core::helper_policy::Access;
 use dyno_core::helper_requests::{CounterId, SmartQuery, ToolKind};
@@ -107,6 +108,10 @@ pub struct Readers {
     pub log: Vec<String>,
     /// The Wake-on-LAN modes every interface answers; `None` answers like a system that reads none.
     pub wol: Option<WolReply>,
+    /// What `powercfg /requests` lists on the helper's computer.
+    pub wake_requests: Vec<WakeRequest>,
+    /// What `wbadmin get versions` lists on the helper's computer.
+    pub backup_versions: Vec<BackupVersion>,
 }
 
 impl Default for Readers {
@@ -129,6 +134,8 @@ impl Default for Readers {
             counters: Vec::new(),
             log: Vec::new(),
             wol: None,
+            wake_requests: Vec::new(),
+            backup_versions: Vec::new(),
         }
     }
 }
@@ -160,6 +167,15 @@ impl ProcessTraffic for Traffic {
                 ..c.clone()
             })
             .collect())
+    }
+}
+struct Extras(Vec<WakeRequest>, Vec<BackupVersion>);
+impl ExtrasReader for Extras {
+    fn wake_requests(&self) -> Result<Vec<WakeRequest>, PlatformError> {
+        Ok(self.0.clone())
+    }
+    fn backup_versions(&self) -> Result<Vec<BackupVersion>, PlatformError> {
+        Ok(self.1.clone())
     }
 }
 struct Items;
@@ -243,7 +259,7 @@ pub fn dispatcher(host: HelperHost, readers: Readers, dir: &std::path::Path) -> 
         clock: Box::new(|| 1_000),
         login_items: Box::new(Items),
         holders: readers.holders,
-        extras: Box::new(dyno_core::helper_extras::NoExtras),
+        extras: Box::new(Extras(readers.wake_requests, readers.backup_versions)),
         counters: Box::new(Counters(readers.counters)),
         memory: Box::new(Memory(readers.memory)),
         processes: Box::new(Sweeps(readers.processes)),
