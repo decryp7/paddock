@@ -8,10 +8,12 @@
 - Licence: `MIT OR Apache-2.0` (kept: `LICENSE-MIT`, `LICENSE-APACHE`, `LICENSE.spdx`, and `license` in its `Cargo.toml`).
   cargo-deny sees it as a path dependency with that licence; the notices generator reads it from `cargo metadata` like any
   other package.
-- Four patches on the copy, nothing else: [`tray-icon-guid-provider.patch`](tray-icon-guid-provider.patch) (Windows, below),
-  [`tray-icon-image-reps.patch`](tray-icon-image-reps.patch) (macOS, below), [`tray-icon-autosave-name.patch`](tray-icon-autosave-name.patch)
-  (macOS autosave name and the Windows `TaskbarCreated` read-out, below; made with `git diff` of `vendor/tray-icon/src` against the copy before it) and the
-  Windows tooltip fix below (its change is in `src/platform_impl/windows/mod.rs`; it has no patch file, so re-make it from its description after a Tauri bump). The GUID patch: `src/lib.rs`: `set_guid_provider` and its
+- Four patches on the copy, nothing else, applied in this order to the pristine crate (`patch -p1` inside a copy of the `.crate`'s contents):
+  [`tray-icon-guid-provider.patch`](tray-icon-guid-provider.patch) (Windows: the GUID provider, `guid_status`, and `is_added`),
+  [`tray-icon-image-reps.patch`](tray-icon-image-reps.patch) (macOS), [`tray-icon-windows-tooltip.patch`](tray-icon-windows-tooltip.patch)
+  (Windows) and [`tray-icon-autosave-name.patch`](tray-icon-autosave-name.patch) (macOS autosave name and the Windows `TaskbarCreated`
+  read-out). Check after a change: unpack tray-icon 0.25.1, apply the four in that order, and `diff -r -x Cargo.lock -x .cargo_vcs_info.json -x .cargo-ok`
+  against `vendor/tray-icon` prints nothing (done 2026-11-05). The GUID patch (which also carries `TrayIcon::is_added` and the `added` flag the shell's answer sets): `src/lib.rs`: `set_guid_provider` and its
   use in `TrayIcon::with_id`, and `GuidStatus` with `TrayIcon::guid_status`. `src/platform_impl/windows/mod.rs`: when the shell
   refuses a GUID (`NIM_ADD` fails), delete the GUID's registration (`NIM_DELETE` by GUID) and add again; if that fails too, add
   the icon without a GUID (and the window forgets the GUID); the outcome is `guid_status`, which Dyno logs. `Cargo.lock` is dropped from the copy. Nothing else differs from the `.crate`.
@@ -57,14 +59,14 @@
 
 ### tray-icon-autosave-name.patch (macOS, and a Windows read-out)
 
-Apply with `patch -p1 -d vendor/tray-icon < vendor/tray-icon-autosave-name.patch` on a fresh copy (after the GUID and image patches).
+Apply with `patch -p1 -d vendor/tray-icon < vendor/tray-icon-autosave-name.patch` on a fresh copy (after the other three patches).
 
 
 - `src/lib.rs`: `set_autosave_name_provider` and its type `AutosaveNameProvider`, like the GUID provider. `src/platform_impl/macos/mod.rs`,
   `TrayIcon::create`: the status item gets its `autosaveName` from the provider right after `statusItemWithLength` and before the image,
   tooltip or menu is set. Upstream never sets one; Dyno set it after `build` (ADR 0028), so ControlCenter first saw the item as
   `Item-0` and logged `Host id changed from ...Item-0... to ...menubar.<n>`. Housekeeping, not the cause of the missing items at login
-  (that is the activation gate, lessons.md 2026-11-05).
+  (there is no measured effect on showing the items: lessons.md, 2026-11-05 retraction).
 - `src/platform_impl/windows/mod.rs` and `src/lib.rs`: `TrayIcon::taskbar_restarts() -> (count, last outcome)`: how many `TaskbarCreated`
   messages the icon saw and what its re-add came to (`GuidStatus`). Dyno logs it in `tray diagnose:` so a diagnostic bundle from a PC
   whose icons are missing at logon shows whether Explorer's taskbar was created after the add. Elsewhere `(0, None)`.
