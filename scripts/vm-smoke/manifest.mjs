@@ -8,6 +8,8 @@ const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const row = (id, re) => ({ id, match: re });
 const readings = (os) => READINGS.filter((r) => r.os.includes(os)).map((r) => row(`reading:${r.id}`, new RegExp(`^Helper reading \\(${os}\\): ${esc(r.title)}$`)));
 const BUILD = row('build-binding', /^Build binding:/);
+// Rule 71 rows (mcp-judges.mjs): required on the final candidate of every OS; a runner that does not supply them leaves the run INCOMPLETE.
+const RULE71 = [row('mcp', /^Rule 71: Dyno MCP from outside/), row('quit-stop', /^Rule 71: Quit and stop measuring/)];
 
 const MAC_START = [
   row('install', /^Install$/), BUILD,
@@ -66,13 +68,13 @@ export function requiredSteps({ os, suite = 'start', ui = false, reboot = false,
   if (os === 'windows') {
     const rebootRun = reboot && !ui;
     if (rebootRun) return [...WIN_BASE, ...WIN_REBOOT];
-    return [...WIN_BASE, ...WIN_FULL, ...(ui || full ? WIN_UI : [])];
+    return [...WIN_BASE, ...WIN_FULL, ...(ui || full ? [...WIN_UI, ...RULE71] : [])];
   }
-  if (os === 'linux') return [...LINUX, ...(reboot || full ? LINUX_REBOOT : []), ...(trayHost ? LINUX_TRAY : [])];
+  if (os === 'linux') return [...LINUX, ...RULE71, ...(reboot || full ? LINUX_REBOOT : []), ...(trayHost ? LINUX_TRAY : [])];
   if (os === 'macos') {
     const base = suite === 'power' ? MAC_POWER : suite === 'helper' ? MAC_HELPER : MAC_START;
     if (suite === 'start') return base;
-    return [...base, ...(reboot ? [row('restart-menu-bar', /^Restart check: menu-bar icons after the restart/)] : readings('macos'))];
+    return [...base, ...(suite === 'power' ? RULE71 : []), ...(reboot ? [row('restart-menu-bar', /^Restart check: menu-bar icons after the restart/)] : readings('macos'))];
   }
   throw new Error(`no manifest for ${os}`);
 }
