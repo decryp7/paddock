@@ -21,7 +21,9 @@ export function judgeHelperLog(text) {
 
 /** The step: reads the unified log of the last 30 minutes for the helper's program. */
 export async function macHelperLogStep(guest) {
-  const r = await guest.exec(`log show --last 30m --info --style compact --predicate 'senderImagePath ENDSWITH "dyno-helper" OR process == "dyno-helper" OR eventMessage CONTAINS "DynoHelper"' 2>&1 | tail -80`);
+  // Only the helper's own lines (`eventMessage CONTAINS "DynoHelper"`): a predicate on the whole process plus `tail -80` lost the start line, because the helper's
+  // CFOpenDirectory noise every 5 s pushed it out of the last 80 lines (2026-11-05: "stopped cleanly after 776012 ms" was kept, its start 13 minutes earlier was cut).
+  const r = await guest.exec(`log show --last 30m --info --style compact --predicate 'eventMessage CONTAINS "DynoHelper"' 2>&1 | grep -E "DynoHelper|exit code" | tail -40`);
   const j = judgeHelperLog(r.stdout ?? '');
   const bad = j.checks.filter((c) => !c.ok);
   return { title: 'macOS helper lines in the unified log (log show)', status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : 'the start line and the end line (duration or exit code) are in the unified log', checks: j.checks, evidence: j.evidence };

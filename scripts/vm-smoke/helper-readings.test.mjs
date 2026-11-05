@@ -109,3 +109,14 @@ test('macDriver pf-rule control loads the rule and checks the OS lists it; clean
   await d.cleanup('pf-rule');
   assert.equal(cmds.length, 1, 'nothing to restore when no rule was loaded');
 });
+
+test('macDriver text polls until the row\'s own words are on the page, so a reading that arrives seconds after the click is not judged early', async () => {
+  const { macDriver } = await import('./helper-readings.mjs');
+  let t = 0, reads = 0;
+  const gui = { waitFor: async (fn, ms) => { for (; t <= ms; t += 3000) { const v = await fn(); if (v) return { ok: true, value: v }; } return { ok: false, value: null }; },
+    texts: async () => [{ text: ++reads < 3 ? 'packet filter (pf) 0 rules.' : 'packet filter (pf) Read by the administrator helper 2 rules. Ports = 59999' }], closeSettings: async () => {} };
+  const text = await macDriver(gui).text(by('firewall'));
+  assert.match(text, /2 rules/);
+  reads = -1000; t = 0;
+  assert.match(await macDriver(gui).text(by('firewall')), /packet filter \(pf\) 0 rules/i);
+});

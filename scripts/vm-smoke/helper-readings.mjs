@@ -90,7 +90,7 @@ export async function readingStep(reading, os, driver) {
     const opened = await driver.openPage(reading.page, reading.tab, reading);
     checks.push({ ok: opened, detail: opened ? `opened ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` : `could not open ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` });
     if (!opened) return { title, status: 'fail', summary: checks.at(-1).detail, checks, evidence: driver.why ? [driver.why] : evidence };
-    const text = (await driver.text()).replace(/\s+/g, ' ');
+    const text = (await driver.text(reading)).replace(/\s+/g, ' ');
     evidence.push(`page text: ${text.slice(0, reading.fullText ?? 3000)}`);
     if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
     const nm = reading.notMeasured?.[os];
@@ -176,6 +176,17 @@ export function macDriver(gui) {
       if (ok && tab) return (await gui.waitFor(async () => (await gui.press(gui.app, `^(${tab})( |$)`, 'AXRadioButton')) || (await gui.press(gui.app, `^(${tab})( |$)`, 'AXButton')), 10_000)).ok;
       return ok;
     },
-    async text() { return (await gui.texts()).map((t) => t.text).join(' '); },
+    /**
+     * The page's text. A page reads its helper data a few seconds after it opens (the firewall page said "0 rules" with no "Read by" label right after the click, and
+     * showed both 12 s later), so when the row names what the page must say, it is polled until all of it is there, bounded at 30 s (a condition, not a delay). What is
+     * still missing after that is judged as it stands.
+     */
+    async text(reading = {}) {
+      const read = async () => (await gui.texts()).map((t) => t.text).join(' ');
+      const want = [...(reading.expect?.macos ?? []), ...(reading.value?.macos ?? [])];
+      if (!want.length) return read();
+      const got = await gui.waitFor(async () => { const t = await read(); return want.every((re) => re.test(t)) ? t : null; }, 30_000);
+      return got.ok ? got.value : read();
+    },
   };
 }
