@@ -54,11 +54,19 @@ import { formatBytes } from './format';
           @case ('installing') {
             <p role="status">{{ installing() }}</p>
           }
+          @case ('installerRunning') {
+            <p role="status" data-testid="updates-installer-running">{{ t.installerRunning }}</p>
+          }
           @case ('failed') {
             <p>{{ t.failed }}</p>
           }
         }
       </div>
+      @if (s.install.administratorNotice; as notice) {
+        @if (s.phase.kind === 'available' || s.phase.kind === 'ready') {
+          <p class="pd-muted" data-testid="updates-administrator">{{ notice }}</p>
+        }
+      }
       @if (store.info()?.notes; as notes) {
         <pre class="pd-text" tabindex="0" [attr.aria-label]="t.notes">{{ notes }}</pre>
       }
@@ -83,7 +91,7 @@ import { formatBytes } from './format';
               <pd-select [options]="channelOptions()" [value]="s.channel" [ariaLabel]="t.channel" (valueChange)="setChannel($event)" />
             </label>
           }
-          @if (s.phase.kind === 'ready') {
+          @if (s.phase.kind === 'ready' && s.install.installOnQuitAvailable) {
             <mat-checkbox [checked]="installOnQuit()" (change)="store.installOnQuit($event.checked)">{{ t.installOnQuit }}</mat-checkbox>
           }
         </div>
@@ -109,6 +117,7 @@ export class PdUpdatesDialog implements DialogContent {
     upToDate: $localize`:@@pd.updates.up-to-date:You have the latest version.`,
     progressInJobs: $localize`:@@pd.updates.progress-in-jobs:The progress is in Jobs.`,
     failed: $localize`:@@pd.updates.failed:The last step did not finish.`,
+    installerRunning: $localize`:@@pd.updates.installer-running:An update is being installed. This window updates when the installer is done.`,
     notes: $localize`:@@pd.updates.notes:Release notes`,
     autoCheck: $localize`:@@pd.updates.auto-check:Check for updates automatically`,
     channel: $localize`:@@pd.updates.channel:Channel`,
@@ -117,6 +126,7 @@ export class PdUpdatesDialog implements DialogContent {
     stopDownload: $localize`:@@pd.updates.stop-download:Stop download`,
     discard: $localize`:@@pd.updates.discard:Discard`,
     restart: $localize`:@@pd.updates.restart:Restart to update`,
+    install: $localize`:@@pd.updates.install:Install`,
     checkAgain: $localize`:@@pd.updates.check-again:Check again`,
     checkNow: $localize`:@@pd.updates.check-now:Check now`,
     download: $localize`:@@pd.updates.download:Download`,
@@ -144,7 +154,7 @@ export class PdUpdatesDialog implements DialogContent {
       case 'downloading':
         return [run('stop', this.t.stopDownload, 'secondary', () => this.store.cancel())];
       case 'ready':
-        return [run('discard', this.t.discard, 'secondary', () => this.store.cancel()), run('restart', this.t.restart, 'primary', () => this.store.restart())];
+        return [run('discard', this.t.discard, 'secondary', () => this.store.cancel()), run('restart', s.install.scope === 'perMachine' ? this.t.install : this.t.restart, 'primary', () => this.store.restart())];
       case 'available':
         return [run('check', this.t.checkAgain, 'secondary', () => this.store.check()), run('download', this.t.download, 'primary', () => this.store.download())];
       case 'failed':
