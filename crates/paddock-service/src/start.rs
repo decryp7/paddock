@@ -369,6 +369,20 @@ mod tests {
     }
 
     #[test]
+    fn a_service_this_call_started_is_waiting_while_its_endpoint_is_silent_even_if_running() {
+        let (sys, starts) = service(
+            vec![
+                query_text("1  STOPPED", 0, 0),
+                query_text("4  RUNNING", 0, 0),
+            ],
+            Output::ok("STATE : 2  START_PENDING"),
+        );
+        let out = run(&sys, |_| false, Duration::from_secs(10));
+        assert!(matches!(out, Revival::Waiting(_)), "{out:?}");
+        assert_eq!(*starts.lock().unwrap(), 1);
+    }
+
+    #[test]
     fn a_service_that_never_answers_is_waiting_after_the_budget_not_down() {
         let (sys, _) = service(vec![query_text("2  START_PENDING", 0, 0)], Output::ok(""));
         let out = run(&sys, |_| false, Duration::from_secs(10));

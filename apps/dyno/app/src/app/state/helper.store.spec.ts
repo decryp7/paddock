@@ -153,6 +153,18 @@ describe('HelperStore', () => {
       store.stopPolling();
     });
 
+    it('keeps Still starting (and Repair) when the card is shown again or checked again while it is still starting', async () => {
+      const { store } = answers('starting');
+      await store.ensure();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(store.stillStarting()).toBe(true);
+      await store.ensure();
+      expect(store.stillStarting(), 'shown again').toBe(true);
+      await store.load();
+      expect(store.stillStarting(), 'Check again').toBe(true);
+      store.stopPolling();
+    });
+
     it('never reads on a timer for a helper that is off, not included, or answering', async () => {
       for (const variant of ['off', 'notIncluded', 'ready'] as const) {
         TestBed.resetTestingModule();

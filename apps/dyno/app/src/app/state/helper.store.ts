@@ -49,7 +49,7 @@ export const HelperStore = signalStore(
   withComputed(({ jobId, status, pollsExhausted }, jobs = inject(JobsStore)) => ({
     /** The running action's phase, count and whether it has been quiet long enough to say "Still working". */
     job: computed(() => progressOf(jobs, jobId())),
-    /** The helper is still coming up after all timed reads: "Still starting", never a Repair. */
+    /** The helper is still coming up after all timed reads (kept across reads while it stays `starting`): Repair is offered beside the note. */
     stillStarting: computed(() => status()?.state === 'starting' && pollsExhausted()),
   })),
   withMethods((store, backend = inject(BACKEND), starter = inject(JobStarter)) => {
@@ -89,9 +89,11 @@ export const HelperStore = signalStore(
       stopPolling();
       step = 0;
       waited = 0;
-      patchState(store, { loading: true, error: null, pollsExhausted: false });
+      patchState(store, { loading: true, error: null });
       try {
-        patchState(store, { status: await backend.helperStatus(), loading: false });
+        const status = await backend.helperStatus();
+        // The three-minute bound is kept across reads while it is still starting; any other state starts a fresh clock.
+        patchState(store, { status, loading: false, ...(status.state === 'starting' ? {} : { pollsExhausted: false }) });
       } catch (e) {
         patchState(store, { loading: false, error: toCommandError(e) });
       }
