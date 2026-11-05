@@ -34,6 +34,8 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Fixed
 
+- Inventory: a memory module's maker and part number that does not fit beside the drawing now shows in full when you point at it, instead of being cut off with no way to read it.
+- Backup health: when File History has never been turned on, the page says "Not set up" and how to turn it on, instead of "Could not check" with a technical message. When a tool really cannot be read, the page now says to choose Check now to try again.
 - macOS: memory in use is read the way Activity Monitor reads it (app memory, wired and compressed). Dyno had counted memory that apps were using as free and showed 17 percent where Activity Monitor showed 54 percent. Memory alarms and the memory figure in reports now match what Activity Monitor says, so a memory alarm can fire on a Mac where it stayed quiet before.
 - Settings: dragging a widget in Menu bar items or Popup widgets now shows the whole row as it looks in the list, with its handle, title and controls in place and without the widget's symbol. Before, the picture under the pointer was drawn out of shape with a huge symbol.
 - Dashboard: while you edit the layout, the History legend checkboxes no longer show large pink squares.

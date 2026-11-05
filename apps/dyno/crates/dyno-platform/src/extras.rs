@@ -371,7 +371,7 @@ fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, zone: &dyn Lo
                     Some((at, _)) => backup::judged(tool, at, now, stale),
                     None => backup::no_backup(tool, "File History has not recorded a finished backup."),
                 },
-                Err(e) => backup::cannot_check(tool, &why("wevtutil", &e)),
+                Err(e) => file_history_problem(tool, &e),
             }
         }
         BackupTool::Restic => match run(
@@ -401,6 +401,26 @@ fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, zone: &dyn Lo
 }
 
 /// A restic/Borg failure: usually the repository is not set in the environment Dyno sees.
+/// A File History log that could not be read. Windows creates the log the first time File History is turned on, so a log that
+/// does not exist means it never ran here: not set up, not a failure. Anything else stays "could not check", with a next step.
+fn file_history_problem(tool: BackupTool, e: &PlatformError) -> BackupStatus {
+    let m = why("wevtutil", e);
+    if m.to_lowercase().contains("channel could not be found") {
+        backup::not_configured(
+            tool,
+            "File History has never run on this computer.",
+            "Open Control Panel > File History to turn it on, or ignore this if you back up another way.",
+        )
+    } else {
+        BackupStatus {
+            next_step: Some(
+                "Choose Check now to try again. If it keeps failing, open File History in Control Panel to see its own state.".into(),
+            ),
+            ..backup::cannot_check(tool, &m)
+        }
+    }
+}
+
 fn repo_problem(tool: BackupTool, e: &PlatformError, var: &str) -> BackupStatus {
     let m = why(tool.name(), e);
     let lower = m.to_lowercase();
@@ -631,6 +651,30 @@ mod tests {
         assert!(backup_statuses(&env(&[], vec![]), "macos", NOW, &FixedZone::UTC, 48).is_empty());
         // A tool that exists on another OS is not even considered.
         assert!(backup_statuses(&env(&[BackupTool::TimeMachine], vec![]), "linux", NOW, &FixedZone::UTC, 48).is_empty());
+    }
+
+    #[test]
+    fn file_history_that_never_ran_is_not_set_up_and_a_real_failure_gives_a_next_step() {
+        // Windows has no File History log until the feature has been turned on once: that is "not set up", not a failure.
+        let never = env(
+            &[BackupTool::FileHistory],
+            vec![(
+                BackupTool::FileHistory,
+                vec![fail("wevtutil failed: The specified channel could not be found.")],
+            )],
+        );
+        let s = backup_statuses(&never, "windows", NOW, &FixedZone::UTC, 48);
+        assert_eq!(s[0].state, BackupState::NotConfigured, "{s:#?}");
+        assert!(!s[0].summary.contains("wevtutil"), "plain words: {}", s[0].summary);
+        assert!(s[0].next_step.as_deref().is_some_and(|n| n.contains("File History")), "{s:#?}");
+        // Any other failure stays "could not check", and now says what to do next.
+        let broken = env(
+            &[BackupTool::FileHistory],
+            vec![(BackupTool::FileHistory, vec![fail("wevtutil failed: Access is denied.")])],
+        );
+        let s = backup_statuses(&broken, "windows", NOW, &FixedZone::UTC, 48);
+        assert_eq!(s[0].state, BackupState::CannotCheck);
+        assert!(s[0].next_step.as_deref().is_some_and(|n| n.contains("Check now")), "{s:#?}");
     }
 
     #[test]
