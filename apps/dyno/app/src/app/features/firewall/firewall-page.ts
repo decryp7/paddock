@@ -70,7 +70,7 @@ export function rulesLine(s: FirewallSource): string {
               @if (!s.rulesHidden) {
                 <p class="faint num">{{ line(s) }}</p>
                 @if (s.rules.length > 0) {
-                  <pd-table [toolbar]="false" [label]="name(s.source) + ' rules'" [rows]="s.rules" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" [maxHeight]="480">
+                  <pd-table [toolbar]="false" [label]="name(s.source) + ' rules'" [rows]="s.rules" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" height="window">
                     <ng-template pdCell="program" let-r let-folded="folded">
                       <span class="prog">
                         @if (r.program) { <pd-path-text [value]="r.program" /> } @else { <span class="faint">—</span> }

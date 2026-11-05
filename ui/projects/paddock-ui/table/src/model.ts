@@ -304,3 +304,22 @@ export const PD_FOLD_EXTRA = 12;
 export function rowHeightFor(token: number): number {
   return (PD_ROW_HEIGHTS as readonly number[]).includes(token) ? token : 32;
 }
+
+/** The least height of a table body in `fill` and `window` mode, in pixels: a few rows stay readable in a small window. */
+export const PD_TABLE_FILL_MIN = 240;
+
+/**
+ * The tallest a `window` table's body grows: the scroll area's height less the table's own chrome (toolbar, header, gaps), so a long
+ * table is never taller than the area the user sees; never below {@link PD_TABLE_FILL_MIN}.
+ */
+export function windowBodyMax(areaHeight: number, chrome: number): number {
+  return Math.max(PD_TABLE_FILL_MIN, Math.floor(areaHeight - chrome));
+}
+
+/** The nearest ancestor of `el` that scrolls vertically (`overflow-y` auto, scroll or overlay), or null. */
+export function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (/^(auto|scroll|overlay)$/.test(getComputedStyle(p).overflowY)) return p;
+  }
+  return null;
+}

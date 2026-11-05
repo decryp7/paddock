@@ -77,7 +77,7 @@ const HINT_TONE: Record<HintKind, string> = {
                 <div class="drawing"><dy-memory-slots [slots]="dimmSlots()" [alt]="alt()" /></div>
               } @else {
                 <div class="tablewrap">
-                  <pd-table [toolbar]="false" label="Memory modules" [rows]="model().slots" [columns]="slotColumns" [rowKey]="slotKey" [filterable]="false" [maxHeight]="420">
+                  <pd-table [toolbar]="false" label="Memory modules" [rows]="model().slots" [columns]="slotColumns" [rowKey]="slotKey" [filterable]="false" height="window">
                     <ng-template pdCell="size" let-s>@if (s.module) {<span class="num">{{ bytes(s.module.capacityBytes) }}</span>} @else {<span class="faint">Empty</span>}</ng-template>
                     <ng-template pdCell="part" let-s><span class="mono">{{ s.module?.partNumber ?? (s.module ? '—' : '') }}</span></ng-template>
                   </pd-table>

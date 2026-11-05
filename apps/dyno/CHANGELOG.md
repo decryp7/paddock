@@ -25,6 +25,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Fixed
 
+- Tables grow and shrink with the window instead of keeping a fixed height. The Processes table fills the page; on every other page (Firewall, Alarms, Extras, Network, Benchmarks, Issues and the rest) the page scrolls once and each table is as tall as its rows, up to the height of the visible page, so a long table never needs more than the window and its last row can always be reached. The mouse wheel passes on to the page at the end of a table.
 - Backup health reads Windows Backup again once the administrator helper is turned on, instead of keeping the earlier "could not check" report and its missing helper note.
 - A dialog that Windows snaps to a screen half but cannot make narrower (the About window at 150 % display scale) now counts as sized by you, like any other snap.
 - Menu-bar and tray items show their metric and reading when you hover them, such as "CPU 34%", instead of "Dyno".

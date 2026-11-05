@@ -20,7 +20,7 @@ import { EXTRAS_STYLES } from './extras-styles';
         } @else if (g.processes.length === 0) {
           <div class="none"><dy-icon name="gpu" /><strong>No process is using the GPU right now</strong><span>Programs that draw heavily or compute on the graphics chip appear here while they do.</span></div>
         } @else {
-          <pd-table [toolbar]="false" label="GPU use per process" [rows]="g.processes" [columns]="columns" [rowKey]="procKey" [filterable]="false" [maxHeight]="620" />
+          <pd-table [toolbar]="false" label="GPU use per process" [rows]="g.processes" [columns]="columns" [rowKey]="procKey" [filterable]="false" height="window" />
           @if (g.source) { <p class="faint muted">From {{ g.source }}.</p> }
         }
       }

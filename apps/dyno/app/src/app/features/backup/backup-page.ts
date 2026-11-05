@@ -62,7 +62,7 @@ import { MatMenuModule } from '@angular/material/menu';
             </section>
 
             <div class="layout" [class.with-detail]="!!selected()">
-              <pd-table [toolbar]="false" label="Backup tools" [rows]="store.statuses()" [columns]="columns" [rowKey]="toolKey" [filterable]="false" [rowHeight]="36" [rowActions]="actions" [selectedKey]="selectedTool()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="escape($event)">
+              <pd-table height="window" [toolbar]="false" label="Backup tools" [rows]="store.statuses()" [columns]="columns" [rowKey]="toolKey" [filterable]="false" [rowHeight]="36" [rowActions]="actions" [selectedKey]="selectedTool()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="escape($event)">
                 <ng-template pdCell="tool" let-s><span class="tool"><span class="tile" aria-hidden="true" [style.background]="tile(s.name)">{{ initial(s.name) }}</span><strong class="nm" [dyFullText]="s.name">{{ s.name }}</strong></span></ng-template>
                 <ng-template pdCell="state" let-s><span class="dot" [attr.data-tone]="dot(s)" aria-hidden="true"></span>{{ label(s) }}</ng-template>
                 <ng-template pdCell="when" let-s><span class="num muted" [attr.title]="fullDate(s)">{{ last(s) }}</span></ng-template>
