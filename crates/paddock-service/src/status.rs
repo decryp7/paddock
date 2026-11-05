@@ -461,7 +461,7 @@ mod tests {
         assert_ne!(unanswered.message, refused.message);
         for s in [&unanswered, &refused] {
             assert_eq!((s.condition, s.can_repair), (Condition::NotRunning, true));
-            assert!(s.message.as_deref().unwrap().contains("press Repair"));
+            assert!(s.message.as_deref().unwrap().contains("Press Repair"));
         }
         // A register that failed leaves nothing registered: that is no plain "not installed".
         let failed = said(Hold::RegisterFailed(3), &Inspection::absent());
