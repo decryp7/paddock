@@ -69,9 +69,11 @@ async function wheelUntil(page: Page, list: Locator, done: (s: Snap) => boolean,
   await expect
     .poll(
       async () => {
-        await assertListUnder(page, at);
         const s = await snap(list);
         if (done(s)) return true;
+        // Checked only while the list still has to move: once it has reached its end, a wheel that carried on to the page (WebKit
+        // passes the rest of a step on) moves the list from under the still pointer, and that is not a swallowed wheel.
+        await assertListUnder(page, at);
         onState?.(s);
         await wheelAndSettle(page, list, s, 400);
         return false;

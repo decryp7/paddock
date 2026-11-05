@@ -256,8 +256,9 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
     /* The ghost leaves the kind icon out (its column stays, so the title keeps the row's offset). */
     .cdk-drag-preview.pd-wc-row .pd-wc-kicon { visibility: hidden; }
     /* The ghost sits in the body, outside the list: it is its own container, so the rows' wrapping follows the ghost's width (the
-       row's), and it is raised (a raised surface and an accent edge, so it also lifts in the dark theme). */
-    .cdk-drag-preview.pd-wc-item { container-type: inline-size; background: var(--pd-surface-3); border: 1px solid var(--pd-accent); border-radius: var(--pd-radius-control); box-shadow: var(--pd-shadow-2); }
+       row's), and it is raised (a raised surface and an accent edge, so it also lifts in the dark theme). The edge is an inset ring, not a border: a
+       border would take 2 px of the ghost's width, and a row whose summary just fits would wrap in the ghost and not in the list. */
+    .cdk-drag-preview.pd-wc-item { container-type: inline-size; background: var(--pd-surface-3); border-radius: var(--pd-radius-control); box-shadow: inset 0 0 0 1px var(--pd-accent), var(--pd-shadow-2); }
     .cdk-drag-animating { transition: transform var(--pd-duration) var(--pd-ease-enter); }
     .pd-wc-list.cdk-drop-list-dragging .pd-wc-item:not(.cdk-drag-placeholder) { transition: transform var(--pd-duration) var(--pd-ease-enter); }
     @media (prefers-reduced-motion: reduce) { :root:not([data-motion='full']) .cdk-drag-animating, :root:not([data-motion='full']) .pd-wc-list .pd-wc-item { transition: none !important; } }

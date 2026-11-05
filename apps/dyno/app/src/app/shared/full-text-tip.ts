@@ -1,6 +1,9 @@
 import { Directive, ElementRef, inject, input } from '@angular/core';
 import { MatTooltip } from '@angular/material/tooltip';
 
+/** The class of a full-text tip: its panel lets the pointer through (a list scrolled under a still pointer must keep the wheel). */
+export const FULL_TEXT_TIP_CLASS = 'dy-full-text-tip';
+
 /**
  * The full text of a clipped line, as a Material tooltip that exists only while the text is really cut off. The element already
  * shows (part of) this text, so a tooltip that is always present would be read twice by a screen reader (the tooltip becomes the
@@ -14,6 +17,8 @@ export class FullTextTip {
   private readonly tip = inject(MatTooltip);
 
   constructor() {
+    // The tip is a reading aid, not content to move onto: it never takes the pointer (see `.dy-full-text-tip` in styles.scss).
+    this.tip.tooltipClass = FULL_TEXT_TIP_CLASS;
     // Capture listeners on the target run before the tooltip's own pointer listener, so the message is set in time.
     this.el.addEventListener('mouseenter', () => this.sync(), true);
     this.el.addEventListener('focusin', () => this.sync(), true);
