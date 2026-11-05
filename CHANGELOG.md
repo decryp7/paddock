@@ -6,6 +6,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `@decryp7/paddock-ui`: `pd-table` `height` (`fit`, `fill`, `window`)
 - New input `height` on `pd-table`, also exported as the type `PdTableHeight`. `fit` (default, unchanged): the body is as tall as its rows up to `maxHeight`, so no other app's table changes. `fill`: the table takes the height its container gives it (a flex column or a grid cell with `min-height: 0`), never less than 240 px; for the one main table of a page that fills the window. `window`: as tall as its rows up to the height of the nearest scrolling ancestor less the table's own toolbar and header, measured with a ResizeObserver and updated live (the window's height when nothing scrolls, `maxHeight` until measured); for a page that scrolls once and stacks tables; the wheel passes to the ancestor at the end of the rows.
+- `window` needs a scrolling ancestor whose height does not depend on its content (a content-sized one grows with the table and the table with it). Only a `window` table with no scrolling ancestor listens to the window's resize; no other table does.
 - New exports `PD_TABLE_FILL_MIN` (240) and `windowBodyMax`. The host has a `data-height` attribute. The gallery's Data page has a `height="fill"` demo.
 
 ### `paddock-service`: registrations are read back; `service_main` is the one service entry point (ADR 0054)

@@ -1329,6 +1329,33 @@ describe('pd-table', () => {
       expect((f.nativeElement.querySelector('.pd-body') as HTMLElement).style.height).toBe('500px');
     });
 
+    it('listens to the window only in window mode with no scroll area; fit and fill tables never do', async () => {
+      const add = vi.spyOn(window, 'addEventListener');
+      const resizes = () => add.mock.calls.filter((c) => c[0] === 'resize').length;
+      // The CDK's own listeners are the same for every mode; the table adds one only when it follows the window itself.
+      const added = async (mode: 'fit' | 'fill' | 'window', scrollerHeight?: number) => {
+        TestBed.resetTestingModule();
+        const before = resizes();
+        await sized(mode, 5, scrollerHeight);
+        return resizes() - before;
+      };
+      const fit = await added('fit', 500);
+      expect(await added('fill', 500)).toBe(fit);
+      expect(await added('window', 500)).toBe(fit);
+      // No scrolling ancestor: the window is the area, and only then the table listens to it.
+      TestBed.resetTestingModule();
+      const before = resizes();
+      TestBed.configureTestingModule({ providers: [provideZonelessChangeDetection()] });
+      const f = TestBed.createComponent(SizedHost);
+      (f.nativeElement.querySelector('.scroller') as HTMLElement).style.overflowY = 'visible';
+      document.body.appendChild(f.nativeElement);
+      f.componentInstance.rows.set(many(5));
+      f.componentInstance.mode.set('window');
+      await settle(f);
+      expect(resizes() - before).toBe(fit + 1);
+      add.mockRestore();
+    });
+
     it('window: a mode change away from window stops following the area, and reduced motion changes nothing', async () => {
       const t = await sized('window', 50, 700);
       document.documentElement.setAttribute('data-motion', 'reduce');

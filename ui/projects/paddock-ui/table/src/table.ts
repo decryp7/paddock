@@ -161,7 +161,7 @@ const VIRTUAL_BUFFER_ROWS = 8;
     PdGlyph,
     PdMiddleText,
   ],
-  host: { '[attr.data-height]': 'height()', '(window:resize)': 'onWindowResize()', '[attr.data-fit-width]': 'width()', '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
+  host: { '[attr.data-height]': 'height()', '[attr.data-fit-width]': 'width()', '[style.--pd-table-row]': 'rowPx() + "px"', '[style.--pd-table-head]': 'headerPx + "px"', '(document:pointerdown)': 'onPointerDownAnywhere($event)' },
   template: `
     @if (toolbar()) {
     <div class="pd-toolbar">
@@ -487,7 +487,7 @@ export class PdTable<T> {
    * How tall the table is. `fit` (default): as tall as its rows, up to `maxHeight`. `fill`: the height its container gives it (a flex
    * column or a grid cell with `min-height: 0`, like a page that fills the window), at least {@link PD_TABLE_FILL_MIN}; for the one main
    * table of a page. `window`: as tall as its rows, up to the height of the nearest scrolling ancestor less the table's own chrome,
-   * updated live; for a page that scrolls once and stacks tables. The wheel passes to that ancestor at the end of the rows.
+   * updated live; for a page that scrolls once and stacks tables. The wheel passes to that ancestor at the end of the rows. The ancestor's height must not depend on its content (a frame or a flex/grid cell with a set height, like the app frame's main region): a content-sized ancestor grows with the table, and the table then grows with it without bound.
    */
   readonly height = input<PdTableHeight>('fit');
   /** Draw only the rows in view (virtual scroll): `auto` from {@link PD_TABLE_VIRTUAL_FROM} lines; `false` draws every row. */
@@ -708,11 +708,14 @@ export class PdTable<T> {
     });
     // `window` mode follows the nearest scrolling ancestor (the page area); with none, the window.
     let areaObserver: ResizeObserver | null = null;
+    let unlisten: (() => void) | null = null;
     effect(() => {
       const follows = this.height() === 'window';
       untracked(() => {
         areaObserver?.disconnect();
         areaObserver = null;
+        unlisten?.();
+        unlisten = null;
         if (!follows) return;
         afterNextRender(
           () => {
@@ -723,6 +726,12 @@ export class PdTable<T> {
               areaObserver = new ResizeObserver(() => this.measureArea());
               areaObserver.observe(area);
             }
+            // Only a table that follows the window itself listens to it, so the other tables of an app are never marked dirty by a drag.
+            if (!area) {
+              const onResize = () => this.measureArea();
+              window.addEventListener('resize', onResize);
+              unlisten = () => window.removeEventListener('resize', onResize);
+            }
           },
           { injector: this.injector },
         );
@@ -730,6 +739,7 @@ export class PdTable<T> {
     });
     inject(DestroyRef).onDestroy(() => {
       areaObserver?.disconnect();
+      unlisten?.();
       observer?.disconnect();
       mutation?.disconnect();
       bodyObserver?.disconnect();
@@ -750,9 +760,6 @@ export class PdTable<T> {
     if (this.height() !== 'window') return;
     const body = this.host.querySelector<HTMLElement>('.pd-body');
     if (body) this.chrome.set(Math.max(0, Math.round(this.host.getBoundingClientRect().height - body.getBoundingClientRect().height)));
-  }
-  protected onWindowResize(): void {
-    if (!this.area) this.measureArea();
   }
 
   /** The height of the body now: the set one, or in `fill` mode what the container gave it (the viewport's measured size, at least the minimum). */
