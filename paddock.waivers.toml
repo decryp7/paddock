@@ -47,24 +47,6 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C39"
-path = "apps/debrief/crates/debrief-ai-worker/src/http.rs"
-reason = "Debrief: a refused-connection test on a freed port; to use a refusing connector or a mapping test"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/debrief/crates/debrief-ai/src/engine/pitwall/http.rs"
-reason = "Debrief: a refused-connection test on a freed port; to use a refusing connector or a mapping test"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
-path = "apps/debrief/crates/debrief-ai/tests/it/net_tls.rs"
-reason = "Debrief: an offline test on a freed port; to use a HeldPort or a mapping test"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C39"
 path = "apps/pitcrew/crates/notify-channels/src/tests.rs"
 reason = "Pitcrew: two refused-connection tests on freed ports; to use HeldPort::reset or a mapping test"
 expires = "2026-12-31"

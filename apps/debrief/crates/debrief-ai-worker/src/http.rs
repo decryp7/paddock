@@ -490,13 +490,19 @@ zz
     }
 
     #[test]
-    fn nobody_listening_is_a_connect_error() {
-        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let e = client(port).send(&call("/health", None, &never), 10).unwrap_err();
-        assert!(matches!(e, HttpError::Connect(_)));
-        assert!(e.to_string().contains("cannot connect"));
+    fn a_connect_failure_is_a_connect_error_that_names_the_cause() {
+        // `ConnectionRefused` cannot be provoked portably (a held port answers, a freed one may belong to another test's server).
+        let e = HttpError::Connect(io::Error::from(io::ErrorKind::ConnectionRefused));
+        assert!(e.to_string().contains("cannot connect"), "{e}");
         for e in [HttpError::Io(io::Error::other("x")), HttpError::TimedOut, HttpError::Cancelled] {
             assert!(!e.to_string().is_empty());
         }
+    }
+
+    #[test]
+    fn a_port_that_hangs_up_is_an_error_not_a_hang() {
+        let held = paddock_testkit::net::HeldPort::hang_up();
+        let r = client(held.port()).send(&call("/health", None, &never), 10);
+        assert!(r.is_err(), "{r:?}");
     }
 }
