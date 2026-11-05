@@ -77,6 +77,7 @@ pub mod scm_host;
 pub mod service_main;
 pub mod spec;
 pub mod start;
+pub mod stop;
 pub mod status;
 pub mod supervised;
 pub mod system;
