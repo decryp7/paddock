@@ -1223,7 +1223,7 @@ fn state_checks(w: &World) -> Vec<Viol> {
         && w.rec.state != State::Removing
         && matches!(w.reg, Reg::Absent | Reg::Registered)
         && !w.program_gone
-        && !hold
+        && !(hold && w.reg == Reg::Registered)
     {
         let after = run_chain(&cooperative(w), &[Ev::Start, Ev::Wait, Ev::Start, Ev::Wait]);
         if after.reg == Reg::Absent {

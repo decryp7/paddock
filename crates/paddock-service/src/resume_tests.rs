@@ -1159,3 +1159,20 @@ fn a_resume_that_the_plan_offers_or_that_finishes_a_removal_leaves_the_service_a
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0").with_app_state(|| Some(true), || false, || true);
     assert!(resume(&mut m).0.is_ok());
 }
+
+#[test]
+fn a_resume_that_failed_keeps_the_marker_of_the_stop_so_the_next_start_tries_again() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    RecordFile::new(dir.path(), LABEL).set_resume_pending(Some(5)).unwrap();
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    {
+        let mut w = sim.lock().unwrap();
+        w.register_error = Some(RegisterError::Other("denied".into()));
+        w.job_after_asks = None;
+    }
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
+    assert!(resume(&mut m).0.is_err());
+    assert_eq!(RecordFile::new(dir.path(), LABEL).resume_pending(), Some(5), "an Err resume keeps the marker");
+}

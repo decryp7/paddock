@@ -68,12 +68,22 @@ fn record(root: &Path) -> paddock_service::record::RecordFile {
     paddock_service::record::RecordFile::new(root, dyno_agent::service::LABEL)
 }
 
-/// Writes the marker (before anything is stopped, so a crash in between still tells the truth).
+/// Writes the marker (before anything is stopped, so a crash in between still tells the truth). It waits for the repair lock a
+/// start repair may hold (its steps write the same record), up to 30 s, so the two writes never race.
 pub fn write_marker(root: &Path, now_ms: i64) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
     let record = record(root);
-    // Under the repair lock when it is free, so a registration changing the record does not lose it.
-    let _lock = record.lock();
+    let mut lock = record.lock();
+    for _ in 0..300 {
+        if lock.is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+        lock = record.lock();
+    }
+    if lock.is_none() {
+        log::warn!("The service repair lock stayed taken; the stop marker is written without it");
+    }
     record
         .set_resume_pending(Some(u64::try_from(now_ms).unwrap_or(0)))
         .map_err(std::io::Error::other)
@@ -317,6 +327,8 @@ pub fn quit_and_stop<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         let root = link.dirs.root().to_path_buf();
         let mechanism = crate::login::platform_service().stop_mechanism();
         log::info!(Service = format!("{mechanism:?}").as_str(); "Quit and stop measuring: begin");
+        // A repair or a switch that is running stops at its next step: the agent must not come back after this stop.
+        crate::login::cancel_service_work();
         if let Err(e) = write_marker(&root, crate::link::ports::now_ms()) {
             log::warn!(Error = e.to_string().as_str(); "The stop marker could not be written");
         }
@@ -415,6 +427,23 @@ mod tests {
             Resume::Nothing,
             "no service: the app starts the agent itself"
         );
+    }
+
+    #[test]
+    fn the_marker_waits_for_the_repair_lock_instead_of_racing_the_repair() {
+        let dir = temp("lockwait");
+        std::fs::create_dir_all(&dir).unwrap();
+        let held = record(&dir).lock().unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(400));
+            drop(held);
+        });
+        let began = std::time::Instant::now();
+        write_marker(&dir, 7).unwrap();
+        assert!(began.elapsed() >= Duration::from_millis(300), "it waited for the lock");
+        release.join().unwrap();
+        assert_eq!(peek_marker(&dir), Some(7));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

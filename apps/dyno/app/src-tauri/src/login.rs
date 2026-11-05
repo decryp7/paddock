@@ -585,9 +585,12 @@ mod mac {
         }
     }
 
-    /// The login items have no cancel button; a repair runs to its bounds.
-    fn never() -> AtomicBool {
-        AtomicBool::new(false)
+    /// Set when the user quits or changes the switch: a repair, a registration or a wait stops at its next step.
+    pub static CANCEL: AtomicBool = AtomicBool::new(false);
+
+    /// The process-wide cancel of the service's work.
+    fn never() -> &'static AtomicBool {
+        &CANCEL
     }
 
     /// The marker that Login Items has been opened for the first run once.
@@ -670,9 +673,9 @@ mod mac {
         /// cycle about 24 s), so the Settings switch must show it as busy.
         fn install(&mut self) -> Result<(), String> {
             let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
-            let quiet = install_is_quiet(self.first_run, opened_marker().exists());
+            let quiet = install_is_quiet(self.first_run);
             // A first run that lost the lock to another registration waits for it instead of leaving nothing registered.
-            let result = m.install_patient(&never(), quiet, 6, std::time::Duration::from_secs(5));
+            let result = m.install_patient(never(), quiet, 6, std::time::Duration::from_secs(5));
             if marker_wanted(self.first_run, quiet, &result) {
                 let marker = opened_marker();
                 let written = marker
@@ -720,7 +723,7 @@ mod mac {
             forget_old_version_file(dyno_agent::paths::Dirs::current().root());
             let mut m = manager(agent_answers, Timings::default())?;
             // Another registration or repair (the first run, a second copy) may hold the lock: wait for it a while.
-            let started = m.on_start_patient(&never(), 6, std::time::Duration::from_secs(5));
+            let started = m.on_start_patient(never(), 6, std::time::Duration::from_secs(5));
             if let Started::Repaired(reason, outcome) = &started {
                 crate::logging::info(&format!("agent service: replaced the registration ({reason:?}): {outcome:?}"));
             }
@@ -744,7 +747,7 @@ mod mac {
         /// waits for in a labelled phase ("Waiting for the background service") instead of a silent wait of up to 120 s here.
         fn resume(&mut self) -> Result<bool, String> {
             let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
-            match m.resume(&never(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
+            match m.resume(never(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
                 Ok(held) => Ok(held),
                 Err(_) if m.pending() => {
                     crate::logging::info("agent service: registered again; the link waits for it to answer");
@@ -909,10 +912,9 @@ mod tests {
     }
 
     #[test]
-    fn the_first_run_is_quiet_only_once_login_items_has_been_opened_for_it() {
-        assert!(!install_is_quiet(false, true), "the Settings switch always opens it");
-        assert!(!install_is_quiet(true, false));
-        assert!(install_is_quiet(true, true));
+    fn the_first_run_is_always_quiet_and_removes_nothing_and_the_settings_switch_never_is() {
+        assert!(install_is_quiet(true), "nobody asked: no System Settings, no removal of a healthy registration");
+        assert!(!install_is_quiet(false), "the Settings switch opens Login Items for what the user has to do");
     }
 
     #[test]

@@ -258,8 +258,9 @@ impl Manager {
                 recorded.phase_of(&self.version),
                 Some(Phase::Registering | Phase::Awaiting)
             );
-        // A job that lingers with no registration is not a registration: it is registered (and the job replaced).
-        let present = inspection.registration != crate::backend::Registration::Absent;
+        // A job that lingers with no registration is left to the start's plan too: a first run removes nothing.
+        let present = inspection.registration != crate::backend::Registration::Absent
+            || !matches!(inspection.job, Job::Absent | Job::Unknown);
         if present {
             // Something is registered: a first run removes nothing. Up (and this version's): remembered; otherwise the
             // start's plan decides what the registration needs.

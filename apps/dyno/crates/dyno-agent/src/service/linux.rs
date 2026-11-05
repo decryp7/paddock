@@ -96,9 +96,11 @@ pub fn install_timings() -> Timings {
     Timings::default().without_start_wait()
 }
 
-/// A request that nobody can cancel (the verbs and the Settings switch run to their bounds).
-fn never() -> AtomicBool {
-    AtomicBool::new(false)
+/// Set by the app when the user quits: the registration or the wait stops at its next step.
+pub static CANCEL: AtomicBool = AtomicBool::new(false);
+
+fn never() -> &'static AtomicBool {
+    &CANCEL
 }
 
 /// What a failed request says to the user, with the Linux words for a switch that is the user's.
@@ -115,7 +117,7 @@ pub fn words(e: &ServiceError) -> String {
 
 /// `dyno-agent service install` and Launch at login switched on: registers the unit, enables it and starts it.
 pub fn install(m: &mut Manager) -> Result<(), String> {
-    m.install_patient(&never(), false, PATIENCE.0, PATIENCE.1)
+    m.install_patient(never(), false, PATIENCE.0, PATIENCE.1)
         .map(drop)
         .map_err(|e| words(&e))
 }
@@ -152,7 +154,7 @@ pub fn ensure_result(started: Started, waited: bool) -> Result<bool, String> {
 /// definition from an older version, a program that is gone). Not installed stays not installed, and what the user switched
 /// off stays off.
 pub fn ensure(m: &mut Manager, waited: bool) -> Result<bool, String> {
-    let started = m.on_start_patient(&never(), PATIENCE.0, PATIENCE.1);
+    let started = m.on_start_patient(never(), PATIENCE.0, PATIENCE.1);
     if let Started::Repaired(reason, outcome) = &started {
         log::info!(reason:? = reason, outcome:? = outcome; "agent service: replaced the registration");
     }

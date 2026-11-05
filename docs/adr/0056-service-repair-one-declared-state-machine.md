@@ -153,10 +153,15 @@ The simulator lives in `paddock_service::testing` (rule 43; apps run a wiring co
 store is a port (`RecordStore`) with the file store and an in-memory store, so a run costs microseconds, not 12 ms per
 fsync and rename; one test uses the real file store and one kills a real child process holding the lock.
 
-**Exploration is to a fixed point, not to a depth.** States are `(record, simulated OS)`; they are finite because attempts
-are at most 3 and the clock is virtual with timings shrunk (as `link/model.rs` does with `Tuning`). The explorer takes
-every event of the alphabet from every reachable state, with crashes as graph edges (before and after each OS effect, and
-during recovery), and prints the state count.
+**Exploration is to a fixed point within stated bounds.** Per configuration the explorer visits every reachable `(record, simulated OS)`
+state until nothing new appears, but rare events (a fault, an interruption) are limited to a short run of steps on each path
+unless `MODEL_DEEP=1` lifts the limit; the default run covers 5 of the 8 configurations (the other 3 need `MODEL_DEEP=1`),
+`model_linux.rs` is bounded by its own alphabet, and the deep run does not finish in an hour on one host in a single process
+(split it with `MODEL_CONFIG=<Caps>/<Resp>`, one configuration per run). The integrator adds the deep run to the nightly workflow
+(`.gitea/workflows/nightly.yml`: one step per configuration, `MODEL_DEEP=1 MODEL_CONFIG=... cargo test --release -p paddock-service
+--test it the_crash_model`, each bounded). Until that runs, "no state in the default bounds violates an invariant" is the claim,
+not "no reachable state does". It states: the set of states is finite because attempts are at most 3 and the clock is virtual,
+with timings shrunk (as `link/model.rs` does with `Tuning`).
 
 Alphabet: Start, Install (asked and unattended), Uninstall, Resume, Repair, StopRequested, update, downgrade, a second copy
 (newer and older), login and reboot, Login Items toggled, damaged and newer record, record write failure, lock contention,

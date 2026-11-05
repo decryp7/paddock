@@ -293,8 +293,14 @@ pub fn plan(f: &Facts<'_>) -> Plan {
             ..
         } = f.state
         {
-            // A new removal cycle is a new register call: not past the cap. `Registering` is the free finish.
-            if capped && matches!(f.state, State::Attempting { phase: Phase::RemovingOld { .. }, .. }) && f.caps.automatic {
+            // The registration is gone and nothing else holds the job: registering it again finishes the replace and is not a new
+            // attempt (`allowed_registers`), so a crash at the cap never loses the service. With a job still held, the next removal
+            // cycle would be a new register call: past the cap that is a hold.
+            if capped
+                && matches!(f.state, State::Attempting { phase: Phase::RemovingOld { .. }, .. })
+                && !matches!(i.job, Job::Absent | Job::Unknown)
+                && f.caps.automatic
+            {
                 return Plan::Leave(held());
             }
             return if f.caps.automatic {
@@ -1066,7 +1072,17 @@ mod tests {
         for ours in [true, false] {
             assert_eq!(
                 with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours }), false),
-                Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS))
+                Plan::Replace(Reason::Interrupted),
+                "the registration is gone and nothing holds a job: registering again is the free finish, never a lost service"
+            );
+            let lingering = Inspection {
+                job: Job::Running,
+                ..Inspection::absent()
+            };
+            assert_eq!(
+                with(&lingering, false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours }), false),
+                Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS)),
+                "a job that is still held needs another removal cycle, which is a new register call past the cap"
             );
             assert_eq!(
                 with(&Inspection::absent(), false, attempting("1.0.4", 1, Phase::RemovingOld { ours }), false),

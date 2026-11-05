@@ -212,12 +212,11 @@ impl Manager {
     /// pending, the location is refused, the attempts are used up), so the app starts an agent of its own then. The
     /// link neither starts nor retires an agent of its own while this is true.
     pub fn pending(&mut self) -> bool {
-        let in_progress = matches!(self.record.peek().0.state, State::Attempting { .. });
-        // Past the attempts the wait ends in a hold, so nothing is coming: not pending.
+        // Past the attempts the wait ends in a hold, so nothing is coming: not pending. A replace that the start will make is
+        // pending already, so the link does not start an agent of its own in the seconds before the start repair runs.
         let used_up = self.record.peek().0.attempts_of(&self.version) >= MAX_ATTEMPTS;
         match self.decide(false, false).2 {
-            Plan::Await(_) => !used_up,
-            Plan::Replace(_) => in_progress && !used_up,
+            Plan::Await(_) | Plan::Replace(_) => !used_up,
             _ => false,
         }
     }
@@ -238,9 +237,19 @@ impl Manager {
     fn run_replace_locked(&mut self, reason: Reason, requested: bool, cancel: &AtomicBool) -> Ran {
         let before = self.record.load();
         let attempts0 = before.attempts_of(&self.version);
-        // Only this version's own `Registering` is a free finish (a crash after the removal, before the call): another
-        // version's attempts are not this one's, so this version starts its own count.
-        let finishing = before.phase_of(&self.version) == Some(Phase::Registering);
+        // Nothing registered and no job held: there is nothing to remove, so the first step is the registration.
+        let nothing_to_remove = {
+            let i = self.backend.inspect();
+            i.registration == crate::backend::Registration::Absent
+                && matches!(i.job, crate::backend::Job::Absent | crate::backend::Job::Unknown)
+        };
+        // Only this version's own replace that was begun (a crash after the removal, before or during the register call) is a
+        // free finish: its register call was already counted or never made. Another version's attempts are not this one's.
+        let finishing = nothing_to_remove
+            && matches!(
+                before.phase_of(&self.version),
+                Some(Phase::Registering | Phase::RemovingOld { .. })
+            );
         let allowed = allowed_registers(requested, self.timings.max_cycles, attempts0, finishing);
         if allowed == 0 {
             return Ran::Outcome(RepairOutcome::Failed(format!(
@@ -254,12 +263,6 @@ impl Manager {
                 Some(Phase::Registering | Phase::Awaiting | Phase::RemovingOld { ours: true })
             );
         let removing = Phase::RemovingOld { ours };
-        // Nothing registered and no job held: there is nothing to remove, so the first step is the registration.
-        let nothing_to_remove = {
-            let i = self.backend.inspect();
-            i.registration == crate::backend::Registration::Absent
-                && matches!(i.job, crate::backend::Job::Absent | crate::backend::Job::Unknown)
-        };
         let first = State::Attempting {
             version: self.version.clone(),
             attempts: attempts0,
@@ -353,6 +356,12 @@ impl Manager {
                 },
             }),
             // Nothing was counted: back to what it was.
+            // A register that was made and then cancelled stays counted (the registration may be there): waiting for it.
+            RepairOutcome::Cancelled if attempts > attempts0 => self.write_state(State::Attempting {
+                version: self.version.clone(),
+                attempts,
+                phase: Phase::Awaiting,
+            }),
             RepairOutcome::Cancelled => self.write_state(before.state.clone()),
             // The replace removed what an attempt of another version made: that attempt is over, so it is not restored (a
             // downgrade would otherwise take it for its own and settle a registration it did not make).
