@@ -18,8 +18,14 @@ pub struct ScanDevice {
     pub kind: Option<String>,
 }
 
+/// The longest device name taken from a scan. Apple silicon names an NVMe controller by its IOService path (150 to 400 characters
+/// seen), which is longer than the 128 characters shown to people ([`MAX_SMART_TEXT`]). The name is one argument of a process
+/// started without a shell, so its length and `/`, `@` and `:` are harmless; it still may not look like an option or hold control
+/// characters.
+const MAX_SCAN_NAME: usize = 1024;
+
 fn name_ok(n: &str) -> bool {
-    !n.is_empty() && n.len() <= MAX_SMART_TEXT && !n.starts_with('-') && !n.chars().any(char::is_control)
+    !n.is_empty() && n.len() <= MAX_SCAN_NAME && !n.starts_with('-') && !n.chars().any(char::is_control)
 }
 
 fn kind_ok(k: &str) -> bool {
@@ -28,24 +34,38 @@ fn kind_ok(k: &str) -> bool {
 
 /// The devices of `smartctl --scan-open -j`, at most `max`; entries with odd names or types are left out.
 pub fn parse_scan(json: &str, max: usize) -> Vec<ScanDevice> {
+    scan_devices(json, max).0
+}
+
+/// [`parse_scan`] and how many entries were left out as odd (for the log line).
+pub fn scan_devices(json: &str, max: usize) -> (Vec<ScanDevice>, usize) {
     let Ok(v) = serde_json::from_str::<Value>(json) else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
     let Some(list) = v["devices"].as_array() else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
-    list.iter()
+    let mut rejected = 0;
+    let devices = list
+        .iter()
         .filter_map(|d| {
-            let name = d["name"].as_str().filter(|n| name_ok(n))?.to_string();
-            let kind = match d["type"].as_str() {
-                Some(k) if kind_ok(k) => Some(k.to_string()),
-                Some(_) => return None,
-                None => None,
-            };
-            Some(ScanDevice { name, kind })
+            let parsed = (|| {
+                let name = d["name"].as_str().filter(|n| name_ok(n))?.to_string();
+                let kind = match d["type"].as_str() {
+                    Some(k) if kind_ok(k) => Some(k.to_string()),
+                    Some(_) => return None,
+                    None => None,
+                };
+                Some(ScanDevice { name, kind })
+            })();
+            if parsed.is_none() {
+                rejected += 1;
+            }
+            parsed
         })
         .take(max)
-        .collect()
+        .collect();
+    (devices, rejected)
 }
 
 /// Why a disk could not be read.
@@ -127,7 +147,7 @@ pub fn parse_disk(device: &str, json: &str, exit: Option<i32>) -> Result<SmartDi
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Invented, same shape as an Apple silicon NVMe read (WP-0): exit 4, health log present, a serial that must not survive.
@@ -208,6 +228,54 @@ mod tests {
         assert_eq!(all[2].kind, None);
         assert_eq!(parse_scan(scan, 1).len(), 1);
         assert!(parse_scan("garbage", 32).is_empty());
+    }
+
+    /// Captured shape (invented values): Apple silicon lists one NVMe controller as several IOService paths, 150 to 370 characters long.
+    pub(crate) fn apple_silicon_scan() -> String {
+        let long = |ans: &str, tail: &str| {
+            format!("IOService:/AppleARMPE/arm-io@10F00000/AppleH16GFamilyIO/{ans}@A000000/AppleANS3NVMeController/{tail}")
+        };
+        let a = format!("{}/{}", long("ans", "NS_01@1"), "IOBlockStorageServices/".repeat(2));
+        let b = format!("{}/{}", long("ans", "NS_02@2"), "IOBlockStorageServices/".repeat(10));
+        let c = format!("{}/{}", long("ans", "NS_03@3"), "IOBlockStorageServices/".repeat(10));
+        format!(
+            r#"{{"json_format_version":[1,0],"smartctl":{{"exit_status":0}},"devices":[{{"name":"{a}","info_name":"{a}","type":"nvme","protocol":"NVMe"}},{{"name":"{b}","info_name":"{b}","type":"nvme","protocol":"NVMe"}},{{"name":"{c}","info_name":"{c}","type":"nvme","protocol":"NVMe"}}]}}"#
+        )
+    }
+
+    /// Captured shape (invented values): one internal NVMe controller and two USB drives, which smartctl also lists as `nvme`.
+    pub(crate) fn internal_and_usb_scan() -> String {
+        let internal = "IOService:/AppleARMPE/arm-io@10F00000/AppleH16GFamilyIO/ans@A000000/AppleANS3NVMeController/NS_01@1";
+        let usb = |n: u8| {
+            format!("IOService:/AppleARMPE/arm-io@10F00000/AppleT8140USBXHCI/usb-drd{n}@B000000/AppleUSBXHCI/usb-device@1/IOUSBHostInterface@0/IOBlockStorageServices")
+        };
+        let entry = |name: &str| format!(r#"{{"name":"{name}","info_name":"{name}","type":"nvme","protocol":"NVMe"}}"#);
+        format!(
+            r#"{{"smartctl":{{"exit_status":0}},"devices":[{},{},{}]}}"#,
+            entry(internal),
+            entry(&usb(1)),
+            entry(&usb(2))
+        )
+    }
+
+    #[test]
+    fn apple_silicon_scan_names_over_128_characters_are_kept() {
+        let scan = apple_silicon_scan();
+        let (devices, rejected) = scan_devices(&scan, 16);
+        assert_eq!(
+            (devices.len(), rejected),
+            (3, 0),
+            "long IOService names are valid arguments, got {devices:?}"
+        );
+        assert!(devices.iter().any(|d| d.name.len() > 300));
+        assert!(devices.iter().all(|d| d.kind.as_deref() == Some("nvme")));
+        // Still strict: absurd lengths, leading dashes and control characters are rejected and counted.
+        let bad = format!(
+            r#"{{"devices":[{{"name":"{}"}},{{"name":"-x"}},{{"name":"a\nb"}},{{"name":"/dev/disk0"}}]}}"#,
+            "x".repeat(5000)
+        );
+        let (devices, rejected) = scan_devices(&bad, 16);
+        assert_eq!((devices.len(), rejected), (1, 3));
     }
 }
 

@@ -441,6 +441,11 @@ pub trait HelperReading: Send {
     fn via_helper(&self, calls: &dyn HelperCalls) -> Result<Self::Value, CallError>;
     /// What the agent can read itself; `Reading::Unavailable(reason)` when nothing.
     fn local(&mut self) -> Reading<Self::Value>;
+    /// Whether the helper reads this on this system at all. When it does not (SMART on macOS: the agent runs its own smartctl as the
+    /// person), the helper is never asked and no reason sends a person to turn it on: the reason is the local reader's alone.
+    fn helper_applies(&self) -> bool {
+        true
+    }
     /// For a local value that is only part of what the helper would give (Linux memory: the total without the slots), the
     /// sentence saying what is missing. The value is still shown; the reading's source then says what would add the rest.
     fn partial(&self, _local: &Self::Value) -> Option<String> {
@@ -530,6 +535,27 @@ impl<R: HelperReading> HelperFirst<R> {
     /// Reads once.
     pub fn read(&mut self) -> Sourced<R::Value> {
         let started = Instant::now();
+        if !self.reading.helper_applies() {
+            let out = match self.reading.local() {
+                Reading::Available(v) => Sourced {
+                    value: Reading::Available(v),
+                    via: ReadVia::Local,
+                },
+                Reading::Unavailable(why) => {
+                    let via = ReadVia::retry(&why);
+                    Sourced {
+                        value: Reading::Unavailable(via.reason().unwrap_or_default().to_string()),
+                        via,
+                    }
+                }
+            };
+            self.note(
+                "read on this computer, the helper does not read this on this system",
+                false,
+                started,
+            );
+            return out;
+        }
         let availability = self.port.availability();
         if !availability.is_ready() {
             let out = self.without_helper(&availability);

@@ -116,8 +116,36 @@ pub struct ReportInput<'a> {
     pub hardware: Vec<String>,
 }
 
+/// A volume smaller than this is not a disk that fills up (mounted installer images, helper volumes): the report leaves it out.
+pub const MIN_REPORT_DISK_BYTES: u64 = 1 << 30;
+
+/// Mount points that are plumbing, not storage a person manages: the OS's helper mounts, temporary folders and VM files.
+const NOT_REPORTED_PREFIXES: &[&str] = &[
+    "/System/Volumes/",
+    "/Volumes/.timemachine",
+    "/Volumes/com.apple.",
+    "/private/var/vm",
+    "/Library/Developer/CoreSimulator",
+    "/private/var/folders",
+    "/var/folders",
+    "/private/tmp",
+    "/tmp",
+    "/var/tmp",
+];
+
+/// Whether a disk of the history belongs in the report. The engine decides (the page and both exports show what the report holds):
+/// never an empty volume, a temporary folder, the OS's helper mounts or a volume too small to fill up. The startup disk is `/`.
+pub fn is_report_disk(d: &ReportDisk) -> bool {
+    let plumbing = NOT_REPORTED_PREFIXES.iter().any(|p| {
+        let bare = p.trim_end_matches('/');
+        d.disk == bare || d.disk.starts_with(&format!("{bare}/"))
+    });
+    !plumbing && d.total >= MIN_REPORT_DISK_BYTES && d.free <= d.total
+}
+
 /// Builds the report.
-pub fn weekly(i: ReportInput<'_>) -> WeeklyReport {
+pub fn weekly(mut i: ReportInput<'_>) -> WeeklyReport {
+    i.disks.retain(is_report_disk);
     let n = i.points.len().max(1) as f32;
     let avg_cpu = i.points.iter().map(|p| p.cpu).sum::<f32>() / n;
     let peak_cpu = i.points.iter().map(|p| p.cpu_max).fold(0.0, f32::max);
@@ -614,6 +642,36 @@ mod tests {
         let mut i = input(&[]);
         i.crashes = 1;
         assert!(!weekly(i).nothing_to_report);
+    }
+
+    #[test]
+    fn noise_volumes_are_not_reported_in_the_page_the_highlights_or_the_exports() {
+        // Invented names of the same shape as real noise: a temp folder volume, mounted installer images, a helper volume.
+        let disk = |name: &str, total: u64, free: u64, forecast| ReportDisk {
+            disk: name.into(),
+            total,
+            free,
+            forecast,
+        };
+        let mut i = input(&[]);
+        i.crashes = 1; // a week with something in it, so the exports have their sections
+        i.disks = vec![
+            disk("/", 500 << 30, 20 << 30, Forecast::FullInDays(12.0)),
+            disk("/private/var/folders/ab/cdef0123/T/tmpXYZ", 0, 0, Forecast::NotEnoughData),
+            disk("/Volumes/Example Installer", 0, 0, Forecast::NotEnoughData),
+            disk("/Volumes/Example App", 55 << 20, 24 << 20, Forecast::NotEnoughData),
+            disk("/Volumes/Example Helper", 8 << 20, 5 << 20, Forecast::FullInDays(2.0)),
+            disk("/System/Volumes/Preboot", 500 << 30, 400 << 30, Forecast::NotFilling),
+            disk("/Volumes/Backup", 4 << 40, 1 << 40, Forecast::NotFilling),
+        ];
+        let r = weekly(i);
+        let names: Vec<&str> = r.disks.iter().map(|d| d.disk.as_str()).collect();
+        assert_eq!(names, ["/", "/Volumes/Backup"]);
+        assert!(!r.highlights.iter().any(|h| h.contains("Example Helper")), "{:?}", r.highlights);
+        for text in [to_markdown(&r, UTC), to_html(&r, UTC)] {
+            assert!(!text.contains("Example") && !text.contains("/private/var"), "{text}");
+            assert!(text.contains("Backup"), "missing Backup in: {text}");
+        }
     }
 
     #[test]
