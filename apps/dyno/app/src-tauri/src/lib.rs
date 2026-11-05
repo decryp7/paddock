@@ -17,6 +17,7 @@ pub mod logging;
 pub mod login;
 pub mod login_item;
 pub mod mcp;
+pub mod per_machine;
 pub mod popover;
 pub mod power_menu;
 pub mod service_repair;
@@ -205,8 +206,8 @@ const LEGAL: [(&str, &str, &str); 3] = [
 /// Updates, About and What's New. Without the CI's updater key the build cannot update itself and says so ("Updates
 /// are not available in this build").
 ///
-/// The installer is `tauri-plugin-updater` (registered in [`run`]) with the same key the updater verifies with: without
-/// it an update is found but never installed.
+/// The installer is the per-machine hand-off on Windows and `tauri-plugin-updater` (registered in [`run`], with the same key
+/// the updater verifies with) elsewhere: without one an update is found but never installed.
 fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHandle<R>) -> UpdatesBuilder {
     let key = option_env!("TAURI_UPDATER_PUBKEY");
     let b = LEGAL
@@ -215,18 +216,37 @@ fn updater<R: Runtime>(test_dir: Option<std::path::PathBuf>, app: &tauri::AppHan
     let b = b
         .channel("stable", "Stable", UPDATE_FEED)
         .public_key(key)
-        .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
-            app.clone(),
-            key.unwrap_or_default(),
-        )))
         .releases_page(RELEASES_PAGE)
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .changelog(include_str!("../../../CHANGELOG.md"))
         .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
+    let b = install_with(b, app, key.unwrap_or_default());
     match test_dir {
         None => b,
         Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false),
     }
+}
+
+/// Windows installs per machine (ADR 0053): Install hands the verified download to `paddock-setup.exe apply-update` in the
+/// install folder, elevated through one Windows prompt; nothing installs when Dyno quits. At start the updater waits, bounded,
+/// for another user's installer. Other systems install through `tauri-plugin-updater`.
+#[cfg(windows)]
+fn install_with<R: Runtime>(b: UpdatesBuilder, app: &tauri::AppHandle<R>, _key: &str) -> UpdatesBuilder {
+    use paddock_updater::{ElevatedHandoff, InstallScope};
+    let dir = per_machine::install_dir();
+    let handoff = ElevatedHandoff::new(
+        dir.clone().unwrap_or_default(),
+        Arc::new(paddock_updater::tauri::ShellElevator),
+        Arc::new(per_machine::SetupFacts),
+    );
+    b.installer(Arc::new(handoff))
+        .install_scope(InstallScope::PerMachine, dir, Some(per_machine::administrator()))
+        .installer_lock(Arc::new(per_machine::SetupLock::new(&app.config().identifier)))
+}
+
+#[cfg(not(windows))]
+fn install_with<R: Runtime>(b: UpdatesBuilder, app: &tauri::AppHandle<R>, key: &str) -> UpdatesBuilder {
+    b.installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(app.clone(), key)))
 }
 
 /// The window layer: the main window from `tauri.conf.json` (`"create": false`), closing the last window keeps Dyno in the
@@ -353,6 +373,12 @@ fn agent_setup<R: Runtime>(
     );
     let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
+    #[cfg(windows)]
+    if installed {
+        if let Some(dir) = per_machine::install_dir() {
+            health::check_setup_version(app, &dir);
+        }
+    }
     if installed {
         // The first run's registration comes first, on a worker the link waits for (it may open System Settings or wait on
         // systemctl: ER-17), so the link finds a supervising service and starts no agent of its own.
