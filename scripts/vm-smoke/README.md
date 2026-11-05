@@ -117,7 +117,7 @@ key (only `powercfg /requests`, `/waketimers` and `/a` are ever run).
 
 | Step | Judged by |
 |---|---|
-| Install (per-user, silent, no UAC) | files under `%LOCALAPPDATA%\Dyno`, product version |
+| Install (per-machine NSIS, silent, a real UAC prompt answered over the VM's VNC) | precondition: no per-user Dyno in the snapshot; files under `C:\Program Files\Dyno`, the HKLM uninstall entry, no write right for standard users, product version. Evidence kept even on failure: `setup.log`, the NSIS exit reason, recent Application errors, the UAC screenshot (in `evidence/`). A failed install stops the suite: one class (product or check), later steps are "not measured" |
 | Cold start, second launch | `Win32_Process`: one `dyno-app`, one `dyno-agent run` whose parent is the app, `agent.json` names it, no new process on a second launch |
 | Keep awake | `dyno awake on/off`; `powercfg /requests` lists then drops the Dyno request |
 | Scheduled wake | `dyno wake-schedule add/list/cancel` (the wake setting is seeded; `settings.json` is written without a BOM, serde_json rejects one); `powercfg /waketimers` only where `powercfg /a` shows a sleep state, else SKIP with the evidence (this VM has none) |
@@ -126,8 +126,7 @@ key (only `powercfg /requests`, `/waketimers` and `/a` are ever run).
 | Screenshot check on the real DOM (`win-ui.mjs`) | paddock-e2e's `screenshotProblems` over every Dyno window: clipped text, raw identifiers, mock text, colour-only chips |
 | Quit | File > Exit: no `dyno-app` or `dyno-agent` left |
 
-**Not built yet (manual):** the Windows admin helper (the UAC consent is on the secure desktop: it needs the VM's VNC enabled in the `.vmx`
-after the snapshot revert, and `vncdo` typing the administrator credentials, because the test account is a standard user), the tray
+**Not built yet (manual):** the tray
 right-click menu with the Keep awake and Wake device submenus, dialogs at 150 % (the live display-scale change fails on the VMware display),
 Wake-on-LAN on the wire, the "Audio is playing" wait (needs a virtual sound card in the `.vmx`), and everything on Linux (an amd64 `.deb` in a
 Rosetta GNOME VM with the polkit prompt).
@@ -146,3 +145,31 @@ Rosetta GNOME VM with the polkit prompt).
 `node --test scripts/vm-smoke/*.test.mjs` (CI's `tools` job): the parsers and judges on captured-shape text, and the whole
 sequence against a fake guest with seeded faults (a second agent ten seconds late, an agent left after Quit, an app that never
 starts). They need no VM.
+
+## The verdict, the manifest and the release set
+
+A run is **PASS only when every step its manifest requires ran and passed** (`manifest.mjs`, per OS and suite; `verdict.mjs`). The three outcomes
+have their own exit codes, on all three runners:
+
+| Verdict | Exit | Meaning |
+|---|---|---|
+| PASS | 0 | every required step passed |
+| FAIL | 1 | a step failed in the product |
+| (error) | 2 | the tool could not run (no Tart, download failed) |
+| INCOMPLETE | 3 | nothing failed, but a required step is missing, was skipped or not measured, or its check broke; the result lists what is missing |
+
+A step reports its **class**: `fail` is the product; `check-broken` is the measurement or its control (a dead SSH, a UAC answer that did not take, a
+per-user leftover in the snapshot, a missing base image) and never counts as a product FAIL. A literal `ok: true` row is `info` (it cannot make a
+pass). Without `--ui` or `--reboot-check` (Windows), `--reboot-check` (Linux) or the right `--suite` the missing steps make the run INCOMPLETE;
+`--partial` requires only what the flags ask for and the result says it is not a release verdict. Windows has two runs (`--ui`, `--reboot-check`)
+because the restart run stops after the install and the start.
+
+The result header states the **installer's sha256**, its source (CI run id or local path) and the **build binding**: `--run` reads the run's head
+commit (`GET /api/v1/repos/decryp7/paddock/actions/runs/<id>`, or give `--expect-commit <12 hex>`), and the installed binary must contain the 12-digit
+commit the `build-env` action embeds (`option_env!("PADDOCK_BUILD_COMMIT")`). Dyno's `--version` prints the version only (every build reads 1.1.0); the
+About page shows the commit, but no CLI prints it: see "What the checks need from the product" in the hand-off.
+
+**The release set for one CI run:** `scripts/vm-smoke/chain-release.sh <ci run id> [results folder]` runs windows-ui, windows-restart, linux-reboot,
+macos-start, macos-power, macos-helper and macos-helper-restart (hold the host's VM lock around it). Results go to a stable folder
+`<folder>/run-<id>/` (a `.md` and a `.json` per run, screenshots in `evidence/`); `release-verdict.mjs <folder>` prints the release verdict:
+PASS only with all seven runs present, not partial, passed, of the same CI run and one installer per OS.

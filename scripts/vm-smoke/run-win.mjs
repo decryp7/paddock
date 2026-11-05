@@ -12,7 +12,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildStep, classifyInstallFailure, expectedCommit } from './verdict.mjs';
 import { requiredSteps } from './manifest.mjs';
-import { commitOfRun, finalizeRun, foundFromPs, psHasCommit, sha256File, withBuildStep } from './report.mjs';
+import { commitOfRun, finalizeRun, resultFolder, foundFromPs, psHasCommit, sha256File, withBuildStep } from './report.mjs';
 import { runUiPhase } from './win-ui.mjs';
 import { helperSteps, answerUac } from './win-helper.mjs';
 import { afterQuitSteps } from './win-machine.mjs';
@@ -95,6 +95,8 @@ async function main(argv) {
     const exe = o.installer ? resolve(o.installer) : await download(o.run, 'dyno-Windows', scratch);
     if (!existsSync(exe)) throw new Error(`${exe} is not a file`);
     const source = o.installer ?? `CI run ${o.run}, artifact dyno-Windows, ${basename(exe)}`;
+    // UAC and actor screenshots go to the run's evidence folder, next to the result (the host /tmp was overwritten by the next run).
+    process.env.PADDOCK_EVIDENCE_DIR = join(resultFolder(out, { run: o.run, installerSha256: sha256File(exe) }), 'evidence');
     // Never touch a VM somebody else is running: if it is up before this run started it, stop here without a revert or a stop in the cleanup.
     if (/running/.test(vm(['status'], 30_000).stdout)) throw new Error('paddock-win11-test is already running (another job?); refusing to revert or stop it');
     started = true;
@@ -194,6 +196,8 @@ async function main(argv) {
     const raw = JSON.parse(readFileSync(stepsFile, 'utf8').replace(/^\uFEFF/, ''));
     let steps = (Array.isArray(raw) ? raw : [raw]).map((s) => ({ ...s, checks: s.checks ?? [], evidence: [].concat(s.evidence ?? []).map(String) }));
     steps = classifyInstallFailure(steps); // one class, and nothing after a failed install counts
+    // The install is per machine: a real UAC prompt must have appeared and been answered (uac-1); none at all is a broken check, not an install.
+    if (steps[0] && !uacNotes.some((u) => /^uac-1:/.test(u.detail))) { steps[0].checks.push({ ok: false, kind: 'check', detail: 'no UAC prompt (consent.exe) was seen for the install: the per-machine install was not exercised' }); steps[0].status = 'fail'; }
     if (steps[0]) { steps[0].evidence.push(...uacNotes.map((u) => `UAC: ${u.detail}`)); const badUac = uacNotes.filter((u) => !u.ok); if (badUac.length) { steps[0].status = 'fail'; steps[0].checks.push(...badUac.map((u) => ({ ok: false, detail: u.detail }))); } }
     if (!done) steps.push({ title: 'Suite finished', status: 'fail', summary: 'the suite did not finish within 40 minutes', checks: [], evidence: [] });
     steps.push(...uiSteps);
@@ -205,7 +209,8 @@ async function main(argv) {
       out, started: started_, meta: { label: o.reboot && !o.ui ? 'windows-restart' : 'windows-ui', os: 'windows', run: o.run ?? null },
       run: { app: 'Dyno', version: steps[0]?.evidence?.[0]?.replace(/^version /, ''), installer: source, installerSha256: sha256File(exe), source, expectedCommit: expected, partial: o.partial, required, guest: 'VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot gui-session-tools), interactive session, x64 installer under emulation', started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps: allSteps },
     });
-    for (const f of readdirSync(dest)) if (f.endsWith('.png')) writeFileSync(join(dirname(file), `${started_.replace(/[:.]/g, '-')}-win-${f}`), readFileSync(join(dest, f)));
+    mkdirSync(join(dirname(file), 'evidence'), { recursive: true });
+    for (const f of readdirSync(dest)) if (f.endsWith('.png') || /^setup-log-.*\.txt$|^run\.log$/.test(f)) writeFileSync(join(dirname(file), 'evidence', `${started_.replace(/[:.]/g, '-')}-win-${f}`), readFileSync(join(dest, f)));
     log(`result: ${file}`);
     console.log(file);
     return exit;
