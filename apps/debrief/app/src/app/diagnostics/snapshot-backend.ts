@@ -32,9 +32,9 @@ export abstract class SnapshotBackend {
   /** Calls `handler` for every `debrief://error` event. */
   abstract onEngineError(handler: (error: EngineError) => void): Promise<Unlisten>;
   /** What a problem report would contain, for the user to review before saving. */
-  abstract reportPreview(description: string): Promise<ProblemReportPreview>;
+  abstract reportPreview(description: string, includeScreenshots?: boolean): Promise<ProblemReportPreview>;
   /** Writes the problem report as a background export job; resolves with the job at once. */
-  abstract saveReport(path: string, description: string, overwrite?: boolean): Promise<number>;
+  abstract saveReport(path: string, description: string, overwrite?: boolean, includeScreenshots?: boolean): Promise<number>;
   /** Opens Debrief's own logs in a new window, filtered to the activity entries (Help ▸ Show activity log). Resolves to the window label. */
   abstract openActivityLog(): Promise<string>;
   /** The diagnostics report this window opened (a zip saved by "Report a problem"), if any. */
@@ -85,11 +85,11 @@ export class TauriSnapshotBackend extends SnapshotBackend {
   onEngineError(handler: (error: EngineError) => void) {
     return this.listen(ENGINE_ERROR_EVENT, (p) => handler(p as EngineError));
   }
-  reportPreview(description: string) {
-    return this.call<ProblemReportPreview>('problem_report_preview', { description });
+  reportPreview(description: string, includeScreenshots = false) {
+    return this.call<ProblemReportPreview>('problem_report_preview', includeScreenshots ? { description, includeScreenshots } : { description });
   }
-  saveReport(path: string, description: string, overwrite = false) {
-    return this.call<number>('save_problem_report', overwrite ? { path, description, overwrite } : { path, description });
+  saveReport(path: string, description: string, overwrite = false, includeScreenshots = false) {
+    return this.call<number>('save_problem_report', { path, description, ...(overwrite ? { overwrite } : {}), ...(includeScreenshots ? { includeScreenshots } : {}) });
   }
   openActivityLog() {
     return this.call<string>('open_activity_log');

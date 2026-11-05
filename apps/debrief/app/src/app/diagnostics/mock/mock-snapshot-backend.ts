@@ -30,7 +30,7 @@ export class MockSnapshotBackend extends SnapshotBackend {
   /** Calls made by the UI, for assertions. */
   readonly exports: { path: string; ids: string[] }[] = [];
   /** Problem reports "saved" by the UI, for assertions. */
-  readonly reports: { path: string; description: string }[] = [];
+  readonly reports: { path: string; description: string; includeScreenshots: boolean }[] = [];
   folderOpened = 0;
 
   /** `crumbs`: the window's latest activity (the Rust shell reads its own ring; the mock asks the UI's). */
@@ -110,7 +110,7 @@ export class MockSnapshotBackend extends SnapshotBackend {
     this.listeners.add(handler);
     return () => this.listeners.delete(handler);
   }
-  async reportPreview(description: string): Promise<ProblemReportPreview> {
+  async reportPreview(description: string, includeScreenshots = false): Promise<ProblemReportPreview> {
     const crumbs = this.crumbs(200);
     const text = description.trim();
     const entries = [
@@ -126,7 +126,7 @@ export class MockSnapshotBackend extends SnapshotBackend {
       { name: 'logs/activity.log', bytes: 4096, summary: `${crumbs.length} activity entries` },
       { name: 'logs/debrief.log', bytes: 65536, summary: "Debrief's own log (recent part)" },
       ...this.items.flatMap((i) => [
-        { name: `snapshots/${i.info.id}.png`, bytes: i.info.bytes, summary: `Screenshot: ${i.info.reason}` },
+        ...(includeScreenshots ? [{ name: `snapshots/${i.info.id}.png`, bytes: i.info.bytes, summary: `Screenshot: ${i.info.reason}` }] : []),
         { name: `snapshots/${i.info.id}.json`, bytes: 1024, summary: `Error details and ${i.info.breadcrumbs.length} breadcrumbs` },
       ]),
     ];
@@ -136,10 +136,10 @@ export class MockSnapshotBackend extends SnapshotBackend {
       systemInfo: { appVersion: 'mock', commit: 'unknown', sessionId: 'mock-session', os: 'browser', plugins: [] },
     };
   }
-  async saveReport(path: string, description: string, overwrite = false) {
+  async saveReport(path: string, description: string, overwrite = false, includeScreenshots = false) {
     if (!overwrite && this.reports.some((r) => r.path === path)) throw new Error(`${path}${FILE_EXISTS_SUFFIX}`);
-    this.reports.push({ path, description });
-    const files = (await this.reportPreview(description)).entries.length;
+    this.reports.push({ path, description, includeScreenshots });
+    const files = (await this.reportPreview(description, includeScreenshots)).entries.length;
     return this.fileJob('Save problem report', path, `${files} files zipped.`);
   }
   /** Times the activity log was opened (a browser has no second window). */

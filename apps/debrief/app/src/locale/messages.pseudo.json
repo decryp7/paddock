@@ -1379,6 +1379,8 @@
     "diagnostics.reportDialog.saveFailed": "⟦Çööûûļð ñööţ šáṽéé ţĥéé ŕééþöŕţ: {$error}⟧",
     "diagnostics.reportDialog.saveTitle": "⟦Šááṽéé þŕööƀļéɱ ŕééþööŕţ⟧",
     "diagnostics.reportDialog.saving": "⟦Šááṽîîñĝ ţöö {$path}. Ýööûû çááñ çļöšéé ţĥîîš ðîîáļööĝ; áá ɱééššáĝéé ţééļļš ýööû ŵĥééñ ţĥéé ƒîîļé îîš ŕééááðý ţö ááţţááçĥ.⟧",
+    "diagnostics.reportDialog.screenshots": "⟦ÎÎñçļûûðéé šçŕéééñšĥööţš ööƒ ţĥé Ðééƀŕîîééƒ ŵîñðööŵ⟧",
+    "diagnostics.reportDialog.screenshotsHint": "⟦ÖÖƒƒ ƀý ðééƒááûļţ. ÅÅ šçŕééééñšĥöţ šĥööŵš ŵĥááţ ŵááš öñ šçŕééééñ ŵĥééñ áñ ééŕŕööŕ ĥááþþéñééð, ŵĥîîçĥ çááñ îñçļûûðéé ţĥéé çöñţééñţš ööƒ ţĥéé ļöĝš ýööûû ĥááṽé ööþééñ, ááñð îţ îîš ñööţ ŕééðáçţééð. Ţĥéé ééŕŕöŕ ðééţááîîļš áŕéé îîñçļûûðéð ééîîţĥééŕ ŵáý.⟧",
     "diagnostics.reportDialog.started": "⟦Šááṽîîñĝ ţĥéé þŕöƀļééɱ ŕééþööŕţ — ŕûññîîñĝ îîñ Ĵööƀš⟧",
     "diagnostics.reportDialog.steps": "⟦Šţééþš ţöö ŕééþŕöðûûçéé⟧",
     "diagnostics.reportDialog.whatHappened": "⟦Ŵĥááţ ĥááþþééñéð? Ŵĥááţ ðîîð ýööû ééẋþééçţ?⟧",

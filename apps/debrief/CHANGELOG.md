@@ -11,6 +11,7 @@ panel reads it at build time); `git cliff` lists every commit if you need the fu
 
 ### Fixed
 
+- **Report a problem:** Debrief's own log and the logs of its helper processes in the report now have secrets and personal details removed (tokens and passwords, your user name, home folder and computer name, e-mail, IP and MAC addresses). Screenshots of the Debrief window are no longer in the report unless you tick Include screenshots in the dialog, because a screenshot can show the contents of the logs you have open
 - **Browser on Windows:** the page browser Debrief downloads (Chrome for Testing) no longer starts its network service twice, which could make the first page it opened fail to load
 - **Event Log follower:** the status no longer shows more queued events than the queue holds while the writer is busy
 - **Research profile:** clearing the kept research profile right after the AI browser closed no longer fails with "in use"
