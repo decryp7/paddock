@@ -115,8 +115,12 @@ some fields; "n/s" means the source does not state them.
   (P3's test: 20 whole reads in 20 refreshes, now 0), and the quadratic join ran inside it. The watcher is now a quiet job
   ("Updating names") that blocks inside the store on `catalogue_status` until the catalogue commits, with no timer. It is
   covered by app tests with a store double (one wait, woken once, never reading names while unbuilt), not by this
-  engine-level run, which does not start the app. The 3.2 CPU-s the rebuild takes on 30 groups is not explained:
-  it is not the join (0 comparisons), and it is the same on both sides; it is the next thing to profile for the 1 s budget.
+  engine-level run, which does not start the app. The 3.1 CPU-s the rebuild takes on 30 groups is the
+  "Comparing look-alike names" phase: 2.89 of its 2.90 s is the page query that reads the events of each look-alike
+  name (full-text search over 133,120 events; the join itself compares 0 pairs). It is the same on both sides. Rule 51's two
+  questions are open for it (queries in parallel, and fewer or cheaper ones: for example one batched read, or none for a
+  name whose look-alikes cannot join); the D7 budget of 1 s is not met on this sample until then. A second run of the
+  scenario with the phases printed (20 s idle window): import 1.19 CPU-s, catalogue and index 6.66, rebuild 3.11, idle 0 statements and 0.004 CPU-s.
   The 60 s idle window shows the store itself is quiet after an import; the 60 s base wait of the loops did not hide a
   burn at the store level (0.010 s CPU, 0 statements in the base), so the idle cost the user saw was the app's watcher.
 
