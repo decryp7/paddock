@@ -34,6 +34,8 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Fixed
 
+- Inventory: a memory module's maker and part number that does not fit beside the drawing now shows in full when you point at it, instead of being cut off with no way to read it.
+- Backup health: when File History has never been turned on, the page says "Not set up" and how to turn it on, instead of "Could not check" with a technical message. When a tool really cannot be read, the page now says to choose Check now to try again.
 - macOS: memory in use is read the way Activity Monitor reads it (app memory, wired and compressed). Dyno had counted memory that apps were using as free and showed 17 percent where Activity Monitor showed 54 percent. Memory alarms and the memory figure in reports now match what Activity Monitor says, so a memory alarm can fire on a Mac where it stayed quiet before.
 - Tables grow and shrink with the window instead of keeping a fixed height. The Processes table fills the page; on every other page (Firewall, Alarms, Extras, Network, Benchmarks, Issues and the rest) the page scrolls once and each table is as tall as its rows, up to the height of the visible page, so a long table never needs more than the window and its last row can always be reached. The mouse wheel passes on to the page at the end of a table.
 - Lifespan on an Apple silicon Mac now reads the internal SSD. Dyno had thrown away the long drive names that macOS gives, so it said smartctl found no drives. A USB drive is now listed as one macOS cannot read health from, and the page no longer tells you to turn on administrator readings on a Mac, where the helper is not involved.
