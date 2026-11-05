@@ -8,6 +8,7 @@
 
 pub mod actions;
 pub mod commands;
+pub mod crash_reports;
 pub mod dialogs;
 pub mod dto;
 pub mod first_data;
@@ -24,7 +25,6 @@ pub mod shell;
 pub mod supervise;
 pub mod tray;
 pub mod tray_away;
-pub mod tray_focus;
 pub mod tray_host;
 pub mod tray_identity;
 pub mod tray_look;
@@ -186,7 +186,9 @@ fn diagnostics_setup() -> Result<paddock_diag::tauri::Setup, Box<dyn std::error:
     let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
     let dirs = paddock_env::AppDirs::for_app(&id)?;
     let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
-    let mut setup = paddock_diag::tauri::Setup::new(info, dirs).settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE);
+    let mut setup = paddock_diag::tauri::Setup::new(info, dirs)
+        .settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE)
+        .section(Arc::new(crash_reports::CrashReports::new(crash_reports::default_dir())));
     if let Some(handle) = logging::handle() {
         setup = setup.log(handle);
     }
@@ -417,9 +419,6 @@ fn on_ready(app: &tauri::AppHandle, asked_hidden: bool) {
         Some(why) => format!("started hidden ({})", why.describe()),
         None => "started with a window".to_string(),
     });
-    // ControlCenter keeps menu-bar items made after it started off screen until the app has been active once: a hidden start never
-    // is, so it activates once now (the tray exists) and gives focus back. A start by hand is active already.
-    tray::activate_at_start(app, hidden);
     if !hidden && app.get_webview_window(paddock_commands::labels::MAIN_LABEL).is_none() {
         if let Err(e) = paddock_window::tauri::create_main(app) {
             log::error!(Error = e.message.as_str(); "The main window could not be opened");
@@ -436,6 +435,12 @@ pub fn run() {
     if let Some(handle) = &_log {
         logging::set_handle(handle.clone());
     }
+    crash_reports::log_at_start(
+        crash_reports::default_dir().as_deref(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX)),
+    );
     let cwd = std::env::current_dir().ok();
     #[allow(unused_mut)]
     let mut launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);

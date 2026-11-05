@@ -1,12 +1,11 @@
-//! The OS calls behind the tray diagnostics and the macOS start activation (ER-27): who is in front, whether Dyno has been active,
-//! ControlCenter's and Explorer's pid and start time, the window server's list of on-screen windows. Thin: every judgement is
-//! in a pure module ([`crate::tray_focus`], [`crate::tray_shown`]).
+//! The OS calls behind the tray diagnostics (ER-27): ControlCenter's and Explorer's pid and start time, the window server's list of
+//! on-screen windows and its menu bar. Thin: every judgement is in a pure module ([`crate::tray_shown`]).
 #![allow(unsafe_code)]
 
 #[cfg(target_os = "macos")]
 pub use mac::context;
 #[cfg(target_os = "macos")]
-pub use mac::{control_center_pid, on_screen_windows, NativeFocus};
+pub use mac::{control_center_pid, on_screen_windows};
 #[cfg(windows)]
 pub use win::context;
 
@@ -18,16 +17,12 @@ pub fn context() -> String {
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use crate::tray::on_main;
-    use crate::tray_focus::{FocusPort, Front, Method};
     use crate::tray_shown::Window;
     use objc2::rc::Retained;
-    use objc2::runtime::NSObjectProtocol;
-    use objc2_app_kit::{NSApplication, NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
+    use objc2_app_kit::NSRunningApplication;
     use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
-    use objc2_foundation::{MainThreadMarker, NSArray, NSDictionary, NSNumber, NSProcessInfo, NSString};
+    use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
     use std::time::{SystemTime, UNIX_EPOCH};
-    use tauri::{AppHandle, Manager, Wry};
 
     /// When process `pid` started (seconds since the epoch), from the kernel (`proc_pidinfo`) (`launchDate` is empty for
     /// ControlCenter, which is not a registered GUI app).
@@ -39,13 +34,10 @@ mod mac {
         (got == size && info.pbi_start_tvsec > 0).then(|| info.pbi_start_tvsec as f64 + info.pbi_start_tvusec as f64 / 1e6)
     }
 
-    /// Dyno's activity and ControlCenter's identity, for the log: whether Dyno is the active app now, ControlCenter's pid and start
-    /// time (seconds since the epoch) and how long after it Dyno started. Main thread only.
+    /// What the log needs to explain a missing item: whether the session has a menu bar at all, ControlCenter's pid and start time
+    /// (seconds since the epoch) and how long after it Dyno started.
     pub fn context() -> String {
-        let Some(mtm) = MainThreadMarker::new() else {
-            return "context unavailable: not on the main thread".to_string();
-        };
-        let active = NSApplication::sharedApplication(mtm).isActive();
+        let bar = on_screen_windows().map_or_else(|e| format!("menu bar unknown ({e})"), |w| crate::tray_shown::menubar(&w).describe());
         let own = start_secs(std::process::id() as i32);
         let cc = NSRunningApplication::runningApplicationsWithBundleIdentifier(&NSString::from_str("com.apple.controlcenter"));
         let cc = cc.firstObject();
@@ -65,7 +57,7 @@ mod mac {
             _ => String::new(),
         };
         let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        format!("Dyno active now {active}; {cc_text}{after}; now {now} (epoch s)")
+        format!("{bar}; {cc_text}{after}; now {now} (epoch s)")
     }
 
     fn string_of(dict: &NSDictionary, key: &str) -> Option<String> {
@@ -113,129 +105,6 @@ mod mac {
             });
         }
         Ok(out)
-    }
-
-    /// The Apple event `activate` to Dyno itself, sent by `osascript` (a program with a timeout, never a window): macOS honours it
-    /// where the cooperative call is refused for a background launch (measured on macOS 26.6.2).
-    fn apple_event_activate() -> Result<(), String> {
-        let script = format!("tell application id \"{}\" to activate", crate::tray_identity::BUNDLE_ID);
-        let mut cmd = paddock_proc::command("/usr/bin/osascript");
-        cmd.args(["-e", &script]);
-        let out =
-            paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(std::time::Duration::from_secs(5))).map_err(|e| e.to_string())?;
-        if out.success() {
-            Ok(())
-        } else {
-            Err(format!("osascript {:?}: {}", out.outcome, out.stderr_text().trim()))
-        }
-    }
-
-    /// [`FocusPort`] over AppKit: every call hops to the main thread (the activation sequence runs on its own thread).
-    pub struct NativeFocus {
-        /// The app.
-        pub app: AppHandle<Wry>,
-        /// The autosave names of Dyno's items (what the window list is asked for).
-        pub names: Vec<String>,
-    }
-
-    fn identity_of(app: &NSRunningApplication) -> Front {
-        Front {
-            pid: app.processIdentifier(),
-            launch_ms: app.launchDate().map(|d| (d.timeIntervalSince1970() * 1000.0) as i64),
-            bundle_id: app.bundleIdentifier().map(|b| b.to_string()),
-        }
-    }
-
-    impl NativeFocus {
-        fn main<T: Send + 'static>(&self, f: impl FnOnce(MainThreadMarker) -> T + Send + 'static) -> Result<T, String> {
-            on_main(&self.app, move |_| {
-                MainThreadMarker::new().map(f).ok_or_else(|| "not on the main thread".to_string())
-            })?
-        }
-    }
-
-    impl FocusPort for NativeFocus {
-        fn os_major(&mut self) -> u64 {
-            NSProcessInfo::processInfo().operatingSystemVersion().majorVersion as u64
-        }
-
-        fn items_shown(&mut self) -> Option<bool> {
-            use crate::tray_shown::{judge, Verdict};
-            let cc = control_center_pid()?;
-            let windows = on_screen_windows().ok()?;
-            let mut all = true;
-            for name in &self.names {
-                match judge(&windows, cc, name) {
-                    Verdict::Shown => {}
-                    Verdict::NotShown { .. } => all = false,
-                    Verdict::NamesUnreadable => return None,
-                }
-            }
-            Some(all && !self.names.is_empty())
-        }
-
-        fn dyno_window_open(&mut self) -> bool {
-            self.app.webview_windows().values().any(|w| w.is_visible().unwrap_or(false))
-        }
-
-        fn frontmost(&mut self) -> Option<Front> {
-            self.main(|_| {
-                let front = NSWorkspace::sharedWorkspace().frontmostApplication()?;
-                (front.processIdentifier() != std::process::id() as i32).then(|| identity_of(&front))
-            })
-            .ok()
-            .flatten()
-        }
-
-        fn is_active(&mut self) -> bool {
-            self.main(|mtm| NSApplication::sharedApplication(mtm).isActive()).unwrap_or(false)
-        }
-
-        fn activate(&mut self, how: Method) -> Result<(), String> {
-            match how {
-                Method::Cooperative => self.main(|mtm| {
-                    let app = NSApplication::sharedApplication(mtm);
-                    // macOS 14+ only: an older system raises an unrecognized-selector exception.
-                    if app.respondsToSelector(objc2::sel!(activate)) {
-                        app.activate();
-                        Ok(())
-                    } else {
-                        Err("activate is not available on this macOS".to_string())
-                    }
-                })?,
-                Method::Forced =>
-                {
-                    #[allow(deprecated)]
-                    self.main(|mtm| NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true))
-                }
-                Method::AppleEvent => apple_event_activate(),
-            }
-        }
-
-        fn give_back(&mut self, to: &Front) -> Result<(), String> {
-            let want = to.clone();
-            self.main(move |mtm| {
-                let other = NSRunningApplication::runningApplicationWithProcessIdentifier(want.pid).ok_or("that app has quit")?;
-                // Rule 53: the pid may belong to another process by now; the launch time and bundle id must still match.
-                if identity_of(&other) != want {
-                    return Err("the pid now belongs to another process".to_string());
-                }
-                let app = NSApplication::sharedApplication(mtm);
-                // macOS 14+: Dyno yields its activation to the other app, which then activates (the cooperative way back).
-                if app.respondsToSelector(objc2::sel!(yieldActivationToApplication:)) {
-                    app.yieldActivationToApplication(&other);
-                }
-                if other.activateWithOptions(NSApplicationActivationOptions::empty()) {
-                    Ok(())
-                } else {
-                    Err("the app refused to activate".to_string())
-                }
-            })?
-        }
-
-        fn wait(&mut self, ms: u64) {
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-        }
     }
 }
 

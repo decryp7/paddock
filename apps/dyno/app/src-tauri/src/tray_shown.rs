@@ -49,6 +49,44 @@ pub fn judge(windows: &[Window], control_center_pid: i32, autosave_name: &str) -
     }
 }
 
+/// Whether the window server lists a menu bar at all: a session can be without one (a guest at the login screen, a display asleep),
+/// and then no app's status item shows, Dyno's or any other's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuBar {
+    /// This many `Menubar` windows are listed.
+    Present(usize),
+    /// Window names are readable and none is a `Menubar`.
+    Absent,
+    /// No window has a readable name, so the list cannot say.
+    Unreadable,
+}
+
+/// The window server's name for a menu bar's window.
+pub const MENUBAR_WINDOW: &str = "Menubar";
+
+/// Judges the menu bar from the on-screen windows.
+pub fn menubar(windows: &[Window]) -> MenuBar {
+    let bars = windows.iter().filter(|w| w.name.as_deref() == Some(MENUBAR_WINDOW)).count();
+    if bars > 0 {
+        MenuBar::Present(bars)
+    } else if windows.iter().any(|w| w.name.is_some()) {
+        MenuBar::Absent
+    } else {
+        MenuBar::Unreadable
+    }
+}
+
+impl MenuBar {
+    /// For the log.
+    pub fn describe(self) -> String {
+        match self {
+            MenuBar::Present(n) => format!("menu bar present ({n} Menubar window(s))"),
+            MenuBar::Absent => "NO menu bar window is on screen (no app's menu-bar items can show)".to_string(),
+            MenuBar::Unreadable => "menu bar unknown (window names are not readable)".to_string(),
+        }
+    }
+}
+
 /// How many windows are listed and how many different owners they have, for the log (no process names).
 pub fn owners_summary(windows: &[Window]) -> String {
     let owners: std::collections::BTreeSet<i32> = windows.iter().map(|w| w.owner_pid).collect();
@@ -88,6 +126,20 @@ mod tests {
     fn a_window_of_another_process_or_without_size_does_not_count() {
         assert_ne!(judge(&[win(7, Some(NAME), 40.0)], CC, NAME), Verdict::Shown);
         assert_ne!(judge(&[win(CC, Some(NAME), 0.0)], CC, NAME), Verdict::Shown);
+    }
+
+    #[test]
+    fn the_menu_bar_is_judged_from_the_window_names() {
+        let bar = [
+            win(7, Some("Menubar"), 1440.0),
+            win(7, Some("Menubar"), 1440.0),
+            win(8, Some("Dock"), 9.0),
+        ];
+        assert_eq!(menubar(&bar), MenuBar::Present(2));
+        assert_eq!(menubar(&[win(8, Some("Dock"), 9.0), win(CC, Some(NAME), 40.0)]), MenuBar::Absent);
+        assert_eq!(menubar(&[win(8, None, 9.0)]), MenuBar::Unreadable);
+        assert_eq!(menubar(&[]), MenuBar::Unreadable);
+        assert!(MenuBar::Absent.describe().contains("NO menu bar"));
     }
 
     #[test]

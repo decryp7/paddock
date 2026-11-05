@@ -91,12 +91,12 @@ tray-icon = { version = "=0.25.1", default-features = false }
 # ControlCenter's and Dyno's process start time from the kernel (tray_platform).
 libc = "0.2"
 # NSStatusItem.autosaveName of the menu-bar items (tray_identity).
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSStatusItem", "NSButton", "NSView", "NSWindow", "NSResponder", "NSApplication", "NSGraphics", "NSFont", "NSFontDescriptor", "NSRunningApplication", "NSWorkspace", "libc", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSStatusItem", "NSButton", "NSView", "NSWindow", "NSResponder", "NSApplication", "NSGraphics", "NSFont", "NSFontDescriptor", "NSRunningApplication", "objc2-core-foundation"] }
 # The CoreText adapter of the tray text port (tray_text.rs): the system font, drawn by the system into an alpha bitmap.
 objc2-core-foundation = "0.3.2"
 objc2-core-graphics = { version = "0.3.2", features = ["CGBitmapContext", "CGColorSpace", "CGContext", "CGImage", "CGWindow"] }
 objc2-core-text = { version = "0.3.2", features = ["CTLine", "CTFont", "CTStringAttributes", "CTFontDescriptor", "CTFontTraits"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSUserDefaults", "NSObject", "NSArray", "NSDictionary", "NSValue", "NSDate", "NSProcessInfo"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSUserDefaults", "NSObject", "NSArray", "NSDictionary", "NSValue", "NSDate"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
 
 [dev-dependencies]
