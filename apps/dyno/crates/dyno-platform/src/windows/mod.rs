@@ -4,6 +4,7 @@
 pub mod activity;
 pub mod counters;
 pub mod firewall_com;
+pub mod indirect;
 pub mod net;
 pub mod nt_query;
 pub mod pdh;
