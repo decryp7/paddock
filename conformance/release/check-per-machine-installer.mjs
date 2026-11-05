@@ -56,7 +56,7 @@ const SEVEN_ZIP_FALLBACK = 'C:\\Program Files\\7-Zip\\7z.exe';
 
 /** The 7z to use: on PATH, then the standard install folder; otherwise one error that says how to get it. */
 export function find7z({ probe = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf8', timeout: 20000 }) } = {}) {
-  for (const cmd of ['7z', SEVEN_ZIP_FALLBACK]) {
+  for (const cmd of ['7z', '7zz', SEVEN_ZIP_FALLBACK]) {
     const r = probe(cmd, ['i']);
     if (!r.error && r.status === 0) return { cmd };
   }
