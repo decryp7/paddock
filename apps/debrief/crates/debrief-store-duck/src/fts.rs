@@ -851,6 +851,7 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
     fn segment_keys_differ_and_the_tokenizer_gives_the_words() {
@@ -905,11 +906,11 @@ mod tests {
         let write_lock = Mutex::new(());
         let held = write_lock.lock().unwrap();
         // A brief holder (a live refresh): the writer stays for the next step.
-        assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
+        assert_eq!(step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap(), Turn::Blocked);
         assert!(crate::lock(&s.writer).is_some(), "a live refresh does not cost the writer");
         // An import: its budget and the writer's heaps never add up.
         s.bulk_import.store(true, Ordering::SeqCst);
-        assert!(!step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap());
+        assert_eq!(step(&s, &dir.join(SEGMENTS_DIR), &conn, &write_lock, 1).unwrap(), Turn::Blocked);
         assert!(
             crate::lock(&s.writer).is_none(),
             "an import's budget and the writer's heaps never add up"
