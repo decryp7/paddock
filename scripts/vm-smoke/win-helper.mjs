@@ -393,5 +393,4 @@ export const helperSteps = [
   ({ browser }) => helperRepair(browser),
   ({ browser }) => helperOff(browser),
   () => winMcpStep(),
-  () => notDriven('Rule 71: Quit and stop measuring stops the agent and it comes back', 'a menu click over CDP ends the app that the later steps (File > Exit, the uninstall) need; it is driven in its own run once the order is agreed'),
 ];

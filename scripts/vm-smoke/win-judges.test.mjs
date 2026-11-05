@@ -116,3 +116,15 @@ test('the real served line (result of a 7534 run) is read per kind', () => {
   assert.equal(bad(judgeServed([REAL], ['Processes', 'Firewall'])).length, 1, 'Firewall=0 was not served');
   assert.equal(bad(judgeServed([REAL.replace('Smart=2', 'Smart=0')], ['Smart'])).length, 1);
 });
+
+test('dead state: a failed or half install does not pass; a planted leftover still there fails', async () => {
+  const { judgeInstalled, judgeKilledInstall } = await import('./win-judges.mjs');
+  assert.ok(bad(judgeInstalled('again', { exit: 2, app: 'no', key: 'no' })).length >= 2);
+  assert.equal(bad(judgeInstalled('again', { exit: 0, app: 'yes', key: 'yes', uninstallIsPlanted: 'no' })).length, 0);
+  assert.equal(bad(judgeInstalled('over', { exit: 0, app: 'yes', key: 'yes', uninstallIsPlanted: 'yes' })).length, 1);
+  assert.equal(judgeInstalled('x', { exit: null, app: 'unreadable', key: 'yes' })[0].kind, 'check');
+  assert.equal(judgeKilledInstall({ killed: false, key: 'no', app: 'no' })[0].kind, 'check');
+  assert.equal(judgeKilledInstall({ killed: true, key: 'yes', app: 'yes' })[0].kind, 'check');
+  assert.equal(bad(judgeKilledInstall({ killed: true, key: 'no', app: 'no' })).length, 0);
+  assert.equal(bad(judgeKilledInstall({ killed: true, key: 'yes', app: 'no' })).length, 1);
+});

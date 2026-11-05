@@ -160,3 +160,31 @@ export function judgeInstallOutcome(label, outcome, smartctlExists) {
   if (outcome === 'failed') return chk(false, `${label}: the install failed (the helper logged "InstallTool failed")`);
   return chk(false, `${label}: the install did not finish (${outcome})`, 'check');
 }
+
+/**
+ * An install run as a person would (a second install after an uninstall, or over a planted leftover `uninstall.exe`): the programs and the machine-wide
+ * uninstall entry exist and the installer ended 0. With `leftoverReplaced` known, the planted file must be the installer's own again.
+ * @param {{exit:number|null, app:'yes'|'no'|'unreadable', key:'yes'|'no'|'unreadable', uninstallIsPlanted?:'yes'|'no'|'unreadable'}} f
+ */
+export function judgeInstalled(label, f) {
+  const unread = [f.app, f.key].includes('unreadable');
+  const checks = [
+    chk(f.exit === 0, f.exit === 0 ? `${label}: the installer ended 0` : `${label}: the installer ended ${f.exit}`, f.exit === null ? 'check' : undefined),
+    chk(f.app === 'yes', f.app === 'yes' ? `${label}: dyno-app.exe is installed` : f.app === 'unreadable' ? `${label}: the install folder could not be read` : `${label}: dyno-app.exe is not installed`, f.app === 'unreadable' ? 'check' : undefined),
+    chk(f.key === 'yes', f.key === 'yes' ? `${label}: the machine-wide uninstall entry exists` : f.key === 'unreadable' ? `${label}: the uninstall entry could not be read` : `${label}: the machine-wide uninstall entry is missing`, f.key === 'unreadable' ? 'check' : undefined),
+  ];
+  if (f.uninstallIsPlanted !== undefined) checks.push(chk(f.uninstallIsPlanted === 'no', f.uninstallIsPlanted === 'no' ? `${label}: the leftover uninstall.exe was replaced by the installer's own` : f.uninstallIsPlanted === 'yes' ? `${label}: the planted leftover uninstall.exe is still there` : `${label}: uninstall.exe could not be read`, f.uninstallIsPlanted === 'unreadable' ? 'check' : undefined));
+  void unread;
+  return checks;
+}
+
+/**
+ * The installer killed part-way: nothing half-installed may be presented as installed. The machine-wide uninstall entry is the product's "installed" fact: it must be
+ * absent (Not installed), or the install must have completed whole (the kill came too late: a broken check, since nothing was interrupted).
+ */
+export function judgeKilledInstall({ killed, key, app }) {
+  if (!killed) return [chk(false, 'the installer was not running when the kill was due (it had already ended), so nothing was interrupted', 'check')];
+  if (key === 'unreadable' || app === 'unreadable') return [chk(false, 'the machine state after the kill could not be read', 'check')];
+  if (key === 'yes' && app === 'yes') return [chk(false, 'the install had completed before the kill: nothing was interrupted', 'check')];
+  return [chk(key === 'no', key === 'no' ? 'after the kill the machine-wide uninstall entry is absent: the product reads as Not installed' : 'after the kill an uninstall entry exists without a complete install: a half-installed product is presented as installed')];
+}

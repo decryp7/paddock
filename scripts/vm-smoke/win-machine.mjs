@@ -1,7 +1,11 @@
 // The per-machine install's host-side steps (Dyno 1.1.0, family ADR 0053): an update announced as the installed version is refused by
 // `paddock-setup.exe apply-update` (exit 27, "not newer", nothing left in updates\), and the uninstall removes the programs, the machine-wide
 // entries and the start-at-login values. Run as the VM's administrator through the SSH admin key; the install itself (the real UAC prompt) is the suite's.
-import { ssh } from './win-helper.mjs';
+import { ssh, answerUac } from './win-helper.mjs';
+import { connect, tunnel } from './win-cdp.mjs';
+import { quitStopStep } from './mcp-judges.mjs';
+import { judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
+import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
 import { makeResult } from './verdict.mjs';
 import { judgeUninstall as judgeUninstallFacts, triState } from './win-judges.mjs';
 
@@ -79,4 +83,82 @@ export async function uninstall() {
   return result('Windows: uninstall removes the programs and the machine-wide entries', checks, [JSON.stringify(facts)], 'the programs, the uninstall entry and the start-at-login values are gone');
 }
 
-export const afterQuitSteps = [() => sameVersionRefused(), () => uninstall()];
+const SETUP = 'C:\\paddock-test\\vmcheck\\setup.exe';
+
+/** Starts the staged installer in the test user's console session (a scheduled task with /it), so its UAC prompt is on the desktop for the VNC answer. */
+function startInstaller() {
+  ssh(`schtasks /end /tn DynoReinstall 2>$null | Out-Null; schtasks /create /tn DynoReinstall /sc once /st 00:00 /ru paddock-test /it /f /tr "${SETUP} /S" | Out-Null; schtasks /run /tn DynoReinstall | Out-Null`);
+}
+const installerRunning = () => ssh('[bool](Get-Process -Name setup -ErrorAction SilentlyContinue)') === 'True';
+const facts = () => ({
+  app: triState(ssh(`Test-Path '${PROG}\\dyno-app.exe'`, { admin: true })),
+  key: triState(ssh("Test-Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Dyno'", { admin: true })),
+});
+
+/** One full install of the staged installer with its own UAC prompt answered over VNC; returns { exit, uac }. */
+async function installOnce(label) {
+  startInstaller();
+  const uac = await answerUac(label);
+  let ended = false;
+  for (let i = 0; i < 100 && !ended; i++) { await sleep(3000); ended = !installerRunning(); }
+  const exitText = ssh('(Get-ScheduledTaskInfo -TaskName DynoReinstall).LastTaskResult');
+  return { uac, exit: ended && /^-?\d+$/.test(exitText.trim()) ? Number(exitText.trim()) : null };
+}
+
+/**
+ * The install rows after the uninstall (each with a later UAC prompt answered over VNC): reinstall over a planted leftover uninstall.exe, the installer killed
+ * part-way, and install again. The text "Not installed" is judged by the machine state the app reads (the machine-wide uninstall entry), not read from the window.
+ */
+export async function installRows() {
+  const steps = [];
+  // 1. Reinstall over a leftover uninstall.exe: planted by the administrator where the uninstaller goes.
+  ssh(`New-Item -ItemType Directory -Force '${PROG}' | Out-Null; Set-Content '${PROG}\\uninstall.exe' 'LEFTOVER-PLANTED'`, { admin: true });
+  const a = await installOnce('reinstall-over-leftover');
+  const planted = triState(ssh(`(Get-Content '${PROG}\\uninstall.exe' -Raw -ErrorAction SilentlyContinue) -match 'LEFTOVER-PLANTED'`, { admin: true }));
+  steps.push(result(ROW_TITLES.winReinstall, [{ ok: a.uac.ok, detail: a.uac.detail }, ...judgeInstalled('reinstall over a leftover', { exit: a.exit, ...facts(), uninstallIsPlanted: planted })], [a.uac.detail], 'the install over a leftover uninstall.exe worked and replaced it'));
+  // 2. Uninstall, then kill the installer part-way.
+  ssh(`Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Process '${PROG}\\uninstall.exe' -ArgumentList '/S' -Wait`, { admin: true, ms: 180_000 });
+  for (let i = 0; i < 20 && facts().key !== 'no'; i++) await sleep(3000);
+  startInstaller();
+  const uacK = await answerUac('kill-installer');
+  await sleep(2500);
+  const killed = installerRunning();
+  ssh('Get-Process -Name setup -ErrorAction SilentlyContinue | Stop-Process -Force');
+  await sleep(4000);
+  steps.push(result(ROW_TITLES.killInstaller, [{ ok: uacK.ok, detail: uacK.detail }, ...judgeKilledInstall({ killed, ...facts() })], [uacK.detail], 'the machine reads Not installed after the installer was killed'));
+  // 3. Install again.
+  ssh(`Remove-Item '${PROG}' -Recurse -Force -ErrorAction SilentlyContinue`, { admin: true });
+  const b = await installOnce('install-again');
+  steps.push(result(ROW_TITLES.installAgain, [{ ok: b.uac.ok, detail: b.uac.detail }, ...judgeInstalled('install again', { exit: b.exit, ...facts() })], [b.uac.detail], 'install again works'));
+  return steps;
+}
+
+export const notDrivenWinRows = () => [notDriven(ROW_TITLES.winFirstUninstall, 'its definition (gone, or the noted reboot fallback) lands with fix/uninstall-cold-leftover, which is not pushed yet'), notDriven(ROW_TITLES.hungPage, NOT_DRIVEN.hungPage), notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
+
+/** "Quit and stop measuring" as the LAST step of the run (it ends the app and the agent): menu click over the DevTools port, 60 s of no Dyno process, reopen. The reboot half is not tried here. */
+export async function winQuitStop() {
+  const launch = () => ssh('Set-Content C:\\paddock-test\\vmcheck\\launch-qs.ps1 \'$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--remote-debugging-port=9222"; Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe"\'; schtasks /create /tn DynoQsLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch-qs.ps1" | Out-Null; schtasks /run /tn DynoQsLaunch | Out-Null');
+  const count = async () => Number(ssh('(Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Measure-Object).Count')) || 0;
+  return quitStopStep({
+    now: () => Date.now(), sleep,
+    trigger: async () => {
+      launch(); await sleep(25_000);
+      const t = tunnel();
+      try {
+        const browser = await connect();
+        const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+        const clicked = await main.evaluate(async () => {
+          const items = () => [...document.querySelectorAll('[role=menuitem]')];
+          if (!items().some((e) => e.textContent.trim().startsWith('Quit and stop'))) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File')?.click(); await new Promise((r) => setTimeout(r, 600)); }
+          const it = items().find((e) => e.textContent.trim().startsWith('Quit and stop'));
+          if (!it) return false;
+          it.click(); return true;
+        }).catch(() => true); // the page goes away with the app
+        if (!clicked) throw new Error('no "Quit and stop measuring" item in the File menu');
+      } finally { t.close(); }
+    },
+    count, reopen: async () => { launch(); await sleep(30_000); return count(); }, reboot: async () => null,
+  });
+}
+
+export const afterQuitSteps = [() => sameVersionRefused(), () => uninstall(), () => installRows(), () => notDrivenWinRows(), () => winQuitStop()];
