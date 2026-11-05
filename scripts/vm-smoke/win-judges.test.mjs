@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from './win-judges.mjs';
+import { judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, serviceState, triState } from './win-judges.mjs';
 import { makeResult } from './verdict.mjs';
 
 const BOOT = '2026-11-05T10:00:00';
@@ -107,4 +107,12 @@ test('a tray count with Dyno not running is information, never a pass', () => {
   const r = judgeTrayCount({ metrics: ['CPU'], visible: 0, overflow: 0, running: false });
   assert.equal(r[0].info, true);
   assert.equal(makeResult('t', r).status, 'not-measured');
+});
+
+const REAL = '1793827772 INFO Helper: served: Info=103 Processes=85 Traffic=1 SocketOwners=0 FileHolders=0 LoginItems=0 Counters=0 MemoryModules=0 Smart=2 InstallTool=1 Firewall=0 Extras=1 Audit=93 LogTail=0 Uninstall=0 ScheduleWake=0 CancelWake=0 ListWakes=0';
+test('the real served line (result of a 7534 run) is read per kind', () => {
+  assert.equal(parseServed([REAL]).get('processes'), 85);
+  assert.equal(bad(judgeServed([REAL], ['Processes', 'Traffic', 'Smart', 'Extras'])).length, 0);
+  assert.equal(bad(judgeServed([REAL], ['Processes', 'Firewall'])).length, 1, 'Firewall=0 was not served');
+  assert.equal(bad(judgeServed([REAL.replace('Smart=2', 'Smart=0')], ['Smart'])).length, 1);
 });

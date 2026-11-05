@@ -340,8 +340,8 @@ export function servedCounts() {
   return result('Windows: the helper reports which readings it served (served counts)', judgeServed(lines, SERVED_KINDS.windows), lines, 'every reading kind taken in this run was served');
 }
 
-/** The kinds the Windows suite reads through the helper while it is on (processes, per-program traffic, wake requests, backup versions). */
-export const SERVED_KINDS = { windows: ['processes', 'traffic', 'wake', 'backup'] };
+/** RequestKind names of the helper's `served:` line (dyno-helper server.rs `ServedCounts::summary`, `Kind=count` for every kind) that this suite's readings go through: Processes, Traffic (per program), Smart (Lifespan), Extras (wake requests and backup versions). */
+export const SERVED_KINDS = { windows: ['Processes', 'Traffic', 'Smart', 'Extras'] };
 
 export const helperSteps = [
   async ({ browser }) => {
