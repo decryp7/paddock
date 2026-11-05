@@ -124,6 +124,15 @@ pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
 #[derive(Default)]
 pub struct SwitchWorker {
     busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SwitchWorker {
+    /// Asks the running change to stop at its next step (the registration, a lock wait or the wait for the service).
+    pub fn cancel(&self) {
+        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        cancel_service_work_for_switch();
+    }
 }
 
 /// Clears the busy flag when the worker ends, however it ends.
@@ -144,11 +153,14 @@ impl SwitchWorker {
     pub fn start(
         &self,
         report: std::sync::Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync>,
-        work: impl FnOnce() -> Result<(), String> + Send + 'static,
+        work: impl FnOnce(&std::sync::atomic::AtomicBool) -> Result<(), String> + Send + 'static,
     ) -> Result<(), String> {
         if self.busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Err("Start at login is still being changed. Try again in a moment.".into());
         }
+        self.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+        begin_service_work();
+        let cancel = self.cancel.clone();
         let clear = Clear(self.busy.clone());
         let spawned = std::thread::Builder::new().name("dyno-login-switch".into()).spawn(move || {
             let _clear = clear;
@@ -158,9 +170,16 @@ impl SwitchWorker {
                     done: 0,
                 }),
             });
-            match work() {
-                Ok(()) => report(paddock_jobs::JobState::Done),
-                Err(message) => report(paddock_jobs::JobState::Failed { message }),
+            let result = work(&cancel);
+            // A cancel that came during the work ends the job as cancelled, whatever the work made of it (the record says what
+            // was registered; the next start puts the rest right).
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                report(paddock_jobs::JobState::Cancelled { reason: paddock_jobs::CancelReason::User });
+            } else {
+                match result {
+                    Ok(()) => report(paddock_jobs::JobState::Done),
+                    Err(message) => report(paddock_jobs::JobState::Failed { message }),
+                }
             }
         });
         spawned.map(drop).map_err(|e| {
@@ -794,12 +813,33 @@ pub fn join_service_work(bound: std::time::Duration) -> bool {
     rx.is_none_or(|rx| !matches!(rx.recv_timeout(bound), Err(std::sync::mpsc::RecvTimeoutError::Timeout)))
 }
 
+/// Set once the user quits: a switch change that starts later does not clear the cancel.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn set_platform_cancel(on: bool) {
+    #[cfg(target_os = "macos")]
+    mac::CANCEL.store(on, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(target_os = "linux")]
+    dyno_agent::service::linux::CANCEL.store(on, std::sync::atomic::Ordering::SeqCst);
+    let _ = on;
+}
+
 /// Asks the service's repair, registration and waits to stop at their next step (Quit and stop measuring).
 pub fn cancel_service_work() {
-    #[cfg(target_os = "macos")]
-    mac::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
-    #[cfg(target_os = "linux")]
-    dyno_agent::service::linux::CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+    QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+    set_platform_cancel(true);
+}
+
+/// The Settings switch's cancel: the same stop, but a later change starts clean.
+fn cancel_service_work_for_switch() {
+    set_platform_cancel(true);
+}
+
+/// A new switch change starts clean unless the app is quitting.
+fn begin_service_work() {
+    if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+        set_platform_cancel(false);
+    }
 }
 
 /// Whether the app is waiting for a registration it made (see [`AgentService::pending`]).
@@ -877,6 +917,53 @@ impl Autostart for NoAutostart {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_cancel_stops_the_switch_change_and_it_ends_as_a_cancelled_job() {
+        use paddock_jobs::{CancelReason, JobState};
+        use std::sync::{mpsc, Arc, Mutex};
+        let worker = Arc::new(SwitchWorker::default());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (reported, wake) = mpsc::channel::<()>();
+        let report: Arc<dyn Fn(JobState) + Send + Sync> = {
+            let seen = seen.clone();
+            Arc::new(move |s| {
+                seen.lock().unwrap().push(s);
+                reported.send(()).unwrap();
+            })
+        };
+        // The work waits for its cancel (as a registration waits for the service) and gives up when it comes.
+        worker
+            .start(report, |cancel| {
+                let began = std::time::Instant::now();
+                while !cancel.load(std::sync::atomic::Ordering::SeqCst) && began.elapsed() < std::time::Duration::from_secs(5) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Ok(())
+            })
+            .unwrap();
+        wake.recv().unwrap();
+        worker.cancel();
+        wake.recv().unwrap();
+        assert_eq!(seen.lock().unwrap()[1], JobState::Cancelled { reason: CancelReason::User });
+    }
+
+    #[test]
+    fn quit_waits_for_the_start_repair_up_to_its_bound() {
+        let done = track_repair();
+        let slow = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            done.send(()).ok();
+        });
+        let began = std::time::Instant::now();
+        assert!(join_service_work(std::time::Duration::from_secs(5)), "it ended within the bound");
+        assert!(began.elapsed() >= std::time::Duration::from_millis(250), "quit waited for it");
+        slow.join().unwrap();
+        // A repair that does not end within the bound is given up on, and nothing registered is nothing to wait for.
+        let _kept = track_repair();
+        assert!(!join_service_work(std::time::Duration::from_millis(50)));
+        assert!(join_service_work(std::time::Duration::from_millis(50)), "taken once: nothing left to wait for");
+    }
+
+    #[test]
     fn the_switch_returns_at_once_while_the_os_step_is_blocked_and_reports_as_a_job() {
         use paddock_jobs::JobState;
         use std::sync::{mpsc, Arc, Mutex};
@@ -894,12 +981,12 @@ mod tests {
         let began = std::time::Instant::now();
         // The OS step (a registration waiting for a lock) blocks until the test lets it go.
         worker
-            .start(report.clone(), move || blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
+            .start(report.clone(), move |_| blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
             .unwrap();
         assert!(began.elapsed() < std::time::Duration::from_secs(2), "the save did not wait for the OS step");
         wake.recv().unwrap();
         assert!(matches!(seen.lock().unwrap()[0], JobState::Running { .. }), "running is reported while blocked");
-        assert!(worker.start(report.clone(), || Ok(())).is_err(), "a second change waits for the first");
+        assert!(worker.start(report.clone(), |_| Ok(())).is_err(), "a second change waits for the first");
         release.send(()).unwrap();
         wake.recv().unwrap();
         assert_eq!(seen.lock().unwrap()[1], JobState::Done);
@@ -907,7 +994,7 @@ mod tests {
         while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::yield_now();
         }
-        worker.start(report, || Err("needs approval".into())).unwrap();
+        worker.start(report, |_| Err("needs approval".into())).unwrap();
         wake.recv().unwrap();
         wake.recv().unwrap();
         assert_eq!(seen.lock().unwrap()[3], JobState::Failed { message: "needs approval".into() });
