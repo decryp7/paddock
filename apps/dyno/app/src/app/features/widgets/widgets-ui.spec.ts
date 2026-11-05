@@ -1,6 +1,8 @@
 import { provideRouter } from '@angular/router';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
+import { PD_ECHARTS, fakeEchartsLoader } from '@decryp7/paddock-ui/chart';
+import { FakeECharts } from '@decryp7/paddock-ui/testing';
 import { PdWidgetGrid } from '@decryp7/paddock-ui/widgets';
 import { BACKEND } from '../../core/backend';
 import { MockBackend, type MockOptions } from '../../core/mock-backend';
@@ -38,7 +40,7 @@ function body(kind: DashboardWidget['kind'], value: DyValue | null) {
 
 function env(options: MockOptions = {}) {
   const mock = new MockBackend({ latencyMs: 0, now: () => 1_700_000_000_000, ...options });
-  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, provideRouter([])] });
+  TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, provideRouter([]), { provide: PD_ECHARTS, useValue: fakeEchartsLoader(new FakeECharts().init) }] });
   TestBed.inject(LiveStore).receive(mock.liveUpdate('summary'));
   return mock;
 }

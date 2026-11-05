@@ -67,6 +67,9 @@ describe('sparklineGeometry options', () => {
   it('grows the box past a too-small capacity', () => {
     expect(sparklineGeometry([0, 10, 0], 100, 30, 0, 0, 10, { capacity: 1 }).line).toBe('M0.0 30.0L50.0 0.0L100.0 30.0');
   });
+  it('ignores a capacity that is not a number', () => {
+    expect(sparklineGeometry([1, 2], 100, 30, 0, 0, 2, { capacity: Number.NaN }).line).toBe('M0.0 15.0L100.0 0.0');
+  });
   it('clamps only when asked', () => {
     expect(sparklineGeometry([-5, 50], 100, 100, 0, 0, 10).line).toBe('M0.0 150.0L100.0 -400.0');
     expect(sparklineGeometry([-5, 50], 100, 100, 0, 0, 10, { clamp: true }).line).toBe('M0.0 100.0L100.0 0.0');
@@ -118,15 +121,15 @@ describe('headroomMax', () => {
 });
 
 describe('sparklineScale', () => {
-  it('fit leaves a missing side to the data, and max overrides the top', () => {
+  it('fit follows the data and ignores max', () => {
     expect(sparklineScale([1, 2], null, 'fit')).toEqual({ min: 1, max: 2 });
-    expect(sparklineScale([1, 2], null, 'fit', 9)).toEqual({ min: 1, max: 9 });
-    expect(sparklineScale([], [], 'fit')).toEqual({ max: undefined });
-    expect(sparklineScale([Number.NaN], undefined, 'fit', 9)).toEqual({ max: 9 });
+    expect(sparklineScale([1, 2], null, 'fit', 9)).toEqual({ min: 1, max: 2 });
+    expect(sparklineScale([], [], 'fit')).toEqual({});
+    expect(sparklineScale([Number.NaN], undefined, 'fit', 9)).toEqual({});
   });
   it('fit puts two series on one range, with or without a max', () => {
     expect(sparklineScale([1, 2], [0, 5], 'fit')).toEqual({ min: 0, max: 5 });
-    expect(sparklineScale([1, 2], [0, 5], 'fit', 9)).toEqual({ min: 0, max: 9 });
+    expect(sparklineScale([1, 2], [0, 5], 'fit', 9)).toEqual({ min: 0, max: 5 });
   });
   it('zero starts at 0 and counts both series in the headroom', () => {
     expect(sparklineScale([1], [10], 'zero')).toEqual({ min: 0, max: 11.5 });
@@ -151,8 +154,8 @@ describe('SuSparkline options', () => {
   it('draws exact paths from zero to a fixed max', () => {
     expect(lines(make({ values: [0, 10], scale: 'zero', max: 10, ...EDGE }))).toEqual(['M0.0 10.0L120.0 0.0']);
   });
-  it('a fitted line is not clamped; a zero or zoom line is', () => {
-    expect(lines(make({ values: [-5, 50], max: 10, ...EDGE }))[0]).toBe('M0.0 10.0L120.0 -26.7');
+  it('a fitted line follows the data and ignores max; a zero line is clamped to its max', () => {
+    expect(lines(make({ values: [-5, 50], max: 10, ...EDGE }))[0]).toBe('M0.0 10.0L120.0 0.0');
     expect(lines(make({ values: [-5, 50], scale: 'zero', max: 10, ...EDGE }))[0]).toBe('M0.0 10.0L120.0 0.0');
   });
   it('draws a dashed second line on the same scale, clamped into a zoomed range', () => {

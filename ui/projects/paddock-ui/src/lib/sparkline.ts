@@ -51,14 +51,15 @@ export function headroomMax(series: readonly (readonly number[])[], max?: number
 
 /**
  * The scale a sparkline draws with. `zoom` follows the first series' range (`max` is the ceiling, 100 when omitted); `zero` starts
- * at 0 and ends at `max` or the peak of both series plus headroom; `fit` fits both series to one range, `max` overriding the top.
+ * at 0 and ends at `max` or the peak of both series plus headroom; `fit` fits both series to one range.
  */
 export function sparklineScale(values: readonly number[], values2: readonly number[] | null | undefined, mode: SparklineScaleMode, max?: number): SparklineScale {
+  // `max` is the fixed top of `zero` and the ceiling of `zoom`; `fit` always follows the data.
   if (mode === 'zoom') return zoomRange(values, 8, max ?? 100);
   if (mode === 'zero') return { min: 0, max: headroomMax([values, values2 ?? []], max) };
   const all = [...values, ...(values2 ?? [])].filter((v) => Number.isFinite(v));
-  if (all.length === 0) return { max };
-  return { min: Math.min(...all), max: max ?? Math.max(...all) };
+  if (all.length === 0) return {};
+  return { min: Math.min(...all), max: Math.max(...all) };
 }
 
 /** Pure geometry of a sparkline: points scaled into `width` x `height` with `pad` px around (so the end dot is not clipped). */
@@ -76,7 +77,7 @@ export function sparklineGeometry(
   const lo = min ?? Math.min(...finite);
   const hi = max ?? Math.max(...finite);
   const span = hi - lo;
-  const slots = Math.max(options.capacity ?? values.length, values.length);
+  const slots = Math.max(options.capacity !== undefined && Number.isFinite(options.capacity) ? options.capacity : values.length, values.length);
   const step = slots > 1 ? (width - 2 * pad) / (slots - 1) : 0;
   const x0 = pad + (slots - values.length) * step;
   const level = (v: number): number => (options.clamp ? Math.min(Math.max(v, lo), hi) : v);
@@ -147,7 +148,7 @@ export class SuSparkline {
   readonly height = input<number>(32);
   readonly area = input<boolean>(false);
   /**
-   * `fit` (default): the data's own range, `max` overriding the top. `zero`: from 0 to `max` (or the peak plus 15% headroom), shared by
+   * `fit` (default): the data's own range (`max` is ignored). `zero`: from 0 to `max` (or the peak plus 15% headroom), shared by
    * rows of sparklines. `zoom`: the first series' range inside 0..`max` (100 when omitted), for levels that barely move. `zero` and
    * `zoom` clamp values into the scale.
    */
