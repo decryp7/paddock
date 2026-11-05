@@ -178,7 +178,8 @@ and the lock that outlives its holder. Each reproduced finding is listed in the 
 
 **N1. A failed register is its own phase.** `Phase` gains `RegisterFailed(kind)` (`Other | NotAsWritten`), written when `register`
 fails. `Registering` + absent (a crash) stays a free finish with no new attempt; `RegisterFailed` + absent retries only under
-the cap, and at the cap the hold is `Hold::RegisterFailed(n)`. `NeedsApproval`, `Unavailable`, `Declined` and `NeedsElevation` are
+the cap, and at the cap the hold is `Hold::RegisterFailed(n)`. A register that failed with anything but `NotAsWritten` (the one failure whose write may have landed) is never settled by the old
+job that still answers: the cycle failed. `NeedsApproval`, `Unavailable`, `Declined` and `NeedsElevation` are
 user or OS states, not attempts: the record returns to the state before the replace and the registration state says the rest.
 
 **N2. `pending` comes from the transition.** `Manager::pending()` is true only when the plan for a start is `Await`, or a

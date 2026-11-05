@@ -1617,10 +1617,7 @@ fn configs() -> &'static [(Caps, Resp)] {
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
-const KNOWN_FAILING: &[(&str, &str)] = &[(
-    "the record says this version is registered but the OS holds another registration",
-    "repair.rs (the Settled stage, `last_error.is_some() && (job == Absent || !answers)`): a failed register while the old job still answers (it outlived the removal) counts as settled, so the record says the new version is registered. MODEL_REPLAY='Mac/RefusedAlways/Healthy|Update+RegOther'. Executor (author).",
-)];
+const KNOWN_FAILING: &[(&str, &str)] = &[];
 
 #[test]
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {

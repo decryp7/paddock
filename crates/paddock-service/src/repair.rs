@@ -244,6 +244,8 @@ pub struct Stepper {
     cycle: u32,
     stage: Stage,
     last_error: Option<String>,
+    /// The last register call failed and the OS did not take the write (`NotAsWritten` is the one failure that may have landed).
+    register_lost: bool,
     last_job: Option<Job>,
     polled: Duration,
 }
@@ -257,6 +259,7 @@ impl Stepper {
             cycle: 0,
             stage: Stage::Removing,
             last_error: None,
+            register_lost: false,
             last_job: None,
             polled: Duration::ZERO,
         }
@@ -375,6 +378,7 @@ impl Stepper {
             }
             (Stage::Registering, OsResult::RegisterOk) => {
                 self.last_error = None;
+                self.register_lost = false;
                 self.stage = Stage::Settling;
                 go(vec![], Action::Settle { ask: false })
             }
@@ -383,6 +387,8 @@ impl Stepper {
                     return self.done(vec![Step::Note(format!("Registering stopped: {e}"))], stop);
                 }
                 self.last_error = Some(e.to_string());
+                // The old job that still answers must not make a registration that failed look settled.
+                self.register_lost = !matches!(e, RegisterError::NotAsWritten(_));
                 self.stage = Stage::Settling;
                 go(vec![Step::RegisterFailed(e.to_string())], Action::Settle { ask: true })
             }
@@ -396,6 +402,7 @@ impl Stepper {
             ) => {
                 self.last_job = Some(job);
                 if job == Job::Refused
+                    || self.register_lost
                     || (self.last_error.is_some() && (job == Job::Absent || !answers))
                 {
                     return self.next_cycle(cancelled, vec![]);
@@ -669,6 +676,22 @@ mod tests {
             panic!("{over:?}")
         };
         assert!(why.contains("Registering failed 1 times (denied)"), "{why}");
+    }
+
+    #[test]
+    fn a_failed_register_is_never_settled_by_the_old_job_that_still_answers_but_a_write_read_back_wrong_may_be() {
+        let to_settle = |error: RegisterError| {
+            let mut s = Stepper::new(&Timings::default(), 4);
+            s.start();
+            through_removal(&mut s);
+            s.next(OsResult::Gone { timed_out: false });
+            s.next(OsResult::RegisterErr(error));
+            s
+        };
+        let lost = to_settle(RegisterError::Other("denied".into())).next(settled(Job::Running, true));
+        assert_eq!(lost.action, Action::Unregister, "the old job answers, the new registration is not there");
+        let maybe = to_settle(RegisterError::NotAsWritten(Inspection::absent())).next(settled(Job::Running, true));
+        assert_eq!(maybe.action, Action::Look, "the write may have landed: look for the service");
     }
 
     #[test]
