@@ -38,6 +38,10 @@ use std::time::Instant;
 /// The commands every dialog may call whatever its contract (the dialog layer adds them to each dialog's base set).
 pub const DIALOG_BASE: &[&str] = &["window_ready", "window_boot_error", "window_pong"];
 
+/// How many times a question's dialog is looked for to take it down, and how long between tries (a dialog may not be up yet).
+pub(crate) const DISMISS_TRIES: u32 = 10;
+pub(crate) const DISMISS_EVERY: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// Called with `true` when the watchdog gives up on a window's page (start-up question, or unresponsive after ready) and
 /// with `false` when the page answers again: `paddock_dialogs::tauri::page_unresponsive` lets a dialog be closed by the
 /// OS close meanwhile (rule 19).
@@ -61,18 +65,23 @@ pub type WatchFilter = dyn Fn(&str, &str) -> bool + Send + Sync;
 
 /// Shows the native question for window `label`, owned by that window, and calls `answer` once with the user's choice.
 pub trait Asker<R: Runtime>: Send + Sync + 'static {
+    /// `seq` is the question's identity: the one [`Asker::dismiss`] is later given.
     fn ask(
         &self,
         app: &AppHandle<R>,
         label: &str,
+        seq: u64,
         prompt: Prompt,
         answer: Box<dyn FnOnce(Choice) + Send>,
     );
 
-    /// Takes down the question shown for window `label` because it is no longer needed (the page recovered). Runs on the main
-    /// thread. The answer of a dismissed question is ignored whatever it says, so an asker that cannot dismiss (the default) leaves a
-    /// harmless dialog on screen.
-    fn dismiss(&self, _app: &AppHandle<R>, _label: &str) {}
+    /// Takes down question `seq` shown for window `label` because it is no longer needed (the page recovered). Runs on the main
+    /// thread. Returns whether the dialog is gone: `false` when it could not be found or closed (not shown yet, queued behind another
+    /// sheet, or an asker that cannot dismiss, the default). It is then retried a few times; if it stays up, the question stays
+    /// counted as open (the window is not asked a second time) and its answer is ignored.
+    fn dismiss(&self, _app: &AppHandle<R>, _label: &str, _seq: u64) -> bool {
+        false
+    }
 }
 
 /// Why a start-up command failed (the command's error; camelCase on the wire).
@@ -195,7 +204,7 @@ impl<R: Runtime> StartupBuilder<R> {
     /// Shows the questions as native message dialogs (`tauri-plugin-dialog`, which the app registers).
     #[cfg(feature = "dialog")]
     pub fn native_dialogs(self) -> Self {
-        self.asker(NativeAsker)
+        self.asker(NativeAsker::default())
     }
 
     /// The run's lifecycle ([`Lifecycle::begin`], called as early as possible in `main`): the running marker, the
@@ -405,23 +414,56 @@ impl<R: Runtime> Startup<R> {
         let answer: Box<dyn FnOnce(Choice) + Send> =
             Box::new(move |choice| answered(&answer_app, &answer_label, seq, choice));
         let app2 = app.clone();
-        let shown = app.run_on_main_thread(move || asker.ask(&app2, &label, prompt, answer));
+        let shown = app.run_on_main_thread(move || {
+            // The page may have recovered while this was queued: then the question is not shown at all.
+            let startup = app2.try_state::<Startup<R>>();
+            if startup.as_ref().and_then(|s| s.with(|w| w.question_seq(&label))) != Some(seq) {
+                log::info!(Window = label.as_str(), Seq = seq; "Question {seq} about window {label} was closed before it was shown");
+                if let Some(s) = startup {
+                    s.with(|w| w.question_dismissed(&label, seq));
+                }
+                return;
+            }
+            asker.ask(&app2, &label, seq, prompt, answer)
+        });
         logged(shown, "", "Could not show the not-responding question");
     }
 
     /// The page of window `label` is fine again (`why`): a question about it that is still on screen is closed and taken down. Its
     /// answer, if the user pressed a button just before, is ignored ([`answered`]).
     fn question_closed(&self, app: &AppHandle<R>, label: &str, why: &str) {
-        if !self.with(|w| w.close_question(label)) {
-            return;
-        }
-        log::info!(Window = label; "Question about window {label} closed: {why}");
-        let Some(asker) = self.asker.clone() else {
+        let Some(seq) = self.with(|w| w.close_question(label)) else {
             return;
         };
-        let (app2, label2) = (app.clone(), label.to_string());
-        let queued = app.run_on_main_thread(move || asker.dismiss(&app2, &label2));
-        logged(queued, label, "Could not take the not-responding question down");
+        log::info!(Window = label, Seq = seq; "Question {seq} about window {label} closed: {why}");
+        let Some(asker) = self.asker.clone() else {
+            self.with(|w| w.question_dismissed(label, seq));
+            return;
+        };
+        // The dialog may not be up yet (the OS shows it from another thread): look for it a few times, off the main thread.
+        let (app, label) = (app.clone(), label.to_string());
+        let spawned = std::thread::Builder::new().name("paddock-startup-dismiss".into()).spawn(move || {
+            for _ in 0..DISMISS_TRIES {
+                let (tx, rx) = std::sync::mpsc::channel();
+                let (app2, label2, asker2) = (app.clone(), label.clone(), asker.clone());
+                let queued = app.run_on_main_thread(move || {
+                    let _ = tx.send(asker2.dismiss(&app2, &label2, seq));
+                });
+                if queued.is_err() {
+                    break;
+                }
+                if rx.recv().unwrap_or(false) {
+                    log::info!(Window = label.as_str(), Seq = seq; "Question {seq} about window {label}: dialog taken down");
+                    if let Some(s) = app.try_state::<Startup<R>>() {
+                        s.with(|w| w.question_dismissed(&label, seq));
+                    }
+                    return;
+                }
+                std::thread::sleep(DISMISS_EVERY);
+            }
+            log::warn!(Window = label.as_str(), Seq = seq; "Question {seq} about window {label} could not be closed; it stays up until answered and its answer is ignored");
+        });
+        logged(spawned, "", "Could not start the dialog dismissal");
     }
 
     /// The page in `webview` reported ready: the reply, the hooks, the log line.
@@ -586,14 +628,14 @@ pub fn visibility(is_visible: Option<bool>, is_minimized: Option<bool>) -> bool 
 fn answered<R: Runtime>(app: &AppHandle<R>, label: &str, seq: u64, choice: Choice) {
     let choice_name = format!("{choice:?}");
     let Some(startup) = app.try_state::<Startup<R>>() else {
-        log::info!(Window = label, Choice = choice_name.as_str(); "Not-responding question answered");
+        log::info!(Window = label, Choice = choice_name.as_str(), Seq = seq; "Not-responding question answered");
         return;
     };
     if !startup.with(|w| w.accept_answer(label, seq, choice)) {
-        log::info!(Window = label, Choice = choice_name.as_str(); "Answer {choice_name} to a question that was closed is ignored");
+        log::info!(Window = label, Choice = choice_name.as_str(), Seq = seq; "Answer {choice_name} to question {seq}, which was closed, is ignored");
         return;
     }
-    log::info!(Window = label, Choice = choice_name.as_str(); "Not-responding question answered");
+    log::info!(Window = label, Choice = choice_name.as_str(), Seq = seq; "Not-responding question answered");
     match choice {
         Choice::Reload => {
             // Waiting again first: if the reload never starts a page, the watchdog still sees it.

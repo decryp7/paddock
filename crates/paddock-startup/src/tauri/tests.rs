@@ -62,7 +62,9 @@ struct Seen {
     relaunch: Vec<String>,
     asked: Vec<(String, Prompt)>,
     answers: Vec<Box<dyn FnOnce(Choice) + Send>>,
-    dismissed: Vec<String>,
+    dismissed: Vec<(String, u64)>,
+    /// How many dismiss calls still find nothing (the dialog is not up yet, or cannot be closed).
+    dismiss_misses: usize,
 }
 
 type Shared = Arc<Mutex<Seen>>;
@@ -74,6 +76,7 @@ impl Asker<MockRuntime> for FakeAsker {
         &self,
         _app: &AppHandle<MockRuntime>,
         label: &str,
+        _seq: u64,
         prompt: Prompt,
         answer: Box<dyn FnOnce(Choice) + Send>,
     ) {
@@ -82,8 +85,25 @@ impl Asker<MockRuntime> for FakeAsker {
         seen.answers.push(answer);
     }
 
-    fn dismiss(&self, _app: &AppHandle<MockRuntime>, label: &str) {
-        lock(&self.0).dismissed.push(label.to_string());
+    fn dismiss(&self, _app: &AppHandle<MockRuntime>, label: &str, seq: u64) -> bool {
+        let mut seen = lock(&self.0);
+        seen.dismissed.push((label.to_string(), seq));
+        match seen.dismiss_misses {
+            0 => true,
+            n => {
+                seen.dismiss_misses = n.saturating_sub(1);
+                false
+            }
+        }
+    }
+}
+
+/// Waits (bounded, no sleep) until `cond` holds: the dismissing runs on its own thread.
+fn until(what: &str, cond: impl Fn() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !cond() {
+        assert!(Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::yield_now();
     }
 }
 
@@ -398,6 +418,7 @@ fn a_silent_window_is_reloaded_once_then_the_user_is_asked_and_each_answer_is_ap
     startup(&app).with(|d| d.keep_waiting("w-2", t0));
     let mut t = 30_500;
     while lock(&seen).asked.len() < 3 {
+        assert!(t < 900_000, "no third question by {t} ms");
         startup(&app).tick(app.handle(), t0 + Duration::from_millis(t));
         t += 500;
     }
@@ -796,14 +817,22 @@ fn every_command_is_async_and_handled() {
 }
 
 #[cfg(feature = "dialog")]
+/// Why the native asker has to leave the window waiting in this test: no window to ask through (macOS and Linux show the dialog
+/// themselves) or no dialog plugin (the others).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+const NATIVE_WAIT_REASON: &str = "to ask through";
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+const NATIVE_WAIT_REASON: &str = "tauri-plugin-dialog is not registered";
+
 #[test]
-fn the_native_asker_without_the_dialog_plugin_waits() {
+fn the_native_asker_without_a_window_or_the_dialog_plugin_waits() {
     let app = app_with(Startup::builder().build().unwrap());
     let got = Arc::new(Mutex::new(None));
     let sink = got.clone();
-    NativeAsker.ask(
+    NativeAsker::default().ask(
         app.handle(),
         "w-native",
+        0,
         Prompt::new(Question::Unresponsive, "App"),
         Box::new(move |c| *lock(&sink) = Some(c)),
     );
@@ -811,7 +840,7 @@ fn the_native_asker_without_the_dialog_plugin_waits() {
     assert!(
         log_of("w-native")
             .iter()
-            .any(|(_, m)| m.contains("tauri-plugin-dialog is not registered"))
+            .any(|(_, m)| m.contains(NATIVE_WAIT_REASON))
     );
     assert!(
         native::message(
@@ -880,11 +909,18 @@ fn the_not_responding_question_closes_by_itself_when_the_page_answers_again() {
     // The page answers its latest ping: it recovered, and the question on screen is taken down.
     let seq = *lock(&got).last().unwrap();
     invoke(&w, "window_pong", json!({ "seq": seq })).unwrap();
-    assert_eq!(lock(&seen).dismissed, ["w-71"]);
-    assert!(!startup(&app).with(|d| d.is_question_open("w-71")));
+    until("the dialog to be taken down", || {
+        !lock(&seen).dismissed.is_empty()
+    });
+    assert_eq!(lock(&seen).dismissed.len(), 1);
+    assert_eq!(lock(&seen).dismissed[0].0, "w-71");
+    until("the question to close", || {
+        !startup(&app).with(|d| d.is_question_open("w-71"))
+    });
     assert!(
         log_of("w-71").iter().any(|(l, m)| *l == log::Level::Info
-            && m == "Question about window w-71 closed: the page responds again"),
+            && m.starts_with("Question ")
+            && m.ends_with(" about window w-71 closed: the page responds again")),
         "{:?}",
         log_of("w-71")
     );
@@ -894,7 +930,8 @@ fn the_not_responding_question_closes_by_itself_when_the_page_answers_again() {
     assert!(
         log_of("w-71")
             .iter()
-            .any(|(_, m)| m == "Answer Reload to a question that was closed is ignored"),
+            .any(|(_, m)| m.starts_with("Answer Reload to question ")
+                && m.ends_with(", which was closed, is ignored")),
         "{:?}",
         log_of("w-71")
     );
@@ -917,11 +954,15 @@ fn the_start_up_question_closes_by_itself_when_the_page_becomes_ready() {
     tick(&app, t0, 0, 20_000);
     assert_eq!(lock(&seen).asked.len(), 1);
     invoke(&w, "window_ready", json!({})).unwrap();
-    assert_eq!(lock(&seen).dismissed, ["w-72"]);
+    until("the dialog to be taken down", || {
+        !lock(&seen).dismissed.is_empty()
+    });
+    assert_eq!(lock(&seen).dismissed.len(), 1);
+    assert_eq!(lock(&seen).dismissed[0].0, "w-72");
     assert!(
         log_of("w-72")
             .iter()
-            .any(|(_, m)| m == "Question about window w-72 closed: the page is ready"),
+            .any(|(_, m)| m.ends_with(" about window w-72 closed: the page is ready")),
         "{:?}",
         log_of("w-72")
     );
@@ -931,6 +972,135 @@ fn the_start_up_question_closes_by_itself_when_the_page_becomes_ready() {
     assert!(lock(&seen).safe_mode.is_empty());
     // A ready page with no question open takes nothing down.
     invoke(&w, "window_ready", json!({})).unwrap();
-    assert_eq!(lock(&seen).dismissed.len(), 1);
+    until("the first dismissal to settle", || {
+        !startup(&app).with(|d| d.is_question_open("w-72"))
+    });
+    assert_eq!(
+        lock(&seen).dismissed.len(),
+        1,
+        "a ready page with no question takes nothing down"
+    );
+    startup(&app).stop();
+}
+
+/// A hung window "w-7x" that was asked about and whose page then answers again; `dismiss_misses` set before.
+fn hung_then_recovered(app: &App, seen: &Shared, label: &str) -> Box<dyn FnOnce(Choice) + Send> {
+    let got = pings(app);
+    let w = window(app, label);
+    page_load(w.as_ref(), PageLoadEvent::Started);
+    invoke(&w, "window_ready", json!({})).unwrap();
+    let t0 = Instant::now();
+    tick(app, t0, 0, 20_000);
+    assert_eq!(lock(seen).asked.len(), 1);
+    let seq = *lock(&got).last().unwrap();
+    invoke(&w, "window_pong", json!({ "seq": seq })).unwrap();
+    lock(seen).answers.pop().unwrap()
+}
+
+#[test]
+fn a_dialog_that_cannot_be_closed_stays_the_only_question_and_its_answer_is_ignored() {
+    let (app, seen) = app();
+    lock(&seen).dismiss_misses = usize::MAX;
+    let answer = hung_then_recovered(&app, &seen, "w-73");
+    until("the retries to give up", || {
+        lock(&seen).dismissed.len() >= DISMISS_TRIES as usize
+    });
+    until("the give-up to be logged", || {
+        log_of("w-73")
+            .iter()
+            .any(|(l, m)| *l == log::Level::Warn && m.contains("could not be closed"))
+    });
+    // The page hangs again, but the first dialog may still be up: no second question on top of it.
+    let t0 = Instant::now();
+    let w = app.get_webview_window("w-73").unwrap();
+    page_load(w.as_ref(), PageLoadEvent::Started);
+    invoke(&w, "window_ready", json!({})).unwrap();
+    tick(&app, t0, 0, 400_000);
+    assert_eq!(lock(&seen).asked.len(), 1, "never two questions");
+    // The person finally presses Reload on the old dialog: ignored, and the window may be asked again.
+    answer(Choice::Reload);
+    assert!(
+        !log_of("w-73")
+            .iter()
+            .any(|(_, m)| m == "Not-responding question answered")
+    );
+    assert!(!startup(&app).with(|d| d.is_question_open("w-73")));
+    startup(&app).stop();
+}
+
+#[test]
+fn dismissing_is_retried_until_the_dialog_is_found() {
+    let (app, seen) = app();
+    lock(&seen).dismiss_misses = 2;
+    let _ = hung_then_recovered(&app, &seen, "w-74");
+    until("three dismiss tries", || lock(&seen).dismissed.len() == 3);
+    until("the question to close", || {
+        !startup(&app).with(|d| d.is_question_open("w-74"))
+    });
+    assert_eq!(
+        lock(&seen).dismissed.len(),
+        3,
+        "no more tries once it is gone"
+    );
+    startup(&app).stop();
+}
+
+#[test]
+fn a_save_report_click_on_a_dialog_that_stayed_up_is_still_carried_out() {
+    let seen = Shared::default();
+    lock(&seen).dismiss_misses = usize::MAX;
+    let (tx, rx) = std::sync::mpsc::channel::<String>();
+    let tx = Mutex::new(tx);
+    let configured = builder(&seen)
+        .report(move |_app, label| {
+            let _ = lock(&tx).send(label.to_string());
+            Ok(())
+        })
+        .build()
+        .unwrap();
+    let app = app_with(configured);
+    let answer = hung_then_recovered(&app, &seen, "w-75");
+    answer(Choice::SaveReport);
+    assert_eq!(rx.recv_timeout(Duration::from_secs(10)).unwrap(), "w-75");
+    startup(&app).stop();
+}
+
+/// An asker that cannot dismiss (it keeps the trait's default).
+struct PlainAsker(Shared);
+
+impl Asker<MockRuntime> for PlainAsker {
+    fn ask(
+        &self,
+        _app: &AppHandle<MockRuntime>,
+        label: &str,
+        _seq: u64,
+        prompt: Prompt,
+        answer: Box<dyn FnOnce(Choice) + Send>,
+    ) {
+        let mut seen = lock(&self.0);
+        seen.asked.push((label.to_string(), prompt));
+        seen.answers.push(answer);
+    }
+}
+
+#[test]
+fn an_asker_that_cannot_dismiss_leaves_the_question_open_and_says_so() {
+    let seen = Shared::default();
+    let configured = Startup::builder()
+        .config(quick())
+        .asker(PlainAsker(seen.clone()))
+        .build()
+        .unwrap();
+    let app = app_with(configured);
+    let _ = hung_then_recovered(&app, &seen, "w-76");
+    until("the give-up to be logged", || {
+        log_of("w-76")
+            .iter()
+            .any(|(l, m)| *l == log::Level::Warn && m.contains("could not be closed"))
+    });
+    assert!(
+        startup(&app).with(|d| d.is_question_open("w-76")),
+        "the dialog may still be up"
+    );
     startup(&app).stop();
 }

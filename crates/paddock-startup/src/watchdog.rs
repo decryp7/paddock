@@ -79,6 +79,9 @@ enum QuestionState {
     Closed,
     /// The dialog is on screen waiting for a button.
     Showing,
+    /// The page recovered while the dialog was up and taking it down did not work (yet): it may still be on screen, so no second
+    /// question is raised; its answer is ignored, and the answer or [`Watchdog::question_dismissed`] ends this state.
+    Stale,
     /// A button was pressed and its answer is being carried out (the problem report is being written): no dialog is up.
     Answered,
 }
@@ -238,6 +241,7 @@ impl Watchdog {
                 }
                 Phase::Unresponsive => {
                     e.phase = Phase::Ready;
+                    e.healthy_since = Some(now);
                     e.live.restart(now, &config);
                     e.question = QuestionState::Closed;
                 }
@@ -254,15 +258,25 @@ impl Watchdog {
     }
 
     /// The page recovered or became ready: the question about `label` that is on screen waiting for a button is closed.
-    /// Returns whether there was one (the caller then takes the dialog down). A question whose answer is being carried out (the
+    /// Returns the question's identity when there was one (the caller then takes the dialog down). A question whose answer is being carried out (the
     /// problem report is being saved) is not on screen any more and stays as it is.
-    pub fn close_question(&mut self, label: &str) -> bool {
+    pub fn close_question(&mut self, label: &str) -> Option<u64> {
         match self.windows.get_mut(label) {
             Some(e) if e.question == QuestionState::Showing => {
-                e.question = QuestionState::Closed;
-                true
+                e.question = QuestionState::Stale;
+                Some(e.question_seq)
             }
-            _ => false,
+            _ => None,
+        }
+    }
+
+    /// The dialog of question `seq` about `label`, which [`Watchdog::close_question`] closed, is gone: the window may be asked again.
+    pub fn question_dismissed(&mut self, label: &str, seq: u64) {
+        if let Some(e) = self.windows.get_mut(label)
+            && e.question == QuestionState::Stale
+            && e.question_seq == seq
+        {
+            e.question = QuestionState::Closed;
         }
     }
 
@@ -278,16 +292,33 @@ impl Watchdog {
     /// answer to a question that was closed meanwhile (the page recovered) is stale and must not be carried out. Save a problem
     /// report keeps the window from being asked again until [`Watchdog::question_answered`]; every other choice frees it.
     pub fn accept_answer(&mut self, label: &str, seq: u64, choice: Choice) -> bool {
-        match self.windows.get_mut(label) {
-            Some(e) if e.question == QuestionState::Showing && e.question_seq == seq => {
-                e.question = if choice == Choice::SaveReport {
+        let Some(e) = self
+            .windows
+            .get_mut(label)
+            .filter(|e| e.question_seq == seq)
+        else {
+            return false;
+        };
+        let report = choice == Choice::SaveReport;
+        match e.question {
+            QuestionState::Showing => {
+                e.question = if report {
                     QuestionState::Answered
                 } else {
                     QuestionState::Closed
                 };
                 true
             }
-            _ => false,
+            // The dialog stayed up after the page recovered. The answer is ignored, except a problem report, which is harmless.
+            QuestionState::Stale => {
+                e.question = if report {
+                    QuestionState::Answered
+                } else {
+                    QuestionState::Closed
+                };
+                report
+            }
+            QuestionState::Closed | QuestionState::Answered => false,
         }
     }
 
@@ -380,7 +411,9 @@ impl Watchdog {
 
     /// Whether any question about window `label` is on screen and unanswered.
     pub fn is_question_open(&self, label: &str) -> bool {
-        self.windows.get(label).is_some_and(|e| e.question != QuestionState::Closed)
+        self.windows
+            .get(label)
+            .is_some_and(|e| e.question != QuestionState::Closed)
     }
 
     /// Whether the start-up question about window `label` is open (it is not asked again until it is answered).
