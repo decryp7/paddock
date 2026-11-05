@@ -1187,11 +1187,17 @@ mod tests {
             location_ok: false,
             ..facts(&reg, MAC, Some("1.0.4"))
         };
-        assert!(matches!(plan(&from_a_disk_image), Plan::Leave(Hold::Unavailable(_))));
+        // The switch is unknown (a damaged settings file), so the removal that was begun is finished from a good place.
         let from_applications = Facts {
             location_ok: true,
+            wanted: None,
             ..from_a_disk_image
         };
+        let from_a_disk_image = Facts {
+            wanted: None,
+            ..from_a_disk_image
+        };
+        assert!(matches!(plan(&from_a_disk_image), Plan::Leave(Hold::Unavailable(_))));
         assert_eq!(plan(&from_applications), Plan::Remove);
     }
 
