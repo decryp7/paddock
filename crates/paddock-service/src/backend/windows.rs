@@ -16,8 +16,8 @@ use super::{
     UnitFileState, UnitOrigin, UnregisterError, as_written, with_failure,
 };
 use crate::parse::{
-    SC_DEMAND_START, SC_DISABLED, SC_RUNNING, SC_SERVICE_SPECIFIC, SC_STOPPED,
-    has_last_exit, run_value_program, sc_config, sc_exit, sc_exit_codes, sc_privileges, sc_state,
+    SC_DEMAND_START, SC_DISABLED, SC_RUNNING, SC_SERVICE_SPECIFIC, SC_STOPPED, has_last_exit,
+    run_value_program, sc_config, sc_exit, sc_exit_codes, sc_privileges, sc_state,
     startup_switched_off,
 };
 use crate::paths::{REG, SC, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY};

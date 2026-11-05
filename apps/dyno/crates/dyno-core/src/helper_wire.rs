@@ -284,9 +284,6 @@ pub enum HelperState {
     Off,
     /// Installed but not answering (stopped, or switched off in Login Items on macOS).
     NotRunning,
-    /// Installed and starting (just after Windows started, or just started by Dyno): not a fault and no Repair; Dyno
-    /// looks again by itself.
-    Starting,
     /// Something is wrong with the installation (damaged, a file missing or not protected): Repair.
     Missing,
     /// Another program answers where the helper should be: Dyno does not trust it and sends it nothing. Repair takes the place back.
@@ -295,6 +292,9 @@ pub enum HelperState {
     Outdated,
     /// Installed and answering.
     Ready,
+    /// Installed and starting (a start in progress after Windows started, or one Dyno just began): not a fault; Dyno looks
+    /// again by itself. Appended last: the enum travels as a postcard index (protocol.rs).
+    Starting,
 }
 
 /// What the user asked of the helper in Settings; each runs as a job with phases (ADR 0027 section 8).

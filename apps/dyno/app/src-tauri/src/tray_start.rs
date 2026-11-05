@@ -1,4 +1,4 @@
-//! How this start began, told once on the first tray line (ER-27): whether the program runs from a per-machine or a per-user
+//! How this start began, told once on the first tray line on Windows (ER-27): whether the program runs from a per-machine or a per-user
 //! folder, whether `--hidden` was given, and how long Explorer has been running. When icons are missing after a login start, the
 //! log then shows whether Dyno came up before the shell did. Never the path, never the user name.
 
@@ -77,7 +77,7 @@ mod win {
     //! Toolhelp and process times: plain queries on handles opened and closed here.
     #![allow(unsafe_code)]
 
-    /// Seconds since `explorer.exe` of this session started; `None` when it is not running or cannot be read.
+    /// Seconds since the oldest running `explorer.exe` (any session) started; `None` when it is not running or cannot be read.
     pub fn explorer_uptime_s() -> Option<u64> {
         use windows_sys::Win32::Foundation::{CloseHandle, FILETIME, INVALID_HANDLE_VALUE};
         use windows_sys::Win32::System::Diagnostics::ToolHelp::{

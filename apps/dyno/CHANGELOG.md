@@ -38,7 +38,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - Windows: the small window that opens from the tray icon no longer closes at once after you click the icon.
 - macOS: the Network page lists every program's connections, also when Start at login is off.
 - "Is this normal?" now counts days by your own calendar and tells you when it will be ready.
-- Administrator readings: right after Windows starts, the helper card says "Starting" and looks again by itself, instead of offering Repair (and a permission prompt) for a helper that was only a moment away from running. Repair is offered only when the helper's service is really stopped, and it says why.
+- Administrator readings: right after Windows starts, the helper card says "Starting" and looks again by itself, instead of offering Repair (and a permission prompt) for a helper that was only a moment away from running. If the service is stopped, or does not answer after it is running, or is still not up after three minutes, Repair is offered and says why.
 - macOS: the menu-bar icons no longer flash on and off.
 - Windows: after a restart the administrator helper starts with the computer, and when it cannot start, the log and the Windows Event Log say why.
 

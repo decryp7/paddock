@@ -23,6 +23,7 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
   it.each<[MockHelperVariant, string, string, string | null]>([
     ['off', 'Off', 'Administrator readings are not turned on', 'Turn on administrator readings'],
     ['silent', 'Not running', 'did not answer. Repair it', 'Repair the helper'],
+    ['starting', 'Starting', 'The helper is starting', null],
     ['foreign', 'Not trusted', 'does not trust it', 'Repair the helper'],
     ['outdated', 'Update available', 'needs helper version 1.1.0 or newer', 'Update the helper'],
     ['ready', 'On', 'Administrator readings are on', null],
@@ -35,6 +36,24 @@ describe('HelperCard: every state is words plus an icon, with the one action it 
     expect(el.querySelector('[data-testid="helper-message"]')?.textContent).toContain(message);
     if (primary) expect(button(primary)).toBeDefined();
     else expect([...el.querySelectorAll('button')].filter((b) => /Turn on|Repair|Update/.test(b.textContent ?? ''))).toHaveLength(0);
+  });
+
+  it('a helper that is still starting after the bound offers Repair and Turn off beside the note', async () => {
+    const { f, el, store, button } = await make('starting');
+    store.stopPolling();
+    expect(button('Repair the helper')).toBeUndefined();
+    expect(el.querySelector('[data-testid="helper-still-starting"]')).toBeNull();
+    vi.useFakeTimers();
+    try {
+      await store.load();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    f.detectChanges();
+    expect(el.querySelector('[data-testid="helper-still-starting"]')).not.toBeNull();
+    expect(button('Repair the helper')).toBeDefined();
+    expect(button('Turn off administrator readings')).toBeDefined();
   });
 
   it('off lists what it shows and what the system will ask, before the click', async () => {

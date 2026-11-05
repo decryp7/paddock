@@ -7,7 +7,7 @@
 //! start (a launch daemon or a system unit needs root or polkit), so there it reports [`Revival::NotSupported`].
 //! Every step is logged with its duration (ER-27).
 
-use crate::parse::{has_last_exit, SC_RUNNING, SC_STOPPED, sc_exit, sc_state};
+use crate::parse::{SC_RUNNING, SC_STOPPED, has_last_exit, sc_exit, sc_state};
 use crate::paths::SC;
 use crate::port::System;
 use paddock_env::Os;
@@ -206,7 +206,13 @@ pub fn revive(
                 budget.as_secs()
             );
             log::warn!(service = name, ms = at(pace); "{why}");
-            return Revival::Waiting(why);
+            // Only a start in progress (or one this call just began) is "starting"; a service that has been running, stopping or
+            // in any other state while its endpoint stays silent is hung, and a person has to repair it.
+            return if started || state == ServiceRun::StartPending {
+                Revival::Waiting(why)
+            } else {
+                Revival::Down(why)
+            };
         }
         pace.pause(POLL);
     }
@@ -352,6 +358,17 @@ mod tests {
     }
 
     #[test]
+    fn a_running_service_with_a_silent_endpoint_is_down_after_the_budget_not_starting() {
+        let (sys, starts) = service(vec![query_text("4  RUNNING", 0, 0)], Output::ok(""));
+        let out = run(&sys, |_| false, Duration::from_secs(10));
+        assert!(
+            matches!(out, Revival::Down(ref w) if w.contains("Running")),
+            "{out:?}"
+        );
+        assert_eq!(*starts.lock().unwrap(), 0);
+    }
+
+    #[test]
     fn a_service_that_never_answers_is_waiting_after_the_budget_not_down() {
         let (sys, _) = service(vec![query_text("2  START_PENDING", 0, 0)], Output::ok(""));
         let out = run(&sys, |_| false, Duration::from_secs(10));
@@ -412,46 +429,30 @@ mod tests {
         assert!(parse_run(&query_text("1  STOPPED", 1066, 3).stdout).failed());
         assert!(!parse_run(&query_text("1  STOPPED", 0, 0).stdout).failed());
     }
-}
 
-#[cfg(test)]
-mod research_never_started {
-    use super::*;
-    use crate::port::Output;
-    use crate::testing::FakeSystem;
-
-    // ERROR_SERVICE_NEVER_STARTED: what `sc query` prints for a service that has not started since boot (parse.rs SC_NEVER_STARTED).
+    // ERROR_SERVICE_NEVER_STARTED: what `sc query` prints for a service that has not started since boot.
     #[test]
     fn a_service_that_never_started_since_boot_is_not_failed() {
-        let text = "SERVICE_NAME: DynoHelper\r\n        STATE              : 1  STOPPED\r\n        WIN32_EXIT_CODE    : 1077  (0x435)\r\n        SERVICE_EXIT_CODE  : 0  (0x0)\r\n";
-        assert!(!parse_run(text).failed());
-    }
-
-    struct Pause(FakeSystem);
-    impl Pace for Pause {
-        fn elapsed(&mut self) -> Duration {
-            self.0.now()
-        }
-        fn pause(&mut self, how_long: Duration) {
-            let mut s = self.0.clone();
-            System::pause(&mut s, how_long);
-        }
+        let text = query_text("1  STOPPED", 1077, 0);
+        assert!(!parse_run(&text.stdout).failed());
+        assert!(parse_run(&query_text("1  STOPPED", 1066, 3).stdout).failed());
     }
 
     #[test]
     fn a_service_that_never_started_since_boot_is_started_without_elevation() {
-        let sys = FakeSystem::new();
-        sys.answer(
-            "sc query",
-            Output::ok("SERVICE_NAME: DynoHelper\r\n        STATE              : 1  STOPPED\r\n        WIN32_EXIT_CODE    : 1077  (0x435)\r\n        SERVICE_EXIT_CODE  : 0  (0x0)\r\n"),
+        let (sys, starts) = service(
+            vec![
+                query_text("1  STOPPED", 1077, 0),
+                query_text("4  RUNNING", 0, 0),
+            ],
+            Output::ok("STATE : 2  START_PENDING"),
         );
-        sys.answer("sc start", Output::ok("STATE : 2  START_PENDING"));
-        let mut pace = Pause(sys.clone());
-        let mut s = sys.clone();
-        let probe = sys.clone();
-        let out = revive(&mut s, Os::Windows, "DynoHelper", Duration::from_secs(4), &mut pace, &|_| None, &mut || {
-            probe.commands().iter().any(|c| c.ends_with("sc start DynoHelper"))
-        });
+        let out = run(
+            &sys,
+            |t| t >= Duration::from_secs(1),
+            Duration::from_secs(4),
+        );
         assert_eq!(out, Revival::Up, "{:?}", sys.commands());
+        assert_eq!(*starts.lock().unwrap(), 1);
     }
 }

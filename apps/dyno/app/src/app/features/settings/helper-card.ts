@@ -33,7 +33,7 @@ import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperAction
           </div>
           <p class="msg" data-testid="helper-message">{{ store.action() ? sentence(store.action()!) : s.message }}</p>
           @if (store.stillStarting() && !store.action()) {
-            <p class="note" role="status" data-testid="helper-still-starting"><dy-icon name="info" /> Still starting. This is taking longer than usual; use Check again in a moment.</p>
+            <p class="note" role="status" data-testid="helper-still-starting"><dy-icon name="info" /> Still starting. This is taking longer than usual; check again, or repair the helper.</p>
           }
 
           @if (!store.action() && s.readings.length && (s.state === 'off' || s.state === 'ready')) {
@@ -45,7 +45,7 @@ import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperAction
             </ul>
             <p class="reads-only">{{ readsOnly }}</p>
           }
-          @if (!store.action() && (s.state === 'off' || s.state === 'outdated' || s.state === 'foreign' || s.state === 'notRunning' || s.state === 'missing')) {
+          @if (!store.action() && (s.state === 'off' || s.state === 'outdated' || s.state === 'foreign' || s.state === 'notRunning' || s.state === 'missing' || store.stillStarting())) {
             <p class="prompt"><dy-icon name="lock" /> <span>{{ s.prompt }} Each change asks once.</span></p>
           }
 
@@ -68,7 +68,10 @@ import { CANCEL_NOTE, HELPER_READS_ONLY, TURN_OFF_LABEL, auditTime, helperAction
               <p class="note" role="status"><dy-icon name="info" /> Stopped before it finished. Nothing was changed.</p>
             }
             <div class="buttons">
-              @if (face.action; as a) {
+              @if (store.stillStarting()) {
+                <button type="button" matButton="filled" (click)="store.start('repair')">Repair the helper</button>
+                <button type="button" matButton="outlined" (click)="store.start('turnOff')">{{ turnOffLabel }}</button>
+              } @else if (face.action; as a) {
                 <button type="button" matButton="filled" (click)="store.start(a.kind)">{{ a.label }}</button>
               }
               @if (face.canTurnOff) {
