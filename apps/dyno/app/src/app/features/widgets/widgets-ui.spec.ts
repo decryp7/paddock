@@ -6,6 +6,7 @@ import { FakeECharts } from '@decryp7/paddock-ui/testing';
 import { PdWidgetGrid } from '@decryp7/paddock-ui/widgets';
 import { BACKEND } from '../../core/backend';
 import { MockBackend, type MockOptions } from '../../core/mock-backend';
+import { mockWidgetChoices } from '../../core/mock/widgets';
 import type { Cells, DashboardWidget, MetricReading, Placement } from '../../core/generated/widgets';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { DiagnosisStore } from '../../state/diagnosis.store';
@@ -328,6 +329,20 @@ describe('dy-widget-board', () => {
     const view = await TestBed.inject(BACKEND).widgetLayout('dashboard');
     const kinds = ('dashboard' in view ? view.dashboard.catalogue.kinds : []).map((k) => k.kind).sort();
     expect([...DASHBOARD_KINDS].sort()).toEqual(kinds);
+  });
+
+  it('offers a metric only for kinds that pick one, never for a panel kind', async () => {
+    const mock = env();
+    // The engine lets every kind but heatmap, ring and top processes show any metric, so a panel kind arrives with several.
+    const choices = mockWidgetChoices();
+    const several = choices.dashboard.find((k) => k.kind === 'graph')!.metrics;
+    choices.dashboard = choices.dashboard.map((k) => (k.kind === 'cpu' || k.kind === 'ring' ? { ...k, metrics: several } : k));
+    vi.spyOn(mock, 'widgetChoices').mockResolvedValue(choices);
+    const f = TestBed.createComponent(WidgetBoard);
+    const board = f.componentInstance as unknown as { hasOptions(kind: string): boolean; choices: { ready(): boolean } };
+    await vi.waitFor(() => expect(board.choices.ready()).toBe(true));
+    expect(board.hasOptions('ring')).toBe(true);
+    expect(board.hasOptions('cpu')).toBe(false);
   });
 
   it('opens the shared chooser in its add mode in a side sheet and adds through the engine', async () => {
