@@ -292,6 +292,9 @@ pub enum HelperState {
     Outdated,
     /// Installed and answering.
     Ready,
+    /// Installed and starting (a start in progress after Windows started, or one Dyno just began): not a fault; Dyno looks
+    /// again by itself. Appended last: the enum travels as a postcard index (protocol.rs).
+    Starting,
 }
 
 /// What the user asked of the helper in Settings; each runs as a job with phases (ADR 0027 section 8).
@@ -510,7 +513,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
             Some(why),
         ),
         Probe::Starting(why) => status(
-            HelperState::NotRunning,
+            HelperState::Starting,
             "The helper is starting. This takes a moment after Windows starts; Dyno looks again by itself.".into(),
             None,
             vec![],
@@ -988,7 +991,7 @@ mod tests {
             Probe::Starting("the service is StartPending".into()),
             "1.1.0",
         );
-        assert_eq!(s.state, HelperState::NotRunning);
+        assert_eq!(s.state, HelperState::Starting);
         assert!(s.message.contains("starting") && !s.message.contains("Repair"), "{}", s.message);
         assert_eq!(s.detail.as_deref(), Some("the service is StartPending"));
         let silent = assess(HelperHost::Windows, Ok(()), Probe::Silent("x".into()), "1.1.0");

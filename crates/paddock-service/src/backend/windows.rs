@@ -16,7 +16,7 @@ use super::{
     UnitFileState, UnitOrigin, UnregisterError, as_written, with_failure,
 };
 use crate::parse::{
-    SC_DEMAND_START, SC_DISABLED, SC_NEVER_STARTED, SC_RUNNING, SC_SERVICE_SPECIFIC, SC_STOPPED,
+    SC_DEMAND_START, SC_DISABLED, SC_RUNNING, SC_SERVICE_SPECIFIC, SC_STOPPED, has_last_exit,
     run_value_program, sc_config, sc_exit, sc_exit_codes, sc_privileges, sc_state,
     startup_switched_off,
 };
@@ -231,7 +231,7 @@ impl WindowsService {
                     .then(|| sc_exit_codes(&o.stdout))
                     .flatten()
                     // Never started since boot: no process has ended, so there is no last exit.
-                    .filter(|(win32, _)| *win32 != SC_NEVER_STARTED)
+                    .filter(|(win32, _)| has_last_exit(*win32))
                     .map(|(win32, specific)| {
                         if win32 == SC_SERVICE_SPECIFIC {
                             LastExit::ServiceSpecific(specific)

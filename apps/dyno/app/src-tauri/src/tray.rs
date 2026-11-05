@@ -1027,6 +1027,8 @@ fn state_of(app: &AppHandle<Wry>) -> tauri::State<'_, TrayState> {
 /// Makes the tray icons match `specs` (waits for the main thread, which does the work; see [`MainToken`]). Called only when the
 /// items changed. Returns the first error.
 pub fn sync_items(app: &AppHandle<Wry>, specs: &[ItemSpec], initial: &[(String, Frame)]) -> Result<(), String> {
+    #[cfg(windows)]
+    crate::tray_start::log_once();
     let (cmd, handle) = (
         TrayCommand::Sync {
             specs: specs.to_vec(),

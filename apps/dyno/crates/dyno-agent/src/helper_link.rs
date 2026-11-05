@@ -539,6 +539,11 @@ mod tests {
                 HelperState::NotRunning,
             ),
             (
+                vec![Err(TransportError::Starting("the service is StartPending".into()))],
+                Ok(()),
+                HelperState::Starting,
+            ),
+            (
                 vec![Err(TransportError::Foreign("S-1-5-21-1".into()))],
                 Ok(()),
                 HelperState::Foreign,

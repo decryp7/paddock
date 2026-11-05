@@ -2070,10 +2070,10 @@ export type JobOutput =
 
 /**
  * Whether the helper is usable. `notIncluded`: this build or system has no helper (an AppImage). `off`: never turned on.
- * `notRunning`: installed but not answering. `missing`: damaged. `foreign`: another program answers where the helper should be
+ * `notRunning`: installed but not answering. `starting`: installed and coming up (after a start of Windows): no Repair until it has taken over three minutes. `missing`: damaged. `foreign`: another program answers where the helper should be
  * (never trusted, never sent anything). `outdated`: needs the bundled newer helper. `ready`: running.
  */
-export type HelperState = 'notIncluded' | 'off' | 'notRunning' | 'missing' | 'foreign' | 'outdated' | 'ready';
+export type HelperState = 'notIncluded' | 'off' | 'notRunning' | 'missing' | 'foreign' | 'outdated' | 'ready' | 'starting';
 
 /** What the user asks of the helper; each runs as a job with phases. */
 export type HelperAction = 'turnOn' | 'repair' | 'update' | 'turnOff';

@@ -169,7 +169,7 @@ impl Availability {
             HelperState::NotIncluded => Availability::Unsupported(m()),
             HelperState::Missing => Availability::Broken(m()),
             HelperState::Foreign => Availability::Foreign(m()),
-            HelperState::NotRunning => Availability::Silent(m()),
+            HelperState::NotRunning | HelperState::Starting => Availability::Silent(m()),
         }
     }
 

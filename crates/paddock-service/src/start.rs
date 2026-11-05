@@ -7,7 +7,7 @@
 //! start (a launch daemon or a system unit needs root or polkit), so there it reports [`Revival::NotSupported`].
 //! Every step is logged with its duration (ER-27).
 
-use crate::parse::{SC_RUNNING, SC_STOPPED, sc_exit, sc_state};
+use crate::parse::{SC_RUNNING, SC_STOPPED, has_last_exit, sc_exit, sc_state};
 use crate::paths::SC;
 use crate::port::System;
 use paddock_env::Os;
@@ -27,7 +27,7 @@ pub const DEFAULT_BUDGET: Duration = Duration::from_secs(15);
 /// What the SCM says about the service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceRun {
-    /// Stopped. `win32` is the exit code it stopped with (0: never started or stopped cleanly; 1066: it ended with its own
+    /// Stopped. `win32` is the exit code it stopped with (0 or 1077 (never started since boot): not a failure; 1066: it ended with its own
     /// code, `specific`).
     Stopped {
         /// `WIN32_EXIT_CODE`.
@@ -48,7 +48,7 @@ pub enum ServiceRun {
 impl ServiceRun {
     /// Stopped with an error rather than cleanly.
     pub fn failed(self) -> bool {
-        matches!(self, ServiceRun::Stopped { win32, .. } if win32 != 0)
+        matches!(self, ServiceRun::Stopped { win32, .. } if win32 != 0 && has_last_exit(win32))
     }
 }
 
@@ -206,7 +206,13 @@ pub fn revive(
                 budget.as_secs()
             );
             log::warn!(service = name, ms = at(pace); "{why}");
-            return Revival::Waiting(why);
+            // Only a start in progress (or one this call just began) is "starting"; a service that has been running, stopping or
+            // in any other state while its endpoint stays silent is hung, and a person has to repair it.
+            return if started || state == ServiceRun::StartPending {
+                Revival::Waiting(why)
+            } else {
+                Revival::Down(why)
+            };
         }
         pace.pause(POLL);
     }
@@ -352,6 +358,31 @@ mod tests {
     }
 
     #[test]
+    fn a_running_service_with_a_silent_endpoint_is_down_after_the_budget_not_starting() {
+        let (sys, starts) = service(vec![query_text("4  RUNNING", 0, 0)], Output::ok(""));
+        let out = run(&sys, |_| false, Duration::from_secs(10));
+        assert!(
+            matches!(out, Revival::Down(ref w) if w.contains("Running")),
+            "{out:?}"
+        );
+        assert_eq!(*starts.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn a_service_this_call_started_is_waiting_while_its_endpoint_is_silent_even_if_running() {
+        let (sys, starts) = service(
+            vec![
+                query_text("1  STOPPED", 0, 0),
+                query_text("4  RUNNING", 0, 0),
+            ],
+            Output::ok("STATE : 2  START_PENDING"),
+        );
+        let out = run(&sys, |_| false, Duration::from_secs(10));
+        assert!(matches!(out, Revival::Waiting(_)), "{out:?}");
+        assert_eq!(*starts.lock().unwrap(), 1);
+    }
+
+    #[test]
     fn a_service_that_never_answers_is_waiting_after_the_budget_not_down() {
         let (sys, _) = service(vec![query_text("2  START_PENDING", 0, 0)], Output::ok(""));
         let out = run(&sys, |_| false, Duration::from_secs(10));
@@ -411,5 +442,31 @@ mod tests {
         assert_eq!(parse_run("nothing"), ServiceRun::Other(0));
         assert!(parse_run(&query_text("1  STOPPED", 1066, 3).stdout).failed());
         assert!(!parse_run(&query_text("1  STOPPED", 0, 0).stdout).failed());
+    }
+
+    // ERROR_SERVICE_NEVER_STARTED: what `sc query` prints for a service that has not started since boot.
+    #[test]
+    fn a_service_that_never_started_since_boot_is_not_failed() {
+        let text = query_text("1  STOPPED", 1077, 0);
+        assert!(!parse_run(&text.stdout).failed());
+        assert!(parse_run(&query_text("1  STOPPED", 1066, 3).stdout).failed());
+    }
+
+    #[test]
+    fn a_service_that_never_started_since_boot_is_started_without_elevation() {
+        let (sys, starts) = service(
+            vec![
+                query_text("1  STOPPED", 1077, 0),
+                query_text("4  RUNNING", 0, 0),
+            ],
+            Output::ok("STATE : 2  START_PENDING"),
+        );
+        let out = run(
+            &sys,
+            |t| t >= Duration::from_secs(1),
+            Duration::from_secs(4),
+        );
+        assert_eq!(out, Revival::Up, "{:?}", sys.commands());
+        assert_eq!(*starts.lock().unwrap(), 1);
     }
 }

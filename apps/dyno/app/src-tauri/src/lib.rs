@@ -38,6 +38,7 @@ pub mod tray_platform;
 #[cfg(target_os = "macos")]
 pub mod tray_position;
 pub mod tray_shown;
+pub mod tray_start;
 #[cfg(target_os = "macos")]
 pub mod tray_text;
 pub mod wol_menu;

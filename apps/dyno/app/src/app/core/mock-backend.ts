@@ -262,7 +262,7 @@ function savedFromUrl(days: string | null): Partial<MockOptions> {
     savedListsAgeMs: d * 86_400_000,
   };
 }
-const HELPER_VARIANTS: readonly string[] = ['notIncluded', 'off', 'notRunning', 'missing', 'outdated', 'ready', 'silent', 'foreign'];
+const HELPER_VARIANTS: readonly string[] = ['notIncluded', 'off', 'notRunning', 'starting', 'missing', 'outdated', 'ready', 'silent', 'foreign'];
 /** What the real engine says when these fail: the cause and the next step. */
 const FAIL_TEXT: Readonly<Record<string, string>> = {
   intelStatus: 'Dyno could not read your IP lists: the agent did not answer. Check that Dyno is running, then try again.',
