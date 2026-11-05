@@ -83,6 +83,30 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, storage medium at 1M to 1B events (branch `docs/debrief-storage-medium`)
+
+- **Commit:** none of the product's; a probe of the store's read paths, base 87c9b8449. Note: [research/2026-11-05-storage-medium.md](research/2026-11-05-storage-medium.md).
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2.
+- **Load:** 1-minute load 5 to 14, other agents' jobs running; heavy steps through the machine's lock.
+- **Build:** DuckDB 2.0.0 CLI (`d54cbbe3df`); `memory_limit` 192 MB for queries, 768 MB for the ordering, 4 threads, 4 async threads; DuckLake 1.1 extension with a DuckDB catalogue.
+- **Corpus:** generated, 64 sources, 13 event columns, no promoted columns, written by DuckDB (zstd, 65,536-row groups, 2 per file): 1M, 10M, 100M, 1B events; 25 GB and 7,630 files at 1B, about 25 bytes an event against the product's about 50.
+- **Command:** `python3 -I harness/probe.py <rows> <label> gen catalog ord hist queries lake` (and `mgmt`); captures: `cooked gen|lookup|bfs|scan|validate`, `harness/run2.sh`.
+- **Runs:** single; each query twice in one process, the second reported; OS cache warm throughout.
+- **Numbers:**
+
+  | Measure at 1B | View today | Files pruned | DuckLake | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Bind, peak footprint | 340 MB | | 23 MB | 300 MB | view **fail** |
+  | Page in a time window | 10,550 ms, 474 MB | 102 ms, 77 MB | 98 ms, 76 MB | 0.5 s, 300 MB | view **fail**, others pass |
+  | Filtered page | 877 ms, 456 MB | 196 ms, 83 MB | 205 ms, 89 MB | 0.5 s, 300 MB | view **fail**, others pass |
+  | First page, no filter | 26,220 ms, 476 MB | | | 0.5 s | **fail** |
+  | 1000-bucket timeline, `histogram` | 70 ms, 82 MB | | | 0.5 s | pass |
+  | `ord` rebuild | 912 s, 1,567 MB, catalogue 4.27 GB | | | 768 MB | **fail** |
+
+  Captures at `limits.rs`' caps (20M objects, 100M references): one object's references 50 ns with arrays against 10 to 47 ms with Parquet; reachability 1.18 s, 84 MB against 19.2 s, 1,230 MB; 20M samples 400 MB against 111 MB; hotspots 19 ms against 47 to 79 ms.
+- **Memory measure:** peak footprint (`/usr/bin/time -l`), of the CLI process.
+- **Notes:** Not the product path: no arrow-rs writers, Tantivy or promoted columns, so use ratios, not absolute times. Nothing here is a cold read. Raw output: [research/2026-11-05-storage-medium/results/](research/2026-11-05-storage-medium/results/).
+
 ### 2026-10-30, `debrief report` under CPU contention: QoS background against utility (branch `fix/debrief-cli-report-hang`)
 
 - **Commit:** A/B: base dfc9cdc94 (mining and full-text pools in QoS `BACKGROUND`) → change 1c2567566 (`UTILITY`)

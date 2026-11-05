@@ -1,0 +1,19 @@
+{"step":"cooked-gen","objects":20000000,"edges":99985487,"secs":12.4}
+ 
+399941948 edges.u32
+160000008 offsets.u64
+80000000 stack.u32
+160000000 time.u64
+160000000 value.u64
+{"step":"cooked-lookup","lookups":1000000,"ns_each":50,"sum":50013002848613}
+           561790976  maximum resident set size
+             1540888  peak memory footprint
+{"step":"cooked-bfs","objects":20000000,"reached":19860692,"edges":99288017,"secs":1.18,"heap_mb":79}
+           643776512  maximum resident set size
+            83542832  peak memory footprint
+{"step":"cooked-lookup","lookups":1000000,"ns_each":50,"sum":50013002848613}
+           561790976  maximum resident set size
+             1524480  peak memory footprint
+{"step":"cooked-scan-hotspots","samples":20000000,"rows":5000000,"secs":0.019}
+           223477760  maximum resident set size
+             3015256  peak memory footprint

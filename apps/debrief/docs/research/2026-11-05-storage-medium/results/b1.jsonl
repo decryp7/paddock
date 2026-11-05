@@ -1,0 +1,51 @@
+{"step": "begin-gen", "t": "19:02:39", "load": 14.23876953125}
+{"step": "gen", "wall": 840.95, "runs": [0.003, 840.263], "peak_mb": 88, "rss_mb": 123, "rc": 0, "t": "19:16:40", "load": 7.91845703125}
+{"step": "gen-size", "files": 7630, "bytes": 25323165456, "footer": 3806, "t": "19:16:41", "load": 7.91845703125}
+{"step": "end-gen", "secs": 841.6, "t": "19:16:41", "load": 7.91845703125}
+{"step": "begin-catalog", "t": "19:16:41", "load": 7.91845703125}
+{"step": "catalog-segments", "wall": 2.2, "runs": [0.026, 0.0, 2.086], "peak_mb": 300, "rss_mb": 320, "rc": 0, "t": "19:16:43", "load": 7.91845703125}
+{"step": "view-sql-bytes", "bytes": 693358, "t": "19:16:43", "load": 7.91845703125}
+{"step": "view-create-first", "wall": 0.31, "runs": [0.001, 0.214], "peak_mb": 344, "rss_mb": 384, "rc": 0, "t": "19:16:43", "load": 7.5244140625}
+{"step": "view-replace-again", "wall": 0.45, "runs": [0.001, 0.215, 0.141], "peak_mb": 347, "rss_mb": 407, "rc": 0, "t": "19:16:44", "load": 7.5244140625}
+{"step": "catalog-size", "bytes": 4468736, "t": "19:16:44", "load": 7.5244140625}
+{"step": "end-catalog", "secs": 3.0, "t": "19:16:44", "load": 7.5244140625}
+{"step": "begin-ord", "t": "19:18:10", "load": 5.60302734375}
+{"step": "ord-rebuild", "wall": 912.47, "runs": [0.001, 912.337], "peak_mb": 1567, "rss_mb": 1551, "rc": 0, "t": "19:33:22", "load": 5.06298828125}
+{"step": "catalog-size-after-ord", "bytes": 4269813760, "t": "19:33:22", "load": 5.06298828125}
+{"step": "end-ord", "secs": 912.5, "t": "19:33:22", "load": 5.06298828125}
+{"step": "begin-hist", "t": "19:33:22", "load": 5.06298828125}
+{"step": "histogram-build", "wall": 18.14, "runs": [0.001, 18.067], "peak_mb": 1145, "rss_mb": 1166, "rc": 0, "t": "19:33:40", "load": 5.86962890625}
+{"step": "catalog-size-after-hist", "bytes": 4379914240, "rows": ["16591569"], "t": "19:33:40", "load": 5.86962890625}
+{"step": "end-hist", "secs": 18.2, "t": "19:33:40", "load": 5.86962890625}
+{"step": "begin-queries", "t": "19:37:43", "load": 9.0625}
+{"step": "q-bind-only", "wall": 2.31, "runs": [0.006, 1.701, 0.145], "peak_mb": 340, "rss_mb": 379, "rc": 0, "t": "19:37:46", "load": 9.0625}
+{"step": "q-count", "wall": 5.43, "runs": [0.001, 3.879, 1.48], "peak_mb": 406, "rss_mb": 448, "rc": 0, "t": "19:37:51", "load": 9.13720703125}
+{"step": "q-level-facet", "wall": 4.53, "runs": [0.001, 2.353, 2.109], "peak_mb": 406, "rss_mb": 448, "rc": 0, "t": "19:37:56", "load": 9.6865234375}
+{"step": "q-1000-buckets-scan", "wall": 20.83, "runs": [0.001, 14.364, 6.403], "peak_mb": 428, "rss_mb": 471, "rc": 0, "t": "19:38:17", "load": 10.330078125}
+{"step": "q-1000-buckets-histogram", "wall": 0.29, "runs": [0.001, 0.191, 0.07], "peak_mb": 82, "rss_mb": 102, "rc": 0, "t": "19:38:17", "load": 10.330078125}
+{"step": "q-page-by-ord-ids-mid", "wall": 0.07, "runs": [0.001, 0.03, 0.003], "peak_mb": 36, "rss_mb": 55, "rc": 0, "t": "19:38:17", "load": 10.330078125}
+{"step": "page-files", "files": 64, "t": "19:38:17", "load": 10.330078125}
+{"step": "q-page-rows-pruned-list", "wall": 0.36, "runs": [0.001, 0.196, 0.137], "peak_mb": 125, "rss_mb": 144, "rc": 0, "t": "19:38:17", "load": 10.330078125}
+{"step": "q-page-rows-full-view", "wall": 3.26, "runs": [0.001, 2.201, 1.003], "peak_mb": 469, "rss_mb": 517, "rc": 0, "t": "19:38:21", "load": 10.38330078125}
+{"step": "q-position-of-id", "wall": 8.1, "runs": [0.001, 7.62, 0.427], "peak_mb": 235, "rss_mb": 253, "rc": 0, "t": "19:38:29", "load": 10.07763671875}
+{"step": "q-keyset-mid-view", "wall": 26.37, "runs": [0.001, 15.757, 10.55], "peak_mb": 474, "rss_mb": 506, "rc": 0, "t": "19:38:55", "load": 12.30078125}
+{"step": "keyset-files", "files": 144, "t": "19:38:55", "load": 12.30078125}
+{"step": "q-keyset-mid-pruned-list", "wall": 0.26, "runs": [0.001, 0.128, 0.102], "peak_mb": 77, "rss_mb": 96, "rc": 0, "t": "19:38:55", "load": 12.30078125}
+{"step": "q-filtered-page-view", "wall": 2.65, "runs": [0.001, 1.715, 0.877], "peak_mb": 456, "rss_mb": 504, "rc": 0, "t": "19:38:58", "load": 12.1162109375}
+{"step": "source-files", "files": 120, "t": "19:38:58", "load": 12.1162109375}
+{"step": "q-filtered-page-pruned-list", "wall": 0.43, "runs": [0.001, 0.198, 0.196], "peak_mb": 83, "rss_mb": 102, "rc": 0, "t": "19:38:59", "load": 12.1162109375}
+{"step": "q-top-first-page-view", "wall": 85.1, "runs": [0.001, 58.827, 26.22], "peak_mb": 476, "rss_mb": 522, "rc": 0, "t": "19:40:24", "load": 8.462890625}
+{"step": "end-queries", "secs": 160.2, "t": "19:40:24", "load": 8.462890625}
+{"step": "begin-lake", "t": "19:44:37", "load": 11.6796875}
+{"step": "lake-install", "wall": 0.03, "runs": [0.004], "peak_mb": 11, "rss_mb": 27, "rc": 0, "t": "19:44:37", "load": 11.6796875}
+{"step": "lake-create", "wall": 0.29, "runs": [0.001, 0.214, 0.032], "peak_mb": 24, "rss_mb": 55, "rc": 0, "t": "19:44:38", "load": 11.6796875}
+{"step": "lake-add-all", "wall": 3.92, "runs": [0.001, 0.022, 3.778], "peak_mb": 4216, "rss_mb": 4244, "rc": 0, "t": "19:44:44", "load": 11.20654296875}
+{"step": "lake-catalog-size", "bytes": 7352320, "t": "19:44:44", "load": 11.20654296875}
+{"step": "lake-bind-only", "wall": 0.07, "runs": [0.022, 0.016, 0.001], "peak_mb": 23, "rss_mb": 53, "rc": 0, "t": "19:44:44", "load": 11.20654296875}
+{"step": "lake-count", "wall": 0.07, "runs": [0.021, 0.022, 0.003], "peak_mb": 23, "rss_mb": 54, "rc": 0, "t": "19:44:44", "load": 11.20654296875}
+{"step": "lake-1000-buckets-scan", "wall": 12.02, "runs": [0.024, 7.72, 4.209], "peak_mb": 332, "rss_mb": 371, "rc": 0, "t": "19:44:56", "load": 10.97265625}
+{"step": "lake-keyset-mid", "wall": 0.4, "runs": [0.021, 0.256, 0.098], "peak_mb": 76, "rss_mb": 108, "rc": 0, "t": "19:44:56", "load": 10.97265625}
+{"step": "lake-filtered-page", "wall": 0.62, "runs": [0.021, 0.368, 0.205], "peak_mb": 89, "rss_mb": 121, "rc": 0, "t": "19:44:57", "load": 10.97265625}
+{"step": "lake-remove-source", "wall": 0.71, "runs": [0.001, 0.021, 0.65], "peak_mb": 179, "rss_mb": 212, "rc": 0, "t": "19:44:58", "load": 10.97265625}
+{"step": "lake-size-after-delete", "catalog": 8138752, "files": 2, "t": "19:44:58", "load": 10.97265625}
+{"step": "end-lake", "secs": 20.8, "t": "19:44:58", "load": 10.57421875}

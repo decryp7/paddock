@@ -1,0 +1,36 @@
+{"step":"cooked-gen","objects":20000000,"edges":99985487,"secs":12.8}
+{"step":"cooked-validate","bad":0,"secs":0.039}
+             1524504  peak memory footprint
+== parquet edges, same shape, sorted by src
+Run Time (s): real 0.001 user 0.000447 sys 0.000443
+Run Time (s): real 9.474 user 9.428893 sys 0.370744
+        9.50 real         9.44 user         0.38 sys
+           114786880  peak memory footprint
+409836787 /Volumes/d7sst7/dev-targets/scratch/storage-research/data/cooked/edges.parquet
+== one object's refs, twice
+Run Time (s): real 0.000 user 0.000340 sys 0.000595
+│            9 │
+Run Time (s): real 0.047 user 0.036022 sys 0.005841
+│            9 │
+Run Time (s): real 0.010 user 0.017630 sys 0.006751
+        0.09 real         0.07 user         0.01 sys
+            16515576  peak memory footprint
+== 200 random objects' refs, twice
+Run Time (s): real 0.000 user 0.000360 sys 0.000494
+Run Time (s): real 0.070 user 0.068840 sys 0.009099
+Run Time (s): real 0.022 user 0.068360 sys 0.008224
+        0.11 real         0.15 user         0.02 sys
+            31212000  peak memory footprint
+== reachability by recursive SQL, 768 MB, stopped after 900 s
+Run Time (s): real 0.000 user 0.000397 sys 0.000345
+Run Time (s): real 19.217 user 5.122236 sys 0.406458
+       19.27 real         5.14 user         0.44 sys
+          1229620520  peak memory footprint
+== samples as Parquet
+111379295 /Volumes/d7sst7/dev-targets/scratch/storage-research/data/cooked/samples.parquet
+Run Time (s): real 0.000 user 0.000331 sys 0.000362
+Run Time (s): real 0.079 user 0.187216 sys 0.014784
+Run Time (s): real 0.047 user 0.179824 sys 0.004434
+        0.14 real         0.38 user         0.02 sys
+           114950696  peak memory footprint
+cooked2-done

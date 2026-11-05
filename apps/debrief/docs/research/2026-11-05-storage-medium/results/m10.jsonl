@@ -1,0 +1,51 @@
+{"step": "begin-gen", "t": "18:25:51", "load": 7.322265625}
+{"step": "gen", "wall": 8.16, "runs": [0.0, 8.135], "peak_mb": 82, "rss_mb": 100, "rc": 0, "t": "18:25:59", "load": 7.48681640625}
+{"step": "gen-size", "files": 77, "bytes": 257240281, "footer": 3806, "t": "18:25:59", "load": 7.48681640625}
+{"step": "end-gen", "secs": 8.2, "t": "18:25:59", "load": 7.48681640625}
+{"step": "begin-catalog", "t": "18:25:59", "load": 7.48681640625}
+{"step": "catalog-segments", "wall": 0.05, "runs": [0.001, 0.0, 0.009], "peak_mb": 28, "rss_mb": 48, "rc": 0, "t": "18:25:59", "load": 7.48681640625}
+{"step": "view-sql-bytes", "bytes": 7058, "t": "18:25:59", "load": 7.48681640625}
+{"step": "view-create-first", "wall": 0.03, "runs": [0.001, 0.003], "peak_mb": 15, "rss_mb": 33, "rc": 0, "t": "18:25:59", "load": 7.48681640625}
+{"step": "view-replace-again", "wall": 0.03, "runs": [0.001, 0.004, 0.002], "peak_mb": 15, "rss_mb": 33, "rc": 0, "t": "18:25:59", "load": 7.48681640625}
+{"step": "catalog-size", "bytes": 1060864, "t": "18:25:59", "load": 7.48681640625}
+{"step": "end-catalog", "secs": 0.1, "t": "18:25:59", "load": 7.48681640625}
+{"step": "begin-ord", "t": "18:25:59", "load": 7.48681640625}
+{"step": "ord-rebuild", "wall": 0.72, "runs": [0.001, 0.697], "peak_mb": 304, "rss_mb": 326, "rc": 0, "t": "18:26:00", "load": 7.48681640625}
+{"step": "catalog-size-after-ord", "bytes": 33042432, "t": "18:26:00", "load": 7.48681640625}
+{"step": "end-ord", "secs": 0.7, "t": "18:26:00", "load": 7.48681640625}
+{"step": "begin-hist", "t": "18:26:00", "load": 7.48681640625}
+{"step": "histogram-build", "wall": 3.13, "runs": [0.001, 3.094], "peak_mb": 903, "rss_mb": 923, "rc": 0, "t": "18:26:03", "load": 7.04736328125}
+{"step": "catalog-size-after-hist", "bytes": 69742592, "rows": ["9353469"], "t": "18:26:03", "load": 7.04736328125}
+{"step": "end-hist", "secs": 3.2, "t": "18:26:03", "load": 7.04736328125}
+{"step": "begin-queries", "t": "18:26:03", "load": 7.04736328125}
+{"step": "q-bind-only", "wall": 0.03, "runs": [0.001, 0.003, 0.001], "peak_mb": 14, "rss_mb": 32, "rc": 0, "t": "18:26:03", "load": 7.04736328125}
+{"step": "q-count", "wall": 0.05, "runs": [0.001, 0.014, 0.011], "peak_mb": 18, "rss_mb": 38, "rc": 0, "t": "18:26:03", "load": 7.04736328125}
+{"step": "q-level-facet", "wall": 0.07, "runs": [0.001, 0.024, 0.021], "peak_mb": 19, "rss_mb": 39, "rc": 0, "t": "18:26:03", "load": 7.04736328125}
+{"step": "q-1000-buckets-scan", "wall": 0.15, "runs": [0.001, 0.062, 0.058], "peak_mb": 36, "rss_mb": 56, "rc": 0, "t": "18:26:03", "load": 7.04736328125}
+{"step": "q-1000-buckets-histogram", "wall": 0.1, "runs": [0.001, 0.039, 0.035], "peak_mb": 43, "rss_mb": 62, "rc": 0, "t": "18:26:03", "load": 7.04736328125}
+{"step": "q-page-by-ord-ids-mid", "wall": 0.03, "runs": [0.001, 0.001, 0.0], "peak_mb": 12, "rss_mb": 31, "rc": 0, "t": "18:26:03", "load": 7.04736328125}
+{"step": "page-files", "files": 64, "t": "18:26:03", "load": 7.04736328125}
+{"step": "q-page-rows-pruned-list", "wall": 0.27, "runs": [0.001, 0.122, 0.12], "peak_mb": 111, "rss_mb": 131, "rc": 0, "t": "18:26:04", "load": 7.04736328125}
+{"step": "q-page-rows-full-view", "wall": 0.27, "runs": [0.001, 0.126, 0.122], "peak_mb": 119, "rss_mb": 139, "rc": 0, "t": "18:26:04", "load": 7.04736328125}
+{"step": "q-position-of-id", "wall": 0.03, "runs": [0.001, 0.005, 0.003], "peak_mb": 43, "rss_mb": 61, "rc": 0, "t": "18:26:04", "load": 7.04736328125}
+{"step": "q-keyset-mid-view", "wall": 0.28, "runs": [0.001, 0.131, 0.127], "peak_mb": 71, "rss_mb": 92, "rc": 0, "t": "18:26:04", "load": 7.04736328125}
+{"step": "keyset-files", "files": 76, "t": "18:26:04", "load": 7.04736328125}
+{"step": "q-keyset-mid-pruned-list", "wall": 0.15, "runs": [0.001, 0.066, 0.064], "peak_mb": 57, "rss_mb": 76, "rc": 0, "t": "18:26:04", "load": 7.04736328125}
+{"step": "q-filtered-page-view", "wall": 0.05, "runs": [0.001, 0.011, 0.009], "peak_mb": 42, "rss_mb": 62, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "source-files", "files": 2, "t": "18:26:05", "load": 7.04736328125}
+{"step": "q-filtered-page-pruned-list", "wall": 0.03, "runs": [0.001, 0.006, 0.004], "peak_mb": 34, "rss_mb": 53, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "q-top-first-page-view", "wall": 0.34, "runs": [0.001, 0.158, 0.155], "peak_mb": 69, "rss_mb": 89, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "end-queries", "secs": 2.0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "begin-lake", "t": "18:26:05", "load": 7.04736328125}
+{"step": "lake-install", "wall": 0.02, "runs": [0.0], "peak_mb": 11, "rss_mb": 27, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "lake-create", "wall": 0.09, "runs": [0.001, 0.024, 0.024], "peak_mb": 23, "rss_mb": 54, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "lake-add-all", "wall": 0.1, "runs": [0.001, 0.019, 0.041], "peak_mb": 74, "rss_mb": 106, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "lake-catalog-size", "bytes": 5517312, "t": "18:26:05", "load": 7.04736328125}
+{"step": "lake-bind-only", "wall": 0.06, "runs": [0.02, 0.013, 0.001], "peak_mb": 22, "rss_mb": 53, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "lake-count", "wall": 0.06, "runs": [0.019, 0.017, 0.002], "peak_mb": 22, "rss_mb": 53, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "lake-1000-buckets-scan", "wall": 0.16, "runs": [0.019, 0.065, 0.049], "peak_mb": 42, "rss_mb": 75, "rc": 0, "t": "18:26:05", "load": 7.04736328125}
+{"step": "lake-keyset-mid", "wall": 0.19, "runs": [0.019, 0.08, 0.065], "peak_mb": 72, "rss_mb": 104, "rc": 0, "t": "18:26:06", "load": 7.04736328125}
+{"step": "lake-filtered-page", "wall": 0.08, "runs": [0.02, 0.023, 0.008], "peak_mb": 48, "rss_mb": 81, "rc": 0, "t": "18:26:06", "load": 7.04736328125}
+{"step": "lake-remove-source", "wall": 0.1, "runs": [0.001, 0.019, 0.041], "peak_mb": 40, "rss_mb": 74, "rc": 0, "t": "18:26:06", "load": 7.04736328125}
+{"step": "lake-size-after-delete", "catalog": 6041600, "files": 2, "t": "18:26:06", "load": 7.04736328125}
+{"step": "end-lake", "secs": 0.9, "t": "18:26:06", "load": 7.04736328125}

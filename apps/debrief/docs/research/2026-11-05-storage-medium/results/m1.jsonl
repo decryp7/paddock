@@ -1,0 +1,64 @@
+{"step": "begin-gen", "t": "18:25:45", "load": 7.08935546875}
+{"step": "gen", "wall": 1.22, "runs": [0.004, 0.876], "peak_mb": 74, "rss_mb": 93, "rc": 0, "t": "18:25:46", "load": 7.08935546875}
+{"step": "gen-size", "files": 8, "bytes": 20686155, "footer": 3809, "t": "18:25:46", "load": 7.08935546875}
+{"step": "end-gen", "secs": 1.2, "t": "18:25:46", "load": 7.08935546875}
+{"step": "begin-catalog", "t": "18:25:46", "load": 7.08935546875}
+{"step": "catalog-segments", "wall": 0.09, "runs": [0.019, 0.0, 0.028], "peak_mb": 25, "rss_mb": 45, "rc": 0, "t": "18:25:46", "load": 7.08935546875}
+{"step": "view-sql-bytes", "bytes": 842, "t": "18:25:46", "load": 7.08935546875}
+{"step": "view-create-first", "wall": 0.03, "runs": [0.001, 0.006], "peak_mb": 12, "rss_mb": 30, "rc": 0, "t": "18:25:46", "load": 7.08935546875}
+{"step": "view-replace-again", "wall": 0.03, "runs": [0.001, 0.001, 0.001], "peak_mb": 12, "rss_mb": 30, "rc": 0, "t": "18:25:46", "load": 7.08935546875}
+{"step": "catalog-size", "bytes": 1060864, "t": "18:25:46", "load": 7.08935546875}
+{"step": "end-catalog", "secs": 0.2, "t": "18:25:46", "load": 7.08935546875}
+{"step": "begin-ord", "t": "18:25:46", "load": 7.08935546875}
+{"step": "ord-rebuild", "wall": 0.14, "runs": [0.001, 0.113], "peak_mb": 58, "rss_mb": 79, "rc": 0, "t": "18:25:46", "load": 7.08935546875}
+{"step": "catalog-size-after-ord", "bytes": 3944448, "t": "18:25:46", "load": 7.08935546875}
+{"step": "end-ord", "secs": 0.1, "t": "18:25:46", "load": 7.08935546875}
+{"step": "begin-hist", "t": "18:25:46", "load": 7.08935546875}
+{"step": "histogram-build", "wall": 0.17, "runs": [0.001, 0.143], "peak_mb": 223, "rss_mb": 243, "rc": 0, "t": "18:25:47", "load": 7.08935546875}
+{"step": "catalog-size-after-hist", "bytes": 10235904, "rows": ["999411"], "t": "18:25:47", "load": 7.08935546875}
+{"step": "end-hist", "secs": 0.2, "t": "18:25:47", "load": 7.08935546875}
+{"step": "begin-queries", "t": "18:25:47", "load": 7.08935546875}
+{"step": "q-bind-only", "wall": 0.03, "runs": [0.001, 0.001, 0.001], "peak_mb": 12, "rss_mb": 29, "rc": 0, "t": "18:25:47", "load": 7.08935546875}
+{"step": "q-count", "wall": 0.03, "runs": [0.001, 0.004, 0.003], "peak_mb": 15, "rss_mb": 34, "rc": 0, "t": "18:25:47", "load": 7.08935546875}
+{"step": "q-level-facet", "wall": 0.04, "runs": [0.001, 0.007, 0.003], "peak_mb": 15, "rss_mb": 35, "rc": 0, "t": "18:25:47", "load": 7.08935546875}
+{"step": "q-1000-buckets-scan", "wall": 0.04, "runs": [0.001, 0.01, 0.008], "peak_mb": 25, "rss_mb": 46, "rc": 0, "t": "18:25:47", "load": 7.08935546875}
+{"step": "q-1000-buckets-histogram", "wall": 0.04, "runs": [0.001, 0.009, 0.006], "peak_mb": 20, "rss_mb": 40, "rc": 0, "t": "18:25:47", "load": 7.08935546875}
+{"step": "q-page-by-ord-ids-mid", "wall": 0.03, "runs": [0.001, 0.004, 0.001], "peak_mb": 12, "rss_mb": 31, "rc": 0, "t": "18:25:47", "load": 7.08935546875}
+{"step": "page-files", "files": 8, "t": "18:25:47", "load": 7.08935546875}
+{"step": "q-page-rows-pruned-list", "wall": 0.1, "runs": [0.001, 0.046, 0.03], "peak_mb": 100, "rss_mb": 120, "rc": 0, "t": "18:25:47", "load": 7.322265625}
+{"step": "q-page-rows-full-view", "wall": 0.09, "runs": [0.001, 0.033, 0.03], "peak_mb": 110, "rss_mb": 130, "rc": 0, "t": "18:25:47", "load": 7.322265625}
+{"step": "q-position-of-id", "wall": 0.03, "runs": [0.001, 0.001, 0.001], "peak_mb": 14, "rss_mb": 32, "rc": 0, "t": "18:25:47", "load": 7.322265625}
+{"step": "q-keyset-mid-view", "wall": 0.08, "runs": [0.001, 0.038, 0.016], "peak_mb": 57, "rss_mb": 77, "rc": 0, "t": "18:25:47", "load": 7.322265625}
+{"step": "keyset-files", "files": 8, "t": "18:25:47", "load": 7.322265625}
+{"step": "q-keyset-mid-pruned-list", "wall": 0.05, "runs": [0.001, 0.014, 0.012], "peak_mb": 51, "rss_mb": 70, "rc": 0, "t": "18:25:47", "load": 7.322265625}
+{"step": "q-filtered-page-view", "wall": 0.04, "runs": [0.001, 0.007, 0.005], "peak_mb": 24, "rss_mb": 45, "rc": 0, "t": "18:25:47", "load": 7.322265625}
+{"step": "source-files", "files": 1, "t": "18:25:47", "load": 7.322265625}
+{"step": "q-filtered-page-pruned-list", "wall": 0.03, "runs": [0.001, 0.005, 0.004], "peak_mb": 21, "rss_mb": 40, "rc": 0, "t": "18:25:47", "load": 7.322265625}
+{"step": "q-top-first-page-view", "wall": 0.06, "runs": [0.001, 0.019, 0.017], "peak_mb": 55, "rss_mb": 75, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "end-queries", "secs": 0.8, "t": "18:25:48", "load": 7.322265625}
+{"step": "begin-lake", "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-install", "wall": 0.03, "runs": [0.004], "peak_mb": 12, "rss_mb": 27, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-create", "wall": 0.34, "runs": [0.001, 0.283, 0.028], "peak_mb": 24, "rss_mb": 55, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-add-all", "wall": 0.09, "runs": [0.001, 0.02, 0.028], "peak_mb": 37, "rss_mb": 69, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-catalog-size", "bytes": 5517312, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-bind-only", "wall": 0.06, "runs": [0.022, 0.015, 0.001], "peak_mb": 22, "rss_mb": 52, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-count", "wall": 0.07, "runs": [0.022, 0.017, 0.002], "peak_mb": 22, "rss_mb": 53, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-1000-buckets-scan", "wall": 0.08, "runs": [0.021, 0.024, 0.008], "peak_mb": 31, "rss_mb": 64, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-keyset-mid", "wall": 0.09, "runs": [0.02, 0.031, 0.015], "peak_mb": 67, "rss_mb": 99, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-filtered-page", "wall": 0.08, "runs": [0.022, 0.022, 0.007], "peak_mb": 33, "rss_mb": 65, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-remove-source", "wall": 0.08, "runs": [0.001, 0.02, 0.025], "peak_mb": 28, "rss_mb": 61, "rc": 0, "t": "18:25:48", "load": 7.322265625}
+{"step": "lake-size-after-delete", "catalog": 6041600, "files": 1, "t": "18:25:48", "load": 7.322265625}
+{"step": "end-lake", "secs": 0.9, "t": "18:25:48", "load": 7.322265625}
+{"step": "begin-mgmt", "t": "18:25:48", "load": 7.322265625}
+{"step": "client-readonly-open-while-held", "rc": 1, "out": "IO Error: Could not set lock on file \"<cat>\": Conflicting lock is held in duckdb (PID n). See also https://duckdb.org/docs/current/connect/concurre", "t": "18:25:49", "load": 7.322265625}
+{"step": "client-attach-readonly-while-held", "rc": 1, "out": "IO Error: Could not set lock on file \"<cat>\": Conflicting lock is held in duckdb (PID n). See also https://duckdb.org/docs/current/connect/concurre", "t": "18:25:49", "load": 7.322265625}
+{"step": "client-parquet-direct-while-held", "rc": 0, "out": "count_star()\n1000000", "t": "18:25:49", "load": 7.322265625}
+{"step": "client-copy-without-wal", "rc": 1, "out": "count_star()\n64\ncount_star()\n1000000\nCatalog Error: Table with name marker does not exist!\nDid you mean \"pg_attrdef\"?", "t": "18:25:49", "load": 7.322265625}
+{"step": "wal-present", "bytes": 292, "t": "18:25:49", "load": 7.322265625}
+{"step": "client-copy-with-wal-readwrite", "rc": 0, "out": "count_star()\n1", "t": "18:25:49", "load": 7.322265625}
+{"step": "client-readonly-after-close", "rc": 0, "out": "count_star()\n1000000", "t": "18:25:49", "load": 7.322265625}
+{"step": "old-client-1.5.6-on-pinned", "rc": 0, "out": "count_star()\n1", "t": "18:25:49", "load": 7.322265625}
+{"step": "old-client-1.5.6-on-default", "rc": 1, "out": "IO Error: Trying to read a database file with version number 69, but we can only read versions between 64 and 68.\nThe database file was created with a newer version of DuckDB.\n\nNewer DuckDB version mi", "t": "18:25:49", "load": 7.322265625}
+{"step": "lake-sqlite-second-process-read", "rc": 0, "out": "\u001b[90mWARNING:\n\u001b[00m\u001b[90mThe 'extension_directory' setting is deprecated and will be removed in a future release.\n\n\u001b[00mcount_star()\n2", "t": "18:25:51", "load": 7.322265625}
+{"step": "lake-sqlite-parquet-visible", "parquet": 0, "t": "18:25:51", "load": 7.322265625}
+{"step": "end-mgmt", "secs": 2.2, "t": "18:25:51", "load": 7.322265625}
