@@ -132,7 +132,7 @@ some fields; "n/s" means the source does not state them.
 - **Build:** release; libduckdb 2.0.0; the store's default 192 MB memory limit
 - **Corpus:** `/samples` imported (38 sources), then its catalogue replaced by 1,600,000 invented rows (42,105 path-like
   names over the 38 sources); synthetic
-- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --no-capture -E 'test(a_1_6_million_row_catalogue)'`
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --no-capture -E 'test(regress_1_2::a_1_6_million_row_catalogue)'`
 - **Runs:** one run per side (the base failure was recorded with the P0 tests, debug build, the same message in a debug run)
 - **Numbers:**
 
@@ -158,7 +158,7 @@ some fields; "n/s" means the source does not state them.
 - **Load:** 1-minute load 5-13 during the runs; other agents running
 - **Build:** release; libduckdb 2.0.0; DuckDB's allocator (no mimalloc in the test process)
 - **Corpus:** `common::corpus` of 300,000 events (346 sources), generated from the invented samples; synthetic
-- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --no-capture -E 'test(building_the_catalogue)'`
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --no-capture -E 'test(regress_1_2::building_the_catalogue)'`
   (polls `duckdb_memory()` for the `IN_MEMORY_TABLE` tag every few ms while the catalogue builds, in steps of 4 MB)
 - **Runs:** one run per side
 - **Numbers:**
@@ -186,7 +186,7 @@ some fields; "n/s" means the source does not state them.
 - **Load:** 1-minute load 12-17 during the runs; Dyno release jobs and other agents running
 - **Build:** release; mimalloc not set in the test (the test process's system allocator); libduckdb 2.0.0
 - **Corpus:** the invented `/samples` log folders (about 38 sources), imported once; catalogue and index built
-- **Command:** `cargo nextest run -p debrief-store-duck --release --test regress_1_2 --run-ignored only --no-capture -E 'test(an_idle_store)'`
+- **Command:** `cargo nextest run -p debrief-store-duck --release --test it --run-ignored only --no-capture -E 'test(regress_1_2::an_idle_store)'`
   (`an_idle_store_statements_and_cpu`; `DEBRIEF_IDLE_S` = 130 s, two turns of the loops' 60 s backstop)
 - **Runs:** one run per side (A then B); the 100-turn counts below are deterministic
 - **Numbers:**
