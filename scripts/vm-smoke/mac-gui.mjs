@@ -63,9 +63,14 @@ export class MacGui {
     return { job: job === 0, file: file === 0 };
   }
 
+  /** Brings the app to the front (a restarted app is not frontmost, and menu items of a background app do not act). */
+  async activate() { await this.g.exec(`osascript -e ${sq(`tell application "${this.app}" to activate`)}`); await this.g.sleep(1000); }
+
   /** Dyno > Settings… (the app menu item opens the Settings window), then the section button of that window. */
   async openSettingsSection(sectionRe) {
     if (!(await this.has(this.app, '^Settings$', 'AXWindow'))) {
+      // An AXPress on a menu item of an app that is not frontmost is accepted and does nothing (row 25 of 2026-11-05: after the MCP row restarted the app with `open`).
+      await this.activate();
       const m = await this.press(this.app, '^Settings…', 'AXMenuItem');
       if (!m) return { ok: false, detail: 'no "Settings…" item in the Dyno menu' };
       const w = await this.waitFor(() => this.has(this.app, '^Settings$', 'AXWindow'), 20_000);
@@ -180,7 +185,11 @@ export class MacGui {
   /** Schedule > Turn on scheduled wake (when offered) > Add schedule: name, time of day (12-hour text), Once, then Add schedule. */
   async addSchedule(name, time12) {
     if (!(await this.openPower('Schedule'))) return { ok: false, detail: 'no Schedule tab' };
-    if (await this.has(this.app, '^Turn on scheduled wake$')) await this.press(this.app, '^Turn on scheduled wake$');
+    if (await this.has(this.app, '^Turn on scheduled wake$')) {
+      await this.press(this.app, '^Turn on scheduled wake$');
+      // An Add press while the page re-renders after "Turn on" is lost (0.2 s after: no form ever; 4 s after: form): wait for the banner to go, a condition, not a delay.
+      if (!(await this.waitFor(async () => !(await this.has(this.app, '^Turn on scheduled wake$')), 20_000)).ok) return { ok: false, detail: '"Turn on scheduled wake" was pressed but the banner never went' };
+    }
     if (!(await this.waitFor(() => this.press(this.app, '^Add schedule$'), 15_000)).ok) return { ok: false, detail: 'no "Add schedule" button' };
     const open = await this.waitFor(async () => (await this.fieldIndex(/^Name of the schedule/)) >= 0, 10_000);
     if (!open.ok) return { ok: false, detail: 'the Add a schedule form did not open' };

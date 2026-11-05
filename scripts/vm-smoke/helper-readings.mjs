@@ -32,14 +32,18 @@ export const READINGS = [
     expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i],
     // Per row (fix/dyno-vm-findings-1, efe366863): a File History log that never ran reads "Not set up" with a next step, which is right in a VM; "Could not check" is for a real tool failure. A build before that commit still says "Could not check 2 backup tools" and keeps failing.
     value: { windows: [/no backup of this PC|Windows Backup has \d+ versions?|Not set up/i] }, allowNotSetUp: true },
-  { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'extras', tab: 'Boot|Start-?up', fullText: 4000,
-    expect: { macos: [/Login items|Background items/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
+  { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'health', fullText: 4000,
+    // Measured 2026-11-05 on run-7575: login items are listed on Health > Start-up items (Extras > Boot has none). With the helper On the page said
+    // "Login items ... need administrator rights to read" because the agent only ever builds NeedsHelperBtm (startup.rs:178); that is the product gap this row catches.
+    expect: { macos: [/Start-up items/i] }, none: [/needs the helper/i, /Login items[^.]*need administrator rights/i] },
   { id: 'firewall', title: 'Firewall rules (pf on macOS, nft on Linux)', os: ['macos', 'linux'], page: 'firewall',
     expect: { macos: [/Read by the administrator helper/i], linux: [/Read by the administrator helper/i] }, none: [/needs the helper/i],
-    // A source named in full and a non-zero rule count ("0 rules" read nothing). On Linux the control loads one known nft rule first (tcp dport 59999).
-    value: { macos: [/\bpacket filter \(pf\)[\s\S]*\b[1-9][\d,]* rules?\b/i], linux: [/\bLinux nftables[\s\S]*\b[1-9][\d,]* rules?\b/i, /59999/] }, prepare: { linux: 'nft-rule' } },
+    // A source named in full and a non-zero rule count ("0 rules" read nothing). The control loads one known rule first, on Linux an nft rule (tcp dport 59999) and
+    // on macOS a pf rule on the same port: the image has an empty pf ruleset, so without the control the page rightly says "0 rules" (2026-11-05: with the rule it says "2 rules", "Ports = 59999").
+    value: { macos: [/\bpacket filter \(pf\)[\s\S]*\b[1-9][\d,]* rules?\b/i, /59999/], linux: [/\bLinux nftables[\s\S]*\b[1-9][\d,]* rules?\b/i, /59999/] }, prepare: { linux: 'nft-rule', macos: 'pf-rule' } },
   { id: 'energy-and-thermal', title: 'macOS CPU energy: the VM reason on the Energy tab', os: ['macos'], page: 'power', tab: 'Energy', fullText: 4000,
-    expect: { macos: [/The helper listed no CPU power, as in a virtual machine/i, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
+    // The reason is the helper's own text (helper_counters.rs "does not report CPU power (powermetrics listed none, as in a virtual machine) to software"); the Energy tab carries no "Read by" label.
+    expect: { macos: [/does not report CPU power \(powermetrics listed none, as in a virtual machine\)/i] }, none: [/needs the helper/i] },
   { id: 'sockets-and-holders', title: 'Linux socket owners and file holders', os: ['linux'], page: 'network',
     expect: { linux: [/Read by the administrator helper/i] }, none: [/needs the helper/i, /\bunknown program\b/i] },
   { id: 'memory-modules', title: 'Linux memory modules (no DMI in a VM: the reason)', os: ['linux'], page: 'inventory',
@@ -53,7 +57,10 @@ export const READINGS = [
     // At least one finding with a verdict word; only "Can't tell" is the VM saying it cannot read the settings: not measured, not a pass.
     value: { linux: [/\b(?:Fine|Needs a change)\b/] }, notMeasured: { linux: { when: (t) => /Can't tell/.test(t) && !/\b(?:Fine|Needs a change)\b/.test(t), why: 'the VM exposes no wake settings (every finding says Can\'t tell)' } } },
   { id: 'thermal-pressure', title: 'macOS temperatures: the thermal pressure reason on the dashboard widget', os: ['macos'], page: 'dashboard', fullText: 4000,
-    expect: { macos: [/macOS reports a thermal pressure level, not temperatures/i] }, none: [/needs the helper/i] },
+    expect: { macos: [/macOS reports a thermal pressure level, not temperatures/i] }, none: [/needs the helper/i],
+    // Measured 2026-11-05 on run-7575: none of the 13 pages and their tabs shows this reason, and the dashboard's default layout has no temperature widget (the widget palette is generic: Graph, Big number, Bars, Ring, driven from the Counters page).
+    // The probe cannot see the thing (ER-33), so the row is not measured, never a pass or a fail, until a control adds a temperature counter widget.
+    notMeasured: { macos: { when: () => true, why: 'the default dashboard has no temperature widget and no control adds one; the reason text is not on any page of this build' } } },
   { id: 'lifespan-smart', title: 'Disk health reading (Lifespan)', os: ['windows', 'linux'], page: 'lifespan',
     expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i], value: { windows: [LIFESPAN_VALUE], linux: [LIFESPAN_VALUE] },
     // The VM base has no smartmontools: the reading cannot be taken there, which is neither a pass nor a fail of the product.
@@ -151,8 +158,17 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
 
 /** macOS: the driver over a MacGui (sidebar links by label; tabs are radio buttons). */
 export function macDriver(gui) {
-  const label = { dashboard: 'Dashboard', processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
+  let loadedPf = false;
+  const label = { dashboard: 'Dashboard', processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', health: 'Health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
   return {
+    /** Controls: `pf-rule` loads one known rule into the guest's (empty) pf ruleset, without enabling pf; `cleanup` restores /etc/pf.conf. */
+    async prepare(key) {
+      if (key !== 'pf-rule') return { ok: false, detail: `unknown control ${key}` };
+      const r = await gui.g.exec(`echo 'block drop quick proto tcp from any to any port 59999' | sudo /sbin/pfctl -f - 2>&1; sudo /sbin/pfctl -sr 2>&1 | grep -c 59999`);
+      loadedPf = /^1$/m.test(r.stdout.trim().split('\n').at(-1) ?? '');
+      return loadedPf ? { ok: true, detail: 'pf rule on tcp port 59999 loaded' } : { ok: false, detail: `pfctl did not list the rule: ${r.stdout.trim().slice(-120)}` };
+    },
+    async cleanup(key) { if (key === 'pf-rule' && loadedPf) { await gui.g.exec('sudo /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1; true'); loadedPf = false; } },
     async openPage(page, tab, reading = {}) {
       await gui.closeSettings(); // the Settings window stays open after the helper step and would be read as the page
       if (reading.minWidth && (await gui.has(gui.app, '^Collapse sidebar'))) await gui.press(gui.app, '^Collapse sidebar'); // room for the Account column

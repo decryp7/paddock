@@ -79,3 +79,33 @@ test('Backup is judged per row: "Not set up" for File History passes, Windows Ba
   assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Backup health Windows Backup could not check. Try again. File History Not set up. Read by the administrator helper'))).status, 'fail');
   assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Dyno could not check 2 backup tools Read by the administrator helper'))).status, 'fail');
 });
+
+test('macOS rows measured 2026-11-05 on run-7575: login items on Health, pf control, the helper own CPU wording, thermal not measured', async () => {
+  const mac = (id, text) => readingStep(by(id), 'macos', driver(text));
+  // login items: Health > Start-up items; the "need administrator rights" notice with the helper On is the product gap (startup.rs:178)
+  assert.equal((await mac('login-items', 'Health Start-up items Programs that start at sign-in Not shown: Login items (System Settings > Login Items & Extensions) need administrator rights to read. Turn on administrator readings in Settings and Dyno helper will show them.')).status, 'fail');
+  assert.equal((await mac('login-items', 'Health Start-up items Programs that start at sign-in Dyno Login item Showing 3 of 3 entries')).status, 'pass');
+  // firewall: the control loads a known rule, so "0 rules" or a missing 59999 is a fail and a rule is a pass; a control that cannot run is check-broken
+  assert.equal(by('firewall').prepare.macos, 'pf-rule');
+  assert.equal((await mac('firewall', 'macOS packet filter (pf) Read by the administrator helper 0 rules. No rules to show.')).status, 'fail');
+  assert.equal((await mac('firewall', 'macOS packet filter (pf) Read by the administrator helper 2 rules. Both All networks Ports = 59999')).status, 'pass');
+  assert.equal((await readingStep(by('firewall'), 'macos', { ...driver('x'), prepare: async () => ({ ok: false, detail: 'pfctl missing' }) })).status, 'check-broken');
+  // energy: the product's own sentence
+  assert.equal((await mac('energy-and-thermal', 'This computer does not report CPU power (powermetrics listed none, as in a virtual machine) to software.')).status, 'pass');
+  // thermal: no page of the build shows it, so it is not measured
+  assert.equal((await mac('thermal-pressure', 'Dashboard Health CPU Memory')).status, 'not-measured');
+});
+test('macDriver pf-rule control loads the rule and checks the OS lists it; cleanup restores pf.conf only if it loaded one', async () => {
+  const { macDriver } = await import('./helper-readings.mjs');
+  const cmds = []; let listed = '1';
+  const gui = { g: { exec: async (c) => { cmds.push(c); return { code: 0, stdout: listed, stderr: '' }; } }, closeSettings: async () => {} };
+  const d = macDriver(gui);
+  assert.equal((await d.prepare('pf-rule')).ok, true);
+  assert.match(cmds[0], /pfctl -f - .*port 59999|port 59999.*pfctl -f -/s);
+  await d.cleanup('pf-rule');
+  assert.match(cmds[1], /pfctl -f \/etc\/pf\.conf/);
+  listed = '0'; cmds.length = 0;
+  assert.equal((await d.prepare('pf-rule')).ok, false);
+  await d.cleanup('pf-rule');
+  assert.equal(cmds.length, 1, 'nothing to restore when no rule was loaded');
+});
