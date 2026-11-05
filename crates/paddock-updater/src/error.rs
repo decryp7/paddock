@@ -185,7 +185,7 @@ impl UpdateError {
                 "Try again, or install the new version from the releases page."
             }
             UpdateError::NotInstalled { .. } => {
-                "Click Install to try again. If it keeps failing, install the new version from the releases page."
+                "Click Install again. If it keeps failing, install the new version from the releases page."
             }
             UpdateError::Declined => {
                 "Click Install again and choose Yes in the Windows prompt. A standard user needs an administrator's name and password."
@@ -293,4 +293,34 @@ pub fn looks_offline(text: &str) -> bool {
     ]
     .iter()
     .any(|p| t.contains(p))
+}
+
+#[cfg(test)]
+mod per_machine_tests {
+    use super::*;
+
+    #[test]
+    fn the_hand_off_errors_have_kinds_texts_and_next_steps_that_name_the_button() {
+        let declined = UpdateError::Declined;
+        assert_eq!(declined.kind(), UpdateErrorKind::Declined);
+        assert_eq!(
+            declined.message(),
+            "Not installed: Windows permission was declined."
+        );
+        assert!(declined.next_step().contains("Install again"));
+        let refused = UpdateError::NotInstalled {
+            reason: "No.".into(),
+        };
+        assert_eq!(refused.kind(), UpdateErrorKind::NotInstalled);
+        assert_eq!(refused.message(), "Not installed: No.");
+        assert!(refused.next_step().contains("Install again"));
+        let quit = UpdateError::PerMachine;
+        assert_eq!(quit.kind(), UpdateErrorKind::PerMachine);
+        assert!(quit.message().contains("click Install"));
+        assert!(!quit.next_step().is_empty());
+        for e in [declined, refused, quit] {
+            assert_eq!(e.to_dto().kind, e.kind());
+            assert_eq!(e.to_string(), e.message(), "no detail to add");
+        }
+    }
 }

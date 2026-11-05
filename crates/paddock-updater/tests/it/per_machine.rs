@@ -23,6 +23,9 @@ impl Elevator for Elev {
 
 struct Contract;
 impl SetupContract for Contract {
+    fn check_install_dir(&self, _dir: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn check_download(&self, _path: &str) -> Result<(), String> {
         Ok(())
     }
@@ -97,7 +100,8 @@ fn ready(outcome: ElevatedOutcome) -> Rig {
         outcome,
         runs: Mutex::new(Vec::new()),
     });
-    let handoff = ElevatedHandoff::new(r"C:\Program Files\Dyno", elev.clone(), Arc::new(Contract));
+    let handoff =
+        ElevatedHandoff::new(r"C:\Program Files\Dyno", elev.clone(), Arc::new(Contract)).unwrap();
     let updater = updater(dir.path(), &records, &server, "1.0.0").with_installer(Arc::new(handoff));
     let (reg, _sink) = jobs();
     let (_, t) = updater.begin_check().unwrap();
@@ -343,4 +347,73 @@ fn a_per_user_copy_is_untouched_by_all_of_this() {
     assert_eq!(s.install.scope, InstallScope::PerUser);
     assert!(s.install.install_on_quit_available && s.install.administrator_notice.is_none());
     assert!(!u.settle_handoff(Duration::from_secs(1)));
+}
+
+#[test]
+fn a_failure_of_a_version_that_is_installed_by_now_is_not_shown() {
+    let r = ready(ElevatedOutcome::Exited(26));
+    r.updater.prepare_restart().unwrap();
+    r.updater.install_at_exit();
+    // The failed 9.9.9 was installed later by hand: the new version starts and the old failure is gone for good.
+    let new = updater(r.dir.path(), &r.records, &FakeServer::new(), "9.9.9");
+    assert_eq!(new.status().phase, UpdatePhase::Idle);
+    assert!(
+        r.records.load().failed_install.is_none(),
+        "cleared, not kept for later"
+    );
+    // A newer one than the failed version too.
+    let r = ready(ElevatedOutcome::Declined);
+    r.updater.prepare_restart().unwrap();
+    r.updater.install_at_exit();
+    let newer = updater(r.dir.path(), &r.records, &FakeServer::new(), "10.0.0");
+    assert_eq!(newer.status().phase, UpdatePhase::Idle);
+}
+
+#[test]
+fn an_unknown_exit_code_keeps_the_record_and_does_not_relaunch() {
+    let r = ready(ElevatedOutcome::Exited(77));
+    r.updater.prepare_restart().unwrap();
+    assert_eq!(
+        r.updater.install_at_exit(),
+        ExitAction::Installed { relaunch: false }
+    );
+    assert!(
+        r.records.load().handoff.is_some(),
+        "the next start settles it"
+    );
+    assert!(r.records.load().failed_install.is_none());
+}
+
+#[test]
+fn turning_install_on_quit_off_is_a_no_op_and_the_installer_running_phase_is_visible() {
+    let r = ready(ElevatedOutcome::Exited(0));
+    let s = r.updater.install_on_quit(false).unwrap();
+    assert!(matches!(
+        s.phase,
+        UpdatePhase::Ready {
+            install_on_quit: false,
+            ..
+        }
+    ));
+    assert!(!r.updater.installer_running());
+    r.updater.prepare_restart().unwrap();
+    r.updater.install_at_exit();
+    let lock = Arc::new(Lock {
+        installing: AtomicBool::new(true),
+        ends_in_wait: false,
+        waited: Mutex::new(Vec::new()),
+    });
+    let old =
+        updater(r.dir.path(), &r.records, &FakeServer::new(), "1.0.0").with_installer_lock(lock);
+    assert!(old.installer_running());
+}
+
+#[test]
+fn without_a_lock_to_look_at_a_recorded_hand_off_is_settled_at_once() {
+    let r = ready(ElevatedOutcome::Exited(0));
+    r.updater.prepare_restart().unwrap();
+    r.updater.install_at_exit();
+    let old = updater(r.dir.path(), &r.records, &FakeServer::new(), "1.0.0");
+    assert!(old.settle_handoff(Duration::from_secs(1)));
+    assert!(matches!(old.status().phase, UpdatePhase::Failed { .. }));
 }

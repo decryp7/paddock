@@ -46,12 +46,11 @@ impl Default for Record {
     }
 }
 
-/// The hand-off record: which version was handed to the installer, and when (seconds since 1970).
+/// The hand-off record: which version was handed to the installer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Handoff {
     pub version: String,
-    pub at: u64,
 }
 
 /// An install that failed when the app quit.

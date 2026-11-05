@@ -85,9 +85,9 @@ pub enum Event {
     InstallFailed(UpdateError),
     /// Forget the update found (the channel changed).
     Reset,
-    /// The installer that was running ended: the failure to show if the update was not installed (the record still named a
-    /// newer version), `None` if there is nothing to show.
-    InstallerEnded(Option<UpdateError>),
+    /// The installer that was running ended without the update being installed (the record still named a newer version): the
+    /// failure to show.
+    InstallerEnded(UpdateError),
 }
 
 fn busy(detail: &str) -> UpdateError {
@@ -117,10 +117,9 @@ impl UpdatePhase {
             ) => {
                 return Err(busy("An update is already being downloaded or installed."));
             }
-            (P::InstallerRunning { .. }, Event::InstallerEnded(Some(error))) => {
+            (P::InstallerRunning { .. }, Event::InstallerEnded(error)) => {
                 P::Failed { error, info: None }
             }
-            (P::InstallerRunning { .. }, Event::InstallerEnded(None)) => P::Idle,
 
             (P::Checking { .. }, Event::Job(id)) => P::Checking { job: Some(id) },
             (P::Downloading { info, .. }, Event::Job(id)) => P::Downloading {

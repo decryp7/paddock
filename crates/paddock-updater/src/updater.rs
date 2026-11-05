@@ -224,6 +224,8 @@ struct Found {
 /// How long the app waits at start for an installer that is running (ADR 0053 section 4.1 step 4). A timeout means "unknown":
 /// the hand-off record settles it at the next start.
 pub const INSTALLER_WAIT_BOUND: Duration = Duration::from_secs(300);
+/// How long one wait on the installer lock lasts in the background thread (so a stop is noticed); the wait goes on in slices.
+pub const INSTALLER_WAIT_SLICE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OnExit {
@@ -281,8 +283,16 @@ impl Updater {
         let available = config.key.is_some() && !config.channels.is_empty() && current.is_some();
         let rec = records.load();
         // Shown once: forgotten as soon as it is the phase (only then is the record written).
-        let failed = rec.failed_install.clone();
-        if failed.is_some() {
+        // Not shown when the version it names is installed by now (this version or older): a later success, by hand or by
+        // another update, must not leave the earlier failure on screen.
+        let failed = rec.failed_install.clone().filter(|f| {
+            let named = semver::Version::parse(f.version.trim_start_matches('v')).ok();
+            match (&named, &current) {
+                (Some(n), Some(c)) => n > c,
+                _ => true,
+            }
+        });
+        if rec.failed_install.is_some() {
             let _ = records.update(|r| r.failed_install = None);
         }
         // A hand-off record naming a version that is not newer than this one is done with: the new version clears it. One
@@ -860,11 +870,10 @@ impl Updater {
             // an installer may be running or may have stopped (ADR 0053 section 4.1 step 2).
             let handoff = self.config.scope == InstallScope::PerMachine;
             if handoff {
-                let at = (self.now)();
                 let version = version.clone();
                 let _ = self
                     .records
-                    .update(|r| r.handoff = Some(Handoff { version, at }));
+                    .update(|r| r.handoff = Some(Handoff { version }));
             }
             let result = installer.install(
                 &Package {
@@ -925,8 +934,12 @@ impl Updater {
             reason: crate::install::installer_stopped(self.config.install_dir.as_deref()),
         };
         let _ = self.records.update(|r| r.handoff = None);
-        self.apply(Event::InstallerEnded(Some(error)), |_| {})
-            .is_ok()
+        self.apply(Event::InstallerEnded(error), |_| {}).is_ok()
+    }
+
+    /// Whether the phase is "an installer is running" (the background thread keeps waiting while it is).
+    pub fn installer_running(&self) -> bool {
+        matches!(self.lock().phase, UpdatePhase::InstallerRunning { .. })
     }
 
     /// At start-up: runs the services' hook once per version change (rule 24). Blocking (the hook waits for the service

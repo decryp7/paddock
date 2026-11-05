@@ -90,9 +90,13 @@ pub trait Elevator: Send + Sync {
 
 /// What the app knows from `paddock-setup` and the updater does not (rule 55: one implementation, in `paddock-setup`).
 pub trait SetupContract: Send + Sync {
+    /// Whether `dir` is a folder the elevated program may be run from: an absolute drive-letter path in Program Files. The
+    /// reason if not; nothing is run from a folder that fails.
+    fn check_install_dir(&self, dir: &str) -> Result<(), String>;
     /// Whether `apply-update` accepts the downloaded file at `path` (a plain local drive-letter path); the reason if not.
     fn check_download(&self, path: &str) -> Result<(), String>;
-    /// The sentence for an exit code of `apply-update` (`None`: a code the program never returns).
+    /// The sentence for an exit code of `apply-update` itself (`None`: not one of its own codes, which makes the outcome
+    /// unknown: other commands of the same program and the installer have exit codes that overlap).
     fn sentence(&self, code: i32) -> Option<String>;
 }
 
@@ -164,18 +168,21 @@ pub struct ElevatedHandoff {
 }
 
 impl ElevatedHandoff {
-    /// `install_dir`: the folder of the running executable (a Program Files folder).
+    /// `install_dir`: the folder of the running executable. Refused (the reason) unless the contract accepts it, before any
+    /// prompt could be raised for a program found through a relative name or a folder an ordinary user can change.
     pub fn new(
         install_dir: impl Into<PathBuf>,
         elevator: Arc<dyn Elevator>,
         contract: Arc<dyn SetupContract>,
-    ) -> ElevatedHandoff {
-        ElevatedHandoff {
-            install_dir: install_dir.into(),
+    ) -> Result<ElevatedHandoff, String> {
+        let install_dir = install_dir.into();
+        contract.check_install_dir(&install_dir.display().to_string())?;
+        Ok(ElevatedHandoff {
+            install_dir,
             elevator,
             contract,
             patience: DEFAULT_PATIENCE,
-        }
+        })
     }
 
     /// Another patience (tests).
@@ -223,15 +230,21 @@ impl Installer for ElevatedHandoff {
                 ));
                 Ok(())
             }
-            ElevatedOutcome::Exited(code) => {
-                let reason = self.contract.sentence(code).unwrap_or_else(|| {
-                    format!("The setup program ended with code {code}. The reason is in setup.log in the install folder's updates folder.")
-                });
-                log_line(format!(
-                    "hand-off: paddock-setup exit {code} after {ms} ms: {reason}"
-                ));
-                Err(UpdateError::NotInstalled { reason })
-            }
+            ElevatedOutcome::Exited(code) => match self.contract.sentence(code) {
+                Some(reason) => {
+                    log_line(format!(
+                        "hand-off: paddock-setup exit {code} after {ms} ms: {reason}"
+                    ));
+                    Err(UpdateError::NotInstalled { reason })
+                }
+                // Not a code of apply-update: the outcome is unknown, so the record stays and the next start settles it.
+                None => {
+                    log_line(format!(
+                        "hand-off: paddock-setup exit {code} after {ms} ms is not one apply-update returns; the outcome is unknown, the next start settles it"
+                    ));
+                    Ok(())
+                }
+            },
             ElevatedOutcome::StillRunning => {
                 log_line(format!(
                     "hand-off still running after {ms} ms; the app exits and the next start settles it"
@@ -251,7 +264,8 @@ impl Installer for ElevatedHandoff {
 }
 
 fn log_line(line: String) {
-    // The core has no logger; the adapter's `log` feature is optional, so the line goes to stderr only in debug builds.
+    // The core has no logger of its own: the line is logged when the adapter (the `tauri` feature, which has `log`) is built, and
+    // dropped otherwise.
     #[cfg(feature = "tauri")]
     log::info!("{line}");
     #[cfg(not(feature = "tauri"))]
@@ -289,6 +303,13 @@ mod tests {
 
     struct Contract;
     impl SetupContract for Contract {
+        fn check_install_dir(&self, dir: &str) -> Result<(), String> {
+            if dir.starts_with("C:\\Program Files\\") {
+                Ok(())
+            } else {
+                Err("not in Program Files".into())
+            }
+        }
         fn check_download(&self, path: &str) -> Result<(), String> {
             if path.starts_with("C:\\") {
                 Ok(())
@@ -317,7 +338,7 @@ mod tests {
     fn handoff(outcome: ElevatedOutcome) -> (ElevatedHandoff, Arc<FakeElevator>) {
         let e = FakeElevator::new(outcome);
         (
-            ElevatedHandoff::new(r"C:\Program Files\Dyno", e.clone(), Arc::new(Contract)),
+            ElevatedHandoff::new(r"C:\Program Files\Dyno", e.clone(), Arc::new(Contract)).unwrap(),
             e,
         )
     }
@@ -381,9 +402,40 @@ mod tests {
         );
         assert!(!e.next_step().is_empty());
         // A code the program never returns still says where to look.
-        let (r, _) = run(ElevatedOutcome::Exited(77));
-        let m = r.unwrap_err().message();
-        assert!(m.contains("code 77") && m.contains("setup.log"), "{m}");
+        // (A code the program never returns is an unknown outcome, see below.)
+    }
+
+    #[test]
+    fn a_code_apply_update_never_returns_is_an_unknown_outcome_not_a_failure() {
+        // 0 is success; 2, 3, 11 and 12 belong to other commands and to the installer's own error levels, not to apply-update.
+        for code in [2, 3, 11, 12, 77] {
+            let (r, _) = run(ElevatedOutcome::Exited(code));
+            assert_eq!(
+                r,
+                Ok(()),
+                "exit {code}: keep the record, do not relaunch, let the next start settle it"
+            );
+        }
+    }
+
+    #[test]
+    fn an_install_folder_that_is_not_the_program_files_folder_gets_no_hand_off() {
+        let e = FakeElevator::new(ElevatedOutcome::Exited(0));
+        for dir in [
+            "",
+            "Dyno",
+            r"relative\Dyno",
+            r"D:\Dyno",
+            r"C:\Users\Ann\Dyno",
+        ] {
+            let r = ElevatedHandoff::new(dir, e.clone(), Arc::new(Contract));
+            let err = r.err().unwrap_or_else(|| panic!("`{dir}` was accepted"));
+            assert!(err.contains("not in Program Files"), "{dir}: {err}");
+        }
+        assert!(
+            ElevatedHandoff::new(r"C:\Program Files\Dyno", e.clone(), Arc::new(Contract)).is_ok()
+        );
+        assert!(e.seen.lock().unwrap().is_empty());
     }
 
     #[test]

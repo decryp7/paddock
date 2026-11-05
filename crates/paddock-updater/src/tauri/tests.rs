@@ -14,8 +14,10 @@ use paddock_download::{Config, Get, Headers, Response, Transport, TransportError
 use serde_json::{Value, json};
 use std::io::Cursor;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 type App = ::tauri::App<MockRuntime>;
 
@@ -581,4 +583,83 @@ impl Installer for FailingInstaller {
             detail: "read-only volume".into(),
         })
     }
+}
+
+struct SlowLock {
+    installing: std::sync::atomic::AtomicBool,
+    waits: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::InstallerLock for SlowLock {
+    fn installing(&self) -> bool {
+        self.installing.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn wait(&self, _bound: Duration) -> bool {
+        self.waits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(2));
+        !self.installing.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[test]
+fn a_per_machine_start_keeps_waiting_off_the_thread_until_the_installer_is_gone() {
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().unwrap();
+    // A hand-off record of a newer version, as the old version finds it after the installer's abort.
+    std::fs::create_dir_all(dir.path().join("config")).unwrap();
+    std::fs::write(
+        dir.path().join("config").join("updates.json"),
+        r#"{"version":1,"handoff":{"version":"9.9.9"}}"#,
+    )
+    .unwrap();
+    let lock = Arc::new(SlowLock {
+        installing: true.into(),
+        waits: 0.into(),
+    });
+    let a = app(Some(
+        json!({ "endpoints": [MANIFEST], "pubkey": fixture("key.pub") }),
+    ));
+    let updates = install(
+        a.handle(),
+        builder(dir.path())
+            .install_scope(
+                crate::InstallScope::PerMachine,
+                Some(PathBuf::from(r"C:\Program Files\Demo")),
+                Some(false),
+            )
+            .installer_lock(lock.clone()),
+    )
+    .unwrap();
+    let status = updates.updater.status();
+    assert_eq!(status.install.scope, crate::InstallScope::PerMachine);
+    assert!(status.install.administrator_notice.is_some());
+    assert!(matches!(status.phase, UpdatePhase::InstallerRunning { .. }));
+    let handle = background(updates.clone(), Duration::from_millis(5)).unwrap();
+    // More than one wait slice passes while the installer runs: the thread does not give up after one bound.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while lock.waits.load(Ordering::SeqCst) < 3 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(lock.waits.load(Ordering::SeqCst) >= 3, "kept waiting");
+    assert!(matches!(
+        updates.updater.status().phase,
+        UpdatePhase::InstallerRunning { .. }
+    ));
+    lock.installing.store(false, Ordering::SeqCst);
+    while !matches!(updates.updater.status().phase, UpdatePhase::Failed { .. })
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let UpdatePhase::Failed { error, .. } = updates.updater.status().phase else {
+        panic!("expected the stopped-installer failure")
+    };
+    assert!(
+        error
+            .message()
+            .contains("The installer stopped before it finished")
+    );
+    updates.stop();
+    handle.thread().unpark();
+    handle.join().unwrap();
 }

@@ -54,7 +54,8 @@ mod elevate {
         GetCurrentProcess, GetExitCodeProcess, OpenProcessToken, WaitForSingleObject,
     };
     use windows_sys::Win32::UI::Shell::{
-        SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+        SEE_MASK_FLAG_NO_UI, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+        ShellExecuteExW,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
@@ -82,7 +83,10 @@ mod elevate {
             // call reads, and the wide strings outlive it.
             let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
             info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
-            info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+            // No error dialog of the shell's own (every failure comes back as a code and a sentence); no owner window: this runs
+            // from the exit hook, where the app's windows are gone, and the UAC prompt is raised by the system on the secure
+            // desktop or in front of the foreground application.
+            info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
             info.lpVerb = verb.as_ptr();
             info.lpFile = file.as_ptr();
             info.lpParameters = params.as_ptr();

@@ -33,10 +33,10 @@ pub use native::{ShellElevator, is_administrator};
 #[cfg(doc)]
 use crate::UpdatePhase;
 use crate::{
-    About, AboutInfo, CancelOutcome, Channel, ExitAction, INSTALLER_WAIT_BOUND, InstallScope,
-    Installer, InstallerLock, Preferences, RecordStore, STATUS_EVENT, ServiceHooks,
-    ServicesOutcome, Target, UpdateError, UpdateErrorDto, UpdateKey, UpdateStatus, Updater,
-    UpdaterConfig, WhatsNew, WhatsNewDecision,
+    About, AboutInfo, CancelOutcome, Channel, ExitAction, INSTALLER_WAIT_BOUND,
+    INSTALLER_WAIT_SLICE, InstallScope, Installer, InstallerLock, Preferences, RecordStore,
+    STATUS_EVENT, ServiceHooks, ServicesOutcome, Target, UpdateError, UpdateErrorDto, UpdateKey,
+    UpdateStatus, Updater, UpdaterConfig, WhatsNew, WhatsNewDecision,
 };
 use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Emitter, Manager, Runtime};
@@ -419,15 +419,12 @@ pub fn install<R: Runtime>(
     Ok(updates)
 }
 
-/// The start-up work off the main thread: the services' hook once per version change, then the automatic check whenever
-/// it is due (looked at every `poll`) until [`Updates::stop`].
+/// The start-up work off the main thread: the services' hook once per version change, then, until [`Updates::stop`], either the
+/// wait for an installer that is running (in slices of [`INSTALLER_WAIT_SLICE`], so a stop is noticed; each
+/// [`INSTALLER_WAIT_BOUND`] that passes is logged and the wait goes on) or the automatic check whenever it is due (looked at
+/// every `poll`).
 pub fn background(updates: Arc<Updates>, poll: Duration) -> Option<std::thread::JoinHandle<()>> {
     let spawned = std::thread::Builder::new().name("paddock-updates".into()).spawn(move || {
-        // First: while another user's installer runs, nothing else starts (ADR 0053 section 4.1 step 4).
-        let began = std::time::Instant::now();
-        if updates.updater.settle_handoff(INSTALLER_WAIT_BOUND) {
-            log::warn!(Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "The installer of a newer version stopped before it finished; shown in the Updates dialog");
-        }
         match updates.updater.on_start() {
             ServicesOutcome::Unchanged => {}
             ServicesOutcome::Registered { previous } => {
@@ -437,7 +434,26 @@ pub fn background(updates: Arc<Updates>, poll: Duration) -> Option<std::thread::
                 log::error!("Registering the services for this version failed (retried at the next start): {e}")
             }
         }
+        let (mut waited, since) = (Duration::ZERO, std::time::Instant::now());
         while !updates.stopped.load(Ordering::SeqCst) {
+            // While another user's installer runs, nothing else starts (ADR 0053 section 4.1 step 4). The wait is bounded
+            // per slice, never forever in one call; what a bound that passes means is logged (ER-27).
+            if updates.updater.installer_running() {
+                let slice_began = std::time::Instant::now();
+                if updates.updater.settle_handoff(INSTALLER_WAIT_SLICE) {
+                    log::warn!(Ms = u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX); "The installer of a newer version stopped before it finished; shown in the Updates dialog");
+                    continue;
+                }
+                waited += slice_began.elapsed().max(INSTALLER_WAIT_SLICE / 10);
+                if waited >= INSTALLER_WAIT_BOUND {
+                    waited = Duration::ZERO;
+                    log::warn!(Seconds = since.elapsed().as_secs(); "The installer of a newer version is still running; still waiting (the Updates dialog says so)");
+                }
+                if slice_began.elapsed() < INSTALLER_WAIT_SLICE / 10 {
+                    std::thread::park_timeout(poll);
+                }
+                continue;
+            }
             if updates.updater.auto_check_due() {
                 let _ = updates.start_check();
             }
