@@ -323,7 +323,10 @@ impl McpControl {
         // An unreadable or damaged list means no keys work until new ones are issued: failing closed. The store has already
         // emptied the list and worded the cause and the next step.
         let loaded = self.key_list.load();
-        *self.keys_problem.lock().unwrap_or_else(PoisonError::into_inner) = loaded.problem.clone();
+        *self
+            .keys_problem
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = loaded.problem.clone();
         match &loaded.problem {
             Some(problem) => log::error!("mcp keys: {problem}"),
             None => log::info!("mcp keys: {} saved key(s) loaded", loaded.entries.len()),
@@ -335,7 +338,10 @@ impl McpControl {
         let saved = self.key_list.save(&self.keys.export());
         if saved.is_ok() {
             // A saved list is the list in use now, whatever was wrong with the old file.
-            *self.keys_problem.lock().unwrap_or_else(PoisonError::into_inner) = None;
+            *self
+                .keys_problem
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = None;
         }
         saved.map_err(|e| {
             McpError::new(
@@ -408,7 +414,11 @@ impl McpControl {
                 .listener
                 .get()
                 .map_or(ListenerView::Unavailable, |l| l.view()),
-            keys_problem: self.keys_problem.lock().unwrap_or_else(PoisonError::into_inner).clone(),
+            keys_problem: self
+                .keys_problem
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
             settings,
         }
     }

@@ -10,12 +10,7 @@ use serde_json::json;
 use std::sync::Arc;
 
 /// Builds the control around the event sender the shell hands over.
-pub fn control(
-    dirs: &AppDirs,
-    app_name: &str,
-    version: &str,
-    emit: Emit,
-) -> Arc<McpControl> {
+pub fn control(dirs: &AppDirs, app_name: &str, version: &str, emit: Emit) -> Arc<McpControl> {
     let log = Arc::new(AuditLog::new(500));
     let sink = McpControl::announcing_sink(log.clone(), emit.clone());
     let server = Arc::new(

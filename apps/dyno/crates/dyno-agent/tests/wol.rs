@@ -27,6 +27,21 @@ const HANG_GUARD: Duration = Duration::from_secs(30);
 
 const MAC: &str = "02:00:5e:10:00:01";
 
+/// The agent's log lines of this test binary, so a test can check what the logs would show (ER-27).
+static LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+struct Capture;
+impl log::Log for Capture {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.target().starts_with("dyno_agent::wol")
+    }
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            LOG.lock().unwrap().push(format!("{} {}", r.level(), r.args()));
+        }
+    }
+    fn flush(&self) {}
+}
+
 struct Harness {
     running: Option<Running>,
     udp: Arc<FakeUdp>,
@@ -275,6 +290,8 @@ fn a_secureon_password_is_appended_to_the_packet() {
 fn a_device_whose_password_is_gone_is_not_woken_without_it_and_the_job_says_what_to_do() {
     // After an update that moves the password store (or a deleted file) the device still says "has a password": a wake without it
     // would silently fail to wake the computer, so the job refuses and names the next step.
+    let _ = log::set_logger(&Capture);
+    log::set_max_level(log::LevelFilter::Info);
     let h = Harness::start();
     let (_w, _lists, jobs) = h.watcher();
     let c = h.client();
@@ -299,6 +316,11 @@ fn a_device_whose_password_is_gone_is_not_woken_without_it_and_the_job_says_what
         "the job says the SecureOn password is missing and how to fix it: {text}"
     );
     assert!(h.udp.sent().is_empty(), "nothing is sent without the password");
+    let lines = LOG.lock().unwrap().join("\n");
+    assert!(
+        lines.contains("WARN wake of device 1 (test=false) failed before it ended: The SecureOn password for this computer is missing"),
+        "the refusal is in the logs, with its cause: {lines}"
+    );
 }
 
 #[test]
@@ -481,5 +503,8 @@ fn a_data_folder_that_is_a_file_does_not_stop_the_agent_from_starting() {
     let file = t.path().join("data");
     std::fs::write(&file, "not a folder").unwrap();
     dyno_agent::wol::prepare_password_folder(&Dirs::at(&file));
-    assert!(dyno_agent::wol::prepare_folder(&file.join("secrets")).is_err(), "the failure is reported, not hidden");
+    assert!(
+        dyno_agent::wol::prepare_folder(&file.join("secrets")).is_err(),
+        "the failure is reported, not hidden"
+    );
 }

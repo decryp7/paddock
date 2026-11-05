@@ -566,7 +566,14 @@ fn a_file_that_never_restores_ignores_a_valid_backup_and_leaves_nothing_in_its_p
             ..
         })
     ));
-    assert!(!f.path().exists(), "the damaged file was moved aside and nothing was written back");
+    assert!(
+        !f.path().exists(),
+        "the damaged file was moved aside and nothing was written back"
+    );
     assert!(names(t.path()).contains(&"state.json.corrupt-1000".to_string()));
-    assert_eq!(f.load().problem, None, "the next start finds no file, not a restored copy");
+    assert_eq!(
+        f.load().problem,
+        None,
+        "the next start finds no file, not a restored copy"
+    );
 }

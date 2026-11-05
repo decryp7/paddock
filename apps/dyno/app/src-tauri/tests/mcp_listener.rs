@@ -45,10 +45,7 @@ fn control(dir: &std::path::Path) -> (Arc<McpControl>, paddock_env::AppDirs) {
         true,
     )
     .unwrap();
-    (
-        mcp::control(&dirs, "Dyno", "1.1.0", Arc::new(|_| {}), Arc::new(Script)),
-        dirs,
-    )
+    (mcp::control(&dirs, "Dyno", "1.1.0", Arc::new(|_| {}), Arc::new(Script)), dirs)
 }
 
 fn port(c: &McpControl) -> u16 {

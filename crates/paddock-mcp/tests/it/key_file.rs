@@ -4,8 +4,8 @@
 use paddock_jobs::FakeClock;
 use paddock_log::Redactor;
 use paddock_mcp::{
-    AuditLog, ErrorCode, FileKeys, KeyEntry, KeyListStore, KeyStore, KeyVerifier,
-    McpControl, MemorySettings, Server,
+    AuditLog, ErrorCode, FileKeys, KeyEntry, KeyListStore, KeyStore, KeyVerifier, McpControl,
+    MemorySettings, Server,
 };
 use std::path::Path;
 use std::sync::Arc;
@@ -188,14 +188,30 @@ fn the_list_holds_nothing_secret() {
 #[test]
 fn the_view_says_why_the_saved_keys_are_not_in_use_until_a_new_key_is_saved() {
     let (_dir, path) = keys_file();
-    assert_eq!(control(&path).get().keys_problem, None, "no file is not a problem");
+    assert_eq!(
+        control(&path).get().keys_problem,
+        None,
+        "no file is not a problem"
+    );
     std::fs::write(&path, "{not json").unwrap();
     let c = control(&path);
     let why = c.get().keys_problem.expect("a damaged list is explained");
-    assert!(why.contains("not valid JSON") && why.contains("kept as") && why.contains("No client can connect"), "{why}");
-    assert!(!why.contains("last good copy"), "the damaged list's older copy is not used, and the text must not say it is: {why}");
+    assert!(
+        why.contains("not valid JSON")
+            && why.contains("kept as")
+            && why.contains("No client can connect"),
+        "{why}"
+    );
+    assert!(
+        !why.contains("last good copy"),
+        "the damaged list's older copy is not used, and the text must not say it is: {why}"
+    );
     c.issue_key("again").unwrap();
-    assert_eq!(c.get().keys_problem, None, "a saved list is the list in use");
+    assert_eq!(
+        c.get().keys_problem,
+        None,
+        "a saved list is the list in use"
+    );
 }
 
 #[test]
@@ -203,16 +219,26 @@ fn each_problem_is_worded_for_what_happened_and_what_to_do() {
     let (_dir, path) = keys_file();
     std::fs::write(&path, r#"{"version": 99, "keys": []}"#).unwrap();
     let newer = FileKeys::new(&path).load().problem.unwrap();
-    assert!(newer.contains("newer version") && newer.contains("Update the app") && !newer.contains("Defaults"), "{newer}");
+    assert!(
+        newer.contains("newer version")
+            && newer.contains("Update the app")
+            && !newer.contains("Defaults"),
+        "{newer}"
+    );
     std::fs::remove_file(&path).unwrap();
     std::fs::create_dir(&path).unwrap();
     let unreadable = FileKeys::new(&path).load().problem.unwrap();
-    assert!(unreadable.contains("could not be opened") && unreadable.contains("move it away"), "{unreadable}");
+    assert!(
+        unreadable.contains("could not be opened")
+            && unreadable.contains("move it away")
+            && unreadable.contains("restart"),
+        "{unreadable}"
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn a_list_that_others_can_write_is_not_trusted_and_a_new_key_replaces_it_owner_only() {
+fn a_list_that_others_can_write_is_not_trusted() {
     use std::os::unix::fs::PermissionsExt;
     let (_dir, path) = keys_file();
     let first = control(&path);
@@ -222,17 +248,19 @@ fn a_list_that_others_can_write_is_not_trusted_and_a_new_key_replaces_it_owner_o
         let c = control(&path);
         assert_eq!(c.keys().verify(&key.key), None, "mode {mode:o} is refused");
         let why = c.get().keys_problem.unwrap_or_default();
-        assert!(why.contains("other users") && why.contains("chmod 600"), "{why}");
+        assert!(
+            why.contains("other users") && why.contains("chmod 600") && why.contains("restart"),
+            "{why}"
+        );
     }
     for mode in [0o600, 0o644, 0o640] {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode)).unwrap();
-        assert_eq!(control(&path).keys().verify(&key.key).as_deref(), Some("Pitwall"), "mode {mode:o} is accepted");
+        assert_eq!(
+            control(&path).keys().verify(&key.key).as_deref(),
+            Some("Pitwall"),
+            "mode {mode:o} is accepted"
+        );
     }
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
-    let c = control(&path);
-    c.issue_key("again").unwrap();
-    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
-    assert_eq!(c.get().keys_problem, None);
 }
 
 #[test]
@@ -241,10 +269,18 @@ fn a_fixed_cause_works_without_a_restart() {
     let (_dir, path) = keys_file();
     std::fs::create_dir(&path).unwrap();
     let c = control(&path);
-    assert_eq!(c.issue_key("x").unwrap_err().code, ErrorCode::StoreUnavailable);
+    assert_eq!(
+        c.issue_key("x").unwrap_err().code,
+        ErrorCode::StoreUnavailable
+    );
     std::fs::remove_dir(&path).unwrap();
-    let issued = c.issue_key("x").expect("the retry works once the cause is gone");
-    assert_eq!(control(&path).keys().verify(&issued.key).as_deref(), Some("x"));
+    let issued = c
+        .issue_key("x")
+        .expect("the retry works once the cause is gone");
+    assert_eq!(
+        control(&path).keys().verify(&issued.key).as_deref(),
+        Some("x")
+    );
     assert_eq!(c.get().keys_problem, None);
 
     // Newer version: refused, then the file is moved away to start fresh.
@@ -253,21 +289,101 @@ fn a_fixed_cause_works_without_a_restart() {
     let c = control(&path2);
     assert!(c.issue_key("x").is_err());
     std::fs::rename(&path2, path2.with_extension("old")).unwrap();
-    assert!(c.issue_key("x").is_ok(), "moving the file away starts fresh");
+    assert!(
+        c.issue_key("x").is_ok(),
+        "moving the file away starts fresh"
+    );
+}
+
+/// Three clicks on "Add client": every one refuses with the restart advice, and the file stays exactly as the user left it.
+fn three_clicks_refuse(c: &McpControl, path: &Path, left: &[u8]) {
+    for click in 1..=3 {
+        let e = c.issue_key("x").unwrap_err();
+        assert!(
+            e.message.contains("Restart the app"),
+            "click {click}: {}",
+            e.message
+        );
+        assert!(!e.message.contains(".."), "click {click}: {}", e.message);
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            left,
+            "click {click} changed the file"
+        );
+    }
+    let mut backup = path.to_path_buf().into_os_string();
+    backup.push(".bak");
+    assert!(
+        !Path::new(&backup).exists() || std::fs::read(&backup).unwrap() != b"",
+        "the backup is not the user's list pushed out"
+    );
+}
+
+fn good_list() -> Vec<u8> {
+    let (_d, p) = keys_file();
+    control(&p).issue_key("Pitwall").unwrap();
+    std::fs::read(&p).unwrap()
 }
 
 #[test]
-fn a_list_restored_by_hand_while_running_is_not_overwritten() {
+fn a_list_restored_by_hand_after_a_refusal_is_never_overwritten() {
+    let good = good_list();
     let (_dir, path) = keys_file();
-    let other = control(&path);
-    let kept = other.issue_key("Pitwall").unwrap();
-    let (_dir2, path2) = keys_file();
-    std::fs::write(&path2, r#"{"version": 99, "keys": []}"#).unwrap();
-    let c = control(&path2);
+    std::fs::write(&path, r#"{"version": 99, "keys": []}"#).unwrap();
+    let c = control(&path);
     assert!(c.issue_key("x").is_err());
-    // The user puts a good list with keys in place.
-    std::fs::copy(&path, &path2).unwrap();
+    std::fs::write(&path, &good).unwrap();
+    three_clicks_refuse(&c, &path, &good);
+}
+
+#[test]
+fn a_list_restored_by_hand_after_a_damaged_file_at_start_is_never_overwritten() {
+    let good = good_list();
+    let (_dir, path) = keys_file();
+    std::fs::write(&path, "{not json").unwrap();
+    let c = control(&path);
+    std::fs::write(&path, &good).unwrap();
+    three_clicks_refuse(&c, &path, &good);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_refused_writable_list_fixed_with_chmod_is_never_overwritten_before_a_restart() {
+    use std::os::unix::fs::PermissionsExt;
+    let (_dir, path) = keys_file();
+    let key = control(&path).issue_key("Pitwall").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+    let c = control(&path);
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let left = std::fs::read(&path).unwrap();
+    three_clicks_refuse(&c, &path, &left);
+    assert_eq!(
+        control(&path).keys().verify(&key.key).as_deref(),
+        Some("Pitwall"),
+        "a restart reads it"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_plain_write_failure_says_what_failed_not_that_the_file_changed() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("config");
+    std::fs::create_dir(&folder).unwrap();
+    let path = folder.join("mcp-keys.json");
+    let c = control(&path);
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o500)).unwrap();
     let e = c.issue_key("x").unwrap_err();
-    assert!(e.message.contains("Restart the app"), "{}", e.message);
-    assert_eq!(control(&path2).keys().verify(&kept.key).as_deref(), Some("Pitwall"), "the restored list is intact");
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(
+        !e.message.contains("Restart the app") && !e.message.contains(".."),
+        "{}",
+        e.message
+    );
+    assert!(
+        e.message.to_lowercase().contains("permission denied"),
+        "{}",
+        e.message
+    );
 }

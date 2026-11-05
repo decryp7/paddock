@@ -248,12 +248,7 @@ pub fn shell_with_log<R: Runtime>(place: Place, log: Option<LogHandle>) -> Build
     // The AI access settings (plan X22): the MCP server's tools, the clients' keys and the activity log behind Settings > AI access.
     builder = builder.mcp(move |_, emit| {
         let dirs = dirs(mcp_dir.as_deref())?;
-        Ok(mcp::control(
-            &dirs,
-            APP_NAME,
-            VERSION,
-            emit,
-        ))
+        Ok(mcp::control(&dirs, APP_NAME, VERSION, emit))
     });
     let report_dir = test_dir.clone();
     // Report a problem (plan X2) and the Logging section: the app's folders and log, the shell's built-in sections.

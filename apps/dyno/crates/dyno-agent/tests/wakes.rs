@@ -271,7 +271,9 @@ fn a_due_schedule_acts_stays_awake_wakes_the_computers_runs_its_job_and_arms_the
     let e = &v.rows[0].entry;
     let run = e.last_run.as_ref().expect("how it went is kept");
     assert!(
-        run.summary.contains("staying awake 30 min") && run.summary.contains("started the wake of 1 computer") && run.summary.contains("started its job"),
+        run.summary.contains("staying awake 30 min")
+            && run.summary.contains("started the wake of 1 computer")
+            && run.summary.contains("started its job"),
         "{}",
         run.summary
     );
