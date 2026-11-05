@@ -22,6 +22,21 @@ impl SensorProbe for NoProbe {
     fn enrich(&mut self, _sample: &mut SystemSample) {}
 }
 
+/// Splits RAM into (used, available). On macOS sysinfo's available memory counts active, inactive and free pages, so
+/// it treats memory that apps are using as free and "used" came out as only wired plus compressed (17 % where Activity
+/// Monitor said 54 %); there "used" is sysinfo's used memory (app memory, wired and compressed, as Activity Monitor
+/// shows) and available is what is left. Elsewhere available is the OS' own figure (`MemAvailable` on Linux, available
+/// physical memory on Windows) and used is the rest.
+pub(crate) fn split_memory(macos: bool, total: u64, sys_available: u64, sys_used: u64) -> (u64, u64) {
+    if macos {
+        let used = sys_used.min(total);
+        (used, total - used)
+    } else {
+        let available = sys_available.min(total);
+        (total - available, available)
+    }
+}
+
 /// Volumes are re-listed (new USB drives) every this many ticks; between, only their space and I/O are refreshed.
 const RELIST_DISKS_EVERY: u64 = 5;
 /// Volume free space is refreshed at most this often.
@@ -97,10 +112,15 @@ impl SysinfoSensors {
         self.sys
             .refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram().with_swap());
         let total = self.sys.total_memory();
-        let available = self.sys.available_memory().min(total);
+        let (used, available) = split_memory(
+            cfg!(target_os = "macos"),
+            total,
+            self.sys.available_memory(),
+            self.sys.used_memory(),
+        );
         let mut m = MemorySample {
             total,
-            used: total - available,
+            used,
             available,
             commit: Reading::unavailable("Commit charge is a Windows measure"),
             swap_used: self.sys.used_swap(),
@@ -291,6 +311,18 @@ mod tests {
         fn enrich(&mut self, sample: &mut SystemSample) {
             sample.fans = Reading::unavailable("probe ran");
         }
+    }
+
+    #[test]
+    fn macos_used_is_app_wired_and_compressed_not_total_minus_active_free() {
+        const GIB: u64 = 1 << 30;
+        // The reported case: 64 GiB, sysinfo "available" 53 GiB (active + inactive + free), used memory 34.8 GiB.
+        let (used, available) = split_memory(true, 64 * GIB, 53 * GIB, 35 * GIB);
+        assert_eq!((used, available), (35 * GIB, 29 * GIB));
+        // Other OSs keep total minus the OS' available figure, and nothing exceeds the total.
+        assert_eq!(split_memory(false, 64 * GIB, 53 * GIB, 35 * GIB), (11 * GIB, 53 * GIB));
+        assert_eq!(split_memory(true, 8 * GIB, 0, 9 * GIB), (8 * GIB, 0));
+        assert_eq!(split_memory(false, 8 * GIB, 9 * GIB, 0), (0, 8 * GIB));
     }
 
     #[test]
