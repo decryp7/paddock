@@ -215,7 +215,7 @@ fn a_resume_calls_nothing_for_an_item_switched_off_unreadable_or_missing() {
         let sys = FakeSystem::new();
         let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
         let (r, said) = resume(&mut m);
-        assert_eq!(r.unwrap(), false, "{status:?} {mark:?}");
+        assert!(!r.unwrap(), "{status:?} {mark:?}");
         assert!(
             calls(&sim).is_empty(),
             "{status:?} {mark:?}: {:?}",
@@ -243,7 +243,7 @@ fn the_light_path_registers_the_enabled_item_once_and_waits_for_the_job_without_
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     let (r, said) = resume(&mut m);
-    assert_eq!(r.unwrap(), true);
+    assert!(r.unwrap());
     // Registering an already registered item is what brings the job back; unregister or bootout would make macOS
     // announce a new background item ("Background Items Added") again.
     assert_eq!(calls(&sim), ["register"]);
@@ -266,7 +266,7 @@ fn a_version_change_goes_to_the_full_repair_and_never_the_light_path() {
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     let (r, _) = resume(&mut m);
-    assert_eq!(r.unwrap(), true);
+    assert!(r.unwrap());
     assert_eq!(
         calls(&sim),
         ["unregister", "bootout", "register"],
@@ -344,9 +344,8 @@ fn the_background_resume_never_opens_login_items_even_when_the_repair_meets_an_a
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     let (r, _) = resume(&mut m);
-    assert_eq!(
-        r.unwrap(),
-        false,
+    assert!(
+        !r.unwrap(),
         "waiting for the user's approval is theirs to give"
     );
     assert!(
