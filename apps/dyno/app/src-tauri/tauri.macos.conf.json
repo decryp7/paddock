@@ -34,7 +34,8 @@
     "macOS": {
       "minimumSystemVersion": "13.0",
       "files": {
-        "Library/LaunchAgents/net.decryptology.dyno.agent.plist": "./macos/net.decryptology.dyno.agent.plist"
+        "Library/LaunchAgents/net.decryptology.dyno.agent.plist": "./macos/net.decryptology.dyno.agent.plist",
+        "Resources/dyno-helper.minisig": "./binaries/dyno-helper.minisig"
       },
       "signingIdentity": "-",
       "hardenedRuntime": false

@@ -359,6 +359,10 @@ fn agent_setup<R: Runtime>(
     let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
     let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
     if installed {
+        // The first run's registration comes first, on a worker the link waits for (it may open System Settings or wait on
+        // systemctl: ER-17), so the link finds a supervising service and starts no agent of its own.
+        let (first_app, first_link) = (app.clone(), link.clone());
+        link.before_first_launch(Box::new(move || login::run_first_run(&first_app, &first_link, false)));
         // Asked before the link starts an agent of its own: none beside one the login service supervises.
         link.set_service_probe(login::service_probe());
     }

@@ -442,35 +442,9 @@ impl<R: Runtime> ShellOf<R> {
                         }
                     }
                 }
-                // Start at login is on by default: the first run registers it once, without Settings being opened.
-                match self.app.path().app_data_dir() {
-                    Ok(dir) => {
-                        let mut service = login::platform_service();
-                        let mut autostart = login::platform_autostart(&self.app);
-                        let marker = paddock_service::login::FirstRunMarker::new(dir.join(login::FIRST_RUN_MARKER));
-                        let mut sys = paddock_service::RealSystem::new();
-                        match login::apply_first_run(
-                            &marker,
-                            &mut sys,
-                            wanted,
-                            login::current_location(),
-                            service.as_mut(),
-                            autostart.as_mut(),
-                        ) {
-                            Ok(login::FirstRun::Applied) => {
-                                link.set_service_installed(service.installed());
-                                link.refresh_service();
-                                logging::info("first run: start at login (the default) was registered");
-                            }
-                            Ok(login::FirstRun::Skipped) => {}
-                            Err(e) => {
-                                log::warn!(target: "dyno", Error = e.as_str(); "First run: start at login (the default) could not be registered; it is tried again at the next start, or turn it off and on in Settings.");
-                                return Err(e);
-                            }
-                        }
-                    }
-                    Err(e) => logging::info(&format!("first run: no data folder, start at login not applied: {e}")),
-                }
+                // Start at login is on by default: the first run registers it once. The start already tried it before the
+                // agent started; this is the same function, once per process, so a failed try is not repeated here.
+                login::run_first_run(&self.app, link, true);
                 Ok(())
             }
             Some(p) if p == wanted => Ok(()),

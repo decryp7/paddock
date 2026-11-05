@@ -222,7 +222,7 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
         let _ = writeln!(o, "MemoryHigh={mb}M");
     }
     if let Some(sandbox) = sandbox {
-        systemd_sandbox(&mut o, sandbox);
+        systemd_sandbox(&mut o, sandbox, &spec.unit_file_name());
     }
     o.push_str("\n[Install]\n");
     let _ = writeln!(
@@ -239,7 +239,7 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
 /// The sandbox keys of a system unit (ADR 0027 §1, systemd.exec(5)): the whole file system read-only but the service's
 /// own folders, no home, a private `/tmp`, no new privileges, only the declared capabilities and socket families, no IP
 /// traffic, system calls of a normal service without mounting, nothing writable and executable, files private by default.
-fn systemd_sandbox(o: &mut String, s: &Sandbox) {
+fn systemd_sandbox(o: &mut String, s: &Sandbox, unit: &str) {
     o.push_str(
         "ProtectSystem=strict\nProtectHome=read-only\nPrivateTmp=yes\nNoNewPrivileges=yes\n",
     );
@@ -255,6 +255,24 @@ fn systemd_sandbox(o: &mut String, s: &Sandbox) {
     );
     if let Some(d) = s.state_directory() {
         let _ = writeln!(o, "StateDirectory={d}\nStateDirectoryMode=0700");
+        // `ProtectSystem=strict` leaves `/var/lib` read-only inside the service, so the service cannot remove its own state
+        // folder when it removes itself (rmdir: "Read-only file system"), and during the stop the service's bind mount of the
+        // folder is still in the host's mount table, so even a `+` stop step gets "busy". A transient unit ordered `After=` this
+        // one starts when the stop is over and the mount is gone. Its parts:
+        // - `rmdir --ignore-fail-on-non-empty` takes only an empty folder and is quiet about one with files (a normal stop leaves
+        //   the log and tools in it), so no stop leaves a failed unit behind;
+        // - `DefaultDependencies=no`: the default `Conflicts=shutdown.target` would stop the unit (or refuse it) when the stop
+        //   is part of a shutdown;
+        // - `systemctl is-active` first: after `systemctl restart` the unit is ordered after the restart job, so the service is
+        //   running again and its folder is left alone (the window between the stop and the check is the restart's own);
+        // - the leading `-` keeps a failed `systemd-run` from failing the stop.
+        // `/usr/bin/...` assumes a merged `/usr` (every systemd distribution since 2021: `/bin` is a link to `/usr/bin`).
+        let _ = writeln!(
+            o,
+            "ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=DefaultDependencies=no \
+             --property=After={unit} /bin/sh -c '/usr/bin/systemctl is-active --quiet {unit} || \
+             exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/{d}'"
+        );
     }
     if let Some(d) = s.runtime_directory() {
         let _ = writeln!(o, "RuntimeDirectory={d}\nRuntimeDirectoryMode=0755");

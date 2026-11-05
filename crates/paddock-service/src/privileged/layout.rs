@@ -16,11 +16,28 @@ pub const LINUX_PROGRAM_FOLDER: &str = "/usr/bin";
 /// The Linux folder a package installs the system unit into (shipped disabled).
 pub const LINUX_UNIT_FOLDER: &str = "/usr/lib/systemd/system";
 
-/// The folders Windows names (read from the environment at run time; tests pass their own).
+/// The folders Windows names (as the OS reports them, never the environment: an elevated process may inherit a user-writable
+/// one; tests pass their own).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Roots {
-    /// `%ProgramFiles%`.
+    /// Program Files (`FOLDERID_ProgramFiles`).
     pub program_files: PathBuf,
+}
+
+impl Roots {
+    /// The roots `folders` names.
+    ///
+    /// # Errors
+    /// [`ServiceError::Unavailable`] when the OS does not name Program Files: nothing is installed into a guessed place.
+    pub fn from_known(folders: &dyn super::KnownFolders) -> Result<Self, ServiceError> {
+        let program_files = folders.program_files().map_err(|e| {
+            ServiceError::Unavailable(format!(
+                "Windows did not name the Program Files folder: {e}"
+            ))
+        })?;
+        log::info!(program_files = program_files.display().to_string().as_str(); "install roots from the OS");
+        Ok(Self { program_files })
+    }
 }
 
 /// The protected copy of the program: a folder only an administrator can change, and the file inside it.
@@ -212,6 +229,30 @@ pub(crate) mod tests {
             lin.registration.unwrap(),
             PathBuf::from("/usr/lib/systemd/system/dyno-helper.service")
         );
+    }
+
+    #[test]
+    fn roots_come_from_the_folders_the_os_names_and_a_missing_answer_is_an_error() {
+        struct Named(Option<&'static str>);
+        impl crate::privileged::KnownFolders for Named {
+            fn system_directory(&self) -> std::io::Result<PathBuf> {
+                Err(std::io::Error::other("unused"))
+            }
+            fn program_files(&self) -> std::io::Result<PathBuf> {
+                self.0
+                    .map(PathBuf::from)
+                    .ok_or_else(|| std::io::Error::other("no answer"))
+            }
+            fn program_data(&self) -> std::io::Result<PathBuf> {
+                Err(std::io::Error::other("unused"))
+            }
+        }
+        use crate::privileged::KnownFolders;
+        assert!(Named(None).system_directory().is_err() && Named(None).program_data().is_err());
+        let r = Roots::from_known(&Named(Some("D:\\PF"))).unwrap();
+        assert_eq!(r.program_files, PathBuf::from("D:\\PF"));
+        let e = Roots::from_known(&Named(None)).unwrap_err();
+        assert!(e.to_string().contains("Program Files"), "{e}");
     }
 
     #[test]

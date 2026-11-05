@@ -463,6 +463,7 @@ struct FilesInner {
     new_owner: Option<u32>,
     tamper: bool,
     fail: Option<std::io::ErrorKind>,
+    swap_after_open: Option<Vec<u8>>,
 }
 
 impl FakeFiles {
@@ -502,6 +503,13 @@ impl FakeFiles {
         inner.entries.insert(path.clone(), facts);
         inner.content.insert(path, content.to_vec());
         drop(inner);
+        self
+    }
+
+    /// The next `open_source` hands out the current bytes and then replaces the file at that path with `bytes`: the swap a
+    /// user makes between the check and a copy that reopens the path.
+    pub fn swap_source_after_open(&self, bytes: &[u8]) -> &Self {
+        self.lock().swap_after_open = Some(bytes.to_vec());
         self
     }
 
@@ -554,6 +562,11 @@ impl FakeFiles {
     }
 
     /// What exists at `path`.
+    /// The bytes at `path`.
+    pub fn content_of(&self, path: &Path) -> Option<Vec<u8>> {
+        self.lock().content.get(path).cloned()
+    }
+
     pub fn facts_of(&self, path: &Path) -> Option<crate::privileged::FileFacts> {
         self.lock().entries.get(path).cloned()
     }
@@ -594,20 +607,37 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
         Ok(())
     }
 
-    fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> std::io::Result<String> {
-        use crate::privileged::{FileFacts, FileKind};
+    fn open_source(
+        &mut self,
+        path: &Path,
+        max: u64,
+    ) -> std::io::Result<Option<crate::privileged::HeldSource>> {
         let mut inner = self.lock();
-        inner
-            .calls
-            .push(format!("copy {} {}", from.display(), to.display()));
+        inner.calls.push(format!("open_source {}", path.display()));
         if let Some(kind) = inner.fail {
             return Err(std::io::Error::from(kind));
         }
-        let bytes = inner
-            .content
-            .get(from)
-            .cloned()
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+        let Some(facts) = inner.entries.get(path).cloned() else {
+            return Ok(None);
+        };
+        let bytes = inner.content.get(path).cloned().unwrap_or_default();
+        if bytes.len() as u64 > max {
+            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+        }
+        // A test swaps the file at this path right after the handle was opened.
+        if let Some(swapped) = inner.swap_after_open.take() {
+            inner.content.insert(path.to_path_buf(), swapped);
+        }
+        Ok(Some(crate::privileged::HeldSource { facts, bytes }))
+    }
+
+    fn write_program(&mut self, bytes: &[u8], to: &Path, mode: u32) -> std::io::Result<String> {
+        use crate::privileged::{FileFacts, FileKind};
+        let mut inner = self.lock();
+        inner.calls.push(format!("write {}", to.display()));
+        if let Some(kind) = inner.fail {
+            return Err(std::io::Error::from(kind));
+        }
         let owner = inner.new_owner.unwrap_or(0);
         let no_owner = inner.no_owner;
         inner.entries.insert(
@@ -619,8 +649,8 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
                 len: bytes.len() as u64,
             },
         );
-        let hash = crate::privileged::files::hash_bytes(&bytes);
-        inner.content.insert(to.to_path_buf(), bytes);
+        let hash = crate::privileged::files::hash_bytes(bytes);
+        inner.content.insert(to.to_path_buf(), bytes.to_vec());
         Ok(hash)
     }
 
@@ -813,5 +843,20 @@ mod tests {
         assert_eq!((facts.owner, text.as_str()), (Some(0), "others"));
         assert!(disk.read_checked(Path::new("/p"), 3).is_err());
         assert!(files.calls().iter().any(|c| c == "read /p"));
+    }
+
+    #[test]
+    fn the_fake_disk_fails_and_bounds_a_source_like_the_real_one() {
+        use crate::privileged::ProtectedFiles;
+        let files = FakeFiles::new();
+        files.put_file("/p", b"abcdef", 0, 0o644);
+        let mut disk = files.clone();
+        assert_eq!(
+            disk.open_source(Path::new("/p"), 3).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        files.fail_with(Some(std::io::ErrorKind::PermissionDenied));
+        assert!(disk.open_source(Path::new("/p"), 9).is_err());
+        assert!(disk.write_program(b"x", Path::new("/q"), 0o755).is_err());
     }
 }

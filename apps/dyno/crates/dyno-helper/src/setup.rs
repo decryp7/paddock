@@ -8,9 +8,11 @@ use crate::elevate::{helper_paths, this_host};
 use crate::paths::HelperPaths;
 use crate::serve::os_of;
 use dyno_core::helper_wire::HelperUser;
-use dyno_helper_service::{install_in_place, uninstall_in_place, uninstall_self_in_place, windows_roots};
-use paddock_env::{Os, ProcessVars};
-use paddock_service::privileged::{ProtectedFiles, RealFiles, Report};
+use dyno_helper_service::source_check::FamilyKey;
+use dyno_helper_service::{install_in_place, install_roots, preflight_in_place, uninstall_in_place, uninstall_self_in_place};
+use paddock_env::Os;
+use paddock_service::privileged::trust_real::RealTrust;
+use paddock_service::privileged::{OsKnownFolders, ProtectedFiles, RealFiles, Report};
 use paddock_service::{RealSystem, System};
 use std::path::Path;
 
@@ -62,6 +64,12 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
         .map_err(|e| format!("This program's own path cannot be read: {e}"))?;
     let (host, paths) = (this_host(), helper_paths());
     let mut files = RealFiles;
+    // First of all: is this the helper that may be installed (its place on Windows, its signature on macOS)? A refusal leaves no
+    // folder made and no configuration written. The folders come from the OS, never from the environment (an elevated process
+    // may inherit a user-writable one).
+    let roots = install_roots(&OsKnownFolders).map_err(|e| e.to_string())?;
+    let verifier = FamilyKey::compiled_in();
+    preflight_in_place(os_of(host), &roots, &source, &mut files, &mut RealTrust, &verifier, &system).map_err(|e| e.to_string())?;
     // Repair: the data root and its tools and staging folders are locked first; one a user made is removed (links are
     // removed, never followed), so nothing in it is trusted. Then the configuration is written into the locked root.
     #[cfg(windows)]
@@ -70,8 +78,8 @@ pub fn install(owner: HelperUser) -> Result<Report, String> {
         .map_err(|e| e.to_string())?;
     let config = HelperConfig::new(owner, crate::VERSION).with_app(crate::orphan::app_location(&source));
     write_config(&paths, &config, &mut files)?;
-    let roots = windows_roots(&ProcessVars);
-    let report = install_in_place(os_of(host), &roots, &source, &mut files, &system).map_err(|e| e.to_string())?;
+    let report =
+        install_in_place(os_of(host), &roots, &source, &mut files, &mut RealTrust, &verifier, &system).map_err(|e| e.to_string())?;
     Ok(report)
 }
 
@@ -101,8 +109,13 @@ pub fn uninstall() -> Result<Report, String> {
         return Err("Removing the helper needs administrator rights; use Dyno's Settings > Helper, or run this with sudo.".into());
     }
     audit_run("uninstall", "");
-    let report =
-        uninstall_in_place(os_of(this_host()), &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())?;
+    let report = uninstall_in_place(
+        os_of(this_host()),
+        &install_roots(&OsKnownFolders).map_err(|e| e.to_string())?,
+        &mut RealFiles,
+        &system,
+    )
+    .map_err(|e| e.to_string())?;
     // The program and the registration are gone: what the helper wrote next to them goes too (its log of the removal is the
     // installer's own phase list above, printed by the command).
     match remove_data_folder(&helper_paths()) {
@@ -171,7 +184,19 @@ pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> R
             }
             Ok("removed".into())
         }
-        Err(_) => Ok(format!("left in place: {} holds something the helper did not write", dir.display())),
+        Err(e) => Ok(left_in_place_note(dir, &e, std::fs::read_dir(dir).map(Iterator::count))),
+    }
+}
+
+/// What the log says when the data folder could not be removed: the real error, and whether the folder holds items (someone
+/// else's), is empty (a service sandbox with a read-only parent: the unit has the service manager remove it after the stop), or
+/// could not be listed (then nothing is claimed about its content).
+fn left_in_place_note(dir: &Path, err: &std::io::Error, remaining: std::io::Result<usize>) -> String {
+    let dir = dir.display();
+    match remaining {
+        Ok(0) => format!("left in place: {dir} is empty but could not be removed from here ({err}); systemd removes it after the stop"),
+        Ok(n) => format!("left in place: {dir} holds {n} item(s) the helper did not write ({err})"),
+        Err(list) => format!("left in place: {dir} could not be removed ({err}) and could not be listed ({list})"),
     }
 }
 
@@ -218,7 +243,8 @@ pub fn uninstall_self(os: Os) -> Result<Report, String> {
     if let Err(why) = remove_endpoint(&helper_paths()) {
         log::warn!(why = why.as_str(); "self-uninstall: the endpoint was kept");
     }
-    uninstall_self_in_place(os, &windows_roots(&ProcessVars), &mut RealFiles, &system).map_err(|e| e.to_string())
+    let roots = install_roots(&OsKnownFolders).map_err(|e| e.to_string())?;
+    uninstall_self_in_place(os, &roots, &mut RealFiles, &system).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -339,6 +365,46 @@ mod tests {
             assert_eq!(note, "removed", "round {round}");
             assert!(!paths.data_dir.exists(), "round {round}: the folder is gone");
         }
+    }
+
+    /// VM check 7538: the folder was empty but could not be removed (the service's `/var/lib` is read-only), and the log said it
+    /// "holds something the helper did not write": the error was swallowed and the cause hidden.
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_folder_that_cannot_be_removed_says_the_real_error_not_that_it_holds_something() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let paths = paths_in(dir.path());
+        std::fs::create_dir_all(&paths.data_dir).unwrap();
+        // The parent refuses the removal of an entry (as the service's read-only `/var/lib` does).
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        if std::fs::create_dir(dir.path().join("probe")).is_ok() {
+            std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+            return; // running as root: a read-only parent does not stop it
+        }
+        let note = remove_data_folder_with(&paths, &|| {});
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let note = note.unwrap();
+        assert!(note.contains("left in place"), "{note}");
+        assert!(!note.contains("holds something"), "the folder is empty: {note}");
+        assert!(
+            note.contains("empty") && note.contains("os error"),
+            "the real error is named: {note}"
+        );
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_listed_is_not_called_empty_and_an_empty_one_names_systemd() {
+        let dir = Path::new("/var/lib/dyno-helper");
+        let err = std::io::Error::from_raw_os_error(30);
+        let unlisted = left_in_place_note(dir, &err, Err(std::io::Error::from_raw_os_error(13)));
+        assert!(
+            unlisted.contains("could not be listed") && !unlisted.contains("empty"),
+            "{unlisted}"
+        );
+        let empty = left_in_place_note(dir, &err, Ok(0));
+        assert!(empty.contains("systemd removes it after the stop"), "{empty}");
+        assert!(left_in_place_note(dir, &err, Ok(2)).contains("holds 2 item(s)"));
     }
 
     #[test]

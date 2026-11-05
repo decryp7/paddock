@@ -1219,3 +1219,59 @@ fn the_first_look_does_not_ask_the_login_service_when_an_agent_is_there_to_conne
     handle.join().unwrap();
     r.launcher.finish(Duration::ZERO);
 }
+
+/// A launcher that only writes its launches into a shared log (the order test below).
+struct LoggingLauncher {
+    log: Arc<Mutex<Vec<&'static str>>>,
+    launched: std::sync::mpsc::Sender<()>,
+}
+
+impl Launcher for LoggingLauncher {
+    fn launch(&self) -> Result<(), String> {
+        lock(&self.log).push("launch");
+        let _ = self.launched.send(());
+        Err("this launcher starts nothing".into())
+    }
+    fn child(&self) -> Child {
+        Child::None
+    }
+    fn finish(&self, _: Duration) {}
+}
+
+/// Bug 7538-1, the order: the first run's registration (the hook) is done before the link's first launch. The hook
+/// waits for a launch for a bounded grace: a link that launches without waiting for it is seen at once (the launch ends the
+/// wait, and the log reads launch before the end of the hook), a correct link makes the hook wait out the grace and launches
+/// after it. The grace only ever turns a missed bug into a pass, never a pass into a failure.
+#[test]
+fn the_first_runs_registration_is_done_before_the_first_launch() {
+    const GRACE: Duration = Duration::from_millis(300);
+    let tmp = tempfile::tempdir().unwrap();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let (launched_tx, launched_rx) = channel();
+    let (status_tx, _status_rx) = channel();
+    let link = AgentLink::tuned(
+        Dirs::at(tmp.path().join("data")),
+        env!("CARGO_PKG_VERSION"),
+        Recorder::new(status_tx),
+        Box::new(LoggingLauncher {
+            log: log.clone(),
+            launched: launched_tx,
+        }),
+        FAST,
+        patient(),
+    );
+    let hook_log = log.clone();
+    link.before_first_launch(Box::new(move || {
+        lock(&hook_log).push("register: start");
+        let _ = launched_rx.recv_timeout(GRACE);
+        lock(&hook_log).push("register: done");
+    }));
+    link.spawn().unwrap();
+    wait_state(&link, "the first launch", |_| lock(&log).contains(&"launch"));
+    assert_eq!(
+        *lock(&log),
+        ["register: start", "register: done", "launch"],
+        "the link launched an agent before the registration was done"
+    );
+    link.quit();
+}

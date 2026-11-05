@@ -1,18 +1,13 @@
-//! Where the helper lives on this computer, read from the environment. (These two functions lived in
+//! Where the helper lives on this computer, from the OS's known folders. (These two functions lived in
 //! `dyno_platform::elevate` until the helper left the 1.0 build; the helper is their only user now.)
 
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_paths::{HelperPaths, WindowsRoots};
-use std::path::PathBuf;
+use paddock_service::privileged::OsKnownFolders;
 
-/// The folders Windows names, from the environment (the usual defaults when a variable is missing).
+/// The folders Windows names, as the OS reports them (never the environment: see [`dyno_helper_service::windows_roots`]).
 pub fn windows_roots() -> WindowsRoots {
-    let var = |name: &str, default: &str| std::env::var_os(name).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(default));
-    WindowsRoots {
-        program_files: var("ProgramFiles", r"C:\Program Files"),
-        program_data: var("ProgramData", r"C:\ProgramData"),
-        system_root: var("SystemRoot", r"C:\Windows"),
-    }
+    dyno_helper_service::windows_roots(&OsKnownFolders)
 }
 
 /// The system the helper runs on.

@@ -22,6 +22,8 @@ pub const ELEVATION_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 pub const OSASCRIPT: &str = "/usr/bin/osascript";
 /// `pkexec`.
 pub const PKEXEC: &str = "pkexec";
+/// The command prefix that gives the elevated program an empty environment and the system's PATH.
+const ELEVATED_ENV: &str = "/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin";
 /// `osascript`'s error number for "User canceled".
 const MAC_CANCELLED: &str = "(-128)";
 
@@ -119,7 +121,9 @@ pub fn osascript_command(
     let mut words = vec![program.as_ref(), prompt];
     words.extend_from_slice(args);
     no_control(&words)?;
-    let mut shell = vec![shell_quote(&program)];
+    // `env -i`: the elevated program starts with no environment of the caller's, only the fixed system PATH (an inherited
+    // `DYLD_*`, `PATH` or `TMPDIR` of the user's session would otherwise steer what runs as root).
+    let mut shell = vec![ELEVATED_ENV.to_string(), shell_quote(&program)];
     shell.extend(args.iter().map(|a| shell_quote(a)));
     let script = format!(
         "do shell script {} with prompt {} with administrator privileges",
@@ -274,7 +278,7 @@ mod tests {
         assert_eq!(c.args[0], "-e");
         assert_eq!(
             c.args[1],
-            "do shell script \"'/Applications/Dyno.app/Contents/MacOS/dyno-helper' 'install' '--note' 'it'\\\\''s \\\"x\\\"' 2>&1\" \
+            "do shell script \"/usr/bin/env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin '/Applications/Dyno.app/Contents/MacOS/dyno-helper' 'install' '--note' 'it'\\\\''s \\\"x\\\"' 2>&1\" \
              with prompt \"Dyno wants to install its helper\" with administrator privileges"
         );
         assert!(matches!(

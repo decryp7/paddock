@@ -49,6 +49,14 @@ describe('dy-reading-source', () => {
     expect(el.querySelector('button')).toBeNull();
   });
 
+  // VM check 7538 (Linux): WebKitGTK leaves a bare <span> out of the accessibility tree (probe in the guest: a span chip is
+  // absent in every placement, a <p> chip is exposed like the page's other paragraphs). The Firewall and Network pages showed no chip
+  // to AT-SPI although the helper had answered. Every other kind of this component is a <p>; the chip is one too.
+  it('is a paragraph like the other kinds, so assistive technology exposes it', () => {
+    const chip = q(render('helper').el, 'reading-source-helper');
+    expect(chip?.tagName).toBe('P');
+  });
+
   it('shows nothing for a local reading without a hint', () => {
     expect(render('local').el.textContent?.trim()).toBe('');
   });

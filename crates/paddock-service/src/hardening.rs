@@ -49,7 +49,8 @@ impl Sandbox {
         self
     }
 
-    /// `StateDirectory=` (0700, under `/var/lib`).
+    /// `StateDirectory=` (0700, under `/var/lib`). The rendered unit has the folder removed after every stop when it is empty
+    /// (the service itself cannot: `/var/lib` is read-only in its sandbox); a folder with files in it is left alone.
     #[must_use]
     pub fn state_dir(mut self, name: &str) -> Self {
         self.state_dir = Some(name.to_string());
