@@ -434,6 +434,7 @@ impl crate::DuckStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::turns::statement_log;
     use debrief_core::ports::Ingest;
     use debrief_core::{PluginRegistry, Profile};
 
@@ -516,6 +517,41 @@ mod tests {
             out.status,
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// H6 (docs/research/2026-10-28-cpu-memory.md): a catalogue loop with nothing to do and no news ran three deletes and
+    /// a query every turn. An idle turn runs no statement at all.
+    #[test]
+    #[ignore = "regress-1-2: FAILING TODAY (fixed by plan package P2, store loops without polling): 100 idle catalogue turns ran 500 statements"]
+    fn a_hundred_idle_turns_run_no_statement() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        let shared = Shared {
+            stop: AtomicBool::new(false),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(0),
+            failed: Mutex::new(HashSet::new()),
+            unsaved: AtomicBool::new(false),
+            heavy: Arc::new(Mutex::new(())),
+            checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
+            dropped_while_exiting: AtomicBool::new(false),
+        };
+        let write_lock = Mutex::new(());
+        let running = crate::shutdown::Active::enter().expect("the process is not exiting");
+        // The first turn looks (it has never looked); after it the store is idle.
+        assert_eq!(step(&running, &shared, &conn, &write_lock).unwrap(), Turn::Idle);
+        statement_log::start(&conn);
+        for _ in 0..100 {
+            assert_eq!(step(&running, &shared, &conn, &write_lock).unwrap(), Turn::Idle);
+        }
+        let ran = statement_log::count(&conn);
+        assert!(
+            ran.is_empty(),
+            "100 idle catalogue turns ran {} statements, the first: {:?}",
+            ran.len(),
+            ran.first()
         );
     }
 }

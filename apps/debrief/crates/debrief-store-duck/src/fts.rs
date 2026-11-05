@@ -936,6 +936,52 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// H6: an index loop with nothing to index and no news ran a query every turn. An idle turn runs no statement.
+    #[test]
+    #[ignore = "regress-1-2: FAILING TODAY (fixed by plan package P2, store loops without polling): 100 idle index turns ran 400 statements"]
+    fn a_hundred_idle_turns_run_no_statement() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-idle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 16 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let s = FtsShared {
+            writer: Mutex::new(None),
+            fts,
+            stop: AtomicBool::new(false),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(0),
+            failure: Mutex::new(None),
+            bulk_import: Arc::new(AtomicBool::new(false)),
+            fail_writes: AtomicBool::new(false),
+        };
+        let write_lock = Mutex::new(());
+        let seg_dir = dir.join(SEGMENTS_DIR);
+        // The first turn looks (it has never looked); after it the store is idle.
+        assert_eq!(step(&s, &seg_dir, &conn, &write_lock, 1).unwrap(), Turn::Idle);
+        crate::turns::statement_log::start(&conn);
+        for _ in 0..100 {
+            assert_eq!(step(&s, &seg_dir, &conn, &write_lock, 1).unwrap(), Turn::Idle);
+        }
+        let ran = crate::turns::statement_log::count(&conn);
+        assert!(
+            ran.is_empty(),
+            "100 idle index turns ran {} statements, the first: {:?}",
+            ran.len(),
+            ran.first()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn a_stopped_indexing_thread_leaves_no_writer_and_so_no_merge_thread_behind() {
         // Tantivy's merge threads outlive a dropped writer unless `wait_merging_threads` ran, and then keep writing into

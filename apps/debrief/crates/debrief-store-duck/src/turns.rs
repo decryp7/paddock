@@ -31,6 +31,25 @@ pub(crate) fn wait_after(turn: Turn) -> Option<Duration> {
     }
 }
 
+/// Counting the statements a store's connections run (DuckDB's query log), for the tests that say an idle loop runs none.
+#[cfg(test)]
+pub(crate) mod statement_log {
+    use duckdb::Connection;
+
+    /// Starts logging every statement of the database `conn` belongs to.
+    pub(crate) fn start(conn: &Connection) {
+        conn.execute_batch("CALL enable_logging('QueryLog')").unwrap();
+    }
+
+    /// The statements logged so far, not counting the reads of this log.
+    pub(crate) fn count(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT message FROM duckdb_logs WHERE type = 'QueryLog' AND message NOT LIKE '%duckdb_logs%' ORDER BY timestamp")
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0)).unwrap().map(Result::unwrap).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

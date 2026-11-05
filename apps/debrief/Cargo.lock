@@ -2247,6 +2247,7 @@ dependencies = [
  "debrief-store-client",
  "debrief-store-duck",
  "duckdb",
+ "flate2",
  "getrandom 0.4.3",
  "libc",
  "log",
