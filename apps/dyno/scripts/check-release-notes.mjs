@@ -8,8 +8,15 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+/**
+ * The SNAKE_CASE rule of the VM harness's raw-text check (`RAW_TEXT_RULES` in ui/projects/paddock-e2e/src/screenshot-check.ts, on
+ * test/dyno-release-vm-checks-v2), kept character for character so a release note passes the same rule the screens do. A test
+ * pins it; once that file is on this line, import it instead of copying.
+ */
+export const SNAKE_CASE = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/;
+
 /** What a user must not read: an ADR number, a work package, a SNAKE_CASE identifier, or a backtick (the dialog shows text as it is written, so code marks appear raw). */
-export const FORBIDDEN = [/ADR \d/, /WP-/, /[A-Z]{2,}_[A-Z]/, /`/];
+export const FORBIDDEN = [/ADR \d/, /WP-/, SNAKE_CASE, /`/];
 
 /** The newest release's section: its heading and body lines. */
 export function newestSection(changelog) {
