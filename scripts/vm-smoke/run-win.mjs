@@ -10,7 +10,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSy
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderResult } from './judge.mjs';
+import { buildStep, expectedCommit } from './verdict.mjs';
+import { requiredSteps } from './manifest.mjs';
+import { commitOfRun, finalizeRun, foundFromPs, psHasCommit, sha256File, withBuildStep } from './report.mjs';
 import { runUiPhase } from './win-ui.mjs';
 import { helperSteps, answerUac } from './win-helper.mjs';
 import { afterQuitSteps } from './win-machine.mjs';
@@ -36,7 +38,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep') o.keep = true; else if (a === '--only') o.only = v(); else if (a === '--ui') o.ui = true; else if (a === '--vnc') o.vnc = true; else if (a === '--scale') o.scale = Number(v()); else if (a === '--reboot-check') o.reboot = true;
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep') o.keep = true; else if (a === '--only') o.only = v(); else if (a === '--ui') o.ui = true; else if (a === '--vnc') o.vnc = true; else if (a === '--scale') o.scale = Number(v()); else if (a === '--reboot-check') o.reboot = true; else if (a === '--expect-commit') o.expectCommit = v(); else if (a === '--partial') o.partial = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Windows suite');
@@ -162,6 +164,9 @@ async function main(argv) {
       done = listing.includes('DONE');
       if (!done) await sleep(2000);
     }
+    // The build binding is read while the app is installed (the uninstall step removes it later).
+    const expected = expectedCommit(o.expectCommit) ?? (o.run ? commitOfRun(o.run) : null);
+    const buildProbe = expected && done ? foundFromPs(clean(ssh(psHasCommit('C:\\Program Files\\Dyno\\dyno-app.exe', expected), 180_000).stdout)) : null;
     let uiSteps = [];
     if (o.ui && done) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
@@ -190,13 +195,16 @@ async function main(argv) {
     steps.push(...uiSteps);
     steps.push({ title: 'Tray right-click menu, dialogs at 150 % (manual)', status: 'manual', summary: 'Not automated yet: the tray menu and the 150 % scale need native input and a live display-scale change that the VMware display does not allow.' });
     const started_ = new Date().toISOString();
-    const md = renderResult({ app: 'Dyno', version: steps[0]?.evidence?.[0]?.replace(/^version /, ''), installer: source, guest: 'VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot gui-session-tools), interactive session, x64 installer under emulation', started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps });
-    const file = join(out, `${started_.replace(/[:.]/g, '-')}-dyno-win.md`);
-    writeFileSync(file, md);
-    for (const f of readdirSync(dest)) if (f.endsWith('.png')) writeFileSync(join(out, `${started_.replace(/[:.]/g, '-')}-win-${f}`), readFileSync(join(dest, f)));
+    const allSteps = withBuildStep(steps, buildStep({ expected, found: buildProbe }));
+    const required = requiredSteps({ os: 'windows', ui: Boolean(o.ui), reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
+    const { file, exit } = finalizeRun({
+      out, started: started_, meta: { label: o.reboot && !o.ui ? 'windows-restart' : 'windows-ui', os: 'windows', run: o.run ?? null },
+      run: { app: 'Dyno', version: steps[0]?.evidence?.[0]?.replace(/^version /, ''), installer: source, installerSha256: sha256File(exe), source, expectedCommit: expected, partial: o.partial, required, guest: 'VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot gui-session-tools), interactive session, x64 installer under emulation', started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps: allSteps },
+    });
+    for (const f of readdirSync(dest)) if (f.endsWith('.png')) writeFileSync(join(dirname(file), `${started_.replace(/[:.]/g, '-')}-win-${f}`), readFileSync(join(dest, f)));
     log(`result: ${file}`);
     console.log(file);
-    return steps.some((s) => s.status === 'fail') ? 1 : 0;
+    return exit;
   } catch (e) {
     log(`error: ${e.message}`);
     return 2;

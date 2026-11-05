@@ -2,6 +2,8 @@
 // the judges that turn those snapshots into pass/fail with evidence. No I/O, no clock: the orchestrator (run.mjs) collects the
 // snapshots and the tests here feed it text. Process identity is pid plus start time (rule 53), never a bare pid.
 
+import { deriveVerdict } from './verdict.mjs';
+
 /**
  * Parses `ps -axww -o pid=,ppid=,etime=,lstart=,command=` (macOS). etime is [[dd-]hh:]mm:ss; `lstart` is the process's start time as
  * ps prints it ("Fri Oct 30 14:25:12 2026", absent in older captures), which with the pid identifies a process (rule 53).
@@ -196,14 +198,24 @@ export function judgeStateFile(content, procs, spec, bundleDir) {
   return { present: true, pid, live, stale: !live };
 }
 
-/** The step list of a run to Markdown: a table of pass/fail per step, then each step's evidence. */
+/**
+ * The step list of a run to Markdown: the derived verdict (verdict.mjs: PASS only when every required step passed), the build binding in the
+ * header, a table per step, then each step's evidence. `run.required` is the manifest's list (manifest.mjs); without it the run is INCOMPLETE.
+ */
 export function renderResult(run) {
-  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO', 'not-measured': 'NOT MEASURED' })[s] ?? s.toUpperCase();
+  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO', 'not-measured': 'NOT MEASURED', 'check-broken': 'CHECK BROKEN' })[s] ?? s.toUpperCase();
+  const v = deriveVerdict({ steps: run.steps, required: run.required ?? [] });
+  const partial = run.partial ? ' (partial run: not a release verdict)' : '';
   const lines = [
     `# VM start check: ${run.app} ${run.version ?? ''}`.trimEnd(),
     '',
-    `- Result: **${run.steps.some((s) => s.status === 'fail') ? 'FAIL' : 'PASS'}**${run.steps.some((s) => s.status === 'manual') ? ' (manual steps are listed below and are not part of this verdict)' : ''}`,
+    `- Result: **${v.verdict}**${partial}${run.steps.some((s) => s.status === 'manual') ? ' (manual steps are listed below and are not part of this verdict)' : ''}`,
+    ...(v.missing.length ? [`- Missing: ${v.missing.map((m) => `${m.id} (${m.why})`).join('; ')}`] : []),
+    ...(v.broken.length ? [`- Checks that broke (not a product failure): ${v.broken.map((s) => s.title).join('; ')}`] : []),
     `- Installer: ${run.installer}`,
+    ...(run.installerSha256 ? [`- Installer sha256: \`${run.installerSha256}\``] : []),
+    ...(run.source ? [`- Source: ${run.source}`] : []),
+    ...(run.expectedCommit ? [`- Expected build commit: \`${run.expectedCommit}\``] : []),
     `- Guest: ${run.guest}`,
     `- Started: ${run.started}`,
     `- Tool: scripts/vm-smoke (commit ${run.commit ?? 'unknown'})`,

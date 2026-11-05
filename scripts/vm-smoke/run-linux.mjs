@@ -10,7 +10,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderResult } from './judge.mjs';
+import { buildStep, expectedCommit } from './verdict.mjs';
+import { requiredSteps } from './manifest.mjs';
+import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } from './report.mjs';
 import { readingSteps } from './helper-readings.mjs';
 import { trayHostChecks } from './linux-tray-host.mjs';
 
@@ -27,7 +29,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep-vm') o.keep = true; else if (a === '--reboot-check') o.reboot = true; else if (a === '--tray-host') o.trayHost = true;
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep-vm') o.keep = true; else if (a === '--reboot-check') o.reboot = true; else if (a === '--tray-host') o.trayHost = true; else if (a === '--expect-commit') o.expectCommit = v(); else if (a === '--partial') o.partial = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Linux suite');
@@ -227,11 +229,18 @@ async function main(argv) {
 
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();
-    const md = renderResult({ app: 'Dyno', version: ver, installer: o.installer ?? `CI run ${o.run}, artifact dyno-Linux, ${basename(deb)}`, guest: `Tart Ubuntu 24.04 arm64 GNOME (X11) clone of ${BASE}, amd64 .deb under Rosetta`, started, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], 20_000).stdout.trim(), steps });
-    const file = join(out, `${started.replace(/[:.]/g, '-')}-dyno-linux.md`);
-    writeFileSync(file, md);
+    // The build binding: the installed dyno-app holds the 12-digit commit CI built it from (build-env, option_env!).
+    const expected = expectedCommit(o.expectCommit) ?? (o.run ? commitOfRun(o.run) : null);
+    const probe = expected ? g(`grep -c -a -F -e ${expected} /usr/bin/dyno-app >/dev/null; exit $?`) : null;
+    const allSteps = withBuildStep(steps, buildStep({ expected, found: probe ? foundFromGrep(probe.code) : null }));
+    const required = requiredSteps({ os: 'linux', reboot: Boolean(o.reboot), trayHost: Boolean(o.trayHost), release: !o.partial, partial: Boolean(o.partial) });
+    const source = o.installer ?? `CI run ${o.run}, artifact dyno-Linux, ${basename(deb)}`;
+    const { file, exit } = finalizeRun({
+      out, started, meta: { label: 'linux-reboot', os: 'linux', run: o.run ?? null },
+      run: { app: 'Dyno', version: ver, installer: source, installerSha256: sha256File(deb), source, expectedCommit: expected, partial: o.partial, required, guest: `Tart Ubuntu 24.04 arm64 GNOME (X11) clone of ${BASE}, amd64 .deb under Rosetta`, started, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], 20_000).stdout.trim(), steps: allSteps },
+    });
     log(`result: ${file}`); console.log(file);
-    return steps.some((s) => s.status === 'fail') ? 1 : 0;
+    return exit;
   } catch (e) { log(`error: ${e.message}`); return 2; } finally { cleanup(); }
 }
 

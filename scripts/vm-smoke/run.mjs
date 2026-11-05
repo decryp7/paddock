@@ -11,7 +11,9 @@ import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
-import { renderResult } from './judge.mjs';
+import { buildStep, expectedCommit } from './verdict.mjs';
+import { requiredSteps } from './manifest.mjs';
+import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } from './report.mjs';
 import { PowerChecks, runPowerSuite } from './power-checks.mjs';
 import { MacGui } from './mac-gui.mjs';
 import { MacIdleChecks } from './mac-idle.mjs';
@@ -43,6 +45,8 @@ export function parseArgs(argv) {
     else if (a === '--guest') o.guest = take(i++, a);
     else if (a === '--suite') o.suite = take(i++, a);
     else if (a === '--reboot-check') o.reboot = true;
+    else if (a === '--expect-commit') o.expectCommit = take(i++, a);
+    else if (a === '--partial') o.partial = true;
     else if (a === '--keep-vm') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
@@ -258,12 +262,20 @@ async function main(argv) {
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
-    const md = renderResult({ app: config.app, version, installer: source, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps });
-    const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}${o.suite === 'power' ? '-power' : o.suite === 'helper' ? '-helper' : ''}.md`);
-    writeFileSync(file, md);
+    // The build binding: the installed binary must contain the commit CI built (12 digits, embedded by build-env).
+    const expected = expectedCommit(o.expectCommit) ?? (o.run ? commitOfRun(o.run) : null);
+    const appSpec = config.processes.find((p) => p.role === 'app');
+    const probe = expected ? await exec(`grep -c -a -F -e ${expected} '/Applications/${config.bundle}/Contents/MacOS/${appSpec.name}' >/dev/null; exit $?`) : null;
+    const allSteps = withBuildStep(steps, buildStep({ expected, found: probe ? foundFromGrep(probe.code) : null }));
+    const label = o.suite === 'start' ? 'macos-start' : o.suite === 'power' ? 'macos-power' : o.reboot ? 'macos-helper-restart' : 'macos-helper';
+    const required = requiredSteps({ os: 'macos', suite: o.suite, reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
+    const { file, exit } = finalizeRun({
+      out, started, meta: { label, os: 'macos', suite: o.suite, run: o.run ?? null },
+      run: { app: config.app, version, installer: source, installerSha256: sha256File(dmg), source, expectedCommit: expected, partial: o.partial, required, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps: allSteps },
+    });
     log(`result: ${file}`);
     console.log(file);
-    return steps.some((s) => s.status === 'fail') ? 1 : 0;
+    return exit;
   } catch (e) {
     log(`error: ${e.message}`);
     return 2;
