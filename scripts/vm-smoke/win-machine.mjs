@@ -1,7 +1,7 @@
 // The per-machine install's host-side steps (Dyno 1.1.0, family ADR 0053): an update announced as the installed version is refused by
 // `paddock-setup.exe apply-update` (exit 27, "not newer", nothing left in updates\), and the uninstall removes the programs, the machine-wide
 // entries and the start-at-login values. Run as the VM's administrator through the SSH admin key; the install itself (the real UAC prompt) is the suite's.
-import { ssh, answerUac } from './win-helper.mjs';
+import { ssh, answerUac, winMcpStep } from './win-helper.mjs';
 import { connect, tunnel } from './win-cdp.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
 import { hungPageStep } from './hung-page.mjs';
@@ -88,9 +88,12 @@ export async function uninstall() {
 
 const SETUP = 'C:\\paddock-test\\vmcheck\\setup.exe';
 
-/** Starts the staged installer in the test user's console session (a scheduled task with /it), so its UAC prompt is on the desktop for the VNC answer. */
+/**
+ * Starts the staged installer in the test user's console session. A task cannot run a requireAdministrator program directly (error 740, no prompt): the task runs a
+ * PowerShell script that starts it with Start-Process (ShellExecute, which shows the UAC prompt), waits, and writes the installer's exit code to a file.
+ */
 function startInstaller() {
-  ssh(`schtasks /end /tn DynoReinstall 2>$null | Out-Null; schtasks /create /tn DynoReinstall /sc once /st 00:00 /ru paddock-test /it /f /tr "${SETUP} /S" | Out-Null; schtasks /run /tn DynoReinstall | Out-Null`);
+  ssh(`Remove-Item C:\\paddock-test\\vmcheck\\reinstall.out -ErrorAction SilentlyContinue; Set-Content C:\\paddock-test\\vmcheck\\reinstall.ps1 '$p = Start-Process ${SETUP} -ArgumentList "/S" -PassThru; $p.WaitForExit(); $p.ExitCode | Set-Content C:\\paddock-test\\vmcheck\\reinstall.out'; schtasks /end /tn DynoReinstall 2>$null | Out-Null; schtasks /create /tn DynoReinstall /sc once /st 00:00 /ru paddock-test /it /f /tr "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\reinstall.ps1" | Out-Null; schtasks /run /tn DynoReinstall | Out-Null`);
 }
 const installerRunning = () => ssh('[bool](Get-Process -Name setup -ErrorAction SilentlyContinue)') === 'True';
 const facts = () => ({
@@ -104,7 +107,7 @@ async function installOnce(label) {
   const uac = await answerUac(label);
   let ended = false;
   for (let i = 0; i < 100 && !ended; i++) { await sleep(3000); ended = !installerRunning(); }
-  const exitText = ssh('(Get-ScheduledTaskInfo -TaskName DynoReinstall).LastTaskResult');
+  const exitText = ssh('Get-Content C:\\paddock-test\\vmcheck\\reinstall.out -ErrorAction SilentlyContinue');
   return { uac, exit: ended && /^-?\d+$/.test(exitText.trim()) ? Number(exitText.trim()) : null };
 }
 
@@ -185,4 +188,4 @@ export async function winQuitStop() {
   });
 }
 
-export const afterQuitSteps = [() => sameVersionRefused(), () => uninstall(), () => installRows(), () => notDrivenWinRows(), () => winHung(), () => winQuitStop()];
+export const afterQuitSteps = [() => sameVersionRefused(), () => winMcpStep(), () => uninstall(), () => installRows(), () => notDrivenWinRows(), () => winHung(), () => winQuitStop()];

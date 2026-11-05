@@ -20,7 +20,7 @@ export async function scopingStep() {
   ssh(`Copy-Item "$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" "C:\\Users\\paddock-test\\owner-secret-probe.exe" -Force; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -ArgumentList "-NoProfile","-Command","while($true){ }" -WindowStyle Hidden`);
   await sleep(4000);
   const ownerView = ssh(`& "${dyno}\\dyno.exe" top --by cpu -n 400 --json 2>&1 | Out-String`);
-  checks.push({ ok: /owner-secret-probe/i.test(ownerView), detail: /owner-secret-probe/i.test(ownerView) ? 'positive control: the owner sees its own probe process' : 'positive control failed: the owner does not see its own probe process in `dyno top`' });
+  checks.push({ ok: /owner-secret-probe/i.test(ownerView), kind: /owner-secret-probe/i.test(ownerView) ? undefined : 'check', detail: /owner-secret-probe/i.test(ownerView) ? 'positive control: the owner sees its own probe process' : 'positive control failed: the owner does not see its own probe process in `dyno top`' });
   // The second account.
   ssh('$p = [Console]::In.ReadLine(); net user paddock-user2 $p /add /y | Out-Null; net localgroup Users paddock-user2 /add 2>$null | Out-Null', { admin: true, input: `${pw}\n` });
   ssh(`Remove-Item "${PUB}\\dyno2" -Recurse -Force -ErrorAction SilentlyContinue; Copy-Item "${dyno}" "${PUB}\\dyno2" -Recurse -Force; Remove-Item "${PUB}\\dyno2\\*.json","${PUB}\\dyno2\\*.db*","${PUB}\\dyno2\\agent.lock" -Force -ErrorAction SilentlyContinue; icacls "${PUB}\\dyno2" /grant "BUILTIN\\Users:(OI)(CI)(RX)" | Out-Null`, { admin: true });

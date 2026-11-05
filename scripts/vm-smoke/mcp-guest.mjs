@@ -30,8 +30,11 @@ const psq = (s) => `'${String(s).replace(/'/g, "''")}'`; // PowerShell single qu
 export function storeEntryCommand(os, entries) {
   if (os === 'macos') return `security add-generic-password -U -s ${KEY_SERVICE} -a ${sq(KEY_ACCOUNT)} -w ${sq(entries)}`;
   if (os === 'linux') return `printf %s ${sq(entries)} | secret-tool store --label=${KEY_SERVICE} service ${KEY_SERVICE} username ${sq(KEY_ACCOUNT)}`;
-  // Windows Credential Manager: the keyring crate's target is "<account>.<service>"; the value must reach cmdkey with its quotes escaped.
-  return `$j = ${psq(entries)}; cmdkey /generic:${psq(`${KEY_ACCOUNT}.${KEY_SERVICE}`)} /user:${psq(KEY_ACCOUNT)} ("/pass:" + $j.Replace('"', '\\"'))`;
+  // Windows Credential Manager: cmdkey refuses a network (SSH) logon ("Credentials cannot be saved from this logon session"), so it runs in the test user's
+  // console session through a scheduled task (/it); the entry is passed base64 so no quoting can damage it, and the task's own output is read back.
+  const b64 = Buffer.from(entries, 'utf8').toString('base64');
+  const script = `$j = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}')); cmdkey /generic:'${KEY_ACCOUNT}.${KEY_SERVICE}' /user:'${KEY_ACCOUNT}' ("/pass:" + $j.Replace('"', '\\"')) *> C:\\paddock-test\\vmcheck\\store-key.out; 'DONE' | Add-Content C:\\paddock-test\\vmcheck\\store-key.out`;
+  return `Remove-Item C:\\paddock-test\\vmcheck\\store-key.out -ErrorAction SilentlyContinue; Set-Content C:\\paddock-test\\vmcheck\\store-key.ps1 ${psq(script)}; schtasks /create /tn DynoStoreKey /sc once /st 00:00 /ru paddock-test /it /f /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\store-key.ps1" | Out-Null; schtasks /run /tn DynoStoreKey | Out-Null; for ($i = 0; $i -lt 30; $i++) { Start-Sleep 1; if ((Get-Content C:\\paddock-test\\vmcheck\\store-key.out -ErrorAction SilentlyContinue) -match 'DONE') { break } }; $o = Get-Content C:\\paddock-test\\vmcheck\\store-key.out -Raw -ErrorAction SilentlyContinue; $o; if ($o -notmatch 'successfully') { exit 1 }`;
 }
 
 /** The command that writes `mcp.json` next to the app's settings (the folder found at run time, never guessed). */

@@ -178,7 +178,7 @@ const TOOLS = `${HELPER}\\tools`;
 const BIN = `${TOOLS}\\smartmontools-7.5\\bin`;
 const helperLog = (n = 6) => ssh(`Get-Content ${HELPER}\\helper.log -Tail ${n}`, { admin: true }).split('\n');
 
-async function pressInstallAndWait(browser, guardSec = 120) {
+async function pressInstallAndWait(browser, guardSec = 240) {
   const s = await openSettings(browser);
   await s.getByRole('button', { name: /^Check again$/ }).last().click().catch(() => {});
   await sleep(3000);
@@ -392,5 +392,4 @@ export const helperSteps = [
   () => servedCounts(),
   ({ browser }) => helperRepair(browser),
   ({ browser }) => helperOff(browser),
-  () => winMcpStep(),
 ];

@@ -17,7 +17,9 @@ test('credential-store commands name service Dyno and account mcp:keys on every 
   const { entries, key } = makeKey(Buffer.alloc(32, 1), 1);
   assert.match(storeEntryCommand('macos', entries), /security add-generic-password -U -s Dyno -a 'mcp:keys'/);
   assert.match(storeEntryCommand('linux', entries), /secret-tool store --label=Dyno service Dyno username 'mcp:keys'/);
-  assert.match(storeEntryCommand('windows', entries), /cmdkey \/generic:'mcp:keys\.Dyno' \/user:'mcp:keys'/);
+  assert.match(storeEntryCommand('windows', entries), /schtasks \/create \/tn DynoStoreKey[^;]*\/it /);
+  assert.match(storeEntryCommand('windows', entries), /FromBase64String/);
+  assert.doesNotMatch(storeEntryCommand('windows', entries), /entries|\[\{"id"/);
   assert.match(mcpCommand('linux', key, '{}', '/usr/bin/dyno'), /DYNO_MCP_KEY='pmk_/);
   assert.doesNotMatch(mcpCommand('linux', key, '{}', '/usr/bin/dyno'), /dyno' mcp pmk_/);
   assert.match(writeSettingsCommand('macos', "/Users/a b/Library", '{}'), /> '\/Users\/a b\/Library\/mcp\.json'/);
