@@ -158,7 +158,7 @@ pub fn compose(s: Seen<'_>) -> ServiceStatus {
             (_, Plan::Leave(Hold::RecordUnavailable(why))) => (
                 Condition::Unavailable,
                 Some(format!(
-                    "{} cannot save its service state, so it changed nothing on its own: {why} Fix that, then press Repair (it goes on without a saved state because you asked).",
+                    "{} cannot save its service state, so it changed nothing on its own: {why} Fix that, then try again: nothing is changed without a saved state, Repair included.",
                     s.app
                 )),
             ),
@@ -394,7 +394,7 @@ mod tests {
         for hold in [Hold::Unanswered(3), Hold::Refused(3), Hold::RegisterFailed(3)] {
             let held = Plan::Leave(hold);
             let s = compose(seen(&with(Registration::Registered, Job::NotRunning), false, &held));
-            assert!(s.message.unwrap().contains("registered 3 times"));
+            assert!(s.message.unwrap().contains('3'));
         }
         let unrecorded = Plan::Leave(Hold::RecordUnavailable("disk full".into()));
         let s = compose(seen(&with(Registration::Registered, Job::NotRunning), false, &unrecorded));

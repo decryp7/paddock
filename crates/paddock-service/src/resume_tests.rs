@@ -1126,7 +1126,8 @@ fn a_request_that_cannot_record_or_finds_the_tracker_busy_changes_nothing() {
     let record = RecordFile::memory();
     record.memory_handle().unwrap().fail_writes(true);
     let mut m = m.with_record(record);
-    assert!(matches!(m.repair(&never()), Err(ServiceError::Failed(w)) if w.contains("cannot be saved")));
+    let repaired = m.repair(&never());
+    assert!(matches!(&repaired, Err(ServiceError::Failed(w)) if w.contains("cannot be saved")), "{repaired:?}");
     assert!(matches!(m.uninstall(), Err(ServiceError::Failed(_))));
     assert!(calls(&sim).is_empty() && no_changes(&sys));
     let dir = tempfile::tempdir().unwrap();

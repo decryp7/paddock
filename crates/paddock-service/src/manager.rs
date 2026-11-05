@@ -265,11 +265,10 @@ impl Manager {
             attempts: attempts0,
             phase: if finishing || nothing_to_remove { Phase::Registering } else { removing },
         };
+        // No OS call without a durable write, not even for what the user asked: a service the record does not know about would be
+        // replaced again at the next start.
         if let Err(e) = self.record.set_state_and_program(first, self.program.as_deref()) {
-            if !requested {
-                return Ran::Unrecorded(e.to_string());
-            }
-            log::warn!(error:% = e; "the repair goes on without a durable record, because it was asked for");
+            return Ran::Unrecorded(e.to_string());
         }
         if !self.tracker.start(Instant::now()) {
             return Ran::Busy;
