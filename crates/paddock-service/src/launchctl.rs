@@ -21,6 +21,9 @@ pub const NOT_FOUND: i32 = 113;
 pub fn job_report(sys: &mut dyn System, target: &str) -> Option<JobReport> {
     let out = sys.run(LAUNCHCTL, &["print", target]).ok()?;
     if out.success() {
+        if let Some(program) = crate::parse::print_program(&out.stdout) {
+            log::debug!(job:% = target, program:% = program; "launchd: the job's program as launchctl prints it");
+        }
         Some(parse_job(&out.stdout))
     } else if out.code == Some(NOT_FOUND) || out.stderr.contains("Could not find service") {
         Some(JobReport::default())

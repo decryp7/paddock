@@ -562,7 +562,7 @@ mod mac {
             Box::new(system()),
         );
         let dirs = dyno_agent::paths::Dirs::current();
-        Ok(Manager::new(
+        let manager = Manager::new(
             "Dyno",
             Box::new(backend),
             dirs.root(),
@@ -578,7 +578,13 @@ mod mac {
             super::first_run_done,
             || super::current_location().is_ok(),
         )
-        .with_timings(timings))
+        .with_timings(timings);
+        // This copy's identity (ADR 0056 section 8): the record keeps the program that registered, so another installed copy
+        // can tell whose registration it sees.
+        Ok(match std::env::current_exe() {
+            Ok(exe) => manager.with_program(&exe.to_string_lossy()),
+            Err(_) => manager,
+        })
     }
 
     /// A manager that is only asked what it sees or told to stop or resume: nothing waits for an agent.

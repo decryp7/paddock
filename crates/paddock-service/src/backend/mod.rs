@@ -403,6 +403,10 @@ pub trait Backend: Send {
     fn definition(&self) -> Option<String> {
         None
     }
+    /// Tells the backend which program this copy would register and which the record says was registered, before each look
+    /// (ADR 0056 section 8: the identity of a copy). A mechanism that cannot read the registered program from the OS
+    /// (`SMAppService`) compares the two itself; the others ignore it.
+    fn know_copy(&mut self, _own: Option<&str>, _registered: Option<&str>) {}
     /// Whether the OS holds the job now. A job the OS could not be asked about is not found (a wait for the job must not
     /// end on a failed look). The default reads a full [`inspect`](Backend::inspect); a backend with a cheaper look overrides it.
     fn job_found(&mut self) -> bool {

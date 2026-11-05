@@ -98,6 +98,10 @@ pub struct LaunchdBundled {
     uid: u32,
     app: Box<dyn AppService>,
     sys: Box<dyn System>,
+    /// The program this copy registers, and the program the record says the registration was made for (ADR 0056 section 8:
+    /// `SMAppService` does not say which copy it holds, so the identity comes from the record).
+    own: Option<String>,
+    registered: Option<String>,
 }
 
 impl LaunchdBundled {
@@ -113,7 +117,26 @@ impl LaunchdBundled {
             uid,
             app,
             sys,
+            own: None,
+            registered: None,
         }
+    }
+
+    /// Which copy the registration is for: its program, whether that is still there, and whether it is this copy's.
+    /// Unknown (`None`) when the record names no program (a Dyno 1.0.0 install) or nothing is registered.
+    fn identity(
+        &mut self,
+        registration: &Registration,
+    ) -> (Option<String>, Option<bool>, Option<bool>) {
+        if matches!(registration, Registration::Absent) {
+            return (None, None, None);
+        }
+        let Some(registered) = self.registered.clone() else {
+            return (None, None, None);
+        };
+        let exists = self.sys.is_program(std::path::Path::new(&registered));
+        let here = self.own.as_ref().map(|own| *own == registered);
+        (Some(registered), Some(exists), here)
     }
 
     fn target(&self) -> String {
@@ -150,9 +173,13 @@ impl Backend for LaunchdBundled {
         };
         let target = self.target();
         let (job, last_exit, restarts) = look_at(job_report(self.sys.as_mut(), &target));
+        let (program, program_exists, points_here) = self.identity(&registration);
         Inspection {
             registration,
             job,
+            program,
+            program_exists,
+            points_here,
             last_exit,
             restarts,
             login_item: Some(LoginItemFacts { status, mark }),
@@ -162,9 +189,19 @@ impl Backend for LaunchdBundled {
 
     fn register(&mut self) -> Result<Inspection, RegisterError> {
         self.app.register()?;
+        // What the OS holds now is this copy's: the record learns it with the next look; this read-back must not call it
+        // another copy's.
+        if self.own.is_some() {
+            self.registered.clone_from(&self.own);
+        }
         let after = self.inspect();
         log::info!(registration:? = after.registration, job:? = after.job; "launchd: bundled agent registered, read back");
         as_written(after, true)
+    }
+
+    fn know_copy(&mut self, own: Option<&str>, registered: Option<&str>) {
+        self.own = own.map(str::to_string);
+        self.registered = registered.map(str::to_string);
     }
 
     fn unregister(&mut self) -> Result<Inspection, UnregisterError> {

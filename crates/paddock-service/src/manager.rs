@@ -158,8 +158,9 @@ impl Manager {
     fn decide(&mut self, waited: bool, resuming: bool) -> (Inspection, bool, Plan) {
         let answers = (self.answers)();
         let covered = (self.cover)();
-        let inspection = self.backend.inspect();
         let (recorded, record_damaged) = self.record.peek();
+        self.backend.know_copy(self.program.as_deref(), recorded.registered_program.as_deref());
+        let inspection = self.backend.inspect();
         let p = plan(&Facts {
             inspection: &inspection,
             answers,
@@ -251,7 +252,7 @@ impl Manager {
             attempts: attempts0,
             phase: if finishing { Phase::Registering } else { removing },
         };
-        if let Err(e) = self.write_state(first) {
+        if let Err(e) = self.record.set_state_and_program(first, self.program.as_deref()) {
             if !requested {
                 return Ran::Unrecorded(e.to_string());
             }
