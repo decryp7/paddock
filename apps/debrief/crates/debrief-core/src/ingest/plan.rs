@@ -47,6 +47,8 @@ pub enum PlanKind {
     },
     /// The streaming JSON importer.
     Json(JsonShape),
+    /// The streaming delimited-text importer (CSV): column roles come from the head, rows are folded into events.
+    Csv,
     /// Another text importer, given the whole decoded file (adapter, until it streams).
     Legacy,
 }
@@ -172,12 +174,13 @@ pub fn plan_with(importers: &Importers, ctx: &ImportCtx, head: &[u8], whole: boo
             }
         }
         "json" => PlanKind::Json(json_shape(&text, whole)),
+        "csv" => PlanKind::Csv,
         _ => PlanKind::Legacy,
     };
     let splittable = match kind {
         PlanKind::Text { time_only, .. } => !time_only,
         PlanKind::Json(shape) => shape == JsonShape::Lines,
-        PlanKind::Binary | PlanKind::Legacy => false,
+        PlanKind::Binary | PlanKind::Csv | PlanKind::Legacy => false,
     };
     Ok(FilePlan {
         encoding,
@@ -189,6 +192,16 @@ pub fn plan_with(importers: &Importers, ctx: &ImportCtx, head: &[u8], whole: boo
         splittable,
         chunks: Vec::new(),
     })
+}
+
+/// The decoded head of a file the plan was made from: its first [`HEAD_BYTES`] from after the byte-order mark, cut
+/// after the last line unless that is the whole file. Equal to the text the plan decided from.
+pub(super) fn plan_head_text<R: Read + std::io::Seek>(reader: &mut R, plan: &FilePlan, size: u64) -> std::io::Result<String> {
+    reader.seek(std::io::SeekFrom::Start(0))?;
+    let mut head = Vec::new();
+    reader.take(HEAD_BYTES as u64).read_to_end(&mut head)?;
+    let whole = size <= HEAD_BYTES as u64;
+    Ok(decode_head(&head, plan.encoding, plan.data_start as usize, whole))
 }
 
 /// The JSON shape, decided as the in-memory JSON importer decides it from the whole file.
@@ -324,7 +337,7 @@ mod tests {
     fn plans_other_importers_and_refuses_unknown_files() {
         let p = compiled("");
         let csv = plan_of(&p, b"a,b\n1,2\n", true).unwrap();
-        assert_eq!((csv.importer.as_str(), csv.kind), ("csv", PlanKind::Legacy));
+        assert_eq!((csv.importer.as_str(), csv.kind), ("csv", PlanKind::Csv));
         assert_eq!(plan_of(&p, b"", true).unwrap_err(), "empty file");
         assert_eq!(plan_of(&p, b"just words", true).unwrap_err(), "no importer recognises this format");
         assert_eq!(

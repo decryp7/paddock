@@ -352,12 +352,25 @@ fn read_events<R: Read + Seek>(
             let mut lines = LineReader::new(&mut chunks);
             json::import_json(ctx, shape, size.saturating_sub(plan.data_start), &mut lines, &mut batcher)?
         }
+        PlanKind::Csv => {
+            let head = super::plan::plan_head_text(reader, plan, size)?;
+            let csv_head = crate::importers::csv_stream_head(ctx, &head)?;
+            drop(head);
+            reader.seek(SeekFrom::Start(plan.data_start))?;
+            let mut chunks = ReaderChunks::new(reader, plan.encoding, plan.data_start);
+            let mut lines = LineReader::new(&mut chunks);
+            super::delimited::import_delimited(csv_head, &mut lines, &mut batcher)?
+        }
         PlanKind::Legacy => {
             reader.seek(SeekFrom::Start(0))?;
+            let t = std::time::Instant::now();
             let mut bytes = Vec::new();
             reader.read_to_end(&mut bytes)?;
+            log::debug!("legacy read: {} bytes read in {} ms", bytes.len(), t.elapsed().as_millis());
+            let t = std::time::Instant::now();
             let content = decode(&bytes).ok_or_else(|| anyhow!("binary file"))?;
             drop(bytes);
+            log::debug!("legacy read: decoded to {} bytes in {} ms", content.len(), t.elapsed().as_millis());
             let importer = env
                 .importers
                 .find(&plan.importer)

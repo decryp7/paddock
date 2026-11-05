@@ -74,7 +74,12 @@ fn dir(tag: &str) -> std::path::PathBuf {
 }
 
 fn row(n: u64) -> String {
-    format!("2026-10-14 10:{:02}:{:02},INFO,svc{},request {n} handled\n", (n / 60) % 60, n % 60, n % 7)
+    format!(
+        "2026-10-14 10:{:02}:{:02},INFO,svc{},request {n} handled\n",
+        (n / 60) % 60,
+        n % 60,
+        n % 7
+    )
 }
 
 #[test]

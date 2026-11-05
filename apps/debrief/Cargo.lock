@@ -1763,6 +1763,7 @@ dependencies = [
  "chrono",
  "criterion",
  "csv",
+ "csv-core",
  "debrief-alloc",
  "debrief-batch",
  "debrief-plugin-api",

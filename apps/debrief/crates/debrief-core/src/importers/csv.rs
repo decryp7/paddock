@@ -169,7 +169,7 @@ fn read_rows(delim: u8, has_header: bool, content: &str) -> Result<(Option<Vec<S
 }
 
 /// Column names and the columns holding the timestamp, level and message.
-struct Layout {
+pub(crate) struct Layout {
     headers: Vec<String>,
     ts_col: Option<usize>,
     /// The time of a timestamp split over two columns (`2026/10/14,10:00:00` with `,` as the delimiter).
@@ -292,6 +292,19 @@ impl Layout {
     /// continuation line of the event before it (a multi-line message or exception written without quotes): its
     /// text, as written, joins that event.
     fn records(&self, content: &str, rows: Rows) -> Imported {
+        let mut out = Imported::default();
+        let mut fold = CsvFold::default();
+        for Row { line, start, record } in rows {
+            if let CsvFolded::Started(Some(prev)) = self.fold(&mut fold, line, &record, raw_line(content, start)) {
+                out.records.push(prev);
+            }
+        }
+        out.records.extend(self.finish(&mut fold));
+        out
+    }
+
+    /// Adds one row (its first line is `line`, `first_line` its text) to the event being built in `fold`.
+    pub(crate) fn fold(&self, fold: &mut CsvFold, line: u32, row: &csv::StringRecord, first_line: &str) -> CsvFolded {
         let Layout {
             headers,
             ts_col,
@@ -304,71 +317,109 @@ impl Layout {
         } = self;
         let (ts_col, time_col, level_col, message_col) = (*ts_col, *time_col, *level_col, *message_col);
         let width = message_last.unwrap_or(headers.len());
-        let mut out = Imported::default();
-        let mut current: Option<Record> = None;
-        let mut extra = String::new();
-        for Row { line, start, record: row } in rows {
-            if row.iter().all(|c| c.is_empty()) {
-                continue;
-            }
-            let ts = ts_col
-                .and_then(|c| row.get(c))
-                .and_then(|value| match time_col.and_then(|t| row.get(t)) {
-                    Some(time) => parser.parse(&format!("{value},{time}")),
-                    None => parser.parse(value),
-                });
-            if ts.is_none() && ts_col.is_some() && current.is_some() && row.len() < width {
-                if extra.len() < MAX_EVENT_BYTES {
-                    if !extra.is_empty() {
-                        extra.push('\n');
-                    }
-                    extra.push_str(raw_line(content, start));
-                }
-                continue;
-            }
-            if let Some(prev) = current.take() {
-                out.records.push(finish(prev, std::mem::take(&mut extra)));
-            }
-            let mut rec = Record::new(line);
-            let overflow = message_last.is_some_and(|n| row.len() > n);
-            for (i, value) in row.iter().enumerate() {
-                if overflow && message_col.is_some_and(|m| i > m) {
-                    // Part of the message.
-                } else if overflow && Some(i) == message_col {
-                    rec.message = rest_after(raw_line(content, start), *delim, i).unwrap_or(value).trim().to_string();
-                } else if Some(i) == ts_col {
-                    rec.ts = ts;
-                } else if Some(i) == time_col {
-                    // Part of the timestamp.
-                } else if Some(i) == level_col {
-                    rec.level = Level::parse(value).unwrap_or(Level::Information);
-                    if Level::parse(value).is_none() && !value.is_empty() {
-                        rec.fields.insert(headers[i].clone(), auto_value(value));
-                    }
-                } else if Some(i) == message_col {
-                    rec.message = value.to_string();
-                } else if !value.is_empty() {
-                    let name = headers.get(i).cloned().unwrap_or_else(|| format!("col{}", i + 1));
-                    rec.fields.insert(name, auto_value(value));
-                }
-            }
-            if rec.message.is_empty() {
-                // Show the row itself so the grid is never empty.
-                rec.message = row
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, v)| Some(*i) != ts_col && Some(*i) != time_col && Some(*i) != level_col && !v.is_empty())
-                    .map(|(_, v)| v)
-                    .collect::<Vec<_>>()
-                    .join(" · ");
-            }
-            current = Some(rec);
+        if row.iter().all(|c| c.is_empty()) {
+            return CsvFolded::Skipped;
         }
-        if let Some(rec) = current.take() {
-            out.records.push(finish(rec, extra));
+        let ts = ts_col
+            .and_then(|c| row.get(c))
+            .and_then(|value| match time_col.and_then(|t| row.get(t)) {
+                Some(time) => parser.parse(&format!("{value},{time}")),
+                None => parser.parse(value),
+            });
+        if ts.is_none() && ts_col.is_some() && fold.current.is_some() && row.len() < width {
+            if fold.extra.len() < MAX_EVENT_BYTES {
+                if !fold.extra.is_empty() {
+                    fold.extra.push('\n');
+                }
+                fold.extra.push_str(first_line);
+            }
+            return CsvFolded::Continued;
         }
-        out
+        let prev = fold.current.take().map(|prev| finish(prev, std::mem::take(&mut fold.extra)));
+        let mut rec = Record::new(line);
+        let overflow = message_last.is_some_and(|n| row.len() > n);
+        for (i, value) in row.iter().enumerate() {
+            if overflow && message_col.is_some_and(|m| i > m) {
+                // Part of the message.
+            } else if overflow && Some(i) == message_col {
+                rec.message = rest_after(first_line, *delim, i).unwrap_or(value).trim().to_string();
+            } else if Some(i) == ts_col {
+                rec.ts = ts;
+            } else if Some(i) == time_col {
+                // Part of the timestamp.
+            } else if Some(i) == level_col {
+                rec.level = Level::parse(value).unwrap_or(Level::Information);
+                if Level::parse(value).is_none() && !value.is_empty() {
+                    rec.fields.insert(headers[i].clone(), auto_value(value));
+                }
+            } else if Some(i) == message_col {
+                rec.message = value.to_string();
+            } else if !value.is_empty() {
+                let name = headers.get(i).cloned().unwrap_or_else(|| format!("col{}", i + 1));
+                rec.fields.insert(name, auto_value(value));
+            }
+        }
+        if rec.message.is_empty() {
+            // Show the row itself so the grid is never empty.
+            rec.message = row
+                .iter()
+                .enumerate()
+                .filter(|(i, v)| Some(*i) != ts_col && Some(*i) != time_col && Some(*i) != level_col && !v.is_empty())
+                .map(|(_, v)| v)
+                .collect::<Vec<_>>()
+                .join(" · ");
+        }
+        fold.current = Some(rec);
+        CsvFolded::Started(prev)
     }
+
+    /// The last event of `fold`, once the rows have ended.
+    pub(crate) fn finish(&self, fold: &mut CsvFold) -> Option<Record> {
+        fold.current.take().map(|rec| finish(rec, std::mem::take(&mut fold.extra)))
+    }
+}
+
+/// The event being built while rows are read: the record of its first row and the text of its continuation rows.
+#[derive(Default)]
+pub(crate) struct CsvFold {
+    current: Option<Record>,
+    extra: String,
+}
+
+impl CsvFold {
+    /// Whether an event is being built (rows before the first event belong to none).
+    pub(crate) fn has_event(&self) -> bool {
+        self.current.is_some()
+    }
+}
+
+/// What a row did to the event being built.
+pub(crate) enum CsvFolded {
+    /// An empty row.
+    Skipped,
+    /// The row continues the event before it.
+    Continued,
+    /// The row starts a new event; the event before it, if any, is finished.
+    Started(Option<Record>),
+}
+
+/// What a streaming read needs from the head of a delimited file.
+pub(crate) struct CsvStreamHead {
+    pub delim: u8,
+    /// The first row names the columns and is not an event.
+    pub has_header: bool,
+    pub layout: Layout,
+}
+
+/// Decides delimiter, header and column roles from the decoded start of a file, exactly as [`CsvImporter::import`]
+/// does from the whole file (the head, 1 MiB, holds the rows those decisions look at).
+pub(crate) fn stream_head(ctx: &ImportCtx, head: &str) -> Result<CsvStreamHead> {
+    let cfg = &ctx.profile.format.csv;
+    let delim = delimiter(&cfg.delimiter, head).ok_or_else(|| anyhow!("could not detect the column delimiter"))?;
+    let has_header = cfg.has_header && !first_row_is_data(ctx, delim, head);
+    let (headers, rows) = read_rows(delim, has_header, head)?;
+    let layout = Layout::new(ctx, delim, headers, &rows);
+    Ok(CsvStreamHead { delim, has_header, layout })
 }
 
 /// The line of `content` starting at byte `start`, without its line break.

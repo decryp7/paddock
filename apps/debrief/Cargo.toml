@@ -27,6 +27,7 @@ base64 = "0.23"
 bytes = "1"
 chrono = "0.4.45"
 csv = "1.4"
+csv-core = "0.1"
 # DuckDB 2.0.0 (MIT), pinned to the prebuilt library the fetch script verifies; never `bundled` (several GB of RAM
 # to compile).
 duckdb = { version = "=1.20000.0", default-features = false }

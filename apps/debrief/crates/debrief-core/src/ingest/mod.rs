@@ -12,6 +12,7 @@
 
 mod batcher;
 mod chunk;
+mod delimited;
 mod discover;
 mod encoding;
 mod fingerprint;

@@ -14,6 +14,7 @@ use chrono::NaiveDate;
 use std::path::Path;
 
 pub use self::csv::CsvImporter;
+pub(crate) use self::csv::{stream_head as csv_stream_head, CsvFold, CsvFolded, CsvStreamHead};
 pub(crate) use self::csv::{count_outside_quotes as csv_count_outside_quotes, delimiter as csv_delimiter};
 pub use self::json::JsonImporter;
 pub use self::text::TextImporter;

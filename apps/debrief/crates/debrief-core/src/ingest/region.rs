@@ -75,7 +75,7 @@ fn not_incremental(plan: &FilePlan) -> Option<&'static str> {
         PlanKind::Text { .. } | PlanKind::Json(JsonShape::Lines) => None,
         PlanKind::Json(_) => Some("it is one JSON document, not one event per line"),
         PlanKind::Binary => Some("it is a binary format"),
-        PlanKind::Legacy => Some("its importer reads whole files only"),
+        PlanKind::Csv | PlanKind::Legacy => Some("its importer reads whole files only"),
     }
 }
 
@@ -349,7 +349,7 @@ pub fn read_appended_from(
         let skipped = match p.plan.kind {
             PlanKind::Text { format, day_first, .. } => text::import_text(&ctx, format, day_first, &mut lines, events)?,
             PlanKind::Json(shape) => json::import_json(&ctx, shape, end - start.byte, &mut lines, events)?,
-            PlanKind::Binary | PlanKind::Legacy => return Err(anyhow!("{importer} cannot read from the middle of a file")),
+            PlanKind::Binary | PlanKind::Csv | PlanKind::Legacy => return Err(anyhow!("{importer} cannot read from the middle of a file")),
         };
         if let Some(c) = confirm.as_mut() {
             c.finish(end);
