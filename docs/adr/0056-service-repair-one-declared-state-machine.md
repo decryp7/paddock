@@ -1,6 +1,6 @@
 # 56. Service repair as one declared state machine
 
-- Status: Proposed (2026-11-05; user decision to redesign before the Dyno 1.1.0 tag; independent review pending)
+- Status: Proposed (2026-11-05; user decision to redesign before the Dyno 1.1.0 tag; revision 2 answers the first independent review: P1-1 to P1-7 and its P2s)
 - Date: 2026-11-05
 - Related: ER-21 / rule 40 (recurring bugs mean a missing design rule), ER-17 to ER-19 (long operations: off the UI thread,
   labelled progress, no timeouts of running jobs), ER-27 (logs explain every failure), rule 53 (reusable OS names; held
@@ -32,143 +32,185 @@ before them; "answers" is one boolean made of three different signals. Patching 
 The record `service-<label>.json` (format 2) holds exactly:
 
 ```text
-Record { registered: Option<Registered { version, program }>,   // the last version that saw the service come up
+Record { registered_version: Option<String>,        // the last version that saw the service come up
+         registered_program: Option<String>,        // optional: the mechanism may not report one
+         resume_pending: Option<u64>,               // "Quit and stop measuring" happened at this time (replaces the marker file)
          state: State }
 
 State = Idle
-      | Attempting { version, attempts, phase }   // phase = Replacing | Awaiting
-      | Held       { version, attempts, why }     // why = Unanswered | Refused | Failed
-      | Removing                                   // an uninstall began
+      | Attempting { version, attempts, phase }     // phase = RemovingOld | Registering | Awaiting
+      | Removing                                    // an uninstall began (the user's switch went off)
 ```
 
-- `Replacing`: written before the first OS step of a replace (before unregister, or before register when only a
-  registration is missing). `Awaiting`: the OS accepted the registration; the service has not answered yet. A crash or
-  quit at any point leaves one of these, which says what is safe next.
-- `attempts` exists only inside `Attempting` and `Held`, and always belongs to a `version`: a state with attempts but no
-  version, or an attempt of another version counting towards this one, cannot be written. `attempts` counts replaces
-  begun and not confirmed, per version, and is bounded by `MAX_ATTEMPTS` (3).
-- `Recovered` (the service answers, or the OS runs the job) writes `Idle` with `registered = this version`, which clears
-  every attempt. Uninstall writes `Removing` before the first OS step, then `Idle` with `registered = None`.
-- Migration, once and nothing else: format 1 `{registeredVersion, registeredProgram}` becomes `registered` with `Idle`;
-  format 1 with `attemptedVersion` and `attempts` becomes `Attempting { Awaiting }` (or `Held { Unanswered }` at or over the
-  cap). A Dyno 1.0.0 install has no record (it kept `service-registered-version`, which 1.1.0 deletes and does not read):
-  `Idle`, `registered = None`, so the first start replaces once. A newer format is left alone (the existing
-  `VersionedFile` rule). No compatibility shim beyond this.
+- **Phases** say what is safe next, because the record and the OS can otherwise look alike after a crash (a registered item
+  with no program name reads the same before and after the new registration). `RemovingOld` is written before the first
+  removal; `Registering` before `register` is called; `Awaiting` after the OS accepted it. After a crash: `RemovingOld` +
+  registered means the old registration is still there, so replace; `RemovingOld` or `Registering` + absent means finish
+  (register only; **no new attempt**, so a crash at the cap cannot lose the service); `Registering` + registered means the
+  call may have landed, so await and never remove; `Awaiting` + registered awaits. An old build's running job never settles
+  a new version while the phase is `RemovingOld`.
+- **A hold is derived, not stored:** `attempts >= MAX_ATTEMPTS` (3) for this version is `Hold::Unanswered(n)` or
+  `Hold::Refused(n)` (by the job). `attempts` counts register calls begun, not replaces, so one replace of up to
+  `max_cycles + 1` cycles cannot make 12 registers: each cycle is an attempt, the backoff survives across starts, and the
+  executor stops at the cap. `attempts` belongs to a `version`; another version's attempts never count.
+- Repair or Install pressed by the user is consent: it runs past the cap, does not re-arm `attempts` (a held state stays
+  held for unattended events until the service answers or the version changes), and its registers are not counted by the
+  invariant "at most 3 per version".
+- `Recovered` (the service answers) writes `Idle` and `registered_version`, clearing `attempts`. `Mark` on Linux and Windows
+  (a current definition, no answer needed) writes the version only. Uninstall writes `Removing` before the first OS step.
+  `Removing` is read only when the app has no other word on the switch (below).
+- Migration, once: format 1 `{registeredVersion, registeredProgram}` becomes the same with `Idle`; format 1 with
+  `attemptedVersion` and `attempts` becomes `Attempting { Awaiting }` with those attempts. A Dyno 1.0.0 install has no
+  record (its `service-registered-version` is deleted by 1.1.0 and not read): `Idle`, no version, so the first start
+  replaces once. A newer format is left alone. The migration runs **only under the lock**; queries (`status`, `check`)
+  read without writing, quarantining or restoring anything.
+- A damaged or unreadable record is an input (`Observation.record_problem`): with a service that answers, the start adopts
+  it (`Mark`) and removes nothing; without one it replaces once and says so in the log.
+- **No OS call without a durable write.** If `record_before` cannot be written the action is not taken: the result is
+  `Hold::RecordUnavailable` with the problem and the next step. (The user's own Repair or Install proceeds, loudly.)
 
-### 2. One pure transition function
+### 2. One pure transition function and stepwise execution
 
 ```text
 transition(record: &Record, event: Event, obs: &Observation, caps: Capabilities) -> Decision { action, record_before }
 ```
 
-Every entry point goes through it: `Event` is `Start`, `FirstRun { quiet }`, `Install { quiet }` (the Settings switch on),
-`Uninstall` (switch off), `Resume` (after "Quit and stop measuring"), `Repair` (the user pressed it), `Settled` and
-`WaitElapsed` (continuations of a running replace). Nothing else decides: `Manager::on_start`, `install`, `repair`,
-`uninstall`, `resume` and Dyno's `login.rs` and `quit.rs` call it and execute the `Action` (`Leave(hold)`, `Mark`,
-`Offer`, `Await`, `Replace(reason)`, `Finish(reason)` (register only, nothing to remove), `Light`, `Remove`, `Refuse`).
-`record_before` is written, atomically, before the action's first OS call.
+`Event`: `Start`, `Install { unattended }` (the Settings switch on; the first run is `Install { unattended: true }`, whose
+action never removes anything), `Uninstall`, `Resume`, `Repair`, `StopRequested` (Quit and stop measuring), `WaitElapsed`,
+and the OS results of a running replace: `Unregistered`, `GoneTimedOut`, `RegisterOk`, `RegisterErr(kind)` with `kind` =
+`NeedsApproval | NeedsElevation | Declined | Unavailable | NotAsWritten | Other`, `Cancelled`. `repair.rs` is only an
+executor: it performs the one OS action the last `Decision` names, feeds back the result as an event and writes
+`record_before` first. Every entry point (`on_start`, `install`, `repair`, `uninstall`, `resume`, Dyno's `login.rs`,
+`quit.rs`, `shell.rs`) calls it; nothing else decides. Actions: `Leave(hold)`, `Mark`, `Offer`, `Await`, `Replace(reason)`,
+`Register` (finish), `Light`, `Remove`, `Refuse(kind)`.
 
-`Observation` separates the signals instead of one `answers`:
+`Observation` separates the signals:
 
-- `service_answers`: the service's own health answer (never the app's agent);
-- `job`: running, not running, refused, absent or unknown, from the OS;
-- `registration`, `login_item`, `program_exists`, `points_here`, `definition_current`: as `Inspection` today;
-- `covered`: the app's own agent holds the data folder. It only keeps a refused job from being replaced while the app
-  measures; it never settles an attempt.
+- `service_answers`: the service's own answer. Because the link may have started an agent of its own, it is true only when
+  the connected agent is the job's process (pid and start time against `Backend::job_process`, rule 53), or the job is
+  running on two looks a poll apart (a KeepAlive crash loop can show `Running` once);
+- `job`: `Absent | Running | NotRunning | Refused | Unknown | Failed(LastExit)`;
+- `registration`, `login_item`, `program`, `program_exists`, `points_here`, `definition_current`;
+- `covered`: the app's own agent holds the data folder; it only keeps a refused job from being replaced while the app
+  measures and never settles or counts an attempt (`WaitElapsed` with `covered` is not an attempt);
+- `wanted`: the user's switch as the app stores it (`launchAtLogin`, read as `first_run_wanted` does), `first_run_done`,
+  `location_ok`, `record_problem`, `now`.
 
-Time and OS facts are inputs; the function reads no clock and does no I/O. Dyno's own decisions (the launch location, the
-user's settings, the stop marker) are inputs too: a refused location is `Observation.location_ok = false`, which leaves
-the resume marker where it is.
+**Reconcile at start** (the settings file is saved by the agent and applied by the app, so a death between them leaves a
+mismatch): `wanted = false` with a registration present is `Remove`; `wanted = true`, absent, first run done is `Register`;
+the OS `SwitchedOff` always wins. `apply_launch_at_login_with` records the step between service and autostart in the same
+way (the app's own login item is reconciled the same: Windows heals with `ensure_app_entry`, macOS through the same
+observation). `Removing` is then needed only when the settings file is damaged.
 
-### 3. Exclusion
+**The link waits for a pending registration.** While the state is `Attempting` in `Registering` or `Awaiting`, the service
+probe reports `pending`, and the link neither starts an agent of its own nor retires one before the wait ends (it shows
+"Waiting for the background service"), because the service's agent would find the folder locked and exit with code 3. The
+fallback and the instance lock are in the simulator.
 
-One OS file lock (`File::try_lock`: `flock` / `LockFileEx`, as `paddock_proc::instance` does) on
-`service-<label>.lock`, released by the kernel when the holder dies (rule 53: no pid or time stamp is trusted, nothing is
-taken over by age, the file is never deleted by path). The record is read again after the lock is taken and the
-transition is run on that, so an `Await` never replaces on facts another copy has just changed. A lost lock is `Busy`;
-the patient variants of start, install and uninstall wait for it with a bound and a log line per look.
+**Two copies and the location.** `LaunchdBundled` reports `program`, `program_exists` and `points_here` from the `program =`
+line of `launchctl print` (to be confirmed on a VM for `BundleProgram`) and from `Manager::with_program`; an `Attempting` of
+a newer version is a newer owner. `location_ok = false` (a disk image, a translocated copy) leaves everything, including
+`resume_pending`, in place: the marker is part of the record, read and cleared under the lock only when the resume
+completes, so it cannot be lost by a crash or a refusal.
 
-### 4. Windows and Linux
+### 3. Exclusion, cancel, locks held
 
-`caps` decides what the function may return: `automatic: false` returns `Offer`, never `Replace`; `pinned_identity: false`
-(Linux, Windows) never turns a recorded attempt into an `Await` or a replace of a current definition; nothing unattended
-(`Start`, `FirstRun { quiet }`, `Resume`) opens a prompt, Login Items or UAC.
+The OS lock is `paddock_proc::InstanceLock::claim` (the `HELD_CHECKS` pacing; `Claim::Unsupported` means "run without it,
+logged", never "held"), released by the kernel on death (rule 53); the file is never deleted by path. State is read **and
+inspected** again after the lock is taken. The lock is **not** held across an `Awaiting` wait: it is released for the wait
+and taken again to act (so a user's event is never blocked 231 s); user events and `StopRequested` set the cancel that the
+wait honours. A real Cancel source exists (Quit sets it).
+
+### 4. Capabilities
+
+`automatic: false` returns `Offer` for every OS-changing action (replace, register, remove), not only `Replace`; a declined
+removal returns the record to the state before it. Non-pinned mechanisms never turn an attempt into an `Await` or a replace
+of a current definition. Nothing unattended opens a prompt, Login Items or UAC.
 
 ### 5. Waits, progress, logs
 
-Waits are measured by an injected elapsed-time source, not by the sum of the polls (a slow OS call counted by the poll
-would stretch 120 s). A wait honours cancel, states its phase to the tracker (`Removing`, `WaitingForRemoval`,
-`Registering`, `WaitingForStart`, and for the link's first look `Waiting for the background service`), and a replace has a
-busy state the UI shows (Dyno's Settings switch is busy while it runs: ER-18). Every transition logs old state, event,
-signals, new state and action in one line (ER-27); a hold logs why and the next step in words that are true for the app
-(Dyno has no Repair button for the agent service: it says to switch Launch at login off and on).
+Waits use real elapsed time as well as the sum of polls (`max` of the two). Phases are labelled for the tracker; a replace
+has a busy state the UI shows (the Settings switch). Every transition logs old state, event, signals, new state and action
+in one line (ER-27); a hold says why and the next step in words true for the app. The Settings switch no longer claims to
+return at once.
 
-### 6. The check
+### 6. Linux and Windows in Dyno
 
-A model test (`crates/paddock-service/tests/model.rs`, public API only) drives the real `Manager` over a simulated OS
-(a `Backend` with a virtual clock, a registration, a job, the user's switch, a start delay, a prompt counter):
+Windows Dyno has no agent service (the agent is started from the per-user `Run` entry by the app); the shared `WindowsRun`
+backend is covered by the crate's model, and Dyno changes nothing there. **Linux Dyno is excluded from this change:** it
+uses `dyno_agent::service` (`ensure`, `uninstall`, `systemctl --user start`) and the `dyno-agent install|uninstall|ensure`
+verbs, an unregistered copy of the mechanism `service-registration`. It is registered in `docs/known-copies.toml` with
+delete-by `dyno-v1.2.0` and the reason (moving it onto `Manager` + `Systemd` is 0.5 to 1 day and is its own change with its
+own VM round); the invariants are claimed for macOS only in 1.1.0.
 
-- scenarios: service comes up fast, slowly (inside the wait), after the wait, never; job refused until removed, refused
-  always; `automatic: false`; no pinned identity; the user switched it off;
-- entry points: Start, FirstRun (quiet), Install, Uninstall, Resume, Repair; every sequence up to depth 3;
-- crash or quit at **every OS call** (an injected unwind at the n-th backend call, then a fresh `Manager` over the same
-  record file, so the lock and the record survive as they would), for each position in the sequence;
-- invariants after every step: the user's switch is never contradicted (no register while switched off; no register after
-  an uninstall); never an unasked prompt (unattended events open nothing, `automatic: false` registers nothing); never a
-  removal of a service that answers unless the version changed or the user pressed Repair or Install; at most
-  `MAX_ATTEMPTS` registers per version per scenario that never answers (and exactly one for one that answers);
-  never a hold with no way out (from every `Held`, Repair or a newer version registers); never a lost service (after any
-  crash, one more Start leaves the service registered whenever the user wanted it and the OS cooperates); a held job is
-  not "supervised";
-- a second model for Dyno's resume marker (`quit.rs`): location refused or accepted x service state x crash before and
-  after each step: the marker is never lost without the service having been resumed.
+### 7. The check
 
-Fast and deterministic: the OS is a struct, the clock virtual, the record in a per-run temp folder; no randomness (the
-exploration is exhaustive and ordered), the first failing sequence is printed as a replayable list. The size is measured
-and printed at the end of the run (sequences, crash points, runs); the budget is 30 s in debug.
+The simulator lives in `paddock_service::testing` (rule 43; apps run a wiring contract against it, not their own model). The
+store is a port (`RecordStore`) with the file store and an in-memory store, so a run costs microseconds, not 12 ms per
+fsync and rename; one test uses the real file store and one kills a real child process holding the lock.
 
-**It fails on `c612dbfa6`.** The model, run there, reproduces: P1-1 (crash during the wait registers twice), P1-2 (a
-refused job registers at every start), P2-2 (crash between unregister and register loses the service), P2-3 (resume at the
-cap registers a fourth time), P2-4 (`Await` with `automatic: false` and on Linux), P2-5's lock part (a dead copy's lock
-file stays "held" for 10 minutes), P1-3 (the marker is lost on the disk-image path), the uninstall crash (a switched-off
-service comes back), and the held-job-is-supervised case. P2-1, 6, 8 and 9 are not state-machine properties and are closed by
-named tests (below).
+**Exploration is to a fixed point, not to a depth.** States are `(record, simulated OS)`; they are finite because attempts
+are at most 3 and the clock is virtual with timings shrunk (as `link/model.rs` does with `Tuning`). The explorer takes
+every event of the alphabet from every reachable state, with crashes as graph edges (before and after each OS effect, and
+during recovery), and prints the state count.
 
-### 7. Work packages
+Alphabet: Start, Install (asked and unattended), Uninstall, Resume, Repair, StopRequested, update, downgrade, a second copy
+(newer and older), login and reboot, Login Items toggled, damaged and newer record, record write failure, lock contention,
+cancel; OS results `NeedsApproval`, `Unavailable`, `NotAsWritten`, register `Other`, `Job::Unknown`, `Failed`, an
+unreadable mark, a removal timeout, a slow OS call.
 
-| WP | What | Closes | Days |
-| --- | --- | --- | --- |
-| 1 | The model test and the simulated OS, red on `c612dbfa6` | proof of the pattern | 1.5 |
-| 2 | `State`, format 2, migration, the OS file lock | P2-2, P2-10, P2-11, record-write failure | 1 |
-| 3 | `transition`, the Manager entry points through it, `caps` | P1-1, P1-2, P2-3, P2-4, uninstall crash | 1.5 |
-| 4 | Signals split, `supervises` of a held job, hold messages in `status`, logs | P2-1, P2-9, P3 logs | 0.5 |
-| 5 | Dyno: `login.rs`, `quit.rs` (peek, then remove), `lib.rs` (link wait without start wait and a phase), `uninstall_patient`, the Settings toggle busy state | P1-3, P2-6, P2-7, P2-8 | 1 |
-| 6 | Mutation tests (`await_start`, `quiet`, a settled `Await`) | surviving mutants | 0.5 |
-| 7 | Rules and lessons, the register | rule 55 | 0.25 |
+Invariants: the user's switch is never contradicted (including `wanted`); no unasked prompt; `automatic: false` changes
+nothing unattended; no removal of a service that answers unless the version changed or the user pressed Repair; at most
+`MAX_ATTEMPTS` unattended registers per version and exactly one for a service that answers; every hold has a way out
+(Repair, a newer version, or the service answering); no lost service (one more Start leaves it registered when wanted and
+the OS cooperates); a held job is not supervised; `resume_pending` is never lost without a resume; the link never falls
+back while a registration is pending.
 
-About 6.25 days of work; the Dyno 1.1.0 tag waits for WP 1 to 6.
+**It fails on `c612dbfa6`** for the right reasons, not `max_cycles`: unattended registers of one version without bound
+(measured: 20 to 40 over 8 starts), and (once the store port exists to run it fast) the crash cases P1-1, P2-2, P2-3, P2-4
+and the lock that outlives its holder. Each reproduced finding is listed in the report.
 
-**Pitwall and Pitcrew.** Their own `service_repair.rs` and `service_install.rs` are copies of this mechanism (rule 55;
-`launchd-job-report` and `service-registration`). Adoption means: construct a `Manager` with the backend, a service-only
-answer function and the data folder; call `on_start` / `install` / `uninstall` / `resume`; show `tracker()` and the hold
-messages; run the same model test with their spec. They keep nothing of their own decisions. The copies are deleted by
-their registered tags (Pitcrew 1.1.0, Pitwall 1.2.0).
+### 8. Work packages (honest estimate)
 
-**Rule 55.** The mechanisms `launchd-job-report` and `service-registration` change in their canonical files and in the
-Dyno wiring in one change. The copies of Pitwall and Pitcrew have the defects this ADR lists; they are not changed here
-(they are deleted on adoption) and the commit touching the members carries `Copies-waived:` trailers naming each
-(`launchd-job-report` Pitwall and Pitcrew, `service-registration` Pitwall and Pitcrew) with that reason.
+| WP | What | Days |
+| --- | --- | --- |
+| 1 | `RecordStore` port, simulator in `testing`, fixed-point explorer, alphabet, red on `c612dbfa6` | 2.5 |
+| 2 | `State`, format 2, migration under the lock, read-only queries, `InstanceLock` | 1.25 |
+| 3 | `transition`, stepwise executor (`repair.rs`), caps, attempts per register | 2 |
+| 4 | Manager entry points, reconcile (`wanted`), `resume_pending`, cancel, lock release during waits | 1.5 |
+| 5 | Signals split, `pending`, link fallback and its model, `supervises` | 1.5 |
+| 6 | Two-copy identity (`program =`, `points_here`, `with_program`) | 1 |
+| 7 | Dyno: `login.rs`, `quit.rs`, `lib.rs`, `shell.rs` reconcile, Settings busy state | 1.5 |
+| 8 | Rewrite the 56 tests of `scenarios.rs` and `resume_tests.rs` against the 99% gate, `control.rs`, shell-demo, paddock-shell tests, README, redraw `uml-state-service` (ER-23) | 2 |
+| 9 | Linux register entry, docs, lessons | 0.25 |
+
+About 13.75 days, plus a VM round of 1.5 days. The Dyno 1.1.0 tag waits for WP 1 to 8.
+
+**VM rows** (left for the VM round): `SMAppService` lag and real start time; the number of Background Items Added notices per
+path; EX_CONFIG after a real update; a register with the old job lingering; a kill in each phase; a disk image and a
+translocated launch, then /Applications; two copies and `program =`; Login Items off and on, `RequiresApproval`; stop,
+resume, login; a slow service against the link's fallback; an update from a real 1.0.0; logout and reboot in `Awaiting`
+and with a hold; systemd disable, stop, crash (Linux, if moved); Windows UAC declined, a crash in the elevated step, no
+prompt on an unattended start.
+
+**Pitwall and Pitcrew.** Adoption: construct a `Manager` with the backend, a service-only answer, `with_program` and the
+data folder; call the entry points; show `tracker()` and the hold messages; run the wiring contract against the simulator.
+They keep nothing of their own decisions. The elevated child and per-machine records (Windows) need their own state file
+under the same type. The copies are deleted by their registered tags.
+
+**Rule 55.** The mechanisms `launchd-job-report` and `service-registration` change in their canonical files and the Dyno
+wiring in one change; the commits touching the members carry `Copies-waived:` trailers (never `approved:`) for Pitwall and
+Pitcrew, and Linux Dyno is registered as above.
 
 ## Consequences
 
 - One place decides; entry points differ only in the `Event` they pass and the words they show.
-- The record format changes from 1 to 2 with a one-way migration; a 1.1.0 build reading a format-2 file written by a
-  later build leaves it alone (the existing `VersionedFile` rule).
-- Hold messages and the next step become part of the contract and are tested.
-- The model test is the guard: a new entry point or a new signal must be added to it.
+- The record format changes from 1 to 2 with a one-way migration under the lock.
+- The model test is the guard: a new entry point, signal or OS result must be added to its alphabet.
 
 ## Alternatives rejected
 
-- Patching each finding (three rounds did; the next review would find the next entry point).
-- A background supervisor that owns the service: a larger design, and on macOS launchd already is one.
-- Keeping the time-stamp lock and adding a pid: a pid is a reusable OS name (rule 53); the OS lock needs neither.
+- Patching each finding (three rounds did).
+- A background supervisor that owns the service (on macOS launchd already is one).
+- A pid or time stamp in the lock file: a reusable OS name (rule 53).
+- A stored `Held` state: it is derived from `attempts`, so it cannot disagree with them.
