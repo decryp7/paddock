@@ -6,6 +6,7 @@
   "ownTestBinaries": {
     "crates/paddock-assistant/tests/tauri.rs": "needs the tauri feature (required-features), which the crate's other tests do not",
     "crates/paddock-service/tests/service_main_process.rs": "runs itself again as the service (child mode): SIGTERM handling and exit statuses belong to a process of its own",
+    "crates/paddock-diag/tests/trail.rs": "installs the process-wide log, once per process",
     "crates/paddock-diag/tests/webview.rs": "installs the process-wide log, once per process",
     "crates/paddock-shell/tests/start_log.rs": "installs the process-wide log, once per process, and reads what the start wrote (needs mock-runtime)",
     "crates/paddock-log/tests/installed.rs": "installs the process-wide subscriber, log logger and panic hook, once per process",
