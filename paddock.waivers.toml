@@ -10,8 +10,8 @@ expires = "2027-04-30"
 # each app's follow-up work, dated so they cannot be forgotten.
 [[waiver]]
 check = "C36"
-path = "apps/*"
-reason = "parser crates of the imported apps without a fuzz target or never-panics test (Debrief 7, Dyno 4, Pitcrew 2, Pitwall 3, Spotter 1); each app adds its never-panics tests as a follow-up"
+path = "apps/dyno/*"
+reason = "Dyno's parser crates (4) have no fuzz target or never-panics test yet; Dyno adds them after its 1.1.0 tag (the other apps have theirs)"
 expires = "2026-12-31"
 
 [[waiver]]
