@@ -33,6 +33,7 @@
 ;   clean-run --dir <dir> --scope <machine|all>
 ;   clean-staging --dir <dir> --keep <the installer's own folder, $EXEDIR>   (what runs from there is never touched)
 ;   hold-installing                                             stays running until the installer exits
+;   check-version --dir <dir> --expect <version>                12 = the installed paddock-setup.exe has another FileVersion (only reported)
 ; Any other non-zero code is a failure of the tool itself (the details and $INSTDIR\updates\setup.log say why).
 ; The mechanism: stop-all ends every session's listed programs itself, by handle (graceful first in the caller's own session;
 ; Restart Manager's shutdown does nothing while another session holds a file, measured in S0). Its exit code 11 is the one
@@ -337,6 +338,16 @@ Var PaddockHaveSetup
 ; POSTINSTALL: the installed copy of paddock-setup.exe (the updater's elevated hand-off and the uninstaller use it).
 !macro PADDOCK_INSTALL_SETUP
   File "/oname=$INSTDIR\paddock-setup.exe" "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
+  ; The file copy silently fails to overwrite a paddock-setup.exe that is still running (the `apply-update` that handed over). The
+  ; per-app build gives it a FileVersion equal to the app version, so the new copy compares the installed one: a mismatch is
+  ; printed in the details and written to setup.log by the tool (exit 12), and never fails the install.
+  !ifdef VERSION
+    !insertmacro _PADDOCK_RUN 'check-version --dir "$R5" --expect ${VERSION}'
+    ${If} $0 == 12
+      DetailPrint "NOTE paddock-setup.exe was not replaced; run the installer again to fix it (see setup.log)"
+      !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe version mismatch"
+    ${EndIf}
+  !endif
 !macroend
 
 ; Last in POSTINSTALL: delete the staged update that is not in use (the next apply-update removes the rest).

@@ -29,9 +29,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_BASIC_INFO,
     FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_STANDARD_INFO, FILE_TYPE_DISK,
     FileBasicInfo, FileStandardInfo, GetDriveTypeW, GetFileInformationByHandle,
-    GetFileInformationByHandleEx, GetFileType, GetFileVersionInfoSizeW, GetFileVersionInfoW,
-    GetFinalPathNameByHandleW, OPEN_EXISTING, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT,
-    VOLUME_NAME_DOS, VS_FIXEDFILEINFO, VerQueryValueW,
+    GetFileInformationByHandleEx, GetFileType, GetFinalPathNameByHandleW, OPEN_EXISTING,
+    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, VOLUME_NAME_DOS,
 };
 use windows_sys::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessW, INFINITE, PROCESS_INFORMATION, ReleaseMutex,
@@ -188,39 +187,8 @@ impl UpdatePort for Real<'_> {
 
     fn installed_version(&mut self) -> Result<Version, Refusal> {
         let exe = PathBuf::from(&self.layout.instdir).join(&self.main);
-        let wide = to_wide(&exe.to_string_lossy());
-        let mut dummy = 0u32;
-        // SAFETY: NUL-terminated path.
-        let size = unsafe { GetFileVersionInfoSizeW(wide.as_ptr(), &mut dummy) };
-        if size == 0 || size > 1 << 20 {
-            return Err(io(&mut self.log, "installed version", handle::last_error()));
-        }
-        let mut data = vec![0u8; size as usize];
-        // SAFETY: `data` holds `size` bytes.
-        if unsafe { GetFileVersionInfoW(wide.as_ptr(), 0, size, data.as_mut_ptr().cast()) } == 0 {
-            return Err(io(&mut self.log, "installed version", handle::last_error()));
-        }
-        let root = to_wide("\\");
-        let mut ptr: *mut core::ffi::c_void = std::ptr::null_mut();
-        let mut len = 0u32;
-        // SAFETY: `data` is a version block; `ptr` points into it afterwards.
-        if unsafe { VerQueryValueW(data.as_ptr().cast(), root.as_ptr(), &mut ptr, &mut len) } == 0
-            || ptr.is_null()
-            || (len as usize) < std::mem::size_of::<VS_FIXEDFILEINFO>()
-        {
-            return Err(io(
-                &mut self.log,
-                "installed version",
-                "no fixed version info",
-            ));
-        }
-        // SAFETY: checked length; read unaligned.
-        let fixed = unsafe { std::ptr::read_unaligned(ptr.cast::<VS_FIXEDFILEINFO>()) };
-        Ok(Version::new(
-            u64::from(fixed.dwFileVersionMS >> 16),
-            u64::from(fixed.dwFileVersionMS & 0xFFFF),
-            u64::from(fixed.dwFileVersionLS >> 16),
-        ))
+        super::fileversion::file_version(&exe)
+            .map_err(|e| io(&mut self.log, "installed version", e))
     }
 
     fn open_source(&mut self, path: &LocalPath) -> Result<SourceFacts, Refusal> {

@@ -33,6 +33,7 @@ pub mod samefolder;
 pub mod selftest;
 pub mod staging;
 pub mod stop;
+pub mod versioncheck;
 pub mod versionres;
 
 #[cfg(windows)]
