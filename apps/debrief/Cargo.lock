@@ -1657,6 +1657,7 @@ dependencies = [
  "debrief-agent",
  "debrief-ai",
  "debrief-alloc",
+ "debrief-budget",
  "debrief-collect",
  "debrief-core",
  "debrief-dump",
@@ -1718,6 +1719,13 @@ dependencies = [
  "arrow-schema",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "debrief-budget"
+version = "0.1.0"
+dependencies = [
+ "log",
 ]
 
 [[package]]
@@ -1797,6 +1805,7 @@ dependencies = [
 name = "debrief-dump"
 version = "0.1.0"
 dependencies = [
+ "debrief-budget",
  "debrief-symbols",
  "postcard",
  "proptest",
@@ -2180,6 +2189,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "debrief-alloc",
+ "debrief-budget",
  "debrief-core",
  "debrief-dump",
  "debrief-ipc",
@@ -2212,6 +2222,8 @@ dependencies = [
 name = "debrief-profile"
 version = "0.1.0"
 dependencies = [
+ "debrief-budget",
+ "log",
  "postcard",
  "proptest",
  "regex",

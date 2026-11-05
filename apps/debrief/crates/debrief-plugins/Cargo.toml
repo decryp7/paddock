@@ -36,6 +36,7 @@ libc.workspace = true
 debrief-core = { path = "../debrief-core" }
 debrief-plugin-host = { path = "../debrief-plugin-host" }
 debrief-profile = { path = "../debrief-profile" }
+debrief-budget = { path = "../debrief-budget" }
 debrief-dump = { path = "../debrief-dump" }
 debrief-ipc = { path = "../debrief-ipc" }
 insta.workspace = true

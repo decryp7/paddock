@@ -83,6 +83,36 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-05, MEM-2: one memory budget for the open captures and documents (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 5342c93f1 (MEM-1: 32 captures per window, no total) against the MEM-2 change on top of it
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 6-10 during the runs; other agents running
+- **Build:** release; the folded importer in this process (the profiling plugin's process is not involved)
+- **Corpus:** 32 generated folded-stacks files of 24 MB each (the same invented stacks); synthetic
+- **Command:** `DEBRIEF_CAPTURES=32 DEBRIEF_BUDGET_MB=128 cargo nextest run -p debrief-plugins --release --no-capture --run-ignored only -E 'test(many_captures_without_a_budget)'`
+  and the same with `many_captures_within_a_budget` (one process per test)
+- **Runs:** one run per side
+- **Numbers:**
+
+  | Measure | Base | MEM-2 (128 MB budget) | Budget | Verdict |
+  |---|---|---|---|---|
+  | Memory the 32 open captures hold (the budget's own count; 256 MB budget: 249 MB) | not counted, about 390 MB | 124 MB | the setting | pass |
+  | Peak resident memory of the process opening all 32 (10 MB before) | 394 MB | 336 MB | | smaller |
+  | Time to open all 32 | 6.3 s | 6.3 s | no slower | pass |
+  | The 33rd capture, and the 33rd dump | refused at 32 (count only, however large) | released and read again as needed; a dump or pasted capture that cannot fit is refused naming it | | |
+
+- **Memory measure:** the budget's estimate (`Profile::approx_bytes`, sizes of the tables) and the process' peak resident set
+- **Notes:** the process peak falls less than the held bytes because the allocator keeps pages it has freed (macOS) and
+  the import itself needs the file and the builder at once; the held bytes are what grows with every capture left open. The
+  budget counts profiles and heap snapshots by the sizes of their tables, and dumps by their encoded size times 3 (a
+  decoded document takes about that many times its encoded size). Dumps are counted and never released (they are changed
+  in place when symbols arrive); captures that have a file are released least recently used first and read again from the
+  file when a view asks. The call trees built for views are not in the budget (a cache of 4 per window, rebuilt when
+  asked); that is the next thing to count. Auto is a quarter of the computer's memory between 512 MB and 8 GB. Red runs: with
+  `with_budget` made a no-op, the three tests (`captures_over_the_budget_release_the_oldest_and_read_it_again`,
+  `a_capture_that_does_not_fit_says_which_one_and_what_to_close`, `documents_are_counted_in_the_memory_budget`) fail.
+
 ### 2026-11-05, MEM-1: opening a capture no longer holds the file in the app (branch `debrief/p0-idle`)
 
 - **Commit:** A/B: base fb027b50d (the app reads the file, copies it for a helper thread and lends the copy) against the MEM-1 change on top of it

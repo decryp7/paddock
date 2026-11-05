@@ -46,14 +46,28 @@ impl DumpsSlot {
     }
 
     /// A slot using the importers plugins contributed to `dumps.importers`.
+    #[cfg(test)]
     pub(crate) fn from_registry(registry: &debrief_core::PluginRegistry) -> DumpsSlot {
-        let importers = registry
+        DumpsSlot::from_registry_within(registry, None)
+    }
+
+    /// [`from_registry`](Self::from_registry) with its documents counted in the app-wide memory `budget`.
+    pub(crate) fn from_registry_within(
+        registry: &debrief_core::PluginRegistry,
+        budget: Option<Arc<debrief_budget::MemoryBudget>>,
+    ) -> DumpsSlot {
+        let importers: Vec<Arc<dyn DumpImporter>> = registry
             .contributions::<dyn DumpImporter>(debrief_dump::IMPORTERS_POINT)
             .into_iter()
             .filter_map(|s| GuardedImporter::within(s, IMPORT_BUDGET))
             .map(|g| Arc::new(g) as Arc<dyn DumpImporter>)
             .collect();
-        DumpsSlot::new(importers)
+        match budget {
+            Some(b) => DumpsSlot {
+                docs: Arc::new(RwLock::new(DumpDocs::new(importers, Limits::default()).with_budget(b))),
+            },
+            None => DumpsSlot::new(importers),
+        }
     }
 }
 

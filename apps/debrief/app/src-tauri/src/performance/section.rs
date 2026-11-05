@@ -68,6 +68,15 @@ pub fn schema() -> SettingsSection {
                 .needs_restart(),
         )
         .field(
+            SettingField::new("documentsMemoryMb", "Memory for open documents", mb(0, 65_536), d.documents_memory_mb)
+                .describe(
+                    "How much memory the captures and documents you have open (profiles, heap snapshots, dumps) may use \
+                     together, in all windows. When it is used up, the captures opened longest ago are released and read \
+                     again from their files when you use them; a dump cannot be released, so Debrief says which to close. \
+                     0 means automatic: a quarter of this computer's memory, between 512 MB and 8 GB.",
+                ),
+        )
+        .field(
             SettingField::new("aiWorkerMemoryMb", "AI worker memory cap", mb(0, 16_384), d.ai_worker_memory_mb)
                 .describe(
                     "The cap of the AI's helper process. The model itself runs in a separate process and is not counted. \
@@ -350,7 +359,11 @@ mod tests {
         s.check().unwrap();
         assert_eq!(s.id, PERFORMANCE_SECTION);
         assert_eq!(s.defaults().to_json(), PerformanceSettings::default().to_values());
-        assert!(s.fields.iter().all(|f| f.restart_required), "everything applies at the next start");
+        // The memory for open documents is the one exception: the budget takes the new limit at once (`Live::apply`).
+        assert!(
+            s.fields.iter().filter(|f| f.key != "documentsMemoryMb").all(|f| f.restart_required),
+            "everything else applies at the next start"
+        );
         assert!(s.fields.iter().all(|f| !f.description.is_empty()), "every field explains itself");
         let advanced: Vec<&str> = s.fields.iter().filter(|f| f.advanced).map(|f| f.key.as_str()).collect();
         assert_eq!(

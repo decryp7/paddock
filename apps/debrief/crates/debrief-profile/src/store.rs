@@ -16,6 +16,7 @@ use crate::model::{MetricId, Profile};
 use crate::ops::diff::Side;
 use crate::ops::tree::{CallTree, CompiledView};
 use crate::ops::{butterfly, diff, findings, flame, hotspots, nav, timeline};
+use debrief_budget::{MemoryBudget, Release, Ticket};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -78,16 +79,69 @@ pub trait HeapQueries: Send + Sync {
 pub trait ProfileStore: CaptureCatalog + ProfileQueries + HeapQueries {}
 impl<T: CaptureCatalog + ProfileQueries + HeapQueries> ProfileStore for T {}
 
-enum Entry {
-    Profile {
-        profile: Arc<Profile>,
-        path: Option<String>,
-    },
+/// What an open capture holds in memory.
+#[derive(Clone)]
+enum Body {
+    Profile(Arc<Profile>),
     Heap {
         snapshot: Arc<HeapSnapshot>,
         analysis: Option<Arc<HeapAnalysis>>,
-        path: Option<String>,
     },
+}
+
+impl Body {
+    fn approx_bytes(&self) -> u64 {
+        match self {
+            Body::Profile(p) => p.approx_bytes(),
+            Body::Heap { snapshot, analysis } => snapshot.approx_bytes() + analysis.as_ref().map_or(0, |a| a.approx_bytes()),
+        }
+    }
+
+    fn of(capture: Capture) -> Body {
+        match capture {
+            Capture::Profile(p) => Body::Profile(Arc::new(p)),
+            Capture::Heap(h) => {
+                let analysis = h.graph.as_ref().map(|g| Arc::new(HeapAnalysis::new(g, h.types.len())));
+                Body::Heap {
+                    snapshot: Arc::new(h),
+                    analysis,
+                }
+            }
+        }
+    }
+}
+
+/// The body of one capture, which the memory budget can release (it is read again from the file on the next use).
+struct Resident {
+    slot: Mutex<Option<Body>>,
+}
+
+impl Resident {
+    fn get(&self) -> Option<Body> {
+        self.slot.lock().unwrap_or_else(|p| p.into_inner()).clone()
+    }
+
+    fn set(&self, body: Body) {
+        *self.slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(body);
+    }
+}
+
+impl Release for Resident {
+    fn release(&self) {
+        *self.slot.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+}
+
+/// An open capture: what the lists need without the body (so a released capture still lists), and the body.
+struct Entry {
+    summary: CaptureSummary,
+    span: Option<ProfileSpan>,
+    heap: bool,
+    name: String,
+    path: Option<String>,
+    resident: Arc<Resident>,
+    /// Its place in the memory budget, when the store has one.
+    ticket: Option<Ticket>,
 }
 
 type Built = Arc<(CompiledView, CallTree)>;
@@ -98,6 +152,8 @@ pub struct Captures {
     limits: Limits,
     next_id: u32,
     entries: BTreeMap<u32, Entry>,
+    /// The app-wide memory budget for open captures and documents (none: unlimited, as in tests).
+    budget: Option<Arc<MemoryBudget>>,
     /// Recently built call trees, most recent last.
     cache: Mutex<Vec<(u32, ProfileView, Built)>>,
 }
@@ -109,66 +165,117 @@ impl Captures {
             limits,
             next_id: 1,
             entries: BTreeMap::new(),
+            budget: None,
             cache: Mutex::new(Vec::new()),
         }
     }
 
+    /// Keeps the open captures within `budget`, shared with the other windows and the dumps: the least recently used
+    /// captures that have a file are released and read again when used.
+    pub fn with_budget(mut self, budget: Arc<MemoryBudget>) -> Captures {
+        self.budget = Some(budget);
+        self
+    }
+
     /// Adds an already imported capture.
     pub fn insert(&mut self, capture: Capture, path: Option<&str>) -> Result<CaptureSummary> {
-        if self.entries.len() >= MAX_OPEN {
-            return Err(ProfileError::LimitExceeded {
-                what: "open captures",
-                limit: MAX_OPEN as u64,
-                hint: "close a capture first",
-            });
-        }
+        self.check_room()?;
         let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1).max(1);
+        let body = Body::of(capture);
         let path = path.map(str::to_string);
-        let entry = match capture {
-            Capture::Profile(p) => Entry::Profile {
-                profile: Arc::new(p),
-                path,
-            },
-            Capture::Heap(h) => {
-                let analysis = h.graph.as_ref().map(|g| Arc::new(HeapAnalysis::new(g, h.types.len())));
-                Entry::Heap {
-                    snapshot: Arc::new(h),
-                    analysis,
-                    path,
-                }
+        let (summary, span, heap, name) = describe(id, &body, path.as_deref());
+        let resident = Arc::new(Resident {
+            slot: Mutex::new(Some(body.clone())),
+        });
+        let ticket = match &self.budget {
+            Some(budget) => {
+                let release: Option<std::sync::Weak<dyn Release>> = path.as_ref().map(|_| {
+                    let r: Arc<dyn Release> = resident.clone();
+                    Arc::downgrade(&r)
+                });
+                let kind = if heap { "heap snapshot" } else { "profile" };
+                Some(
+                    budget
+                        .admit(kind, &name, body.approx_bytes(), release)
+                        .map_err(|e| ProfileError::Budget { message: e.to_string() })?,
+                )
             }
+            None => None,
         };
-        let summary = summarize(id, &entry);
-        self.entries.insert(id, entry);
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        self.entries.insert(
+            id,
+            Entry {
+                summary: summary.clone(),
+                span,
+                heap,
+                name,
+                path,
+                resident,
+                ticket,
+            },
+        );
         Ok(summary)
     }
 
     fn summary(&self, id: u32) -> Option<CaptureSummary> {
-        self.entries.get(&id).map(|e| summarize(id, e))
+        self.entries.get(&id).map(|e| e.summary.clone())
+    }
+
+    /// The body of capture `id`: in memory, or read again from its file when the budget released it.
+    fn body(&self, id: u32) -> Result<(&Entry, Body)> {
+        let e = self.entries.get(&id).ok_or(ProfileError::UnknownCapture(id))?;
+        if let Some(t) = &e.ticket {
+            t.touch();
+        }
+        if let Some(b) = e.resident.get() {
+            return Ok((e, b));
+        }
+        // Released to make room: read it again (no lock held meanwhile; two readers may both load, the last one wins).
+        let path = e.path.as_deref().ok_or(ProfileError::UnknownCapture(id))?;
+        let again = |why: String| ProfileError::Budget {
+            message: format!(
+                "\"{}\" was released from memory to make room for other captures and could not be read again ({why}); open it again",
+                e.name
+            ),
+        };
+        let file = std::path::Path::new(path);
+        let bytes = crate::import::read_bounded(file, &self.limits).map_err(|er| again(er.to_string()))?;
+        let file_name = crate::frames::basename(path).to_string();
+        let capture = import_with(&self.importer_refs(), &file_name, &bytes, &self.limits).map_err(|er| again(er.to_string()))?;
+        drop(bytes);
+        let body = Body::of(capture);
+        if let Some(t) = &e.ticket {
+            t.readmit(body.approx_bytes())
+                .map_err(|o| ProfileError::Budget { message: o.to_string() })?;
+        }
+        e.resident.set(body.clone());
+        log::info!(
+            "capture {id} read again from its file after it was released ({} MB)",
+            body.approx_bytes() >> 20
+        );
+        Ok((e, body))
     }
 
     fn profile(&self, id: u32) -> Result<Arc<Profile>> {
-        match self.entries.get(&id) {
-            Some(Entry::Profile { profile, .. }) => Ok(profile.clone()),
-            Some(Entry::Heap { .. }) => Err(ProfileError::WrongCapture {
+        match self.body(id)? {
+            (_, Body::Profile(p)) => Ok(p),
+            (_, Body::Heap { .. }) => Err(ProfileError::WrongCapture {
                 id,
                 expected: "profile",
                 actual: "heap snapshot",
             }),
-            None => Err(ProfileError::UnknownCapture(id)),
         }
     }
 
     fn heap(&self, id: u32) -> Result<(Arc<HeapSnapshot>, Option<Arc<HeapAnalysis>>)> {
-        match self.entries.get(&id) {
-            Some(Entry::Heap { snapshot, analysis, .. }) => Ok((snapshot.clone(), analysis.clone())),
-            Some(Entry::Profile { .. }) => Err(ProfileError::WrongCapture {
+        match self.body(id)? {
+            (_, Body::Heap { snapshot, analysis }) => Ok((snapshot, analysis)),
+            (_, Body::Profile(_)) => Err(ProfileError::WrongCapture {
                 id,
                 expected: "heap snapshot",
                 actual: "profile",
             }),
-            None => Err(ProfileError::UnknownCapture(id)),
         }
     }
 
@@ -200,16 +307,18 @@ impl Captures {
     }
 }
 
-fn summarize(id: u32, entry: &Entry) -> CaptureSummary {
-    match entry {
-        Entry::Profile { profile: p, path } => {
+/// The summary, the wall-clock span and the name of a body, computed once when it is added.
+fn describe(id: u32, body: &Body, path: Option<&str>) -> (CaptureSummary, Option<ProfileSpan>, bool, String) {
+    let path = path.map(str::to_string);
+    match body {
+        Body::Profile(p) => {
             let mut kinds: Vec<_> = p.events.iter().map(|e| e.kind).collect();
             kinds.sort_by_key(|k| *k as u8);
             kinds.dedup();
-            CaptureSummary::Profile(ProfileSummary {
+            let summary = CaptureSummary::Profile(ProfileSummary {
                 id,
                 name: p.name.clone(),
-                path: path.clone(),
+                path,
                 format: p.source.clone(),
                 kind: p.kind,
                 started_ms: p.started_ms,
@@ -223,20 +332,40 @@ fn summarize(id: u32, entry: &Entry) -> CaptureSummary {
                 threads: p.threads.clone(),
                 event_kinds: kinds,
                 notes: p.notes.clone(),
-            })
+            });
+            let span = p.started_ms.map(|s| ProfileSpan {
+                id,
+                name: p.name.clone(),
+                capture: CaptureKind::Profile,
+                kind: Some(p.kind),
+                from_ms: s,
+                to_ms: p.ended_ms().unwrap_or(s),
+            });
+            (summary, span, false, p.name.clone())
         }
-        Entry::Heap { snapshot: h, path, .. } => CaptureSummary::Heap(HeapSummary {
-            id,
-            name: h.name.clone(),
-            path: path.clone(),
-            format: h.source.clone(),
-            taken_ms: h.taken_ms,
-            type_count: h.types.len() as u64,
-            object_count: h.graph.as_ref().map(|g| g.len() as u64).unwrap_or_else(|| h.total_count()),
-            total_bytes: h.total_bytes(),
-            has_graph: h.graph.is_some(),
-            notes: h.notes.clone(),
-        }),
+        Body::Heap { snapshot: h, .. } => {
+            let summary = CaptureSummary::Heap(HeapSummary {
+                id,
+                name: h.name.clone(),
+                path,
+                format: h.source.clone(),
+                taken_ms: h.taken_ms,
+                type_count: h.types.len() as u64,
+                object_count: h.graph.as_ref().map(|g| g.len() as u64).unwrap_or_else(|| h.total_count()),
+                total_bytes: h.total_bytes(),
+                has_graph: h.graph.is_some(),
+                notes: h.notes.clone(),
+            });
+            let span = h.taken_ms.map(|t| ProfileSpan {
+                id,
+                name: h.name.clone(),
+                capture: CaptureKind::Heap,
+                kind: None,
+                from_ms: t,
+                to_ms: t,
+            });
+            (summary, span, true, h.name.clone())
+        }
     }
 }
 
@@ -314,27 +443,7 @@ impl CaptureCatalog for Captures {
     }
 
     fn spans(&self) -> Vec<ProfileSpan> {
-        self.entries
-            .iter()
-            .filter_map(|(&id, e)| match e {
-                Entry::Profile { profile: p, .. } => p.started_ms.map(|s| ProfileSpan {
-                    id,
-                    name: p.name.clone(),
-                    capture: CaptureKind::Profile,
-                    kind: Some(p.kind),
-                    from_ms: s,
-                    to_ms: p.ended_ms().unwrap_or(s),
-                }),
-                Entry::Heap { snapshot: h, .. } => h.taken_ms.map(|t| ProfileSpan {
-                    id,
-                    name: h.name.clone(),
-                    capture: CaptureKind::Heap,
-                    kind: None,
-                    from_ms: t,
-                    to_ms: t,
-                }),
-            })
-            .collect()
+        self.entries.values().filter_map(|e| e.span.clone()).collect()
     }
 }
 
@@ -439,13 +548,20 @@ impl ProfileQueries for Captures {
         let top = req.top.unwrap_or(5).min(50);
         let mut out = Vec::new();
         for (&id, e) in &self.entries {
-            let Entry::Profile { profile: p, .. } = e else { continue };
-            let (Some(start), Some(end)) = (p.started_ms, p.ended_ms()) else {
-                continue;
-            };
-            if !p.has_time || req.to_ms < start || req.from_ms > end {
+            if e.heap {
                 continue;
             }
+            // From the summary, so a capture outside the window is not read back into memory.
+            let (Some(start), Some(span)) = (e.span.as_ref().map(|s| s.from_ms), e.span.as_ref()) else {
+                continue;
+            };
+            let end = span.to_ms;
+            let CaptureSummary::Profile(summary) = &e.summary else { continue };
+            if !summary.has_time || req.to_ms < start || req.from_ms > end {
+                continue;
+            }
+            let profile = self.profile(id)?;
+            let p = &*profile;
             let to_ns = |ms: i64| u64::try_from(ms.saturating_sub(start)).unwrap_or(0).saturating_mul(1_000_000);
             let range = TimeRange {
                 from_ns: to_ns(req.from_ms),
@@ -770,6 +886,119 @@ mod tests {
 
     fn store() -> Captures {
         Captures::new(vec![Arc::new(Lines(90))], Limits::default())
+    }
+
+    /// A folder with capture files of `Lines`' format, removed on drop.
+    struct Dir(std::path::PathBuf);
+    impl Dir {
+        fn new(tag: &str) -> Dir {
+            let d = std::env::temp_dir().join(format!("debrief-profile-budget-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            Dir(d)
+        }
+        fn file(&self, name: &str, stacks: usize) -> String {
+            let text: String = std::iter::once("#t\n".to_string())
+                .chain((0..stacks).map(|i| format!("main;f{i};g{i} {}\n", i + 1)))
+                .collect();
+            let path = self.0.join(name);
+            std::fs::write(&path, text).unwrap();
+            path.to_string_lossy().into_owned()
+        }
+    }
+    impl Drop for Dir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn open_file(s: &mut Captures, path: &str) -> Result<CaptureSummary> {
+        let name = crate::frames::basename(path).to_string();
+        s.open(&name, Some(path), &std::fs::read(path).unwrap())
+    }
+
+    fn summary_id(c: &CaptureSummary) -> u32 {
+        match c {
+            CaptureSummary::Profile(p) => p.id,
+            CaptureSummary::Heap(h) => h.id,
+        }
+    }
+
+    /// MEM-2: captures are kept within the app-wide budget; the least recently used one that has a file is released
+    /// and read again from it when a view asks, and the other windows' captures count in the same budget.
+    #[test]
+    fn captures_over_the_budget_release_the_oldest_and_read_it_again() {
+        let dir = Dir::new("lru");
+        let (a, b, c) = (dir.file("a.folded", 200), dir.file("b.folded", 200), dir.file("c.folded", 200));
+        // The size of one capture, from a store without a budget.
+        let one = {
+            let mut s = store();
+            open_file(&mut s, &a).unwrap();
+            s.profile(1).unwrap().approx_bytes()
+        };
+        assert!(one > 1_000, "a capture of 200 stacks has a size: {one}");
+        let budget = debrief_budget::MemoryBudget::new(one * 5 / 2);
+        let mut s = Captures::new(vec![Arc::new(Lines(90))], Limits::default()).with_budget(budget.clone());
+        let ids: Vec<u32> = [&a, &b].iter().map(|p| summary_id(&open_file(&mut s, p).unwrap())).collect();
+        assert_eq!(budget.used(), 2 * one);
+        // The third does not fit beside two: the first (least recently used) is released.
+        let third = summary_id(&open_file(&mut s, &c).unwrap());
+        assert_eq!(budget.used(), 2 * one, "one capture was released");
+        assert_eq!(s.list().len(), 3, "a released capture is still listed, with its summary");
+        assert!(s.entries[&ids[0]].resident.get().is_none() && s.entries[&ids[1]].resident.get().is_some());
+        // Asking for the released capture reads it from its file again and releases the next oldest.
+        let hot = s
+            .hotspots(&HotspotsRequest {
+                profile_id: ids[0],
+                view: ProfileView::default(),
+                group_by: GroupBy::Function,
+                metric: None,
+                sort: None,
+                search: None,
+                offset: 0,
+                limit: 5,
+            })
+            .unwrap();
+        assert!(!hot.rows.is_empty());
+        assert!(s.entries[&ids[0]].resident.get().is_some());
+        assert!(s.entries[&ids[1]].resident.get().is_none(), "b was the least recently used then");
+        assert!(s.entries[&third].resident.get().is_some());
+        assert_eq!(budget.used(), 2 * one);
+        // A released capture whose file is gone says which one and what to do.
+        std::fs::remove_file(&b).unwrap();
+        let e = s.profile(ids[1]).unwrap_err();
+        let text = e.to_string();
+        assert!(text.contains("b.folded") && text.contains("open it again"), "{text}");
+        assert_eq!(e.code(), crate::error::ErrorCode::Limit);
+    }
+
+    /// A capture that has no file cannot be released: when it and the others cannot fit, the open fails and the message
+    /// names the document and what to do (MEM-2).
+    #[test]
+    fn a_capture_that_does_not_fit_says_which_one_and_what_to_close() {
+        let dir = Dir::new("pinned");
+        let big = dir.file("big.folded", 300);
+        let bytes = std::fs::read(&big).unwrap();
+        let one = {
+            let mut s = store();
+            s.open("big.folded", None, &bytes).unwrap();
+            s.profile(1).unwrap().approx_bytes()
+        };
+        let budget = debrief_budget::MemoryBudget::new(one * 3 / 2);
+        let mut s = Captures::new(vec![Arc::new(Lines(90))], Limits::default()).with_budget(budget.clone());
+        s.open("pasted.folded", None, &bytes).unwrap();
+        let e = s.open("second.folded", None, &bytes).unwrap_err();
+        let text = e.to_string();
+        assert!(text.contains("second.folded") && text.contains("pasted.folded"), "{text}");
+        assert!(
+            text.contains("Close one of them") && text.contains("Memory for open documents"),
+            "{text}"
+        );
+        assert_eq!(s.list().len(), 1, "the failed open added nothing");
+        assert_eq!(budget.used(), one);
+        // Closing frees the room.
+        assert!(s.close(1));
+        assert!(s.open("second.folded", None, &bytes).is_ok());
     }
 
     #[test]

@@ -117,8 +117,9 @@ impl AppState {
         } else {
             load_profile(self.profile_dir.as_ref(), &registry)
         };
-        let profiling = crate::profiling::ProfilingSlot::from_registry(&registry);
-        let dumps = crate::dumps::DumpsSlot::from_registry(&registry);
+        let budget = self.performance.documents_budget();
+        let profiling = crate::profiling::ProfilingSlot::from_registry_within(&registry, Some(budget.clone()));
+        let dumps = crate::dumps::DumpsSlot::from_registry_within(&registry, Some(budget));
         let host = Host::new(registry, profile.clone())?;
         let engine = Engine::new(self.stores.clone(), self.store_root.clone(), label, profile);
         engine.set_parsers(self.parsers.setup());

@@ -301,6 +301,20 @@ pub fn edge_label(graph: &ObjectGraph, from: u32, to: u32) -> Option<String> {
         .and_then(|(_, l)| graph.label(l).map(str::to_string))
 }
 
+impl HeapAnalysis {
+    /// About how many bytes the analysis holds in memory (an estimate for the memory budget).
+    pub fn approx_bytes(&self) -> u64 {
+        (self.idom.len() * 4
+            + self.retained.len() * 8
+            + self.dom_start.len() * 8
+            + self.dom_list.len() * 4
+            + self.type_retained.len() * 8
+            + self.pred_start.len() * 8
+            + self.pred_list.len() * 4
+            + self.is_root.len()) as u64
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
