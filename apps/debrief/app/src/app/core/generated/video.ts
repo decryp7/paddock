@@ -175,9 +175,6 @@ export type FramesRequest = { key: string, indices: Array<number>,
  */
 redo: boolean, };
 
-/**
- * What describing frames would cost, asked before a job starts so the person can confirm (rule 46).
- */
 export type DescribePlan = { 
 /**
  * How many frames the model would describe.
