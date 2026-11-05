@@ -18,6 +18,7 @@ pub mod logging;
 pub mod login;
 pub mod login_item;
 pub mod mcp;
+pub mod mcp_readings;
 pub mod popover;
 pub mod power_menu;
 pub mod service_repair;

@@ -73,9 +73,16 @@ export class MemoryMcpBackend extends McpBackend {
     return t.action ? s.allowedActions.includes(t.name) : true;
   }
 
+  /** The listener the page would show: off, waiting for a key, or listening on a made-up port. */
+  private listener(): McpView['listener'] {
+    if (!this.settings.enabled) return { kind: 'off' };
+    if (!this.keys.some((k) => !k.revoked)) return { kind: 'noKey' };
+    return { kind: 'listening', port: 49152, discoveryFile: 'mcp-listener.json' };
+  }
+
   private view(): McpView {
     const tools: ToolInfo[] = this.tools.map((t) => ({ name: t.name, title: t.title ?? null, description: t.description, action: t.action === true, exposed: this.exposed(t) }));
-    return { settings: this.settings, tools, keys: this.keys.map((k) => ({ ...k })), maxKeys: MAX_KEYS };
+    return { settings: this.settings, tools, keys: this.keys.map((k) => ({ ...k })), maxKeys: MAX_KEYS, listener: this.listener() };
   }
 
   private emit(): void {

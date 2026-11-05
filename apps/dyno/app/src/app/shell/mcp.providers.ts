@@ -1,8 +1,16 @@
 import { MemoryMcpBackend, TauriMcpBackend, provideMcpBackend, provideShellMcp, type McpBackend, type MemoryTool } from '@decryp7/paddock-ui/shell/mcp';
 import { tauriIpc } from './ipc';
 
-/** The tools the browser build lists: the same four the app registers (`src-tauri/src/mcp.rs`), two reads and two actions. */
+/** The tools the browser build lists: the same twelve the app registers (`src-tauri/src/mcp.rs`, `mcp_readings.rs`), ten reads and two actions. */
 export const DYNO_MCP_TOOLS: readonly MemoryTool[] = [
+  { name: 'system_summary', title: 'System summary', description: 'A short summary of this computer right now: operating system, uptime, CPU load, memory use and swap.' },
+  { name: 'cpu_memory', title: 'CPU and memory', description: 'Current processor and memory readings, with each core when asked.' },
+  { name: 'disks', title: 'Disks', description: 'The volumes with their space, the disk speed and the health of each solid-state drive where the computer reports it.' },
+  { name: 'top_processes', title: 'Top processes', description: 'The busiest programs by CPU or memory: name, process id and numbers only, never command lines, user names or paths.' },
+  { name: 'network_summary', title: 'Network summary', description: 'Bytes per second received and sent, and how many ports listen and connections are open; no addresses.' },
+  { name: 'alarms', title: 'Alarms', description: "Dyno's active alarms and the latest changes." },
+  { name: 'history', title: 'History of one metric', description: 'One metric over the last hour, day, week or month, as at most 120 points.' },
+  { name: 'sensors', title: 'Sensors', description: 'Temperatures, fan speeds, the battery and the graphics card, where the computer has them.' },
   { name: 'power_state', title: 'Power state', description: 'Whether Dyno is keeping the computer awake, and why a hold ended.' },
   { name: 'wol_devices', title: 'Wake-on-LAN computers', description: 'The computers saved for Wake-on-LAN and how their last wake ended.' },
   { name: 'wake_device', title: 'Wake a computer', description: 'Sends a Wake-on-LAN wake to one saved computer.', action: true },

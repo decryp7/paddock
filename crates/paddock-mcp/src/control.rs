@@ -7,6 +7,7 @@
 
 use crate::audit::{AuditEntry, AuditLog, Outcome};
 use crate::keys::{KeyEntry, KeyStore};
+use crate::listener::{Listener, ListenerView};
 use crate::registry::{Access, Policy};
 use crate::server::Server;
 use paddock_env::VersionedFile;
@@ -15,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 /// Most client keys one app keeps (the entries must fit one credential: a few hundred bytes each).
 pub const MAX_KEYS: usize = 16;
@@ -157,6 +158,8 @@ pub struct McpView {
     pub keys: Vec<KeyInfo>,
     /// Most keys that can be issued.
     pub max_keys: u32,
+    /// Whether and where the loopback listener serves.
+    pub listener: ListenerView,
 }
 
 /// The reply of `mcp_issue_key`: the key, shown once.
@@ -275,6 +278,7 @@ pub struct McpControl {
     emit: Emit,
     now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
     write: Mutex<()>,
+    listener: OnceLock<Arc<Listener>>,
 }
 
 fn keys_name() -> Result<Name, McpError> {
@@ -307,6 +311,7 @@ impl McpControl {
             emit,
             now_ms,
             write: Mutex::new(()),
+            listener: OnceLock::new(),
         };
         control.apply(&control.store.load());
         control.load_keys();
@@ -354,6 +359,20 @@ impl McpControl {
         });
     }
 
+    /// Gives the control the app's loopback listener (built over this control's server and [`McpControl::keys`]) and starts it
+    /// if the saved settings ask for it. Call once, at start.
+    pub fn attach_listener(&self, listener: Arc<Listener>) {
+        if self.listener.set(listener).is_ok() {
+            self.sync_listener(&self.store.load());
+        }
+    }
+
+    fn sync_listener(&self, settings: &McpSettings) {
+        if let Some(l) = self.listener.get() {
+            l.reconcile(settings.enabled);
+        }
+    }
+
     fn view(&self) -> McpView {
         let settings = self.store.load();
         McpView {
@@ -381,6 +400,10 @@ impl McpControl {
                 })
                 .collect(),
             max_keys: u32::try_from(MAX_KEYS).unwrap_or(u32::MAX),
+            listener: self
+                .listener
+                .get()
+                .map_or(ListenerView::Unavailable, |l| l.view()),
             settings,
         }
     }
@@ -435,6 +458,7 @@ impl McpControl {
             .save(&settings)
             .map_err(|m| McpError::new(ErrorCode::StoreUnavailable, m, true))?;
         self.apply(&settings);
+        self.sync_listener(&settings);
         Ok(self.view())
     }
 
@@ -471,6 +495,7 @@ impl McpControl {
             self.keys.import(before);
             return Err(e);
         }
+        self.sync_listener(&self.store.load());
         Ok(IssuedKey {
             id,
             client: client.to_string(),
@@ -493,6 +518,7 @@ impl McpControl {
             self.keys.import(before);
             return Err(e);
         }
+        self.sync_listener(&self.store.load());
         Ok(self.view())
     }
 

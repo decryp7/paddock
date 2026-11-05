@@ -1088,6 +1088,24 @@
       <trans-unit id="pd.mcp.col-tool" datatype="html">
         <source>Tool</source>
       </trans-unit>
+      <trans-unit id="pd.mcp.conn-failed" datatype="html">
+        <source>Not listening: <x id="message"/></source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-how" datatype="html">
+        <source>A client connects with its key while this app is running (it can stay in the tray). Programs that start commands, such as Claude Desktop, run the app's command line with the key in the environment. When the app is quit, clients cannot connect.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-listening" datatype="html">
+        <source>Listening on this computer only, port <x id="port"/>. Clients find it in <x id="file"/>.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-no-key" datatype="html">
+        <source>Not listening yet: add a client below to get a key. Nothing listens until a key exists.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-off" datatype="html">
+        <source>Not listening: AI access is off.</source>
+      </trans-unit>
+      <trans-unit id="pd.mcp.conn-title" datatype="html">
+        <source>Connection</source>
+      </trans-unit>
       <trans-unit id="pd.mcp.dismiss" datatype="html">
         <source>Dismiss</source>
       </trans-unit>

@@ -106,6 +106,11 @@ impl KeyStore {
         self.lock().clone()
     }
 
+    /// Whether at least one key is unrevoked (a client could pair).
+    pub fn has_active(&self) -> bool {
+        self.lock().iter().any(|e| !e.revoked)
+    }
+
     /// Replaces the entries with saved ones.
     pub fn import(&self, entries: Vec<KeyEntry>) {
         *self.lock() = entries;

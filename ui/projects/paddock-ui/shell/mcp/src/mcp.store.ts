@@ -33,6 +33,7 @@ export const McpStore = signalStore(
     readOnlyTools: computed(() => (view()?.tools ?? []).filter((t) => !t.action)),
     actionTools: computed(() => (view()?.tools ?? []).filter((t) => t.action)),
     keys: computed(() => view()?.keys ?? []),
+    listener: computed(() => view()?.listener ?? null),
     maxKeys: computed(() => view()?.maxKeys ?? 0),
     atKeyLimit: computed(() => {
       const v = view();

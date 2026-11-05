@@ -199,6 +199,7 @@ pub struct Invocation {
 pub const USAGE: &str = "dyno: look at how your computer is doing, from a terminal or a script\n\n\
 usage: dyno <command> [options]\n\n\
 commands:\n  \
+mcp                                   speak MCP on stdin/stdout for a host (key in DYNO_MCP_KEY; Dyno must be open)\n  \
 status [--json]                       how the computer is doing right now\n  \
 idle [status|cancel|snooze MIN]       the sleep/shut down rules: what they wait for; cancel a countdown\n  \
 awake [on|off|status] [--for 90m|2h] [--until 18:30] [--busy cpu,network,disk] [--while-pid N] [--display]\n  \
