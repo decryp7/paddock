@@ -250,10 +250,11 @@ async function main(argv) {
         power.ui = gui;
         const idle = new MacIdleChecks(guest, power, check, { log, ui: gui });
         const { loadRules, MacTour } = await import('./mac-tour.mjs');
+        const { macHelperLogStep } = await import('./mac-helper-log.mjs');
         const tour = new MacTour(guest, gui, await loadRules(), { log, check });
         const waitReady = async () => { for (let i = 0; i < 75; i++) { if ((await tart(['exec', vm, 'true'], { timeoutMs: 20_000 })).code === 0 && (await guest.exec('/usr/local/bin/axdrive windows | grep -c Dock')).stdout.trim() !== '0') return true; await sleepMs(4000); } return false; };
         const readings = o.reboot ? [macRebootCheck({ waitReady })] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
-        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: readings, helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
+        return runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: readings, post: o.reboot ? [] : [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
       })()
       : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
