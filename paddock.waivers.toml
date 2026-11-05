@@ -195,14 +195,6 @@ expires = "2026-12-31"
 
 [[waiver]]
 check = "C54"
-path = "apps/debrief/crates/debrief-agent/src/service/launchd.rs"
-reason = "Debrief: the headless diagnostics agent's daemon plist is ProcessType Background. Scheduled collection is work nobody waits on, but a person may wait for a triggered capture, so this is a known violation of rule 52"
-owner = "debrief"
-follow_up = "Debrief 1.2: render the agent's plist at Standard (or Adaptive with an XPC trigger) and keep Background only for scheduled collection, through the ADR 0020 priority helper; delete this waiver then"
-expires = "2026-12-31"
-
-[[waiver]]
-check = "C54"
 path = "apps/dyno/crates/dyno-helper/src/install.rs"
 reason = "Dyno: the privileged helper's plist is ProcessType Background while the user waits for its actions; being checked separately (Dyno review)"
 expires = "2026-12-31"
