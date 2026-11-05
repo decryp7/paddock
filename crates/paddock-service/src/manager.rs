@@ -301,6 +301,7 @@ impl Manager {
             abort: &abort,
             allowed,
             register_only: nothing_to_remove || register_only_once,
+        now: &crate::repair::wall_clock,
         };
         // The wait for the service can take 120 s: the lock is let go for it, so a user's event (a removal, a repair) never waits.
         let released = std::cell::Cell::new(false);

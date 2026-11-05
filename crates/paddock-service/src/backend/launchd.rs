@@ -81,6 +81,11 @@ fn stop_of(sys: &mut dyn System, target: String) -> Option<StopMechanism> {
         .then_some(StopMechanism::Launchd { target })
 }
 
+/// The process launchd runs for the job (`pid =` of `launchctl print`), by identity; `None` when none runs or it cannot be read.
+fn process_of(sys: &mut dyn System, target: &str) -> Option<paddock_proc::ProcessId> {
+    job_report(sys, target).and_then(|r| r.pid).and_then(paddock_proc::ProcessId::of)
+}
+
 /// Whether launchd holds the job (a job that could not be asked about is not found).
 fn held(sys: &mut dyn System, target: &str) -> bool {
     job_report(sys, target).is_some_and(|r| r.found)
@@ -226,6 +231,11 @@ impl Backend for LaunchdBundled {
     fn open_login_items(&mut self) -> bool {
         self.app.open_login_items();
         true
+    }
+
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        let target = self.target();
+        process_of(self.sys.as_mut(), &target)
     }
 
     fn job_found(&mut self) -> bool {
@@ -427,6 +437,11 @@ impl Backend for LaunchdFile {
 
     fn definition(&self) -> Option<String> {
         Some(Self::definition(self))
+    }
+
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        let target = self.launchd_target();
+        process_of(self.sys.as_mut(), &target)
     }
 
     fn job_found(&mut self) -> bool {
