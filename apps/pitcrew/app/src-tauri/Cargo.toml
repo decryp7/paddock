@@ -58,5 +58,8 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
 
+[dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
+
 [lints]
 workspace = true
