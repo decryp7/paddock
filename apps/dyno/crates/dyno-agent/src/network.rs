@@ -126,6 +126,14 @@ impl NetCentre {
         Ok((rows, events))
     }
 
+    /// A person pressed "Try again": the helper is asked at the next look, and the cached rows are not reused.
+    fn retry_owners(&self) {
+        if let Some(step) = &self.owners {
+            lock(step).retry_now();
+        }
+        lock(&self.state).cache = None;
+    }
+
     /// `rows` with the hidden owners filled in by the helper; records where they came from in `state`.
     fn with_owners_filled(&self, rows: Vec<SocketRow>, state: &mut State) -> Vec<SocketRow> {
         let Some(step) = &self.owners else { return rows };
@@ -186,6 +194,9 @@ impl NetCentre {
     /// The page's snapshot for `query`.
     pub fn snapshot(&self, shared: &Shared, query: NetworkQuery) -> Result<NetworkSnapshot, AgentError> {
         let processes = lock(&shared.core).latest.processes.clone();
+        if query.retry_helper {
+            self.retry_owners();
+        }
         let (rows, events) = self.look(&processes)?;
         record(shared, &events);
         let mut snapshot = {

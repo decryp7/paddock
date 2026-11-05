@@ -19,7 +19,7 @@ import type {
   HistoryRange,
   LiveDetail,
   LiveUpdate,
-  Locker,
+  LockerList,
   PluginInfo,
   ProcessDetails,
   ProcessRef,
@@ -120,7 +120,7 @@ export interface DynoBackend {
 
   // Processes.
   processDetails(target: ProcessRef): Promise<ProcessDetails>;
-  lockers(path: string): Promise<Locker[]>;
+  lockers(path: string): Promise<LockerList>;
   openLocation(target: ProcessRef): Promise<void>;
   takeSnapshot(label: string): Promise<SnapshotInfo>;
   snapshots(): Promise<SnapshotInfo[]>;

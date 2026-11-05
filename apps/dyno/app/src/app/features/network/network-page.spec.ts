@@ -11,14 +11,17 @@ import { NetworkPage } from './network-page';
 
 const NOW = 1_700_000_000_000;
 
-async function open(how: ReadVia | ((mock: MockBackend) => void) = () => undefined) {
+async function open(how: ReadVia | ((mock: MockBackend) => void) = () => undefined, onCall?: (q: { retryHelper?: boolean }) => void) {
   localStorage.clear();
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
   if (typeof how === 'function') how(mock);
   else {
     // Who read the owners of the sockets: the answer's `ownersVia` is set over the mock's own.
     const real = mock.network.bind(mock);
-    vi.spyOn(mock, 'network').mockImplementation(async (q) => ({ ...(await real(q)), ownersVia: how }));
+    vi.spyOn(mock, 'network').mockImplementation(async (q) => {
+      onCall?.(q);
+      return { ...(await real(q)), ownersVia: how };
+    });
   }
   TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(NetworkPage);
@@ -44,6 +47,16 @@ afterEach(() => {
 });
 
 describe('NetworkPage', () => {
+  it('Try again on the owners source line asks the helper now, once, outside the poll', async () => {
+    const calls: Array<boolean | undefined> = [];
+    const { el, settle } = await open({ unavailable: { reason: 'The helper could not read it.', next: 'retry' } }, (q) => calls.push(q.retryHelper));
+    const before = calls.length;
+    (el.querySelector('[data-testid=reading-source-step]') as HTMLButtonElement).click();
+    await settle();
+    expect(calls.slice(before)).toContain(true);
+    expect(calls.slice(0, before).every((c) => !c)).toBe(true);
+  });
+
   it('names the helper when it filled the owners, and asks for it when the kernel hides them', async () => {
     const helper = await open('helper');
     expect(helper.el.querySelector('[data-testid=reading-source-helper]')?.textContent).toContain('Read by the administrator helper');

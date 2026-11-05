@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
-import type { AppGroup, CommandError, LiveVia, Locker, OtherUsers, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
+import type { AppGroup, CommandError, LiveVia, LockerList, OtherUsers, ProcessDetails, ProcessRef, ProcessSample } from '../core/api.types';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { type Row, type Sort, type ViewMode, buildRows, collapseAllKeys, expandAllKeys } from '../features/processes/process-rows';
@@ -106,7 +106,7 @@ export const ProcessesStore = signalStore(
         }
       },
       /** Which processes hold a file or folder open; rejects with a `CommandError`. */
-      lockers(path: string): Promise<Locker[]> {
+      lockers(path: string): Promise<LockerList> {
         return backend.lockers(path).catch((e: unknown) => Promise.reject(toCommandError(e)));
       },
       async openLocation(ref: ProcessRef): Promise<void> {

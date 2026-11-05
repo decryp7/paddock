@@ -86,7 +86,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             if !p.is_absolute() {
                 return Err(bad("Give the full path of the file."));
             }
-            Ok(Reply::Lockers(lock(&shared.ports.locks).lockers(p)?))
+            Ok(Reply::Lockers(lock(&shared.ports.locks).lockers_with_more(p)?))
         }
         Request::OpenLocation { target } => {
             let exe = lock(&shared.core)
