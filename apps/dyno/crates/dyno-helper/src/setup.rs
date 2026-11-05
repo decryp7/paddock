@@ -54,12 +54,22 @@ fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
 /// # Errors
 /// What went wrong, with the next step.
 pub fn install(owner: HelperUser) -> Result<Report, String> {
-    install_recorded(owner, crate::VERSION)
+    install_recorded(owner, None)
+}
+
+/// The version `config.json` names while an install runs: the one a refresh passes (what it replaces), else what is recorded
+/// now (Settings' "Update the helper" over an older helper), else this program's (a first install). Only after the install
+/// succeeded does the file name this program's version, so a failed install is retried by the next refresh.
+fn recorded_for_install(explicit: Option<&str>, existing: Option<String>) -> String {
+    explicit
+        .map(String::from)
+        .or(existing)
+        .unwrap_or_else(|| crate::VERSION.to_string())
 }
 
 /// [`install`], recording `recorded` as the version in `config.json` until the install has succeeded (a refresh passes the
 /// version it replaces, so a failed refresh is tried again at the next update; a first install passes its own).
-fn install_recorded(owner: HelperUser, recorded: &str) -> Result<Report, String> {
+fn install_recorded(owner: HelperUser, recorded: Option<&str>) -> Result<Report, String> {
     #[cfg(unix)]
     if !crate::sys::is_elevated() {
         return Err("Installing the helper needs administrator rights; turn it on from Dyno (Settings > Helper).".into());
@@ -82,6 +92,8 @@ fn install_recorded(owner: HelperUser, recorded: &str) -> Result<Report, String>
     crate::protect::TrustGuard::system(host, &paths.data_dir)
         .prepare_folders(&paths.data_dir, crate::protect::OnUntrusted::Purge)
         .map_err(|e| e.to_string())?;
+    let recorded = recorded_for_install(recorded, HelperConfig::load(&paths.config).ok().map(|c| c.version));
+    let recorded = recorded.as_str();
     let app = crate::orphan::app_location(&source);
     let make = |version: &str| HelperConfig::new(owner.clone(), version).with_app(app.clone());
     // The configuration goes in before the service is registered (its first start finds it).
@@ -153,11 +165,13 @@ pub fn refresh_decision(recorded: Option<&str>, this: &str) -> Refresh {
 ///
 /// # Errors
 /// What went wrong, with the next step; the installer logs it and carries on (a failed refresh never fails the update).
-pub fn refresh() -> Result<Report, String> {
+pub fn refresh() -> Result<Report, RefreshError> {
     let paths = helper_paths();
     let host = this_host();
     // Like the daemon at start (serve.rs `lock_folders`): the data root must be protected before `config.json` is read. On
-    // Windows `%ProgramData%` lets any user create folders, and a planted `config.json` would name its own owner.
+    // Windows `%ProgramData%` lets any user create folders, and a planted `config.json` would name its own owner. `ensure_root`
+    // makes the data folder, empty and locked, when it is missing (a refresh on a PC without the helper leaves that empty folder
+    // behind; it holds nothing and does not turn the helper on).
     let trusted = || -> Result<(), String> {
         if host != dyno_core::helper::HelperHost::Windows {
             return Ok(());
@@ -167,24 +181,56 @@ pub fn refresh() -> Result<Report, String> {
             .map_err(|e| e.to_string())
     };
     refresh_with(&trusted, &|| HelperConfig::load(&paths.config), &mut |owner, from| {
-        install_recorded(owner, from)
+        install_recorded(owner, Some(from))
     })
+}
+
+/// Why a refresh did not happen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RefreshError {
+    /// The helper's data folder is not protected, so `config.json` was not read and nothing was changed.
+    Refused(String),
+    /// Anything else (a damaged configuration, a failed install).
+    Failed(String),
+}
+
+impl std::fmt::Display for RefreshError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RefreshError::Refused(why) => write!(
+                f,
+                "The helper was not refreshed: {why}. It is left as it is; Settings > Helper offers Update the helper, which repairs the folder."
+            ),
+            RefreshError::Failed(why) => f.write_str(why),
+        }
+    }
+}
+
+impl std::error::Error for RefreshError {}
+
+/// Says a refusal where the installer's details and the OS log can show it (the command line has no logger).
+pub fn log_refusal(e: &RefreshError) {
+    log::warn!("{e}");
+    paddock_service::OsLog::write(
+        paddock_service::os_log::open(&dyno_helper_service::spec()).as_ref(),
+        log::Level::Warn,
+        &e.to_string(),
+    );
 }
 
 /// [`refresh`] over its three steps, so each can be replaced in a test: the trust check of the data folder, the read of
 /// `config.json` (only after the check passed), and the install.
 ///
 /// # Errors
-/// As [`refresh`].
+/// [`RefreshError::Refused`] when the folder is not protected (distinct, so the installer's note can say so),
+/// [`RefreshError::Failed`] for the rest.
 pub fn refresh_with(
     trusted: &dyn Fn() -> Result<(), String>,
     load: &dyn Fn() -> Result<HelperConfig, crate::config::ConfigError>,
     install: &mut dyn FnMut(HelperUser, &str) -> Result<Report, String>,
-) -> Result<Report, String> {
+) -> Result<Report, RefreshError> {
     if let Err(why) = trusted() {
-        // Not an error of the update: the helper is left exactly as it is, and Settings keeps offering "Update the helper".
-        log::warn!(why = why.as_str(); "refresh: the helper's data folder is not protected, so config.json was not read and nothing was changed");
-        return Ok(Report::default());
+        return Err(RefreshError::Refused(why));
     }
     let recorded = match load() {
         Ok(c) => Some(c),
@@ -193,9 +239,9 @@ pub fn refresh_with(
             None
         }
         Err(e @ crate::config::ConfigError::Invalid(_)) => {
-            return Err(format!(
+            return Err(RefreshError::Failed(format!(
                 "{e} The helper was left as it is; turn it off and on again in Settings > Helper."
-            ));
+            )));
         }
     };
     match refresh_decision(recorded.as_ref().map(|c| c.version.as_str()), crate::VERSION) {
@@ -205,9 +251,11 @@ pub fn refresh_with(
             Ok(Report::default())
         }
         Refresh::Refresh { from } => {
-            let owner = recorded.map(|c| c.owner).ok_or("The helper's owner is not recorded.")?;
+            let owner = recorded
+                .map(|c| c.owner)
+                .ok_or_else(|| RefreshError::Failed("The helper's owner is not recorded.".into()))?;
             log::warn!(from = from.as_str(), to = crate::VERSION; "refresh: replacing the installed helper");
-            install(owner, &from)
+            install(owner, &from).map_err(RefreshError::Failed)
         }
     }
 }
@@ -675,9 +723,35 @@ mod refresh_flow_tests {
                 Ok(Report::default())
             },
         );
-        assert_eq!(r, Ok(Report::default()), "not an error: the helper is left as it is");
+        let Err(RefreshError::Refused(why)) = r else {
+            panic!("a refused refresh must not look like success: {r:?}")
+        };
+        assert!(why.contains("not protected"), "{why}");
         assert!(!loaded.get(), "a planted config.json is not even read");
         assert!(!installed.get(), "a planted owner never becomes the helper's owner");
+    }
+
+    #[test]
+    fn a_refusal_has_its_own_exit_code_and_a_sentence_for_the_installer_to_print() {
+        use crate::cli::refresh_exit;
+        assert_eq!(refresh_exit(&Ok(Report::default())), 0);
+        assert_eq!(refresh_exit(&Err(RefreshError::Failed("x".into()))), 1);
+        let refused = RefreshError::Refused("the data folder is not protected".into());
+        assert_eq!(
+            refresh_exit(&Err(refused.clone())),
+            3,
+            "distinct and non-zero, so the hook's NOTE runs"
+        );
+        let s = refused.to_string();
+        assert!(s.contains("not protected") && s.contains("Settings"), "{s}");
+    }
+
+    #[test]
+    fn the_version_recorded_during_an_install_is_the_old_one_when_there_is_one() {
+        // A refresh passes the version it replaces; Settings' install reads what is recorded; a first install has none.
+        assert_eq!(recorded_for_install(Some("0.0.1"), Some("9.9.9".into())), "0.0.1");
+        assert_eq!(recorded_for_install(None, Some("0.5.0".into())), "0.5.0");
+        assert_eq!(recorded_for_install(None, None), crate::VERSION);
     }
 
     #[test]
@@ -700,7 +774,9 @@ mod refresh_flow_tests {
         };
         assert!(refresh_with(&|| Ok(()), &|| Err(ConfigError::Unreadable("missing".into())), &mut count).is_ok());
         assert!(refresh_with(&|| Ok(()), &|| Ok(config(crate::VERSION)), &mut count).is_ok());
-        let e = refresh_with(&|| Ok(()), &|| Err(ConfigError::Invalid("damaged".into())), &mut count).unwrap_err();
+        let e = refresh_with(&|| Ok(()), &|| Err(ConfigError::Invalid("damaged".into())), &mut count)
+            .unwrap_err()
+            .to_string();
         assert!(e.contains("damaged") && e.contains("Settings"), "{e}");
         assert_eq!(installed.get(), 0);
     }

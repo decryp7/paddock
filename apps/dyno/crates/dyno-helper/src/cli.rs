@@ -108,7 +108,17 @@ fn exit_status_of(result: Result<u32, paddock_service::ServiceMainError>) -> i32
     }
 }
 
-/// Runs `command` and returns the process exit code (0 done, 1 failed, 2 usage).
+/// The exit code of `refresh`: 0 done (or nothing to do), 1 failed, 3 refused (the data folder is not protected). The refusal
+/// has its own non-zero code so the installer's hook notes it in `setup.log` instead of reading it as a clean run.
+pub fn refresh_exit(result: &Result<paddock_service::privileged::Report, crate::setup::RefreshError>) -> i32 {
+    match result {
+        Ok(_) => 0,
+        Err(crate::setup::RefreshError::Failed(_)) => 1,
+        Err(crate::setup::RefreshError::Refused(_)) => 3,
+    }
+}
+
+/// Runs `command` and returns the process exit code (0 done, 1 failed, 2 usage, 3 for `refresh`: refused).
 pub fn run(command: Command) -> i32 {
     let result = match command {
         Command::Version => {
@@ -119,7 +129,20 @@ pub fn run(command: Command) -> i32 {
         Command::Serve => return serve(paddock_service::Hosting::Foreground),
         Command::Service => return serve(paddock_service::Hosting::ServiceManager),
         Command::Install { owner } => crate::setup::install(owner).map(|r| report("install", &r)),
-        Command::Refresh => crate::setup::refresh().map(|r| report("refresh", &r)),
+        Command::Refresh => {
+            let result = crate::setup::refresh();
+            match &result {
+                Ok(r) => report("refresh", r),
+                Err(e) => {
+                    // Standard output is what the installer's details capture; the OS log keeps it for later.
+                    println!("dyno-helper: {e}");
+                    if matches!(e, crate::setup::RefreshError::Refused(_)) {
+                        crate::setup::log_refusal(e);
+                    }
+                }
+            }
+            return refresh_exit(&result);
+        }
         Command::Uninstall => crate::setup::uninstall().map(|r| report("uninstall", &r)),
     };
     match result {
