@@ -944,3 +944,22 @@ status = "built"
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
+
+# =====================================================================================================================
+# Release notes and screens: raw-text rules
+# =====================================================================================================================
+
+[[mechanism]]
+id = "raw-text-snake-case"
+title = "The SNAKE_CASE identifier rule a user must not read (screens and release notes)"
+canonical = "ui/projects/paddock-e2e"
+paths = ["ui/projects/paddock-e2e/src/screenshot-check.ts"]
+symbols = ["text:SNAKE_CASE"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/scripts/check-release-notes.mjs"]
+  symbols = ["text:SNAKE_CASE"]
+  owner = "dyno"
+  delete_by = "dyno-v1.1.1"
+  note = "The pattern is copied from RAW_TEXT_RULES of the VM harness's screenshot check, which is on test/dyno-release-vm-checks-v2 and not yet on this line. Import it from there once it lands."

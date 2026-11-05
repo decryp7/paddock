@@ -3,7 +3,7 @@
 //! rights and works in every logon type (WP-0: a standard user read 3 profiles and 494 rules; the CIM cmdlets fail over SSH).
 
 use crate::parse::firewall::{map_windows_rule, RawWinRule};
-use crate::parse::win_indirect::{IndirectLoader, IndirectNames};
+use crate::parse::win_indirect::{Field, IndirectLoader, IndirectNames, ReadStats};
 use dyno_core::firewall::{
     FirewallProfile, FirewallReader, FirewallSource, FirewallSwitch, ProfileState, RuleAction, RuleSource, MAX_FIREWALL_RULES,
 };
@@ -72,6 +72,7 @@ pub fn assemble(profiles: &[WinProfile], rules: &WinRules) -> FirewallSource {
 pub struct WindowsFirewallReader<P: WinFirewallPort> {
     port: P,
     names: IndirectNames,
+    clock: Arc<dyn Clock>,
 }
 
 impl<P: WinFirewallPort> WindowsFirewallReader<P> {
@@ -79,27 +80,51 @@ impl<P: WinFirewallPort> WindowsFirewallReader<P> {
     pub fn new(port: P, loader: Box<dyn IndirectLoader>, clock: Arc<dyn Clock>) -> Self {
         WindowsFirewallReader {
             port,
-            names: IndirectNames::new(loader, clock),
+            names: IndirectNames::new(loader, clock.clone()),
+            clock,
         }
     }
 
-    fn readable(&self, mut rules: WinRules) -> WinRules {
+    fn readable(&self, mut rules: WinRules) -> (WinRules, ReadStats) {
         let mut budget = self.names.budget();
         for r in &mut rules.rules {
-            r.name = self.names.name(&r.name, &mut budget);
+            r.name = self.names.name(&r.name, Field::Name, &mut budget);
             if let Some(g) = &r.group {
-                r.group = Some(self.names.name(g, &mut budget));
+                r.group = Some(self.names.name(g, Field::Group, &mut budget));
             }
         }
-        rules
+        let stats = budget.stats().clone();
+        (rules, stats)
     }
 }
 
 impl<P: WinFirewallPort> FirewallReader for WindowsFirewallReader<P> {
     fn read(&self) -> Result<FirewallSource, PlatformError> {
+        let started = self.clock.monotonic();
         let (profiles, rules) = self.port.read()?;
-        let v = assemble(&profiles, &self.readable(rules));
-        log::info!(Profiles = v.states.len(), Rules = v.rule_count, Truncated = v.truncated, Resolved = self.names.cached(); "Windows firewall read");
+        let read_ms = self.clock.monotonic().saturating_sub(started).as_millis() as u64;
+        let named = self.clock.monotonic();
+        let (rules, names) = self.readable(rules);
+        let names_ms = self.clock.monotonic().saturating_sub(named).as_millis() as u64;
+        let v = assemble(&profiles, &rules);
+        log::info!(Profiles = v.states.len(), Rules = v.rule_count, Truncated = v.truncated, ReadMs = read_ms; "Windows firewall read");
+        if names.resolved + names.fallbacks > 0 {
+            let first_error = names.first_error.as_deref().unwrap_or("none");
+            log::info!(
+                Resolved = names.resolved,
+                Fallbacks = names.fallbacks,
+                OverBudget = names.over_budget,
+                TimedOut = names.timed_out,
+                Lookups = names.lookups,
+                FirstError = first_error,
+                Ms = names_ms,
+                Cached = self.names.cached();
+                "Firewall rule names resolved"
+            );
+            if names.over_budget > 0 {
+                log::warn!(OverBudget = names.over_budget, Ms = names_ms; "The name budget ran out; the rest show a fallback until the next read");
+            }
+        }
         Ok(v)
     }
 }
@@ -107,7 +132,7 @@ impl<P: WinFirewallPort> FirewallReader for WindowsFirewallReader<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::win_indirect::NoLoader;
+    use crate::parse::win_indirect::{Loaded, NoLoader};
     use paddock_jobs::time::FakeClock;
 
     fn profile(p: FirewallProfile, enabled: bool, current: bool) -> WinProfile {
@@ -184,8 +209,12 @@ mod tests {
 
     struct Resolves;
     impl IndirectLoader for Resolves {
-        fn load(&self, s: &str) -> Option<String> {
-            s.contains("OOBE").then(|| "Out of box experience".to_string())
+        fn load(&self, s: &str) -> Loaded {
+            if s.contains("OOBE") {
+                Loaded::Text("Out of box experience".into())
+            } else {
+                Loaded::Unresolvable("0x80070002".into())
+            }
         }
     }
 
@@ -215,7 +244,7 @@ mod tests {
         let v = r.read().unwrap();
         let names: Vec<_> = v.rules.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(names, ["Out of box experience", "Contoso Notes (app rule)", "Core Networking"]);
-        assert_eq!(v.rules[0].group.as_deref(), Some("Windows rule (Firewall API 23255)"));
+        assert_eq!(v.rules[0].group.as_deref(), Some("Windows rule group (Firewall API 23255)"));
         assert!(v
             .rules
             .iter()

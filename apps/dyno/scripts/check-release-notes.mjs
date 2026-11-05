@@ -10,8 +10,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
  * The SNAKE_CASE rule of the VM harness's raw-text check (`RAW_TEXT_RULES` in ui/projects/paddock-e2e/src/screenshot-check.ts, on
- * test/dyno-release-vm-checks-v2), kept character for character so a release note passes the same rule the screens do. A test
- * pins it; once that file is on this line, import it instead of copying.
+ * test/dyno-release-vm-checks-v2), copied so a release note passes the same rule the screens do. It is a registered copy
+ * (docs/known-copies.toml, `raw-text-snake-case`, delete by dyno-v1.1.1): import the pattern from there once that file is on this line.
  */
 export const SNAKE_CASE = /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/;
 
