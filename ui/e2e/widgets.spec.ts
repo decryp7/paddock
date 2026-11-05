@@ -164,6 +164,27 @@ test('Widgets: dragging a handle moves the row', async ({ page }) => {
   await expect.poll(async () => (await shownTitles(page))[0]).not.toBe('Active alarms');
 });
 
+test('Widgets: the drag ghost is the row, at its width and sizes, without the kind icon', async ({ page }) => {
+  await open(page, 'dark');
+  const row = chooser(page).locator('li.pd-wc-item').first();
+  const rowBox = await row.boundingBox();
+  const grip = await grips(page).nth(0).boundingBox();
+  const [x, y] = [(grip?.x ?? 0) + (grip?.width ?? 0) / 2, (grip?.y ?? 0) + (grip?.height ?? 0) / 2];
+  expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.pd-wc-grip') != null, { x, y }), 'the pointer is over the grip').toBe(true);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 6, y + 10, { steps: 4 });
+  await page.mouse.move(x + 20, y + 70, { steps: 8 });
+  const ghost = page.locator('.cdk-drag-preview');
+  await expect(ghost).toHaveCount(1);
+  const box = await ghost.boundingBox();
+  expect(Math.abs((box?.width ?? 0) - (rowBox?.width ?? 0)), 'the ghost is the row width').toBeLessThanOrEqual(2);
+  expect(await ghost.locator('.pd-wc-kicon').evaluate((e) => getComputedStyle(e).visibility), 'the kind icon is left out').toBe('hidden');
+  const biggest = await ghost.evaluate((e) => Math.max(0, ...[...e.querySelectorAll('svg')].map((v) => v.getBoundingClientRect().width)));
+  expect(biggest, 'a symbol in the ghost is drawn huge').toBeLessThanOrEqual(32);
+  await page.mouse.up();
+});
+
 test('Widgets: the row menu opens beside its button and never covers its focus ring', async ({ page }) => {
   await open(page, 'light');
   for (const index of [0, 2, 4]) {
