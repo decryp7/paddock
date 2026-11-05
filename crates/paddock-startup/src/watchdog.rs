@@ -29,16 +29,22 @@ pub enum Action {
     AskStartup(String),
     /// A liveness ping to a ready, visible window (`paddock://ping` with this sequence number).
     Ping { label: String, seq: u64 },
-    /// A ready window missed [`Config::missed_pings`] pings in a row: log it, let its dialog close by the OS close and ask
-    /// the user (Reload / Keep Waiting).
+    /// A ready window missed [`Config::missed_pings`] pings in a row: log it and let its dialog close by the OS close (no question
+    /// yet: a limiter that stops a page for a while is common and the page usually comes back).
     Unresponsive(String),
+    /// A window that has been unresponsive for the long wait ([`Config::ask_wait`]): ask the user (Reload / Keep Waiting). Never raised
+    /// while the window's previous question is unanswered.
+    AskHung(String),
 }
 
 impl Action {
     /// The window the action is for.
     pub fn label(&self) -> &str {
         match self {
-            Action::Reload(l) | Action::AskStartup(l) | Action::Unresponsive(l) => l,
+            Action::Reload(l)
+            | Action::AskStartup(l)
+            | Action::Unresponsive(l)
+            | Action::AskHung(l) => l,
             Action::Ping { label, .. } => label,
         }
     }
@@ -104,6 +110,14 @@ struct Entry {
     live: Liveness,
     /// Keep Waiting answers since the window was last ready: each doubles the next wait (up to [`Config::max_doublings`]).
     asks: u8,
+    /// Questions raised about this ready page since it was last healthy for a long time: each doubles the next wait.
+    hangs: u8,
+    /// A question about this window is on screen and unanswered: no second one is raised.
+    question_open: bool,
+    /// Since when the page has been healthy (ready, or answering again); `None` while it is unresponsive.
+    healthy_since: Option<Instant>,
+    /// When the window was last hidden (`None` while visible).
+    hidden_at: Option<Instant>,
 }
 
 /// The per-window start-up and liveness state (pure: the caller passes the time).
@@ -151,6 +165,10 @@ impl Watchdog {
             visible: true,
             live: Liveness::default(),
             asks: 0,
+            hangs: 0,
+            question_open: false,
+            healthy_since: None,
+            hidden_at: None,
         });
         e.phase = Phase::Waiting;
         e.since = now;
@@ -165,6 +183,7 @@ impl Watchdog {
         e.phase = Phase::Ready;
         e.reloads = 0;
         e.asks = 0;
+        e.healthy_since = Some(now);
         if e.visible {
             e.live.restart(now, &self.config);
         }
@@ -203,10 +222,17 @@ impl Watchdog {
                 Phase::Unresponsive => {
                     e.phase = Phase::Ready;
                     e.live.restart(now, &config);
-                    e.asks = e.asks.saturating_add(1).min(config.max_doublings);
+                    e.question_open = false;
                 }
                 Phase::Waiting | Phase::Ready => {}
             }
+        }
+    }
+
+    /// The user answered the question about `label` (any answer): it may be asked about again later.
+    pub fn question_answered(&mut self, label: &str) {
+        if let Some(e) = self.windows.get_mut(label) {
+            e.question_open = false;
         }
     }
 
@@ -225,6 +251,8 @@ impl Watchdog {
             e.phase = Phase::Ready;
             e.recovered = None;
             e.live.restart(now, &config);
+            // Healthy again, but not forgiven: the earlier questions still count until it has stayed healthy for a long time.
+            e.healthy_since = Some(now);
             return Pong::Recovered;
         }
         Pong::Alive
@@ -241,9 +269,18 @@ impl Watchdog {
             return;
         }
         e.visible = visible;
-        // A window shown after its reload gets a fresh wait: it was never asked about while hidden.
-        if visible && e.phase == Phase::Waiting && e.reloads > 0 {
-            e.since = now;
+        if visible {
+            // Time spent hidden after the reload does not count towards the question, and the time spent visible is not lost either: the
+            // wait moves forward by the hidden time, so a window that comes and goes is still asked about when it has been visible
+            // long enough.
+            match e.hidden_at.take() {
+                Some(hidden) if e.phase == Phase::Waiting && e.reloads > 0 => {
+                    e.since += now.saturating_duration_since(hidden.max(e.since));
+                }
+                _ => {}
+            }
+        } else {
+            e.hidden_at = Some(now);
         }
         if !matches!(e.phase, Phase::Ready | Phase::Unresponsive) {
             return;
@@ -350,6 +387,13 @@ impl Watchdog {
                         e.live.restart(now, &config);
                         continue;
                     }
+                    if e.hangs > 0
+                        && e.phase == Phase::Ready
+                        && e.healthy_since
+                            .is_some_and(|t| now.saturating_duration_since(t) >= Config::MAX_WAIT)
+                    {
+                        e.hangs = 0;
+                    }
                     // No ping scheduled yet: one is due now.
                     if now < e.live.next_at.unwrap_or(now) {
                         continue;
@@ -357,13 +401,21 @@ impl Watchdog {
                     if e.live.sent > e.live.answered {
                         e.live.misses = e.live.misses.saturating_add(1);
                     }
-                    if e.phase == Phase::Ready
-                        && e.live.misses
-                            >= config.missed_pings.saturating_mul(1u32 << e.asks.min(16))
-                    {
+                    if e.phase == Phase::Ready && e.live.misses >= config.missed_pings {
                         e.phase = Phase::Unresponsive;
                         e.recovered = Some(Recovery::Hung);
+                        e.healthy_since = None;
                         out.push(Action::Unresponsive(label.clone()));
+                    }
+                    // The question comes after the long wait, only one at a time, and counts even when the page recovers meanwhile.
+                    if e.phase == Phase::Unresponsive
+                        && !e.question_open
+                        && config.ping_interval.saturating_mul(e.live.misses)
+                            >= config.ask_wait(e.hangs)
+                    {
+                        e.question_open = true;
+                        e.hangs = e.hangs.saturating_add(1).min(config.max_doublings);
+                        out.push(Action::AskHung(label.clone()));
                     }
                     e.live.sent += 1;
                     e.live.next_at = Some(now + config.ping_interval);

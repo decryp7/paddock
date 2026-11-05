@@ -370,7 +370,7 @@ fn the_unit_has_the_empty_state_folder_removed_by_a_unit_that_runs_after_the_sto
         line,
         "ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=DefaultDependencies=no \
          --property=After=dyno-helper.service /bin/sh -c '/usr/bin/systemctl is-active --quiet dyno-helper.service || \
-         exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/dyno-helper'",
+         exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/dyno-helper /var/log/dyno-helper'",
         "{unit}"
     );
 }
@@ -437,8 +437,12 @@ fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_h
     assert!(prerm.contains("remove | deconfigure)") && prerm.contains("disable --now dyno-helper.service"));
     assert!(prerm.contains("upgrade)") && prerm.contains("stop dyno-helper.service"));
     let postrm = package_file("postrm");
-    assert!(postrm.contains("purge)") && postrm.contains("rm -r /var/lib/dyno-helper"));
-    assert_eq!(postrm.matches("rm ").count(), 1, "one removal, of one fixed path, only on purge");
+    assert!(postrm.contains("purge)") && postrm.contains("rm -r /var/lib/dyno-helper") && postrm.contains("rm -r /var/log/dyno-helper"));
+    assert_eq!(
+        postrm.matches("rm ").count(),
+        2,
+        "two removals, each of one fixed path (the state and the logs folder), only on purge"
+    );
     assert!(
         package_file("postinst").contains("try-restart dyno-helper.service"),
         "an upgrade restarts it only when it was enabled"

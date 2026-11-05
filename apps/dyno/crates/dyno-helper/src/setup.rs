@@ -26,12 +26,37 @@ fn system() -> Box<dyn System> {
 /// # Errors
 /// What could not be done, in words.
 pub fn write_config(paths: &HelperPaths, config: &HelperConfig, files: &mut dyn ProtectedFiles) -> Result<(), String> {
+    make_lifecycle_folder_public(paths, files);
     files
         .create_dir(&paths.data_dir, 0o700)
         .map_err(|e| format!("The helper's data folder {} could not be created: {e}", paths.data_dir.display()))?;
     let temp = paths.config.with_extension("json.new");
     write_private(&temp, &config.to_text()).map_err(|e| format!("{} could not be written: {e}", temp.display()))?;
     std::fs::rename(&temp, &paths.config).map_err(|e| format!("{} could not be replaced: {e}", paths.config.display()))
+}
+
+/// The folder above the private data folder (macOS: `/Library/Application Support/Dyno`) holds the lifecycle file a standard user's
+/// report reads, so it must be readable by everyone. Creating the private folder with a recursive 0700 would make its new parents
+/// private too, so the parent is made first at 0755, and an older install's private parent is repaired. Linux's parent is `/var/lib`
+/// (never touched); the lifecycle file lives in the unit's logs folder there.
+fn make_lifecycle_folder_public(paths: &HelperPaths, files: &mut dyn ProtectedFiles) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(parent) = paths.data_dir.parent().filter(|p| p.file_name().is_some_and(|n| n == "Dyno")) else {
+            return;
+        };
+        let made = files
+            .create_dir(parent, 0o755)
+            .and_then(|()| std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755)));
+        if let Err(e) = made {
+            log::warn!(Error = e.to_string().as_str(); "Helper: {} could not be made readable by everyone; a standard user's report will not show the lifecycle file", parent.display());
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (paths, files);
+    }
 }
 
 fn write_private(path: &Path, text: &str) -> std::io::Result<()> {
@@ -154,10 +179,17 @@ pub fn remove_data_folder_with(paths: &HelperPaths, quiesce_log: &dyn Fn()) -> R
     // The lifecycle file lives beside the data folder (macOS) or in the logs folder (Linux): it goes with the helper, before the
     // folder above it is tried.
     if let Some(file) = &paths.lifecycle {
-        crate::lifecycle::remove(file).map_err(|e| format!("{} could not be removed: {e}", file.display()))?;
-        if let Some(parent) = file.parent().filter(|p| p.file_name().is_some_and(|n| n == "dyno-helper")) {
-            // Linux: the unit's LogsDirectory (empty now); a folder with something else in it stays.
-            let _ = std::fs::remove_dir(parent);
+        // Best effort: a file that cannot be removed never stops the data folder and the audit log from going.
+        match crate::lifecycle::remove(file) {
+            Ok(()) => {
+                if let Some(parent) = file.parent().filter(|p| p.file_name().is_some_and(|n| n == "dyno-helper")) {
+                    // Linux: the unit's LogsDirectory (empty now); a folder with something else in it stays.
+                    if let Err(e) = std::fs::remove_dir(parent) {
+                        log::debug!(Error = e.to_string().as_str(); "Helper: the logs folder stays");
+                    }
+                }
+            }
+            Err(e) => log::warn!(Error = e.to_string().as_str(); "Helper: {} could not be removed", file.display()),
         }
     }
     let dir = &paths.data_dir;
@@ -278,6 +310,65 @@ mod tests {
         // Never the machine's real lifecycle file (ER-14): removal tests delete it.
         p.lifecycle = Some(dir.join("lifecycle").join("lifecycle.log"));
         p
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_folder_above_the_private_one_is_readable_by_everyone_so_a_standard_user_can_read_the_lifecycle_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = paths_in(dir.path());
+        // The macOS layout: /Library/Application Support/Dyno/Helper (private) beside Dyno/helper-lifecycle.log (public).
+        paths.data_dir = dir.path().join("Dyno").join("Helper");
+        paths.config = paths.data_dir.join("config.json");
+        paths.lifecycle = Some(dir.path().join("Dyno").join("helper-lifecycle.log"));
+        write_config(&paths, &HelperConfig::new(HelperUser::Uid(501), "1.1.0"), &mut RealFiles).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&paths.data_dir), 0o700, "the helper's own folder stays private");
+        assert_eq!(
+            mode(paths.data_dir.parent().unwrap()),
+            0o755,
+            "the folder the lifecycle file sits in is readable by all"
+        );
+        // An install over an older one that left the parent private repairs it.
+        std::fs::set_permissions(paths.data_dir.parent().unwrap(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        write_config(&paths, &HelperConfig::new(HelperUser::Uid(501), "1.1.1"), &mut RealFiles).unwrap();
+        assert_eq!(mode(paths.data_dir.parent().unwrap()), 0o755);
+    }
+
+    #[test]
+    fn a_lifecycle_file_that_cannot_be_removed_does_not_stop_the_rest_of_the_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = paths_in(dir.path());
+        // A directory in the place of the file: removing it as a file fails.
+        let blocked = dir.path().join("blocked-lifecycle");
+        std::fs::create_dir_all(blocked.join("inside")).unwrap();
+        paths.lifecycle = Some(blocked);
+        std::fs::create_dir_all(&paths.data_dir).unwrap();
+        std::fs::write(paths.data_dir.join("config.json"), "{}").unwrap();
+        std::fs::write(paths.data_dir.join("audit.jsonl"), "").unwrap();
+        remove_data_folder_with(&paths, &|| {}).expect("a best-effort file never aborts the removal");
+        assert!(!paths.data_dir.exists(), "the data folder and the audit log still went");
+    }
+
+    #[test]
+    fn the_logs_folder_the_unit_made_goes_with_the_lifecycle_file_but_not_with_another_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = paths_in(dir.path());
+        let logs = dir.path().join("var-log").join("dyno-helper");
+        std::fs::create_dir_all(&logs).unwrap();
+        paths.lifecycle = Some(logs.join("lifecycle.log"));
+        std::fs::write(logs.join("lifecycle.log"), "t=1 stopped pid=1 version=1\n").unwrap();
+        remove_data_folder_with(&paths, &|| {}).unwrap();
+        assert!(!logs.exists(), "an empty dyno-helper logs folder is removed");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("lifecycle.log"), "x").unwrap();
+        std::fs::write(logs.join("someone-elses.log"), "keep").unwrap();
+        remove_data_folder_with(&paths, &|| {}).unwrap();
+        assert!(
+            logs.join("someone-elses.log").exists() && logs.exists(),
+            "another file keeps the folder"
+        );
     }
 
     #[test]

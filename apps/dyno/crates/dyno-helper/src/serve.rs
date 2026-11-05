@@ -23,6 +23,7 @@ use paddock_ipc::endpoint::{Access, Listener};
 use paddock_ipc::AccountLimits;
 use paddock_jobs::time::SystemClock;
 use paddock_service::privileged::RealFiles;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -63,6 +64,17 @@ pub fn os_of(host: HelperHost) -> Os {
 /// same): `None` event reads how the last run ended, `Some` records one.
 fn note(paths: &HelperPaths, event: Option<&str>) {
     let Some(path) = &paths.lifecycle else { return };
+    note_to(path, event, REMOVED.load(Ordering::SeqCst));
+}
+
+/// Set when the helper removed itself (an Uninstall request, the orphan watch): its files are gone and must stay gone.
+static REMOVED: AtomicBool = AtomicBool::new(false);
+
+fn note_to(path: &Path, event: Option<&str>, removed: bool) {
+    // After the helper removed itself its files are gone: a late `stopped` would bring the file (and, on Linux, its folder) back.
+    if removed && event.is_some() {
+        return;
+    }
     match event {
         None => crate::lifecycle::log_previous_run(path),
         Some(event) => crate::lifecycle::record(path, event),
@@ -243,8 +255,9 @@ fn removal(paths: HelperPaths, stop: Arc<AtomicBool>, why: &'static str, os_log:
         let (paths, stop) = (paths.clone(), stop.clone());
         let spawned = std::thread::Builder::new().name("helper-remove".into()).spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(500));
-            if let Err(e) = crate::setup::uninstall_self(os_of(paths.host)) {
-                log::error!(error = e.as_str(); "Helper: removing itself failed");
+            match crate::setup::uninstall_self(os_of(paths.host)) {
+                Ok(_) => REMOVED.store(true, Ordering::SeqCst),
+                Err(e) => log::error!(error = e.as_str(); "Helper: removing itself failed"),
             }
             stop.store(true, Ordering::SeqCst);
         });
@@ -312,4 +325,18 @@ fn create_endpoint_dir(dir: &std::path::Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn create_endpoint_dir(dir: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn nothing_is_written_after_the_helper_removed_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("lifecycle.log");
+        // The self-uninstall removed the file; the `stopped` note that follows serve's return must not bring it back.
+        note_to(&file, Some("stopped"), true);
+        assert!(!file.exists(), "the removed lifecycle file was recreated by the stop note");
+    }
 }

@@ -116,12 +116,17 @@ pub enum Place {
 /// The start-up watchdog with a visible question, for the installed app only (a test place has no real folders and no dialog: the shell's
 /// default watchdog has no asker, so nothing is ever shown). The question offers Save a problem report… (written without the stuck window).
 ///
-/// When it can appear (it used to be only logged, so this is new): a window the user can see (a hidden one, started at login, is
-/// never asked about) whose page did not report ready within `Config::ready_timeout` (10 s) after it started loading, was reloaded,
-/// and was still silent `Config::ask_timeout` (60 s) after the reload. So never earlier than [`first_question_after`] (70 s) after the
-/// page began loading; each Keep Waiting doubles the next wait (120, 240, 480 s); and never for an app process that was paused (the
-/// watchdog restarts its clocks after a gap of more than `pause_gap`, 3 s, between two ticks). A content process stopped by a limiter
-/// while the app keeps ticking is covered by the long wait and by asking only about visible windows, not by `pause_gap`.
+/// When it can appear (it used to be only logged, so this is new). Only for a window the user can see (a hidden one, started at login, is
+/// never asked about). Two cases:
+/// - A page that never became ready: reloaded after `Config::ready_timeout` (10 s), and still silent `Config::ask_timeout` (60 s) after the
+///   reload, so never earlier than [`first_question_after`] (70 s) after it began loading; hidden time does not count.
+/// - A page that was ready and stopped answering pings (a content process stopped by a limiter while the app keeps ticking): marked after
+///   about 10 s for the dialog code, but asked about only after 60 s of silence, once at a time, and a question counts even when the page
+///   comes back before it is answered.
+///
+/// Each question doubles the next wait (120, 240, 480 s) until the page has been healthy for ten minutes. While a report is being written
+/// from the question it is not asked again. An app process that itself was paused is covered by `pause_gap` (clocks restart after a gap
+/// of more than 3 s between two ticks), a stopped content process by the long waits.
 fn watchdog<R: Runtime>(place: &Place) -> Option<Result<paddock_startup::tauri::Startup<R>, paddock_startup::ConfigError>> {
     matches!(place, Place::Installed).then(|| {
         paddock_startup::tauri::Startup::<R>::builder()

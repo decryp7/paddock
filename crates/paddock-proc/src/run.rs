@@ -346,13 +346,67 @@ fn first_failure(name: &str, how: &str) -> bool {
 /// Most distinct (program, exit) failures remembered for [`first_failure`].
 const MAX_FAILURE_KEYS: usize = 256;
 
-/// `text` with every word that looks like a path (it holds a `/` or a `\`) replaced by `<path>`: an error output names files and
-/// folders of the user, and a log must not (the report's redactor is a second line of defence, not the first).
+/// `text` with anything that could be a user's path or file name replaced: from the first path start of a line to its end becomes
+/// `<path>` (a path may hold spaces, so there is no telling where it ends; the text before it keeps the cause readable), and a
+/// remaining word that looks like a file name (a dot and a short extension) becomes `<file>`. A path start is a `/` or `\\` after a
+/// space, quote or the line's start, `~/`, a drive letter (`C:\`, `C:/`), or a UNC `\\\\`.
 fn scrub_paths(text: &str) -> String {
-    text.split_whitespace()
-        .map(|w| if w.contains(['/', '\\']) { "<path>" } else { w })
-        .collect::<Vec<_>>()
-        .join(" ")
+    text.lines().map(scrub_line).collect::<Vec<_>>().join("\n")
+}
+
+fn scrub_line(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let starts_path = |i: usize| -> bool {
+        let at_boundary = i == 0
+            || matches!(
+                bytes[i - 1],
+                b' ' | b'\t' | b'"' | b'\'' | b'(' | b'=' | b':' | b'[' | b'<'
+            );
+        match bytes[i] {
+            b'/' | b'\\' => at_boundary,
+            b'~' => at_boundary && bytes.get(i + 1) == Some(&b'/'),
+            c if c.is_ascii_alphabetic() => {
+                at_boundary
+                    && bytes.get(i + 1) == Some(&b':')
+                    && matches!(bytes.get(i + 2), Some(b'\\' | b'/'))
+            }
+            _ => false,
+        }
+    };
+    let cut = (0..bytes.len()).find(|i| line.is_char_boundary(*i) && starts_path(*i));
+    let head = &line[..cut.unwrap_or(line.len())];
+    let words: Vec<String> = head
+        .split_whitespace()
+        .map(|w| {
+            if looks_like_file_name(w) {
+                "<file>".to_string()
+            } else {
+                w.to_string()
+            }
+        })
+        .collect();
+    let mut out = words.join(" ");
+    if cut.is_some() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str("<path>");
+    }
+    out
+}
+
+/// A word with a dot inside and a short alphanumeric extension after the last one (`plan.docx`, `tax-return.pdf`), not a version number.
+fn looks_like_file_name(word: &str) -> bool {
+    let word =
+        word.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | ';' | ':' | '(' | ')' | '.'));
+    let Some((stem, ext)) = word.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && (1..=5).contains(&ext.len())
+        && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        && ext.chars().any(|c| c.is_ascii_alphabetic())
+        && stem.chars().any(|c| c.is_ascii_alphabetic())
 }
 
 /// How a run ended in a word (`0`, `3`, `signal`, `timeout`, `output-cap`) and the last 200 characters of its error output.
@@ -410,20 +464,52 @@ mod tests {
 
     #[test]
     fn paths_in_the_error_output_never_reach_the_log() {
-        assert_eq!(
-            scrub_paths(
-                "smartctl: cannot open /dev/disk0 and C:\\Users\\alex\\x.txt (permission denied)"
+        // Paths with spaces (the three the review found leaking), Windows, quoted, and a bare file name.
+        for (input, forbidden) in [
+            (
+                "cannot read /Users/sam/My Secret Plans/tax return.pdf",
+                ["Secret", "tax", "return", "sam"],
             ),
-            "smartctl: cannot open <path> and <path> (permission denied)"
+            (
+                "cannot read C:\\Users\\Bob Smith\\My Docs\\plan.docx: denied",
+                ["Bob", "Smith", "Docs", "plan"],
+            ),
+            (
+                "open \"/home/a b/c d.txt\" failed",
+                ["a b", "c d", "home", ".txt"],
+            ),
+            (
+                "error reading tax-return.pdf",
+                ["tax", "return", "pdf", "tax-return"],
+            ),
+        ] {
+            let out = scrub_paths(input);
+            for word in forbidden {
+                assert!(
+                    !out.contains(word),
+                    "{word} survived in {out:?} (from {input:?})"
+                );
+            }
+        }
+        // The cause stays readable.
+        assert!(
+            scrub_paths("smartctl: cannot read /dev/disk0").starts_with("smartctl: cannot read")
+        );
+        assert_eq!(
+            scrub_paths("exit 3\nsecond /x/y line"),
+            "exit 3\nsecond <path>"
         );
         let o = Output {
             outcome: Outcome::TimedOut,
             stdout: vec![],
-            stderr: b"failed on /Users/sam/secret.doc".to_vec(),
+            stderr: b"failed on /Users/sam/My Secret.doc".to_vec(),
             truncated: false,
         };
         let (_, tail) = describe_run(&o);
-        assert!(!tail.contains("sam") && tail.contains("<path>"), "{tail}");
+        assert!(
+            !tail.contains("sam") && !tail.contains("Secret") && tail.contains("<path>"),
+            "{tail}"
+        );
     }
 
     #[test]

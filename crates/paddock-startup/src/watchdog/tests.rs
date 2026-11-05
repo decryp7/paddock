@@ -14,6 +14,22 @@ fn quick() -> Config {
     }
 }
 
+/// `quick()` with the long-silence question out of reach: for the tests of the mark and of the pings.
+fn marks_only() -> Config {
+    Config {
+        ask_timeout: Duration::from_secs(3_600),
+        ..quick()
+    }
+}
+
+/// The marks and pings only: the long-silence question (`AskHung`) is the subject of its own tests.
+fn without_questions(actions: Vec<(u64, Action)>) -> Vec<(u64, Action)> {
+    actions
+        .into_iter()
+        .filter(|(_, a)| !matches!(a, Action::AskHung(_)))
+        .collect()
+}
+
 fn at(t0: Instant, ms: u64) -> Instant {
     t0 + Duration::from_millis(ms)
 }
@@ -309,7 +325,7 @@ fn a_page_that_stops_answering_after_ready_is_marked_unresponsive() {
             assert_eq!(w.pong(&label, seq, at(t0, t)), Pong::Alive);
         }
     }
-    let actions = run(&mut w, t0, 4_500, 30_000);
+    let actions = without_questions(run(&mut w, t0, 4_500, 30_000));
     // Pings 3 to 7 go unanswered: the fifth miss is noticed when ping 8 is due, 10 s after the first unanswered ping.
     assert_eq!(actions, vec![(16_000, Action::Unresponsive("main".into()))]);
     assert!(w.is_unresponsive("main"));
@@ -342,7 +358,7 @@ fn an_unresponsive_page_the_user_reloads_hears_why() {
     let mut w = Watchdog::new(quick());
     ready_at(&mut w, "main", t0);
     assert_eq!(
-        run(&mut w, t0, 500, 20_000),
+        without_questions(run(&mut w, t0, 500, 20_000)),
         vec![(12_000, Action::Unresponsive("main".into()))]
     );
     // The user chose Reload: the page starts loading again and its start-up clock applies.
@@ -358,7 +374,7 @@ fn an_unresponsive_page_the_user_reloads_hears_why() {
 #[test]
 fn keep_waiting_on_an_unresponsive_page_gives_it_as_many_pings_again() {
     let t0 = Instant::now();
-    let mut w = Watchdog::new(quick());
+    let mut w = Watchdog::new(marks_only());
     ready_at(&mut w, "main", t0);
     assert_eq!(run(&mut w, t0, 500, 12_000).len(), 1);
     w.keep_waiting("main", at(t0, 13_000));
@@ -415,7 +431,7 @@ fn a_paused_app_process_with_a_hung_page_still_notices_the_hang_after_resume() {
         "the outstanding pings are forgotten on resume"
     );
     assert_eq!(
-        run(&mut w, t0, 40_500, 60_000),
+        without_questions(run(&mut w, t0, 40_500, 60_000)),
         vec![(52_000, Action::Unresponsive("main".into()))]
     );
 }
@@ -423,7 +439,7 @@ fn a_paused_app_process_with_a_hung_page_still_notices_the_hang_after_resume() {
 #[test]
 fn hidden_windows_are_not_pinged_and_start_again_when_shown() {
     let t0 = Instant::now();
-    let mut w = Watchdog::new(quick());
+    let mut w = Watchdog::new(marks_only());
     ready_at(&mut w, "main", t0);
     assert_eq!(
         run_all(&mut w, t0, 500, 3_000).len(),
@@ -491,7 +507,7 @@ fn a_window_shown_again_while_still_starting_keeps_its_start_up_clock() {
 #[test]
 fn several_unresponsive_windows_come_in_label_order_each_before_its_ping() {
     let t0 = Instant::now();
-    let mut w = Watchdog::new(quick());
+    let mut w = Watchdog::new(marks_only());
     ready_at(&mut w, "w-2", t0);
     ready_at(&mut w, "main", t0);
     let at12 = run_all(&mut w, t0, 500, 12_000)
@@ -622,4 +638,142 @@ fn inconsistent_ask_timeouts_are_refused() {
         Duration::from_secs(480),
         "the doubling stops at the limit"
     );
+}
+
+/// Ticks every 500 ms from `from` to `to`, answering every ping when `alive` says so at that time; returns every action by time.
+fn run_with(
+    w: &mut Watchdog,
+    t0: Instant,
+    from: u64,
+    to: u64,
+    alive: impl Fn(u64) -> bool,
+) -> Vec<(u64, Action)> {
+    let mut out = Vec::new();
+    let mut ms = from;
+    while ms <= to {
+        let now = at(t0, ms);
+        for a in w.due(now) {
+            if let (Action::Ping { label, seq }, true) = (&a, alive(ms)) {
+                w.pong(label, *seq, now);
+            }
+            out.push((ms, a));
+        }
+        ms += 500;
+    }
+    out
+}
+
+fn hung_questions(acts: &[(u64, Action)]) -> Vec<u64> {
+    acts.iter()
+        .filter(|(_, a)| matches!(a, Action::AskHung(_)))
+        .map(|(t, _)| *t)
+        .collect()
+}
+
+#[test]
+fn a_ready_page_stopped_by_a_limiter_is_marked_at_once_but_asked_about_only_after_a_minute() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    w.page_started("main", t0);
+    assert_eq!(w.ready("main", at(t0, 100)), None);
+    let acts = run_with(&mut w, t0, 0, 130_000, |_| false);
+    let marked = acts
+        .iter()
+        .find(|(_, a)| matches!(a, Action::Unresponsive(_)))
+        .map(|(t, _)| *t)
+        .expect("marked");
+    assert!(
+        marked < 15_000,
+        "the mark (for a dialog's OS close) stays quick: {marked}"
+    );
+    let asked = hung_questions(&acts);
+    assert_eq!(asked.len(), 1, "one question, not a stream: {asked:?}");
+    assert!(
+        asked[0] >= 60_000 && asked[0] <= 70_000,
+        "the first question comes after the long wait: {asked:?}"
+    );
+}
+
+#[test]
+fn a_page_that_comes_back_and_stops_again_does_not_raise_a_second_question_while_the_first_is_open_and_waits_longer_after()
+ {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    w.page_started("main", t0);
+    w.ready("main", at(t0, 100));
+    // Stopped, asked at about 62 s.
+    let first = run_with(&mut w, t0, 0, 70_000, |_| false);
+    let q1 = hung_questions(&first);
+    assert_eq!(q1.len(), 1, "{q1:?}");
+    // The limiter lets the page run for a few seconds (the question is still open on screen), then stops it again.
+    let alive_between = |ms: u64| (70_500..80_000).contains(&ms);
+    let second = run_with(&mut w, t0, 70_500, 400_000, alive_between);
+    assert!(
+        hung_questions(&second).is_empty(),
+        "no second dialog on top of the open one: {:?}",
+        hung_questions(&second)
+    );
+    // The person clicks Keep Waiting (the page was running at that moment).
+    w.question_answered("main");
+    w.keep_waiting("main", at(t0, 400_500));
+    let third = run_with(&mut w, t0, 400_500, 800_000, |_| false);
+    let q3 = hung_questions(&third);
+    assert_eq!(q3.len(), 1, "{q3:?}");
+    // The first wait was about 60 s; after one question the next is about 120 s, not 12 s: the answer was not forgotten when the page recovered.
+    assert!(
+        q3[0] - 400_500 >= 110_000,
+        "asked again after only {} ms",
+        q3[0] - 400_500
+    );
+}
+
+#[test]
+fn a_page_that_stays_healthy_for_ten_minutes_forgets_the_earlier_questions() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    w.page_started("main", t0);
+    w.ready("main", at(t0, 100));
+    let first = run_with(&mut w, t0, 0, 70_000, |_| false);
+    assert_eq!(hung_questions(&first).len(), 1);
+    w.question_answered("main");
+    // Healthy for eleven minutes.
+    run_with(&mut w, t0, 70_500, 740_000, |_| true);
+    let again = run_with(&mut w, t0, 740_500, 820_000, |_| false);
+    let q = hung_questions(&again);
+    assert_eq!(q.len(), 1, "{q:?}");
+    assert!(
+        q[0] - 740_500 <= 75_000,
+        "back to the first wait after a long healthy time: {}",
+        q[0] - 740_500
+    );
+}
+
+#[test]
+fn hiding_and_showing_a_window_over_and_over_does_not_keep_a_hung_start_from_being_asked() {
+    let t0 = Instant::now();
+    let mut w = Watchdog::default();
+    w.page_started("main", t0);
+    let mut asked = Vec::new();
+    let mut ms = 0;
+    let mut visible = true;
+    while ms <= 600_000 {
+        let now = at(t0, ms);
+        // Hidden and shown every 50 s (a window that comes and goes).
+        if ms % 50_000 == 0 && ms > 0 {
+            visible = !visible;
+            w.set_visible("main", visible, now);
+        }
+        for a in w.due(now) {
+            if matches!(a, Action::AskStartup(_)) {
+                asked.push(ms);
+            }
+        }
+        ms += 500;
+    }
+    assert_eq!(
+        asked.len(),
+        1,
+        "a hung start is asked about once its visible time is long enough: {asked:?}"
+    );
+    assert!(asked[0] < 300_000, "{asked:?}");
 }

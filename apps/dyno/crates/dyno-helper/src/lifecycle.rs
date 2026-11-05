@@ -20,6 +20,19 @@ pub fn line(at: i64, event: &str, pid: u32, version: &str) -> String {
 /// The most bytes of the file ever read (its newest part): a planted huge file costs a bounded read.
 const MAX_READ: u64 = 32 * 1024;
 
+/// Opens (creating, 0644) for reading and writing and never follows a link at the last component: the kernel refuses (`O_NOFOLLOW`), so a
+/// link planted between the checks of [`open_checked`] and this open is still not followed.
+fn open_nofollow(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o644).custom_flags(libc::O_NOFOLLOW);
+    }
+    options.open(path)
+}
+
 /// Opens the file for reading and writing without following a link and refuses anything but a regular file with one name (a hard
 /// link would let a write reach a file elsewhere). The parent folder must not be a link either.
 fn open_checked(path: &Path) -> std::io::Result<std::fs::File> {
@@ -32,14 +45,7 @@ fn open_checked(path: &Path) -> std::io::Result<std::fs::File> {
     if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(refuse("the lifecycle file is a link; it was not written"));
     }
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o644).custom_flags(libc::O_NOFOLLOW);
-    }
-    let file = options.open(path)?;
+    let file = open_nofollow(path)?;
     let meta = file.metadata()?;
     if !meta.is_file() {
         return Err(refuse("the lifecycle file is not a regular file"));
@@ -54,6 +60,20 @@ fn open_checked(path: &Path) -> std::io::Result<std::fs::File> {
         }
     }
     Ok(file)
+}
+
+/// Opens the file for reading only if it is a regular file: never blocks on a pipe someone put in its place (`O_NONBLOCK`), never
+/// follows a link at the last component.
+fn open_for_reading(path: &Path) -> Option<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let file = options.open(path).ok()?;
+    file.metadata().ok()?.is_file().then_some(file)
 }
 
 /// The newest part of the file (at most [`MAX_READ`] bytes), cut to whole lines.
@@ -121,7 +141,7 @@ pub fn previous_run_unclean(text: &str) -> bool {
 
 /// Logs how the previous run ended (a warning when it did not finish); call before recording `starting`.
 pub fn log_previous_run(path: &Path) {
-    let text = std::fs::File::open(path).ok().map(|mut f| read_bounded(&mut f));
+    let text = open_for_reading(path).map(|mut f| read_bounded(&mut f));
     match text {
         Some(text) if previous_run_unclean(&text) => {
             log::warn!("Helper: the previous run did not end cleanly (its lifecycle file ends in starting or serving); a power cut, a kill or a crash")
@@ -193,6 +213,60 @@ mod tests {
         remove(&big).unwrap();
         remove(&big).unwrap();
         assert!(!big.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_kernel_refuses_a_link_even_when_the_checks_before_the_open_are_skipped() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("elsewhere");
+        std::fs::write(&target, "keep\n").unwrap();
+        let p = dir.path().join("lifecycle.log");
+        std::os::unix::fs::symlink(&target, &p).unwrap();
+        assert!(
+            open_nofollow(&p).is_err(),
+            "O_NOFOLLOW is what closes the window between the check and the open"
+        );
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
+    }
+
+    #[test]
+    fn the_read_is_bounded_to_the_newest_part_at_a_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("big.log");
+        std::fs::write(&p, "t=1 starting pid=1 version=1\n".repeat(50_000)).unwrap();
+        let mut f = std::fs::File::open(&p).unwrap();
+        let text = read_bounded(&mut f);
+        assert!(text.len() as u64 <= MAX_READ, "{} bytes read", text.len());
+        assert!(text.starts_with("t=1 "), "cut at a line start: {:?}", &text[..20.min(text.len())]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn only_a_regular_file_is_written() {
+        // /dev/null opens for writing, has one name and is no link: only the regular-file check refuses it.
+        assert!(open_checked(Path::new("/dev/null")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[allow(unsafe_code)]
+    fn a_pipe_in_the_place_of_the_file_does_not_hang_the_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("lifecycle.log");
+        let c = std::ffi::CString::new(p.to_str().unwrap()).unwrap();
+        // SAFETY: a NUL-terminated path that outlives the call.
+        assert_eq!(unsafe { libc::mkfifo(c.as_ptr(), 0o644) }, 0);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path = p.clone();
+        std::thread::spawn(move || {
+            log_previous_run(&path);
+            let _ = tx.send(());
+        });
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(),
+            "reading how the last run ended blocked on a pipe: the helper would never serve"
+        );
     }
 
     #[cfg(unix)]

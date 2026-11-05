@@ -31,7 +31,7 @@ MemoryDenyWriteExecute=yes
 UMask=0077
 StateDirectory=dyno-helper
 StateDirectoryMode=0700
-ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=DefaultDependencies=no --property=After=dyno-helper.service /bin/sh -c '/usr/bin/systemctl is-active --quiet dyno-helper.service || exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/dyno-helper'
+ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=DefaultDependencies=no --property=After=dyno-helper.service /bin/sh -c '/usr/bin/systemctl is-active --quiet dyno-helper.service || exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/dyno-helper /var/log/dyno-helper'
 RuntimeDirectory=dyno-helper
 RuntimeDirectoryMode=0755
 LogsDirectory=dyno-helper

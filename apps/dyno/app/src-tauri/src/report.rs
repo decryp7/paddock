@@ -181,6 +181,26 @@ pub fn export_cli(args: &[String], app: &paddock_diag::AppInfo) -> Option<i32> {
 /// modal to nobody, so a second click would open a second dialog.
 static SAVING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Holds the one save slot; dropping it (also while unwinding from a panic in the report hook) frees the slot.
+struct SavingSlot;
+
+impl Drop for SavingSlot {
+    fn drop(&mut self) {
+        SAVING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl SavingSlot {
+    /// The slot, or `None` when a save is under way.
+    fn take() -> Option<SavingSlot> {
+        if SAVING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            None
+        } else {
+            Some(SavingSlot)
+        }
+    }
+}
+
 /// Tells the person in a native message that the report could not be saved (the question's own flow has no other place to say it).
 fn tell_failed<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
@@ -196,12 +216,12 @@ fn tell_failed<R: tauri::Runtime>(app: &tauri::AppHandle<R>, why: &str) {
 /// The watchdog question's Save a problem report…: a native save dialog (its own thread, never the stuck window), then the report
 /// as `--export-diagnostics` writes it, plus the agent's files when the agent answers.
 pub fn save_report_from_question<R: tauri::Runtime>(app: &tauri::AppHandle<R>, app_info: &paddock_diag::AppInfo) -> Result<(), String> {
-    if SAVING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+    let Some(slot) = SavingSlot::take() else {
         log::info!("A problem report is already being saved; the second request was ignored");
         return Ok(());
-    }
+    };
     let outcome = save_report_inner(app, app_info);
-    SAVING.store(false, std::sync::atomic::Ordering::SeqCst);
+    drop(slot);
     if let Err(why) = &outcome {
         tell_failed(app, why);
     }
@@ -663,6 +683,19 @@ mod tests {
         let ev = file_text(&c, "helper/event-log.txt").unwrap();
         assert!(ev.contains("Application") && ev.contains("System"), "{ev}");
         assert!(tools.calls.lock().unwrap().iter().any(|l| l.starts_with("wevtutil.exe")));
+    }
+
+    #[test]
+    fn a_panic_in_the_save_does_not_leave_the_slot_taken() {
+        let first = SavingSlot::take().expect("free at first");
+        assert!(SavingSlot::take().is_none(), "one save at a time");
+        drop(first);
+        let panicked = std::panic::catch_unwind(|| {
+            let _slot = SavingSlot::take().expect("free again");
+            panic!("the report hook panicked");
+        });
+        assert!(panicked.is_err());
+        assert!(SavingSlot::take().is_some(), "the slot is free after the panic");
     }
 
     #[test]

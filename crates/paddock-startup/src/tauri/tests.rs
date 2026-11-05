@@ -238,6 +238,45 @@ fn a_paused_process_is_said_in_the_log_and_does_not_start_a_question() {
 }
 
 #[test]
+fn visibility_is_shown_and_not_minimised_and_unknown_counts_as_visible() {
+    assert!(visibility(Some(true), Some(false)));
+    assert!(!visibility(Some(false), Some(false)), "hidden");
+    assert!(!visibility(Some(true), Some(true)), "minimised");
+    assert!(
+        visibility(None, None),
+        "a window the OS cannot report on is treated as visible"
+    );
+}
+
+/// The wiring from the OS's answer to the question, with the default timings: a hidden window is reloaded but never asked about; a visible
+/// one is asked no earlier than 70 s. (The mock runtime reports every window visible, so the probe stands in for the OS.)
+#[test]
+fn a_hidden_window_is_never_asked_about_through_the_real_tick() {
+    let seen = Shared::default();
+    let configured = Startup::builder()
+        .asker(FakeAsker(seen.clone()))
+        .window_visibility(|w| w.label() != "w-hidden")
+        .build()
+        .unwrap();
+    let app = app_with(configured);
+    let hidden = window(&app, "w-hidden");
+    let shown = window(&app, "w-shown");
+    let t0 = Instant::now();
+    page_started(&app, &hidden, t0);
+    page_started(&app, &shown, t0);
+    tick(&app, t0, 0, 69_000);
+    assert!(
+        lock(&seen).asked.is_empty(),
+        "nothing is asked before 70 s: {:?}",
+        lock(&seen).asked.len()
+    );
+    tick(&app, t0, 69_500, 400_000);
+    let asked: Vec<String> = lock(&seen).asked.iter().map(|(l, _)| l.clone()).collect();
+    assert_eq!(asked, ["w-shown"], "only the visible window is asked about");
+    startup(&app).stop();
+}
+
+#[test]
 fn the_question_offers_save_report_and_stays_closed_while_the_report_is_written() {
     let seen = Shared::default();
     let (tx, rx) = std::sync::mpsc::channel::<String>();
@@ -424,7 +463,7 @@ fn a_page_that_stops_answering_after_ready_is_marked_asked_about_and_recovers_on
     }
     assert!(
         log_of("w-3").iter().any(|(l, m)| *l == log::Level::Error
-            && m == "Window w-3 stopped responding; asking the user")
+            && m.starts_with("Window w-3 stopped responding"))
     );
     // It answers again (a late answer to its latest ping).
     let seq = *lock(&got).last().unwrap();
