@@ -37,7 +37,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 - Inventory: a memory module's maker and part number that does not fit beside the drawing now shows in full when you point at it, instead of being cut off with no way to read it.
 - Firewall (Windows): rules whose names Windows stores as references, such as "@{Microsoft.Windows...}" or "@FirewallAPI.dll,-80204", now show the name Windows itself shows. When Windows cannot supply it, Dyno shows a readable name made from the app or file the rule belongs to, never the raw text.
-- Linux: the agent's systemd unit is registered, updated and removed by the same code as on the other systems. A unit you disabled with `systemctl --user disable` stays disabled (Dyno says which command switches it on), Quit and stop measuring starts the unit again only if it is still enabled, a removal that systemd did not confirm is reported instead of "removed", and the unit text of a new version reaches you once after an update.
+- Linux: the agent's systemd unit is registered, updated and removed by the same code as on the other systems. A unit you disabled with "systemctl --user disable" stays disabled (Dyno says which command switches it on), Quit and stop measuring starts the unit again only if it is still enabled, a removal that systemd did not confirm is reported instead of "removed", and the unit text of a new version reaches you once after an update.
 - macOS: memory in use is read the way Activity Monitor reads it (app memory, wired and compressed). Dyno had counted memory that apps were using as free and showed 17 percent where Activity Monitor showed 54 percent. Memory alarms and the memory figure in reports now match what Activity Monitor says, so a memory alarm can fire on a Mac where it stayed quiet before.
 - Settings: dragging a widget in Menu bar items or Popup widgets now shows the whole row as it looks in the list, with its handle, title and controls in place and without the widget's symbol. Before, the picture under the pointer was drawn out of shape with a huge symbol.
 - Dashboard: while you edit the layout, the History legend checkboxes no longer show large pink squares.
@@ -64,7 +64,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Removed
 
-- Backup health: the Backup health page, its Settings section, the widget, the alarms, the `backup` command and the Time Machine, Windows Backup, File History, restic, Borg and Duplicati checks are removed. They may return as per-tool checks (File History once verified on x64 Windows). Saved settings, alarms, mutes and scheduled wakes that name them load without error and the backup parts are dropped. The agent protocol is now version 6.
+- Backup health: the Backup health page, its Settings section, the widget, the alarms, the "backup" command and the Time Machine, Windows Backup, File History, restic, Borg and Duplicati checks are removed. They may return as per-tool checks (File History once verified on x64 Windows). Saved settings, alarms, mutes and scheduled wakes that name them load without error and the backup parts are dropped. The agent protocol is now version 6.
 
 ### Changed
 
