@@ -580,4 +580,18 @@ mod tests {
             got.problems
         );
     }
+    #[test]
+    fn a_row_with_many_cells_under_the_limit_is_kept_and_rows_keep_their_line_numbers() {
+        let cells = ",x".repeat(200);
+        let text = format!(
+            "Timestamp,Level,Message\n2026-10-14 10:00:00,Info,one{cells}\n2026-10-14 10:00:01,Info,two\n2026-10-14 10:00:02,Info,three\n"
+        );
+        let (got, skipped) = streamed("", &text, CHUNK_FOR_TESTS, crate::importers::MAX_LINE_LEN * 8);
+        let seen: Vec<(u32, &str)> = got.events.iter().map(|e| (e.record.line, e.record.message.as_str())).collect();
+        assert!(seen[0].1.starts_with("one,x"), "the cells past the header stay with the message");
+        assert_eq!(seen.iter().map(|s| s.0).collect::<Vec<_>>(), [2, 3, 4]);
+        assert_eq!((seen[1].1, seen[2].1), ("two", "three"));
+        assert_eq!(skipped, 0);
+        assert_eq!(got.events[2].byte_offset, text.find("2026-10-14 10:00:02").unwrap() as u64);
+    }
 }

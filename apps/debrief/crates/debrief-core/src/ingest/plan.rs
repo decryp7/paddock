@@ -413,4 +413,18 @@ mod tests {
             [ChunkStart { byte_offset: 0, line: 1 }, ChunkStart { byte_offset: 5, line: 2 }]
         );
     }
+    #[test]
+    fn the_head_grows_until_it_holds_more_than_the_asked_rows_and_not_further() {
+        let p = compiled("");
+        let plan = plan_of(&p, b"2026-10-14 10:00:00 a\n", true).unwrap();
+        // 12 lines of 400,000 bytes: 5 fit in 2 MiB, which is not more than 5, so the head doubles once more.
+        let line = format!("{}\n", "x".repeat(400_000 - 1));
+        let data = line.repeat(12);
+        let mut reader = std::io::Cursor::new(data.as_bytes().to_vec());
+        let head = plan_head_text_rows(&mut reader, &plan, data.len() as u64, 5, 16 << 20).unwrap();
+        assert_eq!(head.lines().count(), 10);
+        // The cap stops the growth even when the rows are not reached.
+        let head = plan_head_text_rows(&mut reader, &plan, data.len() as u64, 50, 2 << 20).unwrap();
+        assert_eq!(head.lines().count(), 5);
+    }
 }

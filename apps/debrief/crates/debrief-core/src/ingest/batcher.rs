@@ -375,6 +375,27 @@ when = [{ field = "Ms", op = "gt", value = "100" }]
     }
 
     #[test]
+    fn wide_events_flush_the_batch_by_their_text_size_and_cancel_is_checked() {
+        let p = profile("");
+        let schema = Arc::new(schema_for(&p));
+        let mut sink = Collect::default();
+        let cancel = AtomicBool::new(false);
+        let mut b = RecordBatcher::new(&p, schema, SourceId(4), "app.log", &mut sink, &cancel);
+        // 5 MiB of raw text counts twice, so it stays under the limit; 17 MiB more goes over it.
+        let mut small = event(1, "", Some(1));
+        small.raw = "r".repeat(5 << 20);
+        b.event(small).unwrap();
+        assert_eq!(b.records.len(), 1, "10 MiB of counted text is under the limit");
+        let mut big = event(2, "", Some(2));
+        big.raw = "r".repeat(17 << 20);
+        b.event(big).unwrap();
+        assert!(b.records.is_empty(), "the text size flushed the batch before BATCH_ROWS");
+        b.check().unwrap();
+        cancel.store(true, Ordering::Relaxed);
+        assert!(b.check().is_err(), "a cancelled import fails its check");
+    }
+
+    #[test]
     fn a_full_builder_is_written_at_once_and_the_rest_at_the_end() {
         let p = profile("");
         let schema = Arc::new(schema_for(&p));

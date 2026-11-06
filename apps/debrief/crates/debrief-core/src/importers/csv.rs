@@ -765,4 +765,20 @@ mod tests {
         let out = run("", "\nTimestamp,Message\n2026-10-14 10:00:00,a\n").unwrap();
         assert!(out.records.len() <= 1);
     }
+    #[test]
+    fn the_layout_summary_names_the_columns_and_a_lone_cr_is_told_from_crlf() {
+        let p = CompiledProfile::compile(Profile::default_profile()).unwrap();
+        let ctx = ImportCtx {
+            profile: &p,
+            path: Path::new("x.csv"),
+            file_date: None,
+        };
+        let head = stream_head(&ctx, "Timestamp,Level,Message\n2026-10-14 10:00:00,Info,hi\n").unwrap();
+        let summary = head.layout.summary();
+        assert!(summary.starts_with("columns 3, timestamp"), "{summary}");
+        assert!(is_cr_only("a\rb\r"));
+        assert!(!is_cr_only("a\r\nb"));
+        assert!(!is_cr_only("a\nb"));
+        assert!(!is_cr_only("abc"));
+    }
 }
