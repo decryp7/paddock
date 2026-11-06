@@ -219,12 +219,12 @@ impl Stages<'_> {
                 }
                 drop(order_tx);
             });
+            let _ = committer.join();
             // The input also ends silently when it gave up waiting for a cancel (a blocked `ByteBudget::acquire`): that is
-            // a stop, not an end of the input.
+            // a stop, not an end of the input. Looked at after the committer is done, so a cancel it raised is seen.
             if !stopped && cancelled() {
                 stopped = true;
             }
-            let _ = committer.join();
         });
         !stopped
     }
@@ -442,7 +442,7 @@ mod tests {
                 cancel.store(true, Ordering::SeqCst);
             },
         );
-        assert!(!done, "cancelled while waiting for the budget");
+        assert!(!done, "cancelled while waiting for the budget (committed {committed}, cancel {})", cancel.load(Ordering::SeqCst));
         assert_eq!(committed, 1);
     }
 
