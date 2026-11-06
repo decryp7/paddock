@@ -356,7 +356,9 @@ fn an_update_rewrites_the_unit_once_and_a_unit_in_the_new_text_is_only_marked() 
     );
     let cmds: Vec<String> = rig.sys.commands()[mark..].to_vec();
     assert!(
-        !cmds.iter().any(|c| c.contains(" disable") || c.contains(" stop")),
+        !cmds
+            .iter()
+            .any(|c| c.contains(" disable") || c.contains(" stop")),
         "the working service is registered over, never removed first: {cmds:?}"
     );
     assert_eq!(
@@ -636,5 +638,9 @@ fn a_unit_that_points_at_another_copy_is_removed_first_not_registered_over_while
     let started = rig.manager(V1).on_start(&never());
     assert!(matches!(started, Started::Repaired(..)), "{started:?}");
     let cmds: Vec<String> = rig.sys.commands()[mark..].to_vec();
-    assert!(cmds.iter().any(|c| c.contains(" disable") || c.contains(" stop")), "{cmds:?}");
+    assert!(
+        cmds.iter()
+            .any(|c| c.contains(" disable") || c.contains(" stop")),
+        "{cmds:?}"
+    );
 }

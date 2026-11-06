@@ -165,7 +165,10 @@ impl Manager {
         let (recorded, record_damaged) = self.record.peek();
         // The job that runs must be the one this attempt's register call started (not the old build's that outlived the removal).
         let job_after_register = self.job_after_register(recorded.registered_at);
-        self.backend.know_copy(self.program.as_deref(), recorded.registered_program.as_deref());
+        self.backend.know_copy(
+            self.program.as_deref(),
+            recorded.registered_program.as_deref(),
+        );
         let inspection = self.backend.inspect();
         let p = plan(&Facts {
             inspection: &inspection,
@@ -194,7 +197,9 @@ impl Manager {
     /// Whether the running job started at or after the attempt's register call (`None`: no register time, or the OS cannot say).
     pub(crate) fn job_after_register(&mut self, registered_at: Option<u64>) -> Option<bool> {
         let at = registered_at?;
-        self.backend.job_process().map(|p| p.started().as_micros() >= at)
+        self.backend
+            .job_process()
+            .map(|p| p.started().as_micros() >= at)
     }
 
     /// How the service is doing, for the UI and [`ServiceStatus::health`].
@@ -224,7 +229,10 @@ impl Manager {
         // Past the attempts the wait ends in a hold, so nothing is coming: not pending. A replace that the start will make is
         // pending already, so the link does not start an agent of its own in the seconds before the start repair runs.
         let rec = self.record.peek().0;
-        let paid_tail = matches!(rec.phase_of(&self.version), Some(Phase::Registering | Phase::RemovingOld { paid: true, .. }));
+        let paid_tail = matches!(
+            rec.phase_of(&self.version),
+            Some(Phase::Registering | Phase::RemovingOld { paid: true, .. })
+        );
         let used_up = rec.attempts_of(&self.version) >= MAX_ATTEMPTS;
         match self.decide(false, false).2 {
             Plan::Await(_) => !used_up,
@@ -283,15 +291,29 @@ impl Manager {
         let (nothing_to_remove, had_registration) = {
             let i = self.backend.inspect();
             let had = i.registration != crate::backend::Registration::Absent;
-            (!had && matches!(i.job, crate::backend::Job::Absent | crate::backend::Job::Unknown), had)
+            (
+                !had && matches!(
+                    i.job,
+                    crate::backend::Job::Absent | crate::backend::Job::Unknown
+                ),
+                had,
+            )
         };
         // Only this version's own replace that was begun (a crash after the removal, before or during the register call) is a
         // free finish: its register call was already counted or never made. Another version's attempts are not this one's.
         // The next register of an interrupted replace is paid for once (ADR 0056 rule A): by the request that began it, by the
         // attempt counted when `Registering` was written, or (nothing left to remove) by the crash-after-removal finish.
-        let paid_tail = matches!(before.phase_of(&self.version), Some(Phase::Registering | Phase::RemovingOld { paid: true, .. }));
+        let paid_tail = matches!(
+            before.phase_of(&self.version),
+            Some(Phase::Registering | Phase::RemovingOld { paid: true, .. })
+        );
         let finishing = !requested
-            && (paid_tail || (nothing_to_remove && matches!(before.phase_of(&self.version), Some(Phase::RemovingOld { .. }))));
+            && (paid_tail
+                || (nothing_to_remove
+                    && matches!(
+                        before.phase_of(&self.version),
+                        Some(Phase::RemovingOld { .. })
+                    )));
         // Where registering over what is there replaces it in one step (no pinned build identity: systemd, the Windows Run value), the
         // new registration is made first and the old one is not removed, so a register that fails leaves the old service working.
         let register_first = !self.backend.capabilities().pinned_identity
@@ -316,15 +338,25 @@ impl Manager {
                 before.phase_of(&self.version),
                 Some(Phase::Registering | Phase::Awaiting | Phase::RemovingOld { ours: true, .. })
             );
-        let removing = Phase::RemovingOld { ours, paid: requested || finishing };
+        let removing = Phase::RemovingOld {
+            ours,
+            paid: requested || finishing,
+        };
         let first = State::Attempting {
             version: self.version.clone(),
             attempts: attempts0,
-            phase: if finishing || nothing_to_remove || register_only_once { Phase::Registering } else { removing },
+            phase: if finishing || nothing_to_remove || register_only_once {
+                Phase::Registering
+            } else {
+                removing
+            },
         };
         // No OS call without a durable write, not even for what the user asked: a service the record does not know about would be
         // replaced again at the next start.
-        if let Err(e) = self.record.set_state_and_program(first, self.program.as_deref()) {
+        if let Err(e) = self
+            .record
+            .set_state_and_program(first, self.program.as_deref())
+        {
             return Ran::Unrecorded(e.to_string());
         }
         if !self.tracker.start(Instant::now()) {
@@ -344,7 +376,7 @@ impl Manager {
             abort: &abort,
             allowed,
             register_only: nothing_to_remove || register_only_once,
-        now: &crate::repair::wall_clock,
+            now: &crate::repair::wall_clock,
         };
         // The wait for the service can take 120 s: the lock is let go for it, so a user's event (a removal, a repair) never waits.
         let released = std::cell::Cell::new(false);
@@ -368,7 +400,9 @@ impl Manager {
                         Some(removing)
                     }
                     Step::Registering => {
-                        if let Err(e) = record.set_registered_at(Some(crate::repair::wall_clock().as_micros())) {
+                        if let Err(e) =
+                            record.set_registered_at(Some(crate::repair::wall_clock().as_micros()))
+                        {
                             log::warn!(error:% = e; "the time of the register call could not be recorded");
                         }
                         if free_register {
@@ -402,59 +436,68 @@ impl Manager {
         log::info!(outcome:? = outcome; "service repair finished");
         // After a wait without the lock, what the record says now may be somebody else's: only a record that still shows this
         // wait is settled here.
-        let still_ours = !released.get() || {
-            *lock = self.record.lock();
-            matches!(self.record.load().state, State::Attempting { version: ref v, phase: Phase::Awaiting, .. } if *v == self.version)
-        };
+        let still_ours = !released.get()
+            || {
+                *lock = self.record.lock();
+                matches!(self.record.load().state, State::Attempting { version: ref v, phase: Phase::Awaiting, .. } if *v == self.version)
+            };
         let settled = if !still_ours {
-            log::info!("the record changed during the wait (another request ran); this replace leaves it as it is");
+            log::info!(
+                "the record changed during the wait (another request ran); this replace leaves it as it is"
+            );
             Ok(())
         } else {
             match &outcome {
-            RepairOutcome::Recovered => {
-                self.remember();
-                Ok(())
-            }
-            // Accepted and waiting: the state already says so, and the next start gives it time instead of replacing it.
-            RepairOutcome::Registered => {
-                let tried = self.record.load().attempts_of(&self.version);
-                log::warn!(
-                    attempts = tried;
-                    "the service was registered but did not answer; the next start gives it time and looks again"
-                );
-                Ok(())
-            }
-            // Nothing came up: not trusted as accepted, so the next start replaces (until the attempts are used).
-            RepairOutcome::Failed(_) => self.write_state(State::Attempting {
-                version: self.version.clone(),
-                attempts,
-                // Not an interrupted removal (that one finishes for free): the attempts were used and failed.
-                phase: Phase::RegisterFailed(crate::record::FailKind::Other),
-            }),
-            // Nothing was counted: back to what it was.
-            // A register that was made and then cancelled stays counted (the registration may be there): waiting for it.
-            RepairOutcome::Cancelled if attempts > attempts0 => self.write_state(State::Attempting {
-                version: self.version.clone(),
-                attempts,
-                phase: Phase::Awaiting,
-            }),
-            RepairOutcome::Cancelled => self.write_state(before.state.clone()),
-            // The removal happened and nothing was registered (approval, unavailable, declined): the record keeps saying a removal
-            // is unfinished, never less than the OS shows, so the next start finishes it (its register is paid for, so past the cap too).
-            _ if had_registration && removed.get() && self.backend.inspect().registration == crate::backend::Registration::Absent => {
-                // A state of the user or the OS is not an attempt (N1): the count is the one before this register.
-                self.write_state(State::Attempting {
+                RepairOutcome::Recovered => {
+                    self.remember();
+                    Ok(())
+                }
+                // Accepted and waiting: the state already says so, and the next start gives it time instead of replacing it.
+                RepairOutcome::Registered => {
+                    let tried = self.record.load().attempts_of(&self.version);
+                    log::warn!(
+                        attempts = tried;
+                        "the service was registered but did not answer; the next start gives it time and looks again"
+                    );
+                    Ok(())
+                }
+                // Nothing came up: not trusted as accepted, so the next start replaces (until the attempts are used).
+                RepairOutcome::Failed(_) => self.write_state(State::Attempting {
                     version: self.version.clone(),
-                    attempts: attempts0,
-                    phase: removing,
-                })
-            }
-            // The replace removed what an attempt of another version made: that attempt is over, so it is not restored (a
-            // downgrade would otherwise take it for its own and settle a registration it did not make).
-            _ => self.write_state(match &before.state {
-                State::Attempting { version, .. } if *version != self.version => State::Idle,
-                other => other.clone(),
-            }),
+                    attempts,
+                    // Not an interrupted removal (that one finishes for free): the attempts were used and failed.
+                    phase: Phase::RegisterFailed(crate::record::FailKind::Other),
+                }),
+                // Nothing was counted: back to what it was.
+                // A register that was made and then cancelled stays counted (the registration may be there): waiting for it.
+                RepairOutcome::Cancelled if attempts > attempts0 => {
+                    self.write_state(State::Attempting {
+                        version: self.version.clone(),
+                        attempts,
+                        phase: Phase::Awaiting,
+                    })
+                }
+                RepairOutcome::Cancelled => self.write_state(before.state.clone()),
+                // The removal happened and nothing was registered (approval, unavailable, declined): the record keeps saying a removal
+                // is unfinished, never less than the OS shows, so the next start finishes it (its register is paid for, so past the cap too).
+                _ if had_registration
+                    && removed.get()
+                    && self.backend.inspect().registration
+                        == crate::backend::Registration::Absent =>
+                {
+                    // A state of the user or the OS is not an attempt (N1): the count is the one before this register.
+                    self.write_state(State::Attempting {
+                        version: self.version.clone(),
+                        attempts: attempts0,
+                        phase: removing,
+                    })
+                }
+                // The replace removed what an attempt of another version made: that attempt is over, so it is not restored (a
+                // downgrade would otherwise take it for its own and settle a registration it did not make).
+                _ => self.write_state(match &before.state {
+                    State::Attempting { version, .. } if *version != self.version => State::Idle,
+                    other => other.clone(),
+                }),
             }
         };
         if let Err(e) = settled {
@@ -509,7 +552,9 @@ impl Manager {
             match p {
                 Plan::Leave(h) => {
                     match &h {
-                        Hold::Unanswered(n) | Hold::Refused(n) => log::warn!(count = *n; "this version registered the service {n} times and it did not come up; it is held and not registered again by itself. Switching start at login off and on, an update, or a restart of the computer tries again"),
+                        Hold::Unanswered(n) | Hold::Refused(n) => {
+                            log::warn!(count = *n; "this version registered the service {n} times and it did not come up; it is held and not registered again by itself. Switching start at login off and on, an update, or a restart of the computer tries again")
+                        }
                         _ => {}
                     }
                     return Started::Left(h);
@@ -648,7 +693,13 @@ impl Manager {
             )));
         }
         let forgotten = self.record.forget();
-        log::info!("{}", removal_done(u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX), forgotten.is_ok()));
+        log::info!(
+            "{}",
+            removal_done(
+                u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX),
+                forgotten.is_ok()
+            )
+        );
         forgotten
     }
 
@@ -709,12 +760,22 @@ fn allowed_registers(requested: bool, max_cycles: u32, attempts: u32, finishing:
 
 /// The log line that begins a removal (a user can read from a bundle which registration was taken out).
 fn removal_began(mechanism: Mechanism) -> String {
-    format!("removing the background service's registration ({})", mechanism.describe())
+    format!(
+        "removing the background service's registration ({})",
+        mechanism.describe()
+    )
 }
 
 /// The log line that ends a removal, with how long it took and whether the record was forgotten.
 fn removal_done(ms: u64, recorded: bool) -> String {
-    format!("the background service was removed in {ms} ms{}", if recorded { "" } else { "; the record could not be cleared" })
+    format!(
+        "the background service was removed in {ms} ms{}",
+        if recorded {
+            ""
+        } else {
+            "; the record could not be cleared"
+        }
+    )
 }
 
 /// What a request says when the service is current and answers: nothing is replaced.
@@ -751,13 +812,19 @@ mod tests {
 
     #[test]
     fn the_words_of_a_request_on_a_working_service() {
-        assert_eq!(already_working("Dyno"), "Dyno's background service is already working.");
+        assert_eq!(
+            already_working("Dyno"),
+            "Dyno's background service is already working."
+        );
     }
 
     #[test]
     fn a_removal_logs_how_it_began_and_how_it_ended() {
         assert!(removal_began(Mechanism::SystemdUser).contains("systemd user service"));
-        assert_eq!(removal_done(12, true), "the background service was removed in 12 ms");
+        assert_eq!(
+            removal_done(12, true),
+            "the background service was removed in 12 ms"
+        );
         assert!(removal_done(12, false).contains("record could not be cleared"));
     }
 
@@ -766,7 +833,11 @@ mod tests {
         assert_eq!(allowed_registers(true, 3, 9, false), 4);
         assert_eq!(allowed_registers(false, 3, 1, false), MAX_ATTEMPTS - 1);
         assert_eq!(allowed_registers(false, 3, MAX_ATTEMPTS, false), 0);
-        assert_eq!(allowed_registers(false, 3, MAX_ATTEMPTS, true), 1, "the free finish");
+        assert_eq!(
+            allowed_registers(false, 3, MAX_ATTEMPTS, true),
+            1,
+            "the free finish"
+        );
     }
 
     #[test]

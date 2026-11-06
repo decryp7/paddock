@@ -726,9 +726,7 @@ fn a_busy_start_looks_again_a_bounded_number_of_times() {
     );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
-    let held = RecordFile::new(dir.path(), LABEL)
-        .lock()
-        .unwrap();
+    let held = RecordFile::new(dir.path(), LABEL).lock().unwrap();
     let started = m.on_start_patient(&never(), 3, Duration::from_secs(5));
     assert_eq!(started, Started::Busy);
     assert!(sys.now() >= Duration::from_secs(15), "{:?}", sys.now());
@@ -871,7 +869,11 @@ fn the_settings_switch_then_the_next_start_registers_once() {
     )
     .with_timings(Timings::default().without_start_wait());
     assert!(m.install(&never()).is_ok());
-    assert_eq!(calls(&sim), ["register"], "nothing was registered, so nothing is removed first");
+    assert_eq!(
+        calls(&sim),
+        ["register"],
+        "nothing was registered, so nothing is removed first"
+    );
     // ... and the next start, with launchd's agent running, removes nothing and records the version.
     let mut next = manager(&sim, &sys, dir.path(), "1.1.0");
     assert_eq!(next.on_start(&never()), Started::Marked);
@@ -998,9 +1000,7 @@ fn a_refused_job_is_still_replaced_when_this_version_already_tried() {
 fn a_first_run_that_loses_the_lock_waits_and_then_registers() {
     let dir = tempfile::tempdir().unwrap();
     let (sim, sys, mut m) = unanswered(dir.path(), "1.1.0");
-    let held = RecordFile::new(dir.path(), LABEL)
-        .lock()
-        .unwrap();
+    let held = RecordFile::new(dir.path(), LABEL).lock().unwrap();
     let r = m.install_patient(&never(), true, 3, Duration::from_secs(5));
     assert!(matches!(r, Err(ServiceError::Busy)));
     assert!(sys.now() >= Duration::from_secs(15), "{:?}", sys.now());
@@ -1016,16 +1016,28 @@ fn a_first_run_that_loses_the_lock_waits_and_then_registers() {
 // without a durable write; a resume that is done clears its marker
 
 #[test]
-fn a_first_run_removes_nothing_that_is_registered_and_registers_what_is_not_once_within_the_attempts() {
+fn a_first_run_removes_nothing_that_is_registered_and_registers_what_is_not_once_within_the_attempts()
+ {
     // Something is registered (any version's, up or not): a first run leaves it to the start's plan.
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
-    assert!(matches!(m.install_unattended(&never()), Ok(RepairOutcome::Recovered)));
+    assert!(matches!(
+        m.install_unattended(&never()),
+        Ok(RepairOutcome::Recovered)
+    ));
     assert!(calls(&sim).is_empty(), "{:?}", calls(&sim));
-    assert_eq!(m.recorded().registered_version.as_deref(), Some("1.0.0"), "another version's service is not claimed");
+    assert_eq!(
+        m.recorded().registered_version.as_deref(),
+        Some("1.0.0"),
+        "another version's service is not claimed"
+    );
     // Nothing registered: registered once, with nothing removed first.
     let dir = tempfile::tempdir().unwrap();
     let (sim, _sys, mut m) = unanswered(dir.path(), "1.1.0");
@@ -1038,7 +1050,12 @@ fn a_first_run_removes_nothing_that_is_registered_and_registers_what_is_not_once
     for _ in 0..4 {
         let _ = m.install_unattended(&never());
     }
-    assert_eq!(count(&sim, "register"), crate::plan::MAX_ATTEMPTS as usize, "{:?}", calls(&sim));
+    assert_eq!(
+        count(&sim, "register"),
+        crate::plan::MAX_ATTEMPTS as usize,
+        "{:?}",
+        calls(&sim)
+    );
 }
 
 #[test]
@@ -1048,15 +1065,25 @@ fn a_first_run_that_cannot_record_or_needs_a_prompt_changes_nothing() {
     let record = RecordFile::memory();
     record.memory_handle().unwrap().fail_writes(true);
     let mut m = m.with_record(record);
-    assert!(matches!(m.install_unattended(&never()), Err(ServiceError::Failed(_))));
-    assert!(calls(&sim).is_empty() && no_changes(&sys), "no OS call without a durable write");
+    assert!(matches!(
+        m.install_unattended(&never()),
+        Err(ServiceError::Failed(_))
+    ));
+    assert!(
+        calls(&sim).is_empty() && no_changes(&sys),
+        "no OS call without a durable write"
+    );
 }
 
 #[test]
 fn a_write_that_fails_part_way_stops_the_replace_before_the_next_os_call() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Refused);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Refused,
+    );
     let sys = FakeSystem::new();
     let record = RecordFile::memory();
     record.save("1.0.0", None).unwrap();
@@ -1067,14 +1094,22 @@ fn a_write_that_fails_part_way_stops_the_replace_before_the_next_os_call() {
         matches!(started, Started::Repaired(_, RepairOutcome::Failed(_))),
         "{started:?}"
     );
-    assert!(calls(&sim).is_empty(), "nothing was removed or registered: {:?}", calls(&sim));
+    assert!(
+        calls(&sim).is_empty(),
+        "nothing was removed or registered: {:?}",
+        calls(&sim)
+    );
 }
 
 #[test]
 fn a_held_service_is_not_supervised_and_a_completed_resume_clears_its_marker() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().job_after_asks = None;
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
@@ -1082,26 +1117,55 @@ fn a_held_service_is_not_supervised_and_a_completed_resume_clears_its_marker() {
     for _ in 0..4 {
         last = m.on_start(&never());
     }
-    assert_eq!(last, Started::Left(Hold::Unanswered(crate::plan::MAX_ATTEMPTS)));
+    assert_eq!(
+        last,
+        Started::Left(Hold::Unanswered(crate::plan::MAX_ATTEMPTS))
+    );
     assert!(!m.pending(), "no way forward: the link must not wait");
-    assert!(!m.supervises(), "nothing will start it, so the app must not wait for it");
+    assert!(
+        !m.supervises(),
+        "nothing will start it, so the app must not wait for it"
+    );
     // The same record with the OS now running the job: a held service that is up is supervised, whoever answers.
     sim.lock().unwrap().job = Held::Running;
-    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
-    let mut silent = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", || false);
-    assert!(silent.supervises(), "the OS runs the job, so it is up even if the service itself has not answered");
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
+    let mut silent = Manager::new(
+        "Dyno",
+        Box::new(backend),
+        dir.path(),
+        LABEL,
+        "1.1.0",
+        || false,
+    );
+    assert!(
+        silent.supervises(),
+        "the OS runs the job, so it is up even if the service itself has not answered"
+    );
     sim.lock().unwrap().job = Held::Nothing;
     // The marker of a stop on request: a resume that is done clears it, in the record.
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.1.0");
-    RecordFile::new(dir.path(), LABEL).set_resume_pending(Some(5)).unwrap();
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::Enabled, Held::Nothing);
+    RecordFile::new(dir.path(), LABEL)
+        .set_resume_pending(Some(5))
+        .unwrap();
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::Enabled,
+        Held::Nothing,
+    );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
     assert!(resume(&mut m).0.is_ok());
     assert_eq!(RecordFile::new(dir.path(), LABEL).resume_pending(), None);
     // An unreadable switch registers nothing on a resume and still clears nothing it did not do... it is left alone on purpose.
-    RecordFile::new(dir.path(), LABEL).set_resume_pending(Some(6)).unwrap();
+    RecordFile::new(dir.path(), LABEL)
+        .set_resume_pending(Some(6))
+        .unwrap();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0").with_app_state(|| None, || true, || true);
     sim.lock().unwrap().calls.clear();
     assert!(!resume(&mut m).0.unwrap());
@@ -1114,13 +1178,19 @@ fn a_held_service_is_not_supervised_and_a_completed_resume_clears_its_marker() {
 fn the_apps_own_agent_covers_a_refused_job_and_a_removal_nobody_took_back_is_finished() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.1.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Refused);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Refused,
+    );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0").with_cover(|| true);
     assert_eq!(m.on_start(&never()), Started::Left(Hold::Healthy));
     assert!(calls(&sim).is_empty());
     // An app that does not say what its switch is finishes a removal that was begun.
-    RecordFile::new(dir.path(), LABEL).set_state(crate::record::State::Removing).unwrap();
+    RecordFile::new(dir.path(), LABEL)
+        .set_state(crate::record::State::Removing)
+        .unwrap();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
     assert_eq!(m.on_start(&never()), Started::Removed);
 }
@@ -1133,14 +1203,20 @@ fn a_request_that_cannot_record_or_finds_the_tracker_busy_changes_nothing() {
     record.memory_handle().unwrap().fail_writes(true);
     let mut m = m.with_record(record);
     let repaired = m.repair(&never());
-    assert!(matches!(&repaired, Err(ServiceError::Failed(w)) if w.contains("cannot be saved")), "{repaired:?}");
+    assert!(
+        matches!(&repaired, Err(ServiceError::Failed(w)) if w.contains("cannot be saved")),
+        "{repaired:?}"
+    );
     assert!(matches!(m.uninstall(), Err(ServiceError::Failed(_))));
     assert!(calls(&sim).is_empty() && no_changes(&sys));
     let dir = tempfile::tempdir().unwrap();
     let (_sim, _sys, mut m) = unanswered(dir.path(), "1.1.0");
     assert!(m.tracker().start(std::time::Instant::now()));
     assert!(matches!(m.repair(&never()), Err(ServiceError::Busy)));
-    assert!(matches!(m.install_unattended(&never()), Err(ServiceError::Busy)));
+    assert!(matches!(
+        m.install_unattended(&never()),
+        Err(ServiceError::Busy)
+    ));
 }
 
 #[test]
@@ -1148,21 +1224,37 @@ fn a_removal_and_an_install_wait_for_the_lock_like_a_start_does() {
     let dir = tempfile::tempdir().unwrap();
     let (_sim, sys, mut m) = unanswered(dir.path(), "1.1.0");
     let held = RecordFile::new(dir.path(), LABEL).lock().unwrap();
-    assert!(matches!(m.uninstall_patient(2, Duration::from_secs(5)), Err(ServiceError::Busy)));
+    assert!(matches!(
+        m.uninstall_patient(2, Duration::from_secs(5)),
+        Err(ServiceError::Busy)
+    ));
     assert!(sys.now() >= Duration::from_secs(10), "{:?}", sys.now());
-    assert!(matches!(m.install_patient(&never(), false, 1, Duration::from_secs(5)), Err(ServiceError::Busy)));
+    assert!(matches!(
+        m.install_patient(&never(), false, 1, Duration::from_secs(5)),
+        Err(ServiceError::Busy)
+    ));
     drop(held);
     assert!(m.uninstall_patient(2, Duration::from_secs(5)).is_ok());
-    assert!(m.install_patient(&never(), false, 1, Duration::from_secs(5)).is_ok());
+    assert!(
+        m.install_patient(&never(), false, 1, Duration::from_secs(5))
+            .is_ok()
+    );
 }
 
 #[test]
 fn a_resume_that_the_plan_offers_or_that_finishes_a_removal_leaves_the_service_alone() {
     let dir = tempfile::tempdir().unwrap();
-    RecordFile::new(dir.path(), LABEL).set_state(crate::record::State::Removing).unwrap();
-    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Nothing);
+    RecordFile::new(dir.path(), LABEL)
+        .set_state(crate::record::State::Removing)
+        .unwrap();
+    let sim = world(
+        AppServiceStatus::NotRegistered,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     let sys = FakeSystem::new();
-    let mut m = manager(&sim, &sys, dir.path(), "1.1.0").with_app_state(|| Some(true), || false, || true);
+    let mut m =
+        manager(&sim, &sys, dir.path(), "1.1.0").with_app_state(|| Some(true), || false, || true);
     assert!(resume(&mut m).0.is_ok());
 }
 
@@ -1170,8 +1262,14 @@ fn a_resume_that_the_plan_offers_or_that_finishes_a_removal_leaves_the_service_a
 fn a_resume_that_failed_keeps_the_marker_of_the_stop_so_the_next_start_tries_again() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.0.0");
-    RecordFile::new(dir.path(), LABEL).set_resume_pending(Some(5)).unwrap();
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Nothing);
+    RecordFile::new(dir.path(), LABEL)
+        .set_resume_pending(Some(5))
+        .unwrap();
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     {
         let mut w = sim.lock().unwrap();
         w.register_error = Some(RegisterError::Other("denied".into()));
@@ -1180,7 +1278,11 @@ fn a_resume_that_failed_keeps_the_marker_of_the_stop_so_the_next_start_tries_aga
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.0.0");
     assert!(resume(&mut m).0.is_err());
-    assert_eq!(RecordFile::new(dir.path(), LABEL).resume_pending(), Some(5), "an Err resume keeps the marker");
+    assert_eq!(
+        RecordFile::new(dir.path(), LABEL).resume_pending(),
+        Some(5),
+        "an Err resume keeps the marker"
+    );
 }
 
 #[test]
@@ -1190,41 +1292,72 @@ fn the_lock_is_let_go_while_the_replace_waits_for_the_service_so_a_removal_never
     let probe = record.reopen();
     let free_during_wait = Arc::new(AtomicBool::new(false));
     let seen = free_during_wait.clone();
-    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::NotRegistered,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().job_after_asks = None;
     let sys = FakeSystem::new();
     wire(&sim, &sys);
-    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
-    let mut m = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", move || {
-        // Asked at every look of the wait: a lock another request can take is a lock that is not held.
-        if probe.lock().is_some() {
-            seen.store(true, std::sync::atomic::Ordering::SeqCst);
-        }
-        false
-    })
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
+    let mut m = Manager::new(
+        "Dyno",
+        Box::new(backend),
+        dir.path(),
+        LABEL,
+        "1.1.0",
+        move || {
+            // Asked at every look of the wait: a lock another request can take is a lock that is not held.
+            if probe.lock().is_some() {
+                seen.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            false
+        },
+    )
     .with_record(record)
     .with_timings(Timings {
         start_wait: Duration::from_secs(6),
         ..Timings::default()
     });
     assert!(m.install(&never()).is_ok());
-    assert!(free_during_wait.load(std::sync::atomic::Ordering::SeqCst), "the wait held the repair lock");
+    assert!(
+        free_during_wait.load(std::sync::atomic::Ordering::SeqCst),
+        "the wait held the repair lock"
+    );
 }
 
 #[test]
 fn a_request_on_a_working_service_leaves_it_alone_and_one_on_a_refused_service_replaces_it() {
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.1.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
     assert!(matches!(m.repair(&never()), Ok(RepairOutcome::Recovered)));
     assert!(matches!(m.install(&never()), Ok(RepairOutcome::Recovered)));
-    assert!(calls(&sim).is_empty(), "nothing is removed or registered: {:?}", calls(&sim));
+    assert!(
+        calls(&sim).is_empty(),
+        "nothing is removed or registered: {:?}",
+        calls(&sim)
+    );
     // Refused (launchd keeps the old build's constraint): replaced, as before.
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.1.0");
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Refused);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Refused,
+    );
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
     assert!(m.repair(&never()).is_ok());
     assert!(calls(&sim).contains(&"register".to_string()));
@@ -1235,7 +1368,11 @@ fn a_first_run_leaves_a_lingering_job_alone_and_remembers_what_this_version_was_
     // A job with no registration (a removal that was interrupted): nothing is registered over it, nothing is removed.
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.1.0");
-    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::NotRegistered,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
     assert!(m.install_unattended(&never()).is_ok());
@@ -1249,16 +1386,25 @@ fn a_first_run_leaves_a_lingering_job_alone_and_remembers_what_this_version_was_
         phase: crate::record::Phase::Awaiting,
     })
     .unwrap();
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
-    assert!(matches!(m.install_unattended(&never()), Ok(RepairOutcome::Recovered)));
+    assert!(matches!(
+        m.install_unattended(&never()),
+        Ok(RepairOutcome::Recovered)
+    ));
     assert_eq!(m.recorded().registered_version.as_deref(), Some("1.1.0"));
 }
 
 #[test]
 fn a_wait_ends_when_the_os_runs_the_job_even_if_the_service_has_not_answered_yet() {
     let dir = tempfile::tempdir().unwrap();
-    RecordFile::new(dir.path(), LABEL).save("1.0.0", None).unwrap();
+    RecordFile::new(dir.path(), LABEL)
+        .save("1.0.0", None)
+        .unwrap();
     RecordFile::new(dir.path(), LABEL)
         .set_state(crate::record::State::Attempting {
             version: "1.1.0".into(),
@@ -1266,20 +1412,46 @@ fn a_wait_ends_when_the_os_runs_the_job_even_if_the_service_has_not_answered_yet
             phase: crate::record::Phase::Awaiting,
         })
         .unwrap();
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     let sys = FakeSystem::new();
     wire(&sim, &sys);
-    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
-    let mut m = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", || false);
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
+    let mut m = Manager::new(
+        "Dyno",
+        Box::new(backend),
+        dir.path(),
+        LABEL,
+        "1.1.0",
+        || false,
+    );
     let started = m.on_start(&never());
-    assert!(calls(&sim).is_empty(), "nothing is registered or removed: {:?} {started:?}", calls(&sim));
-    assert!(sys.now() < Duration::from_secs(6), "it did not wait out the time: {:?}", sys.now());
+    assert!(
+        calls(&sim).is_empty(),
+        "nothing is registered or removed: {:?} {started:?}",
+        calls(&sim)
+    );
+    assert!(
+        sys.now() < Duration::from_secs(6),
+        "it did not wait out the time: {:?}",
+        sys.now()
+    );
 }
 
 #[test]
 fn a_wait_ends_at_once_when_the_os_refuses_the_job() {
     let dir = tempfile::tempdir().unwrap();
-    RecordFile::new(dir.path(), LABEL).save("1.0.0", None).unwrap();
+    RecordFile::new(dir.path(), LABEL)
+        .save("1.0.0", None)
+        .unwrap();
     RecordFile::new(dir.path(), LABEL)
         .set_state(crate::record::State::Attempting {
             version: "1.1.0".into(),
@@ -1287,9 +1459,17 @@ fn a_wait_ends_at_once_when_the_os_refuses_the_job() {
             phase: crate::record::Phase::Awaiting,
         })
         .unwrap();
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Refused);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Refused,
+    );
     let sys = FakeSystem::new();
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
     let _ = m.on_start(&never());
-    assert!(sys.now() < Duration::from_secs(6), "a refusal is not waited out: {:?}", sys.now());
+    assert!(
+        sys.now() < Duration::from_secs(6),
+        "a refusal is not waited out: {:?}",
+        sys.now()
+    );
 }

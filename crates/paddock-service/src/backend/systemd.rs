@@ -321,7 +321,10 @@ impl Backend for Systemd {
 
     fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
         let unit = self.spec.unit_file_name();
-        let out = self.ctl(&["show", "-p", "MainPID", &unit]).ok().filter(|o| o.success())?;
+        let out = self
+            .ctl(&["show", "-p", "MainPID", &unit])
+            .ok()
+            .filter(|o| o.success())?;
         let pid = crate::parse::parse_main_pid(&out.stdout)?;
         self.sys.process(pid)
     }

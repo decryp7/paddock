@@ -354,7 +354,10 @@ fn a_bootout_that_hangs_is_bounded_and_ends_with_next_steps() {
         Started::Left(Hold::Refused(crate::plan::MAX_ATTEMPTS))
     );
     // ... and the user's Repair, once launchd lets go, goes through.
-    assert!(matches!(m.repair(&no_cancel()), Ok(RepairOutcome::Recovered)));
+    assert!(matches!(
+        m.repair(&no_cancel()),
+        Ok(RepairOutcome::Recovered)
+    ));
 }
 
 #[test]
@@ -450,7 +453,7 @@ fn nothing_is_installed_unasked_and_install_registers_and_remembers() {
         changes(&sys),
         [
             // Nothing was registered, so nothing is removed first.
-        "register"
+            "register"
         ]
     );
     assert!(sim.lock().unwrap().healthy());
@@ -1657,7 +1660,10 @@ fn manager_contract_details() {
         Started::Left(Hold::RecordUnavailable(_))
     ));
     // The user's own request goes on (loudly) without a record.
-    assert!(matches!(m.repair(&no_cancel()), Err(ServiceError::Failed(_))), "an unwritable record changes nothing");
+    assert!(
+        matches!(m.repair(&no_cancel()), Err(ServiceError::Failed(_))),
+        "an unwritable record changes nothing"
+    );
     assert!(
         std::fs::read_to_string(d.path().join(format!("service-{LABEL}.json")))
             .unwrap()
@@ -1716,9 +1722,14 @@ fn a_systemd_unit_registered_over_another_text_is_restarted_and_over_the_same_te
     sys.put_program("/usr/bin/pitwall-server");
     let mut b = systemd(&sys, "/usr/bin/pitwall-server");
     let text = b.definition();
-    let restarts = |sys: &FakeSystem| changes(sys).iter().filter(|c| c.contains("restart")).count();
+    let restarts = |sys: &FakeSystem| {
+        changes(sys)
+            .iter()
+            .filter(|c| c.contains("restart"))
+            .count()
+    };
     // Another text was there: the running service still has the old program, so registering restarts it.
-    sys.put_file(&unit_path(), "[Service]\nExecStart=/old\n");
+    sys.put_file(unit_path(), "[Service]\nExecStart=/old\n");
     let _ = b.register();
     assert_eq!(restarts(&sys), 1, "{:?}", changes(&sys));
     assert_eq!(sys.file(&unit_path()).unwrap(), text);
@@ -1756,7 +1767,11 @@ fn a_run_value_replaced_by_another_copy_stops_the_agent_the_old_value_started() 
             _ => None,
         })
         .collect();
-    assert_eq!(stops, [format!("{old} stop")], "the old agent is asked to stop once the new value is written");
+    assert_eq!(
+        stops,
+        [format!("{old} stop")],
+        "the old agent is asked to stop once the new value is written"
+    );
 }
 
 #[test]
@@ -1770,14 +1785,22 @@ fn a_cancelled_replace_puts_the_record_back_even_when_it_held_another_versions_a
         attempts: 1,
         phase: crate::record::Phase::Awaiting,
     };
-    crate::record::RecordFile::new(d.path(), LABEL).save("1.0.3", None).unwrap();
-    crate::record::RecordFile::new(d.path(), LABEL).set_state(before.clone()).unwrap();
+    crate::record::RecordFile::new(d.path(), LABEL)
+        .save("1.0.3", None)
+        .unwrap();
+    crate::record::RecordFile::new(d.path(), LABEL)
+        .set_state(before.clone())
+        .unwrap();
     let cancel = AtomicBool::new(true);
     assert_eq!(
         m.on_start(&cancel),
         Started::Repaired(Reason::Refused, RepairOutcome::Cancelled)
     );
-    assert_eq!(m.recorded().state, before, "a cancel before anything was changed leaves the record as it was");
+    assert_eq!(
+        m.recorded().state,
+        before,
+        "a cancel before anything was changed leaves the record as it was"
+    );
     assert!(changes(&sys).is_empty());
 }
 
@@ -1794,13 +1817,25 @@ fn a_failed_register_is_recorded_as_such_the_moment_it_fails() {
         let record = RecordFile::memory();
         let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
         record.mark("1.0.3", None).unwrap();
-        record.memory_handle().unwrap().fail_writes_after(allowed_writes);
+        record
+            .memory_handle()
+            .unwrap()
+            .fail_writes_after(allowed_writes);
         let _ = m.on_start(&no_cancel());
-        if matches!(record.load().state, State::Attempting { phase: Phase::RegisterFailed(FailKind::Other), .. }) {
+        if matches!(
+            record.load().state,
+            State::Attempting {
+                phase: Phase::RegisterFailed(FailKind::Other),
+                ..
+            }
+        ) {
             seen_failed = true;
         }
     }
-    assert!(seen_failed, "a register that failed is on record before the next step begins");
+    assert!(
+        seen_failed,
+        "a register that failed is on record before the next step begins"
+    );
 }
 
 #[test]
@@ -1813,7 +1848,11 @@ fn what_this_version_registered_and_waited_for_is_recorded_as_its_own_when_it_is
     let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
     // This version registered it and waits (the record names no registered version); the user asks for a repair.
     record
-        .set_state(State::Attempting { version: "1.0.4".into(), attempts: 1, phase: Phase::Awaiting })
+        .set_state(State::Attempting {
+            version: "1.0.4".into(),
+            attempts: 1,
+            phase: Phase::Awaiting,
+        })
         .unwrap();
     // One write is allowed: the first state of the replace. Nothing else is written, so nothing else is done.
     record.memory_handle().unwrap().fail_writes_after(1);
@@ -1821,7 +1860,10 @@ fn what_this_version_registered_and_waited_for_is_recorded_as_its_own_when_it_is
     assert!(
         matches!(
             record.load().state,
-            State::Attempting { phase: Phase::RemovingOld { ours: true, .. }, .. }
+            State::Attempting {
+                phase: Phase::RemovingOld { ours: true, .. },
+                ..
+            }
         ),
         "{:?}",
         record.load().state
@@ -1839,7 +1881,13 @@ fn a_first_registration_with_nothing_to_remove_starts_at_registering_not_at_a_re
     record.memory_handle().unwrap().fail_writes_after(1);
     let _ = m.install(&no_cancel());
     assert!(
-        matches!(record.load().state, State::Attempting { phase: Phase::Registering, .. }),
+        matches!(
+            record.load().state,
+            State::Attempting {
+                phase: Phase::Registering,
+                ..
+            }
+        ),
         "{:?}",
         record.load().state
     );

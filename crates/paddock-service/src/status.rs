@@ -391,13 +391,25 @@ mod tests {
         ));
         assert_eq!((s.condition, s.can_repair), (Condition::NewerOwner, false));
         // A hold says what happened and what to do; an unwritable state says nothing was changed.
-        for hold in [Hold::Unanswered(3), Hold::Refused(3), Hold::RegisterFailed(3)] {
+        for hold in [
+            Hold::Unanswered(3),
+            Hold::Refused(3),
+            Hold::RegisterFailed(3),
+        ] {
             let held = Plan::Leave(hold);
-            let s = compose(seen(&with(Registration::Registered, Job::NotRunning), false, &held));
+            let s = compose(seen(
+                &with(Registration::Registered, Job::NotRunning),
+                false,
+                &held,
+            ));
             assert!(s.message.unwrap().contains('3'));
         }
         let unrecorded = Plan::Leave(Hold::RecordUnavailable("disk full".into()));
-        let s = compose(seen(&with(Registration::Registered, Job::NotRunning), false, &unrecorded));
+        let s = compose(seen(
+            &with(Registration::Registered, Job::NotRunning),
+            false,
+            &unrecorded,
+        ));
         assert_eq!(s.condition, Condition::Unavailable);
         assert!(s.message.unwrap().contains("disk full"));
         let mut gone = with(Registration::Registered, Job::NotRunning);

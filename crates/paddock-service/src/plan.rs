@@ -52,7 +52,9 @@ impl Reason {
             Reason::VersionChanged => "the app was updated",
             Reason::ProgramMissing => "the registered program is gone",
             Reason::Moved => "the registration points at another copy of the app",
-            Reason::Interrupted => "an earlier replacement was interrupted after the old registration was removed",
+            Reason::Interrupted => {
+                "an earlier replacement was interrupted after the old registration was removed"
+            }
             Reason::Stopped => "the service was stopped on request",
             Reason::Wanted => "the switch is on and nothing is registered",
             Reason::Unwanted => "the switch is off and the service is still registered",
@@ -303,7 +305,13 @@ pub fn plan(f: &Facts<'_>) -> Plan {
             // A removal whose next register is already paid (by the request that began it, or by an attempt counted) is finished past the
             // cap: one register, never counted twice.
             if capped
-                && matches!(f.state, State::Attempting { phase: Phase::RemovingOld { paid: false, .. }, .. })
+                && matches!(
+                    f.state,
+                    State::Attempting {
+                        phase: Phase::RemovingOld { paid: false, .. },
+                        ..
+                    }
+                )
                 && !matches!(i.job, Job::Absent | Job::Unknown)
                 && f.caps.automatic
             {
@@ -345,7 +353,11 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     }
     // The registration of this version was accepted and the service is up: settled, whatever the attempts were.
     // The proof that the registration is this version's names the time (the job started after the register) and the copy.
-    if accepted && (f.answers || i.job == Job::Running) && f.job_after_register != Some(false) && i.points_here != Some(false) {
+    if accepted
+        && (f.answers || i.job == Job::Running)
+        && f.job_after_register != Some(false)
+        && i.points_here != Some(false)
+    {
         return Plan::MarkCurrent;
     }
     if i.program_exists == Some(false) {
@@ -439,7 +451,8 @@ pub fn resume_path(i: &Inspection, rec: &Recorded, current_version: &str) -> Res
         ),
     };
     // Another version's attempt (a newer copy part-way through registering) is not this version's registration.
-    let other_attempt = matches!(&rec.state, State::Attempting { version, .. } if version != current_version);
+    let other_attempt =
+        matches!(&rec.state, State::Attempting { version, .. } if version != current_version);
     let registered_here = !other_attempt
         && (rec.registered_version.as_deref() == Some(current_version)
             || matches!(
@@ -952,7 +965,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
-            job_after_register: None,
+                job_after_register: None,
             }
         }
         // (a) not registered, `launchctl print` timed out, no record: not installed.
@@ -1004,7 +1017,8 @@ mod tests {
     }
 
     #[test]
-    fn a_version_that_registered_it_already_is_given_time_not_replaced_and_held_after_a_few_tries() {
+    fn a_version_that_registered_it_already_is_given_time_not_replaced_and_held_after_a_few_tries()
+    {
         let reg = |job| Inspection {
             registration: Registration::Registered,
             job,
@@ -1030,13 +1044,19 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
-            job_after_register: None,
+                job_after_register: None,
             })
         };
         let awaiting = |n| attempting("1.0.4", n, Phase::Awaiting);
         // It runs, or answers: settled, nothing removed.
-        assert_eq!(with(&reg(Job::Running), false, awaiting(1), false), Plan::MarkCurrent);
-        assert_eq!(with(&reg(Job::NotRunning), true, awaiting(2), false), Plan::MarkCurrent);
+        assert_eq!(
+            with(&reg(Job::Running), false, awaiting(1), false),
+            Plan::MarkCurrent
+        );
+        assert_eq!(
+            with(&reg(Job::NotRunning), true, awaiting(2), false),
+            Plan::MarkCurrent
+        );
         // Not up yet: wait, no removal; once the wait ran out: replaced while attempts are left, held at the cap.
         assert_eq!(
             with(&reg(Job::NotRunning), false, awaiting(1), false),
@@ -1054,16 +1074,34 @@ mod tests {
         // that runs does not settle a version whose replace has not registered anything yet.
         let phase = |ph| attempting("1.0.4", 1, ph);
         assert_eq!(
-            with(&reg(Job::NotRunning), false, phase(Phase::Registering), false),
+            with(
+                &reg(Job::NotRunning),
+                false,
+                phase(Phase::Registering),
+                false
+            ),
             Plan::Await(Reason::VersionChanged)
         );
         assert_eq!(
-            with(&reg(Job::Running), false, phase(Phase::RemovingOld { ours: false, paid: false }), false),
+            with(
+                &reg(Job::Running),
+                false,
+                phase(Phase::RemovingOld {
+                    ours: false,
+                    paid: false
+                }),
+                false
+            ),
             Plan::Replace(Reason::VersionChanged)
         );
         // Another version's attempts do not count.
         assert_eq!(
-            with(&reg(Job::NotRunning), false, attempting("1.0.3", 9, Phase::Awaiting), false),
+            with(
+                &reg(Job::NotRunning),
+                false,
+                attempting("1.0.3", 9, Phase::Awaiting),
+                false
+            ),
             Plan::Replace(Reason::VersionChanged)
         );
         // A refusal is replaced while attempts are left and held at the cap (never without limit).
@@ -1078,12 +1116,26 @@ mod tests {
         // A crash between the removal and the registration finishes the job at the cap only when the registration itself was
         // next (`Registering`: no new attempt); another removal cycle would be a new register call past the cap: held.
         assert_eq!(
-            with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, Phase::Registering), false),
+            with(
+                &Inspection::absent(),
+                false,
+                attempting("1.0.4", MAX_ATTEMPTS, Phase::Registering),
+                false
+            ),
             Plan::Replace(Reason::Interrupted)
         );
         for ours in [true, false] {
             assert_eq!(
-                with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours, paid: false }), false),
+                with(
+                    &Inspection::absent(),
+                    false,
+                    attempting(
+                        "1.0.4",
+                        MAX_ATTEMPTS,
+                        Phase::RemovingOld { ours, paid: false }
+                    ),
+                    false
+                ),
                 Plan::Replace(Reason::Interrupted),
                 "the registration is gone and nothing holds a job: registering again is the free finish, never a lost service"
             );
@@ -1092,22 +1144,51 @@ mod tests {
                 ..Inspection::absent()
             };
             assert_eq!(
-                with(&lingering, false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours, paid: false }), false),
+                with(
+                    &lingering,
+                    false,
+                    attempting(
+                        "1.0.4",
+                        MAX_ATTEMPTS,
+                        Phase::RemovingOld { ours, paid: false }
+                    ),
+                    false
+                ),
                 Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS)),
                 "a job that is still held needs another removal cycle, which is a new register call past the cap"
             );
             assert_eq!(
-                with(&lingering, false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours, paid: true }), false),
+                with(
+                    &lingering,
+                    false,
+                    attempting(
+                        "1.0.4",
+                        MAX_ATTEMPTS,
+                        Phase::RemovingOld { ours, paid: true }
+                    ),
+                    false
+                ),
                 Plan::Replace(Reason::Interrupted),
                 "a paid finish runs past the cap by its one register (ADR 0056 rule A)"
             );
             assert_eq!(
-                with(&Inspection::absent(), false, attempting("1.0.4", 1, Phase::RemovingOld { ours, paid: false }), false),
+                with(
+                    &Inspection::absent(),
+                    false,
+                    attempting("1.0.4", 1, Phase::RemovingOld { ours, paid: false }),
+                    false
+                ),
                 Plan::Replace(Reason::Interrupted)
             );
         }
         // A register that failed is retried under the cap and held at it.
-        let failed = |n| attempting("1.0.4", n, Phase::RegisterFailed(crate::record::FailKind::Other));
+        let failed = |n| {
+            attempting(
+                "1.0.4",
+                n,
+                Phase::RegisterFailed(crate::record::FailKind::Other),
+            )
+        };
         assert_eq!(
             with(&Inspection::absent(), false, failed(1), false),
             Plan::Replace(Reason::Interrupted)
@@ -1141,13 +1222,20 @@ mod tests {
         let unpaid = State::Attempting {
             version: "1.0.4".into(),
             attempts: MAX_ATTEMPTS,
-            phase: Phase::RemovingOld { ours: false, paid: false },
+            phase: Phase::RemovingOld {
+                ours: false,
+                paid: false,
+            },
         };
-        assert_eq!(plan_for(&unpaid), Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS)));
+        assert_eq!(
+            plan_for(&unpaid),
+            Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS))
+        );
     }
 
     #[test]
-    fn a_mechanism_that_needs_a_prompt_or_has_no_pinned_identity_never_awaits_or_replaces_unattended() {
+    fn a_mechanism_that_needs_a_prompt_or_has_no_pinned_identity_never_awaits_or_replaces_unattended()
+     {
         let reg = Inspection {
             registration: Registration::Registered,
             job: Job::NotRunning,
@@ -1174,11 +1262,19 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
-            job_after_register: None,
+                job_after_register: None,
             })
         };
-        assert_eq!(with(UAC), Plan::MarkCurrent, "a current definition needs no replacement");
-        assert_eq!(with(LINUX), Plan::MarkCurrent, "a current definition needs no replacement");
+        assert_eq!(
+            with(UAC),
+            Plan::MarkCurrent,
+            "a current definition needs no replacement"
+        );
+        assert_eq!(
+            with(LINUX),
+            Plan::MarkCurrent,
+            "a current definition needs no replacement"
+        );
         let stale = Inspection {
             definition_current: Some(false),
             ..reg.clone()
@@ -1198,7 +1294,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
-            job_after_register: None,
+                job_after_register: None,
             })
         };
         assert_eq!(stale_with(UAC), Plan::Offer(Reason::VersionChanged));
@@ -1216,7 +1312,10 @@ mod tests {
             })
         };
         assert_eq!(damaged(&up, false), Plan::MarkCurrent);
-        assert_eq!(damaged(&registered(Job::NotRunning), true), Plan::MarkCurrent);
+        assert_eq!(
+            damaged(&registered(Job::NotRunning), true),
+            Plan::MarkCurrent
+        );
         assert_eq!(
             damaged(&registered(Job::NotRunning), false),
             Plan::Replace(Reason::VersionChanged),
@@ -1243,7 +1342,10 @@ mod tests {
             wanted: None,
             ..from_a_disk_image
         };
-        assert!(matches!(plan(&from_a_disk_image), Plan::Leave(Hold::Unavailable(_))));
+        assert!(matches!(
+            plan(&from_a_disk_image),
+            Plan::Leave(Hold::Unavailable(_))
+        ));
         assert_eq!(plan(&from_applications), Plan::Remove);
     }
 
@@ -1259,13 +1361,28 @@ mod tests {
             })
         };
         assert_eq!(with(Some(false), true, true, &reg), Plan::Remove);
-        assert_eq!(with(Some(false), true, true, &Inspection::absent()), Plan::Leave(Hold::NotInstalled));
-        assert!(matches!(with(Some(true), true, false, &reg), Plan::Leave(Hold::Unavailable(_))));
+        assert_eq!(
+            with(Some(false), true, true, &Inspection::absent()),
+            Plan::Leave(Hold::NotInstalled)
+        );
+        assert!(matches!(
+            with(Some(true), true, false, &reg),
+            Plan::Leave(Hold::Unavailable(_))
+        ));
         // Nothing registered with the switch on after the first run: put it right; before it: never installed unasked.
-        assert_eq!(with(Some(true), true, true, &Inspection::absent()), Plan::Replace(Reason::Wanted));
-        assert_eq!(with(Some(true), false, true, &Inspection::absent()), Plan::Leave(Hold::NotInstalled));
+        assert_eq!(
+            with(Some(true), true, true, &Inspection::absent()),
+            Plan::Replace(Reason::Wanted)
+        );
+        assert_eq!(
+            with(Some(true), false, true, &Inspection::absent()),
+            Plan::Leave(Hold::NotInstalled)
+        );
         // An unreadable switch registers nothing unattended.
-        assert_eq!(with(None, true, true, &Inspection::absent()), Plan::Leave(Hold::NotInstalled));
+        assert_eq!(
+            with(None, true, true, &Inspection::absent()),
+            Plan::Leave(Hold::NotInstalled)
+        );
     }
 
     #[test]
@@ -1281,19 +1398,32 @@ mod tests {
 
     #[test]
     fn a_newer_version_part_way_through_registering_is_the_owner_while_its_program_exists() {
-        let st = State::Attempting { version: "1.1.0".into(), attempts: 1, phase: Phase::Awaiting };
+        let st = State::Attempting {
+            version: "1.1.0".into(),
+            attempts: 1,
+            phase: Phase::Awaiting,
+        };
         let mut i = registered(Job::NotRunning);
         for exists in [Some(true), None] {
             i.program_exists = exists;
             let mut f = facts(&i, MAC, None);
             f.state = &st;
-            assert_eq!(plan(&f), Plan::Leave(Hold::NewerOwner("1.1.0".into())), "program_exists {exists:?}");
+            assert_eq!(
+                plan(&f),
+                Plan::Leave(Hold::NewerOwner("1.1.0".into())),
+                "program_exists {exists:?}"
+            );
         }
     }
 
     #[test]
-    fn a_pinned_build_is_replaced_not_marked_current_when_the_wait_ran_out_whatever_the_definition_says() {
-        let st = State::Attempting { version: "1.0.4".into(), attempts: 1, phase: Phase::Awaiting };
+    fn a_pinned_build_is_replaced_not_marked_current_when_the_wait_ran_out_whatever_the_definition_says()
+     {
+        let st = State::Attempting {
+            version: "1.0.4".into(),
+            attempts: 1,
+            phase: Phase::Awaiting,
+        };
         let mut i = registered(Job::NotRunning);
         i.definition_current = Some(true);
         let mut f = facts(&i, MAC, Some("1.0.0"));
@@ -1321,9 +1451,22 @@ mod tests {
     #[test]
     fn every_reason_has_its_own_words() {
         use Reason::*;
-        let all = [Requested, Refused, VersionChanged, ProgramMissing, Moved, Interrupted, Stopped, Wanted, Unwanted];
+        let all = [
+            Requested,
+            Refused,
+            VersionChanged,
+            ProgramMissing,
+            Moved,
+            Interrupted,
+            Stopped,
+            Wanted,
+            Unwanted,
+        ];
         let words: std::collections::BTreeSet<_> = all.iter().map(|r| r.describe()).collect();
         assert_eq!(words.len(), all.len());
-        assert!(all.iter().all(|r| r.describe().len() > 10 && r.describe() != "xyzzy"));
+        assert!(
+            all.iter()
+                .all(|r| r.describe().len() > 10 && r.describe() != "xyzzy")
+        );
     }
 }

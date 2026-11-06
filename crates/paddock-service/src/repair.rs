@@ -421,7 +421,10 @@ impl Stepper {
                 // The old job that still answers must not make a registration that failed look settled.
                 self.register_lost = !matches!(e, RegisterError::NotAsWritten(_));
                 self.stage = Stage::Settling;
-                go(vec![Step::RegisterFailed(e.to_string())], Action::Settle { ask: true })
+                go(
+                    vec![Step::RegisterFailed(e.to_string())],
+                    Action::Settle { ask: true },
+                )
             }
             (
                 Stage::Settling,
@@ -457,7 +460,10 @@ impl Stepper {
                 self.last_job = Some(job);
                 // The OS now refuses what it accepted a moment ago: another cycle, not a longer wait.
                 if job == Job::Refused {
-                    return self.next_cycle(cancelled, vec![Step::Note("The OS now refuses the registration.".into())]);
+                    return self.next_cycle(
+                        cancelled,
+                        vec![Step::Note("The OS now refuses the registration.".into())],
+                    );
                 }
                 // The longer of the polls' sum (the fake clock) and the real time (a slow OS call counts too).
                 let waited = self.polled.max(elapsed);
@@ -505,7 +511,9 @@ pub fn replace(
 
 /// The wall clock as a process start time (microseconds since the Unix epoch).
 pub fn wall_clock() -> StartTime {
-    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
     StartTime::from_micros(u64::try_from(t.as_micros()).unwrap_or(u64::MAX))
 }
 
@@ -566,7 +574,10 @@ pub fn replace_bounded(
             say(step);
         }
         if bounds.abort.load(Ordering::Relaxed)
-            && matches!(next.action, Action::Unregister | Action::Evict | Action::Register)
+            && matches!(
+                next.action,
+                Action::Unregister | Action::Evict | Action::Register
+            )
         {
             return RepairOutcome::Failed(
                 "The service state could not be written, so nothing more was changed. Check that the data folder is writable, then try again."
@@ -575,7 +586,9 @@ pub fn replace_bounded(
         }
         let result = match next.action {
             Action::Done(outcome) => return outcome,
-            Action::Unregister => OsResult::Unregistered(b.unregister().map(drop).map_err(|e| e.to_string())),
+            Action::Unregister => {
+                OsResult::Unregistered(b.unregister().map(drop).map_err(|e| e.to_string()))
+            }
             Action::Evict => OsResult::Evicted(b.evict()),
             Action::WaitGone => {
                 let began = std::time::Instant::now();
@@ -598,8 +611,8 @@ pub fn replace_bounded(
             Action::Register => {
                 stepper.registered_at((bounds.now)());
                 match b.register() {
-                Ok(_) => OsResult::RegisterOk,
-                Err(e) => OsResult::RegisterErr(e),
+                    Ok(_) => OsResult::RegisterOk,
+                    Err(e) => OsResult::RegisterErr(e),
                 }
             }
             Action::Settle { ask } => {
@@ -613,7 +626,11 @@ pub fn replace_bounded(
             }
             Action::Look => {
                 let answered = answers();
-                let job = if answered { Job::Running } else { b.inspect().job };
+                let job = if answered {
+                    Job::Running
+                } else {
+                    b.inspect().job
+                };
                 let process = if answered { b.job_process() } else { None };
                 log::info!(answers = answered, pid:? = process.map(|p| p.pid()); "service repair: look at the service (the pid is absent when the backend cannot name it)");
                 OsResult::Looked {
@@ -651,7 +668,8 @@ mod tests {
             answers,
             job,
             elapsed: Duration::from_secs(secs),
-            cancelled: false, process: None,
+            cancelled: false,
+            process: None,
         }
     }
 
@@ -664,12 +682,24 @@ mod tests {
         assert_eq!(first.say, [Step::Cycle(0), Step::Removing]);
         assert_eq!(s.next(OsResult::Unregistered(Ok(()))).action, Action::Evict);
         let wait = s.next(OsResult::Evicted(Ok(())));
-        assert_eq!((wait.action, wait.say), (Action::WaitGone, vec![Step::WaitingForRemoval]));
+        assert_eq!(
+            (wait.action, wait.say),
+            (Action::WaitGone, vec![Step::WaitingForRemoval])
+        );
         let reg = s.next(OsResult::Gone { timed_out: false });
-        assert_eq!((reg.action, reg.say), (Action::Register, vec![Step::Registering]));
-        assert_eq!(s.next(OsResult::RegisterOk).action, Action::Settle { ask: false });
+        assert_eq!(
+            (reg.action, reg.say),
+            (Action::Register, vec![Step::Registering])
+        );
+        assert_eq!(
+            s.next(OsResult::RegisterOk).action,
+            Action::Settle { ask: false }
+        );
         let look = s.next(settled(Job::NotRunning, false));
-        assert_eq!((look.action, look.say), (Action::Look, vec![Step::WaitingForStart]));
+        assert_eq!(
+            (look.action, look.say),
+            (Action::Look, vec![Step::WaitingForStart])
+        );
         let up = s.next(looked(true, Job::Running, 1));
         assert_eq!(up.action, Action::Done(RepairOutcome::Recovered));
         assert_eq!(up.say, [Step::Answers]);
@@ -681,9 +711,13 @@ mod tests {
         s.start();
         let evict = s.next(OsResult::Unregistered(Err("busy".into())));
         assert_eq!(evict.action, Action::Evict);
-        assert!(matches!(&evict.say[0], Step::Note(n) if n.contains("Unregister did not succeed") && n.contains("busy")));
+        assert!(
+            matches!(&evict.say[0], Step::Note(n) if n.contains("Unregister did not succeed") && n.contains("busy"))
+        );
         let wait = s.next(OsResult::Evicted(Err("no".into())));
-        assert!(matches!(&wait.say[0], Step::Note(n) if n.contains("Removing the job did not succeed")));
+        assert!(
+            matches!(&wait.say[0], Step::Note(n) if n.contains("Removing the job did not succeed"))
+        );
         assert_eq!(wait.action, Action::WaitGone);
         let timed_out = s.next(OsResult::Gone { timed_out: true });
         assert_eq!(timed_out.say[0], Step::RemovalTimedOut);
@@ -703,14 +737,21 @@ mod tests {
         assert_eq!(again.say, [Step::Cycle(1), Step::Removing]);
         through_removal(&mut s);
         let backoff = s.next(OsResult::Gone { timed_out: false });
-        assert_eq!(backoff.action, Action::Pause(t.backoff), "waits longer each cycle");
+        assert_eq!(
+            backoff.action,
+            Action::Pause(t.backoff),
+            "waits longer each cycle"
+        );
         assert_eq!(s.next(OsResult::Paused).action, Action::Register);
         s.next(OsResult::RegisterOk);
         let over = s.next(settled(Job::Refused, false));
         let Action::Done(RepairOutcome::Failed(why)) = over.action else {
             panic!("{over:?}")
         };
-        assert!(why.contains("after 2 full re-registrations") && why.contains("refuses to start it"), "{why}");
+        assert!(
+            why.contains("after 2 full re-registrations") && why.contains("refuses to start it"),
+            "{why}"
+        );
     }
 
     #[test]
@@ -731,7 +772,8 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_register_is_never_settled_by_the_old_job_that_still_answers_but_a_write_read_back_wrong_may_be() {
+    fn a_failed_register_is_never_settled_by_the_old_job_that_still_answers_but_a_write_read_back_wrong_may_be()
+     {
         let to_settle = |error: RegisterError| {
             let mut s = Stepper::new(&Timings::default(), 4);
             s.start();
@@ -740,10 +782,20 @@ mod tests {
             s.next(OsResult::RegisterErr(error));
             s
         };
-        let lost = to_settle(RegisterError::Other("denied".into())).next(settled(Job::Running, true));
-        assert_eq!(lost.action, Action::Unregister, "the old job answers, the new registration is not there");
-        let maybe = to_settle(RegisterError::NotAsWritten(Inspection::absent())).next(settled(Job::Running, true));
-        assert_eq!(maybe.action, Action::Look, "the write may have landed: look for the service");
+        let lost =
+            to_settle(RegisterError::Other("denied".into())).next(settled(Job::Running, true));
+        assert_eq!(
+            lost.action,
+            Action::Unregister,
+            "the old job answers, the new registration is not there"
+        );
+        let maybe = to_settle(RegisterError::NotAsWritten(Inspection::absent()))
+            .next(settled(Job::Running, true));
+        assert_eq!(
+            maybe.action,
+            Action::Look,
+            "the write may have landed: look for the service"
+        );
     }
 
     #[test]
@@ -752,13 +804,19 @@ mod tests {
             (RegisterError::NeedsApproval, RepairOutcome::NeedsApproval),
             (RegisterError::NeedsElevation, RepairOutcome::NeedsElevation),
             (RegisterError::Declined, RepairOutcome::Declined),
-            (RegisterError::Unavailable("w".into()), RepairOutcome::Unavailable("w".into())),
+            (
+                RegisterError::Unavailable("w".into()),
+                RepairOutcome::Unavailable("w".into()),
+            ),
         ] {
             let mut s = Stepper::new(&Timings::default(), 4);
             s.start();
             through_removal(&mut s);
             s.next(OsResult::Gone { timed_out: false });
-            assert_eq!(s.next(OsResult::RegisterErr(error)).action, Action::Done(outcome));
+            assert_eq!(
+                s.next(OsResult::RegisterErr(error)).action,
+                Action::Done(outcome)
+            );
         }
     }
 
@@ -776,11 +834,18 @@ mod tests {
         };
         // It polls, then gives up with the seconds it waited.
         let mut s = to_wait();
-        assert_eq!(s.next(looked(false, Job::NotRunning, 0)).action, Action::Pause(t.start_poll));
+        assert_eq!(
+            s.next(looked(false, Job::NotRunning, 0)).action,
+            Action::Pause(t.start_poll)
+        );
         assert_eq!(s.next(OsResult::Paused).action, Action::Look);
         let late = s.next(looked(false, Job::NotRunning, t.start_wait.as_secs()));
         assert_eq!(late.action, Action::Done(RepairOutcome::Registered));
-        assert!(matches!(&late.say[0], Step::Note(n) if n.contains("did not answer within 120 seconds")), "{:?}", late.say);
+        assert!(
+            matches!(&late.say[0], Step::Note(n) if n.contains("did not answer within 120 seconds")),
+            "{:?}",
+            late.say
+        );
         // Real time counts as much as the polls: a slow OS call cannot stretch the wait.
         let mut s = to_wait();
         let slow = s.next(looked(false, Job::NotRunning, 500));
@@ -791,19 +856,24 @@ mod tests {
             answers: false,
             job: Job::NotRunning,
             elapsed: Duration::ZERO,
-            cancelled: true, process: None,
+            cancelled: true,
+            process: None,
         });
         assert_eq!(cancelled.action, Action::Done(RepairOutcome::Registered));
         // A refusal seen during the wait is another cycle, not a longer wait.
         let mut s = to_wait();
-        assert_eq!(s.next(looked(false, Job::Refused, 3)).action, Action::Unregister);
+        assert_eq!(
+            s.next(looked(false, Job::Refused, 3)).action,
+            Action::Unregister
+        );
         // A cancel at the cycle boundary leaves nothing half removed.
         let mut s = to_wait();
         let over = s.next(OsResult::Looked {
             answers: false,
             job: Job::Refused,
             elapsed: Duration::ZERO,
-            cancelled: true, process: None,
+            cancelled: true,
+            process: None,
         });
         assert_eq!(over.action, Action::Done(RepairOutcome::Cancelled));
     }
@@ -834,8 +904,8 @@ mod tests {
         paused: Duration,
         job_after_failed_register: Option<Job>,
         failed_last: bool,
-    /// The process the job runs, as `job_process` names it.
-    process: Option<ProcessId>,
+        /// The process the job runs, as `job_process` names it.
+        process: Option<ProcessId>,
     }
 
     impl Backend for Script {
@@ -1176,10 +1246,17 @@ mod tests {
         ProcessId::new(pid, StartTime::from_micros(started))
     }
     fn answered_by(process: Option<ProcessId>) -> OsResult {
-        OsResult::Looked { answers: true, job: Job::Running, elapsed: Duration::ZERO, cancelled: false, process }
+        OsResult::Looked {
+            answers: true,
+            job: Job::Running,
+            elapsed: Duration::ZERO,
+            cancelled: false,
+            process,
+        }
     }
     fn waiting_after_register() -> Stepper {
-        let mut s = Stepper::new(&Timings::default(), 4);        s.start_register_only();
+        let mut s = Stepper::new(&Timings::default(), 4);
+        s.start_register_only();
         s.registered_at(StartTime::from_micros(REGISTERED));
         s.next(OsResult::RegisterOk);
         s.next(settled(Job::NotRunning, false));
@@ -1200,7 +1277,10 @@ mod tests {
         let mut s = waiting_after_register();
         for pid in 20..24 {
             let n = s.next(answered_by(Some(proc(pid, REGISTERED + u64::from(pid)))));
-            assert!(!matches!(n.action, Action::Done(RepairOutcome::Recovered)), "pid {pid}: {n:?}");
+            assert!(
+                !matches!(n.action, Action::Done(RepairOutcome::Recovered)),
+                "pid {pid}: {n:?}"
+            );
         }
     }
 
@@ -1208,7 +1288,10 @@ mod tests {
     fn one_new_process_seen_on_two_looks_settles() {
         let mut s = waiting_after_register();
         let new = proc(30, REGISTERED + 5);
-        assert_eq!(s.next(answered_by(Some(new))).action, Action::Pause(Timings::default().start_poll));
+        assert_eq!(
+            s.next(answered_by(Some(new))).action,
+            Action::Pause(Timings::default().start_poll)
+        );
         let n = s.next(answered_by(Some(new)));
         assert_eq!(n.action, Action::Done(RepairOutcome::Recovered));
     }
@@ -1218,7 +1301,10 @@ mod tests {
         let mut s = waiting_after_register();
         let p = proc(31, REGISTERED);
         s.next(answered_by(Some(p)));
-        assert_eq!(s.next(answered_by(Some(p))).action, Action::Done(RepairOutcome::Recovered));
+        assert_eq!(
+            s.next(answered_by(Some(p))).action,
+            Action::Done(RepairOutcome::Recovered)
+        );
     }
 
     #[test]
@@ -1231,37 +1317,84 @@ mod tests {
     #[test]
     fn the_executor_ends_registered_when_only_the_old_job_answers() {
         let old = proc(7, REGISTERED - 50);
-        let mut s = Script { process: Some(old), ..Script::default() };
+        let mut s = Script {
+            process: Some(old),
+            ..Script::default()
+        };
         let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
-        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
-        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut |_| {});
+        let bounds = Bounds {
+            cancel: &cancel,
+            abort: &abort,
+            allowed: 4,
+            register_only: false,
+            now: &|| StartTime::from_micros(REGISTERED),
+        };
+        let out = replace_bounded(
+            &mut s,
+            &mut || true,
+            &bounds,
+            &Timings::default(),
+            &mut || {},
+            &mut |_| {},
+        );
         assert_eq!(out, RepairOutcome::Registered);
     }
 
     #[test]
     fn the_executor_settles_on_a_process_that_started_after_the_register() {
         let new = proc(8, REGISTERED + 5);
-        let mut s = Script { process: Some(new), ..Script::default() };
+        let mut s = Script {
+            process: Some(new),
+            ..Script::default()
+        };
         let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
-        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
-        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut |_| {});
+        let bounds = Bounds {
+            cancel: &cancel,
+            abort: &abort,
+            allowed: 4,
+            register_only: false,
+            now: &|| StartTime::from_micros(REGISTERED),
+        };
+        let out = replace_bounded(
+            &mut s,
+            &mut || true,
+            &bounds,
+            &Timings::default(),
+            &mut || {},
+            &mut |_| {},
+        );
         assert_eq!(out, RepairOutcome::Recovered);
     }
 
     #[test]
-    fn after_a_register_read_back_wrong_a_silent_or_absent_job_starts_the_next_cycle_and_a_live_one_is_waited_for() {
+    fn after_a_register_read_back_wrong_a_silent_or_absent_job_starts_the_next_cycle_and_a_live_one_is_waited_for()
+     {
         let after = |job, answers| {
             let mut s = Stepper::new(&Timings::default(), 4);
             s.start();
             through_removal(&mut s);
             s.next(OsResult::Gone { timed_out: false });
-            s.next(OsResult::RegisterErr(RegisterError::NotAsWritten(Inspection::absent())));
+            s.next(OsResult::RegisterErr(RegisterError::NotAsWritten(
+                Inspection::absent(),
+            )));
             s.next(settled(job, answers)).action
         };
-        assert_eq!(after(Job::Absent, true), Action::Unregister, "no job at all, whatever answers");
-        assert_eq!(after(Job::NotRunning, false), Action::Unregister, "a job that is silent");
+        assert_eq!(
+            after(Job::Absent, true),
+            Action::Unregister,
+            "no job at all, whatever answers"
+        );
+        assert_eq!(
+            after(Job::NotRunning, false),
+            Action::Unregister,
+            "a job that is silent"
+        );
         assert_eq!(after(Job::Running, true), Action::Look);
-        assert_eq!(after(Job::NotRunning, true), Action::Look, "something answers");
+        assert_eq!(
+            after(Job::NotRunning, true),
+            Action::Look,
+            "something answers"
+        );
     }
 
     #[test]
@@ -1284,9 +1417,20 @@ mod tests {
             process: None,
         };
         let cancelled = waiting().next(look(0, true));
-        assert_eq!(cancelled.action, Action::Done(RepairOutcome::Registered), "cancelled early");
+        assert_eq!(
+            cancelled.action,
+            Action::Done(RepairOutcome::Registered),
+            "cancelled early"
+        );
         let ran_out = waiting().next(look(t.start_wait.as_secs() + 1, false));
-        assert_eq!(ran_out.action, Action::Done(RepairOutcome::Registered), "time ran out");
-        assert!(matches!(waiting().next(look(0, false)).action, Action::Pause(_)), "neither: keep waiting");
+        assert_eq!(
+            ran_out.action,
+            Action::Done(RepairOutcome::Registered),
+            "time ran out"
+        );
+        assert!(
+            matches!(waiting().next(look(0, false)).action, Action::Pause(_)),
+            "neither: keep waiting"
+        );
     }
 }

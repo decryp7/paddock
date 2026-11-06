@@ -636,7 +636,10 @@ impl Backend for SimBackend {
         }
         let pid = 1000 + w.job_ver as u32;
         let started = if w.job_ver == w.owner { u64::MAX } else { 1 };
-        Some(paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(started)))
+        Some(paddock_proc::ProcessId::new(
+            pid,
+            paddock_proc::StartTime::from_micros(started),
+        ))
     }
     fn pause(&mut self, how_long: Duration) {
         advance(
@@ -1743,7 +1746,11 @@ const CONFIGS: [(Caps, Resp); 8] = [
 /// The configurations of the default run (the first five) or the long one (all). A named one (`MODEL_CONFIG=Mac/Slow`) is
 /// looked for among all of them, so a configuration of the long run can be run alone with the default bounds.
 fn configs_for(deep: bool, only: Option<&str>) -> Vec<(Caps, Resp)> {
-    let all: &[(Caps, Resp)] = if deep || only.is_some() { &CONFIGS } else { &CONFIGS[..5] };
+    let all: &[(Caps, Resp)] = if deep || only.is_some() {
+        &CONFIGS
+    } else {
+        &CONFIGS[..5]
+    };
     all.iter()
         .copied()
         .filter(|(c, r)| only.is_none_or(|o| o == format!("{c:?}/{r:?}")))
@@ -1752,8 +1759,15 @@ fn configs_for(deep: bool, only: Option<&str>) -> Vec<(Caps, Resp)> {
 
 #[test]
 fn a_named_configuration_of_the_long_run_runs_alone_with_the_default_bounds() {
-    assert_eq!(configs_for(false, Some("Mac/Slow")), vec![(Caps::Mac, Resp::Slow)]);
-    assert_eq!(configs_for(false, None).len(), 5, "the default run is the first five");
+    assert_eq!(
+        configs_for(false, Some("Mac/Slow")),
+        vec![(Caps::Mac, Resp::Slow)]
+    );
+    assert_eq!(
+        configs_for(false, None).len(),
+        5,
+        "the default run is the first five"
+    );
     assert_eq!(configs_for(true, None).len(), CONFIGS.len());
     assert!(configs_for(false, Some("Mac/Nonsense")).is_empty());
 }
@@ -1835,7 +1849,7 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
     // The alphabet is not silently trimmed: every event, fault and interruption was taken, and the floors hold. A run of one
     // named configuration takes only what that configuration can (the elevation faults are NoAuto's).
     if std::env::var("MODEL_CONFIG").is_err() {
-    for e in ALL_EVS {
+        for e in ALL_EVS {
             assert!(
                 by_event.get(&format!("{e:?}")).copied().unwrap_or(0) > 0,
                 "event {e:?} was never taken\n{out}"
