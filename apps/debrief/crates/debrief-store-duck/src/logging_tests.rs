@@ -259,3 +259,26 @@ fn files_that_fail_leave_no_name_or_text_in_the_log_above_debug() {
         let _ = std::fs::set_permissions(folder.join("secret-unreadable.log"), std::fs::Permissions::from_mode(0o644));
     }
 }
+
+/// A contained plugin crash can quote the record the plugin was reading: the error line names the plugin and the kind, the
+/// message is for debug.
+#[test]
+fn a_plugin_crash_names_the_plugin_at_error_and_keeps_its_message_for_debug() {
+    testlog::install();
+    let health = debrief_core::guard::Health::default();
+    health.fail("net.test.crashing", "bad value customer-4711 in the record");
+    let all = testlog::all();
+    let lines: Vec<&testlog::Record> = all.iter().filter(|r| r.message.contains("net.test.crashing")).collect();
+    let error = lines.iter().find(|r| r.level == log::Level::Error).expect("the error line");
+    assert!(error.message.contains("crashed"), "{error:?}");
+    assert!(
+        !format!("{error:?}").contains("customer-4711"),
+        "no record text at error: {error:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|r| r.level == log::Level::Debug && r.message.contains("customer-4711")),
+        "the message is kept at debug: {lines:?}"
+    );
+}
