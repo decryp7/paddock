@@ -880,6 +880,7 @@ fn reply_samples() -> Vec<Reply> {
         Reply::Job(Box::new(wire_job())),
         Reply::Jobs(vec![wire_job()]),
         Reply::JobCancelled(true),
+        Reply::JobOutput(Box::new(JobOutput::Sleep(zero()))),
         Reply::WidgetLayout(Box::new(widgets::layout_view(&Settings::default(), widgets::DynoSurface::Popover))),
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
         Reply::HelperStatus(Box::new(zero())),

@@ -234,6 +234,18 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_layout_naming_the_removed_backup_widget_loads_without_it() {
+        let value = serde_json::json!({"version": 1, "placements": [
+            {"id": "cpu-memory", "span": 2, "widget": "cpuMemory"},
+            {"id": "backup-health", "span": 2, "widget": "backupHealth"},
+            {"id": "net", "span": 2, "widget": "network"}
+        ], "presets": []});
+        let r = read::<PopoverCatalogue>(&value);
+        assert_eq!(r.layout.placements.len(), 2);
+        assert_eq!(r.notes.len(), 1);
+    }
+
+    #[test]
     fn a_volume_needs_an_id_and_the_popup_holds_eight() {
         let mut s = Stored::<PopoverCatalogue>::default();
         let bad = s.edit(Edit::Add {
