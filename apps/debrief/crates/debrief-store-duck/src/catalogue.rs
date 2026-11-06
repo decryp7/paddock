@@ -748,6 +748,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn a_store_asks_for_the_automatic_workers_unless_a_test_says_otherwise() {
+        assert_eq!(initial_workers(), 0);
+        TEST_WORKERS.with(|w| w.set(3));
+        assert_eq!(initial_workers(), 3);
+        TEST_WORKERS.with(|w| w.set(0));
+    }
+
     /// SR3: several workers write the rows of building the sources one after the other, whatever the order they finish in.
     /// The event ids are left out: two imports of the same files hand out their id blocks in a different order.
     #[test]

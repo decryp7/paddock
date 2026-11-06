@@ -384,6 +384,21 @@ mod tests {
     }
 
     #[test]
+    fn a_budget_takes_bytes_up_to_exactly_its_cap_and_says_its_size() {
+        let budget = ByteBudget::new(100);
+        assert_eq!(budget.cap(), 100);
+        // A cancelled wait only matters if the bytes do not fit: 60 + 40 is exactly the cap and fits at once.
+        let cancel = AtomicBool::new(true);
+        assert!(budget.acquire(60, Some(&cancel)));
+        assert!(budget.acquire(40, Some(&cancel)), "60 + 40 = 100 fits a cap of 100");
+        assert!(!budget.acquire(1, Some(&cancel)), "one more byte does not");
+        // Releasing makes room again.
+        budget.release(40);
+        assert!(budget.acquire(40, Some(&cancel)));
+        assert_eq!(budget.peak(), 100);
+    }
+
+    #[test]
     fn a_budget_wait_ends_on_cancel() {
         let budget = ByteBudget::new(10);
         assert!(budget.acquire(10, None));

@@ -1682,7 +1682,9 @@ mod tests {
         let pool = read_pool(4);
         let cancel = AtomicBool::new(false);
         let ready: HashSet<u32> = [1].into_iter().collect();
+        let finished = Mutex::new(Vec::new());
         let run = |memory: usize| {
+            finished.lock().unwrap().clear();
             let mut w = fts.writer().unwrap();
             let fed = fts
                 .index_files(
@@ -1697,7 +1699,7 @@ mod tests {
                     },
                     &stages(&pool, &cancel),
                     feed_window(&pool),
-                    |_| {},
+                    |n| finished.lock().unwrap().push(n),
                 )
                 .unwrap();
             w.rollback().unwrap();
@@ -1706,6 +1708,17 @@ mod tests {
         let memory = 4 << 20;
         let bounded = run(memory);
         assert_eq!(bounded.docs, rows as u64, "every row is read");
+        assert_eq!(
+            *finished.lock().unwrap(),
+            [1, 2],
+            "files finished, in order, the last one at the end"
+        );
+        assert!(
+            bounded.slices > 2 * 3,
+            "each of the six row groups is cut into several slices: {}",
+            bounded.slices
+        );
+        assert!(bounded.peak_bytes > 0 && bounded.peak_built_bytes > 0);
         assert!(
             bounded.peak_built_bytes <= memory,
             "{} MB of documents were built at once against a budget of {} MB",
@@ -1755,8 +1768,8 @@ mod tests {
                     Arc::new(Int64Array::from(ids.iter().map(|i| *i as i64).collect::<Vec<_>>())),
                     Arc::new(UInt32Array::from(vec![1u32; rows])),
                     Arc::new(StringArray::from(message)),
-                    Arc::new(StringArray::from(vec![None::<&str>; rows])),
-                    Arc::new(StringArray::from(vec![None::<&str>; rows])),
+                    Arc::new(StringArray::from(vec![Some("boom"); rows])),
+                    Arc::new(StringArray::from(vec![Some("tpl {}"); rows])),
                 ];
                 w.write(&RecordBatch::try_new(schema.clone(), cols).unwrap()).unwrap();
                 w.flush().unwrap();
@@ -1878,6 +1891,17 @@ mod tests {
             .unwrap();
         found.sort_unstable();
         assert_eq!(found, all);
+        // With the time a step has by default, one step takes every segment.
+        s.step_time.store(STEP_TIME.as_micros() as u64, Ordering::Relaxed);
+        svc.rebuild(&conn).unwrap();
+        s.gate.news();
+        assert_eq!(step(s, &seg_dir, &conn, &write_lock, svc.epoch).unwrap(), Turn::Worked);
+        assert_eq!(
+            count("SELECT count(*) FROM segments WHERE NOT indexed"),
+            0,
+            "all {segments} segments in one step"
+        );
+        assert_eq!(s.fts.docs(), all.len() as u64);
         drop(conn);
         drop(store);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1927,5 +1951,74 @@ mod tests {
         assert_eq!(fed.stop, StopCause::Shutdown);
         assert!(fed.docs < rows as u64, "the input was cut: {} of {rows}", fed.docs);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A slice yields exactly its rows (not the rest of the group again), and its size is the text plus the per-document
+    /// overhead, as the budget counted it.
+    #[test]
+    fn a_slice_has_its_own_rows_and_the_size_the_budget_counted() {
+        use tantivy::schema::Value;
+        let dir = std::env::temp_dir().join(format!("debrief-fts-slice-docs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let seg_dir = dir.join("segments");
+        std::fs::create_dir_all(&seg_dir).unwrap();
+        let (files, _) = write_long_segments(&seg_dir, 1, 2, 1000, 200);
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 32 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let committed = AtomicUsize::new(0);
+        // 40 KB slices of events of about 200 + 4 + 6 bytes and the overhead: about 120 rows.
+        let mut units = SegmentUnits::new(&seg_dir, &files, None, &committed, 40 << 10);
+        let ready: HashSet<u32> = [1].into_iter().collect();
+        let ts_field = fts.index.schema().get_field("ts").unwrap();
+        let (rows_in_group, per_row) = estimated_row_bytes(&units.open(&files[0]).unwrap().0, 0);
+        assert_eq!(rows_in_group, 1000);
+        assert!(
+            (200 + 10 + DOC_OVERHEAD_BYTES..200 + 10 + DOC_OVERHEAD_BYTES + 64).contains(&per_row),
+            "per row {per_row}"
+        );
+        let _first = units.next_unit().unwrap();
+        let second = units.next_unit().unwrap();
+        assert_eq!(
+            (second.group, second.offset),
+            (0, second.rows.min(1000)),
+            "the second slice follows the first"
+        );
+        assert_eq!(second.bytes, second.rows * per_row);
+        let (docs, bytes) = fts.documents(&second, 7, ts_field, &ready).unwrap();
+        assert_eq!(docs.len(), second.rows);
+        let ids: Vec<u64> = docs
+            .iter()
+            .map(|d| d.get_first(fts.f.id).and_then(|v| v.as_u64()).unwrap())
+            .collect();
+        let want: Vec<u64> = (second.offset as u64..(second.offset + second.rows) as u64).collect();
+        assert_eq!(ids, want, "the rows of the slice, not the start of the group");
+        // The text of each: "alpha <id> word word ...", "boom" and "tpl {}", and the overhead.
+        let text: usize = ids
+            .iter()
+            .map(|i| format!("alpha {i} {}", "word ".repeat(40)).len() + "boom".len() + "tpl {}".len())
+            .sum();
+        assert_eq!(bytes, text + docs.len() * DOC_OVERHEAD_BYTES);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_feed_shape_follows_the_pool_and_the_settings() {
+        assert_eq!(FEED_MEMORY, 64 * 1024 * 1024);
+        assert_eq!(read_pool(3).current_num_threads(), 3);
+        assert_eq!(read_pool(0).current_num_threads(), auto_read_threads());
+        assert!((1..=MAX_READ_THREADS).contains(&auto_read_threads()));
+        assert_eq!(auto_read_threads(), threads(WorkKind::Cpu, None).clamp(1, MAX_READ_THREADS));
+        let pool = read_pool(3);
+        assert_eq!(feed_window(&pool), 6, "two slices for each thread");
+        assert_eq!(StopCause::Done.as_str(), "all files of the step fed");
+        assert_eq!(StopCause::Time.as_str(), "step time used up");
+        assert_eq!(StopCause::Shutdown.as_str(), "the process is exiting");
     }
 }
