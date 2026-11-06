@@ -27,7 +27,9 @@ describe('helperFace', () => {
   });
 
   it('says what the helper shows, that it only reads, names each running action and whether Cancel works at the prompt', () => {
-    expect(HELPER_READS_ONLY).toMatch(/reads system details.*only when you ask/);
+    expect(HELPER_READS_ONLY).toMatch(/reads system details/);
+    expect(HELPER_READS_ONLY).toMatch(/On Windows it also installs the disk-health tool when you ask/);
+    expect(HELPER_READS_ONLY).toMatch(/on macOS and Linux it also sets Dyno's own scheduled wakes/);
     for (const a of ['turnOn', 'repair', 'update', 'turnOff'] as const) expect(helperActionSentence(a), a).not.toMatch(/not turned on/);
     expect(['turnOn', 'repair', 'update', 'turnOff'].map((a) => helperActionBadge(a as never))).toEqual(['Turning on', 'Repairing', 'Updating', 'Turning off']);
     expect(TURN_OFF_LABEL).toBe('Turn off administrator readings');

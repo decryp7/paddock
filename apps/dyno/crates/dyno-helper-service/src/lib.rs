@@ -70,7 +70,7 @@ pub fn spec() -> ServiceSpec {
     ServiceSpec::builder(LABEL, SERVICE_NAME, PROGRAM)
         .unit(PROGRAM)
         .display_name("Dyno helper")
-        .description("Answers Dyno's questions that need administrator rights, such as reading system details. It installs the disk-health tool only when you ask.")
+        .description(DESCRIPTION)
         .args(["serve"])
         .kind(Kind::SystemService)
         .restart(Restart::OnFailure)
@@ -81,6 +81,13 @@ pub fn spec() -> ServiceSpec {
         .build()
         .unwrap_or_else(|e| unreachable!("the helper's constant spec is valid: {e}"))
 }
+
+/// What the helper does, per system: Windows installs the pinned disk-health tool when asked (no other system has a pinned download);
+/// macOS and Linux set Dyno's own scheduled wakes (on Windows the agent's timer does).
+#[cfg(windows)]
+const DESCRIPTION: &str = "Answers Dyno's questions that need administrator rights, such as reading system details, and installs the disk-health tool when you ask.";
+#[cfg(not(windows))]
+const DESCRIPTION: &str = "Answers Dyno's questions that need administrator rights, such as reading system details, and sets Dyno's own scheduled wakes.";
 
 /// The folders Windows names for the helper's places: Program Files, ProgramData and the Windows folder, as the OS reports
 /// them (`SHGetKnownFolderPath`, `GetSystemDirectoryW`), never from the environment: the elevated install may inherit a

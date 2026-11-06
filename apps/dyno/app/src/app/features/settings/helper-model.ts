@@ -32,7 +32,7 @@ export function helperFace(state: HelperState): HelperFace {
 }
 
 /** The assurance under the list of readings. */
-export const HELPER_READS_ONLY = 'It reads system details that need administrator rights. It installs or removes only itself, and installs the disk-health tool only when you ask.';
+export const HELPER_READS_ONLY = 'It reads system details that need administrator rights. It installs or removes only itself. On Windows it also installs the disk-health tool when you ask; on macOS and Linux it also sets Dyno\'s own scheduled wakes.';
 
 /** The word on the badge while an action runs ("Turning on"). */
 export function helperActionBadge(action: HelperAction): string {
