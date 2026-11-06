@@ -3,6 +3,7 @@ import { all, buttonByText, settle, text } from '../../testing/helpers';
 import { DebriefBackend } from '../core/backend';
 import { WorkspaceStore } from '../core/workspace.store';
 import { ProjectBackend } from '../core/tools-backend';
+import { CmdError } from '../core/cmd-error';
 import { CommandRegistry } from '../extensions/command-registry';
 import { DEBRIEF_COMMANDS } from '../extensions/tokens';
 import { CoreUiState } from '../lifecycle/core-ui-state';
@@ -203,6 +204,16 @@ describe('ProjectService', () => {
     expect(projects.path()).toBeNull();
     expect(await projects.open('/nope.debriefz')).toBe(false);
     expect(store.error()).toContain('Could not open the project');
+  });
+
+  it('shows the refusal of a project made with an older Debrief as written, with its next step', async () => {
+    const { projects, tools, store } = await setup();
+    const message =
+      'This project was made with an older Debrief (database format 64) and cannot be opened. Import the files again into a new project.';
+    vi.spyOn(tools, 'openProject').mockRejectedValue(new CmdError({ code: 'invalid', message, retryable: false }));
+    expect(await projects.open('/p/old.debriefz')).toBe(false);
+    expect(store.error()).toBe(`Could not open the project: ${message}`);
+    expect(projects.path()).toBeNull();
   });
 
   it('shows missing paths after opening and can dismiss them', async () => {

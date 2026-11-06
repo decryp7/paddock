@@ -582,6 +582,9 @@ mod tests {
         let e: CmdError = StoreError::Damaged("a data file is damaged".into()).into();
         assert_eq!((e.code, e.retryable), (ErrorCode::Failed, false));
         assert!(e.hint.as_deref().is_some_and(|h| h.contains(".debriefz")));
+        let older = "This project was made with an older Debrief (database format 64) and cannot be opened. Import the files again into a new project.";
+        let e: CmdError = StoreError::Invalid(older.into()).into();
+        assert_eq!((e.code, e.message.as_str(), e.retryable), (ErrorCode::Invalid, older, false));
         let e: CmdError = StoreError::Locked("open elsewhere".into()).into();
         assert_eq!((e.code, e.retryable), (ErrorCode::Busy, true));
         assert!(e.hint.as_deref().is_some_and(|h| h.contains("Close")));

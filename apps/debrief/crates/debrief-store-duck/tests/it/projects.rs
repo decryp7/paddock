@@ -264,3 +264,38 @@ fn a_store_written_by_duckdb_1_x_is_refused_and_left_untouched() {
         "no wal or tmp left behind"
     );
 }
+
+/// A project folder, and the same project as an `.debriefz`, whose catalog was written by Debrief 1.1 (the DuckDB 1.5.6
+/// fixture) are both refused by `open_project` with the same next step; nothing is extracted into a usable store.
+#[test]
+fn a_project_folder_or_archive_with_a_1_x_catalog_is_refused() {
+    let dir = TempDir::new("old-project");
+    let project = dir.0.join("old.debrief");
+    let store = DuckStore::create_project(&project, "old", Profile::default_profile(), PluginRegistry::new()).unwrap();
+    let mut manifest = ProjectManifest {
+        name: "old".into(),
+        ..ProjectManifest::default()
+    };
+    store.save_project(&mut manifest).unwrap();
+    drop(store);
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/store-written-by-duckdb-1.5.6/data.duckdb");
+    std::fs::copy(&fixture, project.join(debrief_store_duck::DB_FILE)).unwrap();
+    let _ = std::fs::remove_file(project.join(format!("{}.wal", debrief_store_duck::DB_FILE)));
+    let refused = |path: &Path, dest: &Path| match DuckStore::open_project(path, dest, Profile::default_profile(), PluginRegistry::new()) {
+        Err(StoreError::Invalid(m)) => m.contains("older Debrief") && m.contains("Import the files again into a new project"),
+        Err(e) => panic!("{e}"),
+        Ok(_) => false,
+    };
+    assert!(refused(&project, &dir.0.join("d1")), "folder");
+    let archive = dir.0.join("old.debriefz");
+    {
+        use std::io::Write;
+        let mut z = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+        for name in ["project.toml", debrief_store_duck::DB_FILE] {
+            z.start_file(name, zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(&std::fs::read(project.join(name)).unwrap()).unwrap();
+        }
+        z.finish().unwrap();
+    }
+    assert!(refused(&archive, &dir.0.join("d2")), "archive");
+}
