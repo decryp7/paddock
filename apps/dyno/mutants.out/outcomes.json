@@ -1,0 +1,1474 @@
+{
+  "outcomes": [
+    {
+      "scenario": "Baseline",
+      "summary": "Success",
+      "log_path": "log/baseline.log",
+      "diff_path": null,
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 0.154245888,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 1.8375046849999999,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:76:5: replace would_lower -> bool with true",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "would_lower",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 1
+              },
+              "end": {
+                "line": 77,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 76,
+              "column": 5
+            },
+            "end": {
+              "line": 76,
+              "column": 21
+            }
+          },
+          "replacement": "true",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_76_col_5.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_76_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.270184781,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.807504305,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:76:5: replace would_lower -> bool with false",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "would_lower",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 1
+              },
+              "end": {
+                "line": 77,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 76,
+              "column": 5
+            },
+            "end": {
+              "line": 76,
+              "column": 21
+            }
+          },
+          "replacement": "false",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_76_col_5_001.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_76_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.259586896,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.856717641,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:76:13: replace < with == in would_lower",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "would_lower",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 1
+              },
+              "end": {
+                "line": 77,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 76,
+              "column": 13
+            },
+            "end": {
+              "line": 76,
+              "column": 14
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_76_col_13.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_76_col_13.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 4.672784888,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.808202265,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:76:13: replace < with > in would_lower",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "would_lower",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 1
+              },
+              "end": {
+                "line": 77,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 76,
+              "column": 13
+            },
+            "end": {
+              "line": 76,
+              "column": 14
+            }
+          },
+          "replacement": ">",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_76_col_13_001.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_76_col_13_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.004925709,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.875030949,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:76:13: replace < with <= in would_lower",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "would_lower",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 72,
+                "column": 1
+              },
+              "end": {
+                "line": 77,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 76,
+              "column": 13
+            },
+            "end": {
+              "line": 76,
+              "column": 14
+            }
+          },
+          "replacement": "<=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_76_col_13_002.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_76_col_13_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.287330296,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.858003768,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:83:5: replace nice_result -> Option<i32> with None",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "nice_result",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 88,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 5
+            },
+            "end": {
+              "line": 87,
+              "column": 6
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_83_col_5.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_83_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.392692909,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.808761015,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:83:5: replace nice_result -> Option<i32> with Some(0)",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "nice_result",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 88,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 5
+            },
+            "end": {
+              "line": 87,
+              "column": 6
+            }
+          },
+          "replacement": "Some(0)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_83_col_5_001.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_83_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.965502758,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 1.021472538,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:83:5: replace nice_result -> Option<i32> with Some(1)",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "nice_result",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 88,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 5
+            },
+            "end": {
+              "line": 87,
+              "column": 6
+            }
+          },
+          "replacement": "Some(1)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_83_col_5_002.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_83_col_5_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.701973042,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.815079437,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:83:5: replace nice_result -> Option<i32> with Some(-1)",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "nice_result",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 88,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 5
+            },
+            "end": {
+              "line": 87,
+              "column": 6
+            }
+          },
+          "replacement": "Some(-1)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_83_col_5_003.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_83_col_5_003.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.237035375,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.852931221,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:83:18: replace && with || in nice_result",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "nice_result",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 88,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 18
+            },
+            "end": {
+              "line": 83,
+              "column": 20
+            }
+          },
+          "replacement": "||",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_83_col_18.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_83_col_18.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.5189495859999997,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.805542679,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:83:12: replace == with != in nice_result",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "nice_result",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 88,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 12
+            },
+            "end": {
+              "line": 83,
+              "column": 14
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_83_col_12.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_83_col_12.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.016031594,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.801787509,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:83:15: delete - in nice_result",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "nice_result",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 88,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 15
+            },
+            "end": {
+              "line": 83,
+              "column": 16
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_83_col_15.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_83_col_15.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 1.966162134,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.808094473,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:83:27: replace != with == in nice_result",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "nice_result",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 79,
+                "column": 1
+              },
+              "end": {
+                "line": 88,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 83,
+              "column": 27
+            },
+            "end": {
+              "line": 83,
+              "column": 29
+            }
+          },
+          "replacement": "==",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_83_col_27.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_83_col_27.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.065561431,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.809865016,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:95:5: replace current_nice -> Option<i32> with None",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "current_nice",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 90,
+                "column": 1
+              },
+              "end": {
+                "line": 101,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 95,
+              "column": 5
+            },
+            "end": {
+              "line": 100,
+              "column": 6
+            }
+          },
+          "replacement": "None",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_95_col_5.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_95_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.557883705,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.777116612,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:95:5: replace current_nice -> Option<i32> with Some(0)",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "current_nice",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 90,
+                "column": 1
+              },
+              "end": {
+                "line": 101,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 95,
+              "column": 5
+            },
+            "end": {
+              "line": 100,
+              "column": 6
+            }
+          },
+          "replacement": "Some(0)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_95_col_5_001.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_95_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.301742976,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.852575478,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:95:5: replace current_nice -> Option<i32> with Some(1)",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "current_nice",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 90,
+                "column": 1
+              },
+              "end": {
+                "line": 101,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 95,
+              "column": 5
+            },
+            "end": {
+              "line": 100,
+              "column": 6
+            }
+          },
+          "replacement": "Some(1)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_95_col_5_002.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_95_col_5_002.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.730146715,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.817106874,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:95:5: replace current_nice -> Option<i32> with Some(-1)",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "current_nice",
+            "return_type": "-> Option<i32>",
+            "span": {
+              "start": {
+                "line": 90,
+                "column": 1
+              },
+              "end": {
+                "line": 101,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 95,
+              "column": 5
+            },
+            "end": {
+              "line": 100,
+              "column": 6
+            }
+          },
+          "replacement": "Some(-1)",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_95_col_5_003.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_95_col_5_003.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 4.638693641,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.805397874,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:106:5: replace set_current_thread -> bool with true",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "set_current_thread",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 103,
+                "column": 1
+              },
+              "end": {
+                "line": 141,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 106,
+              "column": 5
+            },
+            "end": {
+              "line": 140,
+              "column": 6
+            }
+          },
+          "replacement": "true",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_106_col_5.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_106_col_5.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.02983756,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.806192083,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:106:5: replace set_current_thread -> bool with false",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "set_current_thread",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 103,
+                "column": 1
+              },
+              "end": {
+                "line": 141,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 106,
+              "column": 5
+            },
+            "end": {
+              "line": 140,
+              "column": 6
+            }
+          },
+          "replacement": "false",
+          "genre": "FnValue"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_106_col_5_001.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_106_col_5_001.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.115097758,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.863931868,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:114:9: delete match arm Level::Nice10 in set_current_thread",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "set_current_thread",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 103,
+                "column": 1
+              },
+              "end": {
+                "line": 141,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 114,
+              "column": 9
+            },
+            "end": {
+              "line": 130,
+              "column": 10
+            }
+          },
+          "replacement": "",
+          "genre": "MatchArm"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_114_col_9.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_114_col_9.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.189564501,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.805659499,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:123:24: delete ! in set_current_thread",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "set_current_thread",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 103,
+                "column": 1
+              },
+              "end": {
+                "line": 141,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 123,
+              "column": 24
+            },
+            "end": {
+              "line": 123,
+              "column": 25
+            }
+          },
+          "replacement": "",
+          "genre": "UnaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_123_col_24.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_123_col_24.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 3.974106753,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.957395317,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    },
+    {
+      "scenario": {
+        "Mutant": {
+          "name": "crates/dyno-platform/src/priority.rs:128:71: replace == with != in set_current_thread",
+          "package": "dyno-platform",
+          "file": "crates/dyno-platform/src/priority.rs",
+          "function": {
+            "function_name": "set_current_thread",
+            "return_type": "-> bool",
+            "span": {
+              "start": {
+                "line": 103,
+                "column": 1
+              },
+              "end": {
+                "line": 141,
+                "column": 2
+              }
+            }
+          },
+          "span": {
+            "start": {
+              "line": 128,
+              "column": 71
+            },
+            "end": {
+              "line": 128,
+              "column": 73
+            }
+          },
+          "replacement": "!=",
+          "genre": "BinaryOperator"
+        }
+      },
+      "summary": "CaughtMutant",
+      "log_path": "log/crates__dyno-platform__src__priority.rs_line_128_col_71.log",
+      "diff_path": "diff/crates__dyno-platform__src__priority.rs_line_128_col_71.diff",
+      "phase_results": [
+        {
+          "phase": "Build",
+          "duration": 2.161704942,
+          "process_status": "Success",
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--no-run",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        },
+        {
+          "phase": "Test",
+          "duration": 0.802630375,
+          "process_status": {
+            "Failure": 101
+          },
+          "argv": [
+            "/home/decryp7/.rustup/toolchains/stable-aarch64-unknown-linux-gnu/bin/cargo",
+            "test",
+            "--verbose",
+            "--package=dyno-platform@1.1.0"
+          ]
+        }
+      ]
+    }
+  ],
+  "total_mutants": 22,
+  "missed": 0,
+  "caught": 22,
+  "timeout": 0,
+  "unviable": 0,
+  "success": 0,
+  "start_time": "2026-11-06T07:42:03.097346751Z",
+  "end_time": "2026-11-06T07:43:23.605269427Z",
+  "cargo_mutants_version": "27.1.0"
+}

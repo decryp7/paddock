@@ -1,0 +1,4 @@
+crates/dyno-platform/src/priority.rs:88:21: replace || with && in current_nice
+crates/dyno-platform/src/priority.rs:88:15: replace != with == in current_nice
+crates/dyno-platform/src/priority.rs:88:18: delete - in current_nice
+crates/dyno-platform/src/priority.rs:88:50: replace == with != in current_nice
