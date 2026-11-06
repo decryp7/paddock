@@ -339,9 +339,13 @@ The table keeps the recommendations as they were put to the user.
 
 ## 4. Release split (the user's direction, 2026-11-07)
 
-The user chose, on 2026-11-07: "solid foundation in 1.2 first, then slowly one function one by one". This section
-replaces R7 and section 2.5's end date. It changes **release placement only**; every design (ADRs 0064 to 0069, the
-layers of section 1) stays as accepted.
+The user chose, on 2026-11-07: "solid foundation in 1.2 first, then slowly one function one by one". Later that day a
+split of the foundation itself was considered (a first release of the streaming and folder-open chain alone, about
+2027-01-28, the rest of the foundation in 1.3 and 1.4); the user rejected it: **"full foundation in 1.2"**, with rule 47
+in Debrief's views (Y10) in 1.2 as well (the user's 2026-11-05 decision: no waiver extension past 2026-12-31). This
+section replaces R7 and section 2.5's end date. It changes **release placement only**; every design (ADRs 0064 to 0069,
+the layers of section 1) stays as accepted. **Order inside 1.2: the streaming and folder-open chain first** (section 2.1),
+then the rest of the foundation by capacity.
 
 ### 4.1 Debrief 1.2: foundation, plus bug fixes and correctness
 
@@ -355,48 +359,57 @@ unless a foundation acceptance test needs them (then they stay and are named).
 | Foundation, plan | Layers 0 to 6 of §9.2: L-0, X10, X11a/b, X1, WP-SL1, 0.2 to 0.5, X7; 1.4 + B1, 2.2, P1, IP1, 2.6a to 2.6d, PH1 to PH4, J1, 1.2 rest, 1.3, M1 to M4, D-a; SI-0 to SI-18; MEM-3 to MEM-5, MEM-6 ADR; Z0 to Z13 (ADR 0066); F1 to F12, FM, FR (ADR 0067); B0 to B8 (ADR 0065); ST, Q-1 to Q-4, IX, SR, CPU-1, NB-1, P4, BP1, 4.3, 5.1, 5.2, D-b, the bench gates; 2.1, 2.3 to 2.5, 2.7, 3.2, 3.3, 3.6, 3.7, 4.1, 4.2, 4.4, 4.5, the drawing build, W0, LV1 to LV3; Y3 rest, Y4, Y6, Y7, Y8, Y11, Y12, Y14's R0 and R3 (6), Y16; X2 to X6, X8, X9; N3 (the packs mechanism the frame classifier and ADR 0068's unexpected-modules pack use), N8; 5.4, M5, F, R | 463.5 [calc: §9.5's 534 less the functions below] |
 | Foundation, new | FD-U 3, FD-P 0.5, FD-E1 2, FD-E2 3, FD-B 1.5, FD-I 1, FD-F 3, FD-G 1, FD-K 0.5, FD-M 3; **plus ADR 0068's WP-1 (4)**: FD-I rests on its `CheckReport` contract, so the contract stays in 1.2 while the dump checks leave | 22.5 |
 | Correctness | UMDH reader fixes and test generator (2, with SI-11); `+h:mm` and spaced-date shapes (1.5, Checkpoint A); known issues and playbooks scoped to the window (1; they count outside it today); CLI `--profile` (1; the CLI ignores the profile today); outliers' Benjamini–Hochberg (0.5; p-values over up to 6,000 tests); the cap-stop and offset fix and the AI coverage fix (already done, 0) | 6 |
-| **1.2 total** | | **492 raw, 590.4 with 20 %** [calc] |
+| Rule 47 in Debrief's views | Y10 (the user's decision; see below for 2026-12-31) | 18.5 |
+| **1.2 total** | | **510.5 raw, 612.6 with 20 %** [calc] |
 
 **Out of 1.2 (functions):** from the plan Y1 AI memory (10.5), Y2 semantic search with X55 (9.5), N4, N5, N0, N7
-(5.5), Y5 tray popup (5), Y9's small items (4), Y10 rule 47 in Debrief's views (18.5), Y13 formats, PML, batch queries
-(9), Y14's R5 UI items (8): **70.5**. From the approved items: citations, report blocks, the thread/sequence view,
+(5.5), Y5 tray popup (5), Y9's small items (4), Y13 formats, PML, batch queries (9), Y14's R5 UI items (8): **52**. From the approved items: citations, report blocks, the thread/sequence view,
 Pitwall drafting and all of ADR 0068 except WP-1; from the tiny list the collector's detector set, range import in
 local time, the SQL result block.
 
-- **Y10 needs a check** [U]: if a conformance gate or a waiver with a date (C-checks, `paddock.waivers.toml`) requires
-  rule 47 in Debrief's views before its next tag, Y10 (or the part the gate checks) comes back into 1.2.
+- **Y10 and 2026-12-31** [S]. No conformance check or waiver covers rule 47: `paddock.waivers.toml` on `origin/main`
+  `87c9b8449` has no rule 47 entry, and `conformance/`, `eslint/` and `lint/` have no rule 47 check (grep for "rule 47",
+  "Material first", `<select`, `mat-select` finds none). The Debrief waivers that expire on 2026-12-31 are 14 entries for
+  C36, C39 and C53 (for example C39 on `crates/debrief-ai-worker/src/child.rs`): **X7, the waiver sweep, must land by
+  then** (the plan says 2026-12-19). Y10 has no date gate of its own, but the user wants it by 2026-12-31 too. **It fits
+  inside 1.2's schedule** [calc; J]: 18.5 days on two agents is about 11 working days (18.5 / 1.7), so it must start by
+  about 2026-12-14, better 2026-12-01 for margin; from 2026-11-09 to 2026-12-31 there are 38 working days. It is app-only
+  Angular work, so it does not compete with the chain's Rust packages for people, only for the build lock's UI share; it
+  moves other packages later inside 1.2, not 1.2's end, since its days are already in the total. To avoid redoing it,
+  its sub-packages start with the views that 2.7 and 4.5 (lists onto the virtual primitive) do not rewrite.
 - Nothing a foundation acceptance test needs is stranded: SI-15 and F12 need the import, the dialog and the store;
   the B packages need the lists; FD-M needs only the corpus; FD-E2's tests use notes, which exist.
 
-**End date** [calc]: 590.4 / 5.5 = 107.3 working days, plus Spotter 2.5 and quiet-window slips 4 (§9.5's
-allowances): about **114 working days from 2026-11-09, so about 2027-04-15**, against about 2027-04-28 for the plan as it
+**End date** [calc]: 612.6 / 5.5 = 111.4 working days, plus Spotter 2.5 and quiet-window slips 4 (§9.5's
+allowances): about **118 working days from 2026-11-09, so about 2027-04-21**, against about 2027-04-28 for the plan as it
 stood and about 2027-06-11 for "keep everything". 1.2 is barely shorter than the plan because the plan was already
-mostly foundation; the gain is that the functions after it no longer wait for each other.
+mostly foundation; the gain is that the functions after it no longer wait for each other. Inside 1.2 the large event
+log still opens at about T+17 to T+19 and the folder dialog works end to end at about T+28 (section 2.1), since the
+chain goes first.
 
 ### 4.2 After 1.2: one function per release
 
 Ordered by value for effort and dependencies. Each release: raw days × 1.2 spread over the agents one function can use
 (about 2.5 agent-days a day for a small function, 3.4 to 4.25 for the dump and UMDH work [J]), plus about 2 working days
-of release work (safety net, VM pass, tag) [J]. Dates are working days after 2027-04-15, no holidays, one release at a
+of release work (safety net, VM pass, tag) [J]. Dates are working days after 2027-04-21, no holidays, one release at a
 time (ER-1) [calc].
 
 | Release | Function | Raw days | Working days | Rough date |
 |---|---|---|---|---|
-| 1.3 | Citations and report blocks (with the SQL result block) | 8.5 | 6 | 2027-04-26 |
-| 1.4 | Dump checks, crash and hang: ADR 0068 native WP-2, WP-RR, WP-8, WP-3, WP-4, WP-5, WP-6, WP-9, WP-10, WP-11, WP-13, WP-17, WP-18, most of WP-14 and WP-15 | 67 | 21 | 2027-05-25 |
-| 1.5 | Thread/sequence view | 7 | 5.5 | 2027-06-02 |
-| 1.6 | Pitwall report drafting | 4 | 4 | 2027-06-08 |
-| 1.7 | Dump check, memory: WP-7, WP-16, the rest of WP-14 and WP-15 | 10 | 7 | 2027-06-17 |
-| 1.8 | UMDH series (ADR 0069 less the reader fixes) | 25 | 11 | 2027-07-02 |
-| 1.9 | .NET managed state in dumps (ADR 0068 WP-0, WP-12) | 18 | 10.5 | 2027-07-19 |
-| 1.10 | Analyses at 1B events, the R3 build [J: sized by its ADR] | 10 | 7 | 2027-07-28 |
-| 1.11 | Analysis thresholds as Settings, and compare with pattern compare, significance and evidence | 5 | 4.5 | 2027-08-04 |
-| 1.12 | Time in the query language | 4 | 4 | 2027-08-10 |
-| 1.13 | Anomaly scores and per-operation baselines | 4 | 4 | 2027-08-16 |
-| 1.14 | AI tools over every analysis | 3 | 3.5 | 2027-08-20 |
-| 1.15 | Semantic search (Y2) | 9.5 | 6.5 | 2027-08-31 |
-| 1.16 | AI memory (Y1) | 10.5 | 7 | 2027-09-09 |
-| 1.17 | Rule 47 in Debrief's views (Y10), unless a gate pulls it into 1.2 | 18.5 | 8.5 | 2027-09-22 |
+| 1.3 | Citations and report blocks (with the SQL result block) | 8.5 | 7 | 2027-04-30 |
+| 1.4 | Dump checks, crash and hang: ADR 0068 native WP-2, WP-RR, WP-8, WP-3, WP-4, WP-5, WP-6, WP-9, WP-10, WP-11, WP-13, WP-17, WP-18, most of WP-14 and WP-15 | 67 | 21 | 2027-05-31 |
+| 1.5 | Thread/sequence view | 7 | 6 | 2027-06-08 |
+| 1.6 | Pitwall report drafting | 4 | 4 | 2027-06-14 |
+| 1.7 | Dump check, memory: WP-7, WP-16, the rest of WP-14 and WP-15 | 10 | 7 | 2027-06-23 |
+| 1.8 | UMDH series (ADR 0069 less the reader fixes) | 25 | 11 | 2027-07-08 |
+| 1.9 | .NET managed state in dumps (ADR 0068 WP-0, WP-12) | 18 | 11 | 2027-07-23 |
+| 1.10 | Analyses at 1B events, the R3 build [J: sized by its ADR] | 10 | 7 | 2027-08-03 |
+| 1.11 | Analysis thresholds as Settings, and compare with pattern compare, significance and evidence | 5 | 5 | 2027-08-10 |
+| 1.12 | Time in the query language | 4 | 4 | 2027-08-16 |
+| 1.13 | Anomaly scores and per-operation baselines | 4 | 4 | 2027-08-20 |
+| 1.14 | AI tools over every analysis | 3 | 4 | 2027-08-26 |
+| 1.15 | Semantic search (Y2) | 9.5 | 7 | 2027-09-06 |
+| 1.16 | AI memory (Y1) | 10.5 | 8 | 2027-09-16 |
 
 Then, one each in the same way: names (N4, N5, N0, N7, 5.5), formats, PML and batch queries (Y13, 9), the tray popup
 (Y5, 5), Y14's R5 UI items (8), Y9's small items (4), and the rest of the audit's 1.3 list (section 2.4: Moment,
@@ -413,7 +426,7 @@ folder survey in the scan, notes with several anchors), then its "later" list.
 
 ### 4.3 What this changes
 
-- **Release placement only.** R7's "keep everything in 1.2" is replaced. The approved items (citations, report blocks,
+- **Release placement only.** R7's "keep everything in 1.2" is replaced; Y10 stays in 1.2. The approved items (citations, report blocks,
   thread/sequence view, Pitwall drafting, .NET dump stacks) move to 1.3 to 1.9; their designs do not change.
 - **ADR 0068** (Accepted, `1ba8e4ecd`, scope "Debrief 1.2"): its scope line needs updating to "WP-1 in 1.2; crash and
   hang in 1.4; memory in 1.7; .NET in 1.9". That edit belongs to ADR 0068's branch and author; it is not made here.
