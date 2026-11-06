@@ -147,10 +147,10 @@ impl Backend for WindowsRun {
             Ok(o) => return Err(RegisterError::Other(format!("reg add: {}", o.reason()))),
             Err(e) => return Err(RegisterError::Other(format!("reg.exe {e}"))),
         }
-        if let Some(old) = old_program.filter(|p| self.sys.is_program(p)) {
-            if let Err(e) = self.sys.run(&old.to_string_lossy(), &[Verb::Stop.word()]) {
-                log::warn!(error:% = e, program = old.display().to_string().as_str(); "windows: the old agent could not be asked to stop");
-            }
+        if let Some(old) = old_program.filter(|p| self.sys.is_program(p))
+            && let Err(e) = self.sys.run(&old.to_string_lossy(), &[Verb::Stop.word()])
+        {
+            log::warn!(error:% = e, program = old.display().to_string().as_str(); "windows: the old agent could not be asked to stop");
         }
         // Windows starts it at the next log-in; start it now too.
         let exe = self.target.exe.clone();
