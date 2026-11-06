@@ -815,3 +815,42 @@ fn what_a_moved_aside_folder_holds_is_never_checked_but_the_folder_itself_is() {
         "{e}"
     );
 }
+
+#[test]
+fn every_reason_says_what_is_wrong_in_words() {
+    let all = [
+        (Reason::Missing, "not there"),
+        (Reason::Link, "link or reparse point"),
+        (Reason::WrongKind(FileKind::Dir), "Dir"),
+        (Reason::UntrustedOwner("S-1-5-21-1".into()), "S-1-5-21-1"),
+        (Reason::NullDacl, "no access list"),
+        (
+            Reason::Grants {
+                sid: "S-1-5-32-545".into(),
+                right: "WRITE_DAC",
+            },
+            "S-1-5-32-545 holds WRITE_DAC",
+        ),
+        (Reason::Writable(0o777), "777"),
+        (Reason::AclWrite, "allows a write"),
+        (Reason::OutsideRoot, "protected folder"),
+        (Reason::Redirected("D:\\x".into()), "D:\\x"),
+        (Reason::Unreadable("denied".into()), "denied"),
+    ];
+    for (reason, word) in all {
+        let text = reason.to_string();
+        assert!(text.contains(word), "{reason:?}: {text}");
+    }
+}
+
+#[test]
+fn an_inherit_only_entry_is_marked_and_only_that() {
+    let plain = Ace::allow("S-1-5-18", 1);
+    assert!(!plain.inherit_only);
+    let inherited = plain.clone().inherit_only();
+    assert!(inherited.inherit_only);
+    assert_eq!(
+        (inherited.sid.as_str(), inherited.mask, inherited.allow),
+        ("S-1-5-18", 1, true)
+    );
+}

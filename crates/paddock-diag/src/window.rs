@@ -376,4 +376,25 @@ mod tests {
         assert!(log_window(dir.path(), "app", 0).is_empty());
         assert!(log_window(&dir.path().join("nope"), "app", 100).is_empty());
     }
+
+    #[test]
+    fn log_files_lists_matching_logs_and_an_unreadable_folder_is_an_empty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("app.2026-10-24.log"), "a").unwrap();
+        std::fs::write(dir.path().join("app.notes.txt"), "b").unwrap();
+        std::fs::write(dir.path().join("other.log"), "c").unwrap();
+        std::fs::create_dir(dir.path().join("app.dir.log")).unwrap();
+        let names: Vec<String> = log_files(dir.path(), "app")
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["app.2026-10-24.log"], "only files named app*.log");
+        // A missing folder is told apart by try_log_files and is simply empty here.
+        let missing = dir.path().join("gone");
+        assert!(log_files(&missing, "app").is_empty());
+        assert_eq!(
+            try_log_files(&missing, "app").unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
 }
