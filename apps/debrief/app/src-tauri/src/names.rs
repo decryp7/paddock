@@ -390,6 +390,11 @@ impl RebuildReport {
     /// One structured line per ended job: the outcome, why the wait ended, how long it waited and each phase took, how
     /// many groups were built, which sources failed to be catalogued and how many requests joined. No names.
     fn log(&self, job: u64) {
+        self.emit(job, log::logger());
+    }
+
+    /// Writes the line to `logger`; a failed job is a warning, the others information.
+    fn emit(&self, job: u64, logger: &dyn log::Log) {
         let outcome = match &self.outcome {
             RebuildOutcome::Built(_) => "built",
             RebuildOutcome::NotBuilt => "not built",
@@ -397,30 +402,48 @@ impl RebuildReport {
             RebuildOutcome::Cancelled => "cancelled",
             RebuildOutcome::Failed(_) => "failed",
         };
+        let level = if matches!(self.outcome, RebuildOutcome::Failed(_)) {
+            log::Level::Warn
+        } else {
+            log::Level::Info
+        };
         let groups = if let RebuildOutcome::Built(n) = self.outcome { n as u64 } else { 0 };
-        let ph = |p| self.phases.ms(p);
-        log::log!(
-            if matches!(self.outcome, RebuildOutcome::Failed(_)) { log::Level::Warn } else { log::Level::Info },
-            Job = job,
-            Outcome = outcome,
-            WaitEnd = self.wait.as_str(),
-            WaitMs = self.waited.as_millis() as u64,
-            Waits = self.slices,
-            Groups = groups,
-            FailedSources = self.failed_sources,
-            JoinedRequests = self.joined,
-            CatalogueMs = ph(RebuildPhase::Catalogue),
-            GroupingMs = ph(RebuildPhase::Grouping),
-            EventsMs = ph(RebuildPhase::Events),
-            JoiningMs = ph(RebuildPhase::Joining),
-            PublishingMs = ph(RebuildPhase::Publishing);
-            "Name table rebuild {outcome}{}",
-            match (&self.outcome, &self.wait) {
-                (RebuildOutcome::Failed(e), _) => format!(": {e}"),
-                (_, WaitEnd::Unavailable(e)) => format!(": the store could not be asked: {e}"),
-                _ => String::new(),
-            }
-        );
+        let ms = |p| self.phases.ms(p);
+        let numbers = [
+            ("Job", job),
+            ("WaitMs", self.waited.as_millis() as u64),
+            ("Waits", self.slices),
+            ("Groups", groups),
+            ("FailedSources", self.failed_sources),
+            ("JoinedRequests", self.joined),
+            ("CatalogueMs", ms(RebuildPhase::Catalogue)),
+            ("GroupingMs", ms(RebuildPhase::Grouping)),
+            ("EventsMs", ms(RebuildPhase::Events)),
+            ("JoiningMs", ms(RebuildPhase::Joining)),
+            ("PublishingMs", ms(RebuildPhase::Publishing)),
+        ];
+        let mut fields: Vec<(&str, log::kv::Value<'_>)> = vec![
+            ("Outcome", log::kv::Value::from(outcome)),
+            ("WaitEnd", log::kv::Value::from(self.wait.as_str())),
+        ];
+        fields.extend(numbers.iter().map(|(k, n)| (*k, log::kv::Value::from(*n))));
+        let cause = match (&self.outcome, &self.wait) {
+            (RebuildOutcome::Failed(e), _) => format!(": {e}"),
+            (_, WaitEnd::Unavailable(e)) => format!(": the store could not be asked: {e}"),
+            _ => String::new(),
+        };
+        let message = format!("Name table rebuild {outcome}{cause}");
+        let metadata = log::Metadata::builder().level(level).target(module_path!()).build();
+        if logger.enabled(&metadata) {
+            logger.log(
+                &log::Record::builder()
+                    .args(format_args!("{message}"))
+                    .metadata(metadata)
+                    .module_path(Some(module_path!()))
+                    .key_values(&fields)
+                    .build(),
+            );
+        }
     }
 }
 
@@ -1225,6 +1248,162 @@ mod tests {
             rebuild_job(&win, &ctx, || holder.current(), || None, FAR, FAR).outcome,
             RebuildOutcome::Built(1)
         );
+    }
+
+    /// The two numbers the wait runs on: it asks again every 10 s and gives up after 10 minutes without a change.
+    #[test]
+    fn the_wait_asks_every_ten_seconds_and_gives_up_after_ten_quiet_minutes() {
+        assert_eq!(WATCH_SLICE, Duration::from_secs(10));
+        assert_eq!(WATCH_STALL, Duration::from_secs(600));
+        assert!(
+            WATCH_SLICE.as_millis() as u64 <= debrief_core::catalogue::MAX_STATUS_WAIT_MS,
+            "a slice is no longer than the store lets a status call wait"
+        );
+    }
+
+    /// A logger that keeps what it is given: level, message and the key-value pairs as text.
+    /// One logged line: level, message and the key-value pairs.
+    type Line = (log::Level, String, Vec<(String, String)>);
+
+    struct Capture(Mutex<Vec<Line>>, bool);
+
+    impl Capture {
+        fn on() -> Capture {
+            Capture(Mutex::default(), true)
+        }
+    }
+
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            self.1
+        }
+        fn log(&self, record: &log::Record) {
+            struct Pairs<'a>(&'a mut Vec<(String, String)>);
+            impl<'kvs> log::kv::VisitSource<'kvs> for Pairs<'_> {
+                fn visit_pair(&mut self, key: log::kv::Key<'kvs>, value: log::kv::Value<'kvs>) -> Result<(), log::kv::Error> {
+                    self.0.push((key.to_string(), value.to_string()));
+                    Ok(())
+                }
+            }
+            let mut pairs = Vec::new();
+            record.key_values().visit(&mut Pairs(&mut pairs)).unwrap();
+            self.0.lock().unwrap().push((record.level(), record.args().to_string(), pairs));
+        }
+        fn flush(&self) {}
+    }
+
+    fn report(outcome: RebuildOutcome, wait: WaitEnd) -> RebuildReport {
+        RebuildReport {
+            outcome,
+            wait,
+            slices: 3,
+            waited: Duration::from_millis(1_500),
+            failed_sources: 2,
+            phases: PhaseTimes {
+                done: vec![
+                    (RebuildPhase::Catalogue, Duration::from_millis(11)),
+                    (RebuildPhase::Grouping, Duration::from_millis(22)),
+                    (RebuildPhase::Events, Duration::from_millis(33)),
+                    (RebuildPhase::Joining, Duration::from_millis(44)),
+                    (RebuildPhase::Publishing, Duration::from_millis(55)),
+                ],
+                current: None,
+            },
+            joined: 4,
+        }
+    }
+
+    #[test]
+    fn a_rebuild_job_writes_one_line_with_why_it_ended_and_what_it_took_and_no_names() {
+        let capture = Capture::on();
+        report(RebuildOutcome::Built(7), WaitEnd::Built).emit(9, &capture);
+        let lines = capture.0.lock().unwrap().clone();
+        assert_eq!(lines.len(), 1, "one line per ended job");
+        let (level, message, pairs) = &lines[0];
+        assert_eq!((*level, message.as_str()), (log::Level::Info, "Name table rebuild built"));
+        let get = |k: &str| pairs.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str());
+        for (key, want) in [
+            ("Job", "9"),
+            ("Outcome", "built"),
+            ("WaitEnd", "built"),
+            ("WaitMs", "1500"),
+            ("Waits", "3"),
+            ("Groups", "7"),
+            ("FailedSources", "2"),
+            ("JoinedRequests", "4"),
+            ("CatalogueMs", "11"),
+            ("GroupingMs", "22"),
+            ("EventsMs", "33"),
+            ("JoiningMs", "44"),
+            ("PublishingMs", "55"),
+        ] {
+            assert_eq!(get(key), Some(want), "{key}");
+        }
+        // The others: their outcome and the way the wait ended, as information; a failure as a warning with its cause.
+        for (outcome, wait, text, ended) in [
+            (RebuildOutcome::NotBuilt, WaitEnd::Stalled, "not built", "stalled"),
+            (RebuildOutcome::NotBuilt, WaitEnd::CannotSignal, "not built", "store cannot signal"),
+            (RebuildOutcome::UpToDate, WaitEnd::Built, "up to date", "built"),
+            (RebuildOutcome::Cancelled, WaitEnd::Cancelled, "cancelled", "cancelled"),
+            (RebuildOutcome::Cancelled, WaitEnd::WindowGone, "cancelled", "window gone"),
+            (RebuildOutcome::Cancelled, WaitEnd::StoreChanged, "cancelled", "store changed"),
+        ] {
+            let capture = Capture::on();
+            report(outcome, wait).emit(1, &capture);
+            let lines = capture.0.lock().unwrap().clone();
+            assert_eq!(
+                (lines[0].0, lines[0].1.as_str()),
+                (log::Level::Info, format!("Name table rebuild {text}").as_str())
+            );
+            assert!(lines[0].2.contains(&("Outcome".to_string(), text.to_string())));
+            assert!(lines[0].2.contains(&("WaitEnd".to_string(), ended.to_string())));
+            let groups = lines[0].2.iter().find(|(k, _)| k == "Groups").map(|(_, v)| v.as_str());
+            assert_eq!(groups, Some("0"), "no groups were built");
+        }
+        let capture = Capture::on();
+        report(RebuildOutcome::Failed("the names cannot be read: boom".into()), WaitEnd::Built).emit(1, &capture);
+        let lines = capture.0.lock().unwrap().clone();
+        assert_eq!(
+            (lines[0].0, lines[0].1.as_str()),
+            (log::Level::Warn, "Name table rebuild failed: the names cannot be read: boom")
+        );
+        let capture = Capture::on();
+        report(RebuildOutcome::Failed("no store".into()), WaitEnd::Unavailable("no store".into())).emit(1, &capture);
+        let lines = capture.0.lock().unwrap().clone();
+        assert!(lines[0].1.starts_with("Name table rebuild failed: no store"), "{}", lines[0].1);
+        assert!(lines[0].2.contains(&("WaitEnd".to_string(), "store unavailable".to_string())));
+        // A wait that ended because the store could not be asked says so even when the outcome is not a failure.
+        let capture = Capture::on();
+        report(RebuildOutcome::NotBuilt, WaitEnd::Unavailable("gone".into())).emit(1, &capture);
+        assert!(capture.0.lock().unwrap()[0].1.contains("the store could not be asked: gone"));
+    }
+
+    #[test]
+    fn a_rebuild_line_is_not_written_to_a_logger_that_is_off() {
+        let capture = Capture(Mutex::default(), false);
+        report(RebuildOutcome::Built(1), WaitEnd::Built).emit(1, &capture);
+        assert!(capture.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn phase_times_report_the_milliseconds_of_each_phase() {
+        let r = report(RebuildOutcome::Built(1), WaitEnd::Built);
+        assert_eq!(r.phases.ms(RebuildPhase::Catalogue), 11);
+        assert_eq!(r.phases.ms(RebuildPhase::Grouping), 22);
+        assert_eq!(r.phases.ms(RebuildPhase::Publishing), 55);
+        let none = PhaseTimes::default();
+        assert_eq!(none.ms(RebuildPhase::Events), 0);
+        for (end, text) in [
+            (WaitEnd::Built, "built"),
+            (WaitEnd::Cancelled, "cancelled"),
+            (WaitEnd::WindowGone, "window gone"),
+            (WaitEnd::StoreChanged, "store changed"),
+            (WaitEnd::CannotSignal, "store cannot signal"),
+            (WaitEnd::Stalled, "stalled"),
+            (WaitEnd::Unavailable("x".into()), "store unavailable"),
+        ] {
+            assert_eq!(end.as_str(), text);
+        }
     }
 
     #[test]
