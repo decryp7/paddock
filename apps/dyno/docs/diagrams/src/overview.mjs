@@ -72,7 +72,7 @@ box(bx, y(1), bw, BH, 'accent', 'IPC server and handlers', 'One thread per conne
 box(bx, y(2), bw, BH, 'accent', 'Plugin host', 'Starts sensor plugins on first use; a plugin that crashes is quarantined.');
 box(bx, y(3), bw, BH, 'accent', 'Benchmarks', 'Only on a click, one kind at a time, in a child process with a timeout.');
 box(bx, y(4), bw, BH, 'accent', 'History, alarms, recorder', 'SQLite rollups (min, average, max); alarms that notify; issues; ten-minute flight recorder.');
-box(bx, y(5), bw, BH, 'accent', 'Power', 'Keep awake; sleep, hibernate (Windows, Linux) or shut down on idle or a timer; wakes; Wake-on-LAN.');
+box(bx, y(5), bw, BH, 'accent', 'Power', 'Keep awake; sleep, hibernate (Windows, Linux) or shut down on idle or at a set time; wakes; Wake-on-LAN.');
 // around
 const cx = CX + 24, cw = CW - 48;
 box(cx, y(0), cw, BH, 'accent', 'Platform adapters', 'Windows, macOS, Linux behind the core\'s ports.');

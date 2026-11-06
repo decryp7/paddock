@@ -131,11 +131,11 @@ page says about how long the run takes and the most it writes to each drive.
 The **Power** page and the tray menu hold these. Each starts only when you use it or turn it on.
 
 1. To keep the computer awake, open the Power page, choose how long (30 minutes, 1, 2 or 4 hours, Until I stop it, a time of day,
-   while a program runs or while the computer is busy; up to 7 days only with `dyno awake on --for 7d`) and start the hold. From a terminal, `dyno awake on --for 2h`
+   while a program runs or while the computer is busy; up to 7 days only with `dyno awake on --for 168h`) and start the hold. From a terminal, `dyno awake on --for 2h`
    starts it and `dyno awake off` ends it. The hold ends if Dyno restarts, and the page says so.
 2. To sleep, hibernate or shut down the computer, set a rule on the **Sleep and shut down** tab under **When the computer is idle** or **At a
    time of day**. Hibernate works on Windows and Linux; macOS decides by itself when to hibernate. Dyno uses the OS's normal
-   path and never forces it. A countdown with Cancel comes first; `dyno idle cancel` or `dyno idle snooze 30` stops or delays it.
+   path and never forces it. A countdown with Cancel comes first. Cancel ends a timed action for today; `dyno idle snooze 30` delays the action, and the countdown shows again; `dyno idle cancel` cancels from a terminal.
 3. To wake this computer at a set time, turn on scheduled wakes in Settings, then add one on the **Schedule** tab or run
    `dyno wake-schedule add NAME --at 07:30`. On macOS and Linux the administrator helper sets the wake. A missed wake is shown
    as missed and never run late, and nothing can wake a computer that is shut down.

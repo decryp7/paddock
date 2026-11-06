@@ -38,12 +38,12 @@ useCases('uml-use-cases-observe', {
 });
 useCases('uml-use-cases-setup', {
   title: 'Use cases — run and set up', desc: 'What the PC owner runs or sets up. Benchmarks start only on a click; Explain this (Pitwall) is still planned. Power and access are in their own diagram.', owner: 'PC owner',
-  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)', true], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle or the inventory'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Set tray metric, theme, sampling'], ['Start the agent at login']],
+  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)', true], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle or the inventory'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Set tray metric, theme, sampling'], ['Start Dyno at login']],
   ext: { name: 'OS (login)', row: 9 },
 });
 
 useCases('uml-use-cases-power', {
   title: 'Use cases — power and access', desc: 'What the PC owner turns on or asks Dyno to do. An AI client on this PC may keep it awake or wake a saved computer only if the owner allows each action.', owner: 'PC owner',
-  rows: [['Sleep, hibernate (Windows, Linux) or shut down on idle or a timer'], ['Schedule a wake of this computer'], ['Turn on the administrator helper'], ['Turn on AI access for a local AI app'], ['Keep the computer awake'], ['Wake another computer (Wake-on-LAN)']],
+  rows: [['Sleep, hibernate (Windows, Linux) or shut down on idle or at a set time'], ['Schedule a wake of this computer'], ['Turn on the administrator helper'], ['Turn on AI access for a local AI app'], ['Keep the computer awake'], ['Wake another computer (Wake-on-LAN)']],
   ext: { name: 'AI client (if allowed)', rows: [4, 5] },
 });

@@ -70,7 +70,7 @@
 <rect x="496" y="808" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="836" class="h">Power</text>
 <text x="512" y="858" class="t">Keep awake; sleep, hibernate (Windows, Linux) or shut</text>
-<text x="512" y="874" class="t">down on idle or a timer; wakes; Wake-on-LAN.</text>
+<text x="512" y="874" class="t">down on idle or at a set time; wakes; Wake-on-LAN.</text>
 <rect x="1032" y="208" width="224" height="88" rx="6" class="n acc"/>
 <text x="1048" y="236" class="h">Platform adapters</text>
 <text x="1048" y="258" class="t">Windows, macOS, Linux behind</text>
