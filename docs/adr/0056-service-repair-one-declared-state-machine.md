@@ -312,3 +312,21 @@ Pitcrew. Linux Dyno leaves the copies: nothing is registered for it.
 - A background supervisor that owns the service (on macOS launchd already is one).
 - A pid or time stamp in the lock file: a reusable OS name (rule 53).
 - A stored `Held` state: it is derived from `attempts`, so it cannot disagree with them.
+
+## Amendment: cancel ownership (ER-21)
+
+A process-wide cancel flag (`CANCEL`, `QUITTING`) let one operation's or one test's cancel reach another: a cancelled
+Settings change left the flag set, and the next operation that read it (the start repair, the Linux wiring tests in the
+same process) was stopped by a cancel nobody had asked it for.
+
+- **Each operation owns its cancel.** The switch worker, the start repair and the first run each take an `OpCancel`
+  (`app/src-tauri/src/service_ops.rs`, an `Arc<AtomicBool>`) and pass it into the service they use (`LinuxService`,
+  `SmService`; `dyno_agent::service::linux::{install, install_without_waiting, ensure}` take it as `&AtomicBool`). The
+  shared manager (`paddock_service`) already takes `&AtomicBool` and checks it between OS steps, so no change there.
+  `paddock_jobs::CancelToken` was not used: it does not hand out the `AtomicBool` the manager takes.
+- **The Jobs view and Settings cancel one operation:** `SwitchWorker::cancel` and the job's cancel stop the token of the
+  running change only.
+- **Quit is the one app-wide signal.** `ServiceOps` is app state: `quit()` cancels every running operation's token and
+  `begin()` then refuses new operations. It also holds the end-of-start-repair wait Quit joins.
+- **A check keeps it so:** a test scans `login.rs`, `quit.rs` and `dyno-agent`'s service module and fails on a `static`
+  atomic flag.

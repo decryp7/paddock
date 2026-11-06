@@ -476,7 +476,7 @@ impl<R: Runtime> ShellOf<R> {
                 // Windows, once per start: the entry Dyno 1.0.0 left in place of the app's own is repaired with the switch.
                 #[cfg(windows)]
                 {
-                    let mut service = login::platform_service();
+                    let mut service = login::platform_service(crate::service_ops::OpCancel::default());
                     let mut autostart = login::platform_autostart(&self.app);
                     match login::ensure_app_entry(wanted, autostart.as_mut()) {
                         Ok(_) => {}
@@ -511,10 +511,10 @@ impl<R: Runtime> ShellOf<R> {
                 // or taken back from the one just removed; a death in between is put right at the next start (`wanted`).
                 let (app, value) = (self.app.clone(), self.launch_at_login.clone());
                 // The shell plugin manages the app's jobs; its Jobs view lists this one and its Cancel stops it.
-        let jobs = self.app.state::<paddock_jobs::tauri::Jobs>().registry().clone();
-        let register = move || jobs.register("start-at-login", "Start Dyno at login", None);
-        self.login_switch.start(register, move |_cancel| {
-                    let mut service = login::platform_service();
+                let jobs = self.app.state::<paddock_jobs::tauri::Jobs>().registry().clone();
+                let register = move || jobs.register("start-at-login", "Start Dyno at login", None);
+                self.login_switch.start(&self.app.state::<crate::service_ops::ServiceOps>(), register, move |cancel| {
+                    let mut service = login::platform_service(cancel.clone());
                     let mut autostart = login::platform_autostart(&app);
                     let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
                     // The link is the one the app manages (the save command holds only a reference to it).

@@ -325,11 +325,12 @@ pub fn quit_and_stop<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             return;
         };
         let root = link.dirs.root().to_path_buf();
-        let mechanism = crate::login::platform_service().stop_mechanism();
+        let mechanism = crate::login::platform_service(crate::service_ops::OpCancel::default()).stop_mechanism();
         log::info!(Service = format!("{mechanism:?}").as_str(); "Quit and stop measuring: begin");
         // A repair or a switch that is running stops at its next step: the agent must not come back after this stop.
-        crate::login::cancel_service_work();
-        if !crate::login::join_service_work(Duration::from_secs(10)) {
+        let ops = tauri::Manager::state::<crate::service_ops::ServiceOps>(&app);
+        ops.quit();
+        if !ops.join_repair(Duration::from_secs(10)) {
             log::warn!("The start repair of the service did not stop within 10 s; the stop goes on");
         }
         if let Err(e) = write_marker(&root, crate::link::ports::now_ms()) {
