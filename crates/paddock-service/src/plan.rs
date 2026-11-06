@@ -1278,4 +1278,52 @@ mod tests {
             Plan::Replace(Reason::Moved)
         );
     }
+
+    #[test]
+    fn a_newer_version_part_way_through_registering_is_the_owner_while_its_program_exists() {
+        let st = State::Attempting { version: "1.1.0".into(), attempts: 1, phase: Phase::Awaiting };
+        let mut i = registered(Job::NotRunning);
+        for exists in [Some(true), None] {
+            i.program_exists = exists;
+            let mut f = facts(&i, MAC, None);
+            f.state = &st;
+            assert_eq!(plan(&f), Plan::Leave(Hold::NewerOwner("1.1.0".into())), "program_exists {exists:?}");
+        }
+    }
+
+    #[test]
+    fn a_pinned_build_is_replaced_not_marked_current_when_the_wait_ran_out_whatever_the_definition_says() {
+        let st = State::Attempting { version: "1.0.4".into(), attempts: 1, phase: Phase::Awaiting };
+        let mut i = registered(Job::NotRunning);
+        i.definition_current = Some(true);
+        let mut f = facts(&i, MAC, Some("1.0.0"));
+        f.state = &st;
+        f.waited = true;
+        assert_eq!(plan(&f), Plan::Replace(Reason::VersionChanged));
+        // An unpinned one (systemd, the Run value) with a current definition needs no replacement.
+        let mut g = facts(&i, LINUX, Some("1.0.0"));
+        g.state = &st;
+        g.waited = true;
+        assert_eq!(plan(&g), Plan::MarkCurrent);
+    }
+
+    #[test]
+    fn a_resuming_start_leaves_a_service_that_answers_even_when_the_os_shows_no_running_job() {
+        let i = registered(Job::NotRunning);
+        let mut f = facts(&i, MAC, Some("1.0.4"));
+        f.resuming = true;
+        f.answers = true;
+        assert_eq!(plan(&f), Plan::Leave(Hold::Healthy));
+        f.answers = false;
+        assert_eq!(plan(&f), Plan::Replace(Reason::Stopped));
+    }
+
+    #[test]
+    fn every_reason_has_its_own_words() {
+        use Reason::*;
+        let all = [Requested, Refused, VersionChanged, ProgramMissing, Moved, Interrupted, Stopped, Wanted, Unwanted];
+        let words: std::collections::BTreeSet<_> = all.iter().map(|r| r.describe()).collect();
+        assert_eq!(words.len(), all.len());
+        assert!(all.iter().all(|r| r.describe().len() > 10 && r.describe() != "xyzzy"));
+    }
 }

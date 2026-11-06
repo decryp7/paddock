@@ -604,4 +604,37 @@ mod tests {
         assert!(m.save("1.0.0", None).is_err());
         assert_eq!(m.load(), Recorded::default());
     }
+
+    #[test]
+    fn unwritable_is_asked_without_writing_and_only_a_refusing_or_newer_store_says_yes() {
+        let m = RecordFile::memory();
+        assert!(!m.unwritable(), "an ordinary memory store takes writes");
+        m.memory_handle().unwrap().fail_writes_after(1);
+        assert!(!m.unwritable());
+        m.save("1.0.0", None).unwrap();
+        assert!(m.unwritable(), "the writes it allowed are used up");
+        let f = RecordFile::memory();
+        f.memory_handle().unwrap().fail_writes(true);
+        assert!(f.unwritable());
+
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("service-net.a.b.json");
+        let r = RecordFile::new(d.path(), "net.a.b");
+        assert!(!r.unwritable(), "no file yet");
+        std::fs::write(&path, format!(r#"{{"version": {FORMAT}}}"#)).unwrap();
+        assert!(!r.unwritable(), "this app's own format");
+        std::fs::write(&path, format!(r#"{{"version": {}}}"#, FORMAT - 1)).unwrap();
+        assert!(!r.unwritable(), "an older format");
+        std::fs::write(&path, format!(r#"{{"version": {}}}"#, FORMAT + 1)).unwrap();
+        assert!(r.unwritable(), "a newer app's file is left alone");
+    }
+
+    #[test]
+    fn marking_a_version_that_never_registered_leaves_the_state_idle() {
+        let m = RecordFile::memory();
+        m.mark("1.0.4", Some("/p")).unwrap();
+        let r = m.load();
+        assert_eq!(r.state, State::Idle);
+        assert_eq!(r.registered_version.as_deref(), Some("1.0.4"));
+    }
 }

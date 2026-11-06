@@ -800,4 +800,18 @@ mod tests {
             (Some(780), false)
         );
     }
+
+    #[test]
+    fn the_program_line_of_the_jobs_own_block_is_read_and_nested_blocks_are_skipped() {
+        let print = "gui/501/x = {\n\tstate = running\n\tprogram = /Applications/A.app/Contents/MacOS/a\n\tinherited environment = {\n\t\tprogram = /nested\n\t}\n}\n";
+        assert_eq!(super::print_program(print).as_deref(), Some("/Applications/A.app/Contents/MacOS/a"));
+        // Only the top block and the one inside it count: a program line two levels down is not the job's.
+        let deep = "x = {\n\ta = {\n\t\tb = {\n\t\t\tprogram = /deep\n\t\t}\n\t}\n}\n";
+        assert_eq!(super::print_program(deep), None);
+        // After a block closes the depth is back: a line after it still counts.
+        let after = "x = {\n\ta = {\n\t}\n\tprogram = /after\n}\n";
+        assert_eq!(super::print_program(after).as_deref(), Some("/after"));
+        assert_eq!(super::print_program("no program here"), None);
+        assert_eq!(super::print_program(""), None);
+    }
 }
