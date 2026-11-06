@@ -216,13 +216,9 @@ fn files_that_fail_leave_no_name_or_text_in_the_log_above_debug() {
         "2026-10-14 10:00:00 INFO MARKER-5521 first\n2026-10-14 10:00:01 ERROR MARKER-5521 second\n",
     )
     .unwrap();
+    // A failure root cannot bypass (CI containers run as root): a link to nothing.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let unreadable = folder.join("secret-unreadable.log");
-        std::fs::write(&unreadable, "2026-10-14 10:00:00 INFO MARKER-5521 hidden\n").unwrap();
-        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
-    }
+    std::os::unix::fs::symlink(root.path().join("nowhere"), folder.join("secret-broken.log")).unwrap();
     let store_dir = root.path().join("secret-store");
     let store = DuckStore::create(&store_dir, Profile::default_profile(), PluginRegistry::new()).unwrap();
     let _ = store.open(std::slice::from_ref(&folder)).and_then(|s| s.wait());
@@ -246,17 +242,12 @@ fn files_that_fail_leave_no_name_or_text_in_the_log_above_debug() {
             "secret-folder",
             "secret-binary",
             "secret-text",
-            "secret-unreadable",
+            "secret-broken",
             "secret-store",
             "MARKER-5521",
         ] {
             assert!(!text.contains(secret), "{secret} in a line at {:?}: {text}", r.level);
         }
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(folder.join("secret-unreadable.log"), std::fs::Permissions::from_mode(0o644));
     }
 }
 

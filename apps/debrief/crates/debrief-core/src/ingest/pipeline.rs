@@ -253,7 +253,7 @@ pub fn import_stream(
         match &pool {
             Ok(pool) => pool.scope(|s| dispatch(&ctx, Some(s), rx)),
             Err(e) => {
-                crate::log_failure!(warn, "parallel import unavailable; reading files one by one", e);
+                crate::log_failure!(warn, "parallel import unavailable; reading files one by one", e.to_string());
                 dispatch(&ctx, None, rx)
             }
         }

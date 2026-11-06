@@ -385,6 +385,7 @@ mod tests {
         aborted: Vec<SourceId>,
         fail_finish: bool,
         fail_begin: bool,
+        fail_abort: bool,
     }
 
     impl BatchSink for Memory {
@@ -409,6 +410,9 @@ mod tests {
             Ok(())
         }
         fn abort_source(&mut self, id: SourceId) -> Result<()> {
+            if self.fail_abort {
+                anyhow::bail!("cannot remove {}", "secret-folder/a.log");
+            }
             self.aborted.push(id);
             self.batches.retain(|b| b.rows().all(|r| r.source() != id));
             Ok(())
@@ -438,6 +442,45 @@ mod tests {
         let mut b = [0u8; 8];
         getrandom::fill(&mut b).unwrap();
         u64::from_le_bytes(b)
+    }
+
+    /// The abort path of a source that failed twice (its finish and its removal): the lines say which source and why, with no path
+    /// and no text of the sink's error at warn.
+    #[test]
+    fn a_source_that_cannot_be_removed_is_named_by_its_id_not_its_path() {
+        crate::testlog::install();
+        let dir = temp().join("secret-folder");
+        std::fs::create_dir_all(&dir).unwrap();
+        let (importers, profile) = env_parts();
+        let cancel = AtomicBool::new(false);
+        let env = ImportEnv {
+            encodings: &Default::default(),
+            importers: &importers,
+            parsers: &profile,
+            schema: Arc::new(EventSchema::plain()),
+            cancel: &cancel,
+            window: None,
+        };
+        let mut sink = Memory {
+            fail_finish: true,
+            fail_abort: true,
+            ..Memory::default()
+        };
+        let file = write(&dir, "a.log", b"2026-10-14 10:00:00 INFO a\n2026-10-14 10:00:01 ERROR b\n");
+        let out = import_path(&env, &file, "a.log", &HashSet::new(), &mut sink);
+        assert!(matches!(out[0], Outcome::Unrecognized(_)), "{out:?}");
+        let all = crate::testlog::all();
+        let line = all
+            .iter()
+            .find(|r| r.message.contains("partly imported source") && r.level == log::Level::Warn)
+            .expect("the abort failure is logged");
+        assert_eq!(line.props["Source"], 0);
+        assert!(!format!("{line:?}").contains("secret-folder"), "no path at warn: {line:?}");
+        assert!(
+            all.iter()
+                .any(|r| r.level == log::Level::Debug && r.message.contains("secret-folder/a.log")),
+            "the text is kept at debug"
+        );
     }
 
     #[test]

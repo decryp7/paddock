@@ -13,7 +13,7 @@ description = "Debrief's DuckDB store (ADR 0014): events as zstd Parquet segment
 
 [features]
 # `testlog`: captures `log` records, for this crate's tests and the store worker's.
-test-support = []
+test-support = ["debrief-core/test-support"]
 
 [dependencies]
 debrief-core = { path = "../debrief-core" }
@@ -36,6 +36,7 @@ rayon.workspace = true
 tantivy = { workspace = true, features = ["mmap", "lz4-compression"] }
 
 [dev-dependencies]
+debrief-core = { path = "../debrief-core", features = ["test-support"] }
 # The worker's allocator environment (`allocator::worker_env`), so the memory budget test measures what ships.
 debrief-store-client = { path = "../debrief-store-client" }
 # Current resident set size on Windows, macOS and Linux (MIT OR Apache-2.0), for the memory budget test.

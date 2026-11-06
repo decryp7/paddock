@@ -223,7 +223,7 @@ pub fn import_files_parallel(
         Ok(pool) => pool.install(|| order.par_iter().map(|&i| (i, one(i))).collect()),
         // No threads to be had: read one file after another.
         Err(e) => {
-            crate::log_failure!(warn, "parallel import unavailable; reading files one by one", e);
+            crate::log_failure!(warn, "parallel import unavailable; reading files one by one", e.to_string());
             order.iter().map(|&i| (i, one(i))).collect()
         }
     };

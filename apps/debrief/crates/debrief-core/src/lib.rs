@@ -64,6 +64,8 @@ pub mod svg;
 pub mod template;
 #[cfg(test)]
 pub(crate) mod test_dirs;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testlog;
 pub mod threads;
 pub mod tiles;
 pub mod timestamp_issue;

@@ -272,7 +272,11 @@ fn stream_root(
     match pool {
         Ok(pool) => pool.install(|| run(emit)),
         Err(e) => {
-            crate::log_failure!(warn, "parallel folder walk unavailable; walking on the shared threads", e);
+            crate::log_failure!(
+                warn,
+                "parallel folder walk unavailable; walking on the shared threads",
+                e.to_string()
+            );
             run(emit)
         }
     }
