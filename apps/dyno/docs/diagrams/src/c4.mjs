@@ -23,7 +23,8 @@ function column(d, x, w, y0, H, list) {
   const right = [
     ['hosts', 'external', 0, { name: 'Release host', tech: 'Gitea releases, HTTPS', desc: 'Signed installers and latest.json for Dyno\'s own opt-in updates.' }],
     ['debrief', 'external', 0, { name: 'Debrief', tech: 'Sister app', desc: 'Open in Debrief: a time window exported for log analysis.', planned: true }],
-    ['pitwall', 'external', 0, { name: 'Pitwall', tech: 'Local AI hub, MCP client', desc: 'Any local MCP client reads Dyno once AI access is on; Pitwall 1.1 planned.', planned: true }],
+    ['mcp', 'external', 0, { name: 'Local MCP client', tech: 'AI app on this PC', desc: 'Reads Dyno once AI access is on; wakes a saved computer or keeps this one awake only if allowed.' }],
+    ['pitwall', 'external', 0, { name: 'Pitwall', tech: 'Local AI hub', desc: 'Planned for 1.1 as an MCP client of Dyno.', planned: true }],
     ['lan', 'external', 0, { name: 'Computers on the LAN', tech: 'Wake-on-LAN', desc: 'Other computers the owner saved; Dyno wakes one when asked.' }],
   ];
   const H = Math.max(need(d, W, left), need(d, W, right));
@@ -32,7 +33,7 @@ function column(d, x, w, y0, H, list) {
   d.node('sys', 528, y0, W, H, 'accent', { name: 'Dyno', tech: 'Tauri app + per-user agent + Rust core',
     desc: 'A per-user agent that samples, keeps history and raises alarms; a Tauri app (Angular UI) and the dyno command that show it; a pure Rust core that decides. It runs with the user\'s rights; an optional administrator helper does what needs those rights.' });
   const [, oy, , oh] = d.rect.os;
-  const hd = { name: 'dyno-helper', tech: 'Optional OS service', desc: 'Turned on in Settings. Reads what needs administrator rights, sets Dyno\'s own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request, with an audit log.' };
+  const hd = { name: 'dyno-helper', tech: 'Optional OS service', desc: 'Turned on in Settings. Reads what needs administrator rights, sets Dyno\'s own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log.' };
   const hh = d.fit(240, hd);
   const ht = oy + oh - 12 - hh, at = (f) => (oy + oh * f - ht) / hh;
   d.node('helper', 552, ht, 240, hh, 'accent', hd);
@@ -43,6 +44,7 @@ function column(d, x, w, y0, H, list) {
   hub(d, 'sys', 'L', 'data', 'R', { label: 'Reads, writes' });
   hub(d, 'sys', 'R', 'hosts', 'L', { label: 'Checks', dash: true });
   hub(d, 'sys', 'R', 'debrief', 'L', { label: 'Exports', dash: true });
+  hub(d, 'sys', 'R', 'mcp', 'L', { rev: true, label: 'Reads, asks', dash: true });
   hub(d, 'sys', 'R', 'pitwall', 'L', { rev: true, label: 'Reads', dash: true });
   hub(d, 'sys', 'R', 'lan', 'L', { label: 'Wakes', dash: true });
   d.legend([{ kind: 'process', label: 'Person · OS · data' }, { kind: 'accent', label: 'Dyno' }, { kind: 'external', label: 'External system' }, { kind: 'tag', label: 'Planned', role: 'external' }, { kind: 'line', label: 'Uses' }]);
@@ -70,8 +72,8 @@ function column(d, x, w, y0, H, list) {
   d.node('os', lx, r(g2, 1), LW, NH, 'process', { name: 'Operating system', tech: 'Windows · macOS · Linux', desc: 'Counters, /proc, Mach, OS logs, launchd, systemd.' });
   d.node('plugins', rx, r(g2, 0), aw, NH, 'plugin', { name: 'Plugins', tech: 'Rust, out of process', desc: 'Vendor sensors. Depend on dyno-plugin-api only; guarded by dyno-plugin-host.' });
   d.node('bench', rx, r(g2, 1), aw, NH, 'process', { name: 'dyno-bench', tech: 'Rust binary, child process', desc: 'CPU, memory and disk benchmarks, one at a time, killed on timeout.' });
-  d.node('helper', rx, r(g2, 2), aw, NH, 'accent', { name: 'dyno-helper', tech: 'Rust binary, OS service', desc: 'Optional, as administrator: readings, scheduled wakes, the disk-health tool; audit log.' });
-  d.node('cli', bx, g2 + h2 + 56, bw, 96, 'accent', { name: 'dyno', tech: 'Rust binary, command line', desc: 'Readings, plus awake, idle, wake, wake-schedule and mcp (ADR 0014, 0032).' });
+  d.node('helper', rx, r(g2, 2), aw, NH, 'accent', { name: 'dyno-helper', tech: 'Rust binary, OS service', desc: 'Optional, as administrator: readings, scheduled wakes, the Windows disk-health tool; audit log.' });
+  d.node('cli', bx, g2 + h2 + 56, bw, 112, 'accent', { name: 'dyno', tech: 'Rust binary, command line', desc: 'Readings, plus awake, idle, wake, wake-schedule; mcp bridges to the app\'s MCP listener.' });
   link(d, 'person', 'R', 'ui', 'L', { label: 'Uses' });
   link(d, 'ui', 'R', 'shell', 'L', { label: 'Commands' });
   link(d, 'shell', 'R', 'upd', 'L', { label: 'Checks', dash: true });
@@ -85,5 +87,5 @@ function column(d, x, w, y0, H, list) {
   hub(d, 'agent', 'R', 'bench', 'L', { label: 'Spawns' });
   hub(d, 'agent', 'R', 'helper', 'L', { label: 'Asks', dash: true });
   d.legend([{ kind: 'ui', label: 'Angular UI' }, { kind: 'accent', label: 'Dyno container' }, { kind: 'core', label: 'Pure core' }, { kind: 'plugin', label: 'Plugin' }, { kind: 'process', label: 'Process · OS · data' }, { kind: 'external', label: 'External' }, { kind: 'line', label: 'Uses' }, { kind: 'dashline', label: 'Optional · implements' }]);
-  save('c4-2-containers', d, g2 + h2 + 56 + 96);
+  save('c4-2-containers', d, g2 + h2 + 56 + 112);
 }

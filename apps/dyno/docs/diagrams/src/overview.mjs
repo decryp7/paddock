@@ -62,7 +62,7 @@ group(CX, top, CW, gh(6), 'Around the agent');
 box(AX + 24, y(0), AW - 48, BH, 'ui', 'Window', 'Angular 22: live and history, processes, why slow, alarms, disk map, counters, benchmarks.');
 box(AX + 24, y(1), AW - 48, BH, 'accent', 'Tauri shell', 'Commands; validates every request and speaks to the agent.');
 box(AX + 24, y(2), AW - 48, BH, 'accent', 'Tray', 'A live metric and a compact menu; stays when the window closes.');
-box(AX + 24, y(3), AW - 48, BH, 'accent', 'dyno command', 'Readings, plus awake, idle, wake, wake-schedule and mcp.');
+box(AX + 24, y(3), AW - 48, BH, 'accent', 'dyno command', 'Readings, plus awake, idle, wake, wake-schedule; mcp bridges to the app.');
 varrow(AX + 48, y(0) + BH, y(1), 'commands');
 varrow(AX + 48, y(1) + BH, y(2), 'status');
 // agent
@@ -80,7 +80,7 @@ box(cx, y(1), cw, BH, 'process', 'Operating system', 'Counters, /proc and /sys, 
 box(cx, y(2), cw, BH, 'plugin', 'Plugins', 'Vendor sensors; out of process.');
 box(cx, y(3), cw, BH, 'process', 'dyno-bench', 'CPU, memory and disk tests.');
 box(cx, y(4), cw, BH, 'process', 'Data folder', 'Dyno\'s own data: dyno.db and JSON; never uploaded.');
-box(cx, y(5), cw, BH, 'accent', 'dyno-helper', 'Optional administrator service: readings, wakes, the disk-health tool.');
+box(cx, y(5), cw, BH, 'accent', 'dyno-helper', 'Optional; admin readings, wakes, Windows disk tool.');
 varrow(cx + 24, y(0) + BH, y(1), 'reads');
 // horizontal arrows in the gutters
 const mid = (i) => y(i) + BH / 2;

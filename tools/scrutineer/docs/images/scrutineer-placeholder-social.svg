@@ -17,7 +17,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .mono{font-weight:600;fill:var(--muted)}
 .track{fill:none;stroke:var(--line);stroke-width:1.25;opacity:.8}
 .gl{fill:none;stroke:var(--acct);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-.accfill{fill:var(--acc);fill-opacity:.13}.accline{fill:var(--acc)}
+.accfill{fill:var(--acc);fill-opacity:.13}.accline{fill:var(--acc)}.neufill{fill:var(--muted);fill-opacity:.13}.neuline{fill:var(--muted)}.neutxt{font-size:17px;font-weight:600;fill:var(--muted)}
 .ptitle{font-size:29px;font-weight:600;letter-spacing:-.01em}
 .pbody{font-size:21px;fill:var(--muted)}
 .stepn{font-size:16px;font-weight:600;letter-spacing:.1em;fill:var(--muted)}
@@ -67,5 +67,5 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 </svg><text class="name" x="164" y="136" style="font-size:34px">Scrutineer</text>
 <text class="h1" x="72" y="268" style="font-size:50px">Certified before</text><text class="h1" x="72" y="330" style="font-size:50px">it ships.</text>
 <text class="sub" x="72" y="404" style="font-size:20px">Generate, sign, verify and install</text><text class="sub" x="72" y="434" style="font-size:20px">code-signing certificates in one place.</text>
-<rect x="72" y="549" width="109" height="38" rx="19" class="accfill"/><circle cx="90" cy="568" r="4" class="accline"/><text class="pilltxt" x="104" y="574">Dropped</text>
+<rect x="72" y="549" width="109" height="38" rx="19" class="neufill"/><circle cx="90" cy="568" r="4" class="neuline"/><text class="neutxt" x="104" y="574">Dropped</text>
 </svg>

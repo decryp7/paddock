@@ -42,7 +42,8 @@
 <rect x="72" y="568" width="256" height="88" rx="6" class="n acc"/>
 <text x="88" y="596" class="h">dyno command</text>
 <text x="88" y="618" class="t">Readings, plus awake, idle, wake,</text>
-<text x="88" y="634" class="t">wake-schedule and mcp.</text>
+<text x="88" y="634" class="t">wake-schedule; mcp bridges to the</text>
+<text x="88" y="650" class="t">app.</text>
 <path d="M96 296 L96 328" class="e" marker-end="url(#a)"/>
 <text x="106" y="316" class="m">commands</text>
 <path d="M96 416 L96 448" class="e" marker-end="url(#a)"/>
@@ -92,9 +93,8 @@
 <text x="1048" y="754" class="t">JSON; never uploaded.</text>
 <rect x="1032" y="808" width="224" height="88" rx="6" class="n acc"/>
 <text x="1048" y="836" class="h">dyno-helper</text>
-<text x="1048" y="858" class="t">Optional administrator</text>
-<text x="1048" y="874" class="t">service: readings, wakes, the</text>
-<text x="1048" y="890" class="t">disk-health tool.</text>
+<text x="1048" y="858" class="t">Optional; admin readings,</text>
+<text x="1048" y="874" class="t">wakes, Windows disk tool.</text>
 <path d="M1056 296 L1056 328" class="e" marker-end="url(#a)"/>
 <text x="1066" y="316" class="m">reads</text>
 <path d="M328 350 L496 350" class="e" marker-end="url(#a)"/>

@@ -24,7 +24,7 @@ deployment('uml-deployment-macos', { name: 'macOS', ver: 'macOS 13 or newer, App
   app: { name: 'Dyno.app', tech: 'ad-hoc signed bundle, .dmg', desc: 'Tauri shell and Angular UI on WKWebView; dyno-agent and the dyno command bundled inside.' },
   sm: { name: 'launchd', tech: 'gui/<uid> domain', desc: 'net.decryptology.dyno.agent.plist in ~/Library/LaunchAgents runs dyno-agent run; KeepAlive.' },
   agent: { name: 'dyno-agent', tech: 'user process', desc: 'Samples, keeps history, raises alarms. Log in ~/Library/Logs/Dyno/agent.log.' },
-  helper: { name: 'dyno-helper', tech: 'launchd daemon, optional', desc: '/Library/PrivilegedHelperTools/\u200bnet.decryptology.dyno.helper. Reads what needs administrator rights, sets Dyno\'s scheduled wakes (pmset) and installs the pinned disk-health tool on request, with an audit log.' },
+  helper: { name: 'dyno-helper', tech: 'launchd daemon, optional', desc: '/Library/PrivilegedHelperTools/\u200bnet.decryptology.dyno.helper. Reads what needs administrator rights and sets Dyno\'s scheduled wakes (pmset), with an audit log.' },
   data: { name: 'Data folder', tech: '~/Library/Application Support/Dyno', desc: 'dyno.db, settings.json, agent.json: Dyno\'s own data only.' },
 });
 deployment('uml-deployment-windows', { name: 'Windows', ver: 'Windows 10 / 11, x64' }, {
@@ -40,6 +40,6 @@ deployment('uml-deployment-linux', { name: 'Linux', ver: 'x86_64 and aarch64 des
   app: { name: 'Dyno', tech: '.deb or AppImage, WebKitGTK', desc: 'Tauri shell and Angular UI; dyno-agent and dyno beside it; the .deb puts dyno on PATH.' },
   sm: { name: 'systemd --user', tech: 'dyno-agent.service', desc: '~/.config/systemd/user; Restart=always, Nice=10, MemoryHigh=256M.' },
   agent: { name: 'dyno-agent', tech: 'user process', desc: 'Samples from /proc and /sys, keeps history, raises alarms.' },
-  helper: { name: 'dyno-helper', tech: 'systemd system unit, optional, .deb only', desc: '/usr/bin/dyno-helper serve, sandboxed, no network. Reads what needs administrator rights, sets Dyno\'s scheduled wakes (systemd timers) and installs the pinned disk-health tool on request, with an audit log.' },
+  helper: { name: 'dyno-helper', tech: 'systemd system unit, optional, .deb only', desc: '/usr/bin/dyno-helper serve, sandboxed, no network. Reads what needs administrator rights and sets Dyno\'s scheduled wakes (systemd timers), with an audit log.' },
   data: { name: 'Data folder', tech: '~/.local/share/dyno', desc: 'dyno.db, settings.json, agent.json: Dyno\'s own data only.' },
 });

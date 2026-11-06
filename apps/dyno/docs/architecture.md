@@ -1,7 +1,7 @@
 # Dyno architecture
 
 Dyno is built from a pure Rust core, thin OS adapters, a per-user agent that measures and keeps history, a Tauri app that
-shows it. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request, with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate or shut-down after idle or at a set time) run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This page describes how the pieces fit and what is true today; the diagrams
+shows it. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate or shut-down after idle or at a set time) run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This page describes how the pieces fit and what is true today; the diagrams
 are in [design.md](design.md) and the reasoning is in the [ADRs](adr/README.md). Anything marked *planned* is not in the
 code.
 
@@ -88,8 +88,7 @@ implementation calls the shell's one `dyno` command and whose mock serves the br
 
 ### Privileges and plugins
 
-Dyno 1.0 has no privileged helper (ADR 0021; the helper design is ADR 0022, planned for 1.1). The app and the agent run with the
-user's own rights; Dyno registers no system service (its files and agent are per user; on Linux the .deb itself is an ordinary system package). A reading the OS gives only to administrators or to a process's owner is a
+Dyno 1.0 had no privileged helper; 1.1.0 adds an optional one (ADR 0027; ADR 0021 is superseded in part, 2026-11-06). The app and the agent run with the user's own rights; apart from that helper Dyno registers no system service (the agent is per user; on Windows the files are per machine in Program Files, and on Linux the .deb itself is an ordinary system package). A reading the OS gives only to administrators or to a process's owner is a
 `Reading::Unavailable` with a plain reason, never a zero. The platform adapters tell three groups apart: the user's own
 processes and the system's are listed one by one, and every other account's processes form one **Other users** row with whatever
 totals the OS allows (by session on Windows, by uid on macOS and Linux). On Windows the adapter reads
@@ -115,7 +114,7 @@ first use of the plugins page (`Request::Plugins`) and the host guards them (tim
 | [0003](adr/0003-process-grouping.md) | Processes grouped by application |
 | [0006](adr/0006-privileged-helper-and-observe-only.md) | Observe-only default (write parts superseded by 0021; the helper is not in 1.0) |
 | [0016](adr/0016-privileged-helper-install-and-ipc.md) | The helper: a system service installed on a click, one authorised user and program, audit log; not in 1.0 (planned for 1.1) |
-| [0021](adr/0021-monitoring-only.md) | Monitoring only: no taming, cleanup or tuning; no helper in 1.0 |
+| [0021](adr/0021-monitoring-only.md) | Monitoring only: no taming, cleanup or tuning; superseded in part (2026-11-06) by 0027 and 0032 |
 | [0017](adr/0017-issues-and-the-program-baseline.md) | Issues from the OS logs behind a port; a baseline of programs that explains, never accuses |
 | [0020](adr/0020-extras-backup-checks-and-taming-proof.md) | Extras behind a ToolRunner (its backup checks were removed in 1.1.0; see the ADR) |
 | [0007](adr/0007-extensibility-three-tiers.md) | Core, TOML packs, out-of-process plugins |

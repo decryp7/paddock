@@ -7,7 +7,7 @@ planned (not built). The text companion is [architecture.md](architecture.md).
 ## Overview
 
 Dyno is a per-user **agent** that measures the machine and keeps its history, an **app** (Tauri shell plus Angular UI)
-that shows it, a pure Rust **core** that holds every decision, and OS **adapters** behind the core's ports. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request, with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)).
+that shows it, a pure Rust **core** that holds every decision, and OS **adapters** behind the core's ports. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)).
 
 ![Dyno at a glance](../diagrams/dyno-overview.svg)
 

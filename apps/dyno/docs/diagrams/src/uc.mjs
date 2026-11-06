@@ -25,9 +25,9 @@ function useCases(file, { title, desc, owner, rows, ext }) {
   const trunk = bx - 56;
   rows.forEach((_, i) => d.edge('a', `u${i}`, [136, mid], [bx + 24, cy(i)], { arrow: 'none', via: mid === cy(i) ? [] : [[trunk, mid], [trunk, cy(i)]] }));
   if (ext) {
-    const i = ext.row, ex = bx + bw + 120;
-    actor(d, 'x', ex, Math.round(cy(i) - 32), ext.name);
-    d.edge('x', `u${i}`, [ex, Math.round(cy(i))], [bx + 24 + UW, cy(i)], { arrow: 'none', via: [] });
+    const rs = ext.rows ?? [ext.row], ex = bx + bw + 120, ay = Math.round(rs.reduce((a, i) => a + cy(i), 0) / rs.length), bus = ex - 48;
+    actor(d, 'x', ex, ay - 32, ext.name);
+    rs.forEach((i) => d.edge('x', `u${i}`, [ex, ay], [bx + 24 + UW, cy(i)], { arrow: 'none', via: ay === cy(i) ? [] : [[bus, ay], [bus, cy(i)]] }));
   }
   d.legend([{ kind: 'accent', label: 'Use case' }, ...(rows.some(([, p]) => p) ? [{ kind: 'planned', label: 'Planned' }] : []), { kind: 'line', label: 'Association', arrow: 'none' }]);
   save(file, d, y0 + bh);
@@ -43,7 +43,7 @@ useCases('uml-use-cases-setup', {
 });
 
 useCases('uml-use-cases-power', {
-  title: 'Use cases — power and access', desc: 'What the PC owner asks Dyno to do to this or another computer. Each starts from the owner\'s click or setting.', owner: 'PC owner',
-  rows: [['Keep the computer awake'], ['Sleep, hibernate or shut down on idle or a timer'], ['Schedule a wake of this computer'], ['Wake another computer (Wake-on-LAN)'], ['Turn on the administrator helper'], ['Turn on AI access for a local AI app']],
-  ext: { name: 'Other computer', row: 3 },
+  title: 'Use cases — power and access', desc: 'What the PC owner turns on or asks Dyno to do. An AI client on this PC may keep it awake or wake a saved computer only if the owner allows each action.', owner: 'PC owner',
+  rows: [['Sleep, hibernate or shut down on idle or a timer'], ['Schedule a wake of this computer'], ['Turn on the administrator helper'], ['Turn on AI access for a local AI app'], ['Keep the computer awake'], ['Wake another computer (Wake-on-LAN)']],
+  ext: { name: 'AI client (if allowed)', rows: [4, 5] },
 });

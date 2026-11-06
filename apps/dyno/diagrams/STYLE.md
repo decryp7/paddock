@@ -21,7 +21,7 @@ Light / dark, stroke on fill. Dyno's accent is magenta; everything else is neutr
 
 Rules that matter most here: planned work keeps its role's colour, dashed on white with a "planned" tag (the Debrief and Pitwall
 links, the Explain this use case); a diagram has at most 12 edges and fits 1600 x 1200 (sequences 1800 tall), so the
-large ones are split (agent in two, deployment per OS, use cases in two, domain model in three); labels are at most three words
+large ones are split (agent in two, deployment per OS, use cases in three, domain model in three); labels are at most three words
 and sit beside their line; protocols go in the node text, not on the line.
 
 The footer reads "Dyno · updated YYYY-MM-DD". Change the date in `docs/diagrams/src/common.mjs` when a diagram changes.

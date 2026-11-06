@@ -7,7 +7,7 @@ agent only (AGENTS.md "Working in parallel"). Every package ships tests, and eve
 triggers the failure.
 
 Decisions already taken: three-tier extensibility ([ADR 0007](adr/0007-extensibility-three-tiers.md), read-only since
-0021), SQLite ([0008](adr/0008-storage-sqlite-and-retention.md)), a read-only privileged helper, planned for 1.1 and not in 1.0
+0021), SQLite ([0008](adr/0008-storage-sqlite-and-retention.md)), an optional privileged helper, built for 1.1.0 and not in 1.0
 ([0006](adr/0006-privileged-helper-and-observe-only.md), [0016](adr/0016-privileged-helper-install-and-ipc.md),
 [0021](adr/0021-monitoring-only.md), ADR 0022), Linux a first-class platform next to Windows and macOS.
 
@@ -22,7 +22,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 
 | WP | Feature | Status |
 | --- | --- | --- |
-| WP-01 | Privileged helper | built for 1.1.0 (ADR 0027): an optional service that reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request, with an audit log; 1.0 ran with the user's rights only |
+| WP-01 | Privileged helper | built for 1.1.0 (ADR 0027): an optional service that reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log; 1.0 ran with the user's rights only |
 | WP-02 | CPU taming screen and profiles | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
 | WP-03 | Health score and startup items (view only) | built: Health page with reasons and the startup list; fix buttons and startup changes are dropped (ADR 0021) |
 | WP-05 | Tuning catalogue | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
@@ -111,14 +111,12 @@ Measured with `dyno-agent bench 25 none|summary|processes` on the 14-core M4 Mac
 core, and about 24 MB resident (0.15 to 0.25 % of the whole machine). Because the machine was busy, treat these as upper
 bounds. The target is at most about 1 % of the machine. See [architecture.md](architecture.md#dynos-own-overhead) and G13.
 
-## WP-01 Privileged helper (planned for 1.1)
+## WP-01 Privileged helper (built for 1.1.0)
 
-Not in Dyno 1.0 (decided 2026-10-28; ADR 0022 holds the design, the per-OS table of what 1.0 cannot show, and the 1.1 plan).
+Not in Dyno 1.0 (decided 2026-10-28; ADR 0022 holds the design and the per-OS table of what 1.0 cannot show); built for 1.1.0 (ADR 0027).
 
-- **1.0 instead.** Everything runs with the user's rights; no system service is installed. A figure the OS withholds is *Unavailable*
-  with a plain reason, never 0. Other accounts' processes are one "Other users" row.
-- **1.1.** The helper installed with the app from a protected folder, **start as administrator at login**, all
-  processes and administrator-only counters on all three OS, and the helper installing Dyno's own signed updates.
+- **1.0 instead.** Everything ran with the user's rights; no system service was installed. A figure the OS withholds is *Unavailable* with a plain reason, never 0. Other accounts' processes are one "Other users" row.
+- **1.1.0.** The optional helper, turned on in Settings and installed from a protected folder: all processes and administrator-only counters on all three OS, Dyno's own scheduled wakes (macOS, Linux) and the pinned disk-health tool on request (Windows), with an audit log. **Start as administrator at login** and the helper installing Dyno's own updates are not built (later).
   Before it ships, its launchd plist (`crates/dyno-helper/src/install.rs`, the `launchd_plist` text) changes from
   `ProcessType Background` to `Standard`: the helper answers the agent's requests, and launchd runs a `Background` job as
   DARWIN_BG with every thread clamped to the `BACKGROUND` QoS band (rule 52; lessons 2026-10-30).
@@ -378,7 +376,7 @@ Removed in 1.1.0 ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md) 
 ## WP-27 `dyno` CLI
 
 - **Built.** ADR 0014: `dyno status`, `why-slow`, `top`, `alarms`, `snapshot` and `counters`, over the same protocol and discovery
-  file; read-only (the former `end`, `cap` and `undo` are dropped, ADR 0021). Refuses a wrong protocol version with a clear message;
+  file; 1.1.0 adds `awake`, `idle`, `wake`, `wake-schedule` and `mcp` (the former `end`, `cap` and `undo` are dropped, ADR 0021). Refuses a wrong protocol version with a clear message;
   output is stable JSON. The binary is a sidecar of every installer (`bundle.externalBin`, checked by `scripts/check-bundle.sh`).
 - **Touches.** `crates/dyno-cli`, `app/src-tauri/scripts/sidecar.mjs`, docs/cli.md.
 

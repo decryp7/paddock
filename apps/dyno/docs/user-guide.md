@@ -239,7 +239,7 @@ in one line above the list.
 
 Out of the box Dyno still runs only with your own rights. **Settings > Dyno > Administrator readings** can turn on a small helper that gives the readings your account cannot take. Turning it on asks the operating system once: a password
 or Touch ID on macOS, the polkit prompt on Linux, and on Windows the User Account Control prompt, which names an unknown
-publisher because the Windows build is not signed; that is expected. The helper reads what needs administrator rights, sets or cancels Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool when you ask, with an audit log; the card's Turn off removes it.
+publisher because the Windows build is not signed; that is expected. The helper reads what needs administrator rights, sets or cancels Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool when you ask (Windows), with an audit log; the card's Turn off removes it.
 
 What it adds: every account's processes in detail, per-program network traffic (Windows), disk health (SMART), the program that
 holds a socket or a file (Linux), temperatures, fans and CPU energy, memory slots (Linux), and on Windows what keeps the computer

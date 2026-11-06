@@ -25,7 +25,7 @@ export default {
       { glyph: 'bars', title: 'Measure', text: 'Benchmarks, counters and a flight recorder.' },
       { glyph: 'doc', title: 'Report', text: 'A weekly summary you can export.' },
     ],
-    family: 'Any local MCP client reads Dyno once AI access is on; Pitwall 1.1 is planned to.',
+    family: 'Any local MCP client reads Dyno once AI access is on; Pitwall 1.1 is planned as one.',
   },
   worksWith: [
     { app: 'pitwall', note: 'Plain-words diagnosis, later' },
