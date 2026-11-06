@@ -1585,14 +1585,27 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   unregister → evict (`launchctl bootout`) → wait until gone (bounded) → register → check, retried with a growing pause,
   then a bounded wait for the service; approval, elevation, a declined prompt and "unavailable" stop at once; a cancel is
   honoured only where nothing is left unregistered. Every phase is a `Step` for the log and `RepairTracker` (the UI).
-- **The registered version** is `service-<label>.json` in the data folder (`VersionedFile`; C21's
-  `service_registered_version`), written only after a registration took; a lock beside it keeps two copies from repairing
-  at once (a dead copy's lock is taken over after 10 minutes).
+- **The record is one declared state** (ADR 0056). `service-<label>.json` holds the registered version, the program, the
+  stop marker (`resume_pending`, read and cleared only when the resume is done) and one `State`: `Idle`, `Attempting`
+  (`version`, `attempts`, `phase`: `RemovingOld`, `Registering`, `Awaiting`, `RegisterFailed`) or `Removing`. The phase is
+  written before each OS step, so a crash or a quit leaves what is safe next; if the record cannot be written nothing is
+  changed (`Hold::RecordUnavailable`). A lock beside it keeps two copies from repairing at once and is not held across a
+  wait for the service.
+- **Holds** are derived from the attempts, never stored, and each has its own words and a way out: `Unanswered(n)` (the
+  service never answered), `Refused(n)` (the OS refused to start it), `RegisterFailed(n)` (the register call failed; nothing
+  is registered), `RecordUnavailable`, `NewerOwner`, `NeedsApproval`, `SwitchedOff`. Three unattended registers per version
+  at most; Repair and Install asked run past the cap. `Started::Removed` says an unfinished uninstall was completed.
+  `Manager::pending()` is true while a start waits for a registration or one is under way (and false when nothing is going
+  to happen), so an app's link neither starts nor retires an agent of its own meanwhile.
+- **Entry points never queue behind a start.** `ServiceControl::run`, the health repair and `request` answer `Busy` at
+  once while a start or a repair holds the manager (its words say so); `on_start` reports a record it could not save to the
+  UI with the next step.
 - **The program's side.** `watch::ExeWatch` exits a supervised program whose executable changed once it is idle (the OS
   starts the new one); `supervised::supervised_path` merges the login shell's `PATH` (`paddock_proc::login_path`, R05);
   `Verb` is the shared first argument (`install`, `uninstall`, `status`, `stop`, `print-unit`, `print-plist`, `--service`).
 - **Launch at login.** `login::launch_at_login_section` (`pd.login`, one switch, off by default) and
-  `apply_launch_at_login` (the app's own `Autostart` and the service together, each tried, one message).
+  `apply_launch_at_login` / `apply_launch_at_login_with` (the app's own `Autostart` and a `LoginService` together, each tried, one message; a place that will not exist after the next login registers neither: `launch::refuse_unstable_location`), `login::MainAppItem` (`SMAppService.mainApp`), and the start reason (`launch::launch_reason`, `apple_event::open_event`).
+- **After a stop on request.** `Manager::resume` (a light register of an enabled item of this version, otherwise the full repair; never touches an item switched off in Login Items, one the OS has no record of, or one whose switch list could not be read; never opens System Settings), `Manager::supervises`, `Manager::installed` and `Manager::stop_mechanism` (the launchd job while it is held; `stop::stop` judges it by read-back). The raw readings behind them are `Inspection::login_item` (`LoginItemFacts`).
 - **The Windows service host (X4b).** `scm_host::supervise` is the `--service` supervisor over a `Sessions` port: the
   logged-on user's session (connected before disconnected, console first, never session 0; Remote Desktop users are
   found), the program started there with the user's token and environment plus the supervised variable, restarted after

@@ -28,7 +28,7 @@ pub use windows::{ElevatedWindowsService, WindowsRun, WindowsService};
 
 use crate::error::ServiceError;
 use crate::paths::{is_appimage_path, launchd_plist_path, systemd_unit_path};
-use crate::port::RegisterError;
+use crate::port::{AppServiceStatus, RegisterError};
 use crate::spec::{Kind, ServiceSpec};
 use paddock_env::{Os, Vars};
 use serde::Serialize;
@@ -97,6 +97,20 @@ pub enum Job {
     Unknown,
     /// Stopped with an error: the OS keeps how the last process ended (ADR 0054 section 1.1).
     Failed(LastExit),
+}
+
+impl Job {
+    /// What the OS said, in words for a failure message (what it said, never a guessed reason).
+    pub fn describe(self) -> String {
+        match self {
+            Job::Absent => "the OS does not know the job".into(),
+            Job::Running => "running".into(),
+            Job::NotRunning => "not running".into(),
+            Job::Refused => "not running, the OS refuses to start it (spawn failed, exit code 78 or a stale launch constraint)".into(),
+            Job::Unknown => "the OS did not say".into(),
+            Job::Failed(exit) => format!("not running, it stopped with {exit}"),
+        }
+    }
 }
 
 /// How the job's last process ended, as the OS reports it (typed, never free text).
@@ -190,6 +204,59 @@ impl UnitOrigin {
     }
 }
 
+/// What `launchctl print-disabled` said about the item. "Could not read" is not "not listed": a slow or failed look at a
+/// switched-off item must not read as switched on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisabledMark {
+    /// Listed as disabled (the user's switch is off).
+    Disabled,
+    /// Listed as enabled.
+    Enabled,
+    /// The list was read and the item is not in it.
+    NotListed,
+    /// The list could not be read (the tool failed or timed out).
+    Unreadable,
+}
+
+impl DisabledMark {
+    /// The view the plan takes: `None` for both "not listed" and "unreadable" (a repair after a failed look is the existing
+    /// behaviour; only a resume, which would switch the item on, is stricter).
+    pub fn as_option(self) -> Option<bool> {
+        match self {
+            DisabledMark::Disabled => Some(true),
+            DisabledMark::Enabled => Some(false),
+            DisabledMark::NotListed | DisabledMark::Unreadable => None,
+        }
+    }
+}
+
+/// The two raw readings behind a macOS `SMAppService` registration: its status and launchd's override database. Decisions
+/// that must tell "switched off", "never registered" and "could not be read" apart (a resume after a stop) read these;
+/// [`Registration`] is their summary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginItemFacts {
+    /// `SMAppService.status`.
+    pub status: AppServiceStatus,
+    /// `launchctl print-disabled`.
+    pub mark: DisabledMark,
+}
+
+impl LoginItemFacts {
+    /// Whether the user turned the item off in System Settings > Login Items: `RequiresApproval` is how macOS reports an
+    /// item the user switched off (or never allowed); `NotRegistered` alone is also a fresh install, so it only counts when
+    /// launchd has the label marked disabled; `Enabled` with launchd saying disabled is the two views disagreeing and the
+    /// user's switch wins; `NotFound` is not a switch.
+    pub fn switched_off(&self) -> bool {
+        match self.status {
+            AppServiceStatus::RequiresApproval => true,
+            AppServiceStatus::NotRegistered | AppServiceStatus::Enabled => {
+                self.mark.as_option() == Some(true)
+            }
+            AppServiceStatus::NotFound => false,
+        }
+    }
+}
+
 /// One look at the registration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Inspection {
@@ -212,6 +279,8 @@ pub struct Inspection {
     pub restarts: Option<u32>,
     /// Which definition is in force (`None`: the OS does not say).
     pub unit: Option<UnitFile>,
+    /// The raw macOS readings behind `registration` (`None` for the other mechanisms).
+    pub login_item: Option<LoginItemFacts>,
 }
 
 impl Inspection {
@@ -236,6 +305,7 @@ impl Inspection {
             last_exit: None,
             restarts: None,
             unit: None,
+            login_item: None,
         }
     }
 
@@ -331,6 +401,20 @@ pub trait Backend: Send {
     }
     /// The definition this copy registers (plist, unit, `Run` value), when the mechanism has one.
     fn definition(&self) -> Option<String> {
+        None
+    }
+    /// Tells the backend which program this copy would register and which the record says was registered, before each look
+    /// (ADR 0056 section 8: the identity of a copy). A mechanism that cannot read the registered program from the OS
+    /// (`SMAppService`) compares the two itself; the others ignore it.
+    fn know_copy(&mut self, _own: Option<&str>, _registered: Option<&str>) {}
+    /// Whether the OS holds the job now. A job the OS could not be asked about is not found (a wait for the job must not
+    /// end on a failed look). The default reads a full [`inspect`](Backend::inspect); a backend with a cheaper look overrides it.
+    fn job_found(&mut self) -> bool {
+        !matches!(self.inspect().job, Job::Absent | Job::Unknown)
+    }
+    /// The job a stop can name while the OS holds it (launchd job, systemd user unit); `None` where there is none to stop.
+    /// A stop keeps the registration ([`crate::stop`]).
+    fn stop_mechanism(&mut self) -> Option<crate::stop::StopMechanism> {
         None
     }
 }

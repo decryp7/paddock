@@ -126,11 +126,39 @@ pub fn compose(s: Seen<'_>) -> ServiceStatus {
                         .to_string()
                 }),
             ),
+            (_, Plan::Leave(Hold::RegisterFailed(n))) => (
+                Condition::NotInstalled,
+                Some(format!(
+                    "The system could not register {app}'s background service ({n} tries), so {app} stops trying until it is updated. Press Install to try again, or restart the computer.",
+                    app = s.app
+                )),
+            ),
             _ if !i.present() => (Condition::NotInstalled, None),
             (_, Plan::Leave(Hold::NewerOwner(v))) => (
                 Condition::NewerOwner,
                 Some(format!(
                     "A newer copy of {} (version {v}) looks after the background service. Open that copy, or remove the older one.",
+                    s.app
+                )),
+            ),
+            (_, Plan::Leave(Hold::Unanswered(n))) => (
+                Condition::NotRunning,
+                Some(format!(
+                    "{app} registered its background service {n} times and it did not answer, so {app} stops trying until it is updated. Press Repair, switch the service off and on again in {app}'s settings, or restart the computer.",
+                    app = s.app
+                )),
+            ),
+            (_, Plan::Leave(Hold::Refused(n))) => (
+                Condition::NotRunning,
+                Some(format!(
+                    "The system refused to start {app}'s background service after {n} registrations, so {app} stops trying until it is updated. Press Repair, switch the service off and on again in {app}'s settings, or restart the computer.",
+                    app = s.app
+                )),
+            ),
+            (_, Plan::Leave(Hold::RecordUnavailable(why))) => (
+                Condition::Unavailable,
+                Some(format!(
+                    "{} cannot save its service state, so it changed nothing on its own: {why} Fix that, then try again: nothing is changed without a saved state, Repair included.",
                     s.app
                 )),
             ),
@@ -160,7 +188,8 @@ pub fn compose(s: Seen<'_>) -> ServiceStatus {
         Condition::NotRunning | Condition::Refused | Condition::ProgramMissing | Condition::Moved
     ) || (condition == Condition::Running
         && i.present()
-        && matches!(s.plan, Plan::Offer(_)));
+        && matches!(s.plan, Plan::Offer(_)))
+        || matches!(s.plan, Plan::Leave(Hold::RecordUnavailable(_)));
     ServiceStatus {
         mechanism: s.mechanism,
         condition,
@@ -198,7 +227,9 @@ impl ServiceStatus {
             },
             Condition::NotInstalled => down(
                 "notInstalled",
-                "The background service is not installed.".to_string(),
+                self.message
+                    .clone()
+                    .unwrap_or_else(|| "The background service is not installed.".to_string()),
                 "Press Install.",
                 Some(RepairAction::Install),
             ),
@@ -359,6 +390,16 @@ mod tests {
             &newer,
         ));
         assert_eq!((s.condition, s.can_repair), (Condition::NewerOwner, false));
+        // A hold says what happened and what to do; an unwritable state says nothing was changed.
+        for hold in [Hold::Unanswered(3), Hold::Refused(3), Hold::RegisterFailed(3)] {
+            let held = Plan::Leave(hold);
+            let s = compose(seen(&with(Registration::Registered, Job::NotRunning), false, &held));
+            assert!(s.message.unwrap().contains('3'));
+        }
+        let unrecorded = Plan::Leave(Hold::RecordUnavailable("disk full".into()));
+        let s = compose(seen(&with(Registration::Registered, Job::NotRunning), false, &unrecorded));
+        assert_eq!(s.condition, Condition::Unavailable);
+        assert!(s.message.unwrap().contains("disk full"));
         let mut gone = with(Registration::Registered, Job::NotRunning);
         gone.program_exists = Some(false);
         assert_eq!(
@@ -401,6 +442,52 @@ mod tests {
         assert_eq!(json["condition"], "repairing");
         assert_eq!(json["mechanism"], "launchdBundled");
         assert_eq!(json["canOpenLoginItems"], false);
+    }
+
+    #[test]
+    fn every_hold_says_what_happened_and_the_next_step_that_works() {
+        // The three caps are different facts and say so; each names a way out that exists for the state.
+        let reg = with(Registration::Registered, Job::NotRunning);
+        let said = |hold: Hold, i: &Inspection| {
+            let plan = Plan::Leave(hold);
+            compose(seen(i, false, &plan))
+        };
+        let unanswered = said(Hold::Unanswered(3), &reg);
+        let refused = said(Hold::Refused(3), &reg);
+        assert!(
+            unanswered
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("did not answer")
+        );
+        assert!(
+            refused
+                .message
+                .as_deref()
+                .unwrap()
+                .contains("refused to start")
+        );
+        assert_ne!(unanswered.message, refused.message);
+        for s in [&unanswered, &refused] {
+            assert_eq!((s.condition, s.can_repair), (Condition::NotRunning, true));
+            assert!(s.message.as_deref().unwrap().contains("Press Repair"));
+        }
+        // A register that failed leaves nothing registered: that is no plain "not installed".
+        let failed = said(Hold::RegisterFailed(3), &Inspection::absent());
+        assert_eq!(
+            (failed.condition, failed.can_install),
+            (Condition::NotInstalled, true)
+        );
+        let words = failed.message.as_deref().expect("a hold with no words");
+        assert!(
+            words.contains("could not register") && words.contains("Install"),
+            "{words}"
+        );
+        assert!(!words.contains("registered 3 times"), "{words}");
+        // The health entry keeps the words and the way out for it.
+        let h = failed.health();
+        assert!(h.cause.unwrap().message.contains("could not register"));
     }
 
     #[test]

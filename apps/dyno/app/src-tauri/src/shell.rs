@@ -183,6 +183,11 @@ impl<R: Runtime> TrayPixels<R> for NoPixels {
 /// The installed app's shell glue (the commands' state).
 pub type Shell = ShellOf<Wry>;
 
+/// The job id and sequence the Start-at-login switch reports under (the UI keeps the highest sequence per id).
+const LOGIN_JOB_ID: u64 = 0x4c4f_4749_4e00;
+static LOGIN_JOB_SEQ: AtomicU64 = AtomicU64::new(1);
+static LOGIN_JOB_BEGAN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
 /// The shell's state shared by the link, the commands and the tray.
 pub struct ShellOf<R: Runtime> {
     app: AppHandle<R>,
@@ -192,7 +197,9 @@ pub struct ShellOf<R: Runtime> {
     /// Updates received since the shell started.
     updates: AtomicU64,
     /// `launchAtLogin` as last applied (None until the agent has told us).
-    launch_at_login: Mutex<Option<bool>>,
+    launch_at_login: Arc<Mutex<Option<bool>>>,
+    /// Applies the Start-at-login switch off the calling thread.
+    login_switch: login::SwitchWorker,
     /// The last agent status, replayed to windows that opened after it was pushed.
     status: Mutex<Option<AgentStatus>>,
     /// `notifications` as last read from the settings (desktop notifications for new alarms).
@@ -276,7 +283,8 @@ impl<R: Runtime> ShellOf<R> {
             last_live_at: std::sync::atomic::AtomicU64::new(u64::MAX),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
-            launch_at_login: Mutex::new(None),
+            launch_at_login: Arc::new(Mutex::new(None)),
+            login_switch: login::SwitchWorker::default(),
             status: Mutex::new(None),
             notifications: std::sync::atomic::AtomicBool::new(true),
             hub,
@@ -496,18 +504,44 @@ impl<R: Runtime> ShellOf<R> {
             }
             Some(p) if p == wanted => Ok(()),
             Some(_) => {
-                let mut service = login::platform_service();
-                let mut autostart = login::platform_autostart(&self.app);
-                let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
-                // What was just applied is recorded first (it decides what a quit does), then the agent is handed over to
-                // the service just registered, or taken back from the one just removed.
-                link.set_service_installed(service.installed());
-                link.refresh_service();
-                if result.is_ok() {
-                    *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner()) = Some(wanted);
-                    logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
-                }
-                result
+                // The save returns at once; one worker applies it and reports as a job (ER-17). What was just applied is
+                // recorded first (it decides what a quit does), then the agent is handed over to the service just registered,
+                // or taken back from the one just removed; a death in between is put right at the next start (`wanted`).
+                let (app, value) = (self.app.clone(), self.launch_at_login.clone());
+                let reporter = self.app.clone();
+                let report: Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync> = Arc::new(move |state| {
+                    let began = *LOGIN_JOB_BEGAN.get_or_init(std::time::Instant::now);
+                    let snapshot = paddock_jobs::JobSnapshot {
+                        id: paddock_jobs::JobId(LOGIN_JOB_ID),
+                        kind: paddock_jobs::JobKind::new("start-at-login"),
+                        title: "Start Dyno at login".to_string(),
+                        subject: None,
+                        state,
+                        seq: LOGIN_JOB_SEQ.fetch_add(1, Ordering::SeqCst),
+                        elapsed_ms: u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX),
+                        eta_ms: None,
+                        cancellable: false,
+                        not_cancellable_reason: Some("Setting up the service cannot be interrupted.".to_string()),
+                    };
+                    if let Err(e) = reporter.emit(paddock_jobs::EVENT_NAME, snapshot) {
+                        logging::warn(&format!("could not emit the start-at-login job: {e}"));
+                    }
+                });
+                self.login_switch.start(report, move || {
+                    let mut service = login::platform_service();
+                    let mut autostart = login::platform_autostart(&app);
+                    let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
+                    // The link is the one the app manages (the save command holds only a reference to it).
+                    if let Some(link) = app.try_state::<Arc<crate::link::AgentLink>>() {
+                        link.set_service_installed(service.installed());
+                        link.refresh_service();
+                    }
+                    if result.is_ok() {
+                        *value.lock().unwrap_or_else(|e| e.into_inner()) = Some(wanted);
+                        logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
+                    }
+                    result
+                })
             }
         }
     }

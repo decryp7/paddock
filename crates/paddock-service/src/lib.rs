@@ -55,10 +55,14 @@
 //! # Ok::<(), ServiceError>(())
 //! ```
 
+#[cfg(target_os = "macos")]
+pub mod apple_event;
 pub mod backend;
 pub mod control;
 mod error;
+pub mod fake_systemd;
 pub mod hardening;
+pub mod launch;
 pub mod launchctl;
 pub mod login;
 pub mod manager;
@@ -115,17 +119,19 @@ mod readback_tests;
 #[cfg(test)]
 mod recorded_tests;
 #[cfg(test)]
+mod resume_tests;
+#[cfg(test)]
 mod scenarios;
 
 pub use backend::{
-    Backend, Capabilities, Inspection, Job, LastExit, Mechanism, Registration, Target, UnitFile,
-    UnitFileState, UnitOrigin, UnregisterError,
+    Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
+    Registration, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError,
 };
 pub use control::{Request, ServiceCommandError, ServiceControl, ServiceErrorCode, ServiceUpdate};
 pub use error::{ServiceError, SpecError};
 pub use manager::{Manager, Started};
 pub use os_log::OsLog;
-pub use plan::{Hold, Plan, Reason, Refusal};
+pub use plan::{Hold, Plan, Reason, Refusal, ResumePath};
 pub use port::{AppService, AppServiceStatus, Elevator, Output, RegisterError, RunError, System};
 pub use repair::{RepairOutcome, Step, Timings};
 pub use service_main::{Context, Hosting, Outcome, ServiceExit, ServiceMainError, service_main};

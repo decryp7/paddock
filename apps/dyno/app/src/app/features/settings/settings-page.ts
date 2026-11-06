@@ -56,7 +56,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <h2>Start-up</h2>
               <div class="row">
                 <div class="lbl"><strong>Start Dyno at login</strong><small>With this on, the background agent keeps measuring after you quit Dyno. Quit and stop measuring (in the menu) stops it until you open Dyno again or log in.</small></div>
-                <mat-slide-toggle [checked]="d.launchAtLogin" aria-label="Start Dyno at login" (change)="set({ launchAtLogin: $event.checked })" />
+                @if (store.saving()) {
+                  <small class="applying" role="status">Applying…</small>
+                }
+                <mat-slide-toggle [checked]="d.launchAtLogin" [disabled]="store.saving()" aria-label="Start Dyno at login" (change)="set({ launchAtLogin: $event.checked })" />
               </div>
             </section>
 

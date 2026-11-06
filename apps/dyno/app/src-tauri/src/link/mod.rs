@@ -116,6 +116,8 @@ pub trait Sink: Send + Sync {
 pub enum Stall {
     /// The login service is meant to start the agent, and has not.
     WaitingForService,
+    /// A registration of the background service is under way (ADR 0056): the app starts no agent of its own until it ends.
+    RegisteringService,
     /// The agent this app started is running but has not written its discovery file.
     AgentNotAnswering,
     /// Another agent holds the data folder and has not answered.
@@ -149,6 +151,11 @@ pub struct ServiceState {
     /// `Restart=always`), so the app must not run an agent of its own beside it. A Windows `Run` entry only starts it
     /// at the next logon: installed, not supervising.
     pub supervises: bool,
+    /// A registration this app made, or is about to make, is being waited for or is under way (ADR 0056: the plan for a start is
+    /// `Await`, or a replace runs). The job may be absent or not yet answering, and the service's agent will come: the app neither
+    /// starts an agent of its own nor retires one while this is true. False where nothing waits and in every state with no way
+    /// forward (switched off, approval pending, a refused location, the attempts used up), so the app then falls back at once.
+    pub pending: bool,
 }
 
 /// Work that must be done before the link decides anything about an agent.

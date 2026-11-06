@@ -117,6 +117,7 @@ impl Backend for WindowsRun {
             last_exit: None,
             restarts: None,
             unit: None,
+            login_item: None,
         }
     }
 
@@ -391,6 +392,7 @@ impl Backend for WindowsService {
             definition_current: points_here,
             last_exit,
             restarts: None,
+            login_item: None,
         }
     }
 

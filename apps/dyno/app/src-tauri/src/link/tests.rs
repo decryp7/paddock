@@ -671,7 +671,11 @@ impl FakeServiceManager {
     fn new(dirs: Dirs, installed: bool, supervises: bool) -> Arc<FakeServiceManager> {
         Arc::new(FakeServiceManager {
             dirs,
-            state: Mutex::new(ServiceState { installed, supervises }),
+            state: Mutex::new(ServiceState {
+                installed,
+                supervises,
+                pending: false,
+            }),
             agent: Mutex::new(None),
             refused: AtomicUsize::new(0),
             done: std::sync::atomic::AtomicBool::new(false),
@@ -685,7 +689,16 @@ impl FakeServiceManager {
     }
 
     fn set(&self, installed: bool, supervises: bool) {
-        *lock(&self.state) = ServiceState { installed, supervises };
+        *lock(&self.state) = ServiceState {
+            installed,
+            supervises,
+            pending: false,
+        };
+    }
+
+    /// A registration is under way (or over): the job is absent and the service's agent will come.
+    fn set_pending(&self, pending: bool) {
+        lock(&self.state).pending = pending;
     }
 
     /// Runs its job: starts the agent, again and again while it is refused; when the agent exits (asked to), its
@@ -759,6 +772,66 @@ fn with_the_service_supervising_the_app_never_starts_an_agent_of_its_own() {
     manager.stop();
 }
 
+/// Production-like counts, shrunk so that a few dozen looks outlast the old fallback (idle rechecks of the service) many times.
+fn pending_tuning() -> super::machine::Tuning {
+    super::machine::Tuning {
+        service_recheck: 5,
+        idle_rechecks: 2,
+        pending_recheck: 2,
+        ..patient()
+    }
+}
+
+#[test]
+fn a_pending_registration_is_waited_for_and_the_services_agent_finds_the_data_folder_free() {
+    let r = rig_with(false, pending_tuning());
+    let manager = FakeServiceManager::new(r.link.dirs.clone(), false, false);
+    manager.set_pending(true);
+    r.link.set_service_probe(manager.probe());
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "waiting for the registration", |s| {
+        s.phase == Phase::WaitingForService && s.stall.is_some_and(|(_, k)| k == super::Stall::RegisteringService)
+    });
+    // Many times the old fallback (two idle rechecks of five looks): the app starts nothing.
+    wait_state(&r.link, "the old fallback has passed", |s| s.looks >= 60);
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        0,
+        "the app started an agent while the service was registering"
+    );
+    // The registration ends with the service: its agent starts, and finds the folder free (an exit with code 3 is refused()).
+    manager.set(true, true);
+    manager.start_job();
+    running(&r.link, &r.statuses);
+    assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 0);
+    assert!(!r.link.started_by_this_app());
+    assert_eq!(
+        manager.refused.load(Ordering::SeqCst),
+        0,
+        "the service's agent found the data folder locked"
+    );
+    assert!(!r.link.quit(), "the service's agent stays");
+    handle.join().unwrap();
+    manager.stop();
+}
+
+#[test]
+fn a_pending_registration_that_ends_with_no_service_falls_back_to_the_apps_own_agent() {
+    let r = rig_with(false, pending_tuning());
+    let manager = FakeServiceManager::new(r.link.dirs.clone(), false, false);
+    manager.set_pending(true);
+    r.link.set_service_probe(manager.probe());
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "waiting for the registration", |s| s.phase == Phase::WaitingForService);
+    manager.set_pending(false); // refused, switched off or used up: nothing is coming
+    running(&r.link, &r.statuses);
+    assert!(r.link.started_by_this_app(), "the app waited for a service that is not coming");
+    assert_eq!(r.launcher.launches.load(Ordering::SeqCst), 1);
+    r.link.quit();
+    handle.join().unwrap();
+    manager.stop();
+}
+
 #[test]
 fn turning_launch_at_login_on_hands_the_agent_over_to_the_service() {
     let r = rig(false);
@@ -817,6 +890,9 @@ struct StubLauncher {
     finished: AtomicUsize,
     after_launch: Child,
     state: Mutex<Child>,
+    /// Held by a test to keep a launch from happening (the launcher thread blocks on it), so the window between the machine
+    /// asking for a launch and the process existing can be looked at as long as the test wants.
+    gate: Mutex<()>,
 }
 
 impl StubLauncher {
@@ -826,6 +902,7 @@ impl StubLauncher {
             finished: AtomicUsize::new(0),
             after_launch,
             state: Mutex::new(Child::None),
+            gate: Mutex::new(()),
         })
     }
 
@@ -839,6 +916,7 @@ struct StubShared(Arc<StubLauncher>);
 impl Launcher for StubShared {
     fn launch(&self) -> Result<(), String> {
         let me = &self.0;
+        drop(lock(&me.gate));
         if matches!(*lock(&me.state), Child::Running { .. }) {
             return Ok(());
         }
@@ -964,6 +1042,33 @@ fn an_agent_that_never_answers_is_reported_with_retry_and_retry_ends_that_proces
     r.link.quit();
     handle.join().unwrap();
     assert_eq!(r.launcher.launches(), 2);
+}
+
+/// After Retry ends the agent, the launcher still reports that process as exited until the next launch has really happened.
+/// A look in that window must not be read as the new agent having exited (the retry then backed off and launched a third).
+#[test]
+fn a_look_between_retry_asking_for_a_launch_and_the_launch_does_not_judge_the_new_agent_by_the_old_ones_exit() {
+    let r = stub_rig(Child::Running { pid: 4242 });
+    let handle = r.link.spawn().unwrap();
+    wait_state(&r.link, "a stall for an agent that never wrote its discovery file", |s| {
+        s.stall.is_some()
+    });
+    // The second launch is held back: the machine has asked for it, the process does not exist yet.
+    let hold = lock(&r.launcher.gate);
+    r.link.retry();
+    wait_state(&r.link, "the second launch is asked for", |s| s.child == Some(2));
+    let_it_look(&r.link, 8);
+    let seen = r.link.transitions().current();
+    assert_eq!(
+        (seen.child, matches!(seen.phase, Phase::Starting { child: 2 })),
+        (Some(2), true),
+        "looks while the launch was held back took the old agent's exit for the new one's: {seen:?}"
+    );
+    drop(hold);
+    until(HANG_GUARD, || r.launcher.launches() == 2);
+    assert_eq!(r.launcher.launches(), 2);
+    r.link.quit();
+    handle.join().unwrap();
 }
 
 #[test]

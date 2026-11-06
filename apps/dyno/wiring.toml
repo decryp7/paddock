@@ -14,7 +14,7 @@ until = "dyno-v1.1.0"
 # OS-edge modules (family ADR 0054 sections 2.1 and 2.2): modules that hold an adapter, call an OS API through FFI or run an OS
 # tool. C93 fails on a discarded result in their non-test code. Paths are relative to this app folder.
 # Not listed yet, each to be added by the package that owns the file (their findings are that package's to fix):
-# `app/src-tauri/src/{tray,shell,login,login_item,service_repair}.rs` (ADR 0054 L-2 and L-3) and
+# `app/src-tauri/src/{tray,shell,login,login_item}.rs` (ADR 0054 L-2 and L-3) and
 # `crates/dyno-helper/src/{winsvc,logfile,setup}.rs` (RC-1, E-2 and L-3).
 [edges]
 modules = [

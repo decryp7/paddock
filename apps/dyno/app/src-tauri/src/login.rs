@@ -2,25 +2,26 @@
 //! keeps measuring while the window is closed" (ADR 0010). Two registrations back it:
 //!
 //! - the app itself: `SMAppService.mainApp` on macOS (one row in Login Items, nothing under `~/Library/LaunchAgents`;
-//!   started at login, it hides in the tray because macOS says so, [`mac::open_event`]) and
-//!   an XDG autostart file with `--hidden` on Linux and the per-user `Run` value on Windows ([`paddock_service::login::UserRunEntry`], [`crate::login_item::route_for`]);
+//!   started at login, it hides in the tray because macOS says so, [`paddock_service::apple_event::open_event`]) and
+//!   an XDG autostart file with `--hidden` on Linux and the per-user `Run` value on Windows ([`paddock_service::login::UserRunEntry`], [`paddock_service::login::XdgAutostart`]);
 //! - the agent as a per-user service: `SMAppService` on macOS (the plist inside the bundle), a systemd user unit on
 //!   Linux and the per-user `Run` entry on Windows (`dyno_agent::service`).
 //!
-//! The OS parts sit behind two small traits so the orchestration is unit-tested with fakes; the macOS re-registration
-//! after an update is decided and run by [`crate::service_repair`] (also over fakes). Nothing in the tests touches a
+//! The OS parts sit behind two small traits so the orchestration is unit-tested with fakes. On macOS the agent service is
+//! `paddock_service::Manager` over `SMAppService` (registration, the re-registration after an update, stop and resume are
+//! the shared crate's, tested there over fakes); this file only wires it to Dyno's names. Nothing in the tests touches a
 //! real launch agent, unit or registry key.
 
 use std::path::PathBuf;
 
-/// The agent as a per-user background service.
-pub trait AgentService: Send {
+/// Whether the agent answers now, asked from another thread.
+pub type AnswerFn = std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// The agent as a per-user background service. Registering and removing it are the shared
+/// [`paddock_service::login::LoginService`].
+pub trait AgentService: paddock_service::login::LoginService + Send {
     /// Whether it is registered.
     fn installed(&mut self) -> bool;
-    /// Registers (and starts) it.
-    fn install(&mut self) -> Result<(), String>;
-    /// Stops and removes it.
-    fn uninstall(&mut self) -> Result<(), String>;
     /// Whether the OS starts the agent now and restarts it when it exits (launchd, systemd), so the app must hand over
     /// to it instead of running its own; a Windows `Run` entry only starts it at the next logon.
     fn supervises(&mut self) -> bool {
@@ -28,7 +29,12 @@ pub trait AgentService: Send {
     }
     /// Registers it again when the OS cannot start what is registered, and on macOS once after every version change
     /// (an update). `agent_answers` asks whether the agent answers now. Returns whether it registered again.
-    fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String>;
+    fn repair(&mut self, agent_answers: AnswerFn) -> Result<bool, String>;
+    /// Whether a registration this app made is being waited for, or is about to be made (ADR 0056): the link neither starts an
+    /// agent of its own nor retires one while this is true. False where nothing waits and in every state with no way forward.
+    fn pending(&mut self) -> bool {
+        false
+    }
     /// The service job a stop can name (launchd job, systemd user unit), when the OS supervises the agent now; `None` where
     /// there is none to stop (Windows, or nothing supervises). Quit and stop measuring stops it without removing the registration.
     fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
@@ -42,39 +48,27 @@ pub trait AgentService: Send {
 
 pub use paddock_service::login::Autostart;
 
-/// Applies the `launchAtLogin` setting to both registrations. Each is attempted even if the other fails; the message
-/// names what did not work and what to do.
+/// The words of the message [`apply_launch_at_login`] returns.
+fn words() -> paddock_service::login::LoginWords {
+    paddock_service::login::LoginWords {
+        saved: "Your settings are saved".into(),
+        service: "the background agent".into(),
+        app: "Dyno".into(),
+    }
+}
+
+/// Applies the `launchAtLogin` setting to both registrations ([`paddock_service::login::apply_launch_at_login_with`]). Each
+/// is attempted even if the other fails; the message names what did not work and what to do.
 ///
-/// Turning it on from a place that will not exist after the next login (`location`, [`crate::login_item::refuse_unstable_location`])
-/// registers neither and says where to move Dyno; turning it off always runs.
+/// Turning it on from a place that will not exist after the next login (`location`, [`current_location`]) registers neither
+/// and says where to move Dyno; turning it off always runs.
 pub fn apply_launch_at_login(
     on: bool,
     location: Result<(), String>,
     service: &mut dyn AgentService,
     autostart: &mut dyn Autostart,
 ) -> Result<(), String> {
-    if let (true, Err(e)) = (on, location) {
-        return Err(format!("Your settings are saved, but start at login was not turned on: {e}"));
-    }
-    let mut problems = Vec::new();
-    let service_result = if on { service.install() } else { service.uninstall() };
-    if let Err(e) = service_result {
-        problems.push(format!(
-            "the background agent could not be {}: {e}",
-            if on { "registered" } else { "removed" }
-        ));
-    }
-    if let Err(e) = autostart.set(on) {
-        problems.push(format!(
-            "Dyno could not be {} the login items: {e}",
-            if on { "added to" } else { "removed from" }
-        ));
-    }
-    if problems.is_empty() {
-        Ok(())
-    } else {
-        Err(format!("Your settings are saved, but {}.", problems.join("; and ")))
-    }
+    paddock_service::login::apply_launch_at_login_with(on, location, Some(service), autostart, &words())
 }
 
 /// What the first sight of the settings did about start at login.
@@ -122,6 +116,76 @@ pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
         log::warn!(Warning = w.as_str(); "First run: the settings file was not read cleanly; start at login follows what could be read");
     }
     settings.unwrap_or_default().launch_at_login
+}
+
+/// Applying the Start-at-login switch takes seconds (a registration can wait for the lock another registration holds, and each
+/// cycle waits for the OS), so the save returns at once and one worker does it (ER-17); it reports as a job, which the shell's
+/// Jobs view and notices already show (`paddock://jobs`). A second change while one runs is refused with a message.
+#[derive(Default)]
+pub struct SwitchWorker {
+    busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Clears the busy flag when the worker ends, however it ends.
+struct Clear(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for Clear {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl SwitchWorker {
+    /// Runs `work` on a worker thread and returns at once. `report` is told `Running`, then `Done` or `Failed` with the
+    /// message `work` returned.
+    ///
+    /// # Errors
+    /// A message when the previous change has not finished, or no worker could be started.
+    pub fn start(
+        &self,
+        report: std::sync::Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync>,
+        work: impl FnOnce() -> Result<(), String> + Send + 'static,
+    ) -> Result<(), String> {
+        if self.busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err("Start at login is still being changed. Try again in a moment.".into());
+        }
+        let clear = Clear(self.busy.clone());
+        let spawned = std::thread::Builder::new().name("dyno-login-switch".into()).spawn(move || {
+            let _clear = clear;
+            report(paddock_jobs::JobState::Running {
+                phase: Some(paddock_jobs::PhaseProgress {
+                    phase: paddock_jobs::Phase::discovering("service", "Setting up the background service"),
+                    done: 0,
+                }),
+            });
+            match work() {
+                Ok(()) => report(paddock_jobs::JobState::Done),
+                Err(message) => report(paddock_jobs::JobState::Failed { message }),
+            }
+        });
+        spawned.map(drop).map_err(|e| {
+            self.busy.store(false, std::sync::atomic::Ordering::SeqCst);
+            format!("Start at login could not be changed: {e}")
+        })
+    }
+}
+
+/// The user's switch as the service manager needs it (ADR 0056): the settings file's `launchAtLogin`; a missing file is a fresh
+/// install (the default, on); a file that cannot be read is `None`, so nothing is registered unattended until it can.
+pub fn wanted_setting(settings_file: &std::path::Path) -> Option<bool> {
+    let (settings, warning) = dyno_agent::files::load(settings_file, dyno_core::settings::parse);
+    if warning.is_some() {
+        return None;
+    }
+    Some(settings.unwrap_or_default().launch_at_login)
+}
+
+/// Where the first-run marker is (set when the first run looks at it; the service manager asks whether it is there).
+static FIRST_RUN_MARKER_PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Whether the first run has been done: its marker is there.
+pub fn first_run_done() -> bool {
+    FIRST_RUN_MARKER_PATH.get().is_some_and(|p| p.exists())
 }
 
 /// Whether the first-run registration has been tried in this process. A failed attempt is not repeated in the same run
@@ -174,9 +238,10 @@ pub fn run_first_run<R: tauri::Runtime>(app: &tauri::AppHandle<R>, link: &crate:
         crate::logging::info("first run: no data folder, start at login not applied");
         return;
     };
-    let mut service = platform_service();
+    let mut service = first_run_service();
     let mut autostart = platform_autostart(app);
     let marker = paddock_service::login::FirstRunMarker::new(data.join(FIRST_RUN_MARKER));
+    FIRST_RUN_MARKER_PATH.set(data.join(FIRST_RUN_MARKER)).ok();
     let mut sys = paddock_service::RealSystem::new();
     let began = std::time::Instant::now();
     match apply_first_run_once(
@@ -235,9 +300,14 @@ pub fn migrate_legacy_login(
 /// Whether the running executable may be registered to start at login.
 pub fn current_location() -> Result<(), String> {
     match std::env::current_exe() {
-        Ok(exe) => crate::login_item::refuse_unstable_location(&exe),
+        Ok(exe) => current_location_for(&exe.to_string_lossy()),
         Err(e) => Err(format!("the app's folder cannot be found: {e}")),
     }
+}
+
+/// [`current_location`] for the executable at `exe`.
+fn current_location_for(exe: &str) -> Result<(), String> {
+    paddock_service::launch::refuse_unstable_location(std::path::Path::new(exe), "Dyno")
 }
 
 /// The agent program next to the app (or `DYNO_AGENT_BIN` in a development build).
@@ -253,29 +323,114 @@ pub fn agent_override(debug_build: bool, value: Option<&std::ffi::OsStr>) -> Opt
     value.filter(|_| debug_build)
 }
 
-// ---------------------------------------------------------------------------------------------------- Linux, Windows
+// ----------------------------------------------------------------------------------------------------------- Linux
 
-/// The agent's own service registration (`dyno_agent::service`): a systemd user unit or the per-user `Run` entry.
-#[cfg(not(target_os = "macos"))]
+/// The agent's systemd user unit through the shared service manager (`dyno_agent::service::linux`, ADR 0056): the Settings
+/// switch, the repair at start, Quit and the resume are thin callers of `Manager`, so a `systemctl --user disable` is the user's
+/// switch and nothing here writes, enables or starts a unit by itself. `make` builds the manager for the waits a call wants
+/// (the real one in the app, one over the fake systemd in the tests).
+#[cfg(any(target_os = "linux", test))]
+pub struct LinuxService {
+    make: dyno_agent::service::linux::ManagerFactory,
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl LinuxService {
+    /// The service of this user: the real `systemctl`, Dyno's data folder and the agent program next to the app.
+    #[cfg(target_os = "linux")]
+    pub fn real() -> LinuxService {
+        LinuxService::with(Box::new(|timings| {
+            let manager = dyno_agent::service::linux::real_manager(&agent_program()?, env!("CARGO_PKG_VERSION"), timings)?;
+            // The app's own decisions are inputs to the plan, as on macOS (ADR 0056): the user's switch, the first run, the place
+            // the app runs from.
+            Ok(manager.with_app_state(
+                || wanted_setting(&dyno_agent::paths::Dirs::current().settings()),
+                first_run_done,
+                || current_location().is_ok(),
+            ))
+        }))
+    }
+
+    /// A service whose manager comes from `make` (tests).
+    pub fn with(make: dyno_agent::service::linux::ManagerFactory) -> LinuxService {
+        LinuxService { make }
+    }
+
+    /// A manager that is only asked what it sees or told to stop or resume.
+    fn quiet(&self) -> Result<paddock_service::Manager, String> {
+        (self.make)(paddock_service::Timings::default())
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl paddock_service::login::LoginService for LinuxService {
+    /// Registers the unit without waiting for the agent to answer (the link waits for it and falls back to one of its own).
+    fn install(&mut self) -> Result<(), String> {
+        let mut m = (self.make)(dyno_agent::service::linux::install_timings())?;
+        dyno_agent::service::linux::install(&mut m)
+    }
+
+    fn uninstall(&mut self) -> Result<(), String> {
+        dyno_agent::service::linux::uninstall(&mut self.quiet()?)
+    }
+}
+
+#[cfg(any(target_os = "linux", test))]
+impl AgentService for LinuxService {
+    fn installed(&mut self) -> bool {
+        self.quiet().is_ok_and(|mut m| m.installed())
+    }
+
+    /// Registered, not disabled by the user and systemd runs the unit or is about to restart it.
+    fn supervises(&mut self) -> bool {
+        self.quiet().is_ok_and(|mut m| m.supervises())
+    }
+
+    /// After an update (or a moved program) the unit is written again once; what the user disabled is left alone and nothing is
+    /// registered that the user never turned on.
+    fn repair(&mut self, agent_answers: AnswerFn) -> Result<bool, String> {
+        // The app's own agent keeps a refused unit from being replaced while the app measures; it never settles anything.
+        let mut manager = self.quiet()?.with_cover(move || agent_answers());
+        dyno_agent::service::linux::ensure(&mut manager, true)
+    }
+
+    /// Whether a registration this app made is being waited for (the link neither starts nor retires an agent meanwhile).
+    fn pending(&mut self) -> bool {
+        self.quiet().is_ok_and(|mut m| m.pending())
+    }
+
+    /// The user unit, while systemd runs it (the registration is not touched by the stop).
+    fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
+        self.quiet().ok()?.stop_mechanism()
+    }
+
+    /// After a stop on request: the shared resume starts the unit again unless the user switched it off meanwhile.
+    fn resume(&mut self) -> Result<bool, String> {
+        self.quiet()?
+            .resume(&std::sync::atomic::AtomicBool::new(false), &mut |step| {
+                crate::logging::info(&format!("agent service: {step}"))
+            })
+            .map_err(|e| dyno_agent::service::linux::words(&e))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------- Windows
+
+/// On Windows the app's own `Run` value is the logon entry and the app starts the agent hidden: the agent is not registered
+/// separately (an entry that started only the agent opened a console and left no tray icon, Dyno 1.0.0), so `install` only
+/// removes the stale agent entry 1.0.0 wrote, and `repair` does the same and says whether it was there.
+#[cfg(windows)]
 pub struct CliService;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
 impl CliService {
     fn service(&self) -> Result<dyno_agent::service::Service, String> {
         dyno_agent::service::Service::for_current_user(agent_program()?)
     }
 }
 
-/// On Windows the app's own `Run` value is the logon entry and the app starts the agent hidden: the agent is not registered
-/// separately (an entry that started only the agent opened a console and left no tray icon, Dyno 1.0.0), so `install` only
-/// removes the stale agent entry 1.0.0 wrote, and `repair` does the same and says whether it was there.
-#[cfg(not(target_os = "macos"))]
-impl AgentService for CliService {
-    fn installed(&mut self) -> bool {
-        self.service()
-            .is_ok_and(|mut s| !s.app_is_logon_entry() && !matches!(s.status(), dyno_agent::service::Status::NotInstalled))
-    }
-
+#[cfg(windows)]
+impl paddock_service::login::LoginService for CliService {
     fn install(&mut self) -> Result<(), String> {
         let mut s = self.service()?;
         if s.app_is_logon_entry() {
@@ -287,43 +442,20 @@ impl AgentService for CliService {
     fn uninstall(&mut self) -> Result<(), String> {
         self.service()?.uninstall()
     }
+}
 
-    fn supervises(&mut self) -> bool {
-        self.service().is_ok_and(|mut s| s.supervised())
+#[cfg(windows)]
+impl AgentService for CliService {
+    fn installed(&mut self) -> bool {
+        false
     }
 
-    fn repair(&mut self, _agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
+    fn repair(&mut self, _agent_answers: AnswerFn) -> Result<bool, String> {
         let mut s = self.service()?;
         if s.app_is_logon_entry() {
             return s.clear_stale_run_entry();
         }
         s.ensure()
-    }
-
-    /// Linux: the systemd user unit, while it is supervising. Windows has no service job (the app's `Run` entry starts the agent).
-    fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
-        if cfg!(target_os = "linux") && self.supervises() {
-            Some(paddock_service::stop::StopMechanism::SystemdUser {
-                unit: "dyno-agent.service".into(),
-            })
-        } else {
-            None
-        }
-    }
-
-    /// Linux: `systemctl --user start` of the unit that was stopped (never `enable`: Launch at login was not changed).
-    fn resume(&mut self) -> Result<bool, String> {
-        if !cfg!(target_os = "linux") || !self.installed() {
-            return Ok(false);
-        }
-        let mut sys = paddock_service::RealSystem::new().with_timeout(std::time::Duration::from_secs(10));
-        let out = paddock_service::System::run(&mut sys, "systemctl", &["--user", "start", "dyno-agent.service"])
-            .map_err(|e| format!("systemctl start {e}"))?;
-        if out.success() {
-            Ok(true)
-        } else {
-            Err(format!("systemctl --user start dyno-agent.service: {}", out.reason()))
-        }
     }
 }
 
@@ -336,7 +468,7 @@ pub fn repair_stale_agent_entry(
     service: &mut dyn AgentService,
     autostart: &mut dyn Autostart,
 ) -> Result<bool, String> {
-    let cleaned = service.repair(&|| true)?;
+    let cleaned = service.repair(std::sync::Arc::new(|| true))?;
     if cleaned && start_at_login {
         autostart.set(true)?;
     }
@@ -354,50 +486,176 @@ pub fn ensure_app_entry(start_at_login: bool, autostart: &mut dyn Autostart) -> 
     Ok(true)
 }
 
+// ------------------------------------------------------------------------------- the macOS service's decisions (pure)
+
+/// What a failed registration tells the user. `opened`: System Settings was opened for them.
+#[cfg(any(target_os = "macos", test))]
+fn registration_words(e: &paddock_service::ServiceError, opened: bool) -> String {
+    use paddock_service::ServiceError;
+    let shown = if opened { " (opened for you)" } else { "" };
+    match e {
+        ServiceError::NeedsApproval => {
+            format!("macOS needs your approval: allow Dyno in System Settings > General > Login Items{shown}")
+        }
+        ServiceError::SwitchedOff => {
+            format!("Dyno is switched off in System Settings > General > Login Items{shown}: switch it on there")
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Whether a registration is made without opening System Settings: the first run (nobody asked), once Login Items has been
+/// opened for it before.
+#[cfg(any(target_os = "macos", test))]
+fn install_is_quiet(first_run: bool, marker_exists: bool) -> bool {
+    first_run && marker_exists
+}
+
+/// Whether the first run records that it opened Login Items: it did (not quiet) and there was something for the user to do.
+#[cfg(any(target_os = "macos", test))]
+fn marker_wanted(first_run: bool, quiet: bool, result: &Result<paddock_service::RepairOutcome, paddock_service::ServiceError>) -> bool {
+    use paddock_service::ServiceError;
+    first_run && !quiet && matches!(result, Err(ServiceError::NeedsApproval | ServiceError::SwitchedOff))
+}
+
+/// The waits of the Settings switch's registration: it returns at once (the link waits for the agent and falls back to one of
+/// its own), so it does not wait for the service to answer.
+#[cfg(any(target_os = "macos", test))]
+fn install_timings() -> paddock_service::Timings {
+    paddock_service::Timings::default().without_start_wait()
+}
+
+/// What the repair at start tells the caller: `Ok(true)` the registration was replaced and the service runs, `Ok(false)` nothing
+/// was needed, an error when it was registered but never answered, another repair kept the lock, or it failed.
+#[cfg(any(target_os = "macos", test))]
+fn repair_result(started: paddock_service::manager::Started) -> Result<bool, String> {
+    use paddock_service::manager::Started;
+    use paddock_service::{RepairOutcome, ServiceError};
+    match started {
+        Started::Repaired(_, outcome) => match outcome {
+            RepairOutcome::Recovered => Ok(true),
+            RepairOutcome::Registered => {
+                Err("the agent service was registered again but did not answer; it is tried again at the next start".into())
+            }
+            RepairOutcome::Cancelled => Ok(false),
+            RepairOutcome::NeedsApproval => Err(registration_words(&ServiceError::NeedsApproval, false)),
+            RepairOutcome::Failed(why) | RepairOutcome::Unavailable(why) => Err(why),
+            RepairOutcome::NeedsElevation | RepairOutcome::Declined => Err("the agent service could not be registered again".into()),
+        },
+        Started::Busy => Err("another registration or repair kept running; it is tried again at the next start".into()),
+        Started::Left(_) | Started::Marked | Started::Offered(_) | Started::Removed => Ok(false),
+    }
+}
+
 // ---------------------------------------------------------------------------------------------------------- macOS
 
 #[cfg(target_os = "macos")]
-pub use mac::{migrate_legacy_login_at_start, open_event, MainAppLogin, SmService};
+pub use mac::{migrate_legacy_login_at_start, SmService};
 
 #[cfg(target_os = "macos")]
 mod mac {
-    //! `SMAppService` (macOS 13+). The plist is `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist` in the
-    //! bundle (`bundle.macOS.files` in tauri.macos.conf.json) with `BundleProgram` pointing at the bundled agent. The
-    //! Objective-C calls are the only unsafe code; each is a plain message send on objects we own.
-    #![allow(unsafe_code, unused_unsafe)]
+    //! The bundled launch agent through the shared service manager: `Contents/Library/LaunchAgents/net.decryptology.dyno.agent.plist`
+    //! in the bundle (`bundle.macOS.files` in tauri.macos.conf.json) with `BundleProgram` pointing at the bundled agent, registered
+    //! with `SMAppService` by `paddock_service::backend::LaunchdBundled`. Registration, the re-registration after an update,
+    //! stop and resume are `paddock_service::Manager`'s; this file names Dyno's service and maps the results to Dyno's messages.
 
     use super::*;
-    use crate::login_item::OpenEvent;
-    use crate::service_repair::{
-        keep_registered, launchctl_output, parse_print_disabled, plan, record_registered_version, registered_version, run_resume,
-        service_supervises, DisabledMark, JobReport, Observed, RegisterError, RegistrationStatus, RepairOps, ResumeOps,
-        REGISTERED_VERSION_FILE,
-    };
     use dyno_agent::service::LABEL;
-    use objc2_foundation::NSString;
-    use objc2_service_management::{SMAppService, SMAppServiceStatus};
-    use paddock_service::system::RealSystem;
-    use std::time::Duration;
+    use paddock_service::login::{LoginService, MainAppItem};
+    use paddock_service::manager::Started;
+    use paddock_service::repair::Timings;
+    use paddock_service::{Manager, ServiceSpec};
+    use std::sync::atomic::AtomicBool;
 
-    const PLIST: &str = "net.decryptology.dyno.agent.plist";
+    /// The bundled launch agent. `first_run` is the unasked registration at the first sight of the settings: it opens System
+    /// Settings (Login Items) for an approval or a switch at most once, where the Settings switch always does.
+    pub struct SmService {
+        first_run: bool,
+    }
 
-    /// The bundled launch agent.
-    pub struct SmService;
-
-    /// The app itself as a login item: `SMAppService.mainApp` (one row in Login Items, macOS 13+).
-    pub struct MainAppLogin;
-
-    impl Autostart for MainAppLogin {
-        fn set(&mut self, on: bool) -> Result<(), String> {
-            paddock_service::login::AppServiceAutostart::new(Box::new(paddock_service::native::SmAppService::main_app())).set(on)
+    impl SmService {
+        /// The service for what the user asks (Settings switch, repair at start, resume, stop).
+        pub const fn asked() -> SmService {
+            SmService { first_run: false }
         }
+
+        /// The service for the first run (no one asked): Login Items is opened at most once.
+        pub const fn first_run() -> SmService {
+            SmService { first_run: true }
+        }
+    }
+
+    /// The login items have no cancel button; a repair runs to its bounds.
+    fn never() -> AtomicBool {
+        AtomicBool::new(false)
+    }
+
+    /// The marker that Login Items has been opened for the first run once.
+    fn opened_marker() -> PathBuf {
+        dyno_agent::paths::Dirs::current().root().join("login-items-opened")
+    }
+
+    /// Dyno 1.1.0 records the registered version with the shared service record; the 1.0.0 file is of no use any more.
+    fn forget_old_version_file(root: &std::path::Path) {
+        let old = root.join("service-registered-version");
+        match std::fs::remove_file(&old) {
+            Ok(()) => crate::logging::info("removed the 1.0.0 registered-version file (the service record replaces it)"),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => crate::logging::warn(&format!("the 1.0.0 registered-version file could not be removed: {e}")),
+        }
+    }
+
+    /// The service of the agent: its spec, the real `SMAppService` and `launchctl` (5 s per call), Dyno's data folder.
+    /// `agent_answers` says whether the agent answers; `timings` are the waits of a repair.
+    fn manager(agent_answers: AnswerFn, timings: Timings) -> Result<Manager, String> {
+        let spec = ServiceSpec::builder(LABEL, "Dyno", "dyno-agent")
+            .build()
+            .map_err(|e| format!("the agent's service definition is wrong: {e}"))?;
+        let uid = paddock_service::native::current_uid();
+        let target = paddock_service::paths::launchd_target(&spec, uid);
+        let system = || paddock_service::system::RealSystem::new().with_timeout(std::time::Duration::from_secs(5));
+        let backend = paddock_service::backend::LaunchdBundled::new(
+            spec.clone(),
+            uid,
+            Box::new(paddock_service::native::SmAppService::new(&spec)),
+            Box::new(system()),
+        );
+        let dirs = dyno_agent::paths::Dirs::current();
+        let manager = Manager::new(
+            "Dyno",
+            Box::new(backend),
+            dirs.root(),
+            LABEL,
+            env!("CARGO_PKG_VERSION"),
+            // The service's own signal only: launchd running the job. The app's own agent, which the link may have started
+            // meanwhile, is `cover`: it keeps a refused job from being replaced, but never settles a registration.
+            move || paddock_service::launchctl::job_running(&mut system(), &target),
+        )
+        .with_cover(move || agent_answers())
+        .with_app_state(
+            || super::wanted_setting(&dyno_agent::paths::Dirs::current().settings()),
+            super::first_run_done,
+            || super::current_location().is_ok(),
+        )
+        .with_timings(timings);
+        // This copy's identity (ADR 0056 section 8): the record keeps the program that registered, so another installed copy
+        // can tell whose registration it sees.
+        Ok(match std::env::current_exe() {
+            Ok(exe) => manager.with_program(&exe.to_string_lossy()),
+            Err(_) => manager,
+        })
+    }
+
+    /// A manager that is only asked what it sees or told to stop or resume: nothing waits for an agent.
+    fn quiet_manager() -> Result<Manager, String> {
+        manager(std::sync::Arc::new(|| false), Timings::default())
     }
 
     /// Moves a start-at-login the old route (`tauri-plugin-autostart`) wrote to `SMAppService.mainApp` ([`super::migrate_legacy_login`]).
     pub fn migrate_legacy_login_at_start() {
         let Some(home) = std::env::var_os("HOME") else { return };
         let dir = PathBuf::from(home).join("Library/LaunchAgents");
-        match super::migrate_legacy_login(&dir, super::current_location(), &mut MainAppLogin) {
+        match super::migrate_legacy_login(&dir, super::current_location(), &mut MainAppItem::new()) {
             Ok(crate::login_item::LegacyPlist::Removed) => {
                 crate::logging::info("moved start at login from the old Dyno.plist to a Login Items entry")
             }
@@ -406,328 +664,94 @@ mod mac {
         }
     }
 
-    /// What the open-application Apple Event says about this start: `keyAELaunchedAsLogInItem` (`'lgit'`) - Apple's
-    /// `AERegistry.h` (Xcode SDK, read 2026-10-31): "application was launched as a login item and probably shouldn't open
-    /// up untitled documents" - as a parameter of the event or the value of its `keyAEPropData` (`'prdt'`); and
-    /// `keyAERestoreAppState` (`'rsto'`) with the value yes (`AppleEvents.h`), which loginwindow sends when it reopens
-    /// the apps that were running at logout ("Reopen windows"), together with whether the sender (`keySenderPIDAttr`,
-    /// `'spid'`) is the login window, judged by the sender pid's executable path read right here (rule 53: not a pid
-    /// remembered from earlier). Only valid while the event is being handled: call it from `applicationDidFinishLaunching`,
-    /// which is where Tauri runs its setup (`RuntimeRunEvent::Ready`). Any miss gives the default (all false): the window shows.
-    pub fn open_event() -> OpenEvent {
-        use objc2::runtime::AnyObject;
-        use objc2::{class, msg_send};
-        const OAPP: u32 = u32::from_be_bytes(*b"oapp");
-        const PROP_DATA: u32 = u32::from_be_bytes(*b"prdt");
-        const LOGIN_ITEM: u32 = u32::from_be_bytes(*b"lgit");
-        const RESTORE: u32 = u32::from_be_bytes(*b"rsto");
-        const YES: u32 = u32::from_be_bytes(*b"yes ");
-        const SENDER_PID: u32 = u32::from_be_bytes(*b"spid");
-        // SAFETY: plain message sends on Foundation objects; the types of the replies match the documented
-        // NSAppleEventManager / NSAppleEventDescriptor signatures (FourCharCode is u32, a pid is int32).
-        unsafe {
-            let manager: Option<objc2::rc::Retained<AnyObject>> = msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
-            let Some(manager) = manager else { return OpenEvent::default() };
-            let event: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*manager, currentAppleEvent];
-            let Some(event) = event else { return OpenEvent::default() };
-            let id: u32 = msg_send![&*event, eventID];
-            if id != OAPP {
-                return OpenEvent::default();
+    impl LoginService for SmService {
+        /// Registers the agent without waiting for it to answer (`install_timings`): the link waits for it and falls back to an
+        /// agent of its own. This call itself can still take long (a lost lock is waited for up to 30 s, and each registration
+        /// cycle about 24 s), so the Settings switch must show it as busy.
+        fn install(&mut self) -> Result<(), String> {
+            let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
+            let quiet = install_is_quiet(self.first_run, opened_marker().exists());
+            // A first run that lost the lock to another registration waits for it instead of leaving nothing registered.
+            let result = m.install_patient(&never(), quiet, 6, std::time::Duration::from_secs(5));
+            if marker_wanted(self.first_run, quiet, &result) {
+                let marker = opened_marker();
+                let written = marker
+                    .parent()
+                    .map_or(Ok(()), std::fs::create_dir_all)
+                    .and_then(|()| std::fs::write(&marker, "opened\n"));
+                if let Err(e) = written {
+                    crate::logging::warn(&format!("the Login Items marker could not be written: {e}"));
+                }
             }
-            let direct: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: LOGIN_ITEM];
-            let props: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: PROP_DATA];
-            let by_props = match props {
-                Some(p) => {
-                    let code: u32 = msg_send![&*p, enumCodeValue];
-                    code == LOGIN_ITEM
-                }
-                None => false,
-            };
-            let restore: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, paramDescriptorForKeyword: RESTORE];
-            let restore = match restore {
-                Some(r) => {
-                    let code: u32 = msg_send![&*r, enumCodeValue];
-                    code == YES
-                }
-                None => false,
-            };
-            let sender_is_loginwindow = restore && {
-                let sender: Option<objc2::rc::Retained<AnyObject>> = msg_send![&*event, attributeDescriptorForKeyword: SENDER_PID];
-                match sender {
-                    Some(d) => {
-                        let pid: i32 = msg_send![&*d, int32Value];
-                        pid_path(pid).is_some_and(|p| crate::login_item::is_loginwindow(&p))
-                    }
-                    None => false,
-                }
-            };
-            OpenEvent {
-                login_item: direct.is_some() || by_props,
-                restore,
-                sender_is_loginwindow,
-            }
+            result.map(drop).map_err(|e| registration_words(&e, !quiet))
         }
-    }
 
-    /// The executable path of process `pid` now (`proc_pidpath`), `None` when it is gone or unreadable.
-    fn pid_path(pid: i32) -> Option<String> {
-        unsafe extern "C" {
-            fn proc_pidpath(pid: i32, buffer: *mut std::ffi::c_void, size: u32) -> i32;
-        }
-        if pid <= 0 {
-            return None;
-        }
-        let mut buf = vec![0u8; 4096];
-        // SAFETY: `buf` is valid for `size` bytes; the call writes at most that many and returns the length written.
-        let n = unsafe { proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
-        if n <= 0 {
-            return None;
-        }
-        buf.truncate(n as usize);
-        String::from_utf8(buf).ok()
-    }
-
-    fn service() -> objc2::rc::Retained<SMAppService> {
-        let name = NSString::from_str(PLIST);
-        // SAFETY: a class method taking a valid NSString.
-        unsafe { SMAppService::agentServiceWithPlistName(&name) }
-    }
-
-    fn status() -> SMAppServiceStatus {
-        // SAFETY: a property read on a valid object.
-        unsafe { service().status() }
-    }
-
-    fn registration_status() -> RegistrationStatus {
-        match status() {
-            SMAppServiceStatus::Enabled => RegistrationStatus::Enabled,
-            SMAppServiceStatus::RequiresApproval => RegistrationStatus::RequiresApproval,
-            SMAppServiceStatus::NotFound => RegistrationStatus::NotFound,
-            _ => RegistrationStatus::NotRegistered,
-        }
-    }
-
-    /// Registers the launch agent; with `open_settings` a missing approval opens Login Items for the user (only when
-    /// the user asked: the background repair never opens a window).
-    fn register(open_settings: bool) -> Result<(), RegisterError> {
-        let s = service();
-        // SAFETY: a method call on a valid object; the error is returned as a Retained NSError.
-        match unsafe { s.registerAndReturnError() } {
-            Ok(()) => {
-                record_version();
-                Ok(())
-            }
-            Err(e) => {
-                if status() == SMAppServiceStatus::RequiresApproval {
-                    if open_settings {
-                        // SAFETY: a class method without arguments.
-                        unsafe { SMAppService::openSystemSettingsLoginItems() };
-                    }
-                    return Err(RegisterError::NeedsApproval);
-                }
-                if status() == SMAppServiceStatus::NotFound {
-                    return Err(RegisterError::Other(
-                        "run Dyno from the Applications folder (the launch agent is part of the app bundle)".into(),
-                    ));
-                }
-                Err(RegisterError::Other(e.localizedDescription().to_string()))
-            }
-        }
-    }
-
-    fn version_file() -> PathBuf {
-        dyno_agent::paths::Dirs::current().root().join(REGISTERED_VERSION_FILE)
-    }
-
-    /// Remembers that this version registered the agent (a failure only costs one more re-registration).
-    fn record_version() {
-        if let Err(e) = record_registered_version(&version_file(), env!("CARGO_PKG_VERSION")) {
-            crate::logging::warn(&format!("could not remember the registered agent version: {e}"));
-        }
-    }
-
-    /// `gui/<uid>`.
-    fn gui_domain() -> Option<String> {
-        use std::os::unix::fs::MetadataExt;
-        let home = std::env::var_os("HOME")?;
-        Some(format!("gui/{}", std::fs::metadata(home).ok()?.uid()))
-    }
-
-    /// `gui/<uid>/<label>`.
-    fn target() -> Option<String> {
-        Some(format!("{}/{LABEL}", gui_domain()?))
-    }
-
-    /// launchd's report of the job (nothing found when it cannot be read).
-    fn job_report() -> JobReport {
-        target()
-            .and_then(|t| paddock_service::launchctl::job_report(&mut system(), &t))
-            .unwrap_or_default()
-    }
-
-    /// Whether launchd's override database marks the agent disabled (`launchctl print-disabled gui/<uid>`).
-    fn launchd_disabled() -> Option<bool> {
-        let report = launchctl(&["print-disabled", &gui_domain()?])?;
-        parse_print_disabled(&report, LABEL)
-    }
-
-    /// The shared bounded tool runner: output read while the tool runs, the tree ended at the timeout.
-    fn system() -> RealSystem {
-        RealSystem::new().with_timeout(Duration::from_secs(5))
-    }
-
-    /// `launchctl <args>` through it; `None` when it cannot be run, times out or fails.
-    fn launchctl(args: &[&str]) -> Option<String> {
-        launchctl_output(&mut system(), args)
-    }
-
-    /// What `launchctl print-disabled` says: listed, not listed, or could not be read (a failed look is not "switched on").
-    fn launchd_disabled_mark() -> DisabledMark {
-        let Some(domain) = gui_domain() else {
-            return DisabledMark::Unreadable;
-        };
-        match launchctl(&["print-disabled", &domain]) {
-            None => DisabledMark::Unreadable,
-            Some(report) => match parse_print_disabled(&report, LABEL) {
-                Some(true) => DisabledMark::Disabled,
-                Some(false) => DisabledMark::Enabled,
-                None => DisabledMark::NotListed,
-            },
-        }
-    }
-
-    /// [`ResumeOps`] over `SMAppService` and `launchctl`.
-    struct MacResume;
-
-    impl ResumeOps for MacResume {
-        fn status(&mut self) -> RegistrationStatus {
-            registration_status()
-        }
-        fn disabled(&mut self) -> DisabledMark {
-            launchd_disabled_mark()
-        }
-        fn registered_version(&mut self) -> Option<String> {
-            registered_version(&version_file())
-        }
-        fn register(&mut self) -> Result<(), String> {
-            register(false).map_err(|e| format!("{e:?}"))
-        }
-        fn job_found(&mut self) -> bool {
-            job_report().found
-        }
-        fn pause(&mut self) {
-            std::thread::sleep(Duration::from_millis(500));
-        }
-        fn repair(&mut self) -> Result<bool, String> {
-            repair_as(&|| false, true)
-        }
-    }
-
-    /// The repair plan for the observed state, run; `requested` makes it replace the registration whatever launchd reports.
-    fn repair_as(agent_answers: &dyn Fn() -> bool, requested: bool) -> Result<bool, String> {
-        let registered = registered_version(&version_file());
-        let observed = Observed {
-            status: registration_status(),
-            launchd_disabled: launchd_disabled(),
-            answers: agent_answers(),
-            job: job_report(),
-            registered_version: registered.as_deref(),
-            current_version: env!("CARGO_PKG_VERSION"),
-            requested,
-        };
-        keep_registered(
-            plan(&observed),
-            &mut MacOps { answers: agent_answers },
-            &mut record_version,
-            &mut |step| crate::logging::info(&format!("agent service: {step}")),
-        )
-    }
-
-    /// [`RepairOps`] over `SMAppService` and `launchctl`.
-    struct MacOps<'a> {
-        answers: &'a dyn Fn() -> bool,
-    }
-
-    impl RepairOps for MacOps<'_> {
-        fn register(&mut self) -> Result<(), RegisterError> {
-            register(false)
-        }
-        fn unregister(&mut self) -> Result<(), String> {
-            SmService.uninstall()
-        }
-        fn bootout(&mut self) -> Result<(), String> {
-            let t = target().ok_or("the user's launchd domain is unknown")?;
-            paddock_service::launchctl::bootout(&mut system(), &t)
-        }
-        fn job_gone(&mut self) -> bool {
-            !job_report().found
-        }
-        fn job(&mut self) -> JobReport {
-            job_report()
-        }
-        fn service_answers(&mut self) -> bool {
-            // The app may have started an agent of its own meanwhile; launchd running the job counts too.
-            (self.answers)() || job_report().running
-        }
-        fn pause(&mut self, how_long: Duration) {
-            std::thread::sleep(how_long);
+        fn uninstall(&mut self) -> Result<(), String> {
+            // Another registration or repair may hold the lock: wait for it as the install does.
+            quiet_manager()?
+                .uninstall_patient(6, std::time::Duration::from_secs(5))
+                .map_err(|e| e.to_string())
         }
     }
 
     impl AgentService for SmService {
         fn installed(&mut self) -> bool {
-            matches!(status(), SMAppServiceStatus::Enabled | SMAppServiceStatus::RequiresApproval)
+            quiet_manager().is_ok_and(|mut m| m.installed())
+        }
+
+        fn pending(&mut self) -> bool {
+            quiet_manager().is_ok_and(|mut m| m.pending())
         }
 
         /// Enabled, not switched off in Login Items and loaded in launchd: it runs the job (`RunAtLoad`, `KeepAlive`).
         /// Waiting for approval, switched off or dropped by launchd, it runs nothing.
         fn supervises(&mut self) -> bool {
-            service_supervises(registration_status(), launchd_disabled(), job_report())
-        }
-
-        fn install(&mut self) -> Result<(), String> {
-            register(true).map_err(|e| match e {
-                RegisterError::NeedsApproval => {
-                    "macOS needs your approval: allow Dyno in System Settings > General > Login Items (opened for you)".into()
-                }
-                RegisterError::Other(e) => e,
-            })
-        }
-
-        fn uninstall(&mut self) -> Result<(), String> {
-            if status() == SMAppServiceStatus::NotRegistered || status() == SMAppServiceStatus::NotFound {
-                return Ok(());
-            }
-            // SAFETY: a method call on a valid object.
-            unsafe { service().unregisterAndReturnError() }.map_err(|e| e.localizedDescription().to_string())
+            quiet_manager().is_ok_and(|mut m| m.supervises())
         }
 
         /// After an update launchd refuses the registered agent (its stored launch constraint is the previous build's
         /// cdhash) or keeps the old job: replace the registration when launchd reports it stale while the agent does
-        /// not answer, and once after every version change ([`crate::service_repair`]). What the user switched off in
-        /// Login Items is left alone, and nothing is registered that the user never turned on.
-        fn repair(&mut self, agent_answers: &dyn Fn() -> bool) -> Result<bool, String> {
-            repair_as(agent_answers, false)
+        /// not answer, and once after every version change. What the user switched off in Login Items is left alone, and
+        /// nothing is registered that the user never turned on.
+        fn repair(&mut self, agent_answers: AnswerFn) -> Result<bool, String> {
+            // From a disk image or a translocated path the bundle cannot register the agent: replacing would remove a job
+            // that runs and fail to put it back.
+            super::current_location()?;
+            forget_old_version_file(dyno_agent::paths::Dirs::current().root());
+            let mut m = manager(agent_answers, Timings::default())?;
+            // Another registration or repair (the first run, a second copy) may hold the lock: wait for it a while.
+            let started = m.on_start_patient(&never(), 6, std::time::Duration::from_secs(5));
+            if let Started::Repaired(reason, outcome) = &started {
+                crate::logging::info(&format!("agent service: replaced the registration ({reason:?}): {outcome:?}"));
+            }
+            repair_result(started)
         }
 
         /// The launchd job `gui/<uid>/net.decryptology.dyno.agent`, while launchd holds it. The `SMAppService` registration is
         /// not touched: `launchctl bootout` takes the job out of launchd (so `KeepAlive` cannot restart it) and the registration
         /// loads it again at the next login.
         fn stop_mechanism(&mut self) -> Option<paddock_service::stop::StopMechanism> {
-            let target = target()?;
-            job_report()
-                .found
-                .then_some(paddock_service::stop::StopMechanism::Launchd { target })
+            quiet_manager().ok()?.stop_mechanism()
         }
 
-        /// After a stop on request launchd holds no job and `RunAtLoad` fires only when a job is loaded: [`run_resume`] decides and
+        /// After a stop on request launchd holds no job and `RunAtLoad` fires only when a job is loaded: the shared resume decides and
         /// runs it (an item switched off or a list that cannot be read is left alone; a version change goes through the full repair;
         /// an enabled item of this version is registered again without removal, which macOS would announce as a new item).
         /// Returns whether launchd holds the job afterwards (found, not necessarily running yet).
+        ///
+        /// This runs before the link's first look, so nothing else is shown while it works: it does not wait for the agent to
+        /// answer (`install_timings`). A registration that was made and has not answered yet is `pending`, which the link
+        /// waits for in a labelled phase ("Waiting for the background service") instead of a silent wait of up to 120 s here.
         fn resume(&mut self) -> Result<bool, String> {
-            run_resume(&mut MacResume, env!("CARGO_PKG_VERSION"), &mut |step| {
-                crate::logging::info(&format!("agent service: {step}"))
-            })
+            let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
+            match m.resume(&never(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
+                Ok(held) => Ok(held),
+                Err(_) if m.pending() => {
+                    crate::logging::info("agent service: registered again; the link waits for it to answer");
+                    Ok(true)
+                }
+                Err(e) => Err(registration_words(&e, false)),
+            }
         }
     }
 }
@@ -735,13 +759,36 @@ mod mac {
 /// The platform's agent service.
 #[cfg(target_os = "macos")]
 pub fn platform_service() -> Box<dyn AgentService> {
-    Box::new(SmService)
+    Box::new(SmService::asked())
+}
+
+/// The agent service for the first run, which nobody asked for: System Settings is opened at most once.
+#[cfg(target_os = "macos")]
+pub fn first_run_service() -> Box<dyn AgentService> {
+    Box::new(SmService::first_run())
+}
+
+/// The agent service for the first run (the same as [`platform_service`] off macOS).
+#[cfg(not(target_os = "macos"))]
+pub fn first_run_service() -> Box<dyn AgentService> {
+    platform_service()
 }
 
 /// The platform's agent service.
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
+pub fn platform_service() -> Box<dyn AgentService> {
+    Box::new(LinuxService::real())
+}
+
+/// The platform's agent service.
+#[cfg(windows)]
 pub fn platform_service() -> Box<dyn AgentService> {
     Box::new(CliService)
+}
+
+/// Whether the app is waiting for a registration it made (see [`AgentService::pending`]).
+pub fn service_pending() -> bool {
+    platform_service().pending()
 }
 
 /// The probe the agent link asks before it starts an agent of its own (see [`crate::link::ServiceState`]).
@@ -751,6 +798,7 @@ pub fn service_probe() -> crate::link::ServiceProbe {
         crate::link::ServiceState {
             installed: service.installed(),
             supervises: service.supervises(),
+            pending: service.pending(),
         }
     })
 }
@@ -758,7 +806,7 @@ pub fn service_probe() -> crate::link::ServiceProbe {
 /// The app's own login item: `SMAppService.mainApp` on macOS, `tauri-plugin-autostart` elsewhere.
 #[cfg(target_os = "macos")]
 pub fn platform_autostart<R: tauri::Runtime>(_app: &tauri::AppHandle<R>) -> Box<dyn Autostart> {
-    Box::new(MainAppLogin)
+    Box::new(paddock_service::login::MainAppItem::new())
 }
 
 /// The app's own login item on Windows: always the per-user `Run` value, never written while elevated
@@ -813,6 +861,104 @@ impl Autostart for NoAutostart {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn the_switch_returns_at_once_while_the_os_step_is_blocked_and_reports_as_a_job() {
+        use paddock_jobs::JobState;
+        use std::sync::{mpsc, Arc, Mutex};
+        let worker = SwitchWorker::default();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (release, blocked) = mpsc::channel::<()>();
+        let (reported, wake) = mpsc::channel::<()>();
+        let report: Arc<dyn Fn(JobState) + Send + Sync> = {
+            let seen = seen.clone();
+            Arc::new(move |s| {
+                seen.lock().unwrap().push(s);
+                reported.send(()).unwrap();
+            })
+        };
+        let began = std::time::Instant::now();
+        // The OS step (a registration waiting for a lock) blocks until the test lets it go.
+        worker
+            .start(report.clone(), move || blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
+            .unwrap();
+        assert!(began.elapsed() < std::time::Duration::from_secs(2), "the save did not wait for the OS step");
+        wake.recv().unwrap();
+        assert!(matches!(seen.lock().unwrap()[0], JobState::Running { .. }), "running is reported while blocked");
+        assert!(worker.start(report.clone(), || Ok(())).is_err(), "a second change waits for the first");
+        release.send(()).unwrap();
+        wake.recv().unwrap();
+        assert_eq!(seen.lock().unwrap()[1], JobState::Done);
+        // Free again; a failure carries its message.
+        while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        worker.start(report, || Err("needs approval".into())).unwrap();
+        wake.recv().unwrap();
+        wake.recv().unwrap();
+        assert_eq!(seen.lock().unwrap()[3], JobState::Failed { message: "needs approval".into() });
+    }
+
+    #[test]
+    fn the_switch_as_the_service_manager_reads_it_missing_is_on_damaged_is_unknown() {
+        let dir = std::env::temp_dir().join(format!("dyno-wanted-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("settings.json");
+        assert_eq!(wanted_setting(&file), Some(true), "a fresh install: the default");
+        std::fs::write(&file, "{ not json").unwrap();
+        assert_eq!(wanted_setting(&file), None, "unreadable: nothing is registered unattended");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_first_run_is_quiet_only_once_login_items_has_been_opened_for_it() {
+        assert!(!install_is_quiet(false, true), "the Settings switch always opens it");
+        assert!(!install_is_quiet(true, false));
+        assert!(install_is_quiet(true, true));
+    }
+
+    #[test]
+    fn the_marker_is_written_only_by_a_first_run_that_opened_login_items_for_the_user() {
+        use paddock_service::{RepairOutcome, ServiceError};
+        let needs = Err(ServiceError::SwitchedOff);
+        assert!(marker_wanted(true, false, &needs));
+        assert!(marker_wanted(true, false, &Err(ServiceError::NeedsApproval)));
+        assert!(!marker_wanted(false, false, &needs), "the Settings switch does not mark");
+        assert!(!marker_wanted(true, true, &needs), "a quiet install opened nothing");
+        assert!(!marker_wanted(true, false, &Err(ServiceError::Busy)));
+        assert!(!marker_wanted(true, false, &Ok(RepairOutcome::Recovered)));
+    }
+
+    #[test]
+    fn the_settings_switch_registers_without_waiting_for_the_service_to_answer() {
+        assert_eq!(install_timings().start_wait, std::time::Duration::ZERO);
+        assert!(
+            install_timings().gone_wait > std::time::Duration::ZERO,
+            "the removal is still waited for"
+        );
+    }
+
+    #[test]
+    fn the_repair_at_start_reports_what_happened_to_the_caller() {
+        use paddock_service::manager::Started;
+        use paddock_service::{Hold, Reason, RepairOutcome};
+        let repaired = |o| repair_result(Started::Repaired(Reason::VersionChanged, o));
+        assert_eq!(repaired(RepairOutcome::Recovered), Ok(true));
+        assert!(repaired(RepairOutcome::Registered).unwrap_err().contains("did not answer"));
+        assert!(repaired(RepairOutcome::NeedsApproval).unwrap_err().contains("Login Items"));
+        assert_eq!(repaired(RepairOutcome::Failed("why".into())), Err("why".into()));
+        assert_eq!(repaired(RepairOutcome::Cancelled), Ok(false));
+        assert!(repair_result(Started::Busy).unwrap_err().contains("next start"));
+        assert_eq!(repair_result(Started::Left(Hold::Healthy)), Ok(false));
+        assert_eq!(repair_result(Started::Marked), Ok(false));
+    }
+
+    #[test]
+    fn a_failed_registration_names_the_login_items_page_and_says_whether_it_was_opened() {
+        use paddock_service::ServiceError;
+        assert!(registration_words(&ServiceError::NeedsApproval, true).ends_with("(opened for you)"));
+        assert!(!registration_words(&ServiceError::SwitchedOff, false).contains("opened for you"));
+    }
+
+    #[test]
     fn the_agent_override_from_the_environment_counts_only_in_a_development_build() {
         let v = std::ffi::OsString::from("/tmp/other-agent");
         assert_eq!(super::agent_override(true, Some(v.as_os_str())), Some(v.as_os_str()));
@@ -822,6 +968,129 @@ mod tests {
             "a release build ignores it"
         );
         assert_eq!(super::agent_override(true, None), None);
+    }
+
+    /// The wiring of the app's Linux service (`LinuxService`) over the shared simulator: what the transition decides is tested in
+    /// `paddock-service` (its model and `model_linux`); here the Settings switch, the repair at start, Quit and the resume reach
+    /// it with Dyno's unit, its paths and its words.
+    mod linux_wiring {
+        use super::super::*;
+        use dyno_agent::service::linux;
+        use paddock_env::MapVars;
+        use paddock_service::Timings;
+        use paddock_service::fake_systemd::{Active, FakeSystemd};
+        use paddock_service::login::LoginService;
+        use paddock_service::testing::FakeSystem;
+
+        const EXE: &str = "/opt/dyno/dyno-agent";
+
+        struct Rig {
+            sys: FakeSystem,
+            ctl: FakeSystemd,
+            unit: PathBuf,
+            data: tempfile::TempDir,
+        }
+
+        impl Rig {
+            fn new() -> Rig {
+                let vars = MapVars::new().with("HOME", "/home/ana");
+                let unit = linux::unit_path(&vars).unwrap();
+                let sys = FakeSystem::new();
+                sys.put_program(EXE);
+                let ctl = FakeSystemd::new(&sys, "dyno-agent.service", &unit);
+                Rig { sys, ctl, unit, data: tempfile::tempdir().unwrap() }
+            }
+
+            fn service(&self) -> LinuxService {
+                let (sys, data) = (self.sys.clone(), self.data.path().to_path_buf());
+                LinuxService::with(Box::new(move |timings: Timings| {
+                    let sys = sys.clone();
+                    let factory: linux::SystemFactory = Box::new(move || Box::new(sys.clone()));
+                    linux::manager(
+                        std::path::Path::new(EXE),
+                        &MapVars::new().with("HOME", "/home/ana"),
+                        &data,
+                        "1.1.0",
+                        &factory,
+                        timings,
+                    )
+                }))
+            }
+        }
+
+        #[test]
+        fn the_settings_switch_registers_and_removes_the_unit() {
+            let rig = Rig::new();
+            let mut s = rig.service();
+            assert!(!s.installed());
+            s.install().unwrap();
+            assert!(rig.sys.file(&rig.unit).is_some() && rig.ctl.enabled());
+            assert_eq!(rig.ctl.active(), Active::Active);
+            assert!(s.installed() && s.supervises());
+            s.uninstall().unwrap();
+            assert!(rig.sys.file(&rig.unit).is_none() && !rig.ctl.enabled());
+            assert!(!s.installed() && !s.supervises());
+        }
+
+        #[test]
+        fn a_registration_that_is_awaited_is_pending_for_the_link_and_one_that_is_up_or_used_up_is_not() {
+            use paddock_service::record::{Phase, RecordFile, Recorded, State};
+            let rig = Rig::new();
+            let mut s = rig.service();
+            s.install().unwrap();
+            assert!(!s.pending(), "the unit is up: nothing to wait for");
+            rig.ctl.user_stops();
+            let record = RecordFile::new(rig.data.path(), dyno_agent::service::LABEL);
+            let awaiting = |attempts| Recorded {
+                state: State::Attempting { version: "1.1.0".into(), attempts, phase: Phase::Awaiting },
+                ..Recorded::default()
+            };
+            record.store(&awaiting(1)).unwrap();
+            assert!(s.pending(), "registered and not up yet: the link neither starts nor retires an agent");
+            record.store(&awaiting(paddock_service::plan::MAX_ATTEMPTS)).unwrap();
+            assert!(!s.pending(), "the attempts are used up: nothing is coming, so the app starts its own agent");
+        }
+
+        #[test]
+        fn the_repair_at_start_replaces_a_stale_unit_and_leaves_a_missing_or_disabled_one_alone() {
+            let rig = Rig::new();
+            let mut s = rig.service();
+            let answers: AnswerFn = std::sync::Arc::new(|| true);
+            assert_eq!(s.repair(answers.clone()), Ok(false), "never installed unasked");
+            assert!(rig.sys.file(&rig.unit).is_none());
+            s.install().unwrap();
+            rig.sys.put_file(&rig.unit, "[Service]\nExecStart=/old/dyno-agent run\n");
+            assert_eq!(s.repair(answers.clone()), Ok(true));
+            assert!(rig.sys.file(&rig.unit).unwrap().contains(EXE));
+            rig.ctl.user_disables();
+            rig.sys.put_file(&rig.unit, "[Service]\nExecStart=/old/dyno-agent run\n");
+            assert_eq!(s.repair(answers), Ok(false), "the user's disable is theirs");
+            assert!(!s.supervises(), "a disabled unit supervises nothing: the app starts its own agent");
+        }
+
+        #[test]
+        fn quit_and_stop_names_the_unit_and_the_next_start_resumes_it_unless_the_user_disabled_it() {
+            let rig = Rig::new();
+            let mut s = rig.service();
+            assert!(s.stop_mechanism().is_none(), "nothing runs, nothing to stop");
+            s.install().unwrap();
+            let how = s.stop_mechanism().expect("the running unit");
+            assert_eq!(
+                how,
+                paddock_service::stop::StopMechanism::SystemdUser { unit: "dyno-agent.service".into() }
+            );
+            let mut sys = rig.sys.clone();
+            paddock_service::stop::stop(&mut sys, &how, paddock_service::stop::StopTimings::default()).unwrap();
+            assert_eq!(rig.ctl.active(), Active::Inactive);
+            assert_eq!(s.resume(), Ok(true));
+            assert_eq!(rig.ctl.active(), Active::Active);
+            // Stopped, then disabled by the user: the resume leaves it.
+            let mut sys = rig.sys.clone();
+            paddock_service::stop::stop(&mut sys, &how, paddock_service::stop::StopTimings::default()).unwrap();
+            rig.ctl.user_disables();
+            assert_eq!(s.resume(), Ok(false));
+            assert_eq!(rig.ctl.active(), Active::Inactive);
+        }
     }
 
     use super::*;
@@ -835,10 +1104,7 @@ mod tests {
         fail: bool,
     }
 
-    impl AgentService for FakeService {
-        fn installed(&mut self) -> bool {
-            false
-        }
+    impl paddock_service::login::LoginService for FakeService {
         fn install(&mut self) -> Result<(), String> {
             self.calls.lock().unwrap().push("service install".into());
             if self.fail {
@@ -851,7 +1117,13 @@ mod tests {
             self.calls.lock().unwrap().push("service uninstall".into());
             Ok(())
         }
-        fn repair(&mut self, _: &dyn Fn() -> bool) -> Result<bool, String> {
+    }
+
+    impl AgentService for FakeService {
+        fn installed(&mut self) -> bool {
+            false
+        }
+        fn repair(&mut self, _: AnswerFn) -> Result<bool, String> {
             Ok(false)
         }
     }
@@ -1025,22 +1297,17 @@ mod tests {
         );
     }
 
+    /// The logic (both attempted, one message, the location refusal) is `paddock_service::login`'s and tested there; this
+    /// pins Dyno's words and that a refused location registers nothing through Dyno's wiring.
     #[test]
-    fn one_failing_does_not_stop_the_other_and_the_message_says_what_to_do() {
-        let (r, log) = apply(true, true, false);
+    fn the_wiring_speaks_dynos_words_and_a_refused_location_registers_nothing() {
+        let (r, log) = apply(true, true, true);
         assert_eq!(log.len(), 2, "autostart is still attempted");
         let m = r.unwrap_err();
         assert!(
-            m.starts_with("Your settings are saved") && m.contains("background agent") && m.contains("no"),
+            m.starts_with("Your settings are saved, but the background agent could not be registered: no; and Dyno could not be added to the login items: denied"),
             "{m}"
         );
-        let (r, _) = apply(true, true, true);
-        assert!(r.unwrap_err().contains("; and "));
-        assert!(apply(false, false, true).0.unwrap_err().contains("login items"));
-    }
-
-    #[test]
-    fn an_unstable_location_registers_neither_but_turning_off_always_runs() {
         let calls = Calls::default();
         let mut s = FakeService {
             calls: calls.0.clone(),
@@ -1050,15 +1317,21 @@ mod tests {
             calls: calls.0.clone(),
             fail: false,
         };
-        let bad = || Err("move Dyno to Applications".to_string());
-        let m = apply_launch_at_login(true, bad(), &mut s, &mut a).unwrap_err();
+        let m = apply_launch_at_login(true, Err("move Dyno to Applications".into()), &mut s, &mut a).unwrap_err();
         assert!(
             m.contains("move Dyno to Applications") && m.starts_with("Your settings are saved"),
             "{m}"
         );
         assert!(calls.0.lock().unwrap().is_empty(), "nothing was registered");
-        assert_eq!(apply_launch_at_login(false, bad(), &mut s, &mut a), Ok(()));
-        assert_eq!(calls.0.lock().unwrap().len(), 2, "both were removed");
+        assert_eq!(apply_launch_at_login(false, Err("x".into()), &mut s, &mut a), Ok(()));
+        assert_eq!(calls.0.lock().unwrap().len(), 2, "turning off always runs");
+    }
+
+    #[test]
+    fn the_location_check_names_dyno() {
+        let m = current_location_for("/Volumes/Dyno/Dyno.app/Contents/MacOS/dyno-app").unwrap_err();
+        assert!(m.starts_with("Dyno is running from a temporary location"), "{m}");
+        assert!(current_location_for("/Applications/Dyno.app/Contents/MacOS/dyno-app").is_ok());
     }
 
     #[test]
@@ -1105,10 +1378,7 @@ mod tests {
         calls: Arc<Mutex<Vec<String>>>,
     }
 
-    impl AgentService for StaleService {
-        fn installed(&mut self) -> bool {
-            false
-        }
+    impl paddock_service::login::LoginService for StaleService {
         fn install(&mut self) -> Result<(), String> {
             self.calls.lock().unwrap().push("service install".into());
             Ok(())
@@ -1116,7 +1386,13 @@ mod tests {
         fn uninstall(&mut self) -> Result<(), String> {
             Ok(())
         }
-        fn repair(&mut self, _: &dyn Fn() -> bool) -> Result<bool, String> {
+    }
+
+    impl AgentService for StaleService {
+        fn installed(&mut self) -> bool {
+            false
+        }
+        fn repair(&mut self, _: AnswerFn) -> Result<bool, String> {
             self.calls.lock().unwrap().push("repair".into());
             Ok(std::mem::take(&mut self.stale))
         }

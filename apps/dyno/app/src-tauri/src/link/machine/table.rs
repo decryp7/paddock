@@ -31,10 +31,12 @@ fn hint(pid: u32, started_ms: i64, same_build: bool) -> HintSeen {
 const SUPERVISING: ServiceState = ServiceState {
     installed: true,
     supervises: true,
+    pending: false,
 };
 const NO_SERVICE: ServiceState = ServiceState {
     installed: false,
     supervises: false,
+    pending: false,
 };
 
 fn find_look(cmds: &[Command]) -> Option<(Seq, bool)> {
@@ -509,6 +511,284 @@ fn a_lock_held_resets_the_count_of_a_service_that_starts_nothing() {
         launched += launches(&cmds);
     }
     assert_eq!(launched, 0, "a service that was running was replaced");
+}
+
+// ------------------------------------------------------------------------------------------------ a registration is pending (ADR 0056)
+
+/// The job is absent: a removal of the old registration or the OS has not loaded the new one yet.
+const PENDING_NO_JOB: ServiceState = ServiceState {
+    installed: false,
+    supervises: false,
+    pending: true,
+};
+/// The job runs, and the registration still waits for the service's agent to answer.
+const PENDING_JOB_RUNS: ServiceState = ServiceState {
+    installed: true,
+    supervises: true,
+    pending: true,
+};
+/// A job the OS refuses: registered, nothing runs, and nothing will (the attempts are not pending).
+const REFUSED_JOB: ServiceState = ServiceState {
+    installed: true,
+    supervises: false,
+    pending: false,
+};
+
+/// Ticks and answers the looks with `service` and a free lock (nobody holds the data folder).
+fn tick_with(s: &mut Supervisor, n: u32, service: ServiceState) -> Vec<Command> {
+    run_ticks(s, n, |seq, asked| Look {
+        service: asked.then_some(service),
+        ..look(seq)
+    })
+}
+
+#[test]
+fn a_pending_registration_is_waited_for_with_its_cause_at_once_and_the_app_starts_nothing() {
+    let (s, cmds) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    assert_eq!(launches(&cmds), 0);
+    assert_eq!(*s.phase(), Phase::WaitingForService);
+    assert_eq!(stall_of(&cmds), Some(Stall::RegisteringService), "a silent wait: {cmds:?}");
+}
+
+#[test]
+fn a_pending_registration_that_then_answers_is_connected_to_without_a_launch_however_long_it_took() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    // Longer than the old fallback (SERVICE_IDLE_RECHECKS rechecks of SERVICE_RECHECK ticks) and than the repair's wait.
+    let cmds = tick_with(&mut s, SERVICE_RECHECK * (SERVICE_IDLE_RECHECKS + 2), PENDING_NO_JOB);
+    assert_eq!(
+        launches(&cmds),
+        0,
+        "the app started its own agent while the service was registering"
+    );
+    let cmds = tick_with(&mut s, SERVICE_RECHECK * 2, PENDING_JOB_RUNS);
+    assert_eq!(launches(&cmds), 0, "the app started its own agent while the registered job ran");
+    // The service's agent answers: the lock is held and its file is there.
+    let cmds = run_ticks(&mut s, PENDING_RECHECK + LOCK_EVERY, |seq, service| Look {
+        hint: Some(hint(9, 1, true)),
+        lock: Some(LockSeen::Held),
+        service: service.then_some(SUPERVISING),
+        ..look(seq)
+    });
+    assert_eq!(launches(&cmds), 0);
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::Connect { purpose: Purpose::Use, .. })),
+        "{cmds:?}"
+    );
+}
+
+#[test]
+fn a_pending_registration_that_ends_with_no_service_falls_back_at_once_not_after_the_old_delay() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    tick_with(&mut s, SERVICE_RECHECK, PENDING_NO_JOB);
+    // The registration ended (switched off, approval pending, the attempts used up): nothing is coming.
+    let cmds = tick_with(&mut s, PENDING_RECHECK, NO_SERVICE);
+    assert_eq!(launches(&cmds), 1, "the app waited for a service that is not coming: {cmds:?}");
+    assert!(matches!(s.phase(), Phase::Starting { .. }));
+}
+
+#[test]
+fn a_job_the_os_refuses_after_a_pending_registration_falls_back_at_once() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_JOB_RUNS),
+        ..l
+    });
+    let cmds = tick_with(&mut s, PENDING_RECHECK, REFUSED_JOB);
+    assert_eq!(launches(&cmds), 1, "{cmds:?}");
+}
+
+#[test]
+fn a_refused_job_with_no_pending_registration_starts_the_apps_own_agent_at_the_first_look() {
+    let (s, cmds) = first(|l| Look {
+        service: Some(REFUSED_JOB),
+        ..l
+    });
+    assert_eq!(launches(&cmds), 1);
+    assert!(matches!(s.phase(), Phase::Starting { .. }));
+}
+
+#[test]
+fn a_slow_service_whose_job_runs_but_has_not_answered_is_not_given_up_on_while_the_registration_is_pending() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_JOB_RUNS),
+        ..l
+    });
+    // Free lock on every recheck, SERVICE_IDLE_RECHECKS times over: the count of a service that starts nothing must not run.
+    let cmds = tick_with(&mut s, PENDING_RECHECK * SERVICE_IDLE_RECHECKS * 4, PENDING_JOB_RUNS);
+    assert_eq!(launches(&cmds), 0, "{cmds:?}");
+    // The registration ends with a running job: the old count (the service starts nothing) starts only now.
+    let cmds = tick_with(&mut s, SERVICE_RECHECK * (SERVICE_IDLE_RECHECKS - 2), SUPERVISING);
+    assert_eq!(launches(&cmds), 0, "the count began before the registration ended");
+    let cmds = tick_with(&mut s, SERVICE_RECHECK * 3, SUPERVISING);
+    assert_eq!(launches(&cmds), 1, "a service that starts nothing is still replaced after the wait");
+}
+
+#[test]
+fn the_cause_of_a_pending_wait_gives_way_to_the_ordinary_one_when_the_registration_ends_and_the_wait_goes_on() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::RegisteringService));
+    // Ends with a supervising service that does not answer yet: the agent is awaited, said in the usual words.
+    run_ticks(&mut s, PENDING_RECHECK + 1, |seq, service| Look {
+        lock: Some(LockSeen::Held),
+        service: service.then_some(SUPERVISING),
+        ..look(seq)
+    });
+    assert_ne!(
+        s.snapshot().stall.map(|(_, k)| k),
+        Some(Stall::RegisteringService),
+        "the registration is over"
+    );
+    run_ticks(&mut s, NOTE_AFTER, |seq, service| Look {
+        lock: Some(LockSeen::Held),
+        service: service.then_some(SUPERVISING),
+        ..look(seq)
+    });
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::WaitingForService));
+}
+
+#[test]
+fn retry_in_a_pending_wait_looks_again_and_never_starts_an_agent_beside_the_registering_service() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    let id = s.snapshot().stall.map(|(i, _)| i);
+    let cmds = s.step(Event::Retry { stall: id });
+    let seq = look_seq(&cmds);
+    let cmds = s.step(Event::Looked(Look {
+        service: Some(PENDING_NO_JOB),
+        ..look(seq)
+    }));
+    assert_eq!(launches(&cmds), 0, "{cmds:?}");
+    assert_eq!(*s.phase(), Phase::WaitingForService);
+}
+
+#[test]
+fn a_pending_registration_that_never_ends_is_given_up_on_after_the_longest_wait_and_the_app_starts_its_own_agent() {
+    let tuning = Tuning {
+        pending_max: 40,
+        ..Tuning::default()
+    };
+    let mut s = Supervisor::with_tuning(tuning);
+    let seq = look_seq(&s.step(Event::Begin));
+    s.step(Event::Looked(Look {
+        service: Some(PENDING_NO_JOB),
+        ..look(seq)
+    }));
+    let cmds = tick_with(&mut s, 39, PENDING_NO_JOB);
+    assert_eq!(launches(&cmds), 0, "given up before the longest wait");
+    let cmds = tick_with(&mut s, PENDING_RECHECK, PENDING_NO_JOB);
+    assert_eq!(launches(&cmds), 1, "waited forever with no agent");
+    assert!(
+        cmds.iter()
+            .any(|c| matches!(c, Command::Report(r) if r.message.as_deref().is_some_and(|m| m.contains("did not finish")))),
+        "the fallback said nothing: {cmds:?}"
+    );
+}
+
+#[test]
+fn the_apps_own_agent_is_not_handed_over_while_the_registration_is_pending_and_is_when_it_ends() {
+    let mut s = connected_own();
+    let cmds = service_now(&mut s, PENDING_JOB_RUNS);
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::AskToExit { .. } | Command::EndHeldChild { .. })),
+        "the app's agent was retired for a service that is still registering: {cmds:?}"
+    );
+    // The registration ends with the service up: the usual hand-over (the service's agent was refused while ours held the folder).
+    let cmds = service_now(&mut s, SUPERVISING);
+    assert!(cmds.iter().any(|c| matches!(c, Command::EndHeldChild { .. })), "{cmds:?}");
+}
+
+#[test]
+fn a_connected_link_asks_again_while_a_registration_is_pending_so_the_hand_over_is_not_missed() {
+    let mut s = connected_own();
+    service_now(&mut s, PENDING_JOB_RUNS);
+    let mut asked = 0;
+    for _ in 0..PENDING_RECHECK * 3 {
+        if let Some((seq, true)) = find_look(&s.step(Event::Tick)) {
+            asked += 1;
+            s.step(Event::Looked(Look {
+                service: Some(PENDING_JOB_RUNS),
+                ..look(seq)
+            }));
+        }
+    }
+    assert!(asked >= 2, "the connected link never asked the service again ({asked})");
+}
+
+#[test]
+fn a_connected_link_asks_the_service_nothing_on_its_ticks_when_no_registration_is_pending() {
+    let mut s = connected_own();
+    service_now(&mut s, NO_SERVICE);
+    assert!(matches!(s.phase(), Phase::Connected { .. }));
+    let cmds = ticks(&mut s, PENDING_RECHECK * 3);
+    assert!(find_look(&cmds).is_none(), "a look with nothing pending: {cmds:?}");
+}
+
+#[test]
+fn the_cause_of_a_pending_wait_stays_put_while_it_is_asked_about_again() {
+    let (mut s, _) = first(|l| Look {
+        service: Some(PENDING_NO_JOB),
+        ..l
+    });
+    let id = s.snapshot().stall.map(|(i, _)| i);
+    let cmds = tick_with(&mut s, PENDING_RECHECK * 3, PENDING_NO_JOB);
+    assert!(
+        !cmds.contains(&Command::ClearStall),
+        "the cause was cleared and shown again: {cmds:?}"
+    );
+    assert_eq!(s.snapshot().stall.map(|(i, _)| i), id);
+}
+
+#[test]
+fn giving_up_on_a_pending_registration_lasts_while_it_stays_pending_and_ends_with_it() {
+    let tuning = Tuning {
+        pending_max: 40,
+        ..Tuning::default()
+    };
+    let mut s = Supervisor::with_tuning(tuning);
+    let seq = look_seq(&s.step(Event::Begin));
+    s.step(Event::Looked(Look {
+        service: Some(PENDING_NO_JOB),
+        ..look(seq)
+    }));
+    assert!(!s.gave_up_on_pending());
+    tick_with(&mut s, 40 + PENDING_RECHECK, PENDING_NO_JOB);
+    assert!(s.gave_up_on_pending());
+    // Still pending: asked again, still given up on (the wait is not started over).
+    service_now(&mut s, PENDING_NO_JOB);
+    assert!(s.gave_up_on_pending());
+    // The registration ended: the next one is waited for again.
+    service_now(&mut s, NO_SERVICE);
+    assert!(!s.gave_up_on_pending());
+}
+
+#[test]
+fn the_services_own_agent_is_not_asked_to_exit_while_the_registration_replaces_the_job() {
+    // An ordinary update: the old job is removed (absent for a while) and the service's agent still answers.
+    let mut s = connected_other(SUPERVISING);
+    let cmds = service_now(&mut s, PENDING_NO_JOB);
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::AskToExit { .. })),
+        "the service's agent was taken back during an update: {cmds:?}"
+    );
+    assert!(matches!(s.phase(), Phase::Connected { .. }));
+    // The registration ends and nothing is registered (the user switched it off meanwhile): taken back as usual.
+    let cmds = service_now(&mut s, NO_SERVICE);
+    assert!(cmds.iter().any(|c| matches!(c, Command::AskToExit { .. })), "{cmds:?}");
 }
 
 // ------------------------------------------------------------------------------------------------ starting

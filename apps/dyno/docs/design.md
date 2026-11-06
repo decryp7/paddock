@@ -114,5 +114,20 @@ Closing the window destroys it; the tray and the agent stay; opening builds a fr
 
 ![Service registration](../diagrams/svg/uml-state-service.svg)
 
-Not installed, or installed with two flags: running and pointing at this executable. `ensure` repairs a stale
-registration and never installs one unasked.
+The record `service-<label>.json` holds one state (ADR 0056): Idle, Attempting (version, attempts, and a phase: Removing
+old, Registering, Awaiting answer, Register failed) or Removing (uninstall). The phase is written before each OS step, so
+a crash leaves what is safe next: after a crash in Removing old, still there means replace, gone means just register; in
+Registering, absent means just register, there means wait.
+
+- Idle goes to Removing old on a new version (macOS; elsewhere only when the definition differs) or on Repair, and to
+  Registering on a first install or the switch turned on (nothing is removed).
+- Registering goes to Awaiting answer when the OS accepted it, and to Register failed on `Other` or `NotAsWritten`; Register
+  failed retries while attempts are under 3. Declined, cancelled, needs approval or elevation and unavailable return to the
+  state before.
+- Awaiting answer goes back to Removing old with no answer while attempts are under 3, and to Held at 3, as does
+  Register failed. A hold has these ways out: "Answers" (back to Idle), a new version, Repair or Install; the last two run
+  past 3 attempts, and a failed Repair returns to Held. The job of an old build never settles during Removing old.
+- Uninstall or the switch turned off, from any state, writes Removing and then returns to Idle.
+
+Every entry point (start, install, repair, resume, uninstall) goes through one transition function; a start never installs
+one unasked. Windows Dyno has no agent service.

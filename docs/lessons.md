@@ -1447,3 +1447,13 @@ Root cause: `dy-chart` runs `import('./echarts-setup')` on first render. The Ang
 Fix: `src/test-setup.ts` imports `echarts-setup`, so the read happens before any test starts. `chart.spec.ts` fails if a test run reads a module for that import.
 
 Logs: the run output showed only the timeout, and the one clue was a duration well past 5000 ms. Class: lazy imports in specs are blocking disk reads, so preload heavy ones in setup. `PD_ECHARTS`'s default `import('echarts')` in `ui/projects/paddock-ui/chart` has the same exposure wherever a spec has no fake.
+
+## Service repair was an undeclared state machine; three review rounds patched instances (2026-11-05, Dyno 1.1.0, ADR 0056)
+
+Moving Dyno's macOS service code into `paddock-service` took three review rounds that each found the same kind of bug in a different entry point: a registration the OS accepted but had not answered was forgotten and replaced (a second "Background Items Added"); a quit during the 120 s wait left no record; a job that stayed refused was re-registered at every start; the resume marker could be lost behind a refused location; a crash between unregister and register lost the service. State was spread over a version file, an attempt counter, a marker file and a lock; five entry points decided for themselves; it was saved after long waits, not before. The cure is structural (ER-21): one persisted state with phases, written before each OS step; one pure transition function; one executor; holds derived from the attempts; the model explorer as the guard.
+
+- Write the record before the OS call, never after the wait; a thread that waits dies with the app.
+- Never hold a mutex across a wait the user can press a button during: `ServiceControl::run` and the health repair now try the manager and answer Busy at once, with words.
+- Every hold names what happened and a next step that exists for that state: unanswered, refused and register failed are three facts with three messages, and a failed register is not "not installed".
+- A start that cannot save its record changes nothing and tells the UI, with the way out (Repair goes on, loudly).
+- Tests that only restate what the explorer proves are deleted, not rewritten; the ones that pin exact commands, files and words stay.

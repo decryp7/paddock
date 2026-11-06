@@ -2,13 +2,16 @@
 //! Linux, a logon `Run` entry on Windows (a real SCM service runs in session 0, where the user's idle time, foreground
 //! window, per-user startup items and data folder are out of reach). The app drives these through `dyno-agent service`.
 //!
-//! The text of the unit files is built by pure functions in [`spec`], so it is tested on every OS; the OS commands
-//! run behind [`Runner`] so tests never touch the real launchd, systemd or registry.
+//! Linux is the shared service manager's (`paddock_service::Manager` over its systemd backend, ADR 0056): see [`linux`];
+//! [`Service`] is what macOS (outside a bundle) and Windows still use. The text of the launchd and `Run` entries is built by
+//! pure functions in [`spec`], so it is tested on every OS; the OS commands run behind [`Runner`] so tests never touch the
+//! real launchd or registry.
 #![cfg_attr(
     not(test),
     deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
 )]
 
+pub mod linux;
 pub mod spec;
 
 use dyno_platform::process::{command, run_with_timeout};
@@ -55,7 +58,10 @@ pub const GONE_WAIT: Duration = Duration::from_secs(20);
 /// See [`GONE_WAIT`].
 pub const GONE_POLL: Duration = Duration::from_secs(1);
 
-/// A per-user service manager for the current OS.
+/// What [`Service`] says on Linux, where the unit belongs to [`linux`] and nothing here may write it.
+const LINUX_IS_THE_MANAGERS: &str = "the systemd unit is registered by the shared service manager (service::linux), not by Service";
+
+/// A per-user service manager for macOS (outside a bundle) and Windows.
 pub struct Service {
     exe: PathBuf,
     home: PathBuf,
@@ -147,10 +153,6 @@ impl Service {
         self.home.join("Library").join("LaunchAgents").join(format!("{LABEL}.plist"))
     }
 
-    fn unit_path(&self) -> PathBuf {
-        self.home.join(".config").join("systemd").join("user").join("dyno-agent.service")
-    }
-
     fn domain(&self) -> String {
         format!("gui/{}", self.uid)
     }
@@ -175,11 +177,7 @@ impl Service {
                 let path = self.plist_path();
                 self.check("/bin/launchctl", &["bootstrap", &self.domain(), &path.to_string_lossy()])
             }
-            Os::Linux => {
-                write(&self.unit_path(), &spec::systemd_unit(&self.exe))?;
-                self.check("systemctl", &["--user", "daemon-reload"])?;
-                self.check("systemctl", &["--user", "enable", "--now", "dyno-agent.service"])
-            }
+            Os::Linux => Err(LINUX_IS_THE_MANAGERS.into()),
             Os::Windows => self.check(
                 "reg",
                 &[
@@ -215,12 +213,7 @@ impl Service {
                 self.tolerated("/bin/launchctl", &["bootout", &target]);
                 remove(&self.plist_path())
             }
-            Os::Linux => {
-                self.tolerated("systemctl", &["--user", "disable", "--now", "dyno-agent.service"]);
-                remove(&self.unit_path())?;
-                self.tolerated("systemctl", &["--user", "daemon-reload"]);
-                Ok(())
-            }
+            Os::Linux => Err(LINUX_IS_THE_MANAGERS.into()),
             Os::Windows => {
                 self.tolerated("reg", &["delete", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE, "/f"]);
                 self.clear_stale_run_entry().map(|_| ())
@@ -243,18 +236,7 @@ impl Service {
                     .unwrap_or(false);
                 Status::Installed { running, current }
             }
-            Os::Linux => {
-                let Ok(text) = std::fs::read_to_string(self.unit_path()) else {
-                    return Status::NotInstalled;
-                };
-                let current = text.contains(&*self.exe.to_string_lossy());
-                let running = self
-                    .runner
-                    .run("systemctl", &["--user", "is-active", "dyno-agent.service"])
-                    .map(|(ok, out)| ok && out.trim() == "active")
-                    .unwrap_or(false);
-                Status::Installed { running, current }
-            }
+            Os::Linux => Status::NotInstalled,
             Os::Windows => match self
                 .runner
                 .run("reg", &["query", spec::WINDOWS_RUN_KEY, "/v", spec::WINDOWS_AGENT_VALUE])
@@ -293,16 +275,12 @@ impl Service {
     }
 
     /// Whether the OS service manager starts the agent now and restarts it when it exits, so nobody else may run one
-    /// beside it: a bootstrapped launch agent (`KeepAlive`), a systemd user unit that is active or restarting
-    /// (`Restart=always`; `is-active` says `activating` during `RestartSec`, and exits non-zero then). An enabled but
-    /// stopped or failed unit starts nothing now. A Windows `Run` entry starts it only at the next logon: never.
+    /// beside it: a bootstrapped launch agent (`KeepAlive`). A Windows `Run` entry starts it only at the next logon: never.
+    /// (systemd's unit is [`linux`]'s: `Manager::supervises`.)
     pub fn supervised(&mut self) -> bool {
         match self.os {
             Os::Mac => self.plist_path().exists(),
-            Os::Linux => self
-                .runner
-                .run("systemctl", &["--user", "is-active", "dyno-agent.service"])
-                .is_ok_and(|(_, out)| matches!(out.trim(), "active" | "activating")),
+            Os::Linux => false,
             Os::Windows => false,
         }
     }
@@ -333,6 +311,64 @@ impl Service {
             Err(e) => Err(e),
         }
     }
+}
+
+/// What the `service` verbs ask of a registration: the same words and exit codes on every OS.
+pub trait Verbs {
+    /// Registers and starts it.
+    fn install(&mut self) -> Result<(), String>;
+    /// Stops and removes it.
+    fn uninstall(&mut self) -> Result<(), String>;
+    /// Registers it again when stale; whether it did.
+    fn ensure(&mut self) -> Result<bool, String>;
+    /// One line: what is registered and whether it runs.
+    fn status(&mut self) -> String;
+}
+
+/// Runs one `dyno-agent service <cmd>`; the line it returns is what the verb prints.
+pub fn run_verb(cmd: &str, verbs: &mut dyn Verbs) -> Result<String, String> {
+    match cmd {
+        "install" => verbs.install().map(|()| "installed and started".into()),
+        "uninstall" => verbs.uninstall().map(|()| "removed".into()),
+        "ensure" => verbs
+            .ensure()
+            .map(|changed| (if changed { "registered again" } else { "nothing to do" }).into()),
+        "status" => Ok(verbs.status()),
+        _ => Err("service takes install, uninstall, status or ensure".into()),
+    }
+}
+
+impl Verbs for Service {
+    fn install(&mut self) -> Result<(), String> {
+        Service::install(self)
+    }
+
+    fn uninstall(&mut self) -> Result<(), String> {
+        Service::uninstall(self)
+    }
+
+    fn ensure(&mut self) -> Result<bool, String> {
+        Service::ensure(self)
+    }
+
+    fn status(&mut self) -> String {
+        match Service::status(self) {
+            Status::NotInstalled => "not installed".to_string(),
+            Status::Installed { running, current } => format!(
+                "installed, {}{}",
+                if running { "running" } else { "not running" },
+                if current { "" } else { ", registered for another executable" }
+            ),
+        }
+    }
+}
+
+/// The verbs of the current OS for the program at `exe`: the shared manager's systemd unit on Linux, [`Service`] elsewhere.
+pub fn verbs_for_current_user(exe: PathBuf) -> Result<Box<dyn Verbs>, String> {
+    if Os::current() == Os::Linux {
+        return Ok(Box::new(linux::Unit::for_current_user(&exe)?));
+    }
+    Ok(Box::new(Service::for_current_user(exe)?))
 }
 
 #[cfg(unix)]

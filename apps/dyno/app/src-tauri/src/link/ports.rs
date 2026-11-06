@@ -535,6 +535,7 @@ mod tests {
             super::super::ServiceState {
                 installed: true,
                 supervises: true,
+                pending: false,
             }
         });
         let reads = std::cell::Cell::new(0);
@@ -570,6 +571,7 @@ mod tests {
         let probe: ServiceProbe = Arc::new(|| super::super::ServiceState {
             installed: true,
             supervises: true,
+            pending: false,
         });
         let (answer, seen) = ask_watching(
             Some(&probe),
@@ -605,6 +607,7 @@ mod tests {
             super::super::ServiceState {
                 installed: true,
                 supervises: true,
+                pending: false,
             }
         });
         assert!(ask(Some(&probe), Some(&hint(true)), Some(LockSeen::Free), true, false).is_some());
@@ -630,6 +633,7 @@ mod tests {
             super::super::ServiceState {
                 installed: true,
                 supervises: true,
+                pending: false,
             }
         });
         // Held, with or without the file: not asked.
@@ -661,6 +665,7 @@ mod tests {
         let service = super::super::ServiceState {
             installed: true,
             supervises: true,
+            pending: false,
         };
         let look = seen_look(
             Some(HintSeen {

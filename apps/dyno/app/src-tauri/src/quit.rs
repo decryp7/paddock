@@ -20,9 +20,6 @@ pub const QUIT_STOP_COMMAND: &str = "dy.quit-stop";
 /// The menu entry that stops the agent too.
 pub const QUIT_STOP_LABEL: &str = "Quit and stop measuring";
 
-/// The marker file in Dyno's data folder: the agent was stopped on request.
-pub const STOP_MARKER: &str = "agent-stopped-on-request";
-
 /// Whether the agent keeps running after a plain Quit: a service is installed and supervises it.
 pub fn keeps_measuring(service: ServiceState) -> bool {
     service.installed && service.supervises
@@ -65,20 +62,35 @@ pub fn resume_after_stop(marker_present: bool, service: ServiceState) -> Resume 
     }
 }
 
+/// The service's record in Dyno's data folder: the "stopped on request" marker is part of it (ADR 0056), so it is written
+/// atomically with the rest, and a resume clears it only when the resume is done.
+fn record(root: &Path) -> paddock_service::record::RecordFile {
+    paddock_service::record::RecordFile::new(root, dyno_agent::service::LABEL)
+}
+
 /// Writes the marker (before anything is stopped, so a crash in between still tells the truth).
 pub fn write_marker(root: &Path, now_ms: i64) -> std::io::Result<()> {
     std::fs::create_dir_all(root)?;
-    std::fs::write(root.join(STOP_MARKER), now_ms.to_string())
+    let record = record(root);
+    // Under the repair lock when it is free, so a registration changing the record does not lose it.
+    let _lock = record.lock();
+    record
+        .set_resume_pending(Some(u64::try_from(now_ms).unwrap_or(0)))
+        .map_err(std::io::Error::other)
 }
 
-/// Reads and removes the marker: when the agent was stopped on request, and the time of the request in ms.
-pub fn take_marker(root: &Path) -> Option<i64> {
-    let path = root.join(STOP_MARKER);
-    let text = std::fs::read_to_string(&path).ok()?;
-    if let Err(e) = std::fs::remove_file(&path) {
+/// Reads the marker without removing it: when the agent was stopped on request, and the time of the request in ms.
+pub fn peek_marker(root: &Path) -> Option<u64> {
+    record(root).resume_pending()
+}
+
+/// Removes the marker (the resume is done, or the stop did not happen).
+pub fn clear_marker(root: &Path) {
+    let record = record(root);
+    let _lock = record.lock();
+    if let Err(e) = record.set_resume_pending(None) {
         log::warn!(Error = e.to_string().as_str(); "The stop marker could not be removed");
     }
-    Some(text.trim().parse().unwrap_or(0))
 }
 
 /// What a finished stop did, for the log.
@@ -163,20 +175,38 @@ pub enum StartOutcome {
 
 /// At the start, before the link decides anything: tells the log when the agent had been stopped on request (so it is not read as
 /// a crash), and starts the service again when it is installed and nothing supervises it. The marker is read once.
-pub fn resume_at_start(root: &Path, probe: &dyn Fn() -> ServiceState, service: &mut dyn crate::login::AgentService) -> StartOutcome {
-    let Some(at) = take_marker(root) else {
+pub fn resume_at_start(
+    root: &Path,
+    probe: &dyn Fn() -> ServiceState,
+    location: Result<(), String>,
+    service: &mut dyn crate::login::AgentService,
+) -> StartOutcome {
+    let Some(at) = peek_marker(root) else {
         return StartOutcome::NoMarker;
     };
     log::info!(RequestedAtMs = at; "The agent had been stopped on request (Quit and stop measuring), not by a crash");
+    // From a place the bundle cannot register from (a disk image, a translocated copy) nothing is decided and nothing is
+    // removed, on every branch: the marker stays for the start from the right place (it is only peeked at until the resume
+    // is done, so a crash in between loses nothing either).
+    if let Err(e) = location {
+        log::warn!(Error = e.as_str(); "After a stop on request: the service is not started again from here; the marker is kept");
+        return StartOutcome::Resumed(Err(e));
+    }
     let state = probe();
     match resume_after_stop(true, state) {
         Resume::Nothing => {
+            clear_marker(root);
             log::info!(Installed = state.installed, Supervises = state.supervises; "After a stop on request: no service to start again");
             StartOutcome::StoppedOnRequest
         }
         Resume::StartService => {
             let began = std::time::Instant::now();
             let result = service.resume();
+            // A resume that did not fail is done; one that failed keeps the marker, so the next start tries again (the repair
+            // is bounded by its attempts).
+            if result.is_ok() {
+                clear_marker(root);
+            }
             let ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
             match &result {
                 Ok(true) => log::info!(Ms = ms; "After a stop on request: the service was started again (the system holds its job)"),
@@ -311,9 +341,7 @@ pub fn quit_and_stop<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
             Err(e) => {
                 log::error!(Ms = ms, Error = e.as_str(); "Quit and stop measuring: the agent could not be confirmed gone");
                 // The agent runs on, so this was not a stop on request.
-                if let Err(rm) = std::fs::remove_file(root.join(STOP_MARKER)) {
-                    log::info!(Error = rm.to_string().as_str(); "The stop marker was not there to remove");
-                }
+                clear_marker(&root);
                 use tauri_plugin_dialog::DialogExt;
                 app.dialog()
                     .message(format!("Dyno could not confirm that the agent stopped. {e}"))
@@ -338,14 +366,17 @@ mod tests {
     const SUPERVISED: ServiceState = ServiceState {
         installed: true,
         supervises: true,
+        pending: false,
     };
     const STOPPED_SERVICE: ServiceState = ServiceState {
         installed: true,
         supervises: false,
+        pending: false,
     };
     const NONE: ServiceState = ServiceState {
         installed: false,
         supervises: false,
+        pending: false,
     };
     const FAST: StopTimings = StopTimings {
         gone_wait: Duration::from_secs(2),
@@ -387,14 +418,14 @@ mod tests {
     }
 
     #[test]
-    fn the_marker_is_read_once_and_removed() {
+    fn the_marker_is_peeked_at_and_removed_only_when_asked() {
         let dir = std::env::temp_dir().join(format!("dyno-quit-marker-{}", std::process::id()));
-        assert_eq!(take_marker(&dir), None);
+        assert_eq!(peek_marker(&dir), None);
         write_marker(&dir, 1234).unwrap();
-        assert_eq!(take_marker(&dir), Some(1234));
-        assert_eq!(take_marker(&dir), None, "read once");
-        std::fs::write(dir.join(STOP_MARKER), "junk").unwrap();
-        assert_eq!(take_marker(&dir), Some(0), "a damaged marker still counts as a stop on request");
+        assert_eq!(peek_marker(&dir), Some(1234));
+        assert_eq!(peek_marker(&dir), Some(1234), "peeking removes nothing");
+        clear_marker(&dir);
+        assert_eq!(peek_marker(&dir), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -579,17 +610,20 @@ mod tests {
         fail: bool,
     }
 
-    impl crate::login::AgentService for Svc {
-        fn installed(&mut self) -> bool {
-            true
-        }
+    impl paddock_service::login::LoginService for Svc {
         fn install(&mut self) -> Result<(), String> {
             Ok(())
         }
         fn uninstall(&mut self) -> Result<(), String> {
             Ok(())
         }
-        fn repair(&mut self, _: &dyn Fn() -> bool) -> Result<bool, String> {
+    }
+
+    impl crate::login::AgentService for Svc {
+        fn installed(&mut self) -> bool {
+            true
+        }
+        fn repair(&mut self, _: crate::login::AnswerFn) -> Result<bool, String> {
             Ok(false)
         }
         fn resume(&mut self) -> Result<bool, String> {
@@ -612,16 +646,64 @@ mod tests {
         write_marker(&dir, 5).unwrap();
         let mut svc = Svc::default();
         assert_eq!(
-            resume_at_start(&dir, &|| STOPPED_SERVICE, &mut svc),
+            resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
             StartOutcome::Resumed(Ok(true))
         );
         assert_eq!(svc.resumed, 1);
         assert_eq!(
-            resume_at_start(&dir, &|| STOPPED_SERVICE, &mut svc),
+            resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
             StartOutcome::NoMarker,
             "the marker is read once"
         );
         assert_eq!(svc.resumed, 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refused_location_starts_nothing_and_keeps_the_stop_marker_for_the_right_place() {
+        let dir = temp("location");
+        write_marker(&dir, 5).unwrap();
+        let mut svc = Svc::default();
+        let from_a_disk_image = || Err("move Dyno to Applications".to_string());
+        assert_eq!(
+            resume_at_start(&dir, &|| STOPPED_SERVICE, from_a_disk_image(), &mut svc),
+            StartOutcome::Resumed(Err("move Dyno to Applications".into()))
+        );
+        assert_eq!(svc.resumed, 0);
+        assert_eq!(
+            resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
+            StartOutcome::Resumed(Ok(true)),
+            "the next start from a good place still resumes"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refused_location_keeps_the_marker_whatever_the_service_looks_like() {
+        // From a disk image macOS has no record of the item, so nothing looks installed (`NONE`): the marker was lost here
+        // when it was taken before the location was looked at.
+        for state in [NONE, STOPPED_SERVICE, SUPERVISED] {
+            let dir = temp("location-any");
+            write_marker(&dir, 5).unwrap();
+            let mut svc = Svc::default();
+            let out = resume_at_start(&dir, &|| state, Err("move Dyno to Applications".to_string()), &mut svc);
+            assert_eq!(out, StartOutcome::Resumed(Err("move Dyno to Applications".into())));
+            assert_eq!(peek_marker(&dir), Some(5), "{state:?}");
+            assert_eq!(svc.resumed, 0);
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_resume_that_failed_keeps_the_marker_and_one_that_was_done_clears_it() {
+        let dir = temp("keep");
+        write_marker(&dir, 5).unwrap();
+        let mut failing = Svc { fail: true, ..Svc::default() };
+        resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut failing);
+        assert_eq!(peek_marker(&dir), Some(5), "tried again at the next start");
+        let mut svc = Svc::default();
+        resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc);
+        assert_eq!(peek_marker(&dir), None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -634,7 +716,7 @@ mod tests {
             ..Svc::default()
         };
         assert_eq!(
-            resume_at_start(&dir, &|| STOPPED_SERVICE, &mut svc),
+            resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc),
             StartOutcome::Resumed(Err("launchd refused".into()))
         );
         std::fs::remove_dir_all(&dir).unwrap();
@@ -645,10 +727,13 @@ mod tests {
         let dir = temp("nosecond");
         write_marker(&dir, 5).unwrap();
         let mut svc = Svc::default();
-        assert_eq!(resume_at_start(&dir, &|| SUPERVISED, &mut svc), StartOutcome::StoppedOnRequest);
-        assert_eq!(resume_at_start(&dir, &|| STOPPED_SERVICE, &mut svc), StartOutcome::NoMarker);
+        assert_eq!(
+            resume_at_start(&dir, &|| SUPERVISED, Ok(()), &mut svc),
+            StartOutcome::StoppedOnRequest
+        );
+        assert_eq!(resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut svc), StartOutcome::NoMarker);
         write_marker(&dir, 6).unwrap();
-        assert_eq!(resume_at_start(&dir, &|| NONE, &mut svc), StartOutcome::StoppedOnRequest);
+        assert_eq!(resume_at_start(&dir, &|| NONE, Ok(()), &mut svc), StartOutcome::StoppedOnRequest);
         assert_eq!(svc.resumed, 0, "the service was never started in these three");
         std::fs::remove_dir_all(&dir).unwrap();
     }

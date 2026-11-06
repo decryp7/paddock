@@ -56,6 +56,8 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'dy.agent.restarting': () => $localize`:@@pd.health.state.reconnecting:reconnecting`,
   'dy.agent.failed': () => $localize`:@@pd.health.state.stopped:stopped`,
   'dy.agent.waiting-service': () => $localize`:@@pd.health.state.waiting-service:waiting for the login service`,
+  'dy.agent.registering-service': () =>
+    $localize`:@@pd.health.state.registering-service:waiting for the background service`,
   'dy.agent.starting': () => $localize`:@@pd.health.state.still-starting:still starting`,
   'dy.agent.system-silent': () => $localize`:@@pd.health.state.system-silent:system not answering`,
   'dy.agent.keeps-failing': () => $localize`:@@pd.health.state.keeps-failing:keeps failing to start`,
