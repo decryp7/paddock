@@ -48,8 +48,8 @@ function varrow(x, y1, y2, label) {
 }
 
 text(48, 64, 'Dyno', 'title');
-text(48, 94, 'Watches one PC, read-only: a per-user agent keeps the history, a window, tray and command line show it', 'sub');
-text(48, 118, 'Live and history, why slow, alarms, a disk map and benchmarks · never changes the machine · Windows, macOS and Linux', 'desc');
+text(48, 94, 'Watches one PC: a per-user agent keeps the history, a window, tray and command line show it', 'sub');
+text(48, 118, 'Live and history, why slow, alarms, a disk map and benchmarks · acts only when asked · Windows, macOS and Linux', 'desc');
 
 const AX = 48, AW = 304, BX = 472, BW = 416, CX = 1008, CW = 272, top = 160;
 const BH = 88, PITCH = 120, y = (i) => 208 + i * PITCH;

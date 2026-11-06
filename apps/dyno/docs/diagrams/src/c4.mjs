@@ -13,12 +13,12 @@ function column(d, x, w, y0, H, list) {
 // ---------- C4 level 1 ----------
 {
   const d = P({ title: 'Dyno — system context', kind: 'C4 · Level 1 — System context', w: 1344,
-    desc: 'Dyno measures and explains one PC for its owner, read-only: it never changes the machine. Sister apps and the release host are reached only on a click or an opt-in.' });
+    desc: 'Dyno measures and explains one PC for its owner. It acts on the machine only when the owner asks, such as keep awake or a timed sleep. Sister apps and the release host are reached only on a click or an opt-in.' });
   const W = 288, y0 = 144;
   const left = [
     ['owner', 'process', 0, { name: 'PC owner', tech: 'Person', desc: 'Watches the machine, asks why it is slow, gets alarms, runs benchmarks on a click.', person: true }],
-    ['os', 'process', 0, { name: 'Operating system', tech: 'Windows · macOS · Linux', desc: 'Counters, process table, /proc and /sys, OS logs, launchd, systemd, registry. Figures it shows only to administrators are marked Unavailable.' }],
     ['data', 'process', 0, { name: 'Local data', tech: 'SQLite + JSON in the user data folder', desc: 'History, settings, alarms and notes, snapshots, baselines. Never uploaded.' }],
+    ['os', 'process', 0, { name: 'Operating system', tech: 'Windows · macOS · Linux', desc: 'Counters, process table, /proc and /sys, OS logs, launchd, systemd, registry. Figures it shows only to administrators are marked Unavailable.' }],
   ];
   const right = [
     ['hosts', 'external', 0, { name: 'Release host', tech: 'Gitea releases, HTTPS', desc: 'Signed installers and latest.json for Dyno\'s own opt-in updates.' }],
@@ -29,9 +29,14 @@ function column(d, x, w, y0, H, list) {
   column(d, 48, W, y0, H, left);
   column(d, 1008, W, y0, H, right);
   d.node('sys', 528, y0, W, H, 'accent', { name: 'Dyno', tech: 'Tauri app + per-user agent + Rust core',
-    desc: 'A per-user agent that samples, keeps history and raises alarms; a Tauri app (Angular UI) and the dyno command that show it; a pure Rust core that decides. Everything runs with the user\'s rights; no helper in 1.0.' });
+    desc: 'A per-user agent that samples, keeps history and raises alarms; a Tauri app (Angular UI) and the dyno command that show it; a pure Rust core that decides. It runs with the user\'s rights; an optional helper reads what needs an administrator.' });
+  const [, oy, , oh] = d.rect.os;
+  const hd = { name: 'dyno-helper', tech: 'Optional OS service', desc: 'Turned on in Settings. Reads what needs administrator rights, such as every account\'s processes; changes no setting.' };
+  const hh = d.fit(240, hd);
+  d.node('helper', 552, oy + oh - 24 - hh, 240, hh, 'accent', hd);
   hub(d, 'sys', 'L', 'owner', 'R', { rev: true, label: 'Views, asks' });
-  hub(d, 'sys', 'L', 'os', 'R', { label: 'Reads' });
+  link(d, 'sys', 'L', 'os', 'R', { label: 'Reads', t: [(oy + oh * 0.18 - y0) / H, 0.18] });
+  link(d, 'helper', 'L', 'os', 'R', { label: 'Reads as admin', t: [(hh + 24 - oh * 0.28) / hh, 0.72] });
   hub(d, 'sys', 'L', 'data', 'R', { label: 'Reads, writes' });
   hub(d, 'sys', 'R', 'hosts', 'L', { label: 'Checks', dash: true });
   hub(d, 'sys', 'R', 'debrief', 'L', { label: 'Exports', dash: true });
@@ -43,7 +48,7 @@ function column(d, x, w, y0, H, list) {
 // ---------- C4 level 2 ----------
 {
   const d = P({ title: 'Dyno — containers', kind: 'C4 · Level 2 — Containers', w: 1496,
-    desc: 'The app and the agent run as the user (no helper in 1.0); plugins and benchmarks are separate processes. Every Dyno-to-Dyno edge is the dyno-ipc crate.' });
+    desc: 'The app and the agent run as the user; the optional helper is an administrator service. Plugins and benchmarks are separate processes. Dyno-to-Dyno edges use dyno-ipc, the helper link paddock-ipc.' });
   const NH = 120, LW = 232, aw = 256, bw = 288, gap = 128;
   const lx = 48, gx = lx + LW + 96, ax = gx + 24, bx = ax + aw + gap, gw = 24 + aw + gap + bw + 24, rx = gx + gw + 80;
   const r = (g, i) => g + 40 + i * (NH + 32);
@@ -61,6 +66,7 @@ function column(d, x, w, y0, H, list) {
   d.node('os', lx, r(g2, 1), LW, NH, 'process', { name: 'Operating system', tech: 'Windows · macOS · Linux', desc: 'Counters, /proc, Mach, OS logs, launchd, systemd.' });
   d.node('plugins', rx, r(g2, 0), aw, NH, 'plugin', { name: 'Plugins', tech: 'Rust, out of process', desc: 'Vendor sensors. Depend on dyno-plugin-api only; guarded by dyno-plugin-host.' });
   d.node('bench', rx, r(g2, 1), aw, NH, 'process', { name: 'dyno-bench', tech: 'Rust binary, child process', desc: 'CPU, memory and disk benchmarks, one at a time, killed on timeout.' });
+  d.node('helper', rx, r(g2, 2), aw, NH, 'accent', { name: 'dyno-helper', tech: 'Rust binary, OS service', desc: 'Optional, as administrator. Read-only answers with an audit log.' });
   d.node('cli', bx, g2 + h2 + 56, bw, 96, 'accent', { name: 'dyno', tech: 'Rust binary, command line', desc: 'status, why-slow, top, alarms, snapshot, counters. Reads only (ADR 0014, 0021).' });
   link(d, 'person', 'R', 'ui', 'L', { label: 'Uses' });
   link(d, 'ui', 'R', 'shell', 'L', { label: 'Commands' });
@@ -73,6 +79,7 @@ function column(d, x, w, y0, H, list) {
   hub(d, 'agent', 'L', 'db', 'R', { label: 'Reads, writes' });
   hub(d, 'agent', 'R', 'plugins', 'L', { label: 'Calls' });
   hub(d, 'agent', 'R', 'bench', 'L', { label: 'Spawns' });
+  hub(d, 'agent', 'R', 'helper', 'L', { label: 'Asks' });
   d.legend([{ kind: 'ui', label: 'Angular UI' }, { kind: 'accent', label: 'Dyno container' }, { kind: 'core', label: 'Pure core' }, { kind: 'plugin', label: 'Plugin' }, { kind: 'process', label: 'Process · OS · data' }, { kind: 'external', label: 'External' }, { kind: 'line', label: 'Uses' }, { kind: 'dashline', label: 'Optional · implements' }]);
   save('c4-2-containers', d, g2 + h2 + 56 + 96);
 }

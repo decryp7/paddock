@@ -49,9 +49,9 @@ function dynoHero() {
     r(252, 404, 384, 1, 'mrule', 0) + t(252, 432, 'Busiest apps', 'mm') +
     [['Rust build (cargo)', 0.82], ['Google Chrome', 0.3], ['Visual Studio Code', 0.18]].map(([a, q], i) => t(252, 462 + i * 30, a, 'mt') + r(450, 454 + i * 30, 186, 8, 'ms', 4) + r(450, 454 + i * 30, 186 * q, 8, 'maccf', 4)).join('') +
     r(672, 222, 256, 330, 'mc', 10) + t(692, 254, 'Alarms', 'mt') + t(908, 254, '2 active', 'mm', 'end') +
-    alarmRow(692, 276, 216, 'Disk 78% full', 'Full in about 41 days', 'Active', true, 64) +
+    alarmRow(692, 276, 216, 'Disk 93% full', '7% free', 'Active', true, 64) +
     alarmRow(692, 340, 216, 'CPU ran hot', '6 min above 90 °C', 'Active', true, 64) +
-    alarmRow(692, 404, 216, 'Crash loop', 'Docker restarted 6 times', 'Acknowledged', false, 108) +
+    alarmRow(692, 404, 216, 'Crash loop', 'Docker, 6 times in 10 min', 'Acknowledged', false, 108) +
     r(692, 470, 216, 1, 'mrule', 0) + t(692, 500, 'Health 74 of 100', 'mt') + t(692, 522, 'Reasons, no fixes', 'mm');
 }
 function dynoPanel(kind) {
@@ -72,8 +72,8 @@ function dynoPanel(kind) {
   }
   if (kind === 'alarms') {
     return r(40, 24, 592, 232, 'mc', 12) +
-      alarmRow(64, 48, 544, 'Docker backend keeps restarting', '6 restarts in 2 hours · critical', 'Active', true) +
-      alarmRow(64, 108, 544, 'Macintosh HD is 78% full', 'Full in about 41 days', 'Active', true) +
+      alarmRow(64, 48, 544, 'Docker restarted 6 times in 10 minutes', 'Crash loop · warning', 'Active', true) +
+      alarmRow(64, 108, 544, 'Macintosh HD is 93% full', '7% free', 'Active', true) +
       alarmRow(64, 168, 544, 'CPU ran hot', '6 min above 90 °C', 'Acknowledged', false);
   }
   // bench

@@ -71,7 +71,7 @@ const Y = 144;
 // ---------- core ----------
 {
   const d = P({ title: 'dyno-core — components', kind: 'C4 · Level 3 — Components of the Rust core', w: 1400,
-    desc: 'Everything that decides is a pure function over values; time arrives as a parameter. The agent feeds it measurements and shows what it finds; dyno-platform implements its read-only ports.' });
+    desc: 'Everything that decides is a pure function over values; time arrives as a parameter. The agent feeds it measurements and shows what it finds; dyno-platform implements its ports.' });
   const NH = 112, CW = 264, G = 96, x = 72, c = (i) => x + i * (CW + G);
   const gx = 48, gw = 24 + 4 * CW + 3 * G + 24, ay = Y, ah = 80, gy = ay + ah + 56;
   const r = (i) => gy + 40 + i * (NH + 32);
@@ -91,7 +91,7 @@ const Y = 144;
   m('extras', 1, 2, 'extras', 'modules', 'Read-only views of the system (ADR 0020).');
   m('web', 2, 2, 'weblinks · netchange · network', 'modules', 'Redacted search text and hash links; Wi-Fi, VPN and IP changes (ADR 0019).');
   m('snap', 3, 2, 'snapshot · report · inventory', 'modules', 'Snapshots and diffs, the weekly report, hardware and software inventory.');
-  d.node('ports', c(0), r(3), 4 * CW + 3 * G, NH, 'core', { name: 'ports', tech: 'traits, read-only', desc: 'SystemSensors · ProcessSource · FileLocks · StartupItems · FactsSource · UserActivity · CounterSource. Contract: no panics, Unavailable with a reason, bounded calls, a start-time check on every ProcessRef. None of them changes the machine.' });
+  d.node('ports', c(0), r(3), 4 * CW + 3 * G, NH, 'core', { name: 'ports', tech: 'traits', desc: 'SystemSensors · ProcessSource · FileLocks · StartupItems · FactsSource · CounterSource · PowerActions, among 16. Contract: no panics, Unavailable with a reason, bounded calls, a start-time check on every ProcessRef. Only PowerActions asks the OS to act: a sleep, hibernate or shut-down the owner set up.' });
   d.node('platform', gx + gw / 2 - 160, gy + GH + 56, 320, ah, 'accent', { name: 'dyno-platform', tech: 'Rust, adapters', desc: 'Implements the ports per OS.' });
   link(d, 'agent', 'B', 'g', 'T', { label: 'Calls' });
   link(d, 'platform', 'T', 'ports', 'B', { label: 'Implements', dash: true, arrow: 'open', t: [0.5, 0.5] });

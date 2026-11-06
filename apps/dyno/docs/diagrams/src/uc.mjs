@@ -33,11 +33,11 @@ function useCases(file, { title, desc, owner, rows, ext }) {
   save(file, d, y0 + bh);
 }
 useCases('uml-use-cases-observe', {
-  title: 'Use cases — see and understand', desc: 'What the PC owner learns about the machine. Nothing here changes it.', owner: 'PC owner',
+  title: 'Use cases — see and understand', desc: 'What the PC owner learns about the machine. Seeing changes nothing.', owner: 'PC owner',
   rows: [['Watch live performance and history'], ['Browse and sort processes'], ['Ask "why is my PC slow?" or "is this normal?"'], ['Check health and read the reasons'], ['See what starts at login'], ['Receive alarms and anomalies'], ['Browse Issues and unusual processes'], ['Read the weekly report'], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Browse hardware and software inventory'], ['Use Extras; see network changes']],
 });
 useCases('uml-use-cases-setup', {
-  title: 'Use cases — run and set up', desc: 'What the PC owner runs or sets up. Benchmarks start only on a click; Explain this (Pitwall) is planned after 1.0. None of it changes the machine; Dyno writes only its own data.', owner: 'PC owner',
-  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)', true], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Export the inventory report'], ['Set tray metric, theme, sampling'], ['Start the agent at login']],
+  title: 'Use cases — run and set up', desc: 'What the PC owner runs or sets up. Benchmarks start only on a click; Explain this (Pitwall) is planned after 1.0. Power actions run only as the owner set them up; otherwise Dyno writes only its own data.', owner: 'PC owner',
+  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)', true], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Export the inventory report'], ['Set tray metric, theme, sampling'], ['Start the agent at login'], ['Keep awake or schedule a sleep']],
   ext: { name: 'OS (login)', row: 10 },
 });
