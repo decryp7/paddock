@@ -157,9 +157,12 @@ pub const MAX_READ_THREADS: usize = 4;
 /// Reads for the look-alike names run side by side, this many at most: the cores minus one, and never more than
 /// [`MAX_READ_THREADS`].
 fn read_workers(reads: usize) -> usize {
-    crate::threads::threads(crate::threads::WorkKind::Cpu, None)
-        .clamp(1, MAX_READ_THREADS)
-        .min(reads.max(1))
+    workers_for(crate::threads::threads(crate::threads::WorkKind::Cpu, None), reads)
+}
+
+/// `cpu_threads` side by side, at least one and at most [`MAX_READ_THREADS`], and no more than there are reads.
+fn workers_for(cpu_threads: usize, reads: usize) -> usize {
+    cpu_threads.clamp(1, MAX_READ_THREADS).min(reads.max(1))
 }
 
 /// Reads the events of the look-alike groups that could appear together (see [`joinable_look_alikes`]), side by side,
@@ -872,6 +875,12 @@ mod tests {
         assert_eq!(read_workers(0), 1);
         assert_eq!(read_workers(1), 1);
         assert!(read_workers(1_000) >= 1 && read_workers(1_000) <= MAX_READ_THREADS);
+        // The arithmetic, whatever machine this runs on.
+        assert_eq!(workers_for(13, 1_000), MAX_READ_THREADS, "the cores do not raise it past the bound");
+        assert_eq!(workers_for(2, 1_000), 2, "fewer cores lower it");
+        assert_eq!(workers_for(0, 1_000), 1, "never none");
+        assert_eq!(workers_for(13, 3), 3, "no more than there are reads");
+        assert_eq!(workers_for(13, 0), 1);
     }
 
     #[test]

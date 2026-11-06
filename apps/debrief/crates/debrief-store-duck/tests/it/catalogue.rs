@@ -208,7 +208,11 @@ fn a_source_whose_build_failed_counts_as_done_and_is_reported() {
     // One source failed: done and reported.
     store.catalogue_give_up_on(sources[0]).unwrap();
     let s = status();
-    assert_eq!((s.built, s.pending, s.failed), (true, 0, 1), "a failed source does not keep the catalogue from being built");
+    assert_eq!(
+        (s.built, s.pending, s.failed),
+        (true, 0, 1),
+        "a failed source does not keep the catalogue from being built"
+    );
     let reply = store.catalogue(&CatalogueRequest::default()).unwrap();
     assert_eq!((reply.built, reply.pending), (true, 0));
     // Another one that is only missing from the catalogue (not given up on) is pending, and the catalogue is not built.

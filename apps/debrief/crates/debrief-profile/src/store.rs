@@ -175,11 +175,6 @@ pub struct Reload {
 }
 
 impl Reload {
-    /// The id of the capture this reads again.
-    pub fn id(&self) -> u32 {
-        self.id
-    }
-
     /// Imports the file again through the importer that opened it, and checks that the file did not change meanwhile.
     pub fn load(&self) -> Result<Capture> {
         let file_name = crate::frames::basename(&self.path.to_string_lossy()).to_string();

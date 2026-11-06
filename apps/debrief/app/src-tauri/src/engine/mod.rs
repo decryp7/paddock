@@ -602,6 +602,24 @@ pub(crate) mod local;
 mod tests {
     use super::*;
 
+    /// A window's store has an identity that changes with the store, so a job tied to one store sees that the window now holds
+    /// another (two stores can be at the same catalogue generation).
+    #[test]
+    fn the_window_store_has_an_identity_that_changes_when_the_store_is_replaced() {
+        let state = crate::windows::tests::window_state("engine-store-id", debrief_core::PluginRegistry::new());
+        let engine = &state.engine;
+        let (first_id, first) = engine.tagged_store().unwrap();
+        let (again_id, again) = engine.tagged_store().unwrap();
+        assert_eq!(first_id, again_id, "the same store keeps its identity");
+        assert!(Arc::ptr_eq(&first, &again));
+        let second = engine.host().create(&engine.unpack_root(), &engine.profile()).unwrap();
+        engine.replace(second.clone(), StoreKind::Project);
+        let (second_id, current) = engine.tagged_store().unwrap();
+        assert_ne!(second_id, first_id, "another store, another identity");
+        assert!(Arc::ptr_eq(&current, &second), "the window holds the store it was given");
+        assert_eq!(engine.kind(), Some(StoreKind::Project));
+    }
+
     #[test]
     fn store_errors_become_typed_command_errors() {
         let e: CmdError = StoreError::Busy("an import runs".into()).into();
