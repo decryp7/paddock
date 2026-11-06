@@ -44,7 +44,7 @@ To keep your data, open Settings > Apps, uninstall Dyno and leave "Delete the ap
 - Start at login: turning it off stays off. On Linux, a unit you disabled stays disabled.
 - macOS: Dyno no longer asks for your Keychain password after an update. Wake-on-LAN passwords and AI access keys are now kept in files only you can read.
 - Snooze on a timed power action now delays it. Before, it cancelled the action for the day.
-- Dyno windows no longer miss the new list of computers after a wake or a save. Before, a busy connection could keep showing the old "last wake".
+- The window and tray no longer miss updates from the agent when they are busy (power, scheduled wakes, alarms, alerts, activity).
 - A scheduled wake saved while Dyno was syncing wakes is no longer cancelled.
 - Dyno lowers its background threads on Linux even when started under "nice".
 - An update package is checked again right before it is installed.

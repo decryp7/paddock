@@ -14,7 +14,7 @@ row that confirms it. Until a row is run on the build the tag would ship, the cl
 | Helper readings (every account's processes, temperatures, fans, energy, memory modules, connection owners) | P2, P3, 24j |
 | Repair of the login service does not queue behind a start; Quit waits for or cancels a repair; no second agent while registering | 21, 22, 23, 4 |
 | Start at login on and off; a Linux unit you disabled stays disabled | 4, 5, 21 |
-| Jobs view Cancel for the Start at login change | 4, 5 (cancel while the change runs; no row names Cancel yet, add one before the round) |
+| Jobs view Cancel for the Start at login change | 5a |
 | macOS: no Keychain password prompt after an update; Wake-on-LAN passwords and AI access keys in owner-only files | 24e, 34, W7, W8 |
 | Power rules (sleep, hibernate, shut down) show a countdown with Cancel | W3, W4, W5 |
 | Snooze delays a timed power action; Cancel ends it for today | W5, W3 |
@@ -26,12 +26,12 @@ row that confirms it. Until a row is run on the build the tag would ship, the cl
 | Dyno lowers its background threads on Linux under nice | 11 (Dyno's own CPU), run on a Linux VM started under nice |
 | The update package is checked again before install; a damaged signature is refused | 24g |
 | Windows: tray icon and window start at logon with no command prompt; the helper starts with the computer | 4, 21, 24j (restart the VM) |
-| macOS: memory in use matches Activity Monitor; menu-bar icons do not flash; Lifespan reads the internal SSD | 7, 29 (compare with Activity Monitor on a Mac; no row for Lifespan, add one) |
+| macOS: memory in use matches Activity Monitor; menu-bar icons do not flash; Lifespan reads the internal SSD | 7, 29 (compare with Activity Monitor on a Mac); 42 for Lifespan |
 | Quit and stop measuring stops the agent until the next open or login | 2, 3, 23 |
 | Report a problem and "--export-diagnostics" write a report without a window | 35 (no file paths or command lines in the report), plus a run with a window that does not start |
-| Backup health is gone and saved settings naming it still load | 31, 6 (start with a 1.0.0 settings file) |
-| Network lists, world map and firewall view; Dyno never changes the firewall | no row yet; add one before the round |
+| Backup health is gone and saved settings naming it still load | 31, 6, 44 |
+| Network lists, world map and firewall view; Dyno never changes the firewall | 43 |
 | Benchmarks: write at most 14.5 GiB per drive and delete it; on battery it asks first | 8, plus a disk benchmark run watching free space |
-| Saved views and the 1.0 dashboard upgrade after a restart | 10, plus starting from a 1.0.0 data folder |
+| Saved views and the 1.0 dashboard upgrade after a restart | 10, 44 |
 
-Rows named "add one" have no check in the manual today; the round should not pass those claims until a row exists and was run.
+Rows 5a, 42, 43 and 44 were added to the manual for this release; they count only once run on the build the tag would ship.

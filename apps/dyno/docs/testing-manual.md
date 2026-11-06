@@ -15,6 +15,7 @@ Record: date, OS and version, Dyno version, load average at the time, result per
 | 3 | Open Dyno again with no agent | The app starts one; tiles fill in |
 | 4 | Settings > Start Dyno at login on, log out and in | Dyno is in the tray; `dyno-agent status` (Windows: `"C:\Program Files\Dyno\dyno.exe" agent status`) says running; history has no gap longer than the logout |
 | 5 | Settings > Start Dyno at login off | The login registration is removed (macOS Login Items, `systemctl --user is-enabled dyno-agent`, the Run value) |
+| 5a | Windows, macOS and Linux: make the Start at login change slow (for example a loaded VM, or a login service that is slow to answer), open the Jobs view while it works, then press Cancel. Change it again. Restart the computer | The job shows Cancel and ends as Cancelled; the next start puts any rest right; the second change is accepted and runs; after the restart the login item (macOS Login Items, `systemctl --user is-enabled dyno-agent`, the Run value) matches the Settings switch |
 | 6 | Delete `dyno.db` while stopped, start | History starts again; an alert or note says so |
 
 ## Live data
@@ -169,4 +170,6 @@ hand, once per OS, on the release build. Use a VM or a machine you may put to sl
 | 38 | Extras > Files, choose a folder with two identical large files | Both listed as one duplicate group; nothing can be removed from Dyno |
 | 40 | Extras > Inventory > Export report, open the file | Hardware and software lists; nothing else |
 | 41 | Extras > Maintenance: a window that is closed now, wait/inspect | "Next window opens ..."; no log read starts outside it; Rescan on Issues still works |
-
+| 42 | macOS on Apple silicon: Extras > Lifespan | The internal SSD is read and its health shown; a USB drive is listed as one macOS cannot read health from; no advice to turn on administrator readings |
+| 43 | Network: choose an address list and let it download; open the world map; open the firewall view (macOS, Windows and Linux, each) | Matching connections are marked; the map shows your connections with a legend; the firewall rules are listed with readable names and Dyno offers no way to change them; each feature has its own switch |
+| 44 | Copy a Dyno 1.0.0 data folder that has history, a dashboard and Backup health settings, alarms or widgets; install 1.1.0 over it and start | History is there; saved views show with their age; the 1.0 dashboard is upgraded to the free-size grid; the removed Backup health data is ignored without an error or a message |
