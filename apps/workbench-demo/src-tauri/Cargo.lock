@@ -2749,7 +2749,6 @@ dependencies = [
  "paddock-jobs",
  "paddock-log",
  "paddock-proc",
- "paddock-secrets",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -2846,6 +2845,8 @@ dependencies = [
 name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
+ "paddock-proc",
  "paddock-workspace-hack",
  "zeroize",
 ]
@@ -3073,9 +3074,12 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
+ "gio",
  "gio-sys",
+ "glib",
  "glib-sys",
  "gobject-sys",
+ "gtk",
  "http",
  "httparse",
  "idna",
