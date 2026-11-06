@@ -450,7 +450,7 @@ mod tests {
         assert_eq!(back.registered_version.as_deref(), Some("1.0.4"));
         assert_eq!(back.registered_program.as_deref(), Some("/p"));
         let text = std::fs::read_to_string(d.path().join("service-net.a.b.json")).unwrap();
-        assert!(text.contains("\"registeredVersion\"") && text.contains("\"version\": 2"), "{text}");
+        assert!(text.contains("\"registeredVersion\"") && text.contains("\"version\": 3"), "{text}");
         r.forget().unwrap();
         assert_eq!(r.load(), Recorded::default());
     }

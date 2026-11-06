@@ -1383,7 +1383,7 @@ fn key(w: &World) -> String {
         w.ghost,
         w.mark_unreadable,
         w.rare_used,
-        &normalized(&w.rec)
+        normalized(&w.rec)
     )
 }
 
