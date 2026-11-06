@@ -140,6 +140,43 @@ some fields; "n/s" means the source does not state them.
   importer SDK is a larger change, `serve.rs` `ImportProfile`), under its memory cap. Red run of the lock test: with the old
   flow it fails ("the open captures were readable while the second one was imported").
 
+### 2026-11-06, idle after an Event Viewer import: root cause per process (branch `debrief/p0-idle`)
+
+- **Commit:** A/B: base 852b35ac0 (debrief/1.2-int) against ed8e6005a (debrief/p0-idle)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 4-17 during the runs; other agents running (plock normal lane)
+- **Build:** release; libduckdb 2.0.0; worker and plugin binaries from each side
+- **Corpus:** 20 generated `.evtx` of 28 MB (560 MB, 1,164,800 events): the MIT/Apache-2.0 fixture chunk filled as in
+  `evtx_memory.rs`, with SubjectUserName and one TargetUserName rewritten in place to invented names (20,000 `.exe`,
+  4,000 `.dll`, Zipf-weighted, families of 3 look-alike spellings): 24,033 catalogue names, 23,224 groups; synthetic
+- **Command:** example `idle_rca` (debrief-cli, not committed): real store worker and plugin processes with the app's
+  launch values, files opened one after the other, then the app's name step (`watch` = base `watch_catalogue`,
+  `job` = head `schedule_rebuild`, `none`), sampled every 2 s per process and thread (proc_pid_rusage, proc_pidinfo)
+- **Runs:** base watch x2, base none, base split (phases timed), head job, head watch (old 500 ms pattern), head none
+- **Numbers:**
+
+  | Measure | Base | Head | Budget | Verdict |
+  |---|---|---|---|---|
+  | App process CPU after import end (name step) | 118.3 / 117.4 CPU-s, about 1 core for 2 min | 0.2 CPU-s (job), 0.1 (500 ms watch) | rebuild at most 1 s (D7) | base fails, head pass |
+  | Name table rebuild, 23,224 groups | 123.6 / 119.8 s | 1.6 s (job), 1.4 s (watch) | 1 s | head close (not met) |
+  | Of it: `merge_cooccurring` | 114.3 s, 0 merges | n/a | | cause |
+  | Of it: look-alike reads (10 names, 300 rows) / grouping / vocabulary | 2.58 / 0.04 / 0.01 s | n/a | | |
+  | App CPU with no name step | 0.0 CPU-s | 0.0 CPU-s | | removal check |
+  | Store worker CPU after import end, no name step (catalogue and index, done by 20 s) | 32.0 CPU-s | 32.2 CPU-s | 20 CPU-s per GB (D7) | both fail (57 per GB) |
+  | Store worker CPU added by the name step | 8.6-12.1 CPU-s | 9.4-9.6 CPU-s | | same |
+  | Old 500 ms polling while the catalogue builds | app about 0.5 CPU-s, worker +2-3 CPU-s | worker +0 | | minor |
+  | Any process, 22-600 s after import end | 0.000-0.001 cores | 0.000-0.001 cores | 0.5 % of a core | pass |
+  | Plugin process after import end | 0.0-0.7 CPU-s | 0.5 CPU-s | | pass |
+
+- **Memory measure:** not measured (physical footprint was sampled but not analysed)
+- **Cause (ER-28):** base's `merge_cooccurring` compares every pair of groups (trigrams rebuilt per pair) on the app's
+  name thread once the catalogue is built: removed (no name step) the app stays at 0.0 CPU-s, put back it is 117-118 CPU-s
+  in two runs, split it is 114.3 of 123.6 s. Ruled out by measurement: the catalogue and index builds (over by 20 s), the
+  500 ms watcher polling, head's 1 s status waits, idle store loops, the plugin process, DuckDB background work.
+  Not measured: the webview. The fix is a35ef28c1's trigram-indexed merge; the watcher-to-job change is not what removed the CPU.
+- **Notes:** opening the 20 files at once stops the plugin at its 1,024 MB cap (and ten 55 MB files at 4,096 MB),
+  and the store worker at its 2,048 MB cap, on both sides (the whole-file EVTX importer); the files were opened one at a time.
+
 ### 2026-11-06, the name rebuild's look-alike reads on a 10-million-event store (branch `debrief/p0-idle`)
 
 - **Commit:** measured on the working tree of `debrief/p0-idle` on top of ed8e6005a (the bench is `tests/bench_name_reads.rs`; the reads are the ones in `names/build.rs`, before the time bound below was added to them)
@@ -229,11 +266,13 @@ some fields; "n/s" means the source does not state them.
 - **Memory measure:** not measured
 - **Notes:** the generated log has only 38 distinct names (one chunk repeated), so the sample cannot show what a real
   550 MB Event Viewer export does to the name table; the 8,000-group row is the measurement of that part, and on the
-  sample the two sides are equal because there is nothing to join. A candidate cause of what the user saw (1-2 cores for
-  minutes after the import), not confirmed: the app's name watcher read the whole catalogue every 500 ms while the
-  catalogue was built (P3's test: 20 whole reads in 20 refreshes, now 0), and the quadratic join ran inside it. The watcher
-  is now a quiet job ("Updating names") that blocks inside the store on `catalogue_status` until the catalogue commits; it
-  asks again every 10 s (one status statement) to notice a cancel, a closed window or a replaced store. It is
+  sample the two sides are equal because there is nothing to join. What the user saw (1-2 cores for
+  minutes after the import) was the quadratic join, not the watcher: measured per process on 2026-11-06 (see the
+  "idle after an Event Viewer import" block above), base's `merge_cooccurring` took 114 s of a 124 s rebuild on 23,224
+  groups, while the 500 ms watcher cost about 0.5 app CPU-s (earlier note: the watcher read the whole catalogue every 500 ms
+  while it was built, P3's test: 20 whole reads in 20 refreshes, now 0). The watcher is now a quiet job ("Updating
+  names") that blocks inside the store on `catalogue_status` until the catalogue commits (still right for ER-17 and
+  ER-18); it asks again every 10 s (one status statement) to notice a cancel, a closed window or a replaced store. It is
   covered by app tests with a store double (one wait, woken once, never reading names while unbuilt), not by this
   engine-level run, which does not start the app. The 3.1 CPU-s the rebuild takes on 30 groups is the
   "Comparing look-alike names" phase: 2.89 of its 2.90 s is the page query that reads the events of each look-alike
@@ -242,7 +281,7 @@ some fields; "n/s" means the source does not state them.
   name whose look-alikes cannot join); the D7 budget of 1 s is not met on this sample until then. A second run of the
   scenario with the phases printed (20 s idle window): import 1.19 CPU-s, catalogue and index 6.66, rebuild 3.11, idle 0 statements and 0.004 CPU-s.
   The 60 s idle window shows the store itself is quiet after an import; the 60 s base wait of the loops did not hide a
-  burn at the store level (0.010 s CPU, 0 statements in the base), so the idle cost the user saw was the app's watcher.
+  burn at the store level (0.010 s CPU, 0 statements in the base), so the idle cost the user saw was in the app (the join, per the 2026-11-06 block).
 
 ### 2026-11-05, P3: bounded catalogue read and catalogue status (branch `debrief/p0-idle`)
 
