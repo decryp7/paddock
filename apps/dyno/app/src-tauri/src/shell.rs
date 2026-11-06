@@ -726,6 +726,11 @@ impl<R: Runtime> ShellOf<R> {
     }
 }
 
+/// Which lists a lost-events notice makes the shell read again: the activity log and the alerts (lost alarm changes are only logged).
+fn rereads(lost: &dyno_core::protocol::LostEvents) -> (bool, bool) {
+    (lost.activity > 0, lost.alerts > 0)
+}
+
 impl<R: Runtime> Sink for ShellOf<R> {
     fn live(&self, update: LiveUpdate) {
         // The tray's "N min left" is drawn again after a minute while a hold with an end runs.
@@ -809,12 +814,13 @@ impl<R: Runtime> Sink for ShellOf<R> {
             "the agent gave up events this window was too slow to take: {} activity rows, {} alerts, {} alarm changes; reading them again",
             lost.activity, lost.alerts, lost.alarms
         ));
+        let (activity, alerts) = rereads(&lost);
         let Some(link) = lock(&self.link).clone() else { return };
         let app = self.app.clone();
         // On its own thread: this runs on the link's push thread, which a request would wait on.
         let spawned = std::thread::Builder::new().name("dyno-events-resync".into()).spawn(move || {
             // Both lists are merged by id on the page, so showing a row again changes nothing.
-            if lost.activity > 0 {
+            if activity {
                 match link.call(Request::Activity { limit: 100 }) {
                     Ok(Reply::Activities(rows)) => rows.into_iter().rev().for_each(|row| {
                         let _ = app.emit(events::ACTIVITY, row);
@@ -823,7 +829,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
                     Err(e) => logging::warn(&format!("could not read the activity log again: {}", e.message)),
                 }
             }
-            if lost.alerts > 0 {
+            if alerts {
                 match link.call(Request::Alerts { limit: 100 }) {
                     Ok(Reply::Alerts(alerts)) => alerts.into_iter().rev().for_each(|alert| {
                         let _ = app.emit(events::ALERT, alert);
@@ -1015,5 +1021,21 @@ mod saved_items_tests {
         assert_eq!(saved_items(&dir.path().join("missing.json")), defaults);
         let path = write(dir.path(), "{ not json");
         assert_eq!(saved_items(&path), defaults);
+    }
+}
+
+#[cfg(test)]
+mod lost_events_tests {
+    use super::rereads;
+    use dyno_core::protocol::LostEvents;
+
+    #[test]
+    fn a_lost_events_notice_rereads_only_the_lists_that_lost_something() {
+        let lost = |activity, alerts, alarms| LostEvents { activity, alerts, alarms };
+        assert_eq!(rereads(&lost(0, 0, 0)), (false, false));
+        assert_eq!(rereads(&lost(1, 0, 0)), (true, false));
+        assert_eq!(rereads(&lost(0, 1, 0)), (false, true));
+        assert_eq!(rereads(&lost(5, 7, 3)), (true, true));
+        assert_eq!(rereads(&lost(0, 0, 9)), (false, false), "alarm changes are only logged");
     }
 }

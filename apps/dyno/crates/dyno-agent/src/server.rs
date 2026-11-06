@@ -410,6 +410,49 @@ mod tests {
         );
     }
 
+    /// Changes that do not notify are merged into the latest: nothing user-visible is lost, and no stale "first" is delivered.
+    #[test]
+    fn quiet_alarm_changes_are_merged_and_a_later_notifying_one_is_kept() {
+        use dyno_core::alarms::ChangeKind::{Acknowledged, Raised, Returned};
+        let pending = Pending::default();
+        pending.alarms.put(alarm(5, Acknowledged, false));
+        pending.alarms.put(alarm(5, dyno_core::alarms::ChangeKind::Muted, false));
+        pending.alarms.put(alarm(5, Returned, false));
+        let (changes, lost) = pending.alarms.take();
+        assert_eq!(
+            (changes.iter().map(|c| c.kind).collect::<Vec<_>>(), lost),
+            (vec![Returned], 0),
+            "only the final state"
+        );
+        pending.alarms.put(alarm(6, Acknowledged, false));
+        pending.alarms.put(alarm(6, Raised, true));
+        pending.alarms.put(alarm(6, Returned, false));
+        let kinds: Vec<_> = pending.alarms.take().0.iter().map(|c| (c.kind, c.notify)).collect();
+        assert_eq!(
+            kinds,
+            [(Raised, true), (Returned, false)],
+            "the notifying change is kept even when it was not the first"
+        );
+    }
+
+    #[test]
+    fn alerts_given_up_by_the_bound_are_counted_apart_from_activity() {
+        let pending = Pending::default();
+        let alert = |n: usize| dyno_core::alerts::Alert {
+            id: format!("x{n}"),
+            at: dyno_core::time::Timestamp(0),
+            kind: dyno_core::alerts::AlertKind::LowDisk,
+            severity: dyno_core::health::Severity::Warning,
+            title: String::new(),
+            detail: String::new(),
+        };
+        for n in 0..EVENT_QUEUE + 2 {
+            pending.events.push(Message::Alert(alert(n)));
+        }
+        let (items, activity, alerts) = pending.events.take();
+        assert_eq!((items.len(), activity, alerts), (EVENT_QUEUE, 0, 2));
+    }
+
     #[test]
     fn the_pending_alarms_are_bounded_and_say_how_many_were_lost() {
         use dyno_core::alarms::ChangeKind::Raised;

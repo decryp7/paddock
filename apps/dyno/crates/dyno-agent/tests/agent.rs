@@ -105,6 +105,30 @@ impl Harness {
         ask(&peer, Request::Subscribe { detail }).unwrap();
         (peer, rx)
     }
+
+    /// A connection that keeps every alarm, alert and activity push it receives.
+    fn event_pushes(&self) -> (BodyPeer<Message>, Receiver<Message>) {
+        let d = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let (tx, rx) = channel();
+        let peer = BodyPeer::start(
+            conn,
+            BodyOptions::new("the agent").on_push(move |m| {
+                if matches!(m, Message::Alarm(_) | Message::Alert(_) | Message::Activity(_)) {
+                    let _ = tx.send(m);
+                }
+            }),
+        )
+        .unwrap();
+        ask(
+            &peer,
+            Request::Subscribe {
+                detail: LiveDetail::Summary,
+            },
+        )
+        .unwrap();
+        (peer, rx)
+    }
 }
 
 /// Waits for the data folder's lock to be free again. A test that forks (the child that has not exec'd yet) holds a copy of
@@ -400,6 +424,7 @@ fn the_inventory_is_read_once_and_cached() {
 fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_muted() {
     use dyno_core::alarms::{AlarmFilter, AlarmState, ShelveFor};
     let h = Harness::start();
+    let (_watching, pushes) = h.event_pushes();
     h.fake.push_sample(full_disk_sample());
     let peer = h.client();
     ask(
@@ -411,6 +436,18 @@ fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_
     .unwrap();
     let alarm = wait_for_alarm(&peer);
     assert_eq!(alarm.rule, "alert:lowDisk");
+    // Every connected window is told: the alert, and the alarm's raise with its notification.
+    let (mut alert, mut raised) = (false, false);
+    while !(alert && raised) {
+        match pushes
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the alert and the alarm are pushed")
+        {
+            Message::Alert(a) => alert |= a.kind == dyno_core::alerts::AlertKind::LowDisk,
+            Message::Alarm(c) => raised |= c.alarm.id == alarm.id && c.notify && c.kind == dyno_core::alarms::ChangeKind::Raised,
+            _ => {}
+        }
+    }
     assert_eq!(alarm.state, AlarmState::Active);
     assert_eq!(alarm.severity, dyno_core::health::Severity::Critical);
 
