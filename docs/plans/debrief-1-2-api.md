@@ -1,6 +1,7 @@
 # Debrief 1.2 API design (package 0.5): the foundation
 
-- Status: **Proposed**, 2026-11-07, for an independent review before wave 1 starts (plan row 0.5).
+- Status: **Proposed**, 2026-11-07, for an independent review before wave 1 starts (plan row 0.5). Revision 3 answers
+  the independent review of `b9695e5e5` (P1-1 to P1-7 and its P2s).
 - Scope, by the user's decision of 2026-11-07 (plan §10, "full foundation in 1.2, then one function per release"):
   every package of the plan that §10.3 does not move out has its API here. Revision 2 (same day) extends revision 1,
   which had wrongly limited itself to a narrower foundation, to that scope; §3 to §6 are unchanged.
@@ -17,7 +18,8 @@
 | Debrief ADR 0064 (one streaming import trait, Accepted 2026-11-06) | `origin/docs/debrief-streaming-trait` `ed84adfe6` |
 | Debrief ADRs 0065 (bounded replies, Accepted r5) and 0066 (how times are read, Accepted r5) | `origin/docs/debrief-bounded-and-timezone` `df3f58a5b` |
 | Debrief ADR 0067 (folder import dialog, Accepted r5) | `origin/docs/debrief-folder-import-dialog` `0242fcd81` |
-| Debrief ADR 0068 (dump checks, Accepted 2026-11-07) | `origin/docs/debrief-dump-analysis-adr` `1ba8e4ecd` |
+| Debrief ADR 0068 (dump checks, Accepted 2026-11-07; scope split across releases) | `origin/docs/debrief-dump-analysis-adr` `ad386a9bb` (revision 1 read `1ba8e4ecd`) |
+| Family ADRs 0020 (shared executor, with its 2026-10-30 amendment) and 0052 (wired, outcome and layout contracts, Accepted) | `docs/adr/0020-shared-executor.md`; `origin/docs/adr-wiring-outcomes-ui` |
 | Roadmap proposal, layers A-M, FD-* items (approved) | `origin/docs/debrief-analysis-usefulness`, `apps/debrief/docs/research/2026-11-07-roadmap-proposal.md` |
 | Debrief ADR 0063 (binary wire, **Proposed**) | `origin/docs/debrief-binary-wire` |
 | Source: `paddock-plugin-api`, `-plugin-host`, `-jobs`, `-proc`; Debrief's `debrief-plugin-api/src/protocol.rs`, `debrief-batch/src/ids.rs`, `debrief-plugin-host/src/`, the command and port tables | this branch (`852b35ac0` for Debrief) |
@@ -132,10 +134,16 @@ A `cargo tree` check (PH2a) fails when any `paddock-*` crate depends on a `debri
 | Store worker to app | JSON text today (`debrief-store-client/src/protocol.rs`) [S] | `store_port_table!` | `WIRE_VERSION` bump with every port change |
 | Engine to UI | JSON today; MessagePack + Arrow if ADR 0063 is adopted | Rust types with `ts-rs` → `app/src/app/core/generated/*.ts` | generated files checked in CI (`git diff --exit-code` after generation) |
 
-Postcard rules (family ADR 0001, "Versioning"): only a variant appended at the end of an enum is a minor change; a field
-appended to a struct is a new `.vN` namespace. **So every field a foundation struct may ever need must be in its first
-version**, which is why §5's bodies carry fields whose producers land later (`ordinal`, `time_report`); they are
-`Option` or have a defined empty value until then.
+Postcard rules (family ADR 0001, "Versioning"): appending a variant at the end of an enum is a minor change; appending
+a field to a struct is not (it fails in both directions). **The escape route is ADR 0001's own:** new fields travel in a
+new variant appended at the end of the request or reply enum, which carries them. So this file:
+
+- gives every postcard struct the fields it can name now (`ordinal`, `ts_state`, `time`), with a defined empty value
+  until their producers land;
+- carries shapes that will grow as **JSON** inside the body, where ADR 0001 makes a new `Option` or `#[serde(default)]`
+  field a minor change: the Describe reply and every `*Cap` (§5.2), `FileInfo.times` (§5.3), the profile and document
+  option bodies (§5.7) and the view filter (§5.8);
+- never relies on appending a field to a postcard struct later.
 
 ### 1.5 Work roles and identities
 
@@ -224,12 +232,23 @@ pub enum OrdinalKind {
 }
 ```
 
+- `Importer::ordinal()` has **no default** (§3.2), so an importer does not compile without declaring one; the contract
+  test (`debrief-plugin-test`, FD-B) fails a non-text importer (`Access` other than `Lines`) that declares `Line`.
 - The event carries `ordinal: Option<u64>` on the wire (`WireEvent`, §5.3) and in `ParsedEvent` (§3.2). `None` under
   `OrdinalKind::Line` means "the line is the ordinal". The store's column is FD-B's decision (a new `ordinal UBIGINT`, or
   `line` widened); the wire carries the field from v1 either way (§1.4).
-- **Uniqueness is checked at the sink**, per source, on a rolling window: an ordinal that is not greater than the last one
-  of the same source is a `ProblemKind::OrdinalNotIncreasing` (counted, sampled), never an error. A format whose
-  record numbers may repeat (a wrapped EVTX log restarts numbering only on clear [U]) declares `Position` instead.
+- **Unique, not increasing.** Increasing does not imply unique across a split file, and unique does not imply increasing:
+  an EVTX log is a circular buffer, so its record numbers rise across the wrap while file order does not [S: `evtx`
+  walks the oldest chunk first]. The order inside a source is the ordinal, not the file position. The sink checks:
+  - `Line` and `Position`: made by the reader, strictly increasing by construction; equal to the previous is a bug,
+    caught by a debug assertion and the contract test;
+  - `RecordNumber`: a per-source set of seen numbers (a compressed bitmap, freed at `finish_source`), bounded by
+    `import.ordinal_set_bytes` (64 MiB, `hard`). **A duplicate `(source, ordinal)` is refused:** the event is skipped
+    with `ProblemKind::DuplicateOrdinal` (counted, sampled). Past the bound the check stops for that source with one
+    `ProblemKind::OrdinalUnchecked`, and the source's provenance says so.
+- **One order key.** FD-B amends ADR 0062's `(ts, source, line, id)` to `(ts, source, ordinal, id)`, where the ordinal
+  of a text source is its line, so nothing changes for text; `PageAnchor::Key` (§14.5) and `RecordCursor` (§5.6) use the
+  same key.
 - Re-time (ADR 0066 §8) moves `ts` and renumbers `pos`, never the ordinal or the id [A: ADR 0066 keeps ids and blocks].
 
 ### 2.3 Source identity across reloads
@@ -283,8 +302,8 @@ pub enum GoneWhy { SourceRemoved, SourceChanged, NotInStore, DocumentNotOpen }
 - Port (FD-E2): `Inspect::resolve(refs: &[EvidenceRef]) -> Bounded<Vec<Resolved>>`, one row in `store_port_table!`, at
   most 1,000 refs per call (`evidence.resolve_batch`, `hard`); budget from the roadmap: 1,000 refs under 200 ms on the 1B
   store [J target], measured in FD-E2 and recorded under rule 48.
-- **Room left for features:** `DocItem` is an enum on JSON wires only (UI, store worker), so a variant appended later is
-  minor. It never crosses the plugin wire.
+- **Room left for features:** `DocItem` is an enum on JSON wires (UI, store worker), so a variant appended later is
+  minor. On the plugin wire it travels only inside a JSON body (`debrief.analysis.v1`, §5.9), never as postcard.
 - Tests: `debrief-core/src/evidence/tests.rs` (pure: serde, bounds of `Excerpt`); `debrief-store-duck/tests/evidence.rs`
   (found, moved by locator after a reload, moved by hash after a re-time, gone after removal).
 
@@ -336,7 +355,7 @@ apps/debrief/crates/debrief-plugin-ext/src/
   import/
     mod.rs          Importer, DocumentReader, ImportCtx, SniffCtx, Head, ImportEnd, StopReason, ImportError
     input.rs        ImportInput, Access, Lines, Decoded, Bytes, Seekable, ByPath, MemoryInput, WholeReason
-    sink.rs         EventSink, ParsedEvent, Raw, SinkClosed, ProblemKind (re-export of problems)
+    sink.rs         ImportSink, ParsedEvent, Raw, SinkClosed, ProblemKind (re-export of problems)
     budget.rs       RecordBudget, the framer counter
     chunk.rs        ReaderChunks (moved from debrief-core/src/ingest/chunk.rs, SI-2)
     decode.rs       the decode half of encoding.rs (SI-2)
@@ -355,9 +374,13 @@ plugin importers implement one trait.
 
 ```rust
 // import/mod.rs
-pub trait Importer: Send + Sync + 'static { /* exactly ADR 0064 §1, plus: */
-    /// What orders this importer's events (§2.2). Default `Line`.
-    fn ordinal(&self) -> OrdinalKind { OrdinalKind::Line }
+pub trait Importer: Send + Sync + 'static { /* ADR 0064 §1, with ADR 0066 D13's amendment (accepted) and: */
+    /// ADR 0066 D13: what this importer does with times. **No default**, so a new importer does not compile until it says.
+    fn times(&self) -> TimeBasis;
+    /// What orders this importer's events (§2.2). **No default** (FD-B).
+    fn ordinal(&self) -> OrdinalKind;
+    /// ADR 0066 D13: `import` takes `&mut ImportCtx`, so `ctx.times()` can lend the one reader of the call.
+    fn import(&self, ctx: &mut ImportCtx, input: Self::Input<'_>, sink: &mut dyn ImportSink) -> Result<ImportEnd, ImportError>;
     /// Whether the pool may split the file and call `import` once per chunk (core text and JSON lines only in 1.2).
     fn splittable(&self) -> bool { false }
     /// ADR 0067's preselection class (`log`, `event-log`, `dump`, `trace`, `config`, `image`, `untimed-table`).
@@ -368,7 +391,7 @@ pub struct ImportCtx<'a> {
     file: &'a FileInfo,                // §5.3: name, root-relative path tail, size, mtime; never an absolute path
     head: &'a Head,                    // the plan's head, ≤ HEAD_BYTES (1 MiB), decoded once for text importers
     plan: &'a TextPlan,                // encoding, data_start
-    times: RefCell<TimeReader>,        // ADR 0066 §1; finish() called by the SDK, never by the importer
+    times: TimeReader,                 // ADR 0066 §1; finish() called by the SDK, never by the importer
     tail: Option<&'a TailStart>,       // live tail only: the file's start (headers)
     progress: &'a dyn ByteProgress,    // §3.6: bytes delivered after the first event
     log: &'a dyn ImportLog,            // §12.2: phase lines, never content
@@ -376,10 +399,13 @@ pub struct ImportCtx<'a> {
 impl ImportCtx<'_> {
     pub fn file(&self) -> &FileInfo;
     pub fn head(&self) -> &Head;
-    pub fn times(&self) -> RefMut<'_, TimeReader>;
+    pub fn times(&mut self) -> &mut TimeReader;
     pub fn tail(&self) -> Option<&TailStart>;
 }
 pub struct SniffCtx<'a> { pub file: &'a FileInfo, pub encoding: Option<&'a str> }
+/// ADR 0066 D13 (its "A new importer cannot skip it", 1).
+pub enum TimeBasis { Reads, NoTimes { why: NoTimesWhy } }
+pub enum NoTimesWhy { FormatHasNone, DocumentTimesOnly, Other(Box<str>) }
 pub struct Head { bytes: Box<[u8]>, text: Option<Box<str>>, complete: bool }   // `complete`: the head is the whole file
 impl Head { pub fn bytes(&self) -> &[u8]; pub fn text(&self) -> Option<&str>; pub fn is_whole_file(&self) -> bool }
 
@@ -415,7 +441,8 @@ pub enum SinkClosedWhy { Cancelled, HostGone }
 ```
 
 `Record.id` is dropped (ADR 0064 §1, "Importers no longer report `Vec`s") [A]; `Record.line` stays `u32`, saturating per
-file.
+file. `ImportSink` is ADR 0064's `EventSink`, renamed because `paddock_jobs::reporter::EventSink` exists and both are
+in scope in the store worker (§17, Q23).
 
 ### 3.3 Inputs and registration
 
@@ -448,9 +475,14 @@ pub struct ImporterCap {
     pub sniff: DeclaredSniff,
     pub tail: TailSupport,
     pub ordinal: OrdinalKind,
+    pub times: TimeBasis,
+    pub multiline: bool,                       // ADR 0064's `multiline()`
+    pub record_budget: Option<u64>,            // ADR 0064's `record_budget()`; None: the Setting
     pub class: ImportClass,
     pub identity_fields: Vec<Box<str>>,
 }
+// ImporterCap and every other *Cap are serde camelCase and cross inside the JSON Describe reply (§5.2), so a later
+// optional field is a minor change (§1.4).
 /// Type-erased importer: what the host calls. Built only by `register`, so `access` cannot disagree with the code.
 pub struct ErasedImporter { cap: ImporterCap, run: Box<dyn ErasedRun> }
 pub fn register<I: Importer>(importer: I) -> ErasedImporter;
@@ -458,7 +490,7 @@ impl ErasedImporter {
     pub fn cap(&self) -> &ImporterCap;
     pub fn sniff(&self, ctx: &SniffCtx, head: &Head) -> u8;
     /// The host passes the input matching `cap().access`; a mismatch is a programming error caught by the type of `HostInput`.
-    pub fn import(&self, ctx: &ImportCtx, input: HostInput<'_>, sink: &mut dyn EventSink) -> Result<ImportEnd, ImportError>;
+    pub fn import(&self, ctx: &mut ImportCtx, input: HostInput<'_>, sink: &mut dyn ImportSink) -> Result<ImportEnd, ImportError>;
 }
 pub enum HostInput<'a> { Lines(Lines<'a>), Decoded(Decoded<'a>), Bytes(Bytes<'a>), Seekable(Seekable<'a>), ByPath(ByPath<'a>) }
 ```
@@ -489,7 +521,7 @@ pub enum Satisfy { Read, DecompressInOrder, Spool, Path, SpoolThenPath }
 
 pub enum SourceOutcome {
     Imported { events: u64, end: ImportEnd, time: TimeReport, bytes_read: u64 },
-    Refused(Refusal),                         // §6.2: same enum as the scan
+    Refused(FileRefusal),                         // §6.2: same enum as the scan
     Failed { cause: SourceFailure },          // events removed (`abort_source`), listed with Retry
 }
 pub enum SourceFailure { Import(ImportError), Plugin(PluginFault), Gate(LimitExceeded), Spool(LimitExceeded) }
@@ -504,8 +536,8 @@ pub enum SourceFailure { Import(ImportError), Plugin(PluginFault), Gate(LimitExc
 ### 3.5 Back-pressure and Cancel
 
 One blocking chain, no added queue [A: ADR 0064 §4]: the store's slot lock blocks `BatchSink::write`; for a plugin, no
-`Credit` frame goes back; `ItemSink::send` blocks in the plugin; `EventSink::event` blocks; the parser stops reading.
-Cancel is the import job's `CancelToken` (§9), reaching `RemoteStream::cancel` and `EventSink::event` →
+`Credit` frame goes back; `ItemSink::send` blocks in the plugin; `ImportSink::event` blocks; the parser stops reading.
+Cancel is the import job's `CancelToken` (§9), reaching `RemoteStream::cancel` and `ImportSink::event` →
 `Err(SinkClosed { Cancelled })`; every `read` fails with `io::ErrorKind::Other` carrying `ImportError::Cancelled`
 (never `Interrupted`, ADR 0064 §1 notes).
 
@@ -533,7 +565,7 @@ Registry rows from ADR 0064 §5 [A], each with its `limit_case!` in `debrief-cor
 
 ### 3.8 Parallelism and cost
 
-Unchanged from ADR 0064's section [A]: files on the parse pool (`import.parse_threads`, Auto = cores − 1, at most 8),
+Unchanged from ADR 0064's section [A]: files on the parse pool (`performance.import.parse_threads`, Auto = cores − 1, at most 8),
 `2 × threads` files in flight, lowered on `EMFILE`; plugin calls bounded by files in flight; zip members one cloned
 reader each; one spool per file in flight. Cheaper: sniff memo and batch (§5.4), first read grows from 64 KiB, one open
 per file, `Vec<Record>` gone.
@@ -606,7 +638,8 @@ pub use paddock_ipc::{codes, RemoteError};
 impl ExtCtx<'_> { pub fn cancelled_error(&self) -> RemoteError; }
 ```
 
-`serve` (2.6b): sets the thread level per call from `Contract::role` (`paddock_proc::priority::for_role`, §4.5); calls
+`serve` (2.6b): sets the thread level per call from `Contract::role` (`paddock_proc::priority::for_role`, §4.5, the
+only caller of `for_role`; jobs go through the executor's `Class`, §9.5); calls
 `paddock_sandbox::lockdown` before any request (PH1).
 
 ### 4.2 `paddock-plugin-host` additions (2.6a, 2.6b, SI-7)
@@ -630,15 +663,23 @@ impl<C: StreamContract> RemoteStream<C> {
     pub fn cancel(self);
 }
 pub enum StreamEvent<C: StreamContract> { Item(C::Item), Done(C::Reply) }
-pub struct Credit(NonZeroU32);                         // HostConfig::stream_credit, "Auto" = 4 until 2.6b's benchmark
+pub struct Credit(NonZeroU32);                         // HostConfig::stream_credit, "Auto" = 4 until 2.6b's benchmark, max 64
+/// Bytes of items in flight shared by every stream of one import (§8): a credit is returned to a plugin only while the
+/// pool has room for one more item of the largest size seen, so 16 files × credit 4 cannot add up past the budget.
+pub struct CreditPool { /* bytes in flight, limit, waiters */ }
+impl CreditPool { pub fn new(limit_bytes: u64) -> CreditPool; pub fn in_flight(&self) -> u64; }
+impl<C: StreamContract> Remote<C> {
+    pub fn stream_pooled(&self, request: &C::Request, credit: Credit, pool: &Arc<CreditPool>) -> Result<RemoteStream<C>, HostError>;
+}
 
 // services.rs: host-side extension calls
+/// The app's handler of one namespace's host side. The namespace is given once, at registration; a call whose `ns` the
+/// manifest does not list is `denied` before it reaches the handler.
 pub trait HostExtension: Send + Sync {
-    const NS: &'static str;  // checked against the manifest's declared namespaces
     fn handle(&self, plugin: &PluginId, minor: u16, body: &[u8], ctx: &HostCallCtx) -> Result<Vec<u8>, RemoteError>;
 }
 impl HostServices {
-    pub fn register_extension(&self, ns: &'static str, handler: Arc<dyn HostExtensionDyn>);
+    pub fn register_extension(&self, ns: &'static str, handler: Arc<dyn HostExtension>);
 }
 
 // files.rs (SI-7)
@@ -655,19 +696,25 @@ impl HostFiles {
 // grants.rs (2.6a): one memory policy
 pub struct ResourceRequest { pub memory_mib: Option<u32>, pub cpu_percent: Option<u8> }   // from manifest `[resources]`
 impl Grants { pub fn memory(&self, plugin: &PluginId) -> MemoryPolicy; }                  // §4.5
+// One memory path (rule 55): `Plugin::memory_limit()` (paddock-plugin-api/src/plugin.rs:52, sent as
+// `Described::memory_limit`) and `Permission::Memory`/`Permission::Cpu` are deleted in 2.6a (ADR 0001, "One memory
+// policy"); the manifest's request starts the policy and nothing else sets a cap.
 
-// status.rs (2.6a): lifecycle
+// status.rs (2.6a): the existing `Status` enum is extended, not doubled (rule 55): `Running` splits into Idle and Busy.
 pub enum StartPolicy { OnFirstUse, AtStartup }
-pub enum Lifecycle {
+pub enum Status {
     Stopped,
-    Starting { since_tick: u64 },
-    Idle { pid: ProcessId, since_tick: u64 },
-    Busy { pid: ProcessId, in_flight: u16 },
-    Stopping { pid: ProcessId },
-    Quarantined { until: QuarantineUntil },
+    Starting,
+    Idle { pid: ProcessId, since_tick: u64 },              // was Running
+    Busy { pid: ProcessId, in_flight: u16 },               // was Running
+    Stopping { pid: ProcessId },                           // new: idle stop or a stop by the user
+    Restarting { why: FailureKind, delay: Duration },      // `why` typed (was String)
+    Quarantined { why: FailureKind },
+    Refused(RefusalText),
+    Disabled,
 }
-pub struct PluginStatus { pub id: PluginId, pub lifecycle: Lifecycle, pub last_use: Option<u64>,
-                          pub memory: Option<MemorySample>, pub cpu: Option<CpuSample>, pub keep_alive: bool }
+pub struct PluginStatus { pub id: PluginId, pub status: Status, pub last_use_tick: Option<u64>,
+                          pub sample: Option<ProcessSample>, pub keep_alive: bool }   // ProcessSample from §4.5
 
 // failure (2.6a)
 pub enum Failure { Panic, Died, Hang, Garbled, OverMemory { limit: LimitExceeded }, Stall { why: StallWhy } }
@@ -687,10 +734,13 @@ release checklist item stays (ADR 0001, "OS enforcement").
 ### 4.3 `paddock-ipc` (IP1, 2.6d)
 
 ```rust
-pub struct PeerOptions {
-    pub max_concurrent_calls: u16,          // exists, 64
-    pub max_queued_frames: NonZeroU32,      // IP1 item 2: the writer queue bound; a full queue blocks the sender
-    pub max_queued_bytes: NonZeroU64,       // and its byte bound
+pub struct PeerOptions {                // fields as they are [S: peer.rs:79], plus two
+    pub max_concurrent_calls: usize,        // exists: incoming calls handled at once
+    pub call_queue: usize,                  // exists: incoming calls waiting; these bound what the OTHER side sends
+    pub call_queue_bytes: usize,            // exists
+    pub write_queue: usize,                 // IP1 item 2 (new): frames this side has queued to send; a full queue blocks
+    pub write_queue_bytes: usize,           // IP1 item 2 (new): and their bytes; the sender blocks, then fails at the bound
+    /* label, cancel_grace, push_queue, clock: unchanged */
 }
 pub enum ProtocolError { RepeatedCallId { id: u64 }, ItemWithoutCredit, /* ... */ }  // IP1 item 3: closes the connection
 pub trait PeerCredentials { fn peer_uid(&self) -> Option<u32>; }                     // IP1 item 5, Unix; fake in tests
@@ -709,8 +759,8 @@ An oversized reply from a plugin is the plugin's fault (`Failure::Garbled`), not
 /// What the host owes a call: while any is true, the call gets no blocked ticks (ADR 0031 §2, amended by ADR 0064:
 /// waiting for credit is owed by the host).
 pub struct Owed { pub host_call: bool, pub file_read: bool, pub credit: bool }
-impl StallJudge { pub fn observe(&mut self, key: &CallKey, tick: u64, sample: Option<RunSample>, progress: bool, owed: Owed) -> Verdict; }
-pub enum Verdict { Working, Waiting(WaitWhy), Stuck(StuckWhy) }
+impl StallJudge { pub fn observe(&mut self, key: &CallKey, tick: u64, sample: Option<RunSample>, progress: bool, owed: Owed) -> StallVerdict; }
+pub enum StallVerdict { Working, Waiting(WaitWhy), Stuck(StuckWhy) }
 ```
 
 Call keys used by the foundation (C measured per key in LV1, recorded under rule 48): `plugin.start`,
@@ -728,13 +778,19 @@ impl MemoryPolicy { pub fn ceiling(physical: u64) -> u64; }        // 75 % of ph
 pub trait ProcessProbe: Send + Sync { fn sample(&self, id: &ProcessId) -> Option<ProcessSample>; }
 pub trait SystemProbe: Send + Sync { fn physical(&self) -> u64; fn available(&self) -> u64; }
 pub struct ProcessSample { pub footprint: u64, pub cpu: Duration, pub state: Option<RunState> } // footprint per rule 26
+// One sampler (rule 55): ADR 0031's `RunStateProbe` is an adapter over `ProcessProbe` (it reads `state` and `cpu` of the
+// same tick's sample), not a second walk of the process table.
 /// One refresh for all watched pids per tick (P1). Rows by role, versioned camelCase wire type, generated TS.
 pub struct ProcessTable { pub version: u32, pub rows: Vec<ProcessRow> }
 pub struct ProcessRow { pub role: ProcessRole, pub id: ProcessId, pub footprint: u64, pub cpu_percent: f32 }
 pub enum ProcessRole { App, StoreWorker, AiWorker, Plugin { id: Box<str> }, Helper { id: Box<str> } }
 
 pub mod priority {
-    pub fn for_role(role: WorkRole);                 // sets the calling thread's level (rule 52)
+    /// THE table of OS levels per class (ADR 0020's table with its 2026-10-30 amendment): Interactive and User normal;
+    /// Background = QOS_CLASS_UTILITY, nice 10 + ioprio best-effort 7, THREAD_PRIORITY_BELOW_NORMAL (the gentle level);
+    /// Idle = QOS_CLASS_BACKGROUND, SCHED_IDLE, THREAD_MODE_BACKGROUND_BEGIN (starvable: C54 comment required).
+    pub fn apply(class: Class);                      // the executor's workers and child launches use this
+    pub fn for_role(role: WorkRole);                 // Live → User, Bulk → Background, through `apply`; plugin serve only
     pub fn threads(kind: WorkKind, class: Class) -> NonZeroUsize;   // ADR 0024 §1
 }
 ```
@@ -858,8 +914,10 @@ Protocol-1 markers had no request of their own: marker kinds are declared in `Co
 ```rust
 pub struct Describe;
 impl Contract for Describe { const NS: &'static str = "debrief.describe.v1"; const MINOR: u16 = 0;
-    type Request = DescribeRequest; type Reply = DebriefContributions; }
+    type Request = DescribeRequest; type Reply = Json; }   // Json = paddock-plugin-api's JSON wrapper of DebriefContributions
 pub enum DescribeRequest { Contributions }
+/// Crosses as JSON (camelCase), like the platform's `Described`, so an `Option` or `#[serde(default)]` field added later
+/// is a minor change (§1.4). Every *Cap below is a JSON struct for the same reason.
 pub struct DebriefContributions {
     pub importers: Vec<ImporterCap>,            // §3.3
     pub documents: Vec<DocumentCap>,            // { id, access, whole, sniff, kind: DocumentKind }
@@ -883,8 +941,12 @@ pub struct FileInfo {
     pub len: u64,                       // LEN_UNKNOWN (u64::MAX) for a decompressing stream
     pub mtime_ms: Option<i64>,
     pub date: Option<Box<str>>,         // file date for time-only formats (ADR 0066 §9)
-    pub times: TimeSettings,            // the parser's assume_timezone etc., `Inherit` by default (ADR 0066 §2)
+    pub times: Json,                    // TimeSettings as JSON (assume_timezone etc., `inherit` by default, ADR 0066 §2):
+                                        // the settings will grow, so they are not a postcard struct (§1.4)
 }
+// Protocol 1's `FileInfo.path` (the absolute path) is gone: a plugin sees `rel_tail` only, and a first-party `ByPath`
+// importer gets the one chosen path in `WireInput::ChosenPath`. `Permission::OpenedFilePaths` stays in the manifest
+// model for tools that are handed paths by the user (ADR 0001); the Windows plugin stops asking for it (ADR 0064 §2).
 pub const LEN_UNKNOWN: u64 = u64::MAX;
 pub struct TextPlan { pub encoding: Box<str>, pub data_start: u64 }
 pub enum WireInput {
@@ -895,7 +957,11 @@ pub enum WireInput {
 pub struct EventItem { pub events: Vec<WireEvent> }
 pub struct WireEvent {
     pub ts: Option<i64>,
-    pub ts_kind: WireTsKind,                        // Parsed | Inherited | Untimed (TsState), plus Wall (ADR 0066 §2)
+    /// ADR 0066 §6's `ts_state` byte, exactly as the store keeps it: low two bits `TsState` (Parsed 0, Inherited 1,
+    /// Untimed 2), then flags WALL 4, GAP 8, FOLD_UNSURE 16, DATE_AMBIG 32, CONTRADICTS 64. **A plugin may set the low two
+    /// bits, WALL and DATE_AMBIG**; the host masks the rest and sets GAP, FOLD_UNSURE and CONTRADICTS itself when it
+    /// converts wall times. Read through `debrief_batch::TsCode::from_wire(u8)`, the one definition (rule 55).
+    pub ts_state: u8,
     pub level: u8,
     pub message: String,
     pub template: Option<String>,
@@ -907,14 +973,16 @@ pub struct WireEvent {
     pub raw: Option<String>,                        // ADR 0064 "Raw text": crosses as text; None for EVTX
     pub byte_offset: Option<u64>,
 }
-pub enum WireTsKind { Parsed, Inherited, Untimed, Wall }
 pub const MAX_EVENTS_PER_ITEM: usize = 8192;
 pub const ITEM_BYTES: usize = 4 << 20;
 pub const EVENT_FRAME_MAX: usize = 12 << 20;        // over it the SDK drops `raw`, then the event, with EventTooLarge
 ```
 
-`WireEvent` loses `id` (§2.1) and gains `ts_kind`, `ordinal`, `raw` and `byte_offset`. `ts_kind = Wall` replaces the
-need for a later field when ADR 0066's `Stamp::Wall` reaches the store; until Z1 lands, plugins send `Parsed` [J].
+`WireEvent` loses `id` (§2.1) and gains `ts_state`, `ordinal`, `raw` and `byte_offset`, in the one wire change ADR 0066
+D13 asks for ("`Record.ts` plus basis flags cross in the same wire change"). `TsState` and the flag bits stay defined
+once, in `debrief-batch` (`ids.rs`); so that plugins can use them without Arrow, `debrief-batch`'s Arrow dependencies
+move behind a default feature `arrow`, and `debrief-plugin-ext` depends on `debrief-batch` with `default-features =
+false` (§17, Q25). Until Z1 lands, plugins send flags 0.
 
 ### 5.4 `debrief.import.v1`
 
@@ -987,42 +1055,67 @@ allocated in increasing blocks [S: `ids.rs`], so "after" means "imported since".
 ```rust
 pub enum ProfileRequest {
     Sniff { importer: Box<str>, file_name: Box<str>, head: Vec<u8> },                       // Live → Score(u8)
-    Import { importer: Box<str>, file: FileInfo, input: WireInput, limits: ProfileLimits }, // Bulk, items: Piece → Done(ProfileDone)
+    Import { importer: Box<str>, file: FileInfo, input: WireInput, limits: Json },  // Bulk, items: Piece → Done(ProfileDone)
 }
 pub enum DocumentRequest {
     Sniff { importer: Box<str>, file_name: Box<str>, head: Vec<u8> },
-    Import { importer: Box<str>, file: FileInfo, input: WireInput, options: DocumentOptions },
-    Resymbolise { importer: Box<str>, document: HostFileRef, options: DocumentOptions },
+    Import { importer: Box<str>, file: FileInfo, input: WireInput, options: Json },
+    Resymbolise { importer: Box<str>, document: HostFileRef, options: Json },
 }
 pub struct Piece { pub bytes: Vec<u8> }            // ≤ OUTPUT_CHUNK (256 KiB), the library's own encoding
 pub struct ProfileDone { pub bytes: u64, pub heap: bool }
 pub struct DocumentDone { pub bytes: u64 }
 ```
 
-`ProfileLimits` and `DocumentOptions` become typed structs (they are `Json` in protocol 1 [S]); their fields are copied
-from the JSON shapes the plugins read today, in PH2a [J].
+The option bodies stay JSON, as in protocol 1 [S: `debrief-plugin-host/src/{profile,document}.rs`], because their
+limits grow with every format (§1.4). Their types are defined once, in the domain crates the host and the plugin both
+link, and validated at the edge on both sides:
+
+| JSON body | Type | Fields today [S] |
+|---|---|---|
+| `limits` of `debrief.profile.v1` `Import` | `debrief_profile::Limits` (`limits.rs:7`) | `max_input_bytes`, `max_frames`, `max_stack_nodes`, `max_samples`, `max_threads`, `max_events`, `max_stack_depth`, `max_name_len`, `max_objects`, `max_edges`, `max_nesting` |
+| `options` of `debrief.document.v1` | `debrief_dump::ImportOptions` (`import.rs:59`) | `limits: debrief_dump::Limits` (`max_threads`, `max_frames`, `max_stack_bytes`, `max_modules`, `max_handle_types`, `max_stacks`, `max_umdh_frames`, `max_text`, `max_notes`, `max_read_bytes`, `max_encoded_bytes`, and the rest of `limits.rs`), `file_time_ms`, `symbol_folders` |
+
+A new field is `#[serde(default)]`, so an older plugin reads a newer host's body.
 
 ### 5.8 `debrief.view.v1` (host side)
 
 ```rust
 pub enum ViewRequest {
-    Select { ticket: u64, filter: ViewFilter, limit: u32 },     // → Events(Bounded rows as EventItem, cut count)
+    /// One page; `after` continues from the previous page's `next`. → ViewReply::Rows.
+    Select { ticket: u64, filter: Json /* ViewFilter */, limit: u32, after: Option<ViewCursor> },
     Instances { ticket: u64 },                                  // → Instances(Vec<InstanceRow>)
     TimeRange { ticket: u64 },                                  // → Range(Option<(i64, i64)>)
 }
-pub enum ViewReply { Events { item: EventItem, more: bool }, Instances(Vec<InstanceRow>), Range(Option<(i64, i64)>) }
+pub enum ViewReply {
+    /// At most one item's worth (MAX_EVENTS_PER_ITEM or ITEM_BYTES); `next` is `None` at the end or at `limit`.
+    Rows { rows: Vec<ViewRow>, next: Option<ViewCursor> },
+    Instances(Vec<InstanceRow>),
+    Range(Option<(i64, i64)>),
+}
+/// Protocol 1's `WireViewRecord { event, source, instance }` (`protocol.rs:580`) [S], kept.
+pub struct ViewRow { pub event: WireEvent, pub source: Box<str>, pub instance: Box<str> }
+/// The page order's key, `(ts, source, ordinal, id)` (§2.2), reversed under `newest_first`.
+pub struct ViewCursor { pub ts: Option<i64>, pub source: u32, pub ordinal: u64, pub id: EventId }
 ```
 
-Served by Debrief as a `HostExtension` (§4.2) during an annotation, under its ticket; a ticket not open is `denied`.
-`ViewFilter` replaces protocol 1's `filter: Json` with the subset of `Query` that annotators use [U: the subset is listed
-by PH2a from the first-party annotators].
+Served by Debrief as a `HostExtension` (§4.2) during an annotation, under its ticket; a ticket not open is `denied`. A
+run reads at most `limit`, capped at `MAX_VIEW_RECORDS` (100,000, `annotate.rs:17`) [S] across all its pages; a unary
+reply could not carry that in one item, so the continuation is the design, not an option.
+
+`filter` stays JSON, as protocol 1's `filter: Json` [S], because `ViewFilter` (`annotate.rs:31`) holds `CondValue`, which
+is `#[serde(untagged)]` (`condition.rs:22`) and so cannot be postcard (ADR 0001 bans `untagged` on the wire); JSON is
+also where a later optional filter field is minor. Its fields [S]: `when: Vec<ConditionCfg { field, op, value:
+Option<CondValue> }>` with `CondValue = Text | Number | Bool | List`, `from: Option<i64>`, `to: Option<i64>`,
+`newest_first: bool`, all `#[serde(default)]`. The host parses it once at the edge into its typed form and refuses an
+unknown `op`.
 
 ### 5.9 Room left for features
 
 | Namespace (reserved, not designed) | For | Rule |
 |---|---|---|
 | `debrief.dumpquery.v1` | ADR 0068 §7's `DumpQuery` range reads | Its own namespace so `debrief.document.v1` does not change; lends ranges through `HostFiles::lend_ranges` (§4.2) |
-| `debrief.analysis.v1` | plugin analysis contributions (roadmap layer C, "later") | Its reply is §11's `Finding`; registered as a `kind = "extension"` contribution |
+| `debrief.analysis.v1` | plugin analysis contributions (roadmap layer C, "later") | Its reply is §11's `AnyFinding` **as a JSON body** (it holds JSON values and `DocItem`, which are not postcard); registered as a `kind = "extension"` contribution |
 | a variant appended to any request enum above | a new operation of an existing namespace | Minor; refused before sending to an older peer (`introduced_in`, §4.1) |
 
 ## 6. Folder open (ADR 0067)
@@ -1046,13 +1139,13 @@ Packages F1 to F12, FM, FR.
 pub struct JudgeEnv<'a> { pub parsers: &'a ParserSet, pub importers: &'a ImporterRegistry, pub sniff: &'a SniffMemo,
                           pub zone: Option<&'a LogZone>, pub gate_allowance: GateAllowance }
 pub struct FileMeta { pub rel: RelPath, pub size: u64, pub mtime_ms: Option<i64>, pub origin: SourceOrigin }
-pub fn judge<'a>(env: &JudgeEnv<'a>, file: &FileMeta, head: &Head, whole: bool) -> Result<Judged<'a>, Refusal>;
+pub fn judge<'a>(env: &JudgeEnv<'a>, file: &FileMeta, head: &Head, whole: bool) -> Result<Judged<'a>, FileRefusal>;
 pub struct Judged<'a> { pub choice: Choice<'a>, pub plan: FilePlan, pub limits: Vec<JudgedLimit> }
 pub enum JudgedLimit { NoTime, ZoneUnknown, DateFromFileTime, DayOrderUndecided,
                        OverMemory { side: MemorySide, need: u64, can_give: u64, measured: bool }, OverLimit(LimitExceeded) }
 pub enum MemorySide { Plugin, StoreWorker }
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-pub enum Refusal {
+pub enum FileRefusal {
     Empty, Binary, NoParser, NoImporter, NoFormat,
     PluginStopped { plugin: Box<str> },
     Locked { detail: Box<str> }, Unreadable { detail: Box<str> },
@@ -1060,10 +1153,12 @@ pub enum Refusal {
     Encrypted, Damaged, TooManyEntries, TooLarge, Nested,
 }
 pub enum Status { Pending, Supported, Limited, NotSupported, CantRead }
-pub fn status_of(r: &Result<Judged, Refusal>) -> Status;          // pure, the table of ADR 0067 §2
+pub fn status_of(r: &Result<Judged, FileRefusal>) -> Status;          // pure, the table of ADR 0067 §2
 ```
 
-`Refusal`'s `Display` gives today's strings [A]; the UI words come from a key per variant (`refusal.<kebab>`), F9b.
+`FileRefusal`'s `Display` gives today's strings [A]; the UI words come from a key per variant (`refusal.<kebab>`), F9b.
+ADR 0067 calls it `Refusal`; it is renamed here because `paddock_plugin_api::compat::Refusal` is in scope in the same
+crates (§17, Q22).
 `choose` and `plan_with` become `pub(crate)`; F1b's conformance check fails on another whole-file caller.
 
 ### 6.3 The table and view, pure (F3)
@@ -1075,7 +1170,7 @@ pub struct NodeId(u32);
 pub struct Version(u64);
 impl ScanTable {
     pub fn from_listing(listing: impl Iterator<Item = ListedEntry>, limit: &CutRow<First>) -> Bounded<ScanTable>;
-    pub fn set_verdict(&mut self, node: NodeId, v: Verdict) -> Version;
+    pub fn set_verdict(&mut self, node: NodeId, v: RowVerdict) -> Version;
     pub fn check(&mut self, op: CheckOp) -> Result<Version, NodeError>;   // Node(id) | Recommended | AllSupported | None | Range(a, b)
     pub fn totals(&self) -> Totals;
     pub fn cover(&self) -> FolderSelection;                                // smallest rule set; property-tested
@@ -1089,7 +1184,7 @@ pub enum SortKey { Name, Type, Status, Reason, Size, Files }    // natural order
 pub struct FilterSpec { pub name: Option<Box<str>>, pub types: Vec<ImportClass>, pub statuses: Vec<Status> }
 ```
 
-`Verdict` is `{ status, class, reason: Option<ReasonKey>, limits }`; `ReasonKey` is a typed enum (Refusal kinds, limit
+`RowVerdict` is `{ status, class, reason: Option<ReasonKey>, limits }`; `ReasonKey` is a typed enum (FileRefusal kinds, limit
 kinds, `LikelyDuplicate { of: NodeId }`, `SameContent { of: NodeId }`, `NoRule`, `ProjectData`).
 
 ### 6.4 The scan job (F4)
@@ -1100,12 +1195,13 @@ pub struct ScanSpec { pub roots: Vec<GrantedRoot>, pub threads: ThreadCount, pub
 pub struct ScanHandle { pub scan: ScanId, pub job: JobId }
 pub trait ScanPorts: Send + Sync {                  // adapters: fs, plugins, the zone probe; fakes in tests
     fn list(&self, root: &GrantedRoot, sink: &mut dyn FnMut(ListedEntry) -> ControlFlow<()>) -> io::Result<()>;
-    fn head(&self, file: &FileMeta) -> Result<Head, Refusal>;
+    fn head(&self, file: &FileMeta) -> Result<Head, FileRefusal>;
     fn sniff(&self, batch: SniffBatch) -> Result<SniffScores, PluginFault>;
     fn zone_probe(&self, table: &ScanTable, budget: ProbeBudget) -> Option<ZoneGuess>;
 }
-pub fn run_scan(spec: ScanSpec, ports: &dyn ScanPorts, job: &JobContext, table: &RwLock<ScanState>) -> ScanOutcome;
-pub enum ScanOutcome { Finished, Cancelled, Failed(ScanError) }
+/// A job body under ADR 0052 (§9.6): Confirmed after the read-back of the table's totals, Unconfirmed when the listing
+/// was cut or a plugin was not asked, Err for a root that cannot be read; a cancel ends the job `Cancelled`.
+pub fn run_scan(spec: ScanSpec, ports: &dyn ScanPorts, job: &JobContext, table: &RwLock<ScanState>) -> Result<Outcome, JobFailure>;
 ```
 
 Phases (job phase ids): `listing` (growing count), `detecting` (done of total), `zone` (budget), `duplicates` (done of
@@ -1222,7 +1318,7 @@ footprint, 8 threads both-or-neither, FIFO, release on every path, recycled pid)
 ### 6.9 Zips in the dialog (F11)
 
 `paddock_archive::Members::entries()` gives the tree; phase 2 inflates only the head of each member (§4.8). A member's
-`RelPath` is `archive!/member` (`archive::ENTRY_SEPARATOR`) [A]. Archive errors map to `Refusal::{Encrypted, Damaged,
+`RelPath` is `archive!/member` (`archive::ENTRY_SEPARATOR`) [A]. Archive errors map to `FileRefusal::{Encrypted, Damaged,
 TooManyEntries, TooLarge, Nested}`.
 
 ### 6.10 Queries and removal by folder (F8)
@@ -1309,6 +1405,10 @@ Where each bound is enforced, so no package invents another (roadmap layer G).
 | Documents (dumps, captures) | 512 MiB encoded per document; reader 3 GiB | ADR 0023 limits, ADR 0068 §12 | §14.8 |
 | Open documents | `MAX_DOCS` 32 by count today | MEM-2's byte budget; MEM-6 widened (FD-G) | §14.8 |
 | UI process | no import parsing in the app process (MEM-1) | conformance C<whole-file-read> over `app/src-tauri/src/{profiling,dumps}.rs` | §3.9 |
+| **Plugin items in flight, all files of an import** | `import.items_in_flight_bytes` 256 MiB (Setting, 64 MiB to 1 GiB) | `CreditPool` shared by the import's streams (§4.2). Without it: 16 files × credit 4 × up to about 12 MiB per item (`EVENT_FRAME_MAX`) ≈ 768 MiB, the whole store-worker budget, and more at credit 64 [calc] | §4.2 |
+| Analysis results cache (Q-2) | `analysis.results_cache_bytes` 64 MiB (`hard` until measured) | LRU by run id, a superseded run dropped first | §14.5 |
+| Trace and request cache (Q-3) | `analysis.trace_cache_bytes` 64 MiB (`hard` until measured) | LRU by `(QueryKey, generation)` | §14.5 |
+| Lane buckets per reply | `timeline.bucket_cells_max` 2 Mi cells (8 MiB of `u32`), `hard` | lanes × levels × buckets capped; over it the reply is cut by lanes and the panel asks for the rest. Without it 200 lanes × 6 levels × 11,520 buckets × 4 B ≈ 55 MB, past the 16 MiB frame [calc] | §14.2 |
 
 Footprint is physical memory per rule 26 (macOS footprint, Linux PSS, Windows private bytes, recorded by 2.2).
 
@@ -1324,7 +1424,12 @@ Debrief's `JobKind` enum (`app/src-tauri/src/jobs/model.rs`) [S] stays the queue
 | `Import` | `import` | one per window (ADR 0012) | Bulk |
 | `Scan` | `scan` | one per window | Live |
 | `Analysis` | `analysis` | cores − 1 shared | Live (a person waits) |
+| `Capture` | `capture` | one per tool | Bulk (a person started it and waits for the file) |
+| `Maintenance` | `maintenance` | one per store | Idle for compaction and sweeps nobody waits for (C54 comment); Background when a person asked (index repair, Y4) |
 | `Export`, `Collection`, `Download`, `Ai`, `Research` | as today | as today | as today |
+
+`Capture` (profiler and dump captures, ETW sessions) and `Maintenance` (compaction, index repair, spool sweeps) are
+added so that no long operation runs outside a kind's queue [J].
 
 ### 9.2 Phase ids (stable, for tests and i18n)
 
@@ -1351,8 +1456,8 @@ pub enum Submitted { Started(JobId), Joined(JobId) }    // two identical submits
 
 | Operation | Bound | Setting | Cheaper alternative checked |
 |---|---|---|---|
-| Import parse | cores − 1, at most 8 | `import.parse_threads` (Auto) | §3.8 |
-| Scan judge | `import.parse_threads` local, 4 remote | same | raw-byte binary check (F1) cuts about 95 % of judge time [A, calc] |
+| Import parse | cores − 1, at most 8 | `performance.import.parse_threads` (Auto) | §3.8 |
+| Scan judge | `performance.import.parse_threads` local, 4 remote | same | raw-byte binary check (F1) cuts about 95 % of judge time [A, calc] |
 | Plugin calls | files in flight | none (derived) | sniff memo and batch |
 | Spool | one per file in flight | `import.spool_bytes` | sequential members never spool |
 | Evidence resolve | one query per 1,000 refs | none | id hint first, locator second, hash last |
@@ -1370,16 +1475,41 @@ impl JobService {
     /// One queue per `JobKind` (§9.1) with its concurrency; every job is an executor task with its `TaskSpec`.
     pub fn submit(&self, kind: JobKind, key: Option<IdempotencyKey>, role: WorkRole, run: JobFn) -> Submitted;
 }
-/// Rule 52 mapping, the only place it is decided: Live → Class::User; Bulk → Class::User with the thread at the gentle
-/// level (`paddock_proc::priority::for_role`). `Class::Background` and `Class::Idle` only for work nobody waits on,
-/// with the C54 comment.
+/// Rule 52 mapping, the only place a job's class is decided, reading the one level table (`paddock_proc::priority`, §4.5):
+/// Live → Class::User (Class::Interactive only for work that blocks the UI); Bulk → Class::Background, which is the
+/// gentle level on every OS under ADR 0020's 2026-10-30 amendment (UTILITY, nice 10, BELOW_NORMAL). Class::Idle, the
+/// only starvable class, is never returned: a caller names it directly with the C54 comment.
 pub fn class_for(role: WorkRole) -> paddock_jobs::exec::Class;
+pub type JobFn = Box<dyn FnOnce(&JobContext) -> Result<Outcome, JobFailure> + Send + 'static>;   // ADR 0052 §2.1
 ```
 
 - Tests run on `ManualExecutor` with a fake clock (no sleeps): `app/src-tauri/src/jobs/tests.rs`.
 - ADR 0020's `submit_child(.., cap: paddock_proc::MemoryCap)` predates `MemoryPolicy` (§4.5): §17, Q16.
 - The executor is `paddock-jobs`' module `exec` (ADR 0020 §"Decision") [A], so J1's `submit_keyed` (§9.3) and the
   executor live in one crate.
+
+### 9.6 How a job ends (ADR 0052, accepted)
+
+ADR 0052 §2 [A] in `paddock-jobs` (its WP-B1, a dependency of every foundation job package, §15): `JobState::Done {
+outcome }`, `Outcome::{Confirmed { summary }, Unconfirmed { why, next_step }}`, `Failed { reason, next_step }`; a body
+returns `Result<Outcome, JobFailure>`; `Confirmed` only through `Outcome::confirmed(read_back(..)?, summary)`, where
+`read_back` calls the same port the feature reads through; `NextStep` and `Why` defined once there; the executor logs
+every end. The UI gets `JobEnd<T>` through `JobRunner` and shows it with `pd-outcome` (ADR 0052 §2.3). The foundation's
+jobs map like this [J]:
+
+| Job | Read back through | Confirmed when | Unconfirmed | Failed |
+|---|---|---|---|---|
+| Import (and folder import) | the store's source listing (`summary.sources`) | every source the job finished is listed ready with its event count | some sources failed or were refused after a Supported verdict: `why = SourcesFailed { n }`, `NextStep::Retry`; a listing that disagrees: `why = ReadBackMismatch`, `NextStep::ShowLog` | nothing could be read (root gone, store refused): `NextStep::Retry` or `OpenSettings` |
+| Folder scan | `folder_scan_totals` (§6.5) | totals equal the table's counts and no cut | listing cut at `folder.scan_entries` (`NextStep::OpenSettings(path)`); a plugin stopped for the scan (`NextStep::Retry`) | the root cannot be read |
+| Re-time (`set_source_time`) | `source_time(source)` for each moved source | provenance names the new zone or day order | a source failed its swap: `NextStep::Retry` | nothing moved |
+| Remove by folder (F8) | the source listing under the prefix | no source left under it and the rules flipped | some sources could not be removed | none removed |
+| Undo of a removal | the source listing | sources back with their ids (fingerprints, ADR 0051) | back with new ids: `why = IdsChanged` (notes fall back, §6.10) | |
+| Analysis (§14.6) | the run's stored result (Q-3's cache) | result stored under its `AnalysisRunId` | a cut it could not avoid stays in `Bounded`; it is not Unconfirmed | the query failed |
+| Maintenance, capture | as their ADRs | | | |
+
+Each row has the engine test ADR 0052 requires, in which the read-back disagrees and the job ends Unconfirmed, beside
+the job's other tests. ADR 0068's added `NextStep` variants are its WP-18's (moved out with the checks, except as WP-1
+needs them).
 
 ## 10. Time model (ADR 0066)
 
@@ -1394,7 +1524,7 @@ ADR 0066 [A] decides it. Placement and the signatures a plugin or package needs:
 
 ### 10.2 What importers see
 
-`ctx.times()` (§3.2) returns the one reader of the call; the SDK calls `finish()` after `import` returns and puts the
+`ctx.times()` (§3.2, on `&mut ImportCtx` as ADR 0066 D13 recommends) returns the one reader of the call; the SDK calls `finish()` after `import` returns and puts the
 `TimeReport` into `ImportDone.time` (§5.4). A splittable in-process importer gets one reader per region; tallies merge
 in line order [A].
 
@@ -1403,7 +1533,7 @@ impl TimeReader {
     pub fn read(&mut self, text: &str, line: u32) -> Option<EventStamp>;
     pub fn absolute(&mut self, ms: i64, line: u32, kind: NativeClock) -> EventStamp;
 }
-pub struct EventStamp { pub ms: i64, pub kind: WireTsKind }     // Wall when digits only (ADR 0066 §2)
+pub struct EventStamp { pub ms: i64, pub ts_state: u8 }     // §5.3's byte: WALL set when digits only (ADR 0066 §2)
 pub enum NativeClock { FileTime, UnixMs, UnixNs, Header }
 ```
 
@@ -1414,8 +1544,8 @@ a UMDH snapshot, a capture start, an evidence reference, a process start) is a `
 
 ```rust
 // debrief-core::zone::model
-pub struct StampedTime { pub ms: i64, pub basis: TimeBasis, pub confidence: Confidence }
-pub enum TimeBasis { Instant(Written), Wall { zone: ZoneReadingShort } }
+pub struct StampedTime { pub ms: i64, pub basis: StampBasis, pub confidence: Confidence }
+pub enum StampBasis { Instant(Written), Wall { zone: ZoneReadingShort } }   // not ADR 0066's importer `TimeBasis` (§3.2)
 ```
 
 So "logs around the dump" (ADR 0068 §6) and a rate per hour are honest about how the time was read.
@@ -1451,6 +1581,7 @@ pub enum NeedsMoreOf { Dumps, Snapshots }
 pub trait VerdictKind: Serialize { fn cannot_tell() -> Self; fn is_cannot_tell(&self) -> bool; }
 
 /// The type-erased form for reports, Pitwall's fact bundle and the AI tools.
+/// JSON only (engine, store worker, UI, and inside a JSON body on the plugin wire, §5.9); never a postcard type.
 pub struct AnyFinding { pub producer: Producer, pub kind: Box<str>, pub verdict: serde_json::Value /* validated */, pub core: Finding<()> }
 pub enum Producer { DumpCheck(CheckKind), Health, Profile, Heap, Analysis(Box<str>) }
 
@@ -1459,7 +1590,7 @@ pub struct CheckReport {
     pub kind: CheckKind,
     pub docs: Vec<CheckedDoc>,                 // CheckedDoc.process: ProcessInstance (§2.5)
     pub pairing: Option<Pairing>,              // §2.5
-    pub finding: Finding<Verdict>,
+    pub finding: Finding<Verdict>,             // ADR 0068's `debrief_dump::api::Verdict` (Crash, Hang, Memory verdicts)
     pub threads: Option<Vec<ThreadClassRow>>,
     pub memory: Option<MemoryComposition>,
     pub around: Option<EventsAround>,
@@ -1502,6 +1633,9 @@ pub struct CheckReport {
 | time | ADR 0066 "Logs" | as there | as there [A] |
 | dump check | ADR 0068 §14 | as there | as there [A] |
 | analysis run (FD-K) | `Analysis run` | info | kind, input query hash, coverage cuts, settings hash, duration_ms |
+| plugin process start | `Plugin start` | debug on success, info on failure (ADR 0052 §2.4: spawns log once, through `paddock_proc`'s run helper) | plugin, version, ProcessId (pid and start time), containment kind and `Gap`s, memory policy, outcome, duration_ms; on failure the cause and next step |
+| plugin process exit | `Plugin exit` | info (unexpected: error) | plugin, ProcessId, exit code or signal (NTSTATUS on Windows), reason (`idle-stop`, `stop`, `crash`, `over-memory`, `stall`), uptime_ms, calls served |
+| job end | `Job end` | info (failed: warn) | job, kind, outcome kind (`confirmed`, `unconfirmed`, `failed`, `cancelled`), why, next step, phase durations, total duration_ms, cause chain (ADR 0052 §2.1: the executor writes it, so no job can skip it) |
 
 Each line has a test that asserts its fields and that it holds no name beyond the privacy path, in the module that emits
 it (ADR 0067 §13's rule, applied to all) [J]. A bug the logs could not explain adds its line in the fix.
@@ -1580,13 +1714,29 @@ Contract test (1.3): `ui/projects/paddock-ui/testing/src/list-contract.ts`, `run
 **The virtual primitive (2.1), `ui/projects/paddock-ui/virtual/` (new entry point):**
 
 ```ts
-/** A window over rows the app holds or fetches. ONE type for 2.1 and ADR 0067's T4 (F10b): rule 55. */
-export interface PdRowWindow<T> {
+/** A window over rows the app holds or fetches. ONE type for 2.1 and ADR 0067's T4 (F10b): rule 55.
+ *  Two modes: `indexed` when every row has a position (the folder scan, lists, the grid below the exact-position
+ *  threshold), `keyed` when positions are unknown or estimated (the grid above it, §14.5). */
+export type PdRowWindow<T> = IndexedWindow<T> | KeyedWindow<T>;
+export interface IndexedWindow<T> {
+  readonly mode: 'indexed';
   readonly count: number;                       // aria-rowcount
   row(i: number): T | null;                     // null: not loaded; a focusable placeholder is drawn
   place?(i: number): { level: number; posinset: number; setsize: number; expanded?: boolean } | null;
   parent?(i: number): number | null;
 }
+export interface KeyedWindow<T> {
+  readonly mode: 'keyed';
+  readonly count: number | null;                // null: unknown, aria-rowcount = -1 and no aria-rowindex
+  readonly scroll: ScrollModel;                 // drives the primitive's own scaled scrollbar
+  readonly rows: readonly T[];                  // the loaded slice, about one screen each side of the view
+  /** Loads `before` and `after` rows around an anchor (a key, a time, the start or the end). */
+  around(anchor: RowAnchor, before: number, after: number): Promise<void>;
+  /** Where a row sits on the scrollbar (0..1), and which anchor a scrollbar fraction means. */
+  fractionOf(row: T): number;
+  anchorAt(fraction: number): RowAnchor;
+}
+export type RowAnchor = { kind: 'key'; key: RowKey } | { kind: 'time'; ms: number } | { kind: 'start' } | { kind: 'end' };
 @Component({ selector: 'pd-virtual-list' })  inputs: rows?: readonly T[]; window?: PdRowWindow<T>; rowKey: (r: T) => RowKey;
   height: 'measured' | number; overscan = 1 (screens); selection: KeySelection; anchor: ViewportAnchor | null;
   outputs: rangeChange: { start: number; end: number }; anchorChange; selectionChange; activate
@@ -1612,7 +1762,15 @@ export type ScrollModel =
   | { kind: 'time'; from: number; to: number };       // above it: position estimated from time
 ```
 
-The engine answers it with every page (§14.5, `PageReply.scroll`); the grid's `scroll-map.ts` renders either.
+The engine answers it with every page (§14.5, `PageReply.scroll`). In keyed mode **the scrollbar is the primitive's
+own**: a track of the viewport's height whose thumb maps a fraction to an anchor through `anchorAt`, so no element is
+ever `rows × row height` tall (1B rows would pass every browser's maximum element height); the content area holds only
+the loaded slice. The grid's `scroll-map.ts` becomes the `KeyedWindow` implementation.
+
+**Selection over a range in keyed mode** is a key range, not a set: `KeySelection` gains `{ kind: 'range'; from: RowKey;
+to: RowKey }` beside the set form, and actions on it go to the engine as a `SourceSelector`-like `EventRange { from:
+PageAnchor, to: PageAnchor }` with `events_count(range) -> u64` and the action commands taking the range, so no list
+of a million ids crosses (bounded by the action's own limit row).
 
 **Adoption.** 2.7: view `table`/`tree`, workbench Explorer, assistant turns, jobs list, notifications and settings
 lists, each `provideDataList`. 4.5: Debrief's 14 result and analysis lists onto the primitive, each reading
@@ -1792,13 +1950,21 @@ Most of this is inside `debrief-store-duck` and changes no port. The parts that 
 pub struct PageQuery { pub query: QueryKey, pub anchor: PageAnchor, pub before: u32, pub after: u32 }   // before + after ≤ 512
 pub enum PageAnchor {
     Start, End,
-    Key { ts: Option<i64>, source: SourceId, ordinal: u64, id: EventId },  // the `(ts, source, line, id)` order (ADR 0062)
+    /// The order key `(sort?, ts, source, ordinal, id)` (§2.2, FD-B's amendment of ADR 0062). `sort` carries the value
+    /// of a column sort and is allowed only under `ScrollModel::Position`.
+    Key { sort: Option<SortValue>, ts: Option<i64>, source: SourceId, ordinal: u64, id: EventId },
     Position(u64),                                                         // only below the exact-position threshold
     Time(i64),
 }
 pub struct PageReply { pub rows: Bounded<Vec<EventView>>, pub scroll: ScrollModel, pub generation: u64 }
 pub enum ScrollModel { Position { total: u64 }, Time { from: i64, to: i64 } }
+pub enum SortValue { Text(Box<str>), Int(i64), Float(f64), Null }
 ```
+
+- **Sorting at 1 billion events in 1.2:** time order (`ts, source, ordinal, id`) at any size; a sort by another column
+  only below `store.exact_positions_max`. Above it the column sort is not offered: the header says why, with the
+  threshold (a `Cut` with `Next::Narrow`). ST-5 measures a column sort at 1B and may lift this in a later release with
+  its numbers [J].
 
 - **ST-1:** segment pruning by the histogram table (it passed the mixed-segment gate; min/max zone maps did not) [mem];
   internal `trait SegmentPruner { fn select(&self, p: &PrunePredicate) -> SegmentSet }` with the histogram as its one
@@ -1873,14 +2039,14 @@ pub struct AnalysisRun<T> { pub id: AnalysisRunId, pub result: Bounded<T>, pub f
 ### 14.8 Memory (MEM-5, MEM-6 ADR, FD-G)
 
 - **MEM-5:** the PDB cache by bytes: `SymbolCache::new(budget_bytes: u64)`, LRU by identity; Setting
-  `performance.symbols_cache_mb` (§16); a limit row `symbols.cache_bytes`.
+  `performance.symbols.cache_mb` (§16); a limit row `symbols.cache_bytes`.
 - **MEM-6 ADR, widened by FD-G:** decides file-backed models (Parquet for samples and stacks, a rebuildable
   memory-mapped cache for heap graphs) [mem] and a byte budget for **all** open documents (dumps, UMDH, profiles),
   replacing `MAX_DOCS = 32` (`debrief-dump/src/store.rs:13`). The API it must fill:
 
 ```rust
 // debrief-core::documents (MEM-2's budget, done on `debrief/p0-idle`, generalised)
-pub struct DocumentBudget { pub bytes: u64 }                      // Setting performance.documents_mb
+pub struct DocumentBudget { pub bytes: u64 }                      // Setting performance.documents.budget_mb
 pub trait OpenDocuments: Send + Sync {
     fn admit(&self, key: DocumentKey, bytes: u64) -> Result<DocLease, LimitExceeded>;   // evicts LRU first
     fn touch(&self, key: &DocumentKey);
@@ -1924,7 +2090,8 @@ Each has its API in its own ADR; this file only routes:
 
 Material first (rule 47) in Debrief's own views, start by 2026-12-01 (plan §10.4): the audit's 72 `<select>` become
 `mat-select`, 63 checkboxes `mat-checkbox`, 19 radios `mat-radio-group`, 22 hand-rolled tabs `mat-tab-group`; all themed
-through `--pd-*` tokens. No new API. A Debrief-local ESLint rule `debrief/material-first` (warning, then error at Y10's
+through `--pd-*` tokens. No new API. A rule `paddock/material-first` in the **shared `eslint/` preset** (rule 42: rule 47 binds every app; warning for the
+other apps until each has its own pass), an error for Debrief at Y10's
 end) flags native `select`, `input[type=checkbox|radio]` and `role="tab"` outside Material; sub-packages start with
 views that 2.7 and 4.5 do not rewrite. Tests: each touched view's spec on CDK component harnesses (rule 38); axe both
 themes; new screenshots with an independent review (ER-23).
@@ -1944,6 +2111,10 @@ themes; new screenshots with an independent review (ER-23).
 ## 15. Package index: which section each package cites
 
 Every 1.2 package of the plan at `ac85e26c7`, except those §10.3 moves out.
+
+**Shared dependency of every job package below:** ADR 0052 WP-B1 (`Outcome`, `ReadBack`, `NextStep`, `Why` in
+`paddock-jobs`), §9.6. It is ADR 0052's to schedule ("after Spotter 1.0, before Pitcrew 1.1"); the Debrief packages that
+end jobs (F4, F7, F8, 3.4, Z5, Y9, J1, FD-F's builds) land after it or with it.
 
 | Package | Section | | Package | Section |
 |---|---|---|---|---|
@@ -1985,7 +2156,10 @@ Every 1.2 package of the plan at `ac85e26c7`, except those §10.3 moves out.
 
 ## 16. Settings introduced or touched
 
-All under Settings ▸ Performance unless named; each validated in the engine; Auto where a count.
+All under Settings ▸ Performance unless named; each validated in the engine; Auto where a count. **One scheme:**
+`performance.<area>.<name>` for performance values, `<area>.<name>` for the others (`folder.`, `timeline.`, `time.`).
+ADR 0067 names two of them differently (`performance.plugin_memory_mb`, `performance.import_whole_file_mb`); F packages
+use the names here (§17, Q24).
 
 | Path | Default | Bounds | Owner |
 |---|---|---|---|
@@ -1994,18 +2168,19 @@ All under Settings ▸ Performance unless named; each validated in the engine; A
 | `performance.import.dump_whole_bytes` | 1 GiB | exists | exists |
 | `performance.import.spool_bytes` | 16 GiB | 1 GiB to disk | SI-13 |
 | `performance.import.archive_ratio` | 200 (floor 64 MiB) | 10 to 2,000 | SI-13 |
-| `performance.import_whole_file_mb` | store cap − import budget (1,280) | 0 to store cap | FM |
-| `performance.import_headroom_mb` | 256 | 64 to 1,024 | FM |
-| `performance.plugin_memory_mb` | 1,024, or No cap | 64 to 4,096 | 2.6a, 3.2 |
+| `performance.import.whole_file_mb` | store cap − import budget (1,280) | 0 to store cap | FM |
+| `performance.import.headroom_mb` | 256 | 64 to 1,024 | FM |
+| `performance.plugins.memory_mb` | 1,024, or No cap | 64 to 4,096 | 2.6a, 3.2 |
 | `performance.plugins.start` | On first use | On first use, At startup | 2.6a, 4.4 |
 | `performance.plugins.idle_stop_min` | 10 [J] | 1 to 120, Never | 2.6a, 4.4 |
 | `performance.plugins.stream_credit` | Auto (4) | 1 to 64 | 2.6b |
 | `performance.stall.<key>.blocked_ticks`, `.spin_cpu_s` | Auto (per key, LV1) | per key | 2.6c, LV1 |
 | `performance.index.read_threads`, `.write_threads`, `performance.catalogue.workers` | Auto (within cores − 1 beside parse threads; capped at 4 until measured) | 1 to cores | IX-S, SR1, SR3 |
 | `performance.index.tee_mb` | 240 | 0 (fan-out off) to the import memory | IX-S |
-| `performance.symbols_cache_mb` | from MEM-5's measurement | 64 to 4,096 | MEM-5 |
-| `performance.documents_mb` | from the MEM-6 ADR | as there | MEM-6, FD-G |
-| `performance.huge_import_threshold_gb` | from 5.2's measurement | 1 to 1,000 | 5.2 |
+| `performance.symbols.cache_mb` | from MEM-5's measurement | 64 to 4,096 | MEM-5 |
+| `performance.documents.budget_mb` | from the MEM-6 ADR | as there | MEM-6, FD-G |
+| `performance.import.huge_threshold_gb` | from 5.2's measurement | 1 to 1,000 | 5.2 |
+| `performance.import.items_in_flight_mb` | 256 | 64 to 1,024 | 2.6b, 3.4 |
 | `folder.scan_entries` | 500,000 | 10,000 to 5,000,000 | F4 |
 | `folder.scan_threads` | Auto (`parse_threads` local, 4 remote) | 1 to cores | F4 |
 | `timeline.lanes_default` | 10 | 1 to 200, or All | 3.3 |
@@ -2021,31 +2196,37 @@ Limits that are registry rows without a Setting (`hard`) are listed with their s
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q1 | ADR 0063 is still Proposed; FD-U, 3.3 and 4.5 shape replies | **Decide 0063 before 3.3 and 4.5 start** (roadmap R8). FD-U does not wait: the declared bound (§2.1) holds under JSON and under MessagePack alike |
-| Q2 | Ids above 2^53 | **Declared bound** (§2.1), the cheapest of string, bigint or bound; a registry row `store.event_ids` (`hard`) and a test at `2^53 − 1` |
+| Q1 | **User's decision.** ADR 0063 is still Proposed; FD-U, 3.3 and 4.5 shape replies | **Decide 0063 before 3.3 and 4.5 start** (roadmap R8). FD-U does not wait: the declared bound (§2.1) holds under JSON and under MessagePack alike |
+| Q2 | **User's decision.** Ids above 2^53 | **Declared bound** (§2.1), the cheapest of string, bigint or bound; a registry row `store.event_ids` (`hard`) and a test at `2^53 − 1` |
 | Q3 | ADR 0068 §12 drops `WholeReason::DumpWithoutMemoryList` (WP-8), which ADR 0064 lists | Keep it in the enum until WP-8 lands, then remove it in WP-8's change with ADR 0064's amendment. WP-8 moved out of 1.2 with ADR 0068's checks, so in 1.2 the reason stays |
 | Q4 | ADR 0068 §10 names `left_out: Vec<Omission>`; ADR 0065 has no `Omission` | **Use `Vec<Cut>`** (§11); a one-word amendment to ADR 0068 in WP-1's change |
 | Q5 | `NextStep` lives in family ADR 0052's `paddock-jobs` enum, not on main | Use it there; if ADR 0052's crate change slips past WP-1, define `NextStep` in `debrief-core::finding` registered in `docs/known-copies.toml` with a delete-by (rule 55), not silently |
 | Q6 | ADR 0031's `RunStateProbe::sample(pid: u32)` takes a bare pid (rule 53) | **Take `&ProcessId`** in 2.6c; the probe checks the start time before sampling, so a recycled pid reads `Exited`. A one-line amendment to ADR 0031 |
-| Q7 | `WireEvent.ts_kind = Wall` lands before ADR 0066's store column | Ship the variant in v1 (postcard: adding it later would be a v2); plugins send `Parsed` until Z1 |
+| Q7 | (Revised.) The time basis on the wire. Under ADR 0001 appending an enum variant is a minor change and only struct fields freeze, so the issue was never the variant: it was that one `ts_kind` enum could not carry ADR 0066's model (low two bits `TsState`, separate flags) | **`ts_state: u8` with ADR 0066 §6's exact bit layout** (§5.3), the bits a plugin may set named, read through `debrief_batch::TsCode`; plugins send flags 0 until Z1 |
 | Q8 | §6.5's `ChooseToken` instead of paths in `folder_scan_start` deviates from ADR 0067 | Accept the token (no path crosses twice); a one-line note in ADR 0067 by F7 |
 | Q9 | `Supervisor` without containment as a type error (§4.2) instead of ADR 0001's run-time refusal | Type error plus the existing test; the run-time refusal stays for the `developer` feature path |
-| Q10 | `ViewFilter`'s subset (§5.8) and `ProfileLimits` / `DocumentOptions` fields (§5.7) were not listed from source here | PH2a lists them from the first-party plugins before freezing the v1 bodies; the reviewer of PH2a checks every field is present (postcard: no later additions) |
+| Q10 | (Resolved.) `ViewFilter`, the profile limits and the document options | Listed from source and carried as JSON (§5.7, §5.8); `CondValue`'s `untagged` stays legal because it never becomes postcard |
 | Q11 | `FileInfo.rel_tail` caps the path at 3 segments [J] | Accept; importers that read a folder name from the path (a machine folder) get it; the full path stays host-side |
 | Q12 | Plan D5 (`Limit`/`Page` home) | **`paddock-limits`** (§4.6), with ADR 0065's types, not `paddock-view` |
 | Q13 | `performance.plugins.idle_stop_min` default | 10 minutes [J]; 4.4 measures plugin start cost and may change it with a recorded result |
 | Q14 | The drawing research's package ids `F1` (flame fixes) and `C1` (chart bound) collide with the plan's F1 (the judge) and C1 (UMDH reader fixes) | **Rename them FL1 and CH1** in the plan's next edit; this file uses those names |
-| Q15 | `timeline_lane_buckets` answers raw bytes (drawing research) while ADR 0063 would make every reply binary | **One binary mechanism:** if 0063 is adopted, lane buckets are one of its tables and the `LB` layout is not built; if 0063 is rejected, `LB` v1 is the only raw reply, recorded as a short ADR 0018 amendment. Decide with Q1, before 3.3 |
-| Q16 | ADR 0020's executor takes `paddock_proc::MemoryCap` (`submit_child`) and offers `Class::Background`/`Idle`, while §4.5 has `MemoryPolicy` and rule 52 forbids starvable levels for waited work | One memory type: `submit_child` takes `MemoryPolicy` (Y9 amends ADR 0020 in its change); `class_for` (§9.5) is the only mapping from `WorkRole` to `Class` |
-| Q17 | Exact positions below 100M cost 905 MiB of `ord` at 100M against the 768 MB budget (plan §9.6 D7) | Keep `store.exact_positions_max` a `hard` row at 100M and let `ScrollModel` switch to time above it; bring the threshold back to the user with ST-5's numbers, as D7 says |
+| Q15 | **User's decision.** `timeline_lane_buckets` answers raw bytes (drawing research) while ADR 0063 would make every reply binary | **One binary mechanism:** if 0063 is adopted, lane buckets are one of its tables and the `LB` layout is not built; if 0063 is rejected, `LB` v1 is the only raw reply, recorded as a short ADR 0018 amendment. Decide with Q1, before 3.3 |
+| Q16 | (Revised.) ADR 0020's executor takes `paddock_proc::MemoryCap` in `submit_child`, while §4.5 has `MemoryPolicy` | One memory type: `submit_child` takes `MemoryPolicy` (Y9 amends ADR 0020 in its change). On classes there is no conflict: under ADR 0020's 2026-10-30 amendment `Background` is the gentle level on every OS and only `Idle` is starvable, so `class_for` maps Bulk to `Background` (§9.5) |
+| Q17 | **User's decision.** Exact positions below 100M cost 905 MiB of `ord` at 100M against the 768 MB budget (plan §9.6 D7) | Keep `store.exact_positions_max` a `hard` row at 100M and let `ScrollModel` switch to time above it; bring the threshold back to the user with ST-5's numbers, as D7 says |
 | Q18 | ST-6, Y11's "sticky field promotion" and Y14's "R3 split" were not found in the sources read | Each owner writes a one-paragraph scope in the plan row before starting; none changes a foundation API here unless it adds a port row |
 | Q19 | Canvas vs DOM: ADR 0018 decision 8 defaults to DOM, the drawing research to canvas | The rule in §14.2 (canvas if M1a passes; DOM only if it passes where canvas failed), recorded as ADR 0018's note by M0 |
 | Q20 | F10b (ADR 0067's windowed rows) and 2.1 both define a window over rows | **One type, `PdRowWindow`, owned by 2.1**; F10b adopts it, which pulls 1.3 → 2.1 ahead of F10 (roadmap stop-gap table) |
+| Q21 | ADR 0066 D13 asks ADR 0064 for an amendment (`times()` with no default, `&mut ImportCtx`, `ImportDone.time`, the wire flags) | **Taken here as D13 recommends** (§3.2, §5.3, §5.4); ADR 0064's author records the amendment in SI-1's change. No `RefCell` deviation remains |
+| Q22 | `FileRefusal` (§6.2) renames ADR 0067's `Refusal`, which collides with `paddock_plugin_api::compat::Refusal` | Accept the rename; a one-line note in ADR 0067 by F1 |
+| Q23 | `ImportSink` renames ADR 0064's `EventSink`, which collides with `paddock_jobs::reporter::EventSink` | Accept; a one-line note in ADR 0064 by SI-1 |
+| Q24 | Setting paths: ADR 0067 used `performance.plugin_memory_mb` and `performance.import_whole_file_mb` | Use §16's one scheme (`performance.plugins.memory_mb`, `performance.import.whole_file_mb`); FM and 2.6a use these |
+| Q25 | `TsState` lives in `debrief-batch`, which pulls Arrow; plugins must not | `debrief-batch`'s Arrow dependencies behind a default feature `arrow`; `debrief-plugin-ext` depends on it with `default-features = false` (one definition, rule 55). Alternative: move ids and `TsState` to a dependency-free crate; not chosen, one more crate for two types |
+| Q26 | Plugin items in flight across an import add up to the store worker's whole budget (§8) | **A shared `CreditPool` by bytes** (§4.2), with `import.items_in_flight_bytes` 256 MiB; 2.6b's benchmark and 4.3's footprint run may move the default with a recorded result |
 
 ## 18. Completeness
 
 **Complete** (signatures, entry points, names, Settings, test homes): §2 ids and references, §3 streaming import, §4
-the shared platform, §5 the `debrief.*` namespace (with Q10's field lists left to PH2a), §6 folder open, §14.1 lists,
+the shared platform, §5 the `debrief.*` namespace (Q10 resolved), §6 folder open, §9.6 job ends, §14.1 lists,
 §14.2 timeline with the measurement plan, §14.4 UI on foundation types, §14.6 analyses at scale (the API FD-F's ADR
 fills), §14.7 correctness, §16 Settings, §15 the package index.
 
@@ -2058,6 +2239,6 @@ the shell move (workbench.md and the move plan own the API), §14.5 store perfor
 **Scope not found in the sources read, so not designed:** ST-6, Y11's sticky field promotion, Y14's R3 split (Q18).
 
 **Not verified:** nothing was compiled; signatures were checked against the source files named in the header, not
-built. `ViewFilter`, `ProfileLimits` and `DocumentOptions` field lists (Q10). The claim that ids grow with import order
+built. The claim that ids grow with import order
 inside a store (§5.6) rests on the block allocator as read, not on a test. The drawing research's numbers are from
 Playwright's browsers, not the real webviews; M1a settles that.
