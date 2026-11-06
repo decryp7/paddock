@@ -22,7 +22,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 
 | WP | Feature | Status |
 | --- | --- | --- |
-| WP-01 | Privileged helper (read-only) | planned for 1.1, not in 1.0 (ADR 0022); 1.0 runs with the user's rights, marks unreadable figures *Unavailable* with a reason, shows an "Other users" row and has no way to run elevated. The code from before the decision is removed from 1.0 by separate changes |
+| WP-01 | Privileged helper | built for 1.1.0 (ADR 0027): an optional service that reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request, with an audit log; 1.0 ran with the user's rights only |
 | WP-02 | CPU taming screen and profiles | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
 | WP-03 | Health score and startup items (view only) | built: Health page with reasons and the startup list; fix buttons and startup changes are dropped (ADR 0021) |
 | WP-05 | Tuning catalogue | dropped ([ADR 0021](adr/0021-monitoring-only.md)) |
@@ -48,7 +48,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 | WP-24 | Disk and battery life forecasts | built: robust range forecasts for SSD wear and battery capacity, replacement and clock-change handling, readers (smartctl, ioreg, sysfs, powercfg), Lifespan page, Health, report and alarms; reading SSD wear without smartmontools waits for WP-01 |
 | WP-25 | "Is this normal?" learned baselines | built: weekday-and-hour baselines per metric and app with fallbacks, silent learning period, dashboard card in words, optional alarms |
 | WP-26 | Alarms view and custom alerts (ADR 0013) | built: Alarms page (active, history, rules), custom alert rules evaluated by the agent, desktop notifications (tauri-plugin-notification), quiet hours |
-| WP-27 | `dyno` CLI (ADR 0014) | built and shipped in the installers: `dyno status\|why-slow\|top\|alarms\|snapshot\|counters` (text or `--json`), read-only; refuses another protocol version; the binary is a sidecar of every bundle (docs/cli.md); `end`, `cap` and `undo` are dropped |
+| WP-27 | `dyno` CLI (ADR 0014) | built and shipped in the installers: `dyno status\|why-slow\|top\|alarms\|snapshot\|counters` (text or `--json`), plus `awake`, `idle`, `wake`, `wake-schedule` and `mcp` in 1.1.0; refuses another protocol version; the binary is a sidecar of every bundle (docs/cli.md); `end`, `cap` and `undo` are dropped |
 | WP-28 | Flight recorder | built: ring, capture, alarm capture and the timeline page |
 | WP-29 | Diagnostics bundle | built: redaction (IPv4 and IPv6), preview, zip, a redacted sockets file, the page and the OS save dialog |
 | WP-30 | Suite tie-ins (Spotter, Debrief, Pitcrew, Pitwall) | planned, Later (after 1.0) |
@@ -117,7 +117,7 @@ Not in Dyno 1.0 (decided 2026-10-28; ADR 0022 holds the design, the per-OS table
 
 - **1.0 instead.** Everything runs with the user's rights; no system service is installed. A figure the OS withholds is *Unavailable*
   with a plain reason, never 0. Other accounts' processes are one "Other users" row.
-- **1.1.** The read-only helper installed with the app from a protected folder, **start as administrator at login**, all
+- **1.1.** The helper installed with the app from a protected folder, **start as administrator at login**, all
   processes and administrator-only counters on all three OS, and the helper installing Dyno's own signed updates.
   Before it ships, its launchd plist (`crates/dyno-helper/src/install.rs`, the `launchd_plist` text) changes from
   `ProcessType Background` to `Standard`: the helper answers the agent's requests, and launchd runs a `Background` job as
@@ -450,7 +450,7 @@ or other shared OS services must poll rarely or use change notifications.
 <a id="after-v1"></a>
 
 
-Not part of 1.0.0; anything new that only watches goes here. Anything that would change the machine needs a new ADR first.
+Not part of 1.0.0. New work that would change the machine needs a new ADR first.
 
 - **Multi-PC LAN view.** See several of your own PCs on one dashboard over the LAN, opt-in, read-only, over **TLS with a
   pre-shared key**. Needs its own ADR (discovery, key exchange, certificate handling) before any code; depends on WP-16 and

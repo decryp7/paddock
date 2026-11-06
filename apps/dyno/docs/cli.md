@@ -2,7 +2,7 @@
 
 `dyno` talks to the running Dyno agent over the same local protocol as the app (ADR 0014): it reads `agent.json` in the data folder
 (`DYNO_DATA_DIR`, else `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno` or `~/.local/share/dyno`), connects with the
-per-launch token and asks the same requests. It never links the platform adapters, so it is small. The awake and wake commands ask the agent to act, and the agent validates each request ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). Build it with `cargo build -p dyno-cli` (the binary is named `dyno`).
+per-launch token and asks the same requests. It never links the platform adapters, so it is small. The `awake`, `idle`, `wake` and `wake-schedule` commands ask the agent to act, and the agent validates each request ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). Build it with `cargo build -p dyno-cli` (the binary is named `dyno`).
 
 ## Installing and putting it on your PATH
 
@@ -18,7 +18,7 @@ your shell profile or system folders for you; here is how to do it yourself, onc
 
 ## Commands
 
-| Command | What it shows |
+| Command | What it does |
 | --- | --- |
 | `dyno status [--json]` | CPU, memory and pressure, swap, disks, network, battery, uptime, Dyno's own cost |
 | `dyno why-slow [--json]` | The diagnosis: headline, causes with confidence, who is involved, what you could do |
@@ -28,6 +28,11 @@ your shell profile or system folders for you; here is how to do it yourself, onc
 | `dyno counters list [OBJECT] [--json]` | The performance counter objects, or one object's counters and instances |
 | `dyno counters search WORDS... [--json]` | Counters matching all the words |
 | `dyno counters get PATH... [--json]` | Reads counters now; paths look like `\Memory\Free` or `\Network Interface(en0)\Bytes Sent`. Rates are read twice a second apart |
+| `dyno awake [on\|off\|status] [--for 90m\|2h] [--until 18:30] [--busy cpu,network,disk] [--while-pid N] [--display]` | Keeps the computer awake; `on` without `--for` or `--until` lasts until `awake off` |
+| `dyno idle [status\|cancel\|snooze MIN]` | The sleep and shut-down rules: what they wait for; cancels or snoozes a countdown |
+| `dyno wake NAME\|ADDRESS [--test] [--json]` | Wakes a saved computer with Wake-on-LAN; `--test` waits for it to answer |
+| `dyno wake-schedule list\|add NAME --at 07:30 [...]\|cancel NAME\|ID` | Lists, adds or cancels scheduled wakes of this computer |
+| `dyno mcp` | Speaks MCP on stdin and stdout for a host (key in `DYNO_MCP_KEY`; Dyno must be open) |
 
 `--json` output is data in camelCase, the same shapes as the app's contract (`status` and `top` have their own small stable shapes).
 Human output has no command lines or file contents.

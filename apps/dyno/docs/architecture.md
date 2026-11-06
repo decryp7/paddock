@@ -1,7 +1,7 @@
 # Dyno architecture
 
 Dyno is built from a pure Rust core, thin OS adapters, a per-user agent that measures and keeps history, a Tauri app that
-shows it. Everything runs with the user's own rights; an optional administrator helper adds readings the user cannot get ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions (keep awake, Wake-on-LAN, idle and timed sleep) run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This page describes how the pieces fit and what is true today; the diagrams
+shows it. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request, with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate or shut-down after idle or at a set time) run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This page describes how the pieces fit and what is true today; the diagrams
 are in [design.md](design.md) and the reasoning is in the [ADRs](adr/README.md). Anything marked *planned* is not in the
 code.
 
@@ -96,7 +96,7 @@ totals the OS allows (by session on Windows, by uid on macOS and Linux). On Wind
 `NtQuerySystemInformation` and trusts its undocumented CPU and I/O fields only when a start-up self-check against the documented
 calls agrees.
 
-From 1.1 an optional read-only helper (a system service the user turns on in Settings; ADR 0027, built on ADR 0016 and 0022)
+From 1.1 an optional administrator helper (a system service the user turns on in Settings; ADR 0027, built on ADR 0016 and 0022)
 answers a closed list of requests over a local pipe or socket: the caller is identified from the OS's own credentials, each request
 has a standing table (owner, administrator, other) saying full, counts only or denied, and a per-account cap bounds the load.
 The app and the agent still run with the user's own rights; Dyno 1.0 has no way to run elevated.

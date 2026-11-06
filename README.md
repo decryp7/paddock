@@ -8,7 +8,7 @@
 
 <p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>
 
-Paddock is a family of eight desktop apps and one tool for people who keep software and the machines it runs on healthy, and the
+Paddock is a family of eight desktop apps for people who keep software and the machines it runs on healthy, and the
 foundation they share. Each app does one job well and is useful alone. Together they cover the loop from an incident in
 production, through understanding the code and writing a test, to running it on CI. Everything runs on your computer: no
 cloud, no account, no telemetry. Optional local AI, served by one app, makes each of them smarter without sending a byte

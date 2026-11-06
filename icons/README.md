@@ -28,13 +28,13 @@ concept) is kept for reference in `archive/2026-10-flat/`; the sections below on
 | Sighter | Approved (2026-10-23) |
 | Pacenotes | Approved (2026-10-23) |
 | Paddock (umbrella mark) | Reviewed (2026-10-24) |
-| Recce (planned app), Scrutineer (tool, dropped 2026-11-05) | Placeholders (2026-11-04); the real icons come later; see below |
+| Recce (planned app), Scrutineer (tool, dropped 2026-11-05) | Placeholders (2026-11-04); Recce's real icon comes later, Scrutineer was dropped; see below |
 | Paddock Shell Demo (a demo app, not a family member) | New (2026-10-24), awaiting independent review |
 | Paddock Workbench Demo (a demo app, not a family member) | New (2026-10-25), awaiting independent review (rule 22); a near-black tile (`#050505`) with its own silhouette (activity-bar dots, a split dock with tabs on the top pane), white ink; family CVD minimums unchanged (review 3 P2-6) |
 
 ## Placeholders: Recce and Scrutineer (2026-11-04)
 
-The user called this brand work a **placeholder**: the real icons come later. So each has one option, the masters and the 128 and
+The user called this brand work a **placeholder**: Recce's real icon comes later, and Scrutineer was dropped on 2026-11-05. So each has one option, the masters and the 128 and
 60 frames only (no hand-tuned 16 to 64 frames, no trays, no `.ico` or `.icns`), drawn with the shared helpers in
 `tools/placeholder-art.mjs` and built by `node tools/placeholder-icons.mjs` into `alternative/recce-placeholder/` and
 `alternative/scrutineer-placeholder/`, plus `docs/images/src/icons/<id>-placeholder.svg` (the 60 frame the posters inline) and the

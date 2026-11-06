@@ -37,7 +37,13 @@ useCases('uml-use-cases-observe', {
   rows: [['Watch live performance and history'], ['Browse and sort processes'], ['Ask "why is my PC slow?" or "is this normal?"'], ['Check health and read the reasons'], ['See what starts at login'], ['Receive alarms and anomalies'], ['Browse Issues and unusual processes'], ['Read the weekly report'], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Browse hardware and software inventory'], ['Use Extras; see network changes']],
 });
 useCases('uml-use-cases-setup', {
-  title: 'Use cases — run and set up', desc: 'What the PC owner runs or sets up. Benchmarks start only on a click; Explain this (Pitwall) is still planned; power actions run as the owner set them up.', owner: 'PC owner',
-  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)', true], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle or the inventory'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Set tray metric, theme, sampling'], ['Start the agent at login'], ['Keep awake or schedule a sleep'], ['Turn on AI access for a local AI app']],
+  title: 'Use cases — run and set up', desc: 'What the PC owner runs or sets up. Benchmarks start only on a click; Explain this (Pitwall) is still planned. Power and access are in their own diagram.', owner: 'PC owner',
+  rows: [['Acknowledge, mute or note an alarm'], ['Run a benchmark and compare'], ['Explain this in Pitwall (redacted summary)', true], ['Save the flight recorder'], ['Map the disk and drill into folders'], ['Export a diagnostics bundle or the inventory'], ['Search the web or a hash in the browser'], ['Use the dyno command line'], ['Set tray metric, theme, sampling'], ['Start the agent at login']],
   ext: { name: 'OS (login)', row: 9 },
+});
+
+useCases('uml-use-cases-power', {
+  title: 'Use cases — power and access', desc: 'What the PC owner asks Dyno to do to this or another computer. Each starts from the owner\'s click or setting.', owner: 'PC owner',
+  rows: [['Keep the computer awake'], ['Sleep, hibernate or shut down on idle or a timer'], ['Schedule a wake of this computer'], ['Wake another computer (Wake-on-LAN)'], ['Turn on the administrator helper'], ['Turn on AI access for a local AI app']],
+  ext: { name: 'Other computer', row: 3 },
 });

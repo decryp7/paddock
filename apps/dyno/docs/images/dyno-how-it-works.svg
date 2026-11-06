@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1600" height="500" viewBox="0 0 1600 500" role="img" aria-labelledby="t d">
-<title id="t">How Dyno works</title><desc id="d">Sample, then Explain, then Alert, then Measure, then Report. Pitwall can read Dyno over MCP once AI access is on; Explain this is planned.</desc>
+<title id="t">How Dyno works</title><desc id="d">Sample, then Explain, then Alert, then Measure, then Report. Any local MCP client reads Dyno once AI access is on; Pitwall 1.1 is planned to.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#F1F3F7;--bar:#ECEEF2;--link:#8A93A3;--codebg:#F7F8FA;--acc:#B01E6E;--acct:#B01E6E;--accf:#C2287C;--glow:.20;--shadow:.22;--wbg:#FFFFFF}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#1B1E24;--bar:#20242C;--link:#667085;--codebg:#12151A;--acc:#F063A8;--acct:#F063A8;--glow:.26;--shadow:.55;--wbg:#0E0F12}}
@@ -69,5 +69,5 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 <circle class="accfill" cx="1088" cy="188" r="44"/><g class="gl" transform="translate(1070 170) scale(1.5)"><path d="M5 20V10M12 20V4M19 20v-7"/></g><path class="conn" d="M1146 188 L1310 188"/><path class="chev" d="M1304 182 l7 6 -7 6"/><text class="stepn" x="1088" y="272" text-anchor="middle">STEP 4</text><text class="stept" x="1088" y="302" text-anchor="middle">Measure</text><text class="steps" x="1088" y="330" text-anchor="middle">Benchmarks, counters and</text><text class="steps" x="1088" y="358" text-anchor="middle">a flight recorder.</text>
 <circle class="accfill" cx="1376" cy="188" r="44"/><g class="gl" transform="translate(1358 170) scale(1.5)"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/></g><text class="stepn" x="1376" y="272" text-anchor="middle">STEP 5</text><text class="stept" x="1376" y="302" text-anchor="middle">Report</text><text class="steps" x="1376" y="330" text-anchor="middle">A weekly summary you can</text><text class="steps" x="1376" y="358" text-anchor="middle">export.</text>
 <line x1="80" x2="1520" y1="434" y2="434" stroke="var(--line)"/>
-<text class="small" x="80" y="472">Pitwall can read Dyno over MCP once AI access is on; Explain this is planned.</text>
+<text class="small" x="80" y="472">Any local MCP client reads Dyno once AI access is on; Pitwall 1.1 is planned to.</text>
 </svg>

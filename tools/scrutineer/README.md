@@ -4,7 +4,8 @@
 
 # Scrutineer
 
-**Dropped on 2026-11-05: the apps stay unsigned. This page is kept as a record.**
+
+
 
 **A tool for code-signing certificates: generate, sign, verify and install them in one place.**
 
@@ -14,17 +15,17 @@ and installs certificates where the system and your builds will trust them.
 
 </div>
 
-![Placeholder hero for Scrutineer: certified before it ships. A concept mock-up of a certificate list with release, nightly and test-root certificates, their states, and the chain from the test root to the release certificate](docs/images/scrutineer-placeholder-hero.svg?v=dcbacdc8)
+![Placeholder hero for Scrutineer: certified before it ships. A concept mock-up of a certificate list with release, nightly and test-root certificates, their states, and the chain from the test root to the release certificate](docs/images/scrutineer-placeholder-hero.svg?v=360e927c)
 
-> **Status: planned, not released.** There is no code yet. Scrutineer is a tool of the family, not an app.
+> **Status: dropped on 2026-11-05.** There is no code, and the apps stay unsigned. Scrutineer was to be a tool of the family, not an app; this page is kept as a record.
 >
 > **This is a placeholder page.** Its icon, hero and other images are placeholders (their file names say `placeholder`); the
 > real icon, images and page come later. The screens are mock-ups, not product screenshots, and the features below are the
 > tool's purpose, not decisions: the plan is being written on the branch `docs/code-signing-plan`.
 
-## What it will do
+## What it would have done
 
-![Placeholder feature panels for Scrutineer: generate a certificate and its key; sign builds and installers; verify a signature and its chain; install a certificate where it will be trusted](docs/images/scrutineer-placeholder-features.svg?v=d7d2c1dc)
+![Placeholder feature panels for Scrutineer: generate a certificate and its key; sign builds and installers; verify a signature and its chain; install a certificate where it will be trusted](docs/images/scrutineer-placeholder-features.svg?v=2c6a475c)
 
 - **Generate** a certificate and its key, with the uses code signing needs.
 - **Sign** builds and installers with the certificate you choose.

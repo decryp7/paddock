@@ -6,7 +6,7 @@
 
 **Watches your PC.** A background agent samples the machine and keeps its history while the window is
 closed; the app shows what is happening, says in plain words why it is slow, raises alarms, maps the disk and runs
-benchmarks on click. When you set it up, it keeps the computer awake, wakes other computers or sleeps after idle or at a set time ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). On **Windows, macOS
+benchmarks on click. When you set it up, it keeps the computer awake, wakes other computers or sleeps, hibernates or shuts down after idle or at a set time ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). On **Windows, macOS
 and Linux**.
 
 A dynamometer measures an engine under load and shows where the power goes: Dyno does that for your computer.
@@ -17,7 +17,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 
 > **Status: 1.1.0.** Dyno is a monitor: live and history, processes and why it is slow,
-> alarms, issues, a disk map, counters, extras, benchmarks and the command line, plus opt-in keep awake, Wake-on-LAN, idle and timed sleep and the administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values). Taming, cleanup and tuning are dropped, not postponed
+> alarms, issues, a disk map, counters, extras, benchmarks and the command line, plus opt-in keep awake, Wake-on-LAN, scheduled wakes, sleep, hibernate or shut-down after idle or at a set time, and the administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values and, only if you allow each one, wake a saved computer or keep this one awake for up to 12 hours). Taming, cleanup and tuning are dropped, not postponed
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
 
@@ -52,7 +52,7 @@ does the second:
 
 ![Dyno features](docs/images/dyno-features.svg?v=c21897e1)
 
-![How Dyno works](docs/images/dyno-how-it-works.svg?v=853b448e)
+![How Dyno works](docs/images/dyno-how-it-works.svg?v=784cb727)
 
 Every feature, with its state, is in [docs/features.md](docs/features.md). Built today:
 
@@ -83,7 +83,7 @@ Every feature, with its state, is in [docs/features.md](docs/features.md). Built
     ([ADR 0007](docs/adr/0007-extensibility-three-tiers.md), [docs/plugins.md](docs/plugins.md)).
 13. **Updates itself** with the Tauri updater: signed, opt-in ([docs/releasing.md](docs/releasing.md)).
 
-Later, after 1.0 (see the roadmap): the disk map's largest, oldest and duplicate-hint lists and its hidden-space breakdown; the privileged helper and "start as administrator at login"; declarative read-only packs, an optional local web API, "Explain this" via Pitwall,
+Later, after 1.0 (see the roadmap): the disk map's largest, oldest and duplicate-hint lists and its hidden-space breakdown; "start as administrator at login"; declarative read-only packs, an optional local web API, "Explain this" via Pitwall,
 suite tie-ins, session recording, a multi-PC view.
 
 ### Screenshots

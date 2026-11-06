@@ -311,8 +311,7 @@ read. [WP-12](roadmap.md#wp-12-performance-counters-browser).
 
 ## Command line
 
-The `dyno` command speaks the agent's own local protocol (ADR 0014) and is read-only: `status`, `why-slow`, `top`, `alarms`,
-`snapshot` and `counters`, as text or `--json`. It ships in the installers. A `dyno` built for another protocol version than
+The `dyno` command speaks the agent's own local protocol (ADR 0014) : `status`, `why-slow`, `top`, `alarms`, `snapshot` and `counters` read, as text or `--json`; `awake`, `idle`, `wake` and `wake-schedule` ask the agent to act; `mcp` serves MCP to a host while Dyno is open. It ships in the installers. A `dyno` built for another protocol version than
 the running Dyno refuses with a message. [cli.md](cli.md). [WP-27](roadmap.md#wp-27-dyno-cli).
 
 ## Tray, window and settings
@@ -351,8 +350,8 @@ Dyno's own Copy menu, no browser keys.
 
 ## What Dyno writes
 
-**Built.** Dyno keeps its own data. Taming, cleanup and tuning are dropped ([ADR 0021](adr/0021-monitoring-only.md)); keep awake, Wake-on-LAN and idle or timed sleep run as you set them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). The agent runs with your own rights, and a figure the OS withholds says *Unavailable* with the reason
-(user guide, [Running with your own rights](user-guide.md#running-with-your-own-rights)). An optional administrator helper, turned on in Settings, reads what your account cannot (ADR 0027). Tests act only on processes and folders they create.
+**Built.** Dyno keeps its own data. Taming, cleanup and tuning are dropped ([ADR 0021](adr/0021-monitoring-only.md)); keep awake, Wake-on-LAN, scheduled wakes and sleep, hibernate or shut-down after idle or at a set time run as you set them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). The agent runs with your own rights, and a figure the OS withholds says *Unavailable* with the reason
+(user guide, [Running with your own rights](user-guide.md#running-with-your-own-rights)). An optional administrator helper, turned on in Settings, reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request, with an audit log (ADR 0027). Tests act only on processes and folders they create.
 
 ## Extensibility
 

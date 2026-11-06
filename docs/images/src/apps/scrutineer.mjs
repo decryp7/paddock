@@ -1,7 +1,7 @@
 export default {
-  // A planned TOOL, not an app; PLACEHOLDER art (the user, 2026-11-04): the real icon, hero and page come later. Its page lives with
+  // A TOOL, not an app, dropped on 2026-11-05; PLACEHOLDER art (the user, 2026-11-04): the real icon, hero and page come later. Its page lives with
   // the family's tools (tools/scrutineer); the plan is being written on the branch docs/code-signing-plan.
-  id: 'scrutineer', name: 'Scrutineer', icon: 'scrutineer-placeholder', stem: 'scrutineer-placeholder', home: 'tools/scrutineer', planned: true, status: 'Planned',
+  id: 'scrutineer', name: 'Scrutineer', icon: 'scrutineer-placeholder', stem: 'scrutineer-placeholder', home: 'tools/scrutineer', illustrated: true, status: 'Dropped',
   platforms: 'Platforms to be decided',
   accent: { dark: '#E07CC8', light: '#840070', fill: '#840070' },
   headline: ['Certified before', 'it ships.'],
