@@ -36,6 +36,8 @@ struct World {
     /// A `register` brings the job after this many `launchctl print` asks (`None`: it never comes).
     job_after_asks: Option<u32>,
     asks_since_register: u32,
+    /// Without a job, launchd refuses it after this many `print` asks (`None`: it does not).
+    refuse_after_asks: Option<u32>,
     register_error: Option<RegisterError>,
     /// `bootout` leaves the job in place this many `print` asks.
     lingers: u32,
@@ -54,6 +56,7 @@ fn world(status: AppServiceStatus, mark: DisabledMark, job: Held) -> Sim {
         job,
         job_after_asks: Some(0),
         asks_since_register: 0,
+        refuse_after_asks: None,
         register_error: None,
         lingers: 0,
         refuses_always: false,
@@ -107,6 +110,12 @@ fn wire(sim: &Sim, sys: &FakeSystem) {
             && w.job_after_asks.is_some_and(|n| w.asks_since_register > n)
         {
             w.job = Held::Running;
+        }
+        if w.job == Held::Nothing
+            && w.refuse_after_asks
+                .is_some_and(|n| w.asks_since_register > n)
+        {
+            w.job = Held::Refused;
         }
         if w.refuses_always {
             return Ok(Output::ok(SPAWN_FAILED));
@@ -1472,4 +1481,87 @@ fn a_wait_ends_at_once_when_the_os_refuses_the_job() {
         "a refusal is not waited out: {:?}",
         sys.now()
     );
+}
+
+/// A manager whose service never answers on its own, so only what the OS shows can settle a wait.
+fn silent_manager(sim: &Sim, sys: &FakeSystem, dir: &Path) -> Manager {
+    wire(sim, sys);
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
+    Manager::new("Dyno", Box::new(backend), dir, LABEL, "1.1.0", || false).with_timings(Timings {
+        start_wait: Duration::from_secs(6),
+        ..Timings::default()
+    })
+}
+
+#[test]
+fn a_wait_ends_as_soon_as_the_os_runs_the_job_even_when_the_service_has_not_answered() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
+    sim.lock().unwrap().job_after_asks = Some(1);
+    let sys = FakeSystem::new();
+    let mut m = silent_manager(&sim, &sys, dir.path());
+    assert!(m.await_start(&never()));
+    assert!(
+        sys.now() < Duration::from_secs(6),
+        "it did not wait out the start time: {:?}",
+        sys.now()
+    );
+    assert!(calls(&sim).is_empty(), "the wait registers nothing");
+}
+
+#[test]
+fn a_wait_ends_as_soon_as_the_os_refuses_the_job() {
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
+    sim.lock().unwrap().job_after_asks = None;
+    sim.lock().unwrap().refuse_after_asks = Some(1);
+    let sys = FakeSystem::new();
+    let mut m = silent_manager(&sim, &sys, dir.path());
+    assert!(!m.await_start(&never()));
+    assert!(
+        sys.now() < Duration::from_secs(6),
+        "a refusal is not waited out: {:?}",
+        sys.now()
+    );
+}
+
+#[test]
+fn the_link_waits_for_a_service_that_is_coming_and_for_a_replace_that_is_about_to_run() {
+    // A registration this version made that has not come up yet: the app waits and starts no agent of its own.
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.0.0");
+    RecordFile::new(dir.path(), LABEL)
+        .set_state(crate::record::State::Attempting {
+            version: "1.1.0".into(),
+            attempts: 1,
+            phase: crate::record::Phase::Awaiting,
+        })
+        .unwrap();
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
+    sim.lock().unwrap().job_after_asks = None;
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert!(m.pending(), "registered and not up yet");
+    // The OS refuses the job: a replace is about to run, which is pending too.
+    sim.lock().unwrap().job = Held::Refused;
+    assert!(m.pending(), "the replace the start will make");
 }

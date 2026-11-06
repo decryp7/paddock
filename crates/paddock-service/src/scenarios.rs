@@ -1176,6 +1176,27 @@ fn a_run_entry_is_added_started_switched_off_by_the_user_and_removed() {
 }
 
 #[test]
+fn a_run_value_with_no_program_in_it_stops_no_old_agent() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    // Even an empty path that the system calls a program is not run: there is no old agent to stop.
+    sys.put_program("");
+    sys.answer(
+        "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        Output::ok("    Dyno    REG_SZ    \r\n"),
+    );
+    let mut b = WindowsRun::new(dyno(), Target::exe(DYNO_EXE), Box::new(sys.clone()));
+    let _ = b.register(); // the read-back is the same canned answer: not as written, which is not the point here
+    assert!(
+        !sys.commands()
+            .iter()
+            .any(|c| c.trim_end().ends_with("stop")),
+        "{:?}",
+        sys.commands()
+    );
+}
+
+#[test]
 fn run_entry_failure_paths() {
     use crate::backend::{Backend, Registration};
     let sys = FakeSystem::new();
@@ -1696,7 +1717,13 @@ fn manager_contract_details() {
         "1.0.0",
         || false,
     );
+    sys.clear_calls();
     m.uninstall().unwrap();
+    assert!(
+        !sys.calls().iter().any(|c| matches!(c, Call::Pause(_))),
+        "a job that is gone is not waited for: {:?}",
+        sys.calls()
+    );
     // A job that never stops is waited for a bounded time.
     sys.answer("systemctl --user is-active", Output::ok("active\n"));
     sys.clear_calls();
