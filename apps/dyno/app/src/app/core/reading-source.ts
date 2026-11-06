@@ -21,12 +21,12 @@ export const TURN_ON_LABEL = 'Turn on administrator readings';
 /** The button's words for a reading whose helper is older than this Dyno accepts. */
 export const UPDATE_LABEL = 'Update the helper';
 
-/** The button's words for a reading the helper must be repaired for (Repair is in Settings > Helper). */
+/** The button's words for a reading the helper must be repaired for (Repair is in Settings > Dyno > Administrator readings). */
 export const OPEN_SETTINGS_LABEL = 'Open helper settings';
 /** The button's words for a reading that may work if asked again. */
 export const RETRY_LABEL = 'Try again';
 
-/** What the button does for `next`: turn the helper on, update it (both in Settings > Helper), or nothing. */
+/** What the button does for `next`: turn the helper on, update it (both in Settings > Dyno > Administrator readings), or nothing. */
 function stepOf(next: NextStep): 'turnOn' | 'update' | null {
   if (next === 'updateHelper') return 'update';
   return typeof next === 'object' && 'openSettings' in next && next.openSettings === 'helper' ? 'turnOn' : null;

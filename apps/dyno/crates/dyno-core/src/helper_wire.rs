@@ -459,7 +459,7 @@ pub fn readings(host: HelperHost) -> &'static [Advertised] {
 
 /// The text shown when an action needs a helper that is not there.
 pub const HELPER_MISSING: &str =
-    "This reading needs Dyno's helper, which is not installed. Install it under Settings > Helper (the system asks for your \
+    "This reading needs Dyno's helper, which is not installed. Install it under Settings > Dyno > Administrator readings (the system asks for your \
      permission once); nothing else in Dyno needs it.";
 
 /// The verb the system's prompt uses for what the card offers in `state`.

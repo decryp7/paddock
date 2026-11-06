@@ -26,10 +26,10 @@ pub enum ConnectError {
 impl std::fmt::Display for ConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConnectError::NotRunning(why) => write!(f, "The helper is not running ({why}). Turn it on in Settings > Helper."),
+            ConnectError::NotRunning(why) => write!(f, "The helper is not running ({why}). Turn it on in Settings > Dyno > Administrator readings."),
             ConnectError::Untrusted(why) => write!(
                 f,
-                "Something else answers where the helper should be, so Dyno did not use it ({why}). Turn the helper off and on again in Settings > Helper."
+                "Something else answers where the helper should be, so Dyno did not use it ({why}). Turn the helper off and on again in Settings > Dyno > Administrator readings."
             ),
             ConnectError::Peer(e) => write!(f, "The helper could not be reached: {e}"),
         }
@@ -111,7 +111,7 @@ mod tests {
             .err()
             .unwrap();
         assert!(matches!(&err, ConnectError::NotRunning(w) if w.contains("no such file")));
-        assert!(err.to_string().contains("Settings > Helper"));
+        assert!(err.to_string().contains("Settings > Dyno > Administrator readings"));
     }
 
     #[test]

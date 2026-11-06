@@ -71,7 +71,7 @@ impl HelperConfig {
             serde_json::from_str(text).map_err(|e| ConfigError::Invalid(format!("The helper's configuration is damaged: {e}")))?;
         if c.schema != SCHEMA {
             return Err(ConfigError::Invalid(format!(
-                "The helper's configuration has schema {}, expected {SCHEMA}. Turn the helper off and on again in Settings > Helper.",
+                "The helper's configuration has schema {}, expected {SCHEMA}. Turn the helper off and on again in Settings > Dyno > Administrator readings.",
                 c.schema
             )));
         }
@@ -114,7 +114,7 @@ mod tests {
         assert!(matches!(HelperConfig::parse(""), Err(ConfigError::Invalid(_))));
         let other = HelperConfig { schema: 1, ..sample() };
         let e = HelperConfig::parse(&other.to_text()).unwrap_err().to_string();
-        assert!(e.contains("schema 1") && e.contains("Settings > Helper"));
+        assert!(e.contains("schema 1") && e.contains("Settings > Dyno > Administrator readings"));
     }
 
     #[test]

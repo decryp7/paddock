@@ -45,7 +45,7 @@
     Pop $0
     DetailPrint "dyno-helper refresh: exit code $0"
     ${If} $0 != 0
-      DetailPrint "NOTE the helper was not refreshed (code $0); Settings > Helper offers Update the helper"
+      DetailPrint "NOTE the helper was not refreshed (code $0); Settings > Dyno > Administrator readings offers Update the helper"
       ; And in setup.log, where the rest of an update's story is (the helper's own reason is in its audit log).
       ClearErrors
       FileOpen $R6 "$INSTDIR\updates\setup.log" a

@@ -29,7 +29,7 @@ describe('sourceView', () => {
     expect(sourceView('local', 'More with the helper.')).toEqual({ kind: 'hint', text: 'More with the helper.' });
   });
 
-  it('names the helper, and gives a needs-helper reason a Settings step only for Settings > Helper', () => {
+  it('names the helper, and gives a needs-helper reason a Settings step only for Settings > Dyno > Administrator readings', () => {
     expect(sourceView('helper')).toEqual({ kind: 'helper', text: HELPER_CHIP });
     expect(sourceView(NEEDS)).toMatchObject({ kind: 'needsHelper', step: 'turnOn' });
     expect(sourceView({ needsHelper: { reason: 'x', next: 'retry' } })).toMatchObject({ kind: 'needsHelper', step: null });
