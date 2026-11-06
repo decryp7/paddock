@@ -354,7 +354,10 @@ fn a_bootout_that_hangs_is_bounded_and_ends_with_next_steps() {
         Started::Left(Hold::Refused(crate::plan::MAX_ATTEMPTS))
     );
     // ... and the user's Repair, once launchd lets go, goes through.
-    assert!(matches!(m.repair(&no_cancel()), Ok(RepairOutcome::Recovered)));
+    assert!(matches!(
+        m.repair(&no_cancel()),
+        Ok(RepairOutcome::Recovered)
+    ));
 }
 
 #[test]
@@ -450,7 +453,7 @@ fn nothing_is_installed_unasked_and_install_registers_and_remembers() {
         changes(&sys),
         [
             // Nothing was registered, so nothing is removed first.
-        "register"
+            "register"
         ]
     );
     assert!(sim.lock().unwrap().healthy());
@@ -1173,6 +1176,27 @@ fn a_run_entry_is_added_started_switched_off_by_the_user_and_removed() {
 }
 
 #[test]
+fn a_run_value_with_no_program_in_it_stops_no_old_agent() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    // Even an empty path that the system calls a program is not run: there is no old agent to stop.
+    sys.put_program("");
+    sys.answer(
+        "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        Output::ok("    Dyno    REG_SZ    \r\n"),
+    );
+    let mut b = WindowsRun::new(dyno(), Target::exe(DYNO_EXE), Box::new(sys.clone()));
+    let _ = b.register(); // the read-back is the same canned answer: not as written, which is not the point here
+    assert!(
+        !sys.commands()
+            .iter()
+            .any(|c| c.trim_end().ends_with("stop")),
+        "{:?}",
+        sys.commands()
+    );
+}
+
+#[test]
 fn run_entry_failure_paths() {
     use crate::backend::{Backend, Registration};
     let sys = FakeSystem::new();
@@ -1657,7 +1681,10 @@ fn manager_contract_details() {
         Started::Left(Hold::RecordUnavailable(_))
     ));
     // The user's own request goes on (loudly) without a record.
-    assert!(matches!(m.repair(&no_cancel()), Err(ServiceError::Failed(_))), "an unwritable record changes nothing");
+    assert!(
+        matches!(m.repair(&no_cancel()), Err(ServiceError::Failed(_))),
+        "an unwritable record changes nothing"
+    );
     assert!(
         std::fs::read_to_string(d.path().join(format!("service-{LABEL}.json")))
             .unwrap()
@@ -1690,7 +1717,13 @@ fn manager_contract_details() {
         "1.0.0",
         || false,
     );
+    sys.clear_calls();
     m.uninstall().unwrap();
+    assert!(
+        !sys.calls().iter().any(|c| matches!(c, Call::Pause(_))),
+        "a job that is gone is not waited for: {:?}",
+        sys.calls()
+    );
     // A job that never stops is waited for a bounded time.
     sys.answer("systemctl --user is-active", Output::ok("active\n"));
     sys.clear_calls();
@@ -1707,4 +1740,182 @@ fn manager_contract_details() {
         })
         .sum();
     assert_eq!(paused, Timings::default().gone_wait);
+}
+
+#[test]
+fn a_systemd_unit_registered_over_another_text_is_restarted_and_over_the_same_text_is_not() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    sys.put_program("/usr/bin/pitwall-server");
+    let mut b = systemd(&sys, "/usr/bin/pitwall-server");
+    let text = b.definition();
+    let restarts = |sys: &FakeSystem| {
+        changes(sys)
+            .iter()
+            .filter(|c| c.contains("restart"))
+            .count()
+    };
+    // Another text was there: the running service still has the old program, so registering restarts it.
+    sys.put_file(unit_path(), "[Service]\nExecStart=/old\n");
+    let _ = b.register();
+    assert_eq!(restarts(&sys), 1, "{:?}", changes(&sys));
+    assert_eq!(sys.file(&unit_path()).unwrap(), text);
+    // The same text: nothing changed, nothing to restart.
+    sys.clear_calls();
+    let _ = b.register();
+    assert_eq!(restarts(&sys), 0, "{:?}", changes(&sys));
+    // No unit before: nothing runs the old program either.
+    let sys2 = FakeSystem::new();
+    sys2.put_program("/usr/bin/pitwall-server");
+    let mut c = systemd(&sys2, "/usr/bin/pitwall-server");
+    let _ = c.register();
+    assert_eq!(restarts(&sys2), 0, "{:?}", changes(&sys2));
+}
+
+#[test]
+fn a_run_value_replaced_by_another_copy_stops_the_agent_the_old_value_started() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    let old = r"C:\Program Files\Dyno\old\dyno.exe";
+    let new = r"C:\Program Files\Dyno\new\dyno.exe";
+    sys.put_program(old);
+    sys.put_program(new);
+    sys.emulate_run_registry();
+    let mut first = WindowsRun::new(dyno(), Target::exe(old), Box::new(sys.clone()));
+    first.register().unwrap();
+    sys.clear_calls();
+    let mut second = WindowsRun::new(dyno(), Target::exe(new), Box::new(sys.clone()));
+    second.register().unwrap();
+    let stops: Vec<String> = sys
+        .calls()
+        .into_iter()
+        .filter_map(|c| match c {
+            Call::Run(s) if s.starts_with(old) => Some(s),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        stops,
+        [format!("{old} stop")],
+        "the old agent is asked to stop once the new value is written"
+    );
+}
+
+#[test]
+fn a_cancelled_replace_puts_the_record_back_even_when_it_held_another_versions_attempt() {
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, Some(1));
+    let sys = FakeSystem::new();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4");
+    let before = crate::record::State::Attempting {
+        version: "1.0.3".into(),
+        attempts: 1,
+        phase: crate::record::Phase::Awaiting,
+    };
+    crate::record::RecordFile::new(d.path(), LABEL)
+        .save("1.0.3", None)
+        .unwrap();
+    crate::record::RecordFile::new(d.path(), LABEL)
+        .set_state(before.clone())
+        .unwrap();
+    let cancel = AtomicBool::new(true);
+    assert_eq!(
+        m.on_start(&cancel),
+        Started::Repaired(Reason::Refused, RepairOutcome::Cancelled)
+    );
+    assert_eq!(
+        m.recorded().state,
+        before,
+        "a cancel before anything was changed leaves the record as it was"
+    );
+    assert!(changes(&sys).is_empty());
+}
+
+#[test]
+fn a_failed_register_is_recorded_as_such_the_moment_it_fails() {
+    use crate::record::{FailKind, Phase, RecordFile, State};
+    // A disk that fills up part-way: whatever write number it stops at, the last record written says what happened.
+    let mut seen_failed = false;
+    for allowed_writes in 1..10 {
+        let d = tempfile::tempdir().unwrap();
+        let sim = launchd(2, Some(1));
+        sim.lock().unwrap().register_error = Some(RegisterError::Other("denied".into()));
+        let sys = FakeSystem::new();
+        let record = RecordFile::memory();
+        let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+        record.mark("1.0.3", None).unwrap();
+        record
+            .memory_handle()
+            .unwrap()
+            .fail_writes_after(allowed_writes);
+        let _ = m.on_start(&no_cancel());
+        if matches!(
+            record.load().state,
+            State::Attempting {
+                phase: Phase::RegisterFailed(FailKind::Other),
+                ..
+            }
+        ) {
+            seen_failed = true;
+        }
+    }
+    assert!(
+        seen_failed,
+        "a register that failed is on record before the next step begins"
+    );
+}
+
+#[test]
+fn what_this_version_registered_and_waited_for_is_recorded_as_its_own_when_it_is_replaced() {
+    use crate::record::{Phase, RecordFile, State};
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, Some(2));
+    let sys = FakeSystem::new();
+    let record = RecordFile::memory();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+    // This version registered it and waits (the record names no registered version); the user asks for a repair.
+    record
+        .set_state(State::Attempting {
+            version: "1.0.4".into(),
+            attempts: 1,
+            phase: Phase::Awaiting,
+        })
+        .unwrap();
+    // One write is allowed: the first state of the replace. Nothing else is written, so nothing else is done.
+    record.memory_handle().unwrap().fail_writes_after(1);
+    let _ = m.install(&no_cancel());
+    assert!(
+        matches!(
+            record.load().state,
+            State::Attempting {
+                phase: Phase::RemovingOld { ours: true, .. },
+                ..
+            }
+        ),
+        "{:?}",
+        record.load().state
+    );
+}
+
+#[test]
+fn a_first_registration_with_nothing_to_remove_starts_at_registering_not_at_a_removal() {
+    use crate::record::{Phase, RecordFile, State};
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, None);
+    let sys = FakeSystem::new();
+    let record = RecordFile::memory();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+    record.memory_handle().unwrap().fail_writes_after(1);
+    let _ = m.install(&no_cancel());
+    assert!(
+        matches!(
+            record.load().state,
+            State::Attempting {
+                phase: Phase::Registering,
+                ..
+            }
+        ),
+        "{:?}",
+        record.load().state
+    );
 }

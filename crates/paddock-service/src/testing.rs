@@ -34,6 +34,7 @@ pub type Responder = Box<dyn FnMut(&[String], Duration) -> Result<Output, RunErr
 struct Inner {
     files: BTreeMap<PathBuf, String>,
     programs: BTreeSet<PathBuf>,
+    processes: std::collections::BTreeMap<u32, paddock_proc::ProcessId>,
     calls: Vec<Call>,
     now: Duration,
     rules: Vec<(String, Responder)>,
@@ -151,6 +152,12 @@ impl FakeSystem {
     }
 
     /// Makes `path` an existing, non-empty program.
+    /// A process the fake machine runs (what `System::process` finds by its pid).
+    pub fn put_process(&self, id: paddock_proc::ProcessId) -> &Self {
+        self.lock().processes.insert(id.pid(), id);
+        self
+    }
+
     pub fn put_program(&self, path: impl Into<PathBuf>) -> &Self {
         self.lock().programs.insert(path.into());
         self
@@ -219,6 +226,10 @@ impl FakeSystem {
 }
 
 impl System for FakeSystem {
+    fn process(&mut self, pid: u32) -> Option<paddock_proc::ProcessId> {
+        self.lock().processes.get(&pid).copied()
+    }
+
     fn run(&mut self, program: &str, args: &[&str]) -> Result<Output, RunError> {
         let mut words = vec![program.to_string()];
         words.extend(args.iter().map(|a| a.to_string()));

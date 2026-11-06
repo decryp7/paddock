@@ -854,9 +854,13 @@ fn the_event_source_stays_while_the_service_is_marked_for_deletion_and_still_run
 fn launchd_names_the_process_of_the_job_by_identity() {
     let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
     let sys = FakeSystem::new();
+    sys.put_process(me);
     let mut b = launchd_file(&sys);
     sys.put_file(PLIST, &b.definition());
-    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())));
+    sys.answer(
+        "/bin/launchctl print gui",
+        launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())),
+    );
     assert_eq!(b.job_process(), Some(me));
     sys.answer("/bin/launchctl print gui", launchd_print("waiting", 1, ""));
     assert_eq!(b.job_process(), None, "no pid line: no process");
@@ -866,8 +870,12 @@ fn launchd_names_the_process_of_the_job_by_identity() {
 fn systemd_names_the_main_process_of_the_unit_by_identity() {
     let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
     let sys = FakeSystem::new();
+    sys.put_process(me);
     let mut b = system_unit(&sys);
-    sys.answer("systemctl show", Output::ok(&format!("MainPID={}\n", me.pid())));
+    sys.answer(
+        "systemctl show",
+        Output::ok(&format!("MainPID={}\n", me.pid())),
+    );
     assert_eq!(b.job_process(), Some(me));
     sys.answer("systemctl show", Output::ok("MainPID=0\n"));
     assert_eq!(b.job_process(), None);
@@ -877,8 +885,58 @@ fn systemd_names_the_main_process_of_the_unit_by_identity() {
 fn the_bundled_agent_names_the_process_of_the_job_by_identity() {
     let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
     let sys = FakeSystem::new();
+    sys.put_process(me);
     let app = FakeAppService::new(&sys);
-    let mut b = LaunchdBundled::new(spec(Kind::UserAgent), 501, Box::new(app), Box::new(sys.clone()));
-    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())));
+    let mut b = LaunchdBundled::new(
+        spec(Kind::UserAgent),
+        501,
+        Box::new(app),
+        Box::new(sys.clone()),
+    );
+    sys.answer(
+        "/bin/launchctl print gui",
+        launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())),
+    );
     assert_eq!(b.job_process(), Some(me));
+}
+
+#[test]
+fn a_bundled_agent_names_the_program_it_was_registered_with_and_whether_it_is_this_copy() {
+    let sys = FakeSystem::new();
+    let app = FakeAppService::new(&sys);
+    app.set_status(AppServiceStatus::Enabled);
+    let mut b = LaunchdBundled::new(
+        spec(Kind::UserAgent),
+        501,
+        Box::new(app.clone()),
+        Box::new(sys.clone()),
+    );
+    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, ""));
+    b.know_copy(
+        Some("/Applications/A.app/Contents/MacOS/a"),
+        Some("/Applications/A.app/Contents/MacOS/a"),
+    );
+    sys.put_program("/Applications/A.app/Contents/MacOS/a");
+    let look = b.inspect();
+    assert_eq!(
+        look.program.as_deref(),
+        Some("/Applications/A.app/Contents/MacOS/a")
+    );
+    assert_eq!(
+        (look.program_exists, look.points_here),
+        (Some(true), Some(true))
+    );
+    b.know_copy(
+        Some("/Applications/A.app/Contents/MacOS/a"),
+        Some("/Users/u/B.app/Contents/MacOS/b"),
+    );
+    let other = b.inspect();
+    assert_eq!(
+        other.program.as_deref(),
+        Some("/Users/u/B.app/Contents/MacOS/b")
+    );
+    assert_eq!(
+        (other.program_exists, other.points_here),
+        (Some(false), Some(false))
+    );
 }

@@ -260,6 +260,26 @@ with its real file (ER-11 holds). The identity of a copy (`points_here`, `progra
 against this copy's path plus a file check, written with `RemovingOld`; `program =` from `launchctl print` is parsed for the log
 only. Tests that the explorer covers are deleted, not rewritten, if the explorer counts towards the 99% gate (rule 43).
 
+**Mutation results (cargo-mutants 2026-11-06, in place, macOS, over the diff against `c612dbfa6`).** Shards are 0-indexed and each
+shard's outcomes equal its mutants (ER-33). paddock-service: targeted rerun of the touched functions (2 shards) 107 and 106 mutants,
+101+87 caught, 2+3 missed, 4+15 unviable, 0+1 timeout; shard 0/8 54 mutants (39 caught, 5 missed, 10 unviable); shard 1/8 54
+(47, 1, 5, 1 timeout). dyno-app shard 0/6: 18 (10 caught, 5 missed, 2 unviable, 1 timeout); targeted login run 11 of 11 caught.
+Every survivor of these runs in `Manager::pending`, `await_start`, `uninstall_locked`, `WindowsRun::register` and the login
+defaults got a test; a final run over those functions had 36 paddock-service mutants (31 caught, 4 unviable, 1 timeout, 0 missed).
+Survivors that remain, with the reason:
+
+- Equivalent: `record.rs` `left > 0` to `>=` in `RecordFile::store` (the `left == 0` branch comes first); `resume.rs`
+  `tried += 1` to `*= 1` in `install_patient` (the count only feeds a log line); `manager.rs` deleting the
+  `Hold::Unanswered | Hold::Refused` arm in `start_with` (it only chooses the warning text).
+- Real OS calls that tests must not make (ER-14): the `SmService` wrappers in `login.rs` (about lines 683-751),
+  `platform_service` and `service_pending`.
+- Test gap, to close after the 1.1.0 tag: `quit.rs` (about lines 315 and 332) and `shell.rs` (about line 455), which need a
+  live Tauri `AppHandle` or `ShellOf`; `login.rs` `run_first_run` (same reason); `first_run_done` (reads the process-wide
+  `FIRST_RUN_MARKER_PATH`; its test waits for the review-fix change that passes the path in).
+- Not measured on macOS: `login.rs` `LinuxService::real` is `cfg(target_os = "linux")` and `login.rs` about line 469 is
+  `cfg(windows)`; the Linux run covers the first, the Windows VM round checks the second by hand.
+- `repair.rs` `Stepper::next_cycle` `+=` to `*=` is a timeout (the loop never ends), which counts as caught.
+
 ### 9. Work packages (honest estimate, revision 4)
 
 | WP | What | Days |

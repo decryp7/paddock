@@ -83,7 +83,8 @@ fn stop_of(sys: &mut dyn System, target: String) -> Option<StopMechanism> {
 
 /// The process launchd runs for the job (`pid =` of `launchctl print`), by identity; `None` when none runs or it cannot be read.
 fn process_of(sys: &mut dyn System, target: &str) -> Option<paddock_proc::ProcessId> {
-    job_report(sys, target).and_then(|r| r.pid).and_then(paddock_proc::ProcessId::of)
+    let pid = job_report(sys, target).and_then(|r| r.pid)?;
+    sys.process(pid)
 }
 
 /// Whether launchd holds the job (a job that could not be asked about is not found).

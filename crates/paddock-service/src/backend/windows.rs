@@ -488,7 +488,8 @@ impl Backend for WindowsService {
         let name = self.spec.name().to_string();
         match self.sys.run(SC, &["queryex", &name]) {
             Ok(o) if o.success() => {
-                crate::parse::sc_pid(&o.stdout).and_then(paddock_proc::ProcessId::of)
+                let pid = crate::parse::sc_pid(&o.stdout)?;
+                self.sys.process(pid)
             }
             _ => None,
         }

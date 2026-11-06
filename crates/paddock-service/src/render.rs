@@ -217,7 +217,9 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
     );
     if spec.low_priority() {
         // Never the idle I/O class (rule 52): the service answers requests somebody waits for.
-        o.push_str("Nice=10\nCPUWeight=20\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7\n");
+        o.push_str(
+            "Nice=10\nCPUWeight=20\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7\n",
+        );
     }
     if let Some(mb) = spec.memory_high_mb() {
         let _ = writeln!(o, "MemoryHigh={mb}M");

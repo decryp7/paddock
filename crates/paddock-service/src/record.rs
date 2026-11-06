@@ -64,7 +64,11 @@ pub enum FailKind {
 
 /// What the app is doing about the registration, as of the last durable write.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum State {
     /// Nothing is in progress.
     #[default]
@@ -251,7 +255,10 @@ impl RecordFile {
                 }
                 loaded.value
             }
-            Store::Memory(m) => m.value.lock().map_or_else(|e| e.into_inner().clone(), |v| v.clone()),
+            Store::Memory(m) => m
+                .value
+                .lock()
+                .map_or_else(|e| e.into_inner().clone(), |v| v.clone()),
         }
     }
 
@@ -272,7 +279,10 @@ impl RecordFile {
                 let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
                     return (Recorded::default(), true);
                 };
-                let version = value.get("version").and_then(serde_json::Value::as_u64).unwrap_or(1);
+                let version = value
+                    .get("version")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(1);
                 if version > u64::from(FORMAT) {
                     return (Recorded::default(), true);
                 }
@@ -294,7 +304,9 @@ impl RecordFile {
     /// Reads only, so a query can ask it.
     pub fn unwritable(&self) -> bool {
         match &self.store {
-            Store::Memory(m) => m.fail_writes.load(Ordering::SeqCst) || m.writes_left.load(Ordering::SeqCst) == 0,
+            Store::Memory(m) => {
+                m.fail_writes.load(Ordering::SeqCst) || m.writes_left.load(Ordering::SeqCst) == 0
+            }
             Store::File { file, .. } => std::fs::read(file.path())
                 .ok()
                 .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
@@ -352,7 +364,11 @@ impl RecordFile {
         r.registered_version = Some(version.to_string());
         r.registered_program = program.map(str::to_string);
         r.state = if attempts > 0 {
-            State::Attempting { version: version.to_string(), attempts, phase: Phase::Awaiting }
+            State::Attempting {
+                version: version.to_string(),
+                attempts,
+                phase: Phase::Awaiting,
+            }
         } else {
             State::Idle
         };
@@ -389,7 +405,11 @@ impl RecordFile {
     ///
     /// # Errors
     /// [`ServiceError::Failed`] when it could not be saved.
-    pub fn set_state_and_program(&self, state: State, program: Option<&str>) -> Result<(), ServiceError> {
+    pub fn set_state_and_program(
+        &self,
+        state: State,
+        program: Option<&str>,
+    ) -> Result<(), ServiceError> {
         let mut r = self.load();
         r.state = state;
         if let Some(p) = program {
@@ -423,7 +443,9 @@ impl RecordFile {
     /// and the log says so.
     pub fn lock(&self) -> Option<RepairLock> {
         match &self.store {
-            Store::Memory(m) => (!m.held.swap(true, Ordering::SeqCst)).then(|| RepairLock::Memory(m.clone())),
+            Store::Memory(m) => {
+                (!m.held.swap(true, Ordering::SeqCst)).then(|| RepairLock::Memory(m.clone()))
+            }
             Store::File { lock, .. } => match InstanceLock::claim(lock) {
                 Ok(Claim::Acquired(l)) => Some(RepairLock::File(l)),
                 Ok(Claim::Held) => None,
@@ -473,7 +495,10 @@ mod tests {
         assert_eq!(back.registered_version.as_deref(), Some("1.0.4"));
         assert_eq!(back.registered_program.as_deref(), Some("/p"));
         let text = std::fs::read_to_string(d.path().join("service-net.a.b.json")).unwrap();
-        assert!(text.contains("\"registeredVersion\"") && text.contains("\"version\": 3"), "{text}");
+        assert!(
+            text.contains("\"registeredVersion\"") && text.contains("\"version\": 3"),
+            "{text}"
+        );
         r.forget().unwrap();
         assert_eq!(r.load(), Recorded::default());
     }
@@ -488,7 +513,10 @@ mod tests {
         std::fs::write(&path, r#"{"version": 99, "registeredVersion": "9.0.0"}"#).unwrap();
         let r = RecordFile::new(d.path(), "net.a.b");
         assert_eq!(r.load(), Recorded::default());
-        assert!(matches!(r.save("1.0.0", None), Err(ServiceError::Failed(_))));
+        assert!(matches!(
+            r.save("1.0.0", None),
+            Err(ServiceError::Failed(_))
+        ));
         assert!(std::fs::read_to_string(&path).unwrap().contains("99"));
     }
 
@@ -496,7 +524,11 @@ mod tests {
     fn a_format_1_file_becomes_the_declared_state() {
         let d = tempfile::tempdir().unwrap();
         let path = d.path().join("service-net.a.b.json");
-        std::fs::write(&path, r#"{"version": 1, "registeredVersion": "1.0.0", "registeredProgram": "/p"}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"version": 1, "registeredVersion": "1.0.0", "registeredProgram": "/p"}"#,
+        )
+        .unwrap();
         let r = RecordFile::new(d.path(), "net.a.b").load();
         assert_eq!(r.registered_version.as_deref(), Some("1.0.0"));
         assert_eq!(r.state, State::Idle);
@@ -504,7 +536,11 @@ mod tests {
         let r = RecordFile::new(d.path(), "net.a.b").load();
         assert_eq!(
             r.state,
-            State::Attempting { version: "1.1.0".into(), attempts: 2, phase: Phase::Awaiting }
+            State::Attempting {
+                version: "1.1.0".into(),
+                attempts: 2,
+                phase: Phase::Awaiting
+            }
         );
         assert_eq!((r.attempts_of("1.1.0"), r.attempts_of("1.0.0")), (2, 0));
     }
@@ -514,14 +550,24 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let r = RecordFile::new(d.path(), "net.a.b");
         for phase in [
-            Phase::RemovingOld { ours: false, paid: false },
-            Phase::RemovingOld { ours: true, paid: true },
+            Phase::RemovingOld {
+                ours: false,
+                paid: false,
+            },
+            Phase::RemovingOld {
+                ours: true,
+                paid: true,
+            },
             Phase::Registering,
             Phase::Awaiting,
             Phase::RegisterFailed(FailKind::Other),
             Phase::RegisterFailed(FailKind::NotAsWritten),
         ] {
-            let s = State::Attempting { version: "1.1.0".into(), attempts: 3, phase };
+            let s = State::Attempting {
+                version: "1.1.0".into(),
+                attempts: 3,
+                phase,
+            };
             r.set_state(s.clone()).unwrap();
             assert_eq!(r.load().state, s);
         }
@@ -539,7 +585,10 @@ mod tests {
         assert!(r.reopen().lock().is_none(), "another copy holds it");
         drop(held);
         let again = r.reopen().lock();
-        assert!(again.is_some(), "released with its holder, nothing to take over");
+        assert!(
+            again.is_some(),
+            "released with its holder, nothing to take over"
+        );
         // Garbage in the file (an old time stamp from a dead copy) means nothing: only the OS lock counts.
         drop(again);
         std::fs::write(d.path().join("service-net.a.b.lock"), "999999 1").unwrap();
@@ -565,14 +614,23 @@ mod tests {
         assert!(!path.exists());
         std::fs::write(&path, "{ not json").unwrap();
         assert_eq!(r.peek(), (Recorded::default(), true));
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{ not json", "nothing quarantined or restored");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "{ not json",
+            "nothing quarantined or restored"
+        );
         std::fs::write(&path, r#"{"version": 99}"#).unwrap();
         assert!(r.peek().1, "a newer app's file");
         std::fs::write(&path, r#"{"version": 1, "registeredVersion": "1.0.0", "attemptedVersion": "1.1.0", "attempts": 2}"#).unwrap();
         let (rec, damaged) = r.peek();
         assert!(!damaged);
         assert_eq!(rec.attempts_of("1.1.0"), 2);
-        assert!(std::fs::read_to_string(&path).unwrap().contains("attemptedVersion"), "not migrated by a query");
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("attemptedVersion"),
+            "not migrated by a query"
+        );
     }
 
     #[test]
@@ -603,5 +661,38 @@ mod tests {
         m.memory_handle().unwrap().fail_writes(true);
         assert!(m.save("1.0.0", None).is_err());
         assert_eq!(m.load(), Recorded::default());
+    }
+
+    #[test]
+    fn unwritable_is_asked_without_writing_and_only_a_refusing_or_newer_store_says_yes() {
+        let m = RecordFile::memory();
+        assert!(!m.unwritable(), "an ordinary memory store takes writes");
+        m.memory_handle().unwrap().fail_writes_after(1);
+        assert!(!m.unwritable());
+        m.save("1.0.0", None).unwrap();
+        assert!(m.unwritable(), "the writes it allowed are used up");
+        let f = RecordFile::memory();
+        f.memory_handle().unwrap().fail_writes(true);
+        assert!(f.unwritable());
+
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("service-net.a.b.json");
+        let r = RecordFile::new(d.path(), "net.a.b");
+        assert!(!r.unwritable(), "no file yet");
+        std::fs::write(&path, format!(r#"{{"version": {FORMAT}}}"#)).unwrap();
+        assert!(!r.unwritable(), "this app's own format");
+        std::fs::write(&path, format!(r#"{{"version": {}}}"#, FORMAT - 1)).unwrap();
+        assert!(!r.unwritable(), "an older format");
+        std::fs::write(&path, format!(r#"{{"version": {}}}"#, FORMAT + 1)).unwrap();
+        assert!(r.unwritable(), "a newer app's file is left alone");
+    }
+
+    #[test]
+    fn marking_a_version_that_never_registered_leaves_the_state_idle() {
+        let m = RecordFile::memory();
+        m.mark("1.0.4", Some("/p")).unwrap();
+        let r = m.load();
+        assert_eq!(r.state, State::Idle);
+        assert_eq!(r.registered_version.as_deref(), Some("1.0.4"));
     }
 }

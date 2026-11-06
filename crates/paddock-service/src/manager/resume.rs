@@ -10,9 +10,9 @@ use super::{Manager, Ran, outcome_result, refusal};
 use crate::backend::{DisabledMark, Job};
 use crate::error::ServiceError;
 use crate::manager::Started;
+use crate::plan::Reason;
 use crate::plan::{ResumePath, installed, request, resume_path, supervises};
 use crate::record::Phase;
-use crate::plan::Reason;
 use crate::repair::RepairOutcome;
 use crate::stop::StopMechanism;
 use std::sync::atomic::AtomicBool;
@@ -95,8 +95,11 @@ impl Manager {
     ) -> Result<bool, ServiceError> {
         let inspection = self.backend.inspect();
         let recorded = self.record.load();
-        if matches!(recorded.state, crate::record::State::Removing) || (self.wanted)() != Some(true) {
-            say("the user's switch is off or unknown (or a removal was begun); the service stays as it is");
+        if matches!(recorded.state, crate::record::State::Removing) || (self.wanted)() != Some(true)
+        {
+            say(
+                "the user's switch is off or unknown (or a removal was begun); the service stays as it is",
+            );
             self.clear_resume_pending();
             return Ok(false);
         }
@@ -134,7 +137,9 @@ impl Manager {
                 let registered = match ran {
                     Ran::Busy => return Err(ServiceError::Busy),
                     Ran::Unrecorded(why) => {
-                        say(&format!("the service state cannot be written, so nothing is registered: {why}"));
+                        say(&format!(
+                            "the service state cannot be written, so nothing is registered: {why}"
+                        ));
                         return Err(ServiceError::Failed(why));
                     }
                     // A register that reads back wrong may only be the OS lagging: look for the job before replacing anything
@@ -147,7 +152,9 @@ impl Manager {
                     }
                     Ran::Outcome(o) if o.registered() => true,
                     Ran::Outcome(_) => {
-                        say("the enabled item cannot be registered without the user; the service stays as it is");
+                        say(
+                            "the enabled item cannot be registered without the user; the service stays as it is",
+                        );
                         return Ok(false);
                     }
                 };
@@ -278,7 +285,11 @@ impl Manager {
             if up && here {
                 self.remember();
             }
-            return Ok(if up { RepairOutcome::Recovered } else { RepairOutcome::Registered });
+            return Ok(if up {
+                RepairOutcome::Recovered
+            } else {
+                RepairOutcome::Registered
+            });
         }
         if !self.backend.capabilities().automatic {
             return Err(ServiceError::Unavailable(
