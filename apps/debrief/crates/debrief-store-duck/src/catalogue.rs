@@ -28,8 +28,28 @@ use std::time::Duration;
 /// Sources built at the same time when the option says automatic: one. Four workers built the catalogue of `large10`
 /// about 2.4 times sooner than one (performance.md, "catalogue workers"), but with more than one connection the
 /// regression test `building_the_catalogue_keeps_its_unsaved_rows_bounded` measures 20 to 24 MB of unsaved rows against
-/// its 16 MB bound (12 to 16 MB with one), whatever the round size, so the default waits for a decision on that bound.
+/// its 16 MB bound (12 to 16 MB with one), whatever the round size, so the workers wait for a decision on that bound: there is
+/// no option for them yet ([`initial_workers`]).
 const AUTO_WORKERS: usize = 1;
+
+/// Workers of the catalogue service a store starts: automatic (0), except in tests, which may ask for more on the
+/// current thread to check that several workers build the same catalogue. There is no option for it until the D-0 bound
+/// is decided.
+pub(crate) fn initial_workers() -> usize {
+    #[cfg(test)]
+    {
+        TEST_WORKERS.with(|w| w.get())
+    }
+    #[cfg(not(test))]
+    {
+        0
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(crate) static TEST_WORKERS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
 /// Layout and extraction version; sources built with another are built again.
 pub const VERSION: u32 = 1;
@@ -69,6 +89,8 @@ fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry
         use duckdb::arrow::array::{Array, AsArray, RecordBatch, StructArray};
         use duckdb::arrow::datatypes::{Int64Type, UInt64Type};
         let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? LIMIT ?")?;
+        // `stream_arrow` starts the statement's streaming execution. Its iterator is dropped unused on purpose: it panics when a
+        // fetch fails, so the chunks are pulled with `step()` below, which returns the error.
         let _ = stmt.stream_arrow(params![source, MAX_EVENTS_SCANNED as u64])?;
         // Batches, not rows: the texts are borrowed from the Arrow arrays instead of copied into a String each.
         while let Some(chunk) = stmt.step()? {
@@ -735,11 +757,10 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("debrief-catalogue-workers-{workers}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
-            let opts = crate::StoreOptions {
-                catalogue_workers: workers,
-                ..Default::default()
-            };
+            TEST_WORKERS.with(|w| w.set(workers));
+            let opts = crate::StoreOptions::default();
             let store = DuckStore::create_with(&dir, Profile::default_profile(), PluginRegistry::new(), opts).unwrap();
+            TEST_WORKERS.with(|w| w.set(0));
             store.open(std::slice::from_ref(&samples)).unwrap().wait().unwrap();
             assert!(store.wait_for_catalogue(Duration::from_secs(120)).unwrap());
             let conn = store.inner.conn().unwrap();

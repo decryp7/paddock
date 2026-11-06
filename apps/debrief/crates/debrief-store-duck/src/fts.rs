@@ -23,16 +23,18 @@ use crate::turns::{wait_after, Gate, Turn};
 use crate::writer::{meta_u64, set_meta};
 use anyhow::{Context, Result};
 use debrief_core::batch::EventId;
+use debrief_core::stages::ByteBudget;
 use debrief_core::stages::Stages;
 use debrief_core::threads::{lower_priority, threads, WorkKind};
 use debrief_core::words::WordQuery;
 use duckdb::{params, Connection};
-use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder};
+use parquet::arrow::arrow_reader::{ArrowReaderMetadata, ArrowReaderOptions, ParquetRecordBatchReaderBuilder, RowSelection, RowSelector};
 use parquet::arrow::ProjectionMask;
+use parquet::file::metadata::PageIndexPolicy;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 use tantivy::collector::{Collector, Count, SegmentCollector, TopDocs};
 use tantivy::query::{BooleanQuery, EmptyQuery, Occur, Query, RegexQuery, TermQuery};
@@ -355,50 +357,88 @@ impl Fts {
     }
 
     /// Indexes the rows of ready sources of `files` (segment files, in order) as one pipeline: the files are cut into
-    /// row groups, each group is read and its documents built on `stages`' pool (IO and CPU, in parallel, ADR 0062
-    /// prototype A), and the documents are added to the writer in the order of the files and groups (so the result does
-    /// not depend on the pool). No further file is started once `deadline` has passed and one was started (the caller
-    /// commits by the clock). `done` is called with the number of files finished so far. Returns how many files it
-    /// started, all of them finished; stops when `stages` is cancelled (the caller rolls back).
-    fn index_files(&self, w: &mut IndexWriter, feed: Feed<'_>, stages: &Stages<'_>, mut done: impl FnMut(usize) + Send) -> Result<usize> {
+    /// slices of row groups, each slice is read and its documents built on `stages`' pool (IO and CPU, in parallel,
+    /// ADR 0062 prototype A), and the documents are added to the writer in the order of the files and slices (so the
+    /// result does not depend on the pool). The built documents the feed holds at once stay within `feed.memory` bytes
+    /// (an estimate from the segments' footers; one slice is never cut below [`MIN_SLICE_ROWS`] rows). No further file
+    /// is started once `deadline` has passed and one was started (the caller commits by the clock). `done` is called
+    /// with the number of files finished so far. Returns what it did: how many files it started (all finished, unless
+    /// the process is exiting, which [`Fed::stop`] says) or an error when `stages` was cancelled (the caller rolls
+    /// back).
+    fn index_files(
+        &self,
+        w: &mut IndexWriter,
+        feed: Feed<'_>,
+        stages: &Stages<'_>,
+        window: usize,
+        mut done: impl FnMut(usize) + Send,
+    ) -> Result<Fed> {
         let Feed {
             seg_dir,
             files,
             ready,
             deadline,
+            memory,
+            down,
         } = feed;
         let ts_field = self.index.schema().get_field("ts")?;
         let keys: Vec<u64> = files.iter().map(|f| segment_key(f)).collect();
         let committed = AtomicUsize::new(0);
-        let mut units = SegmentUnits::new(seg_dir, files, deadline, &committed);
+        let budget = ByteBudget::new(memory);
+        let built = AtomicUsize::new(0);
+        let peak_built = AtomicUsize::new(0);
+        let exiting = AtomicBool::new(false);
+        let mut units = SegmentUnits::new(seg_dir, files, deadline, &committed, (memory / window.max(1)).max(1));
         // Reading stops once the process exits (the exit handler waits for running steps only so long).
-        let input = std::iter::from_fn(|| if crate::shutdown::down() { None } else { units.next_unit() });
+        let input = std::iter::from_fn(|| {
+            if down() {
+                exiting.store(true, Ordering::SeqCst);
+                return None;
+            }
+            let unit = units.next_unit()?;
+            // Waits for the writer to add what is read ahead; the adding thread gives the bytes back.
+            budget.acquire(unit.bytes, stages.cancel).then_some(unit)
+        });
         let mut first_error: Option<anyhow::Error> = None;
         let mut finished = 0usize;
+        let mut docs_added = 0u64;
+        let mut slices = 0usize;
         let mut seen = vec![false; files.len()];
-        let completed = stages.run(
+        let completed = stages.run_windowed(
+            window,
             input,
             |unit| {
-                self.documents(unit, keys[unit.file], ts_field, ready)
-                    .with_context(|| format!("reading {}", files[unit.file]))
+                let (docs, bytes) = self
+                    .documents(unit, keys[unit.file], ts_field, ready)
+                    .with_context(|| format!("reading {}", files[unit.file]))?;
+                peak_built.fetch_max(built.fetch_add(bytes, Ordering::SeqCst) + bytes, Ordering::SeqCst);
+                Ok::<_, anyhow::Error>((docs, bytes))
             },
-            |unit, docs, _| {
+            |unit, built_docs, _| {
                 committed.fetch_add(1, Ordering::Relaxed);
+                slices += 1;
                 let file = unit.file;
-                if first_error.is_some() {
-                    return;
-                }
-                if !std::mem::replace(&mut seen[file], true) {
-                    w.delete_term(Term::from_field_u64(self.f.seg, keys[file]));
-                    while finished < file {
-                        finished += 1;
-                        done(finished);
+                let bytes = built_docs.as_ref().map_or(0, |(_, bytes)| *bytes);
+                if first_error.is_none() {
+                    if !std::mem::replace(&mut seen[file], true) {
+                        w.delete_term(Term::from_field_u64(self.f.seg, keys[file]));
+                        while finished < file {
+                            finished += 1;
+                            done(finished);
+                        }
+                    }
+                    let added = built_docs.and_then(|(docs, _)| {
+                        docs_added += docs.len() as u64;
+                        docs.into_iter()
+                            .try_for_each(|d| w.add_document(d).map(|_| ()).map_err(anyhow::Error::from))
+                    });
+                    if let Err(e) = added {
+                        first_error = Some(e.context(format!("indexing {}", files[file])));
                     }
                 }
-                let added = docs.and_then(|docs| docs.into_iter().try_for_each(|d| w.add_document(d).map(|_| ()).map_err(Into::into)));
-                if let Err(e) = added {
-                    first_error = Some(e.context(format!("indexing {}", files[file])));
-                }
+                // The slice's documents are gone: the bytes of the feed and of the read-ahead are free again.
+                built.fetch_sub(bytes, Ordering::SeqCst);
+                budget.release(unit.bytes);
             },
         );
         if let Some(e) = first_error {
@@ -418,25 +458,48 @@ impl Fts {
             }
         }
         done(started);
-        Ok(started)
+        let stop = if exiting.load(Ordering::SeqCst) {
+            StopCause::Shutdown
+        } else {
+            units.stop_cause()
+        };
+        Ok(Fed {
+            started,
+            docs: docs_added,
+            slices,
+            peak_bytes: budget.peak(),
+            peak_built_bytes: peak_built.load(Ordering::SeqCst),
+            stop,
+        })
     }
 
-    /// The documents of the ready rows of one row group of a segment (pure in the unit: any thread).
-    fn documents(&self, unit: &Unit, key: u64, ts_field: Field, ready: &HashSet<u32>) -> Result<Vec<tantivy::TantivyDocument>> {
+    /// The documents of the ready rows of one slice of a row group (pure in the unit: any thread) and their size in bytes
+    /// (text and [`DOC_OVERHEAD_BYTES`] each).
+    fn documents(&self, unit: &Unit, key: u64, ts_field: Field, ready: &HashSet<u32>) -> Result<(Vec<tantivy::TantivyDocument>, usize)> {
         let file = std::fs::File::open(&unit.path).with_context(|| format!("opening {}", unit.path.display()))?;
-        let reader = ParquetRecordBatchReaderBuilder::new_with_metadata(file, unit.meta.clone())
+        let mut builder = ParquetRecordBatchReaderBuilder::new_with_metadata(file, unit.meta.clone())
             .with_projection(unit.mask.clone())
             .with_row_groups(vec![unit.group])
-            .with_batch_size(DOC_BATCH_ROWS)
-            .build()?;
-        let mut out = Vec::new();
-        for rb in reader {
-            self.documents_of(&rb?, key, ts_field, ready, &mut out)?;
+            .with_batch_size(DOC_BATCH_ROWS);
+        // The rest of the group is skipped (page by page where the file has a page index), not decoded.
+        if unit.offset > 0 || unit.rows < unit.group_rows {
+            let mut selectors = Vec::with_capacity(3);
+            if unit.offset > 0 {
+                selectors.push(RowSelector::skip(unit.offset));
+            }
+            selectors.push(RowSelector::select(unit.rows));
+            builder = builder.with_row_selection(RowSelection::from(selectors));
         }
-        Ok(out)
+        let mut out = Vec::new();
+        let mut bytes = 0usize;
+        for rb in builder.build()? {
+            bytes += self.documents_of(&rb?, key, ts_field, ready, &mut out)?;
+        }
+        Ok((out, bytes))
     }
 
-    /// Appends the documents of the ready rows of one record batch.
+    /// Appends the documents of the ready rows of one record batch; returns their size ([`DOC_OVERHEAD_BYTES`] and the
+    /// text of each).
     fn documents_of(
         &self,
         rb: &duckdb::arrow::record_batch::RecordBatch,
@@ -444,7 +507,7 @@ impl Fts {
         ts_field: Field,
         ready: &HashSet<u32>,
         out: &mut Vec<tantivy::TantivyDocument>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         use duckdb::arrow::array::{Array, AsArray};
         use duckdb::arrow::datatypes::{Int64Type, UInt32Type, UInt64Type};
         let col = |name: &str| rb.column_by_name(name).with_context(|| format!("column {name}"));
@@ -455,6 +518,7 @@ impl Fts {
         let exc = col("exception")?.as_string_opt::<i32>().context("exception type")?;
         let tpl = col("template")?.as_string_opt::<i32>().context("template type")?;
         out.reserve(rb.num_rows());
+        let mut bytes = 0usize;
         for i in 0..rb.num_rows() {
             if !ready.contains(&src.value(i)) {
                 continue;
@@ -466,15 +530,18 @@ impl Fts {
                 ts_field => if ts.is_null(i) { i64::MAX } else { ts.value(i) },
                 self.f.text => msg.value(i),
             );
+            bytes += DOC_OVERHEAD_BYTES + msg.value(i).len();
             if !exc.is_null(i) {
                 d.add_text(self.f.text, exc.value(i));
+                bytes += exc.value(i).len();
             }
             if !tpl.is_null(i) {
                 d.add_text(self.f.text, tpl.value(i));
+                bytes += tpl.value(i).len();
             }
             out.push(d);
         }
-        Ok(())
+        Ok(bytes)
     }
 }
 
@@ -486,6 +553,64 @@ struct Feed<'a> {
     files: &'a [String],
     ready: &'a HashSet<u32>,
     deadline: Option<Instant>,
+    /// What the feed may hold of built documents at once, in bytes ([`FEED_MEMORY`]).
+    memory: usize,
+    /// Whether the process is exiting ([`crate::shutdown::down`]; tests inject their own).
+    down: fn() -> bool,
+}
+
+/// Document bytes the index feed may hold at once, read ahead of the writer: the documents of the slices being read,
+/// waiting or being added. Counted as the text bytes of the rows plus [`DOC_OVERHEAD_BYTES`] each, estimated from the
+/// segment's footer before a slice is read. It is on top of the writer's heaps ([`WriterBudget`]).
+/// Why 64 MiB: a fixed amount that keeps the old 8-thread feed busy (about 8 MiB per slice with 8 slices in flight) while
+/// staying a small part of the 768 MB import budget; it is a constant, not a Setting, because it is a safety bound and
+/// not a speed knob (the read threads are the Setting). There is no constants register in the repo; the reason lives here.
+pub const FEED_MEMORY: usize = 64 << 20;
+
+/// What a built document takes besides its text (the id, source, segment and time values and the string headers).
+const DOC_OVERHEAD_BYTES: usize = 128;
+
+/// Fewest rows in a slice, however long the texts (a single event is never cut). Why 16: below it the per-slice cost of
+/// opening the file and skipping to the rows outweighs the rows; a slice of 16 events of 1 MB would still be 16 MB.
+const MIN_SLICE_ROWS: usize = 16;
+
+/// What an index step did, for its log line.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Fed {
+    /// Files started, all of them finished.
+    started: usize,
+    /// Documents added.
+    docs: u64,
+    /// Slices of row groups read.
+    slices: usize,
+    /// The most estimated document bytes held at once by the feed (read ahead, waiting, being added).
+    peak_bytes: usize,
+    /// The most document bytes (actual text bytes and per-document overhead) built and not yet added at once.
+    peak_built_bytes: usize,
+    /// Why the feed handed out no further file.
+    stop: StopCause,
+}
+
+/// Why the feed handed out no further file.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum StopCause {
+    /// Every file of the step was fed.
+    #[default]
+    Done,
+    /// The step's time was used up ([`STEP_TIME`]).
+    Time,
+    /// The process is exiting: the input was cut short and nothing of the step may be kept.
+    Shutdown,
+}
+
+impl StopCause {
+    fn as_str(self) -> &'static str {
+        match self {
+            StopCause::Done => "all files of the step fed",
+            StopCause::Time => "step time used up",
+            StopCause::Shutdown => "the process is exiting",
+        }
+    }
 }
 
 /// Whether a step that began at `began` should start no further segment at `now`. The row groups already read but not
@@ -500,7 +625,8 @@ fn out_of_time(deadline: Instant, began: Instant, now: Instant, emitted: usize, 
 /// Rows decoded at a time inside a row group.
 const DOC_BATCH_ROWS: usize = 8192;
 
-/// One row group of one segment file: the unit of reading (and of parallelism) of the index feed.
+/// A slice of one row group of one segment file: the unit of reading (and of parallelism) of the index feed. A slice
+/// is at most [`DOC_BATCH_ROWS`] rows and about a window's share of the feed's memory.
 struct Unit {
     /// Index of the file in the step's list.
     file: usize,
@@ -510,26 +636,64 @@ struct Unit {
     /// The columns the index needs.
     mask: ProjectionMask,
     group: usize,
+    /// Rows of the whole group, the rows skipped before the slice and the rows in it.
+    group_rows: usize,
+    offset: usize,
+    rows: usize,
+    /// The estimated size of the slice's documents, counted against the feed's memory.
+    bytes: usize,
 }
 
-/// The row groups of several segment files, one after the other. A file whose footer cannot be read ends the
-/// iteration and is kept for [`SegmentUnits::error`]. After `deadline` no further file is started (the first always is).
+/// The slice being handed out: the rest of a row group.
+struct Cursor {
+    file: usize,
+    meta: ArrowReaderMetadata,
+    mask: ProjectionMask,
+    group: usize,
+    group_rows: usize,
+    /// Rows of the group handed out so far.
+    next_row: usize,
+    /// Rows per slice of this group and the estimated size of a document in it.
+    slice_rows: usize,
+    row_bytes: usize,
+}
+
+/// The text columns' share of a row group and the rows of it: the estimated size of a built document, in bytes.
+fn estimated_row_bytes(meta: &ArrowReaderMetadata, group: usize) -> (usize, usize) {
+    let rg = meta.metadata().row_group(group);
+    let rows = usize::try_from(rg.num_rows()).unwrap_or(0);
+    let text: i64 = rg
+        .columns()
+        .iter()
+        .filter(|c| matches!(c.column_path().string().as_str(), "message" | "exception" | "template"))
+        .map(|c| c.uncompressed_size())
+        .sum();
+    let per_row = usize::try_from(text).unwrap_or(0) / rows.max(1);
+    (rows, per_row.saturating_add(DOC_OVERHEAD_BYTES))
+}
+
+/// The slices of the row groups of several segment files, one after the other. A file whose footer cannot be read ends the
+/// iteration and is kept for [`SegmentUnits::error`]. After `deadline` no further file is started (the first always is),
+/// and once the deadline cut the iteration it stays cut.
 struct SegmentUnits<'a> {
     dir: &'a Path,
     files: &'a [String],
     deadline: Option<Instant>,
     began: Instant,
-    /// Row groups handed out, and added to the index so far (the difference waits in the pipeline).
+    /// Slices handed out, and added to the index so far (the difference waits in the pipeline).
     emitted: usize,
     committed: &'a AtomicUsize,
     next_file: usize,
-    /// The file being cut into groups: its index, footer, mask and the next group.
-    current: Option<(usize, ArrowReaderMetadata, ProjectionMask, usize)>,
+    /// The bytes one slice should come to at most (the feed's memory over its window).
+    slice_bytes: usize,
+    current: Option<Cursor>,
     failed: Option<anyhow::Error>,
+    /// Set when the deadline ended the iteration: it never starts a file after that, however the clock reads.
+    out_of_time: bool,
 }
 
 impl<'a> SegmentUnits<'a> {
-    fn new(dir: &'a Path, files: &'a [String], deadline: Option<Instant>, committed: &'a AtomicUsize) -> Self {
+    fn new(dir: &'a Path, files: &'a [String], deadline: Option<Instant>, committed: &'a AtomicUsize, slice_bytes: usize) -> Self {
         SegmentUnits {
             dir,
             files,
@@ -538,14 +702,18 @@ impl<'a> SegmentUnits<'a> {
             emitted: 0,
             committed,
             next_file: 0,
+            slice_bytes,
             current: None,
             failed: None,
+            out_of_time: false,
         }
     }
 
     fn open(&self, file: &str) -> Result<(ArrowReaderMetadata, ProjectionMask)> {
         let f = std::fs::File::open(self.dir.join(file))?;
-        let meta = ArrowReaderMetadata::load(&f, ArrowReaderOptions::new())?;
+        // The page index (when the file has one) lets a slice skip the pages before it.
+        let options = ArrowReaderOptions::new().with_page_index_policy(PageIndexPolicy::Optional);
+        let meta = ArrowReaderMetadata::load(&f, options)?;
         let names = ["id", "ts", "source", "message", "exception", "template"];
         let roots: Vec<usize> = names
             .iter()
@@ -559,25 +727,54 @@ impl<'a> SegmentUnits<'a> {
         Ok((meta, mask))
     }
 
+    /// The cursor of the next non-empty row group of `meta`, from `group` on.
+    fn cursor(file: usize, meta: &ArrowReaderMetadata, mask: &ProjectionMask, mut group: usize, slice_bytes: usize) -> Option<Cursor> {
+        while group < meta.metadata().num_row_groups() {
+            let (rows, row_bytes) = estimated_row_bytes(meta, group);
+            if rows > 0 {
+                return Some(Cursor {
+                    file,
+                    meta: meta.clone(),
+                    mask: mask.clone(),
+                    group,
+                    group_rows: rows,
+                    next_row: 0,
+                    slice_rows: (slice_bytes / row_bytes).clamp(MIN_SLICE_ROWS, DOC_BATCH_ROWS),
+                    row_bytes,
+                });
+            }
+            group += 1;
+        }
+        None
+    }
+
     fn next_unit(&mut self) -> Option<Unit> {
-        if self.failed.is_some() {
+        if self.failed.is_some() || self.out_of_time {
             return None;
         }
         loop {
-            if let Some((file, meta, mask, group)) = &mut self.current {
-                if *group < meta.metadata().num_row_groups() {
+            if let Some(c) = &mut self.current {
+                if c.next_row < c.group_rows {
+                    let rows = c.slice_rows.min(c.group_rows - c.next_row);
                     let unit = Unit {
-                        file: *file,
-                        path: self.dir.join(&self.files[*file]),
-                        meta: meta.clone(),
-                        mask: mask.clone(),
-                        group: *group,
+                        file: c.file,
+                        path: self.dir.join(&self.files[c.file]),
+                        meta: c.meta.clone(),
+                        mask: c.mask.clone(),
+                        group: c.group,
+                        group_rows: c.group_rows,
+                        offset: c.next_row,
+                        rows,
+                        bytes: rows * c.row_bytes,
                     };
-                    *group += 1;
+                    c.next_row += rows;
                     self.emitted += 1;
                     return Some(unit);
                 }
-                self.current = None;
+                let (file, group) = (c.file, c.group + 1);
+                let (meta, mask) = (c.meta.clone(), c.mask.clone());
+                self.current = Self::cursor(file, &meta, &mask, group, self.slice_bytes);
+                continue;
             }
             let i = self.next_file;
             let file = self.files.get(i)?;
@@ -586,11 +783,12 @@ impl<'a> SegmentUnits<'a> {
                     .deadline
                     .is_some_and(|d| out_of_time(d, self.began, Instant::now(), self.emitted, self.committed.load(Ordering::Relaxed)))
             {
+                self.out_of_time = true;
                 return None;
             }
             self.next_file += 1;
             match self.open(file) {
-                Ok((meta, mask)) => self.current = Some((i, meta, mask, 0)),
+                Ok((meta, mask)) => self.current = Self::cursor(i, &meta, &mask, 0, self.slice_bytes),
                 Err(e) => {
                     self.failed = Some(e.context(format!("opening {file}")));
                     return None;
@@ -604,6 +802,15 @@ impl<'a> SegmentUnits<'a> {
         self.next_file
     }
 
+    /// Why the iteration ended: the time, or every file fed.
+    fn stop_cause(&self) -> StopCause {
+        if self.out_of_time {
+            StopCause::Time
+        } else {
+            StopCause::Done
+        }
+    }
+
     fn error(&mut self) -> Option<anyhow::Error> {
         self.failed.take()
     }
@@ -612,6 +819,10 @@ impl<'a> SegmentUnits<'a> {
 /// State shared by the store and its indexing thread.
 pub struct FtsShared {
     pub fts: Fts,
+    /// How long a step keeps starting segments ([`STEP_TIME`]; tests shorten it).
+    step_time: AtomicU64,
+    /// The threads that read row groups and build documents for [`index_files`](Fts::index_files).
+    pool: rayon::ThreadPool,
     /// The one writer (Tantivy allows one per index), while there is work.
     writer: Mutex<Option<IndexWriter>>,
     stop: AtomicBool,
@@ -645,6 +856,7 @@ impl FtsService {
         bulk_import: Arc<AtomicBool>,
         generation: Arc<AtomicU64>,
         budget: WriterBudget,
+        read_threads: usize,
     ) -> Result<FtsService> {
         let epoch = match meta_u64(&conn, "fts_epoch") {
             0 => {
@@ -659,6 +871,8 @@ impl FtsService {
         }
         let shared = Arc::new(FtsShared {
             fts,
+            step_time: AtomicU64::new(STEP_TIME.as_micros() as u64),
+            pool: read_pool(read_threads),
             writer: Mutex::new(None),
             stop: AtomicBool::new(false),
             wake: (Mutex::new(true), Condvar::new()),
@@ -787,34 +1001,48 @@ fn todo(conn: &Connection) -> Result<(Vec<String>, HashSet<u32>)> {
 }
 
 /// Segments indexed under one lock and one commit at most (the lock is held that long; imports and compaction wait).
+/// Why 64: with tiny segments the clock alone would let a step start hundreds, and one `UPDATE ... IN (?)` marks them all;
+/// the step's time ([`STEP_TIME`]) is what normally ends a step. Not a Setting: no user-visible effect either way.
 const MAX_SEGMENTS_PER_STEP: usize = 64;
 
 /// The time a step keeps starting segments: the commit follows the clock, so a faster feed does not commit more often
 /// (every commit leaves a small index segment per writer thread for the merges) and a slower one still lets imports in.
 const STEP_TIME: Duration = Duration::from_secs(2);
 
-/// Most threads reading row groups and building documents.
+/// Most threads reading row groups and building documents when the setting is automatic (cores minus one up to this:
+/// the work is CPU and file reads; past 8 the single in-order writer is the limit, performance.md).
 const MAX_READ_THREADS: usize = 8;
 
-/// Row groups per chunk of the feed (a group is up to 65,536 rows).
-const READ_CHUNK: usize = 2;
+/// Read threads chosen automatically: the cores minus one, at most [`MAX_READ_THREADS`], at least one.
+pub fn auto_read_threads() -> usize {
+    threads(WorkKind::Cpu, None).clamp(1, MAX_READ_THREADS)
+}
 
-/// The pipeline of the indexer: row groups are read and turned into documents on a shared pool, committed in order.
-fn stages(cancel: &AtomicBool) -> Stages<'_> {
-    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
-    let pool = POOL.get_or_init(|| {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(threads(WorkKind::Cpu, None).clamp(1, MAX_READ_THREADS))
-            .thread_name(|i| format!("debrief-fts-docs-{i}"))
-            .start_handler(|_| {
-                lower_priority();
-            })
-            .build()
-            .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().num_threads(1).build().expect("a one-thread pool"))
-    });
+/// The pool of the indexer: row group slices are read and turned into documents on it, committed in order. `threads` 0 is
+/// automatic. Its threads run lowered ([`lower_priority`]).
+fn read_pool(threads: usize) -> rayon::ThreadPool {
+    let n = if threads == 0 { auto_read_threads() } else { threads.clamp(1, 256) };
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(n)
+        .thread_name(|i| format!("debrief-fts-docs-{i}"))
+        .start_handler(|_| {
+            lower_priority();
+        })
+        .build()
+        .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().num_threads(1).build().expect("a one-thread pool"))
+}
+
+/// Slices read, built or waiting at once: two for each thread of the pool (the pool never waits for the writer while the
+/// next slices wait in the queue); the byte budget ([`FEED_MEMORY`]) bounds them further.
+fn feed_window(pool: &rayon::ThreadPool) -> usize {
+    pool.current_num_threads() * 2
+}
+
+/// The pipeline of the indexer over `pool`.
+fn stages<'a>(pool: &'a rayon::ThreadPool, cancel: &'a AtomicBool) -> Stages<'a> {
     Stages {
         pool,
-        chunk: READ_CHUNK,
+        chunk: 1,
         cancel: Some(cancel),
     }
 }
@@ -859,14 +1087,17 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
             seg_dir,
             files: batch,
             ready: &ready,
-            deadline: Some(Instant::now() + STEP_TIME),
+            deadline: Some(Instant::now() + Duration::from_micros(s.step_time.load(Ordering::Relaxed))),
+            memory: FEED_MEMORY,
+            down: crate::shutdown::down,
         },
-        &stages(&s.stop),
+        &stages(&s.pool, &s.stop),
+        feed_window(&s.pool),
         |n| s.pending.store(total - n as u64, Ordering::SeqCst),
     );
-    let fed = fed_at.elapsed();
-    let started = match result {
-        Ok(n) => n,
+    let fed_for = fed_at.elapsed();
+    let fed = match result {
+        Ok(f) => f,
         Err(e) => {
             let _ = w.rollback();
             if s.stop.load(Ordering::SeqCst) {
@@ -879,20 +1110,23 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
             return Err(e.context(format!("indexing {bad}")));
         }
     };
-    let batch = &batch[..started];
+    let batch = &batch[..fed.started];
     // The process is exiting: nothing more is written (the documents added go with the writer and the segments stay
-    // unindexed, so they are indexed again next time).
-    if crate::shutdown::down() {
+    // unindexed, so they are indexed again next time). The input may have been cut short by it, which no other check
+    // sees.
+    if fed.stop == StopCause::Shutdown || crate::shutdown::down() {
+        log::info!(
+            "full-text index step abandoned: {} ({} segments started, {} documents added, not committed)",
+            fed.stop.as_str(),
+            fed.started,
+            fed.docs
+        );
         let _ = w.rollback();
         return Ok(Turn::Idle);
     }
     let committing = Instant::now();
     s.fts.commit(w, epoch)?;
-    log::debug!(
-        "full-text index step: {} segments, read and added in {fed:.2?}, committed in {:.2?}",
-        batch.len(),
-        committing.elapsed()
-    );
+    step_log(&fed, files.len(), fed_for, committing.elapsed());
     // One statement (one commit, one write-ahead-log sync) for the step's segments, not one per segment.
     let marks = vec!["?"; batch.len()].join(", ");
     conn.execute(
@@ -901,6 +1135,33 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
     )?;
     s.pending.store(total - batch.len() as u64, Ordering::SeqCst);
     Ok(Turn::Worked)
+}
+
+/// Steps whose summary is logged at info: the first of a run of them and then every [`STEP_LOG_EVERY`]th (the rest at debug),
+/// so a million-event index leaves a few hundred lines, not one per second.
+static STEPS_LOGGED: AtomicUsize = AtomicUsize::new(0);
+/// Why 20: at one step a second that is a line every 20 s at info, enough to follow a long index in a bundle.
+const STEP_LOG_EVERY: usize = 20;
+
+/// The summary line of a committed step (ER-27): what was indexed, how it stopped and the memory the feed held.
+fn step_log(fed: &Fed, files_todo: usize, read_and_added: Duration, committed_in: Duration) {
+    let n = STEPS_LOGGED.fetch_add(1, Ordering::Relaxed);
+    let level = if n.is_multiple_of(STEP_LOG_EVERY) {
+        log::Level::Info
+    } else {
+        log::Level::Debug
+    };
+    log::log!(
+        level,
+        "full-text index step {n}: {} of {files_todo} segments, {} documents in {} slices, read and added in {read_and_added:.2?}, \
+         committed in {committed_in:.2?}; stopped because: {}; feed held at most {} MB estimated ({} MB built)",
+        fed.started,
+        fed.docs,
+        fed.slices,
+        fed.stop.as_str(),
+        fed.peak_bytes >> 20,
+        fed.peak_built_bytes >> 20,
+    );
 }
 
 /// The segment a failure names (its message holds the file name), when it does.
@@ -1017,6 +1278,8 @@ mod tests {
         .unwrap();
         let s = FtsShared {
             writer: Mutex::new(Some(fts.writer().unwrap())),
+            pool: read_pool(1),
+            step_time: AtomicU64::new(STEP_TIME.as_micros() as u64),
             fts,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
@@ -1061,6 +1324,8 @@ mod tests {
         .unwrap();
         let s = FtsShared {
             writer: Mutex::new(None),
+            pool: read_pool(1),
+            step_time: AtomicU64::new(STEP_TIME.as_micros() as u64),
             fts,
             stop: AtomicBool::new(false),
             wake: (Mutex::new(false), Condvar::new()),
@@ -1324,12 +1589,22 @@ mod tests {
             files: &files,
             ready: &ready,
             deadline,
+            memory: FEED_MEMORY,
+            down: crate::shutdown::down,
         };
         let spent = std::time::Instant::now();
-        let n = s.fts.index_files(&mut w, feed(Some(spent)), &stages(&cancel), |_| {}).unwrap();
-        assert_eq!(n, 1, "the deadline had passed: one segment, not {}", files.len());
-        let n = s.fts.index_files(&mut w, feed(None), &stages(&cancel), |_| {}).unwrap();
-        assert_eq!(n, files.len(), "no deadline: all of them");
+        let n = s
+            .fts
+            .index_files(&mut w, feed(Some(spent)), &stages(&s.pool, &cancel), feed_window(&s.pool), |_| {})
+            .unwrap();
+        assert_eq!(n.started, 1, "the deadline had passed: one segment, not {}", files.len());
+        assert_eq!(n.stop, StopCause::Time);
+        let n = s
+            .fts
+            .index_files(&mut w, feed(None), &stages(&s.pool, &cancel), feed_window(&s.pool), |_| {})
+            .unwrap();
+        assert_eq!(n.started, files.len(), "no deadline: all of them");
+        assert_eq!(n.stop, StopCause::Done);
     }
 
     /// A segment of several row groups (read in parallel) is indexed whole and in order: every event once.
@@ -1384,5 +1659,273 @@ mod tests {
         // Nothing added yet counts the whole time so far per group.
         assert!(out_of_time(deadline, began, now, 3, 0));
         assert!(out_of_time(deadline, began, deadline, 0, 0));
+    }
+
+    /// The index feed is bounded by bytes, not by rows: long events (10 KB each) read from row groups of a thousand rows
+    /// leave at most the feed's memory of documents built at once, however many the pool and the queue could hold.
+    #[test]
+    fn the_feed_holds_long_events_within_its_byte_budget() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-bytes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let seg_dir = dir.join("segments");
+        std::fs::create_dir_all(&seg_dir).unwrap();
+        let (files, rows) = write_long_segments(&seg_dir, 2, 3, 600, 10 << 10);
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 32 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let pool = read_pool(4);
+        let cancel = AtomicBool::new(false);
+        let ready: HashSet<u32> = [1].into_iter().collect();
+        let run = |memory: usize| {
+            let mut w = fts.writer().unwrap();
+            let fed = fts
+                .index_files(
+                    &mut w,
+                    Feed {
+                        seg_dir: &seg_dir,
+                        files: &files,
+                        ready: &ready,
+                        deadline: None,
+                        memory,
+                        down: crate::shutdown::down,
+                    },
+                    &stages(&pool, &cancel),
+                    feed_window(&pool),
+                    |_| {},
+                )
+                .unwrap();
+            w.rollback().unwrap();
+            fed
+        };
+        let memory = 4 << 20;
+        let bounded = run(memory);
+        assert_eq!(bounded.docs, rows as u64, "every row is read");
+        assert!(
+            bounded.peak_built_bytes <= memory,
+            "{} MB of documents were built at once against a budget of {} MB",
+            bounded.peak_built_bytes >> 20,
+            memory >> 20
+        );
+        assert!(bounded.peak_bytes <= memory, "the estimate held {} bytes", bounded.peak_bytes);
+        // The probe can see a breach: with a budget of 1 GB the same files put far more than 4 MB in flight.
+        let unbounded = run(1 << 30);
+        assert!(
+            unbounded.peak_built_bytes > 2 * memory,
+            "the unbounded feed built {} MB at once; the test would not notice a breach",
+            unbounded.peak_built_bytes >> 20
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Writes `files` segments of `groups` row groups of `rows` events of about `text` bytes each (source 1) and returns
+    /// their names and the number of events.
+    fn write_long_segments(dir: &Path, files: usize, groups: usize, rows: usize, text: usize) -> (Vec<String>, usize) {
+        use duckdb::arrow::array::{ArrayRef, Int64Array, StringArray, UInt32Array, UInt64Array};
+        use duckdb::arrow::datatypes::{DataType, Field as AField, Schema as ASchema};
+        use duckdb::arrow::record_batch::RecordBatch;
+        use parquet::arrow::ArrowWriter;
+        let schema = Arc::new(ASchema::new(vec![
+            AField::new("id", DataType::UInt64, false),
+            AField::new("ts", DataType::Int64, true),
+            AField::new("source", DataType::UInt32, false),
+            AField::new("message", DataType::Utf8, false),
+            AField::new("exception", DataType::Utf8, true),
+            AField::new("template", DataType::Utf8, true),
+        ]));
+        let mut names = Vec::new();
+        let mut id = 0u64;
+        for f in 0..files {
+            let name = format!("long-{f}.parquet");
+            let props = parquet::file::properties::WriterProperties::builder()
+                .set_max_row_group_row_count(Some(rows))
+                .build();
+            let mut w = ArrowWriter::try_new(std::fs::File::create(dir.join(&name)).unwrap(), schema.clone(), Some(props)).unwrap();
+            for _ in 0..groups {
+                let ids: Vec<u64> = (0..rows as u64).map(|i| id + i).collect();
+                let message: Vec<String> = ids.iter().map(|i| format!("alpha {i} {}", "word ".repeat(text / 5))).collect();
+                id += rows as u64;
+                let cols: Vec<ArrayRef> = vec![
+                    Arc::new(UInt64Array::from(ids.clone())),
+                    Arc::new(Int64Array::from(ids.iter().map(|i| *i as i64).collect::<Vec<_>>())),
+                    Arc::new(UInt32Array::from(vec![1u32; rows])),
+                    Arc::new(StringArray::from(message)),
+                    Arc::new(StringArray::from(vec![None::<&str>; rows])),
+                    Arc::new(StringArray::from(vec![None::<&str>; rows])),
+                ];
+                w.write(&RecordBatch::try_new(schema.clone(), cols).unwrap()).unwrap();
+                w.flush().unwrap();
+            }
+            w.close().unwrap();
+            names.push(name);
+        }
+        (names, files * groups * rows)
+    }
+
+    /// A segment is cut into slices of a row group without losing or doubling a row, whatever the slice size.
+    #[test]
+    fn slices_of_a_row_group_cover_every_row_once() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-slices-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (files, rows) = write_long_segments(&dir, 1, 3, 1000, 200);
+        let committed = AtomicUsize::new(0);
+        // 40 KB slices of 200-byte events: about 160 rows each.
+        let mut units = SegmentUnits::new(&dir, &files, None, &committed, 40 << 10);
+        let mut covered = vec![0u8; rows];
+        let mut n = 0;
+        while let Some(u) = units.next_unit() {
+            assert!(u.rows >= 1 && u.rows <= DOC_BATCH_ROWS);
+            for r in 0..u.rows {
+                covered[u.group * 1000 + u.offset + r] += 1;
+            }
+            n += 1;
+        }
+        assert!(n > 3, "cut into several slices per group: {n}");
+        assert!(covered.iter().all(|c| *c == 1));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Once the deadline has cut the iteration it stays cut, whatever the clock reads next.
+    #[test]
+    fn the_deadline_cut_is_sticky() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-sticky-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let (files, _) = write_long_segments(&dir, 3, 1, 10, 50);
+        let committed = AtomicUsize::new(0);
+        let mut units = SegmentUnits::new(&dir, &files, Some(Instant::now()), &committed, 1 << 20);
+        while units.next_unit().is_some() {}
+        assert_eq!(units.started(), 1, "the deadline had passed: the first file only");
+        assert_eq!(units.stop_cause(), StopCause::Time);
+        // The deadline moves away (a slow clock, a descheduled thread): no file is started after the cut.
+        units.deadline = Some(Instant::now() + Duration::from_secs(3600));
+        assert!(units.next_unit().is_none());
+        assert_eq!(units.started(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The step's time cut at the store level: with no time at all each step indexes the first segment only; the turns after
+    /// it index the rest, and every event ends up in the index once.
+    #[test]
+    fn a_step_out_of_time_marks_only_its_first_segment_and_later_turns_index_the_rest() {
+        use debrief_core::ports::Ingest;
+        let dir = std::env::temp_dir().join(format!("debrief-fts-cut-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let logs = dir.join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        let store = crate::DuckStore::create(
+            &dir.join("store"),
+            debrief_core::Profile::default_profile(),
+            debrief_core::PluginRegistry::new(),
+        )
+        .unwrap();
+        // The indexing thread is stopped and joined first: the test takes the turns.
+        let svc = store.inner.fts.as_ref().unwrap();
+        svc.shared.stop.store(true, Ordering::SeqCst);
+        svc.wake();
+        // A DuckStore keeps its FtsService until dropped; wait for the thread by its handle.
+        let handle = svc.handle.as_ref().unwrap();
+        while !handle.is_finished() {
+            std::thread::yield_now();
+        }
+        for (i, name) in ["a", "b", "c", "d"].iter().enumerate() {
+            let file = logs.join(format!("{name}.log"));
+            std::fs::write(
+                &file,
+                format!("2026-10-14 10:00:0{i} INFO alpha {name}1\n2026-10-14 10:01:0{i} INFO alpha {name}2\n"),
+            )
+            .unwrap();
+            store.open(&[file]).unwrap().wait().unwrap();
+        }
+        let conn = store.inner.conn().unwrap();
+        let count = |sql: &str| conn.query_row(sql, [], |r| r.get::<_, i64>(0)).unwrap();
+        let segments = count("SELECT count(*) FROM segments");
+        assert!(segments >= 4, "one segment per import: {segments}");
+        let s = &svc.shared;
+        s.stop.store(false, Ordering::SeqCst);
+        // No time at all for a step.
+        s.step_time.store(0, Ordering::Relaxed);
+        let write_lock = Mutex::new(());
+        let seg_dir = dir.join("store").join(SEGMENTS_DIR);
+        s.gate.news();
+        assert_eq!(step(s, &seg_dir, &conn, &write_lock, svc.epoch).unwrap(), Turn::Worked);
+        assert_eq!(count("SELECT count(*) FROM segments WHERE indexed"), 1, "the first segment only");
+        let mut turns = 1;
+        loop {
+            s.gate.news();
+            match step(s, &seg_dir, &conn, &write_lock, svc.epoch).unwrap() {
+                Turn::Worked => turns += 1,
+                _ => break,
+            }
+            assert!(turns <= segments + 1, "each turn indexes a segment");
+        }
+        assert_eq!(count("SELECT count(*) FROM segments WHERE NOT indexed"), 0);
+        let all: Vec<u64> = {
+            let mut stmt = conn.prepare("SELECT id FROM events ORDER BY id").unwrap();
+            stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect()
+        };
+        assert_eq!(s.fts.docs(), all.len() as u64, "every event once");
+        let mut found = s
+            .fts
+            .all_ids(&debrief_core::words::WordQuery::parse("alpha"), 10_000)
+            .unwrap()
+            .unwrap();
+        found.sort_unstable();
+        assert_eq!(found, all);
+        drop(conn);
+        drop(store);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An input cut short by the process exiting is not reported as a finished step.
+    #[test]
+    fn an_input_cut_short_by_the_exit_says_so() {
+        static CALLS: AtomicUsize = AtomicUsize::new(0);
+        fn exits_after_a_few_slices() -> bool {
+            CALLS.fetch_add(1, Ordering::SeqCst) >= 5
+        }
+        let dir = std::env::temp_dir().join(format!("debrief-fts-exit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let seg_dir = dir.join("segments");
+        std::fs::create_dir_all(&seg_dir).unwrap();
+        let (files, rows) = write_long_segments(&seg_dir, 2, 3, 600, 100);
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 32 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let pool = read_pool(2);
+        let cancel = AtomicBool::new(false);
+        let ready: HashSet<u32> = [1].into_iter().collect();
+        let mut w = fts.writer().unwrap();
+        let fed = fts
+            .index_files(
+                &mut w,
+                Feed {
+                    seg_dir: &seg_dir,
+                    files: &files,
+                    ready: &ready,
+                    deadline: None,
+                    memory: FEED_MEMORY,
+                    down: exits_after_a_few_slices,
+                },
+                &stages(&pool, &cancel),
+                feed_window(&pool),
+                |_| {},
+            )
+            .unwrap();
+        assert_eq!(fed.stop, StopCause::Shutdown);
+        assert!(fed.docs < rows as u64, "the input was cut: {} of {rows}", fed.docs);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

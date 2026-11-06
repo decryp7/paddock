@@ -311,7 +311,11 @@ mod tests {
         let want: Vec<_> = (0..200u32).map(|i| (i, u64::from(i) * 2, i as usize + 1)).collect();
         assert_eq!(seen, want);
         // The window (3) waiting in the queue, one being committed, one being read.
-        assert!(peak.load(Ordering::SeqCst) <= 3 + 2, "in flight at most a window: {}", peak.load(Ordering::SeqCst));
+        assert!(
+            peak.load(Ordering::SeqCst) <= 3 + 2,
+            "in flight at most a window: {}",
+            peak.load(Ordering::SeqCst)
+        );
     }
 
     #[test]
