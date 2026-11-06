@@ -619,6 +619,19 @@ impl Backend for SimBackend {
     fn job_gone(&mut self) -> bool {
         lk(&self.s).w.job == Job::Absent
     }
+
+    /// The process of the job the OS runs: the old build's job that outlived a removal has its own, older identity, so the
+    /// settle check can tell it from the job this registration started (ADR 0056 P1-4).
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        let sim = lk(&self.s);
+        let w = &sim.w;
+        if w.job != Job::Running {
+            return None;
+        }
+        let pid = 1000 + w.job_ver as u32;
+        let started = if w.job_ver == w.owner { u64::MAX } else { 1 };
+        Some(paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(started)))
+    }
     fn pause(&mut self, how_long: Duration) {
         advance(
             &mut lk(&self.s).w,
@@ -1287,6 +1300,10 @@ fn state_checks(w: &World) -> Vec<Viol> {
         && matches!(w.reg, Reg::Absent | Reg::Registered)
         && !w.program_gone
         && !(hold && w.reg == Reg::Registered)
+        // Allowed outcome (ADR 0056): where the OS needs the old registration removed before the new one is made (macOS, R03), a
+        // register that keeps failing after the removal leaves nothing. The hold says the service could not be registered, with
+        // the cause, and Repair tries again.
+        && !(w.caps == Caps::Mac && matches!(plan, Plan::Leave(Hold::RegisterFailed(_))))
     {
         let after = run_chain(&cooperative(w), &[Ev::Start, Ev::Wait, Ev::Start, Ev::Wait]);
         if after.reg == Reg::Absent {
@@ -1697,20 +1714,7 @@ fn configs() -> &'static [(Caps, Resp)] {
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
-const KNOWN_FAILING: &[(&str, &str)] = &[
-    (
-        "the record says this version is registered but the OS holds another registration",
-        "P1-4 on the simulator side: MODEL_REPLAY='Mac/Fast/Healthy|Update+RemovalTimeout' leaves the old build's job answering while the record says V2 registered; the settle check (same process across 2 looks, started after the register) needs the simulator to answer `job_process` with the lingering job's identity.",
-    ),
-    (
-        "more unattended registers across starts than the cap allows",
-        "open: MODEL_REPLAY='Mac/Never/Healthy|Update+RemovalTimeout;JobRefuse;Start+RegNotAsWritten' makes 4 registers over two starts. The Update's replace used its 3 attempts on a lingering old job (the settle check needs the simulator's job_process); the Start then registers once more. To be traced with the simulator's lingering job answering job_process.",
-    ),
-    (
-        "the user's service was lost",
-        "open decision: MODEL_REPLAY='Mac/Fast/Healthy|Update+RegOther': a new version replaces a healthy old build's service (the removal comes first on macOS, R03) and every register then fails, so nothing is left. Either the invariant exempts a version-change replace whose register keeps failing (and the hold says so), or the replace registers before it removes where the OS allows it.",
-    ),
-];
+const KNOWN_FAILING: &[(&str, &str)] = &[];
 
 #[test]
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {

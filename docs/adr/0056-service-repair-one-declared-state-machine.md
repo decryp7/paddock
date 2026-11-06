@@ -203,6 +203,12 @@ identity check (the plan's `Healthy`): it leaves it alone, logs "{app}'s backgro
 success. Only an unhealthy, refused, missing or stale registration is replaced, so a request cannot lose a service that works
 (the model's `Install+RegOther` on a healthy service).
 
+**A version-change replace that keeps failing.** Where registering over the old registration replaces it in one step (systemd, the
+Windows `Run` value: no pinned build identity), the replace registers the new service first and does not remove the old one, so a
+register that fails leaves the old service working. Where the OS needs the old registration removed first (macOS, R03), a register
+that keeps failing after the removal leaves nothing registered. That is an allowed outcome, not a lost service: the hold says the
+background service could not be registered, with the cause, and Repair tries again; the model records it as allowed.
+
 **R1.** `Looked(answers | refused | settled)` is an event for a look during a wait, and a failed `unregister` or `evict` is an
 event too. **R2.** Settling by `Running` needs the same pid and start time on two looks of a process that started after the
 register; `Registering` is entered only on a confirmed `Unregistered` or `GoneTimedOut` (recorded which). **R3.** `wanted` is

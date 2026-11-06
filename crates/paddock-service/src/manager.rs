@@ -259,6 +259,10 @@ impl Manager {
                 before.phase_of(&self.version),
                 Some(Phase::Registering | Phase::RemovingOld { .. })
             );
+        // Where registering over what is there replaces it in one step (no pinned build identity: systemd, the Windows Run value), the
+        // new registration is made first and the old one is not removed, so a register that fails leaves the old service working.
+        let register_first = !self.backend.capabilities().pinned_identity && !nothing_to_remove && !register_only_once;
+        let register_only_once = register_only_once || register_first;
         let allowed = if register_only_once {
             1
         } else {
