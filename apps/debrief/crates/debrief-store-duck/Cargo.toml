@@ -11,6 +11,10 @@ description = "Debrief's DuckDB store (ADR 0014): events as zstd Parquet segment
 # It links the official prebuilt libduckdb (never `bundled`, which needs several GB of RAM to compile):
 #   eval "$(crates/debrief-store-duck/scripts/fetch-libduckdb.sh "$HOME/.cache/debrief-libduckdb")"
 
+[features]
+# `testlog`: captures `log` records, for this crate's tests and the store worker's.
+test-support = []
+
 [dependencies]
 debrief-core = { path = "../debrief-core" }
 # Gives freed memory back to the OS when an import or an index build ends (`debrief_alloc::release`).
@@ -19,7 +23,9 @@ anyhow.workspace = true
 # CSV export of SQL console results.
 csv.workspace = true
 duckdb = { workspace = true, features = ["appender-arrow"] }
-log.workspace = true
+log = { workspace = true, features = ["kv"] }
+# `fingerprint`: shows that two paths were equal without writing them (the same function as the app and the UI use).
+paddock-log = { path = "../../../../crates/paddock-log" }
 serde.workspace = true
 toml.workspace = true
 serde_json = { workspace = true, features = ["preserve_order"] }

@@ -5,6 +5,7 @@
 //!
 //! Operations not offered yet answer [`StoreError::Unsupported`] naming the phase that adds them.
 
+pub mod activity;
 mod analysis;
 mod anomalies;
 mod catalogue;
@@ -26,6 +27,7 @@ pub mod promote;
 mod qlang;
 mod read;
 mod redaction;
+mod repeat;
 mod reuse;
 mod schema;
 pub mod segments;
@@ -34,6 +36,8 @@ mod spans;
 mod sql;
 pub mod stats;
 mod tail;
+#[cfg(any(test, feature = "test-support"))]
+pub mod testlog;
 mod writer;
 
 pub use compact::Compaction;
@@ -294,34 +298,45 @@ impl Inner {
     /// complete without them; the next change retries).
     ///
     /// `progress` names each stage and is polled for Cancel: a cancelled import skips the compaction (only an
-    /// optimisation; the next change retries) but still orders the events, so what was read stays usable.
-    fn maintain(&self, conn: &Connection, progress: Option<&ImportProgress>) {
+    /// optimisation; the next change retries) but still orders the events, so what was read stays usable. Returns the
+    /// time of each stage, for the import's summary line.
+    fn maintain(&self, conn: &Connection, progress: Option<&ImportProgress>) -> MaintainTimes {
         let stage = |label: &str| {
             if let Some(p) = progress {
                 p.set_stage(Some(label));
             }
         };
+        let mut times = MaintainTimes::default();
         let tc = std::time::Instant::now();
         if progress.is_some_and(|p| p.cancel_flag().load(Ordering::SeqCst)) {
-            log::info!("import cancelled: segment compaction skipped");
+            log::info!(EventId = "store.compact.skipped"; "import cancelled: segment compaction skipped");
         } else {
             stage("Compacting segments");
             match compact::compact(conn, &self.dir, &self.schema) {
-                Ok(c) if c.replaced > 0 => log::info!("compacted {} segments into {}", c.replaced, c.written),
+                Ok(c) if c.replaced > 0 => {
+                    times.replaced = c.replaced as u64;
+                    times.written = c.written as u64;
+                    log::info!(EventId = "store.compact", Replaced = c.replaced as u64, Written = c.written as u64, Ms = ms(tc.elapsed()); "compacted {} segments into {}", c.replaced, c.written);
+                }
                 Ok(_) => {}
-                Err(e) => log::warn!("segment compaction failed: {e:#}"),
+                Err(e) => log::warn!(EventId = "store.compact.failed"; "segment compaction failed: {e:#}"),
             }
         }
+        times.compact_ms = ms(tc.elapsed());
         stage("Ordering events by time");
-        log::debug!("import: compact {:?}", tc.elapsed());
-        if let Err(e) = pos::rebuild(conn) {
-            log::warn!("time-order positions could not be rebuilt: {e}");
+        let tp = std::time::Instant::now();
+        crate::activity::record(crate::activity::Loop::Positions, crate::activity::Turn::Worked);
+        match pos::rebuild(conn) {
+            Ok(()) => log::debug!(EventId = "store.positions.rebuilt", Ms = ms(tp.elapsed()); "time-order positions rebuilt"),
+            Err(e) => {
+                log::warn!(EventId = "store.positions.failed", Ms = ms(tp.elapsed()); "time-order positions could not be rebuilt: {e}")
+            }
         }
-        log::debug!("import: pos {:?}", tc.elapsed());
+        times.pos_ms = ms(tp.elapsed());
         stage("Saving the index");
         // Write the catalog into the database file now, so a reopen does not replay the WAL.
         if let Err(e) = conn.execute_batch("CHECKPOINT") {
-            log::warn!("checkpoint failed: {e}");
+            log::warn!(EventId = "store.checkpoint.failed"; "checkpoint failed: {e}");
         }
         self.generation.fetch_add(1, Ordering::SeqCst);
         if let Some(f) = &self.fts {
@@ -332,6 +347,7 @@ impl Inner {
         }
         // The burst's free pages go back to the OS now: the process may idle afterwards.
         debrief_alloc::release();
+        times
     }
 
     pub(crate) fn conn(&self) -> StoreResult<Conn<'_>> {
@@ -489,12 +505,27 @@ impl Inner {
         self.import_keeping(paths, progress, std::collections::HashMap::new())
     }
 
-    /// [`Inner::import`] where the sources at the paths of `keep` keep the given ids (a reload, see `reuse`).
+    /// [`Inner::import`] where the sources at the paths of `keep` keep the given ids (a reload, see `reuse`). Logs one
+    /// `store.import` line with the outcome and the time of each stage.
     pub(crate) fn import_keeping(
         &self,
         paths: &[PathBuf],
         progress: &ImportProgress,
         keep: std::collections::HashMap<String, u32>,
+    ) -> StoreResult<ImportReport> {
+        let started = std::time::Instant::now();
+        let mut stats = ImportStats::default();
+        let result = self.import_timed(paths, progress, keep, &mut stats);
+        stats.log(&result, progress.cancel_flag().load(Ordering::SeqCst), started.elapsed());
+        result
+    }
+
+    fn import_timed(
+        &self,
+        paths: &[PathBuf],
+        progress: &ImportProgress,
+        keep: std::collections::HashMap<String, u32>,
+        stats: &mut ImportStats,
     ) -> StoreResult<ImportReport> {
         let started = std::time::Instant::now();
         // From here the progress reads "finding files" with live counts; it ends with this function, however.
@@ -563,7 +594,9 @@ impl Inner {
         parsers::record(&conn, &parser_set).map_err(engine)?;
         record_fingerprints(&conn, &fingerprints);
         let t2 = t0.elapsed();
-        self.maintain(&conn, Some(progress));
+        stats.parse = t1;
+        stats.finish = t2.saturating_sub(t1);
+        stats.maintain = self.maintain(&conn, Some(progress));
         self.bump_version(&conn)?;
         log::debug!("import: parse {t1:?} finish {t2:?} maintained {:?}", t0.elapsed());
         let mut report = ImportReport::default();
@@ -591,6 +624,101 @@ impl Inner {
     }
 }
 
+fn ms(d: std::time::Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
+
+/// The time of each stage of [`Inner::maintain`], and what compaction did.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct MaintainTimes {
+    compact_ms: u64,
+    pos_ms: u64,
+    replaced: u64,
+    written: u64,
+}
+
+/// What an import measured about itself, for its one summary line.
+#[derive(Debug, Default)]
+struct ImportStats {
+    parse: std::time::Duration,
+    finish: std::time::Duration,
+    maintain: MaintainTimes,
+}
+
+impl ImportStats {
+    /// The `store.import` line: info when it ended (done or cancelled), a warning when it failed. A failure's DuckDB error can
+    /// quote a value it could not convert, so only its class (the text before the first colon, "Conversion Error") is written
+    /// at warn and the whole chain at debug only.
+    fn log(&self, result: &StoreResult<ImportReport>, cancelled: bool, total: std::time::Duration) {
+        let maintain_ms = self.maintain.compact_ms.saturating_add(self.maintain.pos_ms);
+        match result {
+            Ok(r) => log::info!(
+                EventId = "store.import",
+                Outcome = if cancelled { "cancelled" } else { "done" },
+                Sources = r.sources.len() as u64,
+                Events = r.events as u64,
+                Bytes = r.bytes,
+                ParseMs = ms(self.parse),
+                FinishMs = ms(self.finish),
+                MaintainMs = maintain_ms,
+                CompactMs = self.maintain.compact_ms,
+                PosMs = self.maintain.pos_ms,
+                SegmentsReplaced = self.maintain.replaced,
+                SegmentsWritten = self.maintain.written,
+                Ms = ms(total);
+                "Import {}", if cancelled { "cancelled" } else { "finished" }
+            ),
+            Err(e) => {
+                let class = failure_class(e);
+                log::warn!(
+                    EventId = "store.import",
+                    Outcome = "failed",
+                    ParseMs = ms(self.parse),
+                    FinishMs = ms(self.finish),
+                    Ms = ms(total),
+                    Why = class.as_str();
+                    "Import failed: {class}"
+                );
+                log::debug!(EventId = "store.import.error"; "Import failed (full error): {e}");
+            }
+        }
+    }
+}
+
+/// What kind of failure an error from a read or a file is, without text that could name a user's file: the kind of the
+/// underlying I/O error when there is one, else "error".
+pub(crate) fn anyhow_class(e: &anyhow::Error) -> String {
+    e.chain()
+        .find_map(|c| c.downcast_ref::<std::io::Error>())
+        .map_or_else(|| "error".to_string(), |io| io.kind().to_string())
+}
+
+/// What kind of failure an import ended with, without any text that could name a user's file or quote a record's value: the
+/// error's kind, and for a database error DuckDB's class (the text before its first colon, "Conversion Error"), which names
+/// what failed without the value it failed on.
+pub(crate) fn failure_class(e: &StoreError) -> String {
+    match e {
+        StoreError::Engine(text) => {
+            let class = text.split_once(':').map_or(text.as_str(), |(class, _)| class).trim();
+            // A long first segment is not a class: it is the message itself, which may carry a value.
+            if class.len() <= 40 && class.chars().all(|c| c.is_ascii_alphanumeric() || c == ' ') {
+                format!("store: {class}")
+            } else {
+                "store".to_string()
+            }
+        }
+        StoreError::Unsupported { .. } => "unsupported".into(),
+        StoreError::Invalid(_) => "invalid".into(),
+        StoreError::Query(_) => "query".into(),
+        StoreError::NotFound(_) => "not found".into(),
+        StoreError::Busy(_) => "busy".into(),
+        StoreError::Cancelled => "cancelled".into(),
+        StoreError::Io(_) => "io".into(),
+        StoreError::Damaged(_) => "damaged".into(),
+        StoreError::Locked(_) => "locked".into(),
+    }
+}
+
 /// Keeps the content fingerprints of the files read (best effort: a rename is then only not recognised).
 fn record_fingerprints(conn: &Connection, fingerprints: &[(u32, debrief_core::ingest::Fingerprint)]) {
     for (id, fp) in fingerprints {
@@ -602,6 +730,15 @@ fn record_fingerprints(conn: &Connection, fingerprints: &[(u32, debrief_core::in
             return;
         }
     }
+}
+
+/// What a freshly opened store holds, for the log (see [`DuckStore::open_counts`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenCounts {
+    pub segments: u64,
+    /// Segments the full-text index has not covered yet.
+    pub waiting: u64,
+    pub data_version: u64,
 }
 
 /// A DuckDB store in a folder (`data.duckdb` plus a `tmp` spill folder). Cheap to share: clones use
@@ -661,7 +798,9 @@ fn recover(conn: &Connection, dir: &Path, schema: &EventSchema) -> anyhow::Resul
         }
     }
     for left in segments::sweep(&seg_dir, &listed) {
-        log::warn!("could not delete {}", left.display());
+        // Relative to the store folder: the folder's own path names the user's project.
+        let shown = left.strip_prefix(dir).unwrap_or(&left);
+        log::warn!(EventId = "store.sweep.not_deleted"; "could not delete {}", shown.display());
     }
     compact::empty_trash(conn)?;
     writer::refresh_view(conn, dir, schema)
@@ -833,6 +972,27 @@ impl DuckStore {
     /// The store folder.
     pub fn dir(&self) -> &Path {
         &self.inner.dir
+    }
+
+    /// Counts for the `store.open` log line: segments, segments still waiting for the full-text index, and the data version.
+    /// `None` when the catalog cannot be read (the line then leaves them out).
+    pub fn open_counts(&self) -> Option<OpenCounts> {
+        let conn = self.inner.conn().ok()?;
+        let (segments, waiting): (u64, u64) = conn
+            .query_row("SELECT count(*), count(*) FILTER (WHERE NOT indexed) FROM segments", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .ok()?;
+        let data_version = conn
+            .query_row("SELECT value FROM meta WHERE key = 'data_version'", [], |r| r.get::<_, String>(0))
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        Some(OpenCounts {
+            segments,
+            waiting,
+            data_version,
+        })
     }
 
     /// Changes the limits; parse threads apply to the next import, DuckDB's settings at once.
@@ -1201,11 +1361,43 @@ impl Search for DuckStore {
 }
 
 #[cfg(test)]
+mod logging_tests;
+#[cfg(test)]
 mod maintain_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_import_failure_logs_its_class_never_the_value_or_the_path() {
+        let conversion = StoreError::Engine("Conversion Error: Could not convert string 'customer-4711' to INT32".into());
+        assert_eq!(failure_class(&conversion), "store: Conversion Error");
+        // A message that is not "Class: text" is not a class: it may carry a value.
+        let long = StoreError::Engine("an unexpected failure while reading the value customer-4711 from the file".into());
+        assert_eq!(failure_class(&long), "store");
+        // Long and plain letters still is not a class: no rule lets a long first segment through.
+        let plain = StoreError::Engine("a very long message that only has letters and spaces in it at all".into());
+        assert_eq!(failure_class(&plain), "store");
+        assert_eq!(failure_class(&StoreError::Engine("IO Error: x".into())), "store: IO Error");
+        assert_eq!(failure_class(&StoreError::Engine("no colon here".into())), "store: no colon here");
+        let io = StoreError::Io("/home/secret-user/secret-name.log: permission denied".into());
+        assert_eq!(failure_class(&io), "io");
+        assert_eq!(failure_class(&StoreError::Cancelled), "cancelled");
+        assert_eq!(failure_class(&StoreError::Locked("x".into())), "locked");
+        assert_eq!(failure_class(&StoreError::Busy("x".into())), "busy");
+        assert_eq!(failure_class(&StoreError::NotFound("x".into())), "not found");
+        assert_eq!(failure_class(&StoreError::Invalid("x".into())), "invalid");
+        assert_eq!(failure_class(&StoreError::Damaged("x".into())), "damaged");
+    }
+
+    #[test]
+    fn a_read_error_is_classed_by_its_io_kind_without_the_path() {
+        let io = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "/home/secret-user/secret-name.log");
+        let e = anyhow::Error::new(io).context("reading the appended lines");
+        assert_eq!(anyhow_class(&e), "permission denied");
+        assert_eq!(anyhow_class(&anyhow::anyhow!("something else at /home/secret-user")), "error");
+    }
 
     #[test]
     fn database_failures_become_typed_errors() {

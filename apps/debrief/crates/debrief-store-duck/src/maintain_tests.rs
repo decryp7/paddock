@@ -61,7 +61,13 @@ fn a_cancelled_import_skips_compaction_but_still_orders_the_events() {
 
     let progress = ImportProgress::default();
     progress.cancel();
-    store.inner.maintain(&conn, Some(&progress));
+    crate::testlog::install();
+    let skipped = store.inner.maintain(&conn, Some(&progress));
+    assert_eq!((skipped.replaced, skipped.written), (0, 0));
+    assert!(
+        !crate::testlog::records("store.compact.skipped").is_empty(),
+        "a cancelled import says it skipped the compaction"
+    );
 
     assert_eq!(segment_files(&conn), files_before, "compaction was skipped");
     let events = store.summary().unwrap().total as u64;
@@ -85,8 +91,22 @@ fn a_cancelled_import_skips_compaction_but_still_orders_the_events() {
     assert_eq!(page.rows.len(), 5, "the store stays queryable");
 
     // The next change (here: an import that is not cancelled) retries the compaction.
-    store.inner.maintain(&conn, Some(&ImportProgress::default()));
+    crate::testlog::install();
+    let times = store.inner.maintain(&conn, Some(&ImportProgress::default()));
     assert_ne!(segment_files(&conn), files_before, "the garbage segments were rewritten");
+    assert!(times.replaced > 0, "the times say what compaction did: {times:?}");
+    let logged = crate::testlog::wait_for("store.compact", std::time::Duration::from_secs(5), |r| {
+        r.props["Replaced"] == times.replaced && r.props["Written"] == times.written
+    })
+    .expect("the compaction's line");
+    assert_eq!(
+        (logged.props["Written"].as_u64(), logged.level),
+        (Some(times.written), log::Level::Info)
+    );
+    // Nothing left to compact: no line (a compaction of zero segments is not an event).
+    let again = store.inner.maintain(&conn, Some(&ImportProgress::default()));
+    assert_eq!((again.replaced, again.written), (0, 0));
+    assert!(crate::testlog::records("store.compact").iter().all(|r| r.props["Replaced"] != 0));
     assert_eq!(store.positioned().unwrap(), store.summary().unwrap().total as u64);
 }
 

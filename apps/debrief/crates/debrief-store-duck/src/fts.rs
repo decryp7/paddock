@@ -15,6 +15,8 @@
 //! - The commit payload names the catalog's `fts_epoch`; an index that is missing, damaged or from another
 //!   epoch is recreated and every segment indexed again.
 
+use crate::activity::{Loop, Turn};
+use crate::repeat::{Failure, RepeatGuard};
 use crate::segments::SEGMENTS_DIR;
 use crate::writer::{meta_u64, set_meta};
 use anyhow::{Context, Result};
@@ -29,7 +31,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tantivy::collector::{Collector, Count, SegmentCollector, TopDocs};
 use tantivy::query::{BooleanQuery, EmptyQuery, Occur, Query, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, FAST, INDEXED};
@@ -651,14 +653,26 @@ fn stages(cancel: &AtomicBool) -> Stages<'_> {
     }
 }
 
+/// What one turn of the indexing loop came to.
+enum Stepped {
+    /// This many segments were indexed in one commit.
+    Indexed(usize),
+    /// Nothing to index.
+    Nothing,
+    /// There is work but the write lock was busy.
+    Blocked,
+}
+
 /// Indexes the next segments (up to [`SEGMENTS_PER_STEP`]) in one commit, if the write lock is free and there are
-/// some; true when it did.
-fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) -> Result<bool> {
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+/// some.
+fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) -> Result<Stepped> {
+    let Ok(_writing) = write_lock.try_lock() else {
+        return Ok(Stepped::Blocked);
+    };
     let (files, ready) = todo(conn)?;
     s.pending.store(files.len() as u64, Ordering::SeqCst);
     if files.is_empty() {
-        return Ok(false);
+        return Ok(Stepped::Nothing);
     }
     let batch = &files[..files.len().min(SEGMENTS_PER_STEP)];
     let mut slot = crate::lock(&s.writer);
@@ -673,7 +687,7 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
     if let Err(e) = result {
         let _ = w.rollback();
         if s.stop.load(Ordering::SeqCst) {
-            return Ok(false);
+            return Ok(Stepped::Nothing);
         }
         // Not retried in a loop: a segment that cannot be indexed stays unsearchable and the failure is reported;
         // the others of the batch are tried again.
@@ -686,7 +700,7 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         conn.execute("UPDATE segments SET indexed = TRUE WHERE file = ?", params![file])?;
     }
     s.pending.store(total - batch.len() as u64, Ordering::SeqCst);
-    Ok(true)
+    Ok(Stepped::Indexed(batch.len()))
 }
 
 /// The segment a failure names (its message holds the file name), when it does.
@@ -695,19 +709,105 @@ fn failing_segment<'a>(e: &anyhow::Error, batch: &'a [String]) -> Option<&'a Str
     batch.iter().find(|f| text.contains(f.as_str()))
 }
 
+/// What the loop did since its writer was last dropped: one `store.fts.idle` line says it when it ends.
+struct Run {
+    started: Instant,
+    steps: u64,
+    segments: u64,
+    busy: Duration,
+}
+
+impl Run {
+    /// One more step that indexed `segments` and took `busy`.
+    fn indexed(&mut self, segments: usize, busy: Duration) {
+        self.steps += 1;
+        self.segments += segments as u64;
+        self.busy += busy;
+    }
+}
+
+/// Why the loop woke.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Wake {
+    /// Someone said there is news (an import, a change).
+    News,
+    /// The half-second wait ran out with segments still waiting (a retry of a busy lock).
+    Retry,
+    /// The half-second wait ran out with nothing to do (the backstop).
+    Backstop,
+}
+
+/// What woke the loop: the flag was set (before the wait or during it), or the wait ran out.
+fn wake_cause(flagged: bool, timed_out: bool, pending: bool) -> Wake {
+    if flagged || !timed_out {
+        Wake::News
+    } else if pending {
+        Wake::Retry
+    } else {
+        Wake::Backstop
+    }
+}
+
+/// Wakes counted between two idle lines.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Wakes {
+    import: u64,
+    retry: u64,
+    backstop: u64,
+}
+
+impl Wakes {
+    fn count(&mut self, why: Wake) {
+        match why {
+            Wake::News => self.import += 1,
+            Wake::Retry => self.retry += 1,
+            Wake::Backstop => self.backstop += 1,
+        }
+    }
+}
+
 fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epoch: u64) {
     let seg_dir = dir.join(SEGMENTS_DIR);
+    let mut guard = RepeatGuard::default();
+    let mut run: Option<Run> = None;
+    let mut wakes = Wakes::default();
+    // The documents when the last run ended: a run's documents are the difference.
+    let mut docs_then = s.fts.docs();
     while !s.stop.load(Ordering::SeqCst) {
         // One segment per turn, under the write lock (imports and compaction wait for at most one).
-        match step(s, &seg_dir, conn, write_lock, epoch) {
-            Ok(true) => continue,
-            Ok(false) => {}
-            Err(e) => {
-                log::warn!("full-text indexing failed: {e:#}");
-                *crate::lock(&s.failure) = Some(format!("{e:#}"));
-                *crate::lock(&s.writer) = None;
+        let began = Instant::now();
+        let turn = match step(s, &seg_dir, conn, write_lock, epoch) {
+            Ok(Stepped::Indexed(n)) => {
+                recovered(&mut guard);
+                let r = run.get_or_insert(Run {
+                    started: began,
+                    steps: 0,
+                    segments: 0,
+                    busy: Duration::ZERO,
+                });
+                r.indexed(n, began.elapsed());
+                crate::activity::record(Loop::Fts, Turn::Worked);
+                continue;
             }
-        }
+            Ok(Stepped::Nothing) => {
+                recovered(&mut guard);
+                Turn::Idle
+            }
+            Ok(Stepped::Blocked) => Turn::Blocked,
+            Err(e) => {
+                let text = format!("{e:#}");
+                if let Failure::First { ended } = guard.failed(&text, Instant::now()) {
+                    if let Some(r) = ended {
+                        log::info!(EventId = "store.fts.cause_changed", Failures = r.failures, Ms = crate::ms(r.lasted); "The earlier full-text indexing failure happened {} times; a different one follows", r.failures);
+                    }
+                    log::warn!(EventId = "store.fts.failed"; "full-text indexing failed: {text}");
+                }
+                *crate::lock(&s.failure) = Some(text);
+                *crate::lock(&s.writer) = None;
+                Turn::Worked
+            }
+        };
+        crate::activity::record(Loop::Fts, turn);
         // Idle: free the writer's heap and wait for news (or retry a busy lock soon).
         if s.pending.load(Ordering::SeqCst) == 0 {
             // The slot stays locked until the writer is gone: a clear or a source removal in that window would find the
@@ -717,27 +817,108 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
                 // Let the background merges finish (they hold memory and allocate until they do), then give the
                 // index build's heap and its threads' pages back to the OS: the process may idle now.
                 if let Err(e) = w.wait_merging_threads() {
-                    log::warn!("full-text index merges failed: {e}");
+                    log::warn!(EventId = "store.fts.merges_failed"; "full-text index merges failed: {e}");
                 }
                 debrief_alloc::release();
+                if let Some(r) = run.take() {
+                    let docs_now = s.fts.docs();
+                    let docs = docs_now.saturating_sub(docs_then);
+                    docs_then = docs_now;
+                    log::info!(
+                        EventId = "store.fts.idle",
+                        Steps = r.steps,
+                        Segments = r.segments,
+                        Documents = docs,
+                        BusyMs = crate::ms(r.busy),
+                        Ms = crate::ms(r.started.elapsed()),
+                        WakesImport = wakes.import,
+                        WakesRetry = wakes.retry,
+                        WakesBackstop = wakes.backstop;
+                        "Full-text indexing is up to date"
+                    );
+                    wakes = Wakes::default();
+                }
             }
         }
         let mut woken = crate::lock(&s.wake.0);
-        if !*woken {
-            woken = s
+        if *woken {
+            wakes.count(Wake::News);
+        } else {
+            let (g, waited) = s
                 .wake
                 .1
                 .wait_timeout(woken, Duration::from_millis(500))
-                .map(|r| r.0)
-                .unwrap_or_else(|p| p.into_inner().0);
+                .unwrap_or_else(|p| p.into_inner());
+            woken = g;
+            wakes.count(wake_cause(*woken, waited.timed_out(), s.pending.load(Ordering::SeqCst) > 0));
         }
         *woken = false;
+    }
+}
+
+/// The loop worked again: one line when it had been failing.
+fn recovered(guard: &mut RepeatGuard) {
+    if let Some(r) = guard.recovered(Instant::now()) {
+        log::info!(EventId = "store.fts.recovered", Failures = r.failures, Ms = crate::ms(r.lasted); "Full-text indexing recovered after {} failures", r.failures);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_run_adds_up_its_steps_segments_and_busy_time() {
+        let mut r = Run {
+            started: Instant::now(),
+            steps: 0,
+            segments: 0,
+            busy: Duration::ZERO,
+        };
+        r.indexed(4, Duration::from_millis(30));
+        r.indexed(2, Duration::from_millis(12));
+        assert_eq!((r.steps, r.segments, r.busy), (2, 6, Duration::from_millis(42)));
+    }
+
+    #[test]
+    fn the_wake_that_ended_the_wait_is_told_apart_and_counted() {
+        assert_eq!(wake_cause(true, false, true), Wake::News);
+        assert_eq!(wake_cause(true, true, false), Wake::News, "flagged as the wait ran out: still news");
+        assert_eq!(wake_cause(false, false, false), Wake::News, "woken early");
+        assert_eq!(wake_cause(false, true, true), Wake::Retry);
+        assert_eq!(wake_cause(false, true, false), Wake::Backstop);
+        let mut w = Wakes::default();
+        for why in [Wake::News, Wake::News, Wake::Retry, Wake::Backstop, Wake::Backstop, Wake::Backstop] {
+            w.count(why);
+        }
+        assert_eq!(
+            w,
+            Wakes {
+                import: 2,
+                retry: 1,
+                backstop: 3
+            }
+        );
+    }
+
+    #[test]
+    fn a_recovery_is_one_line_with_the_failures_and_their_duration() {
+        crate::testlog::install();
+        let t0 = Instant::now();
+        let mut guard = RepeatGuard::default();
+        for i in 0..7u64 {
+            guard.failed("fts disk full test", t0 + Duration::from_millis(i * 500));
+        }
+        recovered(&mut guard);
+        let line = crate::testlog::wait_for("store.fts.recovered", Duration::from_secs(5), |r| r.props["Failures"] == 7)
+            .expect("the recovery line");
+        assert_eq!(line.level, log::Level::Info);
+        assert!(line.props["Ms"].is_u64());
+        // Nothing failed: nothing to say.
+        let before = crate::testlog::records("store.fts.recovered").len();
+        recovered(&mut guard);
+        assert_eq!(crate::testlog::records("store.fts.recovered").len(), before);
+    }
 
     #[test]
     fn segment_keys_differ_and_the_tokenizer_gives_the_words() {

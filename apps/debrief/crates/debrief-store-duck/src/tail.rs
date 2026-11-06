@@ -388,7 +388,17 @@ impl Inner {
                     });
                 }
                 // One unreadable file does not stop the others; the next change tries again.
-                Err(e) => log::warn!("live tail could not read an appended file: {e:#}"),
+                // The chain may name the user's file: its id and a fingerprint of the path at warn, the chain at debug only.
+                Err(e) => {
+                    log::warn!(
+                        EventId = "store.tail.read_failed",
+                        Source = f.id,
+                        Fingerprint = paddock_log::fingerprint(&f.path).as_str(),
+                        Why = crate::anyhow_class(&e).as_str();
+                        "live tail could not read an appended file"
+                    );
+                    log::debug!(EventId = "store.tail.read_error"; "live tail could not read an appended file: {e:#}");
+                }
             }
         }
         sink.finish().map_err(|e| engine(format!("{e:#}")))?;
@@ -472,6 +482,7 @@ impl DuckStore {
             ));
         }
         let _importing = Importing(self.inner.clone());
+        crate::activity::record(crate::activity::Loop::Tail, crate::activity::Turn::Worked);
         let roots: Vec<PathBuf> = read_lock(&self.inner.state).roots.clone();
         let hint: Vec<PathBuf> = changed.iter().map(|p| canonical(p)).collect();
         let mut out = TailAppend::default();

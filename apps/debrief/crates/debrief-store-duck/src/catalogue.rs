@@ -13,6 +13,8 @@
 //!   remove and refresh. A source built with another [`VERSION`] is built again.
 //! - Bounds: see [`debrief_core::catalogue`]; one thread, one source in memory at a time.
 
+use crate::activity::{Loop, Turn};
+use crate::repeat::{Failure, RepeatGuard};
 use crate::{engine, lock};
 use anyhow::Result;
 use debrief_core::catalogue::*;
@@ -22,7 +24,7 @@ use duckdb::{params, params_from_iter, Connection};
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Layout and extraction version; sources built with another are built again.
 pub const VERSION: u32 = 1;
@@ -193,10 +195,12 @@ impl Drop for CatalogueService {
     }
 }
 
-/// One turn: tidy, then build the next source. True when a source was built (go on at once).
-fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
+/// One turn: tidy, then build the next source. [`Turn::Worked`] when a source was built (go on at once).
+fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     let todo = {
-        let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+        let Ok(_writing) = write_lock.try_lock() else {
+            return Ok(Turn::Blocked);
+        };
         conn.execute_batch(
             "DELETE FROM catalogue WHERE source NOT IN (SELECT id FROM sources);
              DELETE FROM catalogue_trigrams WHERE source NOT IN (SELECT id FROM sources);
@@ -207,7 +211,8 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     let failed = lock(&s.failed).clone();
     let todo: Vec<u32> = todo.into_iter().filter(|id| !failed.contains(id)).collect();
     s.pending.store(todo.len() as u64, Ordering::SeqCst);
-    let Some(&source) = todo.first() else { return Ok(false) };
+    let Some(&source) = todo.first() else { return Ok(Turn::Idle) };
+    let began = Instant::now();
     let built = match build(conn, source) {
         Ok(b) => b,
         Err(e) => {
@@ -218,18 +223,58 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     };
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+    let Ok(_writing) = write_lock.try_lock() else {
+        return Ok(Turn::Blocked);
+    };
+    let rows = entries.len() as u64;
     commit(conn, source, &entries, dropped, guids)?;
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
-    Ok(true)
+    log::info!(
+        EventId = "store.catalogue.built",
+        Source = source,
+        Rows = rows,
+        Ms = crate::ms(began.elapsed());
+        "Catalogued source {source}"
+    );
+    Ok(Turn::Worked)
+}
+
+/// Whether the loop builds the next source without waiting: after a turn that built one, not after a failed turn (the same
+/// cause would fail again at once) and not after an idle or blocked one.
+fn goes_on_at_once(turn: Turn, failed: bool) -> bool {
+    turn == Turn::Worked && !failed
 }
 
 fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
+    let mut guard = RepeatGuard::default();
     while !s.stop.load(Ordering::SeqCst) {
-        match step(s, conn, write_lock) {
-            Ok(true) => continue,
-            Ok(false) => {}
-            Err(e) => log::warn!("catalogue: {e:#}"),
+        // A failed turn waits like an idle one: the same cause would fail again at once.
+        let mut failed = false;
+        let turn = match step(s, conn, write_lock) {
+            Ok(turn) => {
+                if let Some(r) = guard.recovered(Instant::now()) {
+                    log::info!(
+                        EventId = "store.catalogue.recovered",
+                        Failures = r.failures,
+                        Ms = crate::ms(r.lasted);
+                        "The catalogue recovered after {} failures",
+                        r.failures
+                    );
+                }
+                turn
+            }
+            Err(e) => {
+                let text = format!("{e:#}");
+                if matches!(guard.failed(&text, Instant::now()), Failure::First { .. }) {
+                    log::warn!(EventId = "store.catalogue.failed"; "catalogue: {text}");
+                }
+                failed = true;
+                Turn::Worked
+            }
+        };
+        crate::activity::record(Loop::Catalogue, turn);
+        if goes_on_at_once(turn, failed) {
+            continue;
         }
         let mut woken = lock(&s.wake.0);
         if !*woken {
@@ -342,5 +387,22 @@ impl crate::DuckStore {
             }
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+}
+
+#[cfg(test)]
+mod loop_tests {
+    use super::*;
+
+    #[test]
+    fn only_a_turn_that_built_a_source_goes_on_without_waiting() {
+        assert!(goes_on_at_once(Turn::Worked, false));
+        assert!(
+            !goes_on_at_once(Turn::Worked, true),
+            "a failed turn waits: the same cause would fail again at once"
+        );
+        assert!(!goes_on_at_once(Turn::Idle, false));
+        assert!(!goes_on_at_once(Turn::Blocked, false));
+        assert!(!goes_on_at_once(Turn::Idle, true));
     }
 }

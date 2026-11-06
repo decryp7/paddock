@@ -78,7 +78,7 @@ impl HitsCache {
     pub fn new(dir: &Path) -> HitsCache {
         let _ = std::fs::remove_dir_all(dir);
         if let Err(e) = std::fs::create_dir_all(dir) {
-            log::warn!("search hits folder {} unavailable: {e}", dir.display());
+            log::warn!(EventId = "store.hits.unavailable", Why = e.kind().to_string().as_str(); "search hits folder {} unavailable", dir.file_name().map_or_else(|| "hits".into(), |n| n.to_string_lossy()));
         }
         HitsCache {
             dir: dir.to_path_buf(),
