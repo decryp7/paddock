@@ -547,6 +547,9 @@ pub struct FtsShared {
     /// Tests: the next writes through [`FtsService`] fail after their operations are queued.
     #[cfg(test)]
     pub(crate) fail_writes: AtomicBool,
+    /// Tests: how many writers [`drop_writer`] has waited for (a writer dropped without the wait is not counted).
+    #[cfg(test)]
+    pub(crate) merge_waits: AtomicU64,
 }
 
 /// The indexing thread of a store; stopped and joined on drop.
@@ -586,6 +589,8 @@ impl FtsService {
             bulk_import,
             #[cfg(test)]
             fail_writes: AtomicBool::new(false),
+            #[cfg(test)]
+            merge_waits: AtomicU64::new(0),
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
@@ -689,6 +694,9 @@ impl Drop for FtsService {
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
+        // After the join, whatever the thread ended with (it may have panicked mid-step), and a writer a store thread
+        // opened since (`with_writer`): the index is quiet when the service is gone.
+        drop_writer(&self.shared);
     }
 }
 
@@ -801,12 +809,24 @@ const LOWER_INDEXING_THREAD: bool = !cfg!(windows);
 /// Lets the background merges finish (they hold memory and allocate until they do), drops the index writer and gives its
 /// heaps and its threads' pages back to the OS. The slot stays locked until the writer is gone: a clear or a source
 /// removal in that window would find the slot empty, try to open a second writer and fail on the index's lock.
+///
+/// Limit: Tantivy's `wait_merging_threads` returns early when an indexing worker failed (index_writer.rs, the
+/// `wait_merging_threads` start), so after such a failure merges may still outlive the writer. The wait, its duration
+/// and its outcome are logged (debug; info from one second), so a slow close shows in a diagnostic bundle.
 fn drop_writer(s: &FtsShared) {
     let mut slot = crate::lock(&s.writer);
     if let Some(w) = slot.take() {
-        if let Err(e) = w.wait_merging_threads() {
-            log::warn!("full-text index merges failed: {e}");
+        let started = std::time::Instant::now();
+        log::debug!("full-text index: waiting for the writer's merges");
+        let outcome = w.wait_merging_threads();
+        let took = started.elapsed();
+        match &outcome {
+            Err(e) => log::warn!("full-text index merges failed after {took:?}: {e}"),
+            Ok(()) if took >= std::time::Duration::from_secs(1) => log::info!("full-text index merges finished in {took:?}"),
+            Ok(()) => log::debug!("full-text index merges finished in {took:?}"),
         }
+        #[cfg(test)]
+        s.merge_waits.fetch_add(1, Ordering::SeqCst);
         debrief_alloc::release();
     }
 }
@@ -825,7 +845,7 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
             Err(e) => {
                 log::warn!("full-text indexing failed: {e:#}");
                 *crate::lock(&s.failure) = Some(format!("{e:#}"));
-                *crate::lock(&s.writer) = None;
+                drop_writer(s);
                 Turn::Blocked
             }
         };
@@ -905,6 +925,7 @@ mod tests {
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
             fail_writes: AtomicBool::new(false),
+            merge_waits: AtomicU64::new(0),
         };
         let write_lock = Mutex::new(());
         let held = write_lock.lock().unwrap();
@@ -950,13 +971,85 @@ mod tests {
             failure: Mutex::new(None),
             bulk_import: Arc::new(AtomicBool::new(false)),
             fail_writes: AtomicBool::new(false),
+            merge_waits: AtomicU64::new(0),
         };
         run(&s, &dir, &conn, &Mutex::new(()), 1);
         assert!(
             crate::lock(&s.writer).is_none(),
             "the indexing thread returned with the index writer (and its merge threads) still alive"
         );
+        assert_eq!(
+            s.merge_waits.load(Ordering::SeqCst),
+            1,
+            "the writer was dropped without waiting for its merges"
+        );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A step that fails gives the writer back through the same wait (a bare `= None` left the merges running).
+    #[test]
+    fn a_failed_step_waits_for_the_writers_merges_too() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-failstep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // No `segments` table: `todo` fails, which is a failed step.
+        let conn = Connection::open_in_memory().unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 16 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let s = FtsShared {
+            writer: Mutex::new(Some(fts.writer().unwrap())),
+            fts,
+            stop: AtomicBool::new(false),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(0),
+            failure: Mutex::new(None),
+            bulk_import: Arc::new(AtomicBool::new(false)),
+            fail_writes: AtomicBool::new(false),
+            merge_waits: AtomicU64::new(0),
+        };
+        let write_lock = Mutex::new(());
+        std::thread::scope(|scope| {
+            let (s, dir, write_lock) = (&s, &dir, &write_lock);
+            // The connection is not `Sync`: it moves into the thread, like the indexing thread's own.
+            let runner = scope.spawn(move || run(s, dir, &conn, write_lock, 1));
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            while crate::lock(&s.failure).is_none() || crate::lock(&s.writer).is_some() {
+                assert!(std::time::Instant::now() < deadline, "the failed step was not reported");
+                std::thread::yield_now();
+            }
+            s.stop.store(true, Ordering::SeqCst);
+            s.wake.1.notify_all();
+            runner.join().unwrap();
+        });
+        assert_eq!(
+            s.merge_waits.load(Ordering::SeqCst),
+            1,
+            "the failed step dropped the writer without the wait"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A writer a store thread opened after the indexing thread ended is waited for when the service is dropped.
+    #[test]
+    fn dropping_the_service_waits_for_a_writer_opened_after_the_thread_ended() {
+        let t = Indexed::new("dropwait");
+        let shared = t.fts().shared.clone();
+        let before = shared.merge_waits.load(Ordering::SeqCst);
+        t.fts().clear().unwrap();
+        assert!(crate::lock(&shared.writer).is_some(), "with_writer reopened a writer");
+        drop(t);
+        assert_eq!(
+            shared.merge_waits.load(Ordering::SeqCst),
+            before + 1,
+            "the service dropped the writer without the wait"
+        );
+        assert!(crate::lock(&shared.writer).is_none());
     }
 
     #[test]
