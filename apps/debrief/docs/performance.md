@@ -769,6 +769,13 @@ Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
 
   Medians: base 84.1 s and 1,443 MB; change at Auto 96.6 s and 1,057 MB. One run per read-thread row, so differences under about
   30% are noise.
+- **Re-measured after the review fixes** (`d4d09d4c5`: slices sized by the footer's unencoded text size, excess charged after a
+  slice is built; `ff7f0ed57` above used the encoded size): Auto, three runs on the same store (`g-new-auto-1..3.txt`): index ready
+  102.9, 73.0 and 76.5 s (median 76.5 s), peak footprint 1,003, 1,172 and 1,172 MB (median 1,172 MB), search "timeout" p50 703.5,
+  597.4 and 660.2 ms. Run 1 ended at load 12.7 (a DuckLake trial beside it): **marked, load above 12**. The footprint median rose
+  from 1,057 to 1,172 MB (the full-size count of repetitive template and exception text makes slices smaller and the budget
+  tighter, so more work waits elsewhere) and stays 19% below the base's median of 1,443 MB (every run below every base run).
+  The memory verdict stands on these figures; the speed and search figures are within the spread of the table above.
 - **Read-threads sweep (rule 51): not shown.** 1 thread 98.5 s, 2 threads 88.9 s, 4 threads 82.1 s (one run each, a trend of
   about 17% sooner from 1 to 4 that the noise could hide), Auto (8 threads) 77.2, 96.6 and 125.5 s, a slower median than 4.
   These numbers do not say that more read threads help, and they do not justify the Auto cap of 8 either: the cap
