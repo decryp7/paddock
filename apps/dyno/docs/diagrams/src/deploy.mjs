@@ -11,15 +11,17 @@ function deployment(file, os, o) {
   d.node('agent', c1, r(0), CW, 2 * NH + 32, 'accent', o.agent);
   d.node('data', c2, r(0), CW, NH, 'process', o.data);
   d.node('helper', c2, r(1), CW, NH, 'accent', o.helper);
-  hub(d, 'agent', 'L', 'app', 'R', { rev: true, label: 'Requests' });
-  hub(d, 'agent', 'L', 'sm', 'R', { rev: true, label: 'Starts' });
+  hub(d, 'agent', 'L', 'app', 'R', { rev: true, label: o.smApp ? 'Starts, asks' : 'Requests' });
+  // Windows: the Run value starts the app, which starts the agent.
+  if (o.smApp) link(d, 'sm', 'T', 'app', 'B', { label: 'Starts' });
+  else hub(d, 'agent', 'L', 'sm', 'R', { rev: true, label: 'Starts' });
   hub(d, 'agent', 'R', 'data', 'L', { label: 'Reads, writes' });
   hub(d, 'agent', 'R', 'helper', 'L', { label: 'Asks' });
   d.legend([{ kind: 'accent', label: 'Dyno artefact' }, { kind: 'process', label: 'OS facility · data · process' }, { kind: 'line', label: 'Communication' }]);
   save(file, d, y0 + gh);
 }
 
-deployment('uml-deployment-macos', { name: 'macOS', ver: 'macOS 13 or newer, Apple Silicon and Intel' }, {
+deployment('uml-deployment-macos', { name: 'macOS', ver: 'macOS 13 or newer, Apple Silicon' }, {
   desc: 'The app and the agent are separate processes of the same user; a launch agent starts the agent. The optional helper is a launchd system daemon, turned on in Settings.',
   app: { name: 'Dyno.app', tech: 'ad-hoc signed bundle, .dmg', desc: 'Tauri shell and Angular UI on WKWebView; dyno-agent and the dyno command bundled inside.' },
   sm: { name: 'launchd', tech: 'gui/<uid> domain', desc: 'SMAppService registers the agent plist inside Dyno.app; launchd runs dyno-agent run; KeepAlive.' },
@@ -28,9 +30,10 @@ deployment('uml-deployment-macos', { name: 'macOS', ver: 'macOS 13 or newer, App
   data: { name: 'Data folder', tech: '~/Library/Application Support/Dyno', desc: 'dyno.db, settings.json, agent.json: Dyno\'s own data only.' },
 });
 deployment('uml-deployment-windows', { name: 'Windows', ver: 'Windows 10 / 11, x64' }, {
-  desc: 'The agent runs in each user\'s own session, started by a Run entry at logon or by the app. Dyno installs once per PC in Program Files; the optional helper is its one SCM service.',
+  smApp: true,
+  desc: 'At logon a Run value starts the app, and the app starts the agent in the user\'s own session. Dyno installs once per PC in Program Files; the optional helper is its one SCM service.',
   app: { name: 'Dyno', tech: 'NSIS installer, per-machine', desc: 'Tauri shell and Angular UI on WebView2; dyno-agent.exe and dyno.exe beside it.' },
-  sm: { name: 'HKCU Run entry', tech: 'value "Dyno agent"', desc: 'Starts dyno-agent.exe run at logon, in the user\'s session.' },
+  sm: { name: 'HKCU Run value', tech: 'value "Dyno"', desc: 'Starts dyno-app.exe --hidden at logon; the app then starts dyno-agent.exe run.' },
   agent: { name: 'dyno-agent.exe', tech: 'user process', desc: 'Samples, keeps history, raises alarms; reads performance counters.' },
   helper: { name: 'DynoHelper', tech: 'SCM service, optional', desc: 'dyno-helper.exe in Program Files\\Dyno Helper, starts with Windows. Reads what needs administrator rights and installs the pinned disk-health tool on request, with an audit log.' },
   data: { name: 'Data folder', tech: '%LOCALAPPDATA%\\Dyno', desc: 'dyno.db, settings.json, agent.json: Dyno\'s own data only.' },

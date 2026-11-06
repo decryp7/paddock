@@ -16,8 +16,8 @@ marked *placeholder* are described in [features.md](features.md) and [roadmap.md
 
 Per OS in the [README](../README.md#quick-start); macOS in [macos.md](macos.md), Linux in [linux.md](linux.md). After
 installing, open Dyno. The window starts with a short splash and then the dashboard. If no agent is running, the app starts
-one; **Start Dyno at login** is on by default: the first time Dyno runs it registers itself (this registers the agent with the OS:
-`SMAppService` on macOS, a systemd user unit on Linux, a per-user Run entry on Windows), starts in the tray at login and keeps measuring. Turn it off under **Settings > Launch at login**; Dyno never turns it on again.
+one; **Start Dyno at login** is on by default: the first time Dyno runs it registers itself (on macOS it registers the agent with
+`SMAppService`, on Linux a systemd user unit; on Windows a per-user Run value `Dyno` starts the app, which starts the agent), starts in the tray at login and keeps measuring. Turn it off under **Settings > Start Dyno at login**; Dyno never turns it on again.
 
 ## First run
 
