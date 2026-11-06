@@ -29,6 +29,7 @@ import type {
   LiveDetail,
   LiveUpdate,
   Locker,
+  LockerList,
   PluginInfo,
   ProcessDetails,
   ProcessRef,
@@ -686,7 +687,7 @@ export class MockBackend implements DynoBackend {
     }
   }
 
-  lockers(path: string): Promise<Locker[]> {
+  lockers(path: string): Promise<LockerList> {
     return this.reply('lockers', () => {
       if (!path.trim()) throw err('badRequest', 'Enter a file or folder path.');
       const lower = path.toLowerCase();
@@ -694,10 +695,11 @@ export class MockBackend implements DynoBackend {
         const p = this.processes.find((x) => x.name === name);
         return p ? [{ process: { pid: p.pid, started: p.started }, name: p.name, kind, via: 'local' as const }] : [];
       };
-      if (lower.includes('target')) return [...pick(this.profile.names.rustc, 'Writes build output'), ...pick(this.profile.names.code, 'rust-analyzer watches it'), ...pick(this.profile.names.indexer, 'Indexing')];
-      if (lower.includes('chrome')) return pick(this.profile.names.chrome, 'Browser profile');
-      if (lower.endsWith('.log')) return pick(this.profile.names.agent, null);
-      return [];
+      const all = (lockers: Locker[]): LockerList => ({ lockers, notListed: 0, truncated: false });
+      if (lower.includes('target')) return all([...pick(this.profile.names.rustc, 'Writes build output'), ...pick(this.profile.names.code, 'rust-analyzer watches it'), ...pick(this.profile.names.indexer, 'Indexing')]);
+      if (lower.includes('chrome')) return all(pick(this.profile.names.chrome, 'Browser profile'));
+      if (lower.endsWith('.log')) return all(pick(this.profile.names.agent, null));
+      return all([]);
     });
   }
 

@@ -107,6 +107,10 @@ pub trait ProcessSource: Send {
 pub trait FileLocks: Send {
     /// The processes that hold `path` open (Restart Manager on Windows, `lsof` on macOS).
     fn lockers(&mut self, path: &Path) -> Result<Vec<Locker>, PlatformError>;
+    /// The same with what the reader could not list. A reader that always lists everything keeps this default.
+    fn lockers_with_more(&mut self, path: &Path) -> Result<crate::process::LockerList, PlatformError> {
+        self.lockers(path).map(crate::process::LockerList::of)
+    }
 }
 
 /// The startup manager's view of the OS.
@@ -119,6 +123,13 @@ pub trait StartupItems: Send {
     /// What the last [`StartupItems::list`] could not read, one sentence each, for the page to show next to a partial list.
     fn unavailable(&self) -> Vec<String> {
         Vec::new()
+    }
+    /// Gives the list the administrator helper's login items (macOS reads them only through it); other systems ignore it. The
+    /// agent calls it once it exists, because the platform is built before it.
+    fn use_login_items(&mut self, _link: Box<dyn crate::btm::LoginItemsLink>) {}
+    /// Who read the login items and background tasks of the last [`StartupItems::list`] (macOS); everything else needs no helper.
+    fn btm_via(&self) -> crate::read_via::ReadVia {
+        crate::read_via::ReadVia::Local
     }
 }
 

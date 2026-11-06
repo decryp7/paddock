@@ -68,12 +68,12 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
         Request::VirusTotalUrl { sha256 } => virustotal_url(&sha256).map(Reply::Url).map_err(|e| bad(e.to_string())),
         Request::StartupOverview { filter } => {
             // The list and what it could not read come from one lock, so they describe the same read.
-            let (list, unavailable) = {
+            let (list, unavailable, btm_via) = {
                 let mut startup = lock(&shared.ports.startup);
                 let list = startup.list()?;
-                (list, startup.unavailable())
+                (list, startup.unavailable(), startup.btm_via())
             };
-            let mut overview = dyno_core::startup::overview(list, filter, crate::unusual::current_os());
+            let mut overview = dyno_core::startup::overview(list, filter, crate::unusual::current_os()).with_btm_via(btm_via);
             overview.unavailable = unavailable;
             Ok(Reply::StartupOverview(Box::new(overview)))
         }

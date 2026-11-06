@@ -214,6 +214,15 @@ export interface Locker {
   via: ReadVia;
 }
 
+/** The answer to "what is locking this file?": the programs, and how many more the reader could not list. */
+export interface LockerList {
+  lockers: Locker[];
+  /** Programs of other accounts that also hold the file but are not named (the helper counts them where the settings say not to name them). */
+  notListed: number;
+  /** The search stopped at its limit: more may hold the file. */
+  truncated: boolean;
+}
+
 /** One application with all its processes. */
 export interface AppGroup {
   id: string;
@@ -1391,6 +1400,8 @@ export interface NetworkQuery {
   search: string;
   /** Only connections to this country (ISO code, from the location database). */
   country: string | null;
+  /** Set by "Try again" on the owners' source line: ask the helper now, even if it was left alone after a failure. */
+  retryHelper?: boolean;
 }
 
 /** Other accounts' programs as one total (bytes since each program started). */

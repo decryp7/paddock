@@ -98,7 +98,10 @@ fn whose<'a>(pid: u32, before: &HashMap<u32, &RawProcess>, after: &HashMap<u32, 
     let (Some(b), Some(a)) = (before.get(&pid), after.get(&pid)) else {
         return Whose::Other;
     };
-    if b.started.is_none() || b.started != a.started || b.owner != a.owner {
+    // The same start time proves the same process. The system's own process (pid 4 on Windows) has none: it is the system's when
+    // both sweeps say System, and nothing else without a start time is trusted.
+    let same_system_process = a.owner == RawOwner::System && b.owner == RawOwner::System && b.started.is_none() && a.started.is_none();
+    if !same_system_process && (b.started.is_none() || b.started != a.started || b.owner != a.owner) {
         return Whose::Other;
     }
     match &a.owner {
@@ -436,5 +439,21 @@ mod tests {
         let a = traffic_answer(vec![c(10, "gone.exe")], &before, &after, &me, Visibility::Own(OthersPolicy::Total));
         assert!(a.counters.is_empty());
         assert_eq!(a.others.map(|o| o.programs), Some(1));
+    }
+
+    #[test]
+    fn the_systems_process_without_a_start_time_is_shown_only_when_both_sweeps_say_system() {
+        let me = HelperUser::Uid(1_000);
+        let system = |owner| sweep_of(vec![proc(4, None, "System", owner)]);
+        let answer =
+            |before: &Sweep, after: &Sweep| traffic_answer(vec![c(4, "System")], before, after, &me, Visibility::Own(OthersPolicy::Total));
+        let ok = answer(&system(RawOwner::System), &system(RawOwner::System));
+        assert_eq!(ok.counters.iter().map(|x| x.pid).collect::<Vec<_>>(), vec![4]);
+        assert!(ok.others.is_none());
+        // A pid reused by a process that is not the system's, or an account's process with no start time, is not trusted.
+        let reused = answer(&system(RawOwner::System), &system(mine(1_000)));
+        assert!(reused.counters.is_empty() && reused.others.is_some());
+        let account = answer(&system(mine(1_000)), &system(mine(1_000)));
+        assert!(account.counters.is_empty() && account.others.is_some());
     }
 }

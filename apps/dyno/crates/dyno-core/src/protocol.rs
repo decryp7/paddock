@@ -14,7 +14,7 @@ use crate::health::HealthReport;
 use crate::history::{Consumer, HistoryPoint, HistoryRange};
 use crate::metrics::{MemoryPressure, SystemSample};
 use crate::others::OtherUsers;
-use crate::process::{Locker, ProcessDetails, ProcessRef, ProcessSample};
+use crate::process::{ProcessDetails, ProcessRef, ProcessSample};
 use crate::report::WeeklyReport;
 use crate::settings::Settings;
 use crate::snapshot::{SnapshotDiff, SnapshotInfo};
@@ -819,7 +819,7 @@ pub enum Reply {
     /// Activity entries.
     Activities(Vec<ActivityEntry>),
     /// Lockers.
-    Lockers(Vec<Locker>),
+    Lockers(crate::process::LockerList),
     /// A snapshot header.
     Snapshot(SnapshotInfo),
     /// Snapshot headers.
@@ -1483,7 +1483,7 @@ mod tests {
         let s = Reply::Settings(Box::default()).into_json().unwrap();
         assert_eq!(s["version"], 1);
         let all = vec![
-            Reply::Lockers(vec![]),
+            Reply::Lockers(crate::process::LockerList::default()),
             Reply::Snapshots(vec![]),
             Reply::Anomalies(vec![]),
             Reply::Startup(vec![]),

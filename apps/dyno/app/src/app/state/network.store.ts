@@ -74,6 +74,14 @@ export const NetworkStore = signalStore(
       },
       stop,
       load,
+      /** "Try again" on the owners' source line: one read that asks the helper now (the poll keeps its own pace). */
+      async retryHelper(): Promise<void> {
+        try {
+          patchState(store, { snapshot: await backend.network({ ...store.query(), retryHelper: true }), error: null });
+        } catch (e) {
+          patchState(store, { error: toCommandError(e) });
+        }
+      },
       async setQuery(patch: Partial<NetworkQuery>): Promise<void> {
         patchState(store, (s) => ({ query: { ...s.query, ...patch } }));
         if (timer !== null) clearTimeout(timer);
