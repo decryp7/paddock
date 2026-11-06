@@ -433,13 +433,15 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     await tab(f, el, 'Rules');
     const sw = (l: string) => el.querySelector<HTMLButtonElement>(`button[role="switch"][aria-label="${l}"]`)!;
-    expect(sw('New exposed listener').getAttribute('aria-checked')).toBe('false');
-    sw('New exposed listener').click();
-    await settle(f);
-    expect(TestBed.inject(SettingsStore).settings()!.networkAlerts).toEqual({ newExposedListener: true, newRemoteHost: false });
+    // The mock's demo settings have the exposed-listener rule on (the engine default is off, dyno-core network_alerts.rs), the remote-host rule off.
+    expect(sw('New exposed listener').getAttribute('aria-checked')).toBe('true');
+    expect(sw('New remote host').getAttribute('aria-checked')).toBe('false');
     sw('New remote host').click();
     await settle(f);
     expect(TestBed.inject(SettingsStore).settings()!.networkAlerts).toEqual({ newExposedListener: true, newRemoteHost: true });
+    sw('New exposed listener').click();
+    await settle(f);
+    expect(TestBed.inject(SettingsStore).settings()!.networkAlerts).toEqual({ newExposedListener: false, newRemoteHost: true });
   });
 
   it('edits notifications and quiet hours, converting HH:MM to minutes', async () => {

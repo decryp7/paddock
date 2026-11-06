@@ -72,8 +72,8 @@ describe('MockWidgets dashboard grid', () => {
     const w = new MockWidgets();
     const d = dash(w);
     expect(d.layout.placements).toHaveLength(15);
-    expect(rect(w, 'health')).toMatchObject({ x: 0, y: 0, w: 6, h: 9 });
-    expect(rect(w, 'diagnosis')).toMatchObject({ x: 6, y: 0, w: 6, h: 9 });
+    expect(rect(w, 'health')).toMatchObject({ x: 0, y: 0, w: 6, h: 12 });
+    expect(rect(w, 'diagnosis')).toMatchObject({ x: 6, y: 0, w: 6, h: 12 });
     expect(d.arrangements.map((a) => a.columns)).toEqual([12, 6, 1]);
     const order = (n: number) => d.arrangements[n]!.placements.map((p) => p.id);
     expect(order(1)).toEqual(order(0));
