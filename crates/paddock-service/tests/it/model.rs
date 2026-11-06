@@ -813,7 +813,13 @@ fn environment(w: &mut World, ev: Ev) {
                 w.rec.resume_pending = Some(1);
             }
         }
-        Ev::SettingsOn => w.wanted = Some(true),
+        Ev::SettingsOn => {
+            // Off and on again is a user asking for the service again: the count starts over.
+            if w.wanted == Some(false) {
+                w.ghost = 0;
+            }
+            w.wanted = Some(true);
+        }
         Ev::SettingsOff => w.wanted = Some(false),
         Ev::SettingsDamaged => w.wanted = None,
         Ev::DamageRecord => {

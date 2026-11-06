@@ -192,7 +192,7 @@ impl Manager {
     }
 
     /// Whether the running job started at or after the attempt's register call (`None`: no register time, or the OS cannot say).
-    fn job_after_register(&mut self, registered_at: Option<u64>) -> Option<bool> {
+    pub(crate) fn job_after_register(&mut self, registered_at: Option<u64>) -> Option<bool> {
         let at = registered_at?;
         self.backend.job_process().map(|p| p.started().as_micros() >= at)
     }
