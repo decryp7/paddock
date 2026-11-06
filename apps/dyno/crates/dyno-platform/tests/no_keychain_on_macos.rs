@@ -163,7 +163,8 @@ fn tree_has(krate: &str, target: &str) -> Result<bool, String> {
         "--manifest-path",
     ])
     .arg(&manifest);
-    let out = dyno_platform::process::run_with_timeout(cmd, Duration::from_secs(120)).map_err(|e| format!("cargo tree could not run: {e}"))?;
+    let out =
+        dyno_platform::process::run_with_timeout(cmd, Duration::from_secs(120)).map_err(|e| format!("cargo tree could not run: {e}"))?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     let found = stdout.lines().any(|l| l.starts_with(&format!("{krate} v")));
