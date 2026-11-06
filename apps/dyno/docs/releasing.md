@@ -78,7 +78,7 @@ In this order, on one commit:
 
 0. Every 1.0 branch is merged: disk-map-1.0, jobs-1.0 (with its CHANGELOG bullet folded into the `[1.0.0]` section), tables/layout and the startup fix. Nothing may land after step 1 without repeating steps 2 and 3.
 1. Bump the version (and, in the same commit, update the README status line, for example "1.1.0 released") in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files), and date the
-   `CHANGELOG.md` section (`## [1.0.0] - <date>`, never "Unreleased"): the first release's notes are that section and the
+   `CHANGELOG.md` section (`## [1.0.0] - <date>`, never "Unreleased"; the date is set in this bump commit to the tag date): the first release's notes are that section and the
    release run fails without it. `main` is green.
 2. Run one **manual `dyno-release` with `gates: true`** on that commit (Actions > dyno-release > Run workflow, rule 25). It
    runs Dyno's legs of `ci.yml` (WebKit included) and builds the installers on all three systems.
