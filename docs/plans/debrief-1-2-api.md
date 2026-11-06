@@ -221,7 +221,7 @@ A total order inside a source that survives reload and re-time. `(source, line)`
 
 ```rust
 // debrief-plugin-ext::import (the contract; see §3.2)
-/// What orders the events of one source. Declared by the importer; `Line` is the default.
+/// What orders the events of one source. Declared by every importer (`Importer::ordinal`, no default).
 pub enum OrdinalKind {
     /// The 1-based line of the event's first line (text formats).
     Line,
@@ -247,7 +247,7 @@ pub enum OrdinalKind {
     with `ProblemKind::DuplicateOrdinal` (counted, sampled). Past the bound the check stops for that source with one
     `ProblemKind::OrdinalUnchecked`, and the source's provenance says so.
 - **One order key.** FD-B amends ADR 0062's `(ts, source, line, id)` to `(ts, source, ordinal, id)`, where the ordinal
-  of a text source is its line, so nothing changes for text; `PageAnchor::Key` (§14.5) and `RecordCursor` (§5.6) use the
+  of a text source is its line, so nothing changes for text; `PageAnchor::Key` (§14.5) and `ViewCursor` (§5.8) use the
   same key.
 - Re-time (ADR 0066 §8) moves `ts` and renumbers `pos`, never the ordinal or the id [A: ADR 0066 keeps ids and blocks].
 
@@ -601,7 +601,7 @@ pub trait Contract: 'static {
     /// The minor that introduced `request`'s variant; the host refuses to send it to an older peer (IP1 item 4).
     fn introduced_in(_request: &Self::Request) -> u16 { 0 }
 }
-pub enum WorkRole { Live, Bulk }
+pub use paddock_proc::priority::WorkRole;   // defined once in paddock-proc (§4.5), re-exported here
 
 /// A contract whose replies stream: items, then one reply.
 pub trait StreamContract: Contract { type Item: Serialize + DeserializeOwned; }
@@ -664,13 +664,38 @@ impl<C: StreamContract> RemoteStream<C> {
 }
 pub enum StreamEvent<C: StreamContract> { Item(C::Item), Done(C::Reply) }
 pub struct Credit(NonZeroU32);                         // HostConfig::stream_credit, "Auto" = 4 until 2.6b's benchmark, max 64
-/// Bytes of items in flight shared by every stream of one import (§8): a credit is returned to a plugin only while the
-/// pool has room for one more item of the largest size seen, so 16 files × credit 4 cannot add up past the budget.
-pub struct CreditPool { /* bytes in flight, limit, waiters */ }
-impl CreditPool { pub fn new(limit_bytes: u64) -> CreditPool; pub fn in_flight(&self) -> u64; }
+/// Bytes of items in flight shared by every stream of one import (§8). Every credit a plugin holds, the initial grant
+/// included, is a reservation in the pool, so the import's items in flight never pass the pool's limit.
+pub struct CreditPool { /* limit, reserved bytes, FIFO of waiting streams */ }
+impl CreditPool {
+    /// `limit` is `performance.import.items_in_flight_mb`; at least `streams × EVENT_FRAME_MAX` (see `max_streams`).
+    pub fn new(limit_bytes: u64) -> CreditPool;
+    /// How many plugin streams may be open at once: `limit / EVENT_FRAME_MAX`. The import lowers its plugin files in
+    /// flight to this (in-process files are not affected), so every open stream can always hold one item of any size.
+    pub fn max_streams(&self) -> usize;
+    pub fn reserved(&self) -> u64;
+}
 impl<C: StreamContract> Remote<C> {
+    /// Opens a stream whose `credit` (its maximum) is granted one credit at a time from `pool`.
     pub fn stream_pooled(&self, request: &C::Request, credit: Credit, pool: &Arc<CreditPool>) -> Result<RemoteStream<C>, HostError>;
 }
+```
+
+The pool's rules (2.6b's tests, with a fake plugin and no sleeps):
+
+- **Reservation per credit.** Each credit reserves the stream's own item estimate: `max(ITEM_BYTES, the largest item seen on
+  this stream)`, at most `EVENT_FRAME_MAX`. "Largest seen" is **per stream**, so one stream with large events does not
+  shrink what the others are granted. When an item arrives, its encoded size replaces the reservation; the bytes are
+  released when the batcher has taken the item.
+- **Initial grant from the pool.** Opening a stream reserves its first credit at `EVENT_FRAME_MAX` (nothing is known yet)
+  before the request is sent; a stream that cannot get it waits, FIFO, before it opens. So 16 streams × credit 4 × 12 MiB
+  can never be granted up front.
+- **Fairness.** Every open stream keeps at least one credit; further credits go one at a time, FIFO among the streams
+  waiting for one; a stream never gets a second credit while another open stream has none.
+- **No deadlock.** A stream's first credit is reserved before it opens, so an open stream can always make progress; the
+  pool holds no lock while a stream waits.
+
+```rust
 
 // services.rs: host-side extension calls
 /// The app's handler of one namespace's host side. The namespace is given once, at registration; a call whose `ns` the
@@ -786,6 +811,10 @@ pub struct ProcessRow { pub role: ProcessRole, pub id: ProcessId, pub footprint:
 pub enum ProcessRole { App, StoreWorker, AiWorker, Plugin { id: Box<str> }, Helper { id: Box<str> } }
 
 pub mod priority {
+    /// Defined here, once: paddock-proc has no paddock-* dependency, and paddock-jobs (which depends on it) and
+    /// paddock-plugin-api re-export both (`paddock_jobs::exec::Class`, `paddock_plugin_api::extension::WorkRole`).
+    pub enum Class { Interactive, User, Background, Idle }      // ADR 0020's classes, moved here from paddock-jobs::exec
+    pub enum WorkRole { Live, Bulk }                            // rule 52's roles (§4.1)
     /// THE table of OS levels per class (ADR 0020's table with its 2026-10-30 amendment): Interactive and User normal;
     /// Background = QOS_CLASS_UTILITY, nice 10 + ioprio best-effort 7, THREAD_PRIORITY_BELOW_NORMAL (the gentle level);
     /// Idle = QOS_CLASS_BACKGROUND, SCHED_IDLE, THREAD_MODE_BACKGROUND_BEGIN (starvable: C54 comment required).
@@ -1037,18 +1066,22 @@ Configuration parsers stay whole-reading under their 64 MiB cap (ADR 0064 D1, "l
 ### 5.6 `debrief.annotate.v1` and `debrief.transform.v1`
 
 ```rust
-pub enum AnnotateRequest { Annotate { annotator: Box<str>, ticket: u64, since: Option<RecordCursor> } }   // Bulk
-pub struct AnnotateReply { pub annotations: Vec<Annotation>, pub dropped: u64 }   // at most MAX_ANNOTATIONS (existing)
-pub struct RecordCursor { pub after: EventId, pub ts: Option<i64> }
+pub enum AnnotateRequest { Annotate { annotator: Box<str>, ticket: u64, since: Option<ListedSince> } }   // Bulk
+pub struct AnnotateReply { pub annotations: Vec<Annotation>, pub dropped: u64, pub listed_through: u64 }   // MAX_ANNOTATIONS
+/// "New since the previous run": events in segments listed after this listing sequence (ADR 0062's listing transaction).
+pub struct ListedSince { pub listing: u64 }
 
 pub enum TransformRequest { Transform { transform: Box<str>, source_name: Box<str>, rows: Vec<WireEvent> } } // Bulk
 pub struct TransformOut { pub rows: Vec<WireEvent>, pub keep: Vec<bool>, pub marks: Vec<(u32, Box<str>)>, pub notes: Vec<Box<str>> }
 ```
 
-`RecordCursor` is `{ id: u32, ts }` in protocol 1 (`debrief-plugin-api/src/annotate.rs:21`) [S]; v1 widens the id to
-`EventId` (§2.1). An id is a fair cursor here: the host makes it, within one store, where ids are never reused and are
-allocated in increasing blocks [S: `ids.rs`], so "after" means "imported since". It is not stable across a re-import
-[A: ADR 0062], and an annotation run never spans one.
+Protocol 1's `RecordCursor { id: u32, ts }` (`debrief-plugin-api/src/annotate.rs:21`) [S] is replaced. Neither an
+event id nor a time-order `ViewCursor` says "new since": ids are allocated in blocks per segment, so an id does not tell
+when its event became visible, and events imported later can sort earlier in time. The store already lists segments in
+one transaction each when they are ready (ADR 0062) [A]; giving each listing a sequence number [J] makes "new since"
+exact: the host answers `listed_through` with each run, the next run sends it back as `since`, and `ViewRequest::Select`
+takes `listed_after: Option<u64>` (§5.8) to read only those segments. The number is the store's and lives as long as the
+store; a re-import starts a new store, and an annotation run never spans one.
 
 ### 5.7 `debrief.profile.v1` and `debrief.document.v1`
 
@@ -1083,7 +1116,7 @@ A new field is `#[serde(default)]`, so an older plugin reads a newer host's body
 ```rust
 pub enum ViewRequest {
     /// One page; `after` continues from the previous page's `next`. → ViewReply::Rows.
-    Select { ticket: u64, filter: Json /* ViewFilter */, limit: u32, after: Option<ViewCursor> },
+    Select { ticket: u64, filter: Json /* ViewFilter */, limit: u32, after: Option<ViewCursor>, listed_after: Option<u64> },
     Instances { ticket: u64 },                                  // → Instances(Vec<InstanceRow>)
     TimeRange { ticket: u64 },                                  // → Range(Option<(i64, i64)>)
 }
@@ -1405,12 +1438,27 @@ Where each bound is enforced, so no package invents another (roadmap layer G).
 | Documents (dumps, captures) | 512 MiB encoded per document; reader 3 GiB | ADR 0023 limits, ADR 0068 §12 | §14.8 |
 | Open documents | `MAX_DOCS` 32 by count today | MEM-2's byte budget; MEM-6 widened (FD-G) | §14.8 |
 | UI process | no import parsing in the app process (MEM-1) | conformance C<whole-file-read> over `app/src-tauri/src/{profiling,dumps}.rs` | §3.9 |
-| **Plugin items in flight, all files of an import** | `import.items_in_flight_bytes` 256 MiB (Setting, 64 MiB to 1 GiB) | `CreditPool` shared by the import's streams (§4.2). Without it: 16 files × credit 4 × up to about 12 MiB per item (`EVENT_FRAME_MAX`) ≈ 768 MiB, the whole store-worker budget, and more at credit 64 [calc] | §4.2 |
+| **Plugin items in flight, all files of an import** | `performance.import.items_in_flight_mb`, **128 MiB** (registry row `import.items_in_flight`, unit MiB, 64 to 1,024), raised only with 2.6b's and 4.3's recorded measurements | `CreditPool` (§4.2), initial grants included; at 128 MiB at most 10 plugin streams open (128 / 12 MiB). Without it: 16 files × credit 4 × up to about 12 MiB per item (`EVENT_FRAME_MAX`) ≈ 768 MiB, the whole store-worker budget, and more at credit 64 [calc] | §4.2 |
 | Analysis results cache (Q-2) | `analysis.results_cache_bytes` 64 MiB (`hard` until measured) | LRU by run id, a superseded run dropped first | §14.5 |
 | Trace and request cache (Q-3) | `analysis.trace_cache_bytes` 64 MiB (`hard` until measured) | LRU by `(QueryKey, generation)` | §14.5 |
 | Lane buckets per reply | `timeline.bucket_cells_max` 2 Mi cells (8 MiB of `u32`), `hard` | lanes × levels × buckets capped; over it the reply is cut by lanes and the panel asks for the rest. Without it 200 lanes × 6 levels × 11,520 buckets × 4 B ≈ 55 MB, past the 16 MiB frame [calc] | §14.2 |
 
 Footprint is physical memory per rule 26 (macOS footprint, Linux PSS, Windows private bytes, recorded by 2.2).
+
+**The store worker's import budget, 768 MB (D7's gate), by part.** The parts must add up; 4.3 measures each and replaces
+these numbers with recorded ones (rule 48):
+
+| Part | Bound | MB |
+|---|---|---:|
+| Read buffers: `2 × threads` files (16) × (up to 8 MiB chunk + 1 MiB head) | `CHUNK_BYTES`, `HEAD_BYTES` | 151 [calc] |
+| Plugin items in flight | `CreditPool` | 134 (128 MiB) |
+| ADR 0062's tee share (index and names queues) | `performance.index.tee_mb` | 240 [A] |
+| Subtotal of bounded import parts | | 525 [calc] |
+| Left for the batcher's batches, the Parquet writer's row groups, DuckDB and the worker's idle footprint | 768 − 525 | 243 [calc] |
+
+That remainder is below the idle footprint allowance ADR 0067 uses on macOS (630 MB) and near the Linux one (320 MB)
+[A: ADR 0067 §2], so **the budget does not add up on macOS as the parts stand** (§17, Q27). The tee share is already
+released before `maintain` and is off in low-memory mode (plan 5.2) [A].
 
 ## 9. Jobs
 
@@ -1447,7 +1495,7 @@ added so that no long operation runs outside a kind's queue [J].
 // paddock-jobs
 pub struct IdempotencyKey(u128);                 // hash of kind + canonical request; built by the app
 impl JobRegistry {
-    pub fn submit_keyed(&self, kind: JobKind, key: IdempotencyKey, start: impl FnOnce(JobContext) + Send + 'static) -> Submitted;
+    pub fn submit_keyed(&self, kind: JobKind, key: IdempotencyKey, run: JobFn) -> Submitted;   // JobFn: §9.5, returns Outcome
 }
 pub enum Submitted { Started(JobId), Joined(JobId) }    // two identical submits give one id
 ```
@@ -1739,7 +1787,8 @@ export interface KeyedWindow<T> {
 export type RowAnchor = { kind: 'key'; key: RowKey } | { kind: 'time'; ms: number } | { kind: 'start' } | { kind: 'end' };
 @Component({ selector: 'pd-virtual-list' })  inputs: rows?: readonly T[]; window?: PdRowWindow<T>; rowKey: (r: T) => RowKey;
   height: 'measured' | number; overscan = 1 (screens); selection: KeySelection; anchor: ViewportAnchor | null;
-  outputs: rangeChange: { start: number; end: number }; anchorChange; selectionChange; activate
+  outputs: rangeChange: { start: number; end: number } (indexed mode only); needRows: { anchor: RowAnchor; before: number;
+  after: number } (keyed mode only: the primitive asks, the app calls `around`); anchorChange; selectionChange; activate
 // pd-virtual-table and pd-virtual-tree: the same inputs plus columns (as PdTable) and sticky headers
 export function boundedSlice<T>(items: readonly T[], limit: LimitValue, of: string): Bounded<T[]>;    // ADR 0065
 @Component({ selector: 'pd-scroll-markers' })  input: markers: Bounded<MarkerBuckets>; output: navigate(fraction)
@@ -2180,7 +2229,7 @@ use the names here (§17, Q24).
 | `performance.symbols.cache_mb` | from MEM-5's measurement | 64 to 4,096 | MEM-5 |
 | `performance.documents.budget_mb` | from the MEM-6 ADR | as there | MEM-6, FD-G |
 | `performance.import.huge_threshold_gb` | from 5.2's measurement | 1 to 1,000 | 5.2 |
-| `performance.import.items_in_flight_mb` | 256 | 64 to 1,024 | 2.6b, 3.4 |
+| `performance.import.items_in_flight_mb` | 128 | 64 to 1,024 | 2.6b, 3.4 |
 | `folder.scan_entries` | 500,000 | 10,000 to 5,000,000 | F4 |
 | `folder.scan_threads` | Auto (`parse_threads` local, 4 remote) | 1 to cores | F4 |
 | `timeline.lanes_default` | 10 | 1 to 200, or All | 3.3 |
@@ -2220,8 +2269,14 @@ Limits that are registry rows without a Setting (`hard`) are listed with their s
 | Q22 | `FileRefusal` (§6.2) renames ADR 0067's `Refusal`, which collides with `paddock_plugin_api::compat::Refusal` | Accept the rename; a one-line note in ADR 0067 by F1 |
 | Q23 | `ImportSink` renames ADR 0064's `EventSink`, which collides with `paddock_jobs::reporter::EventSink` | Accept; a one-line note in ADR 0064 by SI-1 |
 | Q24 | Setting paths: ADR 0067 used `performance.plugin_memory_mb` and `performance.import_whole_file_mb` | Use §16's one scheme (`performance.plugins.memory_mb`, `performance.import.whole_file_mb`); FM and 2.6a use these |
-| Q25 | `TsState` lives in `debrief-batch`, which pulls Arrow; plugins must not | `debrief-batch`'s Arrow dependencies behind a default feature `arrow`; `debrief-plugin-ext` depends on it with `default-features = false` (one definition, rule 55). Alternative: move ids and `TsState` to a dependency-free crate; not chosen, one more crate for two types |
-| Q26 | Plugin items in flight across an import add up to the store worker's whole budget (§8) | **A shared `CreditPool` by bytes** (§4.2), with `import.items_in_flight_bytes` 256 MiB; 2.6b's benchmark and 4.3's footprint run may move the default with a recorded result |
+| Q25 | `TsState` lives in `debrief-batch`, which pulls Arrow; plugins must not | `debrief-batch`'s Arrow dependencies behind a default feature `arrow`; `debrief-plugin-ext` depends on it with `default-features = false` (one definition, rule 55); a `cargo tree` check in CI (beside PH2a's) fails when a plugin binary (`debrief-plugins`, `debrief-plugin-*`) links an `arrow-*` crate. Alternative: move ids and `TsState` to a dependency-free crate; not chosen, one more crate for two types |
+| Q26 | Plugin items in flight across an import add up to the store worker's whole budget (§8) | **A shared `CreditPool` by bytes** (§4.2), initial grants included, at most `limit / EVENT_FRAME_MAX` plugin streams, FIFO fairness; `performance.import.items_in_flight_mb` 128 MiB, raised only with 2.6b's and 4.3's recorded results |
+| Q27 | **User's decision.** The 768 MB import budget by part (§8) leaves 243 MB for batches, the writer, DuckDB and the idle footprint, below ADR 0067's macOS idle allowance (630 MB) | 4.3 measures every part first; then either a per-OS budget (macOS higher, as rule 26's footprint differs) or a smaller tee share on macOS. Bring back with 4.3's numbers, beside plan §9.6 D1 |
+| Q28 | Annotation "new since" needs a listing sequence the store does not have (§5.6) | Add it in the listing transaction (IX-B1, which owns `writer.rs`), with a test that a run after an import sees exactly the newly listed segments |
+
+**Where the ADR notes land.** Q21's amendment of ADR 0064 and Q23's note land in SI-1's first commit; Q22's note in
+ADR 0067 lands in F1's first commit; Q8 and Q24's notes in ADR 0067 with F7 and FM; Q6 in ADR 0031 with 2.6c; Q4 in
+ADR 0068 with WP-1; Q16 in ADR 0020 with Y9.
 
 ## 18. Completeness
 
@@ -2239,6 +2294,5 @@ the shell move (workbench.md and the move plan own the API), §14.5 store perfor
 **Scope not found in the sources read, so not designed:** ST-6, Y11's sticky field promotion, Y14's R3 split (Q18).
 
 **Not verified:** nothing was compiled; signatures were checked against the source files named in the header, not
-built. The claim that ids grow with import order
-inside a store (§5.6) rests on the block allocator as read, not on a test. The drawing research's numbers are from
+built. The listing sequence of §5.6 is a new store field [J]; IX-B1 or PH2b adds it with its test. The drawing research's numbers are from
 Playwright's browsers, not the real webviews; M1a settles that.
