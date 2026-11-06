@@ -409,9 +409,27 @@ pub struct PluginProcess {
     reported: Arc<Mutex<Vec<debrief_ipc::sandbox::Note>>>,
     /// Settings ▸ Performance's limits, read at every start.
     limits: Arc<Mutex<PluginLimits>>,
-    /// Files the host stopped this plugin over (path, size, cap in bytes): the same file under the same cap would
-    /// use the same memory again, so it is refused without starting the process. A raised cap is a new key.
-    cap_stops: Mutex<std::collections::HashSet<(std::path::PathBuf, u64, u64)>>,
+    /// Files the host stopped this plugin over: the same bytes under the same cap and plugin version would use the
+    /// same memory again, so they are refused without starting the process. A raised cap is a new key.
+    cap_stops: Mutex<std::collections::HashSet<CapStopKey>>,
+}
+
+/// What identifies a file for the "already stopped at the cap" memory. `path` is the file's source path, which for an
+/// archive member names the member (`archive!/member`), and `head` hashes its first bytes, so two members of one archive
+/// are two files.
+pub(crate) struct CapStopFile<'a> {
+    pub path: &'a std::path::Path,
+    pub size: u64,
+    pub head: u64,
+}
+
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct CapStopKey {
+    path: std::path::PathBuf,
+    size: u64,
+    head: u64,
+    cap: u64,
+    version: String,
 }
 
 impl PluginProcess {
@@ -494,18 +512,30 @@ impl PluginProcess {
         self.spec.connect_window
     }
 
-    /// Whether this file (same path and size) was already stopped at `cap` bytes.
-    pub(crate) fn cap_stopped_before(&self, path: &std::path::Path, size: u64, cap: u64) -> bool {
-        lock(&self.cap_stops).contains(&(path.to_path_buf(), size, cap))
+    fn cap_stop_key(&self, file: &CapStopFile<'_>, cap: u64) -> CapStopKey {
+        CapStopKey {
+            path: file.path.to_path_buf(),
+            size: file.size,
+            head: file.head,
+            cap,
+            version: self.manifest.version.to_string(),
+        }
+    }
+
+    /// Whether this file (same source path, size and head bytes, under this plugin version) was already stopped at
+    /// `cap` bytes.
+    pub(crate) fn cap_stopped_before(&self, file: &CapStopFile<'_>, cap: u64) -> bool {
+        lock(&self.cap_stops).contains(&self.cap_stop_key(file, cap))
     }
 
     /// Remembers that this file was stopped at `cap` bytes (see [`PluginProcess::cap_stopped_before`]).
-    pub(crate) fn remember_cap_stop(&self, path: &std::path::Path, size: u64, cap: u64) {
+    pub(crate) fn remember_cap_stop(&self, file: &CapStopFile<'_>, cap: u64) {
+        let key = self.cap_stop_key(file, cap);
         let mut stops = lock(&self.cap_stops);
         if stops.len() >= MAX_CAP_STOPS {
             stops.clear();
         }
-        stops.insert((path.to_path_buf(), size, cap));
+        stops.insert(key);
     }
 
     /// The memory cap its process gets at its next start (bytes).

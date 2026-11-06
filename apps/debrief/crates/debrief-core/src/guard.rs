@@ -92,11 +92,6 @@ impl CapStopped {
             next_step: next_step.into(),
         }
     }
-
-    /// Whether an error (or one it was caused by) is a stop at the memory cap.
-    pub fn is_in(e: &anyhow::Error) -> bool {
-        e.chain().any(|c| c.is::<CapStopped>())
-    }
 }
 
 /// Runs `f`, turning a panic into an error ([`Crashed`]: "{what} crashed: ...").
@@ -624,6 +619,10 @@ impl Importer for GuardedImporter {
     fn unavailable(&self) -> Option<String> {
         self.guard.unavailable()
     }
+    fn claims(&self, file_name: &str) -> bool {
+        // Declared data, no call into the plugin: it must answer while the plugin is quarantined (that is when it is used).
+        self.inner.claims(file_name)
+    }
     /// Runs on a helper thread (abandoned past the import budget) when there
     /// is a budget; on this thread otherwise.
     fn import(&self, ctx: &ImportCtx, content: &str) -> Result<Imported> {
@@ -679,6 +678,10 @@ impl BinaryImporter for GuardedBinaryImporter {
     }
     fn unavailable(&self) -> Option<String> {
         self.guard.unavailable()
+    }
+    fn claims(&self, file_name: &str) -> bool {
+        // Declared data, no call into the plugin: it must answer while the plugin is quarantined (that is when it is used).
+        self.inner.claims(file_name)
     }
     fn import(&self, ctx: &ImportCtx, bytes: &[u8]) -> Result<Imported> {
         if self.guard.health.admit(&self.guard.owner, CallKind::Import)?.is_none() {

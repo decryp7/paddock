@@ -31,6 +31,10 @@ impl TextImporter for Fake {
         vec!["Host".into(), "App".into()]
     }
 
+    fn extensions(&self) -> Vec<String> {
+        vec!["log".into()]
+    }
+
     fn sniff(&self, _: &ImportCtx, head: &str) -> u8 {
         if head.starts_with("#fake") {
             100
@@ -50,13 +54,7 @@ impl TextImporter for Fake {
             "fail" => bail!("a typed failure"),
             l if l.starts_with("alloc ") => {
                 let mb: usize = l[6..].parse().unwrap_or(0);
-                let mut held = vec![0u8; mb << 20];
-                // Touch every page so the memory counts as used, then wait for the host's watcher to stop the process.
-                for i in (0..held.len()).step_by(4096) {
-                    held[i] = 1;
-                }
-                std::thread::sleep(std::time::Duration::from_secs(30));
-                bail!("not stopped at the cap ({} bytes held)", held.len())
+                alloc_and_wait(mb)
             }
             l if l.starts_with("many ") => {
                 let n: usize = l[5..].parse().unwrap_or(0);
@@ -96,6 +94,85 @@ impl TextImporter for Fake {
                 })
             }
         }
+    }
+}
+
+/// Parks this thread until the host stops the process (it never returns); `held` stays alive meanwhile.
+fn hold_until_stopped(held: &[u8]) -> ! {
+    loop {
+        std::thread::park();
+        std::hint::black_box(held);
+    }
+}
+
+/// Touches `mb` megabytes so they count as used, then waits for the host's watcher to stop the process.
+fn alloc_and_wait(mb: usize) -> ! {
+    let mut held = vec![0u8; mb << 20];
+    for i in (0..held.len()).step_by(4096) {
+        held[i] = 1;
+    }
+    hold_until_stopped(&held)
+}
+
+/// The document importer `fake.doc`: a file starting with `alloc <mb>` holds that much memory until stopped; any
+/// other file is answered with a typed error (the process is fine).
+struct FakeDoc;
+
+impl debrief_plugin_api::DocumentImporter for FakeDoc {
+    fn id(&self) -> &str {
+        "fake.doc"
+    }
+
+    fn produces(&self) -> &str {
+        "dump"
+    }
+
+    fn sniff(&self, _: &str, _: &[u8]) -> u8 {
+        0
+    }
+
+    fn import_encoded(&self, _: &str, file: &dyn debrief_plugin_api::host_file::RangeRead, _: &Value) -> Vec<u8> {
+        let head = file.read_at(0, 64).unwrap_or_default();
+        let text = String::from_utf8_lossy(&head);
+        if let Some(mb) = text
+            .strip_prefix("alloc ")
+            .and_then(|r| r.split_whitespace().next())
+            .and_then(|n| n.parse().ok())
+        {
+            alloc_and_wait(mb);
+        }
+        debrief_dump::wire::encode_result(&Err(debrief_dump::DumpError::invalid("the fake document reader refuses this file")))
+    }
+}
+
+/// The profile importer `fake.prof`: like [`FakeDoc`], over the whole file.
+struct FakeProf;
+
+impl debrief_plugin_api::ProfileImporter for FakeProf {
+    fn id(&self) -> &str {
+        "fake.prof"
+    }
+
+    fn heap(&self) -> bool {
+        false
+    }
+
+    fn sniff(&self, _: &str, _: &[u8]) -> u8 {
+        0
+    }
+
+    fn import_encoded(&self, _: &str, bytes: &[u8], _: &Value) -> Vec<u8> {
+        let text = String::from_utf8_lossy(&bytes[..bytes.len().min(64)]);
+        if let Some(mb) = text
+            .strip_prefix("alloc ")
+            .and_then(|r| r.split_whitespace().next())
+            .and_then(|n| n.parse().ok())
+        {
+            alloc_and_wait(mb);
+        }
+        debrief_profile::wire::encode_result(&Err(debrief_profile::ProfileError::invalid(
+            "the fake profile reader refuses this file",
+        )))
     }
 }
 
@@ -268,6 +345,8 @@ impl Plugin for FakePlugin {
 
     fn register(&self, c: &mut Contributions) -> Result<()> {
         c.add_importer(Fake)
+            .add_document_importer(FakeDoc)
+            .add_profile_importer(FakeProf)
             .add_tool(Arc::new(FakeTool))
             .add_annotator(Notes)
             .set_settings(Arc::new(FakeSettings));

@@ -37,9 +37,20 @@ struct RemoteDocumentImporter {
 }
 
 impl RemoteDocumentImporter {
-    fn failed(&self, e: IpcError) -> DumpError {
+    fn failed(&self, e: IpcError, call: &str, file_bytes: u64) -> DumpError {
         let id = self.process.id();
-        if e.is_process_failure() || matches!(&e, IpcError::Remote(r) if r.code == debrief_ipc::peer::code::PANIC) {
+        if let IpcError::OverMemoryCap { limit, used } = &e {
+            // Not a crash: no health count, so no quarantine; the reason names the Setting to raise.
+            crate::remote::log_cap_stop(id, &format!("{call} \"{}\"", self.cap.id), *limit, *used, file_bytes);
+            let cap_mb = limit.div_ceil(1 << 20);
+            let reason = format!(
+                "the dump reader was stopped at its memory cap of {cap_mb} MB; this is not a crash and does not count against the plugin. {}",
+                crate::remote::cap_next_step(cap_mb)
+            );
+            self.health.note(id, &reason);
+            return DumpError::limit(reason);
+        }
+        if e.counts_as_crash() || matches!(&e, IpcError::Remote(r) if r.code == debrief_ipc::peer::code::PANIC) {
             self.health.fail(id, &format!("document importer \"{}\" failed: {e}", self.cap.id));
         }
         DumpError::invalid(format!("the dump reader failed: {e}"))
@@ -67,6 +78,7 @@ impl DumpImporter for RemoteDocumentImporter {
     fn import(&self, file_name: &str, file: Arc<dyn ReadAt>, options: &ImportOptions) -> debrief_dump::Result<Document> {
         let cap = options.limits.max_encoded_bytes;
         let options_json = serde_json::to_value(options).map_err(|e| DumpError::invalid(e.to_string()))?;
+        let size = ReadAt::len(file.as_ref());
         let source = Ranges(file.as_ref());
         let lent = Lent {
             ranges: vec![&source as &dyn RangeSource],
@@ -94,7 +106,7 @@ impl DumpImporter for RemoteDocumentImporter {
                     Ok(())
                 },
             )
-            .map_err(|e| self.failed(e))?;
+            .map_err(|e| self.failed(e, "import_document", size))?;
         if done.bytes != encoded.len() as u64 {
             return Err(DumpError::invalid("the document arrived incomplete"));
         }
@@ -105,6 +117,7 @@ impl DumpImporter for RemoteDocumentImporter {
         let cap = options.limits.max_encoded_bytes;
         let options_json = serde_json::to_value(options).map_err(|e| DumpError::invalid(e.to_string()))?;
         let body = debrief_dump::wire::encode_result(&Ok(doc));
+        let body_len = body.len() as u64;
         let lent = Lent {
             files: vec![body.as_slice()],
             ..Lent::default()
@@ -130,7 +143,7 @@ impl DumpImporter for RemoteDocumentImporter {
                     Ok(())
                 },
             )
-            .map_err(|e| self.failed(e))?;
+            .map_err(|e| self.failed(e, "resymbolise_document", body_len))?;
         if done.bytes == 0 {
             return Err(DumpError::unsupported("this reader cannot name the frames of an open dump again"));
         }

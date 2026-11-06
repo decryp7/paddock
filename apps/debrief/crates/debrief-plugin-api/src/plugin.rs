@@ -201,6 +201,7 @@ impl Contributions {
                 tail: true,
                 multiline: i.multiline(),
                 identity_fields: i.identity_fields(),
+                extensions: i.extensions(),
             })
             .chain(self.binary.iter().map(|i| ImporterCap {
                 id: i.id().into(),
@@ -208,6 +209,7 @@ impl Contributions {
                 tail: false,
                 multiline: false,
                 identity_fields: i.identity_fields(),
+                extensions: i.extensions(),
             }))
             .collect();
         Manifest {

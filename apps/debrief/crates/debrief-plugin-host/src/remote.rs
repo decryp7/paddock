@@ -78,12 +78,7 @@ impl Ctx {
     /// The error of a stop at the memory cap: a typed [`CapStopped`] naming the cap, the file and the next step.
     fn cap_stopped(&self, what: &str, cap: u64, subject: Option<&Subject<'_>>) -> anyhow::Error {
         let cap_mb = cap.div_ceil(1 << 20);
-        let max_mb = debrief_plugin_api::manifest::MAX_MEMORY_LIMIT >> 20;
-        let next_step = if cap_mb >= max_mb {
-            format!("The cap is already at its maximum of {max_mb} MB, so this file is too large for this plugin.")
-        } else {
-            format!("Next step: raise Settings \u{25b8} Performance \u{25b8} Plugin memory cap (now {cap_mb} MB, up to {max_mb} MB) and import it again, or import a smaller file.")
-        };
+        let next_step = cap_next_step(cap_mb);
         let file = subject.map(|s| (s.name, s.size));
         anyhow::Error::new(CapStopped::new(
             format!("plugin \"{}\" ({what})", self.id()),
@@ -100,14 +95,9 @@ impl Ctx {
             // Not a failure of the plugin: no health count (so no quarantine), but the logs show it with the numbers
             // and a repeat of the same file under the same cap is refused without running the plugin.
             if let Some(s) = subject {
-                self.process.remember_cap_stop(s.path, s.size, *limit);
+                self.process.remember_cap_stop(&s.file(), *limit);
             }
-            log::warn!(
-                target: "debrief_plugin_host::remote", Plugin = id, Call = what, CapMb = limit >> 20, UsedMb = used >> 20,
-                FileBytes = subject.map_or(0, |s| s.size);
-                "Plugin {id} ({what}) was stopped at its memory cap of {} MB (used {} MB); not counted as a crash",
-                limit >> 20, used >> 20
-            );
+            log_cap_stop(id, what, *limit, *used, subject.map_or(0, |s| s.size));
             let error = self.cap_stopped(what, *limit, subject);
             self.health.note(id, &format!("{error:#}"));
             return error;
@@ -184,7 +174,7 @@ impl Ctx {
     /// same bytes would use the same memory again. A different file, or a raised cap, is tried.
     fn refuse_known_cap_stop(&self, what: &str, subject: &Subject<'_>) -> Result<()> {
         let cap = self.process.memory_cap();
-        if self.process.cap_stopped_before(subject.path, subject.size, cap) {
+        if self.process.cap_stopped_before(&subject.file(), cap) {
             return Err(self.cap_stopped(what, cap, Some(subject)));
         }
         Ok(())
@@ -223,19 +213,66 @@ impl Ctx {
     }
 }
 
+/// What the user can do after a stop at the memory cap of `cap_mb` MB (the Setting is named).
+pub(crate) fn cap_next_step(cap_mb: u64) -> String {
+    let max_mb = debrief_plugin_api::manifest::MAX_MEMORY_LIMIT >> 20;
+    if cap_mb >= max_mb {
+        format!("The cap is already at its maximum of {max_mb} MB, so this file is too large for this plugin.")
+    } else {
+        format!("Next step: raise Settings \u{25b8} Performance \u{25b8} Plugin memory cap (now {cap_mb} MB, up to {max_mb} MB) and import it again, or import a smaller file.")
+    }
+}
+
+/// Logs a stop at the memory cap with the numbers; it is not a crash and is never counted in [`Health`].
+pub(crate) fn log_cap_stop(plugin: &str, what: &str, limit: u64, used: u64, file_bytes: u64) {
+    log::warn!(
+        target: "debrief_plugin_host::remote", Plugin = plugin, Call = what, CapMb = limit >> 20, UsedMb = used >> 20,
+        FileBytes = file_bytes;
+        "Plugin {plugin} ({what}) was stopped at its memory cap of {} MB (used {} MB); not counted as a crash",
+        limit >> 20, used >> 20
+    );
+}
+
+/// Whether the extension of `file_name` is one of `extensions` (lower case, no dot), case-insensitively.
+fn has_extension(extensions: &[String], file_name: &str) -> bool {
+    std::path::Path::new(file_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| extensions.iter().any(|x| x.eq_ignore_ascii_case(e)))
+}
+
 /// The file an import call reads: what a stop at the memory cap names.
 struct Subject<'a> {
     path: &'a std::path::Path,
     name: &'a str,
     size: u64,
+    /// Hash of the first and last [`FINGERPRINT_BYTES`] of the content: members of one archive share `path`.
+    head: u64,
 }
 
+/// How many bytes at each end of the content identify it for the "already stopped" memory.
+const FINGERPRINT_BYTES: usize = 1 << 20;
+
 impl<'a> Subject<'a> {
-    fn of(ctx: &'a ImportCtx, name: &'a str, size: usize) -> Subject<'a> {
+    fn of(ctx: &'a ImportCtx, name: &'a str, content: &[u8]) -> Subject<'a> {
+        use std::hash::{Hash, Hasher};
+        // `DefaultHasher::new()` is keyed with fixed keys: the same bytes always hash the same within a run.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        content[..content.len().min(FINGERPRINT_BYTES)].hash(&mut hasher);
+        content[content.len().saturating_sub(FINGERPRINT_BYTES)..].hash(&mut hasher);
         Subject {
             path: ctx.path,
             name,
-            size: size as u64,
+            size: content.len() as u64,
+            head: hasher.finish(),
+        }
+    }
+
+    fn file(&self) -> crate::process::CapStopFile<'a> {
+        crate::process::CapStopFile {
+            path: self.path,
+            size: self.size,
+            head: self.head,
         }
     }
 }
@@ -263,7 +300,7 @@ impl Importer for RemoteImporter {
         let file = self.ctx.file_info(ctx);
         let importer = self.cap.id.clone();
         let name = file.name.clone();
-        let subject = Subject::of(ctx, &name, content.len());
+        let subject = Subject::of(ctx, &name, content.as_bytes());
         let (done, records): (ImportDone, _) =
             self.ctx
                 .import_call("import", CallKind::Import, Some(&subject), vec![content.as_bytes()], |refs| {
@@ -313,6 +350,10 @@ impl Importer for RemoteImporter {
         self.cap.multiline
     }
 
+    fn claims(&self, file_name: &str) -> bool {
+        has_extension(&self.cap.extensions, file_name)
+    }
+
     fn identity_fields(&self) -> Vec<String> {
         self.cap.identity_fields.clone()
     }
@@ -332,6 +373,10 @@ impl BinaryImporter for RemoteBinaryImporter {
         self.cap.identity_fields.clone()
     }
 
+    fn claims(&self, file_name: &str) -> bool {
+        has_extension(&self.cap.extensions, file_name)
+    }
+
     fn sniff(&self, ctx: &ImportCtx, head: &[u8]) -> u8 {
         let req = PluginRequest::Sniff {
             importer: self.cap.id.clone(),
@@ -345,7 +390,7 @@ impl BinaryImporter for RemoteBinaryImporter {
         let file = self.ctx.file_info(ctx);
         let importer = self.cap.id.clone();
         let name = file.name.clone();
-        let subject = Subject::of(ctx, &name, bytes.len());
+        let subject = Subject::of(ctx, &name, bytes);
         let (done, records): (ImportDone, _) = self
             .ctx
             .import_call("import", CallKind::Import, Some(&subject), vec![bytes], |refs| {

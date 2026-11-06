@@ -50,6 +50,12 @@ pub trait Importer: Send + Sync {
         None
     }
 
+    /// Whether this importer's plugin declares the extension of `file_name` as one it reads (see
+    /// [`Importers::refusal`]); sniffing, not this, decides what it imports. Built-in importers declare none.
+    fn claims(&self, _file_name: &str) -> bool {
+        false
+    }
+
     /// Live tail: parses `tail`, text appended to a file this importer already
     /// read, whose start is `head` (for headers, the detected format and date
     /// order). Line numbers are relative to `tail`. `None` means the importer
@@ -90,6 +96,11 @@ pub trait BinaryImporter: Send + Sync {
     /// As [`Importer::unavailable`].
     fn unavailable(&self) -> Option<String> {
         None
+    }
+
+    /// As [`Importer::claims`].
+    fn claims(&self, _file_name: &str) -> bool {
+        false
     }
 
     /// As [`Importer::identity_fields`]: fields that identify who wrote an event (e.g. EVTX `Computer`,
@@ -171,22 +182,25 @@ impl Importers {
             .map(|(_, i)| i.as_ref())
     }
 
-    /// The reason shown for a file nothing could read: `base`, or, when an importer could not be asked at all (its
-    /// plugin is quarantined, not responding or inactive), why that one could not check the file. The file may be
-    /// perfectly readable, so `base` ("binary file") would blame it for the plugin's state.
-    pub fn refusal(&self, base: &str) -> String {
+    /// The reason shown for a file nothing could read: `base`, and, when an importer whose plugin declares the extension
+    /// of `file_name` could not be asked at all (its plugin is quarantined, not responding or inactive), why that one
+    /// could not check the file. The file may be perfectly readable, so the note says it is the plugin's state; an
+    /// unrelated file (another extension) gets `base` alone.
+    pub fn refusal(&self, base: &str, file_name: &str) -> String {
         let unavailable = self
             .binary
             .iter()
+            .filter(|i| i.claims(file_name))
             .filter_map(|i| i.unavailable().map(|why| (i.id().to_string(), why)))
             .chain(
                 self.list
                     .iter()
+                    .filter(|i| i.claims(file_name))
                     .filter_map(|i| i.unavailable().map(|why| (i.id().to_string(), why))),
             )
             .next();
         match unavailable {
-            Some((id, why)) => format!("importer \"{id}\" could not check this file: {why}"),
+            Some((id, why)) => format!("{base} (importer \"{id}\" could not check this file: {why})"),
             None => base.to_string(),
         }
     }

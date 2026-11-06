@@ -21,6 +21,11 @@ const SELECT_CHARS: usize = 64 * 1024;
 /// Lines of the head that decide an ambiguous day/month order.
 const DAY_ORDER_LINES: usize = 2000;
 
+/// The name of the file `ctx` imports, for the refusal reason.
+fn file_name_of(ctx: &ImportCtx) -> String {
+    ctx.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
 /// The shape of a JSON file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsonShape {
@@ -158,10 +163,12 @@ pub fn plan_with(importers: &Importers, ctx: &ImportCtx, head: &[u8], whole: boo
     let (encoding, data_start) = (detected.encoding, detected.bom_len);
     let text = decode_head(head, encoding, data_start as usize, whole);
     if looks_binary(&text) {
-        return Err(importers.refusal("binary file"));
+        return Err(importers.refusal("binary file", &file_name_of(ctx)));
     }
     let select: String = text.chars().take(SELECT_CHARS).collect();
-    let importer = importers.select(ctx, &select).ok_or_else(|| importers.refusal("no importer recognises this format"))?;
+    let importer = importers
+        .select(ctx, &select)
+        .ok_or_else(|| importers.refusal("no importer recognises this format", &file_name_of(ctx)))?;
     let kind = match importer.id() {
         "text" => {
             let format = lines::best_format(ctx.profile, &text).ok_or("no output template or regex in the profile matches this file")?;
@@ -388,7 +395,7 @@ mod tests {
         );
     }
 
-    /// A binary file that only a quarantined plugin could have read is refused with that reason, not "binary file".
+    /// A binary file of an extension a quarantined plugin declares is refused with "binary file" and why the plugin could not check it.
     #[test]
     fn a_file_refused_while_its_plugin_is_quarantined_says_so() {
         use crate::guard::{Guard, GuardedBinaryImporter, Health, QUARANTINE_AFTER};
@@ -408,6 +415,9 @@ mod tests {
             }
             fn import(&self, _: &ImportCtx, _: &[u8]) -> anyhow::Result<Imported> {
                 Ok(Imported::default())
+            }
+            fn claims(&self, file_name: &str) -> bool {
+                file_name.ends_with(".evtx")
             }
         }
         let health = Arc::new(Health::default());
@@ -432,6 +442,12 @@ mod tests {
             reason.contains("win") && reason.contains("disabled after repeated crashes"),
             "{reason}"
         );
-        assert!(!reason.contains("binary file"), "{reason}");
+        assert!(reason.starts_with("binary file"), "the base reason stays: {reason}");
+        // A file the plugin does not claim is just a binary file.
+        let other = ImportCtx {
+            path: Path::new("a.bin"),
+            ..ctx
+        };
+        assert_eq!(plan(&importers, &other, head, true).unwrap_err(), "binary file");
     }
 }

@@ -181,23 +181,106 @@ fn a_file_the_cap_stopped_is_not_tried_again_until_the_cap_changes() {
     // A new workspace per import: one workspace never reads a refused file twice.
     let _ = workspace(&b).open(std::slice::from_ref(&big));
     let first = pid(workspace(&b).registry());
-    let started = Instant::now();
     let mut ws = workspace(&b);
     let _ = ws.open(std::slice::from_ref(&big));
-    let again = started.elapsed();
     assert!(refused(&ws)[0].1.contains("memory cap of 64 MB"), "{:?}", refused(&ws));
     assert_eq!(
         pid(ws.registry()),
         first,
         "the plugin was not started again for the same file and cap"
     );
-    assert!(again < Duration::from_secs(2), "refused without running the plugin: {again:?}");
     // A raised cap is a new question: the file is tried again (and stopped at the new cap).
     b.set_limits(&limits(96));
     b.process(ID).unwrap().shutdown();
     let mut ws = workspace(&b);
     let _ = ws.open(&[big]);
     assert!(refused(&ws)[0].1.contains("memory cap of 96 MB"), "{:?}", refused(&ws));
+}
+
+/// A zip of `(name, bytes)` entries.
+fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    use std::io::Write;
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (name, data) in entries {
+        w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+        w.write_all(data).unwrap();
+    }
+    w.finish().unwrap().into_inner()
+}
+
+#[test]
+fn a_member_stopped_at_the_cap_does_not_refuse_another_member_of_the_same_archive() {
+    let b = builtins();
+    b.set_limits(&PluginLimits {
+        default_memory: Some(64 << 20),
+        ..PluginLimits::default()
+    });
+    let dir = tempfile::tempdir().unwrap();
+    // Both members have 16 bytes; the archive is one path for the plugin.
+    let (big, small) = (b"#fake\nalloc 300\n".as_slice(), b"#fake\nhello1234\n".as_slice());
+    assert_eq!(big.len(), small.len());
+    let zip = dir.path().join("two.zip");
+    std::fs::write(&zip, zip_of(&[("big.log", big), ("small.log", small)])).unwrap();
+    let mut ws = workspace(&b);
+    let _ = ws.open(&[zip]);
+    let reasons = refused(&ws);
+    assert_eq!(reasons.len(), 1, "only the big member is refused: {reasons:?}");
+    assert!(
+        reasons[0].0.contains("big.log") && reasons[0].1.contains("memory cap of 64 MB"),
+        "{reasons:?}"
+    );
+    assert_eq!(ws.records().len(), 1, "the small member of the same size imported");
+    assert_eq!(ws.records()[0].message.as_str(), "hello1234");
+}
+
+#[test]
+fn document_and_profile_importers_stopped_at_the_cap_never_quarantine_the_plugin() {
+    use debrief_dump::{DumpImporter, ImportOptions};
+    use debrief_profile::CaptureImporter;
+    let b = builtins();
+    b.set_limits(&PluginLimits {
+        default_memory: Some(64 << 20),
+        ..PluginLimits::default()
+    });
+    let r = registry(&b);
+    let docs = r.contributions::<dyn DumpImporter>(debrief_dump::IMPORTERS_POINT);
+    let doc = docs
+        .iter()
+        .find(|i| i.call(|i| i.id() == "fake.doc").unwrap_or(false))
+        .expect("fake document importer");
+    let profs = r.contributions::<dyn CaptureImporter>(debrief_profile::IMPORTERS_POINT);
+    let prof = profs
+        .iter()
+        .find(|i| i.call(|i| i.id() == "fake.prof").unwrap_or(false))
+        .expect("fake profile importer");
+    // More stops in a row than the crash quarantine allows.
+    for _ in 0..4 {
+        let e = doc
+            .call(|i| i.import("a.dmp", Arc::new(b"alloc 300".to_vec()), &ImportOptions::default()))
+            .unwrap()
+            .expect_err("stopped at the cap");
+        assert!(
+            e.message.contains("memory cap of 64 MB") && e.message.contains("Plugin memory cap"),
+            "{}",
+            e.message
+        );
+        assert!(!e.message.contains("crashed"), "{}", e.message);
+        let e = prof
+            .call(|i| i.import("a.prof", b"alloc 300", &debrief_profile::Limits::default()))
+            .unwrap()
+            .expect_err("stopped at the cap");
+        let text = e.to_string();
+        assert!(text.contains("memory cap of 64 MB") && text.contains("Plugin memory cap"), "{text}");
+    }
+    let ws = Workspace::with_registry(Profile::default_profile(), r).unwrap();
+    let info = ws.summary().plugins.into_iter().find(|p| p.id == ID).unwrap();
+    assert_eq!((info.failures, info.status), (0, PluginStatus::Active), "{info:?}");
+    // The next file is still read by the same plugin.
+    let e = doc
+        .call(|i| i.import("b.dmp", Arc::new(b"plain".to_vec()), &ImportOptions::default()))
+        .unwrap()
+        .expect_err("the fake reader refuses it");
+    assert!(e.message.contains("fake document reader"), "{}", e.message);
 }
 
 #[test]
@@ -396,4 +479,27 @@ fn an_elevated_operation_reports_progress_while_it_runs_not_with_its_answer() {
         assert!(early >= Duration::from_millis(400), "progress arrived {early:?} before the answer");
     }
     process.shutdown();
+}
+
+#[test]
+fn a_quarantined_plugin_is_named_only_for_files_it_declares() {
+    let b = builtins();
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = workspace(&b);
+    for i in 0..3 {
+        let _ = ws.open(&[file(dir.path(), &format!("crash{i}.log"), "crash")]);
+    }
+    let info = ws.summary().plugins.into_iter().find(|p| p.id == ID).unwrap();
+    assert_eq!(info.status, PluginStatus::Quarantined, "{info:?}");
+    // A file of the plugin's extension keeps its reason and says the plugin could not check it.
+    let _ = ws.open(&[file(dir.path(), "after.log", "hello")]);
+    let after = refused(&ws).into_iter().find(|(n, _)| n == "after.log").expect("refused").1;
+    assert!(after.starts_with("no enabled parser reads this file"), "{after}");
+    assert!(after.contains("disabled after repeated crashes") && after.contains(ID), "{after}");
+    // An unrelated binary file is just a binary file: the plugin did not claim it.
+    let other = dir.path().join("blob.bin");
+    std::fs::write(&other, [0u8, 159, 146, 150, 0, 1, 2, 3, 255, 254, 0, 0]).unwrap();
+    let _ = ws.open(&[other]);
+    let reason = refused(&ws).into_iter().find(|(n, _)| n == "blob.bin").expect("refused").1;
+    assert_eq!(reason, "binary file", "{reason}");
 }

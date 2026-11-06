@@ -109,6 +109,12 @@ pub trait TextImporter: Send + Sync {
     fn identity_fields(&self) -> Vec<String> {
         Vec::new()
     }
+
+    /// File extensions this importer reads, lower case without the dot. Declaring them only lets Debrief say, when the
+    /// plugin is quarantined or inactive, that a refused file is one it would have read. The default is none.
+    fn extensions(&self) -> Vec<String> {
+        Vec::new()
+    }
 }
 
 /// A binary format (e.g. Windows `.evtx`). Binary importers are asked first, with the raw bytes.
@@ -124,6 +130,12 @@ pub trait BinaryImporter: Send + Sync {
 
     /// As [`TextImporter::identity_fields`] (e.g. EVTX `Computer`, `ProcessId`). The default is none.
     fn identity_fields(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// File extensions this importer reads, lower case without the dot. Declaring them only lets Debrief say, when the
+    /// plugin is quarantined or inactive, that a refused file is one it would have read. The default is none.
+    fn extensions(&self) -> Vec<String> {
         Vec::new()
     }
 }

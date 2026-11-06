@@ -145,12 +145,17 @@ fn import(path: &Path, cap_mb: u64) -> (Result<(), String>, u64, Option<u64>, us
     let outcome = match (opened, plugin.status, plugin.failures) {
         (Ok(_), PluginStatus::Active, 0) if records > 0 => Ok(()),
         (o, _, _) => Err(format!(
-            "open: {:?}; plugin: {:?}, {} failures, last error: {:?}; unrecognised: {:?}",
+            "open: {:?}; plugin: {:?}, {} failures, last error: {:?}; unrecognised reasons: {}",
             o.err().map(|e| e.to_string()),
             plugin.status,
             plugin.failures,
             plugin.last_error,
-            ws.summary().unrecognized
+            ws.summary()
+                .unrecognized
+                .iter()
+                .map(|u| u.reason.as_str())
+                .collect::<Vec<_>>()
+                .join("; ")
         )),
     };
     drop(ws);
@@ -186,11 +191,7 @@ fn a_plugin_stopped_at_its_cap_says_so_instead_of_crashed() {
     assert!(stopped.is_some(), "the watcher stopped the plugin at its cap");
     let error = outcome.expect_err("the import failed");
     assert!(error.contains("memory cap of 128 MB"), "the import's error names the cap: {error}");
-    // The error text is a debug dump that holds the field `crashed: false`; the words of the reason must not say it.
-    assert!(
-        !error.replace("crashed: false", "").contains("crashed"),
-        "a stop at the cap is not a crash: {error}"
-    );
+    assert!(!error.contains("crashed"), "a stop at the cap is not a crash: {error}");
     assert!(error.contains("Plugin memory cap"), "the reason says what to do next: {error}");
 }
 

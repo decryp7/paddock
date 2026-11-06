@@ -25,9 +25,23 @@ struct RemoteCaptureImporter {
 }
 
 impl RemoteCaptureImporter {
-    fn failed(&self, e: IpcError) -> ProfileError {
+    fn failed(&self, e: IpcError, file_bytes: u64) -> ProfileError {
         let id = self.process.id();
-        if e.is_process_failure() || matches!(&e, IpcError::Remote(r) if r.code == debrief_ipc::peer::code::PANIC) {
+        if let IpcError::OverMemoryCap { limit, used } = &e {
+            // Not a crash: no health count, so no quarantine; the reason names the Setting to raise.
+            crate::remote::log_cap_stop(id, &format!("import_profile \"{}\"", self.cap.id), *limit, *used, file_bytes);
+            let cap_mb = limit.div_ceil(1 << 20);
+            let message = format!(
+                "the profile reader was stopped at its memory cap of {cap_mb} MB; this is not a crash and does not count against the plugin. {}",
+                crate::remote::cap_next_step(cap_mb)
+            );
+            self.health.note(id, &message);
+            return ProfileError::Importer {
+                importer: self.cap.id.to_string(),
+                message,
+            };
+        }
+        if e.counts_as_crash() || matches!(&e, IpcError::Remote(r) if r.code == debrief_ipc::peer::code::PANIC) {
             self.health.fail(id, &format!("profile importer \"{}\" failed: {e}", self.cap.id));
         }
         ProfileError::Importer {
@@ -84,7 +98,7 @@ impl CaptureImporter for RemoteCaptureImporter {
                     Ok(())
                 },
             )
-            .map_err(|e| self.failed(e))?;
+            .map_err(|e| self.failed(e, bytes.len() as u64))?;
         if done.bytes != encoded.len() as u64 {
             return Err(ProfileError::malformed("plugin capture", "the capture arrived incomplete"));
         }

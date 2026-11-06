@@ -128,3 +128,35 @@ fn nearby_shapes_still_read_their_offset() {
     assert_eq!(csv[1].0, Some(utc_ms(2026, 10, 25, 1, 30, 1, 0)));
     assert_eq!(csv[0].1, "Service starting");
 }
+
+/// The importer that read `bytes` named `name`.
+fn importer_of(name: &str, bytes: &[u8]) -> String {
+    let dir = Dir(std::env::temp_dir().join(format!("debrief-offset-comma-imp-{}-{name}", std::process::id())));
+    let _ = std::fs::remove_dir_all(&dir.0);
+    std::fs::create_dir_all(&dir.0).unwrap();
+    let path = dir.0.join(name);
+    std::fs::write(&path, bytes).unwrap();
+    let mut ws = Workspace::new(Profile::default_profile()).unwrap();
+    ws.open(&[path]).unwrap();
+    ws.sources()[0].importer.clone()
+}
+
+#[test]
+fn a_headerless_csv_with_an_offset_straight_before_a_comma_stays_a_csv() {
+    // A timestamp column that ends in `Z` or in an offset glued to the time, then more columns: a CSV, whose columns
+    // the text importer would lose by reading the rest as one message.
+    let z = "\
+2026-10-25T10:00:00Z,ERROR,OrderService,Payment failed
+2026-10-25T10:00:01Z,INFO,OrderService,Retry scheduled
+2026-10-25T10:00:02Z,INFO,OrderService,Payment accepted
+";
+    assert_eq!(importer_of("orders-z.csv", z.as_bytes()), "csv");
+    let glued = "\
+2026-10-25T10:00:00+02:00,ERROR,OrderService,Payment failed
+2026-10-25T10:00:01+02:00,INFO,OrderService,Retry scheduled
+";
+    assert_eq!(importer_of("orders-offset.csv", glued.as_bytes()), "csv");
+    // The shape the offset fix is for (a space before the offset) still reads as text.
+    let spaced = "2026/03/29 00:30:00 +01:00,Pump station started,ok\n2026/03/29 03:30:00 +02:00,Pump station stopped,ok\n";
+    assert_eq!(importer_of("pumps.csv", spaced.as_bytes()), "text");
+}

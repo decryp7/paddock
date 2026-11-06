@@ -26,6 +26,10 @@ impl BinaryImporter for EvtxImporter {
         ["Computer", "ProcessId"].map(String::from).to_vec()
     }
 
+    fn extensions(&self) -> Vec<String> {
+        vec!["evtx".into()]
+    }
+
     fn sniff(&self, _ctx: &ImportCtx, head: &[u8]) -> u8 {
         if is_evtx(head) {
             100

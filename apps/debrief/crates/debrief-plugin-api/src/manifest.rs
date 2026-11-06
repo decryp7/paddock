@@ -67,10 +67,17 @@ pub struct ImporterCap {
     /// [`crate::importer::TextImporter::identity_fields`]).
     #[serde(default)]
     pub identity_fields: Vec<String>,
+    /// File extensions it reads, without the dot (lower case). Only used to say, when the plugin is unavailable,
+    /// that a refused file is one it would have read; sniffing still decides what an importer reads.
+    #[serde(default)]
+    pub extensions: Vec<String>,
 }
 
 /// Most identity fields an importer may declare.
 pub const MAX_IDENTITY_FIELDS: usize = 8;
+
+/// Most file extensions an importer may declare.
+pub const MAX_EXTENSIONS: usize = 16;
 
 /// A configuration format a plugin contributes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +199,15 @@ impl Manifest {
                 ));
             }
         }
+        for i in &self.importers {
+            let bad = |e: &String| e.is_empty() || e.len() > 16 || !e.chars().all(|c| c.is_ascii_alphanumeric());
+            if i.extensions.len() > MAX_EXTENSIONS || i.extensions.iter().any(bad) {
+                return Err(format!(
+                    "importer \"{}\": declare at most {MAX_EXTENSIONS} extensions of 1–16 letters or digits, without the dot",
+                    i.id
+                ));
+            }
+        }
         for t in &self.tools {
             t.check()?;
         }
@@ -230,6 +246,7 @@ mod tests {
                 tail: true,
                 multiline: false,
                 identity_fields: vec!["Host".into()],
+                extensions: vec!["toy".into()],
             }],
             config_parsers: Vec::new(),
             marker_kinds: vec![PluginMarkerKind::new("boom", "Boom")],

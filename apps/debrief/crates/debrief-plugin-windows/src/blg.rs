@@ -76,6 +76,10 @@ impl BinaryImporter for BlgImporter {
         "blg"
     }
 
+    fn extensions(&self) -> Vec<String> {
+        vec!["blg".into()]
+    }
+
     fn sniff(&self, ctx: &ImportCtx, head: &[u8]) -> u8 {
         let blg = ctx
             .path
