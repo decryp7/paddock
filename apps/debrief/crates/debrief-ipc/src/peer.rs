@@ -141,6 +141,8 @@ struct Inner {
     next: AtomicU64,
     closed: Mutex<Option<IpcError>>,
     is_closed: AtomicBool,
+    /// The connection ended by an I/O error (not by either side closing it).
+    broke: AtomicBool,
     closed_cv: Condvar,
     closed_wait: Mutex<()>,
 }
@@ -177,6 +179,7 @@ impl Peer {
                 next: AtomicU64::new(1),
                 closed: Mutex::new(None),
                 is_closed: AtomicBool::new(false),
+                broke: AtomicBool::new(false),
                 closed_cv: Condvar::new(),
                 closed_wait: Mutex::new(()),
             }),
@@ -199,6 +202,20 @@ impl Peer {
     /// Why the connection is closed, if it is.
     pub fn closed(&self) -> Option<IpcError> {
         lock(&self.inner.closed).clone()
+    }
+
+    /// Why the connection is closed when it broke on an I/O error; `None` while open or when a side closed it.
+    pub fn broke(&self) -> Option<IpcError> {
+        self.inner.broke.load(Ordering::SeqCst).then(|| self.closed()).flatten()
+    }
+
+    /// Closes with `why` after an I/O error.
+    fn mark_broke(&self, why: IpcError) {
+        // Only the first reason counts: a connection that was closed already did not break.
+        if !self.is_closed() {
+            self.inner.broke.store(true, Ordering::SeqCst);
+        }
+        self.mark_closed(why);
     }
 
     pub fn is_closed(&self) -> bool {
@@ -475,12 +492,12 @@ async fn writer(peer: Peer, mut w: impl AsyncWrite + Unpin, mut rx: mpsc::Unboun
         match out {
             Out::Frame(bytes) => {
                 if let Err(e) = w.write_all(&bytes).await {
-                    peer.mark_closed(IpcError::Died(format!("the connection to {} broke ({e})", peer.label())));
+                    peer.mark_broke(IpcError::Died(format!("the connection to {} broke ({e})", peer.label())));
                     return;
                 }
                 // Flush once the queue is empty, so bursts go out together.
                 if rx.is_empty() && w.flush().await.is_err() {
-                    peer.mark_closed(IpcError::Died(format!("the connection to {} broke", peer.label())));
+                    peer.mark_broke(IpcError::Died(format!("the connection to {} broke", peer.label())));
                     return;
                 }
             }
@@ -505,7 +522,7 @@ async fn reader(peer: Peer, mut r: impl AsyncRead + Unpin, handler: Arc<dyn Hand
                 return;
             }
             Err(FrameError::Io(e)) => {
-                peer.mark_closed(IpcError::Died(format!("the connection to {} broke ({e})", peer.label())));
+                peer.mark_broke(IpcError::Died(format!("the connection to {} broke ({e})", peer.label())));
                 return;
             }
             Err(e @ (FrameError::TooLarge { .. } | FrameError::Invalid(_))) => {

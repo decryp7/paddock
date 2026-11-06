@@ -360,3 +360,48 @@ fn an_answer_too_large_for_a_frame_is_a_typed_error() {
         matches!(a.call(Vec::new(), T), Err(IpcError::Remote(e)) if e.code == code::INTERNAL && e.message.contains("could not be sent"))
     );
 }
+
+/// A stream whose writes fail and whose reads never end: the connection breaks on an I/O error, no side closed it.
+struct BrokenWrite;
+
+impl tokio::io::AsyncRead for BrokenWrite {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        _: &mut std::task::Context<'_>,
+        _: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Pending
+    }
+}
+
+impl tokio::io::AsyncWrite for BrokenWrite {
+    fn poll_write(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>, _: &[u8]) -> std::task::Poll<std::io::Result<usize>> {
+        std::task::Poll::Ready(Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)))
+    }
+
+    fn poll_flush(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+/// A connection that broke on an I/O error is told from one a side closed: the child logs the first as an error and the
+/// second as the host closing it.
+#[test]
+fn a_broken_connection_is_told_from_one_a_side_closed() {
+    let broken = Peer::start(BrokenWrite, Arc::new(NoCalls), PeerOptions::new("broken"), rt().handle());
+    assert!(broken.broke().is_none(), "open");
+    let _ = broken.call(Vec::new(), T);
+    assert!(broken.wait_closed(Some(Duration::from_secs(5))));
+    let why = broken.broke().expect("it broke");
+    assert!(matches!(why, IpcError::Died(_)), "{why:?}");
+
+    let (a, b) = pair(Arc::new(NoCalls), Arc::new(NoCalls));
+    b.close();
+    assert!(a.wait_closed(Some(Duration::from_secs(5))));
+    assert!(a.closed().is_some() && a.broke().is_none(), "the other side closed it: not a break");
+    assert!(b.broke().is_none(), "closing it yourself is not a break");
+}

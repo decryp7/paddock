@@ -84,13 +84,7 @@ pub fn child_main_hooked(
         lifeline_then(stdin_closed);
     }
     peer.wait_closed(None);
-    Ok(peer.closed().and_then(|why| broke(&why)))
-}
-
-/// Whether `why` is a break (not the host closing the connection): the reason text of a break says "broke".
-fn broke(why: &crate::IpcError) -> Option<Broke> {
-    let text = why.to_string();
-    text.contains("broke").then_some(Broke(text))
+    Ok(peer.broke().map(|why| Broke(why.to_string())))
 }
 
 /// The lifeline: when the host closes stdin (or dies), exit at once.
@@ -197,15 +191,6 @@ fn lock_down(bootstrap: &Bootstrap, elevated: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_break_of_the_connection_is_told_from_the_host_closing_it() {
-        use crate::IpcError;
-        let broken = broke(&IpcError::Died("the connection to Debrief broke (os error 32)".into()));
-        assert!(broken.is_some_and(|b| b.0.contains("os error")));
-        assert_eq!(broke(&IpcError::Died("Debrief closed the connection".into())), None);
-        assert_eq!(broke(&IpcError::Died("the connection to Debrief was closed".into())), None);
-    }
 
     /// The lifeline runs its hook before the process exits: the test starts itself as the child (`exit` ends a process).
     #[test]
