@@ -44,7 +44,6 @@ const MERGE_GROUPS: usize = 200;
 const MERGE_EVENTS: usize = 30;
 /// Share of the rarer name's events that must hold the other for two look-alike names to be one.
 const MERGE_STRENGTH: f64 = 0.6;
-
 /// The phases of a rebuild, in the order they run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RebuildPhase {
@@ -110,15 +109,23 @@ pub enum RebuildEnd {
     Cancelled,
 }
 
-/// The entities named by each of the first [`MERGE_EVENTS`] events that hold `name` as it is spelled, or none when the store
-/// cannot answer. A substring search stops at the thirtieth hit, where the phrase search through the full-text index
-/// checks every candidate event first (1,074 ms against 20 ms a read on 133,120 events: `docs/performance.md`).
-fn events_naming(store: &(impl SearchSource + Sync + ?Sized), name: &str) -> Option<Vec<Vec<String>>> {
+/// The first and last time a name was seen (each unknown when no event of it has a time).
+type TimeRange = (Option<i64>, Option<i64>);
+
+/// The entities named by each of the first [`MERGE_EVENTS`] events that hold `name`, or none when the store cannot
+/// answer. A substring search stops at the thirtieth hit, where the phrase search through the full-text index checks every
+/// candidate event first (1,074 ms against 20 ms a read on 133,120 events; on 10 million events 330-630 ms against
+/// 550-890 ms, for names of 5 to 30,000 events: `docs/performance.md`). A name with fewer than thirty events is a scan of
+/// every event whatever the search, so the scan is bounded by the time range the catalogue saw the name in (`range`:
+/// from and to, when known).
+fn events_naming(store: &(impl SearchSource + Sync + ?Sized), name: &str, range: TimeRange) -> Option<Vec<Vec<String>>> {
     let page = store
         .page(&PageQuery {
             query: Filter {
                 text: name.to_string(),
                 text_mode: TextMode::Substring,
+                from: range.0,
+                to: range.1,
                 ..Filter::default()
             },
             offset: 0,
@@ -140,11 +147,18 @@ fn events_naming(store: &(impl SearchSource + Sync + ?Sized), name: &str) -> Opt
     )
 }
 
-/// Reads for the look-alike names run side by side, this many at most: each is a search of the store (CPU), which
-/// answers them from its own connections. Bounded by the cores, and never more than four (rule 51).
+/// The most reads of look-alike names that run side by side (a registered constant, rule 51, not a Setting: nothing
+/// else about a rebuild is tunable, and a rebuild is background work nobody waits on). The bound is the store's query
+/// memory budget: each read is a scan on a connection of its own, and on 10 million events 8 side by side failed 7 of 16
+/// reads with "Out of Memory Error ... (182.1 MiB/183.1 MiB used)", where 1, 2 and 4 side by side did not and 4 took 41 and
+/// 80 % of the time of 1 in two runs (`docs/performance.md`, 2026-11-06). A read that fails ends the best-effort join, so the bound errs low.
+pub const MAX_READ_THREADS: usize = 4;
+
+/// Reads for the look-alike names run side by side, this many at most: the cores minus one, and never more than
+/// [`MAX_READ_THREADS`].
 fn read_workers(reads: usize) -> usize {
     crate::threads::threads(crate::threads::WorkKind::Cpu, None)
-        .clamp(1, 4)
+        .clamp(1, MAX_READ_THREADS)
         .min(reads.max(1))
 }
 
@@ -160,7 +174,11 @@ fn merge_by_cooccurrence(
     if wanted.len() < 2 {
         return Some(0);
     }
-    let names: Vec<String> = wanted.iter().map(|i| groups[*i].canonical().to_string()).collect();
+    // The most frequent spelling is what is searched for, within the time range the catalogue saw the group in.
+    let names: Vec<(String, TimeRange)> = wanted
+        .iter()
+        .map(|i| (groups[*i].canonical().to_string(), (groups[*i].first_ts, groups[*i].last_ts)))
+        .collect();
     let total = names.len() as u64;
     let report = |done: u64| {
         (ctl.progress)(RebuildProgress {
@@ -186,7 +204,7 @@ fn merge_by_cooccurrence(
                     if n >= names.len() || stop.load(std::sync::atomic::Ordering::SeqCst) {
                         return;
                     }
-                    if tx.send((n, events_naming(store, &names[n]))).is_err() {
+                    if tx.send((n, events_naming(store, &names[n].0, names[n].1))).is_err() {
                         return;
                     }
                 }
@@ -674,6 +692,188 @@ mod tests {
         assert!(same.most.load(std::sync::atomic::Ordering::SeqCst) <= read_workers(2));
     }
 
+    /// What a recorded search asked for: the text, its mode and the time range.
+    type Asked = (String, TextMode, Option<i64>, Option<i64>);
+
+    /// [`Together`] that records how each look-alike was searched for, and can fail every search.
+    struct Recording {
+        inner: Together,
+        asked: Mutex<Vec<Asked>>,
+        fail: bool,
+    }
+
+    impl Recording {
+        fn of(cands: Vec<Candidate>, fail: bool) -> Recording {
+            Recording {
+                inner: Together(cands),
+                asked: Mutex::new(Vec::new()),
+                fail,
+            }
+        }
+    }
+
+    impl SearchSource for Recording {
+        fn summary(&self) -> StoreResult<crate::ports::SummaryReply> {
+            self.inner.summary()
+        }
+        fn page(&self, q: &crate::ports::PageQuery) -> StoreResult<crate::ports::PageReply> {
+            self.asked
+                .lock()
+                .unwrap()
+                .push((q.query.text.clone(), q.query.text_mode, q.query.from, q.query.to));
+            if self.fail {
+                return Err(crate::ports::StoreError::Invalid("the search failed".into()));
+            }
+            self.inner.page(q)
+        }
+        fn facet(&self, q: &crate::api::FacetRequest) -> StoreResult<crate::api::Facet> {
+            self.inner.facet(q)
+        }
+        fn exception_groups(&self) -> StoreResult<Vec<crate::exceptions::ExceptionGroup>> {
+            self.inner.exception_groups()
+        }
+        fn catalogue(&self, q: &CatalogueRequest) -> StoreResult<CatalogueReply> {
+            self.inner.catalogue(q)
+        }
+    }
+
+    /// [`Recording`] of the whole query, for the time range of a read.
+    #[test]
+    fn a_read_is_bounded_by_the_time_range_the_catalogue_saw_the_group_in() {
+        let store = Recording::of(
+            vec![
+                ranged("gfxbuilder.exe", 9, Some(100), Some(200)),
+                ranged("gfx-bilder.exe", 8, Some(150), Some(300)),
+            ],
+            false,
+        );
+        Names::default().rebuild(&store, &RebuildControl::none()).unwrap();
+        let asked = store.asked.lock().unwrap().clone();
+        assert_eq!(asked.len(), 2);
+        let mut ranges: Vec<_> = asked
+            .iter()
+            .map(|(text, mode, from, to)| (text.as_str(), *mode, *from, *to))
+            .collect();
+        ranges.sort_by_key(|r| r.0);
+        assert_eq!(
+            ranges,
+            vec![
+                ("gfx-bilder.exe", TextMode::Substring, Some(150), Some(300)),
+                ("gfxbuilder.exe", TextMode::Substring, Some(100), Some(200))
+            ]
+        );
+        // A group whose times are unknown is read without a bound.
+        let unknown = Recording::of(
+            vec![
+                ranged("gfxbuilder.exe", 9, None, None),
+                ranged("gfx-bilder.exe", 8, Some(1), Some(2)),
+            ],
+            false,
+        );
+        Names::default().rebuild(&unknown, &RebuildControl::none()).unwrap();
+        let asked = unknown.asked.lock().unwrap().clone();
+        assert!(asked
+            .iter()
+            .any(|(t, _, from, to)| t == "gfxbuilder.exe" && from.is_none() && to.is_none()));
+    }
+
+    #[test]
+    fn a_search_that_fails_leaves_the_groups_as_they_are_and_is_not_a_cancel() {
+        let names = Names::default();
+        let store = Recording::of(
+            vec![cand("gfxbuilder.exe", 9), cand("gfx-bilder.exe", 8), cand("tray.exe", 5)],
+            false,
+        );
+        assert_eq!(
+            names.rebuild(&store, &RebuildControl::none()).unwrap(),
+            RebuildEnd::Built { groups: 2 }
+        );
+        let failing = Recording::of(
+            vec![cand("gfxbuilder.exe", 9), cand("gfx-bilder.exe", 8), cand("tray.exe", 5)],
+            true,
+        );
+        assert_eq!(
+            Names::default().rebuild(&failing, &RebuildControl::none()).unwrap(),
+            RebuildEnd::Built { groups: 3 },
+            "built without the join: best effort, and not reported as cancelled"
+        );
+    }
+
+    fn ranged(name: &str, n: u64, first: Option<i64>, last: Option<i64>) -> Candidate {
+        let mut c = in_source(name, n, "a.log");
+        c.first_ts = first;
+        c.last_ts = last;
+        c
+    }
+
+    #[test]
+    fn look_alikes_that_never_overlap_in_time_are_not_read_and_touching_or_unknown_ranges_are() {
+        let reads = |a: Candidate, b: Candidate| {
+            let store = Counted::of(vec![a, b]);
+            Names::default().rebuild(&store, &RebuildControl::none()).unwrap();
+            store.reads.load(std::sync::atomic::Ordering::SeqCst)
+        };
+        // Disjoint, either way round: one ends before the other starts.
+        assert_eq!(
+            reads(
+                ranged("gfxbuilder.exe", 9, Some(0), Some(10)),
+                ranged("gfx-bilder.exe", 8, Some(20), Some(30))
+            ),
+            0
+        );
+        assert_eq!(
+            reads(
+                ranged("gfxbuilder.exe", 9, Some(20), Some(30)),
+                ranged("gfx-bilder.exe", 8, Some(0), Some(10))
+            ),
+            0
+        );
+        // They touch at one instant: possible.
+        assert_eq!(
+            reads(
+                ranged("gfxbuilder.exe", 9, Some(0), Some(10)),
+                ranged("gfx-bilder.exe", 8, Some(10), Some(20))
+            ),
+            2
+        );
+        assert_eq!(
+            reads(
+                ranged("gfxbuilder.exe", 9, Some(10), Some(20)),
+                ranged("gfx-bilder.exe", 8, Some(0), Some(10))
+            ),
+            2
+        );
+        // One range is unknown: possible, whichever end is missing.
+        assert_eq!(
+            reads(
+                ranged("gfxbuilder.exe", 9, None, None),
+                ranged("gfx-bilder.exe", 8, Some(20), Some(30))
+            ),
+            2
+        );
+        assert_eq!(
+            reads(
+                ranged("gfxbuilder.exe", 9, Some(0), None),
+                ranged("gfx-bilder.exe", 8, Some(20), Some(30))
+            ),
+            2
+        );
+        assert_eq!(
+            reads(
+                ranged("gfxbuilder.exe", 9, Some(0), Some(10)),
+                ranged("gfx-bilder.exe", 8, None, Some(30))
+            ),
+            2
+        );
+    }
+
+    #[test]
+    fn the_side_by_side_reads_are_bounded() {
+        assert_eq!(read_workers(0), 1);
+        assert_eq!(read_workers(1), 1);
+        assert!(read_workers(1_000) >= 1 && read_workers(1_000) <= MAX_READ_THREADS);
+    }
+
     #[test]
     fn a_rebuild_reports_each_phase_in_order_and_never_goes_back() {
         let names = Names::default();
@@ -745,6 +945,7 @@ mod tests {
                 generation: 7,
                 built: false,
                 pending: 2,
+                failed: 0,
             })
         }
     }
