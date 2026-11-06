@@ -238,8 +238,15 @@ fn deep() -> bool {
 /// `MODEL_REAL_CRASHES=1`: every crash is a real panic unwound through the manager, as before the edges of crashes were taken
 /// from a running run (the two give the same states and edges: the fingerprint of the states in the output says so).
 fn real_crashes() -> bool {
-    std::env::var_os("MODEL_REAL_CRASHES").is_some()
+    // Read once: it is asked on every edge, and an environment lookup is a system call on Windows (it also walks the whole
+    // environment block, which on a CI runner is large).
+    static REAL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *REAL.get_or_init(|| std::env::var_os("MODEL_REAL_CRASHES").is_some())
 }
+
+/// Panics that unwound through the manager (a crash edge taken by really panicking). Counted to show how many the
+/// exploration still pays for: an unwind costs tens of microseconds on macOS and far more on Windows.
+static REAL_PANICS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Events that matter in combination with the core alphabet but not with each other: a path takes at most one of them, so
 /// each is tried from every core state without multiplying the state space by every combination.
@@ -1076,6 +1083,7 @@ fn run(
     let (crashed, out) = match result {
         Ok(o) => (false, Some(o)),
         Err(p) => {
+            REAL_PANICS.fetch_add(1, Ordering::Relaxed);
             if let Some(msg) = describe_panic(p.as_ref()) {
                 viols.push(("the code under test panicked", msg));
             }
@@ -2259,7 +2267,8 @@ fn check_model(configs: &[(Caps, Resp)], floor: Option<Floor>) {
         }
     }
     out += &format!(
-        "total: {states} states, {edges} edges ({crash_edges} crash edges) in {:?}\nedges by event {by_event:?}\nedges by fault {by_fault:?}\nedges by interruption {by_intr:?}\n",
+        "total: {states} states, {edges} edges ({crash_edges} crash edges, {} real panics) in {:?}\nedges by event {by_event:?}\nedges by fault {by_fault:?}\nedges by interruption {by_intr:?}\n",
+        REAL_PANICS.load(Ordering::Relaxed),
         started.elapsed()
     );
     for (k, (n, replay, why)) in &kinds {
@@ -2308,6 +2317,120 @@ fn check_model(configs: &[(Caps, Resp)], floor: Option<Floor>) {
         fixed.is_empty(),
         "known-failing entries that no longer fail (delete them): {fixed:?}\n{out}"
     );
+}
+
+/// Reports, in the job log, what the pieces of one edge cost on this machine, so a platform on which the exploration is far
+/// slower than elsewhere (the Windows runner: 20 to 35 times a Mac per edge, CI run 7642) can be told apart by measurement and
+/// not by guessing: the per-call cost of the system calls an edge makes (the clocks the manager reads several times, an
+/// environment lookup, a lock, a small allocation, an unwind) and the cost of whole edges. It asserts nothing about time
+/// (ER-12); it asserts only that it measured something, so a broken probe cannot read as a result (ER-33).
+#[test]
+fn the_cost_of_the_pieces_of_one_edge_is_reported() {
+    silence_crashes();
+    fn per_call(n: u32, mut f: impl FnMut()) -> f64 {
+        let t = Instant::now();
+        for _ in 0..n {
+            f();
+        }
+        t.elapsed().as_nanos() as f64 / f64::from(n)
+    }
+    let m = Mutex::new(0u32);
+    let sink = std::sync::atomic::AtomicU64::new(0);
+    let mut out = String::from("cost of the pieces of one edge (ns per call)\n");
+    let rows: Vec<(&str, f64)> = vec![
+        (
+            "Instant::now",
+            per_call(20_000, || {
+                sink.fetch_add(
+                    Instant::now().elapsed().as_nanos() as u64,
+                    Ordering::Relaxed,
+                );
+            }),
+        ),
+        (
+            "SystemTime::now",
+            per_call(20_000, || {
+                sink.fetch_add(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.subsec_nanos()) as u64,
+                    Ordering::Relaxed,
+                );
+            }),
+        ),
+        (
+            "env::var_os (absent name)",
+            per_call(20_000, || {
+                sink.fetch_add(
+                    u64::from(std::env::var_os("MODEL_COST_PROBE_ABSENT").is_some()),
+                    Ordering::Relaxed,
+                );
+            }),
+        ),
+        (
+            "Mutex lock and unlock",
+            per_call(20_000, || {
+                *lk_u32(&m) += 1;
+            }),
+        ),
+        (
+            "Box::new of 64 bytes",
+            per_call(20_000, || {
+                sink.fetch_add(u64::from(Box::new([1u8; 64])[3]), Ordering::Relaxed);
+            }),
+        ),
+        (
+            "catch_unwind without a panic",
+            per_call(20_000, || {
+                let _ = std::hint::black_box(catch_unwind(|| std::hint::black_box(1u32)));
+            }),
+        ),
+        (
+            "catch_unwind with a Crash panic",
+            per_call(300, || {
+                let _ = catch_unwind(|| panic_any(Crash));
+            }),
+        ),
+    ];
+    for (name, ns) in &rows {
+        out += &format!("  {name}: {ns:.0}\n");
+    }
+    // Whole edges: every entry point from the seeds of one configuration, repeated.
+    let (caps, resp) = (Caps::NoAuto, Resp::Fast);
+    let mut edges = 0u32;
+    let t = Instant::now();
+    for _ in 0..20 {
+        for (_, w) in seeds(caps, resp) {
+            for &ev in ALL_EVS.iter().filter(|e| is_entry(**e)) {
+                let e = apply(&w, ev, Fault::None, Intr::None);
+                edges += 1;
+                sink.fetch_add(u64::from(e.crashed), Ordering::Relaxed);
+            }
+        }
+    }
+    let whole = t.elapsed().as_nanos() as f64 / f64::from(edges);
+    let t = Instant::now();
+    for _ in 0..20 {
+        for (_, w) in seeds(caps, resp) {
+            for &ev in ALL_EVS.iter().filter(|e| is_entry(**e)) {
+                let (e, c) = apply_with_crashes(&w, ev, Fault::None);
+                sink.fetch_add(u64::from(e.crashed) + c.len() as u64, Ordering::Relaxed);
+            }
+        }
+    }
+    let with_crashes = t.elapsed().as_nanos() as f64 / f64::from(edges);
+    out += &format!(
+        "  whole edge, {edges} entry-point edges of {caps:?}/{resp:?}: {whole:.0}\n  the same with crash snapshots: {with_crashes:.0}\n"
+    );
+    println!("{out}");
+    assert!(
+        edges > 0 && whole > 0.0 && rows.iter().all(|(_, ns)| *ns > 0.0),
+        "the probe measured nothing\n{out}"
+    );
+}
+
+fn lk_u32(m: &Mutex<u32>) -> std::sync::MutexGuard<'_, u32> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Replays one path printed by a failure: `MODEL_REPLAY='Mac/Fast/Healthy|Start;Install+RegOther@CrashAfter(2)'` prints the
