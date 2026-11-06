@@ -191,6 +191,36 @@ fn an_unbuilt_catalogue_falls_back_to_facets_and_reports_pending() {
     assert!(reply.built && reply.candidates.is_empty() && reply.pending == 0);
 }
 
+/// A source whose build failed is given up on, not retried until the store is reopened: it counts as done (the catalogue is
+/// built without it, and a wait for the catalogue ends) and is reported, where a source that is only not yet catalogued is
+/// pending.
+#[test]
+fn a_source_whose_build_failed_counts_as_done_and_is_reported() {
+    let (logs, _dir, store) = setup("failed");
+    lines(&logs.0.join("a.log"), &["Started CompanyA.Graphic.Builder.exe"]);
+    lines(&logs.0.join("b.log"), &["Started CompanyA.Tray.Agent.exe"]);
+    store.open(std::slice::from_ref(&logs.0)).unwrap().wait().unwrap();
+    built(&store);
+    let status = || store.catalogue_status(&Default::default()).unwrap();
+    let sources: Vec<u32> = store.summary().unwrap().sources.iter().map(|s| s.id).collect();
+    assert_eq!(sources.len(), 2);
+    assert_eq!((status().built, status().pending, status().failed), (true, 0, 0));
+    // One source failed: done and reported.
+    store.catalogue_give_up_on(sources[0]).unwrap();
+    let s = status();
+    assert_eq!((s.built, s.pending, s.failed), (true, 0, 1), "a failed source does not keep the catalogue from being built");
+    let reply = store.catalogue(&CatalogueRequest::default()).unwrap();
+    assert_eq!((reply.built, reply.pending), (true, 0));
+    // Another one that is only missing from the catalogue (not given up on) is pending, and the catalogue is not built.
+    store
+        .bench_sql(&format!("DELETE FROM catalogue_sources WHERE source = {}", sources[1]))
+        .unwrap();
+    let s = status();
+    assert_eq!((s.built, s.pending, s.failed), (false, 1, 1));
+    let reply = store.catalogue(&CatalogueRequest::default()).unwrap();
+    assert_eq!((reply.built, reply.pending), (false, 1));
+}
+
 #[test]
 fn every_name_is_listed_for_the_name_book_and_graphic_builder_groups_its_spellings() {
     use debrief_core::names::Names;

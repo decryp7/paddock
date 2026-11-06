@@ -574,6 +574,19 @@ impl crate::Inner {
 
 impl crate::DuckStore {
     /// Waits until every ready source is catalogued (tests and benchmarks), at most `timeout`; true when it is.
+    /// Makes `source` look like one whose catalogue build failed: its rows are removed and the service has given up on it
+    /// (as after an error in its build). A hook for tests.
+    #[doc(hidden)]
+    pub fn catalogue_give_up_on(&self, source: u32) -> StoreResult<()> {
+        let service = self.inner.catalogue.as_ref().ok_or_else(|| engine("the store has no catalogue"))?;
+        let conn = self.inner.conn()?;
+        for sql in DELETE_SQL {
+            conn.execute(sql, params![source]).map_err(engine)?;
+        }
+        lock(&service.shared.failed).insert(source);
+        Ok(())
+    }
+
     /// The row counters of the catalogue builds so far (none without a catalogue service); a hook for tests.
     #[doc(hidden)]
     pub fn catalogue_row_stats(&self) -> Option<RowStats> {
@@ -702,6 +715,9 @@ mod tests {
             failed: Mutex::new(HashSet::new()),
             unsaved: AtomicBool::new(false),
             unsaved_rows: AtomicU64::new(0),
+            rows_high: AtomicU64::new(0),
+            rows_committed: AtomicU64::new(0),
+            rows_largest: AtomicU64::new(0),
             heavy: Arc::new(Mutex::new(())),
             checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
             dropped_while_exiting: AtomicBool::new(false),
