@@ -45,6 +45,8 @@ pub enum Turn {
     Idle,
     /// There was work but the write lock was busy.
     Blocked,
+    /// The turn failed (the loop waits before it tries again).
+    Failed,
 }
 
 /// The turns of one loop since the last [`take`].
@@ -53,15 +55,16 @@ pub struct Counts {
     pub worked: u64,
     pub idle: u64,
     pub blocked: u64,
+    pub failed: u64,
 }
 
 /// The counters of every loop: [`record`] and [`take`] work on the process's one set; tests make their own.
-pub struct Counters([[AtomicU64; 3]; 4]);
+pub struct Counters([[AtomicU64; 4]; 4]);
 
 impl Counters {
     /// All zero.
     pub const fn new() -> Counters {
-        Counters([const { [const { AtomicU64::new(0) }; 3] }; 4])
+        Counters([const { [const { AtomicU64::new(0) }; 4] }; 4])
     }
 
     /// Counts one turn of `l`.
@@ -79,6 +82,7 @@ impl Counters {
                     worked: c[Turn::Worked as usize].swap(0, Ordering::Relaxed),
                     idle: c[Turn::Idle as usize].swap(0, Ordering::Relaxed),
                     blocked: c[Turn::Blocked as usize].swap(0, Ordering::Relaxed),
+                    failed: c[Turn::Failed as usize].swap(0, Ordering::Relaxed),
                 },
             )
         })
@@ -115,6 +119,7 @@ mod tests {
         c.record(Loop::Fts, Turn::Idle);
         c.record(Loop::Fts, Turn::Worked);
         c.record(Loop::Catalogue, Turn::Blocked);
+        c.record(Loop::Catalogue, Turn::Failed);
         let got = c.take();
         assert_eq!(
             got[0],
@@ -123,7 +128,8 @@ mod tests {
                 Counts {
                     worked: 1,
                     idle: 2,
-                    blocked: 0
+                    blocked: 0,
+                    failed: 0
                 }
             )
         );
@@ -134,7 +140,8 @@ mod tests {
                 Counts {
                     worked: 0,
                     idle: 0,
-                    blocked: 1
+                    blocked: 1,
+                    failed: 1
                 }
             )
         );

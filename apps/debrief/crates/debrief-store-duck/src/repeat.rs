@@ -5,6 +5,42 @@
 
 use std::time::{Duration, Instant};
 
+/// The event ids and words of one loop's failure lines.
+pub(crate) struct Names {
+    pub failed: &'static str,
+    pub cause_changed: &'static str,
+    pub recovered: &'static str,
+    /// "full-text indexing failed": what the warning says (never the error).
+    pub what: &'static str,
+}
+
+/// The full-text indexing loop's lines.
+pub(crate) const FTS: Names = Names {
+    failed: "store.fts.failed",
+    cause_changed: "store.fts.cause_changed",
+    recovered: "store.fts.recovered",
+    what: "full-text indexing failed",
+};
+
+/// The name catalogue loop's lines.
+pub(crate) const CATALOGUE: Names = Names {
+    failed: "store.catalogue.failed",
+    cause_changed: "store.catalogue.cause_changed",
+    recovered: "store.catalogue.recovered",
+    what: "cataloguing failed",
+};
+
+/// What makes two failures the same cause: the outermost context (it names the segment or source) and the class of the root
+/// cause, never the whole text (it can carry values that change from turn to turn, and a counter in it would defeat the guard).
+pub(crate) fn cause_key(e: &anyhow::Error) -> String {
+    let class = debrief_core::logsafe::class_of(&e.root_cause().to_string());
+    if e.chain().count() > 1 {
+        format!("{e}|{class}")
+    } else {
+        class
+    }
+}
+
 /// What a failure means for the log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Failure {
@@ -49,6 +85,24 @@ impl RepeatGuard {
         self.take(now)
     }
 
+    /// A failed turn: the first failure of a cause is logged (the class at warn, the text at debug), repeats are only
+    /// counted, and a new cause says how long the old one lasted.
+    pub fn log_failure(&mut self, names: &Names, e: &anyhow::Error, now: Instant) {
+        if let Failure::First { ended } = self.failed(&cause_key(e), now) {
+            if let Some(r) = ended {
+                log::info!(EventId = names.cause_changed, Failures = r.failures, Ms = crate::ms(r.lasted); "The earlier failure happened {} times; a different one follows", r.failures);
+            }
+            debrief_core::log_failure!(warn, names.what, e; EventId = names.failed);
+        }
+    }
+
+    /// A turn that did its job or found nothing to do (not one that was blocked): one line when the loop had been failing.
+    pub fn log_recovery(&mut self, names: &Names, now: Instant) {
+        if let Some(r) = self.recovered(now) {
+            log::info!(EventId = names.recovered, Failures = r.failures, Ms = crate::ms(r.lasted); "Recovered after {} failures", r.failures);
+        }
+    }
+
     fn take(&mut self, now: Instant) -> Option<Run> {
         let since = self.since.take()?;
         self.cause = None;
@@ -81,6 +135,42 @@ mod tests {
             })
         );
         assert_eq!(g.recovered(at(60_000)), None, "reported once");
+    }
+
+    #[test]
+    fn a_loop_logs_a_hundred_identical_failures_once_and_its_recovery_once() {
+        crate::testlog::install();
+        const TEST: Names = Names {
+            failed: "test.repeat.failed",
+            cause_changed: "test.repeat.cause_changed",
+            recovered: "test.repeat.recovered",
+            what: "the test loop failed",
+        };
+        let t0 = Instant::now();
+        let mut g = RepeatGuard::default();
+        // The same cause with a different value each time (what a DuckDB message does): still one cause.
+        for i in 0..100u64 {
+            let e = anyhow::anyhow!("IO Error: could not read value {i}").context("indexing seg-0001");
+            g.log_failure(&TEST, &e, t0 + Duration::from_millis(i * 500));
+        }
+        assert_eq!(crate::testlog::records("test.repeat.failed").len(), 1);
+        let first = &crate::testlog::records("test.repeat.failed")[0];
+        assert_eq!((first.level, first.props["Why"].as_str()), (log::Level::Warn, Some("IO Error")));
+        assert!(!format!("{first:?}").contains("value 0"), "the text is for debug: {first:?}");
+        // Another cause: logged, and the old run is closed with its count.
+        g.log_failure(
+            &TEST,
+            &anyhow::anyhow!("Binder Error: x").context("indexing seg-0002"),
+            t0 + Duration::from_secs(60),
+        );
+        assert_eq!(crate::testlog::records("test.repeat.failed").len(), 2);
+        let changed = &crate::testlog::records("test.repeat.cause_changed")[0];
+        assert_eq!(changed.props["Failures"], 100);
+        g.log_recovery(&TEST, t0 + Duration::from_secs(70));
+        g.log_recovery(&TEST, t0 + Duration::from_secs(71));
+        let recovered = crate::testlog::records("test.repeat.recovered");
+        assert_eq!(recovered.len(), 1, "once");
+        assert_eq!(recovered[0].props["Failures"], 1);
     }
 
     #[test]

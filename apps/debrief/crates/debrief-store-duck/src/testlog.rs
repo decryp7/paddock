@@ -71,6 +71,11 @@ pub fn records(event: &str) -> Vec<Record> {
         .collect()
 }
 
+/// Every record so far, oldest first.
+pub fn all() -> Vec<Record> {
+    RECORDS.lock().unwrap_or_else(|p| p.into_inner()).clone()
+}
+
 /// The first record with `event` that `wanted` accepts, waiting up to `within` for it (background loops write theirs
 /// after the call that caused them returned). `None` when none came.
 pub fn wait_for(event: &str, within: Duration, wanted: impl Fn(&Record) -> bool) -> Option<Record> {

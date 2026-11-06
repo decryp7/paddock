@@ -14,7 +14,7 @@
 //! - Bounds: see [`debrief_core::catalogue`]; one thread, one source in memory at a time.
 
 use crate::activity::{Loop, Turn};
-use crate::repeat::{Failure, RepeatGuard};
+use crate::repeat::{self, RepeatGuard};
 use crate::{engine, lock};
 use anyhow::Result;
 use debrief_core::catalogue::*;
@@ -196,7 +196,7 @@ impl Drop for CatalogueService {
 }
 
 /// One turn: tidy, then build the next source. [`Turn::Worked`] when a source was built (go on at once).
-fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
+fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>, built_run: &mut BuiltRun) -> Result<Turn> {
     let todo = {
         let Ok(_writing) = write_lock.try_lock() else {
             return Ok(Turn::Blocked);
@@ -229,52 +229,60 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
     let rows = entries.len() as u64;
     commit(conn, source, &entries, dropped, guids)?;
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
-    log::info!(
-        EventId = "store.catalogue.built",
-        Source = source,
-        Rows = rows,
-        Ms = crate::ms(began.elapsed());
-        "Catalogued source {source}"
-    );
+    built_run.add(rows, began.elapsed());
     Ok(Turn::Worked)
 }
 
-/// Whether the loop builds the next source without waiting: after a turn that built one, not after a failed turn (the same
-/// cause would fail again at once) and not after an idle or blocked one.
-fn goes_on_at_once(turn: Turn, failed: bool) -> bool {
-    turn == Turn::Worked && !failed
+/// The sources built since the loop last went idle: one `store.catalogue.built` line says it (not one line per source).
+#[derive(Debug, Default, PartialEq, Eq)]
+struct BuiltRun {
+    sources: u64,
+    rows: u64,
+    ms: u64,
+}
+
+impl BuiltRun {
+    fn add(&mut self, rows: u64, took: Duration) {
+        self.sources += 1;
+        self.rows += rows;
+        self.ms += crate::ms(took);
+    }
+
+    /// The run so far, reset; `None` when nothing was built.
+    fn take(&mut self) -> Option<BuiltRun> {
+        (self.sources > 0).then(|| std::mem::take(self))
+    }
+}
+
+/// Whether the loop builds the next source without waiting: after a turn that built one. A failed turn waits (the same cause
+/// would fail again at once), and so does an idle or a blocked one.
+fn goes_on_at_once(turn: Turn) -> bool {
+    turn == Turn::Worked
 }
 
 fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
     let mut guard = RepeatGuard::default();
+    let mut built_run = BuiltRun::default();
     while !s.stop.load(Ordering::SeqCst) {
-        // A failed turn waits like an idle one: the same cause would fail again at once.
-        let mut failed = false;
-        let turn = match step(s, conn, write_lock) {
+        let turn = match step(s, conn, write_lock, &mut built_run) {
             Ok(turn) => {
-                if let Some(r) = guard.recovered(Instant::now()) {
-                    log::info!(
-                        EventId = "store.catalogue.recovered",
-                        Failures = r.failures,
-                        Ms = crate::ms(r.lasted);
-                        "The catalogue recovered after {} failures",
-                        r.failures
-                    );
+                // A blocked turn did not show that the cause is gone.
+                if turn != Turn::Blocked {
+                    guard.log_recovery(&repeat::CATALOGUE, Instant::now());
                 }
                 turn
             }
             Err(e) => {
-                let text = format!("{e:#}");
-                if matches!(guard.failed(&text, Instant::now()), Failure::First { .. }) {
-                    log::warn!(EventId = "store.catalogue.failed"; "catalogue: {text}");
-                }
-                failed = true;
-                Turn::Worked
+                guard.log_failure(&repeat::CATALOGUE, &e, Instant::now());
+                Turn::Failed
             }
         };
         crate::activity::record(Loop::Catalogue, turn);
-        if goes_on_at_once(turn, failed) {
+        if goes_on_at_once(turn) {
             continue;
+        }
+        if let Some(b) = built_run.take() {
+            log::info!(EventId = "store.catalogue.built", Sources = b.sources, Rows = b.rows, Ms = b.ms; "Catalogued {} sources", b.sources);
         }
         let mut woken = lock(&s.wake.0);
         if !*woken {
@@ -396,13 +404,26 @@ mod loop_tests {
 
     #[test]
     fn only_a_turn_that_built_a_source_goes_on_without_waiting() {
-        assert!(goes_on_at_once(Turn::Worked, false));
-        assert!(
-            !goes_on_at_once(Turn::Worked, true),
-            "a failed turn waits: the same cause would fail again at once"
+        assert!(goes_on_at_once(Turn::Worked));
+        for turn in [Turn::Idle, Turn::Blocked, Turn::Failed] {
+            assert!(!goes_on_at_once(turn), "{turn:?} waits");
+        }
+    }
+
+    #[test]
+    fn a_run_of_built_sources_is_one_line_and_resets() {
+        let mut run = BuiltRun::default();
+        assert_eq!(run.take(), None);
+        run.add(10, Duration::from_millis(30));
+        run.add(5, Duration::from_millis(12));
+        assert_eq!(
+            run.take(),
+            Some(BuiltRun {
+                sources: 2,
+                rows: 15,
+                ms: 42
+            })
         );
-        assert!(!goes_on_at_once(Turn::Idle, false));
-        assert!(!goes_on_at_once(Turn::Blocked, false));
-        assert!(!goes_on_at_once(Turn::Idle, true));
+        assert_eq!(run.take(), None);
     }
 }

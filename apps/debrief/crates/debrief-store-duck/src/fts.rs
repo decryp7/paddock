@@ -16,7 +16,7 @@
 //!   epoch is recreated and every segment indexed again.
 
 use crate::activity::{Loop, Turn};
-use crate::repeat::{Failure, RepeatGuard};
+use crate::repeat::{self, RepeatGuard};
 use crate::segments::SEGMENTS_DIR;
 use crate::writer::{meta_u64, set_meta};
 use anyhow::{Context, Result};
@@ -778,7 +778,7 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
         let began = Instant::now();
         let turn = match step(s, &seg_dir, conn, write_lock, epoch) {
             Ok(Stepped::Indexed(n)) => {
-                recovered(&mut guard);
+                guard.log_recovery(&repeat::FTS, Instant::now());
                 let r = run.get_or_insert(Run {
                     started: began,
                     steps: 0,
@@ -790,21 +790,15 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
                 continue;
             }
             Ok(Stepped::Nothing) => {
-                recovered(&mut guard);
+                guard.log_recovery(&repeat::FTS, Instant::now());
                 Turn::Idle
             }
             Ok(Stepped::Blocked) => Turn::Blocked,
             Err(e) => {
-                let text = format!("{e:#}");
-                if let Failure::First { ended } = guard.failed(&text, Instant::now()) {
-                    if let Some(r) = ended {
-                        log::info!(EventId = "store.fts.cause_changed", Failures = r.failures, Ms = crate::ms(r.lasted); "The earlier full-text indexing failure happened {} times; a different one follows", r.failures);
-                    }
-                    log::warn!(EventId = "store.fts.failed"; "full-text indexing failed: {text}");
-                }
-                *crate::lock(&s.failure) = Some(text);
+                guard.log_failure(&repeat::FTS, &e, Instant::now());
+                *crate::lock(&s.failure) = Some(format!("{e:#}"));
                 *crate::lock(&s.writer) = None;
-                Turn::Worked
+                Turn::Failed
             }
         };
         crate::activity::record(Loop::Fts, turn);
@@ -817,7 +811,7 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
                 // Let the background merges finish (they hold memory and allocate until they do), then give the
                 // index build's heap and its threads' pages back to the OS: the process may idle now.
                 if let Err(e) = w.wait_merging_threads() {
-                    log::warn!(EventId = "store.fts.merges_failed"; "full-text index merges failed: {e}");
+                    debrief_core::log_failure!(warn, "full-text index merges failed", e; EventId = "store.fts.merges_failed");
                 }
                 debrief_alloc::release();
                 if let Some(r) = run.take() {
@@ -853,13 +847,6 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
             wakes.count(wake_cause(*woken, waited.timed_out(), s.pending.load(Ordering::SeqCst) > 0));
         }
         *woken = false;
-    }
-}
-
-/// The loop worked again: one line when it had been failing.
-fn recovered(guard: &mut RepeatGuard) {
-    if let Some(r) = guard.recovered(Instant::now()) {
-        log::info!(EventId = "store.fts.recovered", Failures = r.failures, Ms = crate::ms(r.lasted); "Full-text indexing recovered after {} failures", r.failures);
     }
 }
 
@@ -899,25 +886,6 @@ mod tests {
                 backstop: 3
             }
         );
-    }
-
-    #[test]
-    fn a_recovery_is_one_line_with_the_failures_and_their_duration() {
-        crate::testlog::install();
-        let t0 = Instant::now();
-        let mut guard = RepeatGuard::default();
-        for i in 0..7u64 {
-            guard.failed("fts disk full test", t0 + Duration::from_millis(i * 500));
-        }
-        recovered(&mut guard);
-        let line = crate::testlog::wait_for("store.fts.recovered", Duration::from_secs(5), |r| r.props["Failures"] == 7)
-            .expect("the recovery line");
-        assert_eq!(line.level, log::Level::Info);
-        assert!(line.props["Ms"].is_u64());
-        // Nothing failed: nothing to say.
-        let before = crate::testlog::records("store.fts.recovered").len();
-        recovered(&mut guard);
-        assert_eq!(crate::testlog::records("store.fts.recovered").len(), before);
     }
 
     #[test]
