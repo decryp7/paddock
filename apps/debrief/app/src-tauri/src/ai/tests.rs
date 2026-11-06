@@ -1705,7 +1705,7 @@ fn ai_requests_are_jobs_run_one_at_a_time_and_a_crash_fails_only_the_running_one
     // Shown in the pane after 2 s: the turn waits at position 1, and may be moved.
     app.state::<crate::test_support::TestClock>().0.advance(3_000);
     let list = ipc(&main, "jobs_list", json!({})).unwrap();
-    // The window's name-table rebuild (a Maintenance job, shown like any job after 2 s) is not what this test is about: only AI jobs are.
+    // The window's name-table rebuild (a `JobKind::Names` job, shown like any job after 2 s) is not what this test is about: only AI jobs are.
     let jobs: Vec<&Value> = list["jobs"].as_array().unwrap().iter().filter(|j| j["kind"] == "ai").collect();
     assert_eq!(jobs.len(), 2);
     assert_eq!(
@@ -2254,12 +2254,38 @@ fn a_search_answers_from_the_last_table_at_once_and_queues_at_most_one_rebuild()
     // Cancel stops a rebuild and leaves the table as it was.
     let ctx = crate::jobs::JobCtx::detached();
     ctx.cancel_flag().store(true, Ordering::SeqCst);
-    let store = win.engine.store().unwrap();
+    let (id, store) = win.engine.tagged_store().unwrap();
     assert_eq!(
-        win.names.run_rebuild(store.as_ref(), &ctx),
+        win.names.run_rebuild(id, store.as_ref(), &ctx),
         crate::names::RebuildOutcome::Cancelled
     );
     assert!(win.names.names().is_built());
+}
+
+#[test]
+fn queue_if_stale_queues_a_rebuild_only_for_a_table_that_is_out_of_date_and_says_so() {
+    let f = Fixture::new("names-stale");
+    let app = f.app(f.core());
+    let main = window(&app, "main");
+    let win = app.state::<crate::windows::Windows>().get("main").unwrap();
+    let jobs = app.state::<crate::jobs::Jobs>().inner().clone();
+    // A rebuild is running (its job key is held): the table does not exist, so it is stale and one more is queued.
+    let held = hold_rebuild(&app, "main");
+    open_samples(&main);
+    assert!(
+        crate::names::queue_if_stale(app.handle(), &win),
+        "no table yet: stale, a rebuild was queued"
+    );
+    drop(held);
+    wait_until("the name table", || win.names.names().is_built());
+    wait_until("the rebuild jobs to end", || {
+        jobs.find_active(|j| j.kind == crate::jobs::JobKind::Names).is_empty()
+    });
+    // The table is current: nothing is queued.
+    let runs = win.names.rebuild_runs();
+    assert!(!crate::names::queue_if_stale(app.handle(), &win), "a current table queues nothing");
+    assert!(jobs.find_active(|j| j.kind == crate::jobs::JobKind::Names).is_empty());
+    assert_eq!(win.names.rebuild_runs(), runs);
 }
 
 /// ADR 0024 section 3: each reader of the name table has a test with a stale table. The chat turn is one: it uses the

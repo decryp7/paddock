@@ -269,11 +269,12 @@ impl JobQueue {
     /// As [`submit`](Self::submit), saying whether a job was added.
     pub fn submit_or_existing(&mut self, spec: JobSpec, now: i64) -> Result<Submission, Refusal> {
         if let Some(key) = &spec.key {
-            if let Some(j) = self
-                .active
-                .iter()
-                .find(|j| j.kind == spec.kind && j.key.as_ref() == Some(key) && !j.state().is_finished())
-            {
+            if let Some(j) = self.active.iter().find(|j| {
+                j.kind == spec.kind
+                    && j.key.as_ref() == Some(key)
+                    && !j.state().is_finished()
+                    && (spec.joins_running || j.state() == JobState::Queued)
+            }) {
                 return Ok(Submission { id: j.id, created: false });
             }
         }
@@ -641,6 +642,34 @@ mod tests {
         q.finish(a, JobEnd::Done(None), 3).unwrap();
         let again = q.submit(ai("a").keyed("main|x"), 4).unwrap();
         assert_ne!(again, a);
+    }
+
+    #[test]
+    fn a_request_that_arrives_while_the_work_runs_queues_the_next_run_but_only_one() {
+        let mut q = JobQueue::new(4);
+        let first = q.submit_or_existing(ai("a").keyed_while_queued("main|n"), 0).unwrap();
+        assert!(first.created);
+        // Queued: an equal request is served by it.
+        assert_eq!(
+            q.submit_or_existing(ai("a").keyed_while_queued("main|n"), 0).unwrap(),
+            Submission {
+                id: first.id,
+                created: false
+            }
+        );
+        q.start(first.id, 1).unwrap();
+        // Running: the request may have come after the run read its input, so it queues the next run.
+        let next = q.submit_or_existing(ai("a").keyed_while_queued("main|n"), 2).unwrap();
+        assert!(next.created, "the trigger during the run is not lost");
+        assert_ne!(next.id, first.id);
+        // At most one waits.
+        assert_eq!(
+            q.submit_or_existing(ai("a").keyed_while_queued("main|n"), 3).unwrap(),
+            Submission {
+                id: next.id,
+                created: false
+            }
+        );
     }
 
     fn states(q: &JobQueue, now: i64) -> Vec<(String, JobState)> {

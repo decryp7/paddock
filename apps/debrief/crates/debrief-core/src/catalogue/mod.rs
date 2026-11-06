@@ -124,10 +124,14 @@ pub struct CatalogueStatusRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogueStatus {
-    /// Whether every ready source is catalogued and saved.
+    /// Whether every ready source is done: catalogued and saved, or given up on ([`failed`](Self::failed)).
     pub built: bool,
-    /// Sources not catalogued yet.
+    /// Sources not catalogued yet, not counting the failed ones.
     pub pending: u64,
+    /// Sources whose build failed (their names are missing; not tried again until the store is reopened). They count
+    /// as done, so a catalogue with one broken source still becomes built.
+    #[serde(default)]
+    pub failed: u64,
     /// Moves whenever the catalogue's state may have changed; the `after` of the next request.
     pub generation: u64,
 }

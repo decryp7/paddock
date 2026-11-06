@@ -432,8 +432,12 @@ pub struct JobSpec {
     /// Background housekeeping nobody waits for: it ends without a message or notification (it still shows in the pane).
     pub quiet: bool,
     /// Idempotency key (ADR 0024 rule 3): while a queued or running job of the same kind has an equal key, submitting
-    /// returns that job instead of adding one. `None`: never deduplicated. Retry builds its spec the same way, so it keeps the key.
+    /// returns that job instead of adding one (only a queued one for [`JobSpec::joins_running`] false). `None`: never deduplicated. Retry builds its spec the same way, so it keeps the key.
     pub key: Option<String>,
+    /// Whether an equal key also matches a job that already runs. False ([`JobSpec::keyed_while_queued`]): only a job
+    /// that still waits serves the request, so a trigger that arrives while the work runs queues the next run (the
+    /// running one may have read its input before the trigger).
+    pub joins_running: bool,
 }
 
 impl JobSpec {
@@ -446,10 +450,20 @@ impl JobSpec {
             request: None,
             quiet: false,
             key: None,
+            joins_running: true,
         }
     }
 
+    /// As [`keyed`](Self::keyed), but only a job that is still queued serves an equal request: one that arrives while
+    /// the work runs queues one more run (at most one waits), so a change made after the run began is not lost.
+    pub fn keyed_while_queued(mut self, key: impl Into<String>) -> JobSpec {
+        self.key = Some(key.into());
+        self.joins_running = false;
+        self
+    }
+
     /// Makes the spec idempotent (see [`JobSpec::key`]); the caller builds the key from the window and the request.
+    #[cfg(test)]
     pub fn keyed(mut self, key: impl Into<String>) -> JobSpec {
         self.key = Some(key.into());
         self

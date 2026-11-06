@@ -190,33 +190,9 @@ fn an_idle_store_statements_and_cpu() {
     eprintln!("IDLE {idle} s: {statements} statements, {used:.3} CPU-s");
 }
 
-/// Most memory the catalogue's committed but not yet checkpointed rows may hold (DuckDB's `IN_MEMORY_TABLE`) while it
-/// builds (D-0: the store's checkpoint threshold is 1 GB, so they all stayed in memory until the build ended).
-const UNSAVED_CATALOGUE_MB: u64 = 16;
-
-/// The most `IN_MEMORY_TABLE` memory (in MB, in steps of 4) the store held at any poll while its catalogue was built.
-fn peak_unsaved_mb_while_cataloguing(store: &debrief_store_duck::DuckStore) -> u64 {
-    let mut peak = 0;
-    loop {
-        for mb in (peak / 4 + 1..=64).map(|i| i * 4) {
-            let over = store
-                .bench_sql(&format!(
-                    "SELECT 1 WHERE (SELECT coalesce(sum(memory_usage_bytes), 0) FROM duckdb_memory() WHERE tag = 'IN_MEMORY_TABLE') > {}",
-                    mb << 20
-                ))
-                .unwrap();
-            if over == 0 {
-                break;
-            }
-            peak = mb;
-        }
-        if store.catalogue(&CatalogueRequest::default()).unwrap().built {
-            return peak;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
-}
-
+/// The service keeps the high-water mark of the rows committed and not yet checkpointed (a hook, [`RowStats`]), so the
+/// bound is read exactly: a sample of the store's memory taken from outside can miss the peak and pass without the fix.
+/// Without the mid-run checkpoint every row of the run stays unsaved and the mark is the total.
 #[test]
 fn building_the_catalogue_keeps_its_unsaved_rows_bounded() {
     let base = TempDir::new("regress-unsaved-corpus");
@@ -224,11 +200,25 @@ fn building_the_catalogue_keeps_its_unsaved_rows_bounded() {
     let corpus = common::corpus::corpus(&base.0.join("corpus"), 300_000);
     let store = debrief_store_duck::DuckStore::create(&dir.0, Profile::default_profile(), debrief_core::PluginRegistry::new()).unwrap();
     store.open(&[corpus]).unwrap().wait().unwrap();
-    let peak = peak_unsaved_mb_while_cataloguing(&store);
-    let sources = store.summary().unwrap().sources.len();
-    eprintln!("{sources} sources catalogued; unsaved catalogue rows held up to {peak} MB");
     assert!(
-        peak <= UNSAVED_CATALOGUE_MB,
-        "building the catalogue of {sources} sources held {peak} MB of unsaved rows in memory; the bound is {UNSAVED_CATALOGUE_MB} MB"
+        store.wait_for_catalogue(std::time::Duration::from_secs(300)).unwrap(),
+        "the catalogue was not built"
+    );
+    let stats = store.catalogue_row_stats().expect("the store has a catalogue service");
+    eprintln!("{stats:?}");
+    // The probe can see the thing (ER-33): the run wrote several times the bound, so an unbounded run would show it.
+    assert!(
+        stats.committed >= 2 * stats.checkpoint_after,
+        "the corpus committed {} rows, too few to tell a bounded run from an unbounded one (bound {})",
+        stats.committed,
+        stats.checkpoint_after
+    );
+    // A checkpoint follows the commit that crossed the bound, so one commit more than the bound can be unsaved.
+    assert!(
+        stats.high_water <= stats.checkpoint_after + stats.largest_commit,
+        "the catalogue held {} unsaved rows at once; the bound is {} plus the largest commit ({})",
+        stats.high_water,
+        stats.checkpoint_after,
+        stats.largest_commit
     );
 }
