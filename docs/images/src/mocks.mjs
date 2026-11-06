@@ -20,7 +20,7 @@ function box(x, y, w, h, label) {
 }
 
 
-// ---- Dyno (read-only monitor): no action buttons anywhere, only readings, reasons and alarms ----
+// ---- Dyno (monitor): readings, reasons and alarms ----
 /** A sparkline through values 0..1 in the box (x, y, w, h), with a soft fill under it. */
 function spark(x, y, w, h, v) {
   const P = v.map((q, i) => [x + (i * w) / (v.length - 1), y + h - q * h]);
@@ -41,7 +41,7 @@ function alarmRow(x, y, w, title, detail, state, on, cw = 108) {
 }
 function dynoHero() {
   return sidebar(['Dashboard', 'Processes', 'Why slow', 'Alarms', 'Issues', 'Counters', 'Benchmarks', 'Reports'], 0) +
-    t(232, 48, 'Dashboard', 'mh') + t(232, 70, 'Watching this PC · read-only', 'mm') + r(820, 34, 108, 26, 'mact', 13) + `<circle class="maccf" cx="838" cy="47" r="4"/>` + t(850, 52, 'Monitoring', 'mta') +
+    t(232, 48, 'Dashboard', 'mh') + t(232, 70, 'Watching this PC', 'mm') + r(820, 34, 108, 26, 'mact', 13) + `<circle class="maccf" cx="838" cy="47" r="4"/>` + t(850, 52, 'Monitoring', 'mta') +
     tile(232, 88, 207, 'CPU', '76', '%', CPU) + tile(449, 88, 207, 'Memory', '52', '%', MEM) + tile(672, 88, 123, 'Disk', '236', 'MB/s', DSK) + tile(805, 88, 123, 'Network', '1.2', 'MB/s', NET) +
     r(232, 222, 424, 330, 'mc', 10) + t(252, 254, 'Likeliest cause', 'mm') + t(252, 284, 'A build is using most of the CPU', 'mt2') +
     t(252, 312, 'cargo runs 6 compilers in parallel; the rest waits.', 'mm') +
@@ -49,9 +49,9 @@ function dynoHero() {
     r(252, 404, 384, 1, 'mrule', 0) + t(252, 432, 'Busiest apps', 'mm') +
     [['Rust build (cargo)', 0.82], ['Google Chrome', 0.3], ['Visual Studio Code', 0.18]].map(([a, q], i) => t(252, 462 + i * 30, a, 'mt') + r(450, 454 + i * 30, 186, 8, 'ms', 4) + r(450, 454 + i * 30, 186 * q, 8, 'maccf', 4)).join('') +
     r(672, 222, 256, 330, 'mc', 10) + t(692, 254, 'Alarms', 'mt') + t(908, 254, '2 active', 'mm', 'end') +
-    alarmRow(692, 276, 216, 'Disk 78% full', 'Full in about 41 days', 'Active', true, 64) +
+    alarmRow(692, 276, 216, 'Disk 93% full', '7% free', 'Active', true, 64) +
     alarmRow(692, 340, 216, 'CPU ran hot', '6 min above 90 °C', 'Active', true, 64) +
-    alarmRow(692, 404, 216, 'Backup', 'Late · last run 9 days ago', 'Acknowledged', false, 108) +
+    alarmRow(692, 404, 216, 'Crash loop', 'Docker, 6 times in 10 min', 'Acknowledged', false, 108) +
     r(692, 470, 216, 1, 'mrule', 0) + t(692, 500, 'Health 74 of 100', 'mt') + t(692, 522, 'Reasons, no fixes', 'mm');
 }
 function dynoPanel(kind) {
@@ -72,9 +72,9 @@ function dynoPanel(kind) {
   }
   if (kind === 'alarms') {
     return r(40, 24, 592, 232, 'mc', 12) +
-      alarmRow(64, 48, 544, 'Docker backend keeps restarting', '6 restarts in 2 hours · critical', 'Active', true) +
-      alarmRow(64, 108, 544, 'Macintosh HD is 78% full', 'Full in about 41 days', 'Active', true) +
-      alarmRow(64, 168, 544, 'Backup has not run for 9 days', 'Time Machine', 'Acknowledged', false);
+      alarmRow(64, 48, 544, 'Docker restarted 6 times in 10 minutes', 'Crash loop · warning', 'Active', true) +
+      alarmRow(64, 108, 544, 'Macintosh HD is 93% full', '7% free', 'Active', true) +
+      alarmRow(64, 168, 544, 'CPU ran hot', '6 min above 90 °C', 'Acknowledged', false);
   }
   // bench
   const rows = [['Processor', 0.62, 0.69, '+11%'], ['Memory', 0.7, 0.78, '+11%'], ['Disk', 0.48, 0.54, '+12%']];
@@ -163,7 +163,7 @@ function reccePanel(kind) {
       return (i === 0 ? r(144, y - 4, 384, 34, 'mact', 8) : '') + r(160, y + 2, 22, 22, i === 0 ? 'maccf' : 'mfield', 6) + t(171, y + 17.5, g, i === 0 ? 'mtw' : 'mm', 'middle') + t(196, y + 18, s, 'mt') + t(512, y + 18, k, 'mm', 'end'); }).join('');
 }
 
-// ---- Scrutineer (planned code-signing certificate tool): certificates with their state, a chain, sign, verify, install ----
+// ---- Scrutineer (code-signing certificate tool, dropped 2026-11-05; kept as a record): certificates with their state, a chain, sign, verify, install ----
 const CERTS = [
   ['Release signing', 'Code signing · RSA 3072', 'Expires 2027-11-04', 'Trusted', true],
   ['Nightly builds', 'Code signing · ECDSA P-256', 'Expires in 20 days', 'Renew soon', false],

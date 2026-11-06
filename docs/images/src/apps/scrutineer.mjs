@@ -1,8 +1,8 @@
 export default {
-  // A planned TOOL, not an app; PLACEHOLDER art (the user, 2026-11-04): the real icon, hero and page come later. Its page lives with
-  // the family's tools (tools/scrutineer); the plan is being written on the branch docs/code-signing-plan.
-  id: 'scrutineer', name: 'Scrutineer', icon: 'scrutineer-placeholder', stem: 'scrutineer-placeholder', home: 'tools/scrutineer', planned: true, status: 'Planned',
-  platforms: 'Platforms to be decided',
+  // A TOOL, not an app, dropped on 2026-11-05 (the apps stay unsigned); its PLACEHOLDER art (2026-11-04) is kept as a record. Its page
+  // lives with the family's tools (tools/scrutineer).
+  id: 'scrutineer', name: 'Scrutineer', icon: 'scrutineer-placeholder', stem: 'scrutineer-placeholder', home: 'tools/scrutineer', illustrated: true, concept: true, status: 'Dropped',
+  platforms: 'Dropped on 2026-11-05, never built',
   accent: { dark: '#E07CC8', light: '#840070', fill: '#840070' },
   headline: ['Certified before', 'it ships.'],
   sub: ['Generate, sign, verify and install', 'code-signing certificates in one place.'],

@@ -50,17 +50,14 @@ Apply these deliberately. They are not decoration:
 
 ## Safety
 
-Dyno only watches ([ADR 0021](docs/adr/0021-monitoring-only.md)), with one exception: power state, on the person's request ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md): keep awake, and later sleep and shut down by the normal path, never forced). Therefore:
+Dyno only watches ([ADR 0021](docs/adr/0021-monitoring-only.md)), with these exceptions, all on the person's request: power state ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md): keep awake, Wake-on-LAN, and sleep, hibernate or shut down by the normal path, never forced), and the optional helper's scheduled wakes and pinned disk-health tool install ([ADR 0027](docs/adr/0027-helper-for-1-1-0.md)). Therefore:
 
-- **Never change the machine** (power state on request is the one exception; tests never hold, sleep or wake a real machine: fakes behind `paddock_power::PowerOs`). No process action (end, suspend, cap, priority), no delete, move or restore of files, no
+- **Never change the machine** (the exceptions above; tests never hold, sleep or wake a real machine: fakes behind `paddock_power::PowerOs`). No process action (end, suspend, cap, priority), no delete, move or restore of files, no
   setting or startup change, no tuning. Code that does any of this is removed, not hidden behind a flag. What Dyno writes is its
   own data: history, settings, alarm acknowledgements, mutes and notes, snapshots, baselines and the exports the user saves.
 - **Reads are bounded.** External tools and OS calls run with timeouts; a missing tool or right is an unavailable reading with a
   reason, never an exception.
-- **No privileged helper in 1.0** (ADR 0021 point 4, ADR 0022 for 1.1). The app and the agent run with the user's rights and
-  never elevate themselves; there is no way to run elevated in 1.0 (elevation is planned for 1.1). A reading the OS withholds is `Reading::Unavailable` with a plain reason,
-  never 0; other accounts' processes are one "Other users" row. Any helper that comes back in 1.1 is read-only, validates every
-  frame again and audits every call.
+- **The privileged helper is optional** (ADR 0027). The app and the agent run with the user's rights and never elevate themselves; the helper, turned on in Settings, reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log. Without it a reading the OS withholds is `Reading::Unavailable` with a plain reason, never 0; other accounts' processes are one "Other users" row. The helper validates every frame again and audits every call.
 - **Plugins are sensors only.** There is no cleanup or action provider.
 - **Tests act only on what they create.** Dummy processes the test spawns, temp folders it creates, registry keys
   under a test key it deletes afterwards. Never touch, kill or inspect anything else in a way that could change the

@@ -13,7 +13,7 @@ const W = 1600; // H follows from the layout (see the legend)
 
 
 // Layout: Pacenotes, Debrief and Sighter on top; Recce, Dyno and Spotter below; Pitwall is the band between. Pitcrew, which needs no
-// Pitwall, sits alone under Dyno. The tool Scrutineer is not an app: it serves every app's release, so it is drawn in the foundation.
+// Pitwall, sits alone under Dyno.
 const row1 = [
   { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#657C1F', lines: ['Understands code in any', 'language: link graph, code', 'review, local search.'] },
   { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
@@ -22,7 +22,7 @@ const row1 = [
 // Recce is planned (placeholder icon and page only): its card carries the Planned chip like Sighter's and Pacenotes'.
 const row3 = [
   { id: 'recce-placeholder', key: 'recce', name: 'Recce', accent: '#2E9E75', lines: ['One search box for the', 'whole PC, answers with', 'sources. Retrieval engine.'] },
-  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC:', 'read-only monitor.'] },
+  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC and', 'explains why it is slow.'] },
   { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new releases', 'anywhere, the moment', 'one appears.'] },
 ];
 const pitcrew = { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] };
@@ -178,7 +178,7 @@ const chipRow = (labels, right, y, cls) => {
 // share one right edge.
 // The App shell layer is taller: its parts take two chip rows.
 const SX0 = PX + 20, SW = PW - 40, CHIPR = SX0 + SW - 24, LH = 100, LH2 = 128, LGAP = 30, L1 = PY + 96, L2 = L1 + LH + LGAP;
-const LT = L2 + LH2 + 16, LH3 = 76, PH = LT + LH3 + 20 - PY;
+const PH = L2 + LH2 + 20 - PY;
 const kits = chipRow(['UI kit, design system', 'Rust crates', 'Diagram kit', 'Icon set', 'Conformance checks', 'Release practices', 'Lessons'], CHIPR, PY + 30, 'chip');
 const layer = (y, h, cls, chipCls, name, who, apps, rows) => {
   const ix = SX0 + 24 + { Workbench: 104, 'App shell': 84 }[name] + 14; // measured title widths at 20px/600
@@ -193,12 +193,6 @@ const layers = layer(L1, LH, 'layer wb', 'chip', 'Workbench', ['Adds IDE panes t
   layer(L2, LH2, 'layer', 'chip2', 'App shell', ['The base of all eight apps. Shell only:', 'Pitcrew, Pitwall, Spotter, Dyno, Recce.'], ['pitcrew', 'pitwall', 'spotter', 'dyno', 'recce-placeholder'],
     [['Startup protection, safe mode', 'Report a problem', 'Services, login items', 'Notifications, health'],
       ['Dialogs', 'Jobs and progress', 'Settings, About, Updates', 'Storage', 'Undo', 'Theme']]);
-// Tools: what serves every app's release rather than being an app. Scrutineer is planned (placeholder icon).
-const TIX = SX0 + 24 + 64;
-const tools = `<g><rect class="layer" x="${SX0}" y="${LT}" width="${SW}" height="${LH3}" rx="14"/>
-<text class="lt" x="${SX0 + 24}" y="${LT + 45}">Tools</text>${icon('scrutineer-placeholder', TIX + 16, LT + 18, 40)}
-<text class="vt" x="${TIX + 70}" y="${LT + 33}">Scrutineer</text>${statusChip(STATUS.scrutineer, TIX + 70 + 96 + 88, LT + 13)}
-<text class="vs" x="${TIX + 70}" y="${LT + 57}">Signs every app’s installers: makes a private CA and code-signing certificates, and installs and verifies the certificate.</text></g>`;
 // "Builds on": a short arrow from the Workbench down into the App shell, labelled in the gap.
 const BX = SX0 + 48;
 const buildsOn = `<path class="hand" d="M${BX} ${L1 + LH + 2} L${BX} ${L2 - 2}"/>${head(BX, L2 - 1, 'd', 'ah')}<text class="legt" x="${BX + 14}" y="${L1 + LH + LGAP / 2 + 5}">builds on</text>`;
@@ -222,7 +216,7 @@ const legend = `<g>
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">The Paddock family</title>
-<desc id="d">Eight local-first desktop apps and one tool. ${CODEBASE_TOOL}, Debrief and Sighter above; Recce, Dyno and Spotter below; Pitwall, the optional local AI hub, between them; Pitcrew under Dyno. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief drives Sighter over MCP to reproduce a bug from a video, Pitcrew sends Debrief job logs and Dyno sends it issues (one line up the left margin, beside Recce and Pitwall, not through them), Dyno sends Pitcrew machine health and Spotter installed software, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Uses of Pitwall (dotted): ${CODEBASE_TOOL} for answers and embeddings, Debrief as its AI engine once paired (its built-in engine is the fallback), Sighter for vision and as agent planner, Recce for answers, Dyno for diagnosis, Spotter for what's-new summaries. Planned for Pitwall 1.1 (dash-dot, labelled MCP): Pitwall as MCP client and host calls the MCP servers of ${CODEBASE_TOOL}, Debrief, Sighter, Recce (the family's retrieval engine, so Pitwall builds no index of its own) and Dyno (its MCP server is opt-in). Recce (one search box for the whole PC) is planned and shown with its placeholder icon. Underneath, Paddock provides the kits (UI kit and design system, shared Rust crates, diagram kit, icon set, conformance checks, release practices, lessons) and two layers: the App shell every app uses (startup protection and safe mode, Report a problem, background services and login items, notifications and service health, dialogs, jobs and progress, settings, about and updates, the Storage page, undo, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter, Dyno and Recce use the shell with pages. Below them, Tools: the planned Scrutineer signs every app's installers (a private CA and code-signing certificates, installed and verified).</desc>
+<desc id="d">Eight local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above; Recce, Dyno and Spotter below; Pitwall, the optional local AI hub, between them; Pitcrew under Dyno. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief drives Sighter over MCP to reproduce a bug from a video, Pitcrew sends Debrief job logs and Dyno sends it issues (one line up the left margin, beside Recce and Pitwall, not through them), Dyno sends Pitcrew machine health and Spotter installed software, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Uses of Pitwall (dotted): ${CODEBASE_TOOL} for answers and embeddings, Debrief as its AI engine once paired (its built-in engine is the fallback), Sighter for vision and as agent planner, Recce for answers, Dyno for diagnosis, Spotter for what's-new summaries. Planned for Pitwall 1.1 (dash-dot, labelled MCP): Pitwall as MCP client and host calls the MCP servers of ${CODEBASE_TOOL}, Debrief, Sighter, Recce (the family's retrieval engine, so Pitwall builds no index of its own) and Dyno (its MCP server is opt-in). Recce (one search box for the whole PC) is planned and shown with its placeholder icon. Underneath, Paddock provides the kits (UI kit and design system, shared Rust crates, diagram kit, icon set, conformance checks, release practices, lessons) and two layers: the App shell every app uses (startup protection and safe mode, Report a problem, background services and login items, notifications and service health, dialogs, jobs and progress, settings, about and updates, the Storage page, undo, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter, Dyno and Recce use the shell with pages.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E;--line2:#CDD3DD;--wbf:#E8EEF8;--wbs:#B3C2DB}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0;--line2:#3A414D;--wbf:#1F2939;--wbs:#4A5D80}}
@@ -269,7 +263,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 
 <text class="eyebrow" x="${W / 2}" y="76" text-anchor="middle">PADDOCK</text>
 <text class="h1" x="${W / 2}" y="136" text-anchor="middle">Eight local-first apps for people who keep systems running</text>
-<text class="sub" x="${W / 2}" y="176" text-anchor="middle">One private AI hub, one shared foundation, one signing tool. Each app is good alone and better together.</text>
+<text class="sub" x="${W / 2}" y="176" text-anchor="middle">One private AI hub and one shared foundation. Each app is good alone and better together.</text>
 
 ${stubs}
 ${mcps}
@@ -285,7 +279,6 @@ ${icon('paddock', PX + 26, PY + 22, 60)}
 ${kits}
 ${layers}
 ${buildsOn}
-${tools}
 </g>
 
 ${valueEls}

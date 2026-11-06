@@ -7,8 +7,7 @@ planned (not built). The text companion is [architecture.md](architecture.md).
 ## Overview
 
 Dyno is a per-user **agent** that measures the machine and keeps its history, an **app** (Tauri shell plus Angular UI)
-that shows it, a pure Rust **core** that holds every decision, and OS **adapters** behind the core's ports. Dyno 1.0 has no privileged helper: everything runs with the user's own rights. Dyno only watches: it changes nothing on the machine
-([ADR 0021](adr/0021-monitoring-only.md)).
+that shows it, a pure Rust **core** that holds every decision, and OS **adapters** behind the core's ports. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)).
 
 ![Dyno at a glance](../diagrams/dyno-overview.svg)
 
@@ -22,15 +21,13 @@ ADR 0021 removed. They are retaken after Dyno moves onto the shared shell ([rele
 ![System context](../diagrams/svg/c4-1-context.svg)
 
 The PC owner uses Dyno; Dyno reads the operating system through ports and checks Dyno's own release host for opt-in
-updates. Debrief (open a time window) and Pitwall (explain on click) are planned integrations and never get data unless the user
-clicks; Dyno also checks that backup tools ran (built, read-only).
+updates. Debrief (open a time window) and Pitwall (explain on click) are planned integrations and never get data unless the user clicks; any local MCP client can read Dyno once AI access is on, and Dyno wakes saved computers on the LAN when asked.
 
 ### Level 2 — containers
 
 ![Containers](../diagrams/svg/c4-2-containers.svg)
 
-The app (Angular UI in a Tauri shell) and the agent run as the user; every arrow between Dyno processes is the one
-`dyno-ipc` crate. The agent is the single writer of the data folder. Plugins run out of process. There is no helper in 1.0.
+The app (Angular UI in a Tauri shell) and the agent run as the user; Dyno's processes talk over `paddock-ipc`, and the agent asks the optional administrator helper, a system service. The Tauri app also serves MCP to local AI clients while it is open. The agent is the single writer of the data folder. Plugins run out of process.
 
 ### Level 3 — core components
 
@@ -68,8 +65,9 @@ unit, a per-user `Run` entry on Windows), the agent process and the data folder.
 
 ![Use cases: run and set up](../diagrams/svg/uml-use-cases-setup.svg)
 
-What the owner runs or sets up. Benchmarks start only on a click; Explain this in Pitwall is planned for after 1.0 (dashed). Dyno
-only watches (ADR 0021): none of these changes the machine. The disk map is in scope for 1.0.
+![Use cases: power and access](../diagrams/svg/uml-use-cases-power.svg)
+
+What the owner runs or sets up. Benchmarks start only on a click; Explain this in Pitwall is still planned (dashed). Keep awake, Wake-on-LAN, scheduled wakes and sleep, hibernate (Windows and Linux) or shut-down run as the owner set them up (ADR 0032); they and AI access are in the power and access diagram. The disk map is in scope for 1.0.
 
 ## Domain model
 

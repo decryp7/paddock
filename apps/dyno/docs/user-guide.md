@@ -1,7 +1,6 @@
 # User guide
 
-Dyno measures your PC and explains why it is slow. It only watches: it never changes your machine, ends a program,
-deletes a file or alters a setting ([ADR 0021](adr/0021-monitoring-only.md)). This guide covers what works today; screens
+Dyno measures your PC and explains why it is slow. When you set it up, it also keeps the computer awake and wakes other computers. It can also sleep, hibernate (Windows and Linux) or shut down the computer after idle or at a set time ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This guide covers what works today; screens
 marked *placeholder* are described in [features.md](features.md) and [roadmap.md](roadmap.md).
 
 ## Glossary
@@ -11,14 +10,14 @@ marked *placeholder* are described in [features.md](features.md) and [roadmap.md
 | Agent | `dyno-agent`, the background program that measures and keeps your history, also when the window is closed |
 | App | The Dyno window and tray icon |
 | Application (group) | All processes of one program (Chrome and its 40 helpers) shown as one |
-| Read-only | What Dyno is: it measures, explains and notifies; it writes only its own data (history, settings, alarm notes) |
+| Own data | What Dyno writes: history, settings, alarm notes |
 
 ## Install
 
 Per OS in the [README](../README.md#quick-start); macOS in [macos.md](macos.md), Linux in [linux.md](linux.md). After
 installing, open Dyno. The window starts with a short splash and then the dashboard. If no agent is running, the app starts
-one; **Launch at login** is on by default: the first time Dyno runs it registers itself (this registers the agent with the OS:
-`SMAppService` on macOS, a systemd user unit on Linux, a per-user Run entry on Windows), starts in the tray at login and keeps measuring. Turn it off under **Settings > Launch at login**; Dyno never turns it on again.
+one; **Start Dyno at login** is on by default: the first time Dyno runs it registers itself (on macOS it registers the agent with
+`SMAppService`, on Linux a systemd user unit; on Windows a per-user Run value `Dyno` starts the app, which starts the agent), starts in the tray at login and keeps measuring. Turn it off under **Settings > Start Dyno at login**; Dyno never turns it on again.
 
 ## First run
 
@@ -127,6 +126,22 @@ page says about how long the run takes and the most it writes to each drive.
   more than 10 % is marked "Unsteady". There is no single score. Runs are compared only when measured the same way on the same drive.
   On battery Dyno asks first; leave the computer otherwise idle while a run is going.
 
+## Power (Dyno 1.1)
+
+The **Power** page and the tray menu hold these. Each starts only when you use it or turn it on.
+
+1. To keep the computer awake, open the Power page, choose how long (30 minutes, 1, 2 or 4 hours, Until I stop it, a time of day,
+   while a program runs or while the computer is busy; up to 7 days only with `dyno awake on --for 168h`) and start the hold. From a terminal, `dyno awake on --for 2h`
+   starts it and `dyno awake off` ends it. The hold ends if Dyno restarts, and the page says so.
+2. To sleep, hibernate or shut down the computer, set a rule on the **Sleep and shut down** tab under **When the computer is idle** or **At a
+   time of day**. Hibernate works on Windows and Linux; macOS decides by itself when to hibernate. Dyno uses the OS's normal
+   path and never forces it. A countdown with Cancel comes first. Cancel ends a timed action for today (a one-time action for good); `dyno idle snooze 30` delays the action, and the countdown shows again; `dyno idle cancel` cancels from a terminal.
+3. To wake this computer at a set time, turn on scheduled wakes in Settings, then add one on the **Schedule** tab or run
+   `dyno wake-schedule add NAME --at 07:30`. On macOS and Linux the administrator helper sets the wake. A missed wake is shown
+   as missed and never run late, and nothing can wake a computer that is shut down.
+4. To wake another computer, save it on the **Wake devices** tab and wake it there, from the tray menu or with `dyno wake NAME`.
+   The check under **This computer** says whether this computer can be woken over the network and what to change.
+
 ## Settings
 
 | Setting | Meaning |
@@ -143,8 +158,8 @@ Settings are versioned and saved with a backup; a damaged file falls back to the
 
 ## AI access (Dyno 1.1)
 
-**Settings > AI access** lets a program on this computer that speaks MCP (the Model Context Protocol), such as Pitwall or another
-AI client, ask Dyno about this computer. It is off until you turn it on, it listens only on this computer, and a client needs a
+**Settings > AI access** lets a program on this computer that speaks MCP (the Model Context Protocol), such as an AI client
+(planned for Pitwall 1.1), ask Dyno about this computer. It is off until you turn it on, it listens only on this computer, and a client needs a
 key that you issue there and can revoke. Once it is on, every reading tool is on until you switch it off, and every tool has its own switch, and the page lists every call a client made (the time,
 the client, the tool, the choices it passed and how big the answer was, never the answer itself).
 
@@ -226,9 +241,7 @@ disappeared shows *Unavailable* with the reason. Rates (per second) need two rea
 
 ## Running with your own rights
 
-Dyno 1.0 has no privileged helper. The app and the agent run with your own rights, register no system service, and never need
-administrator rights to run. Installing needs none either, except that on Linux the `.deb` is a system package, so `apt` asks for
-root (the AppImage needs none). What the OS shows only to administrators, or only to the account that owns a
+Installing Dyno needs one administrator step: on Windows a User Account Control prompt (Dyno installs once for every user, in Program Files); on Linux `apt` asks for root for the `.deb` (the AppImage needs none); on macOS the first open may ask for an administrator under Privacy & Security. After that the app and the agent run with your own rights. The optional administrator helper is a system service that you turn on in Settings ([Administrator readings](#administrator-readings-dyno-11)); without it, what the OS shows only to administrators, or only to the account that owns a
 process, is never guessed and never shown as zero: the figure says *Unavailable* with a plain reason (for example "Windows
 shows this only to administrators").
 
@@ -238,11 +251,9 @@ in one line above the list.
 
 ### Administrator readings (Dyno 1.1)
 
-Out of the box Dyno still runs only with your own rights. **Settings > Dyno > Administrator readings** can turn on a small
-read-only helper that gives the readings your account cannot take. Turning it on asks the operating system once: a password
+Out of the box Dyno still runs only with your own rights. **Settings > Dyno > Administrator readings** can turn on a small helper that gives the readings your account cannot take. Turning it on asks the operating system once: a password
 or Touch ID on macOS, the polkit prompt on Linux, and on Windows the User Account Control prompt, which names an unknown
-publisher because the Windows build is not signed; that is expected. The helper only reads (and sets or cancels Dyno's own scheduled
-wakes); it changes nothing else, and the card's Turn off removes it.
+publisher because the Windows build is not signed; that is expected. The helper reads what needs administrator rights, sets or cancels Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool when you ask (Windows), with an audit log; the card's Turn off removes it.
 
 What it adds: every account's processes in detail, per-program network traffic (Windows), disk health (SMART), the program that
 holds a socket or a file (Linux), temperatures, fans and CPU energy, memory slots (Linux), and on Windows what keeps the computer

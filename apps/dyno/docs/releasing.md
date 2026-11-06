@@ -15,7 +15,7 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
 
 ## What a build contains
 
-- **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-user).
+- **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-machine in Program Files since 1.1.0).
 - **macOS:** `Dyno_<version>_aarch64.dmg`, and with signing secrets also the `.app.tar.gz` the updater installs. The bundle is
   **ad-hoc signed** (`signingIdentity "-"` in `tauri.macos.conf.json`): `SMAppService` and launch agents refuse a
   linker-signed bundle. It is not notarised: users open it once through Privacy & Security > Open Anyway (twice, then an administrator password; macOS 26). Developer ID signing and
@@ -77,7 +77,7 @@ reinstall from the releases page, and revoke the old secrets.
 In this order, on one commit:
 
 0. Every 1.0 branch is merged: disk-map-1.0, jobs-1.0 (with its CHANGELOG bullet folded into the `[1.0.0]` section), tables/layout and the startup fix. Nothing may land after step 1 without repeating steps 2 and 3.
-1. Bump the version in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files), and date the
+1. Bump the version (and, in the same commit, update the README status line, for example "1.1.0 released") in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files), and date the
    `CHANGELOG.md` section (`## [1.0.0] - <date>`, never "Unreleased"): the first release's notes are that section and the
    release run fails without it. `main` is green.
 2. Run one **manual `dyno-release` with `gates: true`** on that commit (Actions > dyno-release > Run workflow, rule 25). It

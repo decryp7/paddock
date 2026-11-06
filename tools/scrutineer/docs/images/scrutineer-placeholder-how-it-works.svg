@@ -18,7 +18,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .mono{font-weight:600;fill:var(--muted)}
 .track{fill:none;stroke:var(--line);stroke-width:1.25;opacity:.8}
 .gl{fill:none;stroke:var(--acct);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-.accfill{fill:var(--acc);fill-opacity:.13}.accline{fill:var(--acc)}
+.accfill{fill:var(--acc);fill-opacity:.13}.accline{fill:var(--acc)}.neufill{fill:var(--muted);fill-opacity:.08}.neuline{fill:var(--muted)}.neutxt{font-size:17px;font-weight:600;fill:var(--muted)}
 .ptitle{font-size:29px;font-weight:600;letter-spacing:-.01em}
 .pbody{font-size:21px;fill:var(--muted)}
 .stepn{font-size:16px;font-weight:600;letter-spacing:.1em;fill:var(--muted)}
