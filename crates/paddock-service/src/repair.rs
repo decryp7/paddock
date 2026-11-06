@@ -500,7 +500,7 @@ pub fn replace(
         register_only: false,
         now: &wall_clock,
     };
-    replace_bounded(b, answers, &bounds, t, &mut || {}, say)
+    replace_bounded(b, answers, &bounds, t, &mut || {}, &mut || true, say)
 }
 
 /// The wall clock as a process start time (microseconds since the Unix epoch).
@@ -532,6 +532,7 @@ pub fn replace_bounded(
     bounds: &Bounds<'_>,
     t: &Timings,
     before_wait: &mut dyn FnMut(),
+    after_wait: &mut dyn FnMut() -> bool,
     say: &mut dyn FnMut(Step),
 ) -> RepairOutcome {
     let cancel = bounds.cancel;
@@ -556,12 +557,24 @@ pub fn replace_bounded(
         stepper.start()
     };
     let mut waiting_since: Option<std::time::Instant> = None;
+    // The caller let go of what it holds for the wait (`before_wait`) and has not taken it back since.
+    let mut let_go = false;
     loop {
+        // A later cycle (the OS refused what it had accepted) changes the OS again: whatever was let go of for the wait is taken
+        // back first, and the caller says whether the record still shows this replace (ADR 0056 section 3: the lock is taken again
+        // to act). Before the steps are said, which write the record.
+        if let_go && matches!(next.action, Action::Unregister | Action::Evict | Action::Register) {
+            let_go = false;
+            if !after_wait() {
+                return RepairOutcome::Cancelled;
+            }
+        }
         for step in next.say.drain(..) {
             if step == Step::WaitingForStart {
                 waiting_since = Some(std::time::Instant::now());
                 // The wait is long and changes nothing: the caller lets go of what it holds for it.
                 before_wait();
+                let_go = true;
             }
             say(step);
         }
@@ -1234,7 +1247,7 @@ mod tests {
         let mut s = Script { process: Some(old), ..Script::default() };
         let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
         let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
-        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut |_| {});
+        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut || true, &mut |_| {});
         assert_eq!(out, RepairOutcome::Registered);
     }
 
@@ -1244,7 +1257,7 @@ mod tests {
         let mut s = Script { process: Some(new), ..Script::default() };
         let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
         let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
-        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut |_| {});
+        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut || true, &mut |_| {});
         assert_eq!(out, RepairOutcome::Recovered);
     }
 }
