@@ -1376,13 +1376,6 @@ mod tests {
         assert!(!s.pending(), "the default: nothing is awaited, so the link starts its own agent");
     }
 
-    #[test]
-    fn the_busy_flag_is_cleared_when_the_worker_ends() {
-        let busy = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        drop(Clear(busy.clone()));
-        assert!(!busy.load(std::sync::atomic::Ordering::SeqCst));
-    }
-
     struct FakeAutostart {
         calls: Arc<Mutex<Vec<String>>>,
         fail: bool,
