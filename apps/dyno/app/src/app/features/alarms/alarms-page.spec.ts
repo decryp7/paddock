@@ -433,7 +433,7 @@ describe('dy-alarms-page, Rules', () => {
     await settle(f);
     await tab(f, el, 'Rules');
     const sw = (l: string) => el.querySelector<HTMLButtonElement>(`button[role="switch"][aria-label="${l}"]`)!;
-    // The exposed-listener rule is on by default (the engine's default), the remote-host rule off.
+    // The mock's demo settings have the exposed-listener rule on (the engine default is off, dyno-core network_alerts.rs), the remote-host rule off.
     expect(sw('New exposed listener').getAttribute('aria-checked')).toBe('true');
     expect(sw('New remote host').getAttribute('aria-checked')).toBe('false');
     sw('New remote host').click();
