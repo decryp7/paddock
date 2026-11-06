@@ -229,3 +229,29 @@ fn the_bridge_says_so_when_the_app_is_not_open_or_the_key_is_wrong() {
     .unwrap_err();
     assert!(err.to_string().contains("isn't open"), "{err}");
 }
+
+/// A discovery file that cannot be written fails the start with a message that says what to fix; nothing keeps listening
+/// (the port it had opened is closed) and a later reconcile with a writable place starts normally.
+#[test]
+fn an_unwritable_discovery_file_is_reported_and_leaves_nothing_listening() {
+    let dir = tempfile::tempdir().unwrap();
+    // The file's parent is a regular file, so the hint can never be created there.
+    let blocker = dir.path().join("not-a-folder");
+    std::fs::write(&blocker, b"x").unwrap();
+    let r = rig();
+    let keys = Arc::new(KeyStore::new());
+    keys.issue("Pitwall", 1).unwrap();
+    let l = Listener::new(r.server.clone(), keys.clone(), blocker.join("mcp.json"), 4);
+    l.reconcile(true);
+    match l.view() {
+        ListenerView::Failed { message } => {
+            assert!(message.contains("Could not write"), "{message}");
+            assert!(message.contains("writable"), "{message}");
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+    assert!(l.addr().is_none(), "a failed start keeps no listener");
+    // Turning access off clears the failure.
+    l.reconcile(false);
+    assert_eq!(l.view(), ListenerView::Off);
+}

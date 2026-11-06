@@ -736,4 +736,29 @@ mod tests {
             .is_err()
         );
     }
+
+    #[test]
+    fn every_job_state_is_described_in_the_oss_words() {
+        let all = [
+            (Job::Absent, "does not know the job"),
+            (Job::Running, "running"),
+            (Job::NotRunning, "not running"),
+            (Job::Refused, "refuses to start it"),
+            (Job::Unknown, "did not say"),
+            (Job::Failed(LastExit::Code(78)), "stopped with exit code 78"),
+            (Job::Failed(LastExit::Signal(9)), "stopped with signal 9"),
+            (
+                Job::Failed(LastExit::Win32(1053)),
+                "stopped with Win32 error 1053",
+            ),
+            (
+                Job::Failed(LastExit::ServiceSpecific(7)),
+                "stopped with service-specific exit code 7",
+            ),
+        ];
+        for (job, words) in all {
+            let text = job.describe();
+            assert!(text.contains(words), "{job:?}: {text}");
+        }
+    }
 }

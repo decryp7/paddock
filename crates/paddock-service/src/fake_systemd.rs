@@ -311,3 +311,162 @@ impl FakeSystemd {
         w.active = Active::Inactive;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::port::System;
+
+    fn ctl(sys: &FakeSystem, args: &[&str]) -> Output {
+        let mut all = vec!["--user"];
+        all.extend_from_slice(args);
+        sys.clone().run("systemctl", &all).unwrap()
+    }
+
+    fn rig() -> (FakeSystem, FakeSystemd) {
+        let sys = FakeSystem::new();
+        let d = FakeSystemd::new(
+            &sys,
+            "dyno-agent.service",
+            Path::new("/u/dyno-agent.service"),
+        );
+        (sys, d)
+    }
+
+    #[test]
+    fn a_unit_systemd_does_not_know_cannot_be_disabled_or_stopped_and_reads_inactive() {
+        let (sys, _d) = rig();
+        let disable = ctl(&sys, &["disable", "dyno-agent.service"]);
+        assert_eq!(disable.code, Some(1));
+        assert!(
+            disable.stderr.contains("does not exist"),
+            "{}",
+            disable.stderr
+        );
+        let stop = ctl(&sys, &["stop", "dyno-agent.service"]);
+        assert_eq!(stop.code, Some(5));
+        assert!(stop.stderr.contains("not loaded"), "{}", stop.stderr);
+        let active = ctl(&sys, &["is-active", "dyno-agent.service"]);
+        assert_eq!(
+            (active.code, active.stdout.as_str()),
+            (Some(3), "inactive\n")
+        );
+        assert_eq!(
+            ctl(&sys, &["is-enabled", "dyno-agent.service"]).code,
+            Some(1)
+        );
+        assert_eq!(ctl(&sys, &["daemon-reload"]).code, Some(0));
+        assert_eq!(
+            ctl(&sys, &["frobnicate"]).code,
+            Some(1),
+            "an unknown verb fails"
+        );
+        // Enabling without naming the unit does nothing.
+        assert_eq!(ctl(&sys, &["enable", "other.service"]).code, Some(1));
+    }
+
+    #[test]
+    fn enabling_and_the_users_own_systemctl_calls_move_the_unit_as_systemd_would() {
+        let (sys, d) = rig();
+        // Enabling without --now only enables; the user's later calls move it.
+        assert_eq!(ctl(&sys, &["enable", "dyno-agent.service"]).code, Some(0));
+        let show = ctl(&sys, &["show", "dyno-agent.service"]).stdout;
+        assert!(
+            show.contains("UnitFileState=enabled")
+                && show.contains("FragmentPath=/u/dyno-agent.service"),
+            "{show}"
+        );
+        d.user_disables();
+        assert!(
+            ctl(&sys, &["show", "dyno-agent.service"])
+                .stdout
+                .contains("UnitFileState=disabled")
+        );
+        d.user_enables();
+        assert_eq!(
+            ctl(&sys, &["is-enabled", "dyno-agent.service"]).stdout,
+            "enabled\n"
+        );
+        ctl(&sys, &["start", "dyno-agent.service"]);
+        assert_eq!(
+            ctl(&sys, &["is-active", "dyno-agent.service"]).code,
+            Some(0)
+        );
+        d.user_stops();
+        assert_eq!(
+            ctl(&sys, &["is-active", "dyno-agent.service"]).code,
+            Some(3)
+        );
+        assert!(d.bus_up());
+
+        // The unit file is removed behind systemd's back: it forgets the unit.
+        d.forgets();
+        assert_eq!(
+            ctl(&sys, &["is-enabled", "dyno-agent.service"]).code,
+            Some(1)
+        );
+        assert!(
+            !ctl(&sys, &["show", "dyno-agent.service"])
+                .stdout
+                .contains("FragmentPath")
+        );
+        // `user_enables` leaves a unit systemd does not know alone.
+        d.user_enables();
+        assert_eq!(
+            ctl(&sys, &["is-enabled", "dyno-agent.service"]).stdout,
+            "disabled\n"
+        );
+    }
+
+    #[test]
+    fn a_crash_a_restart_loop_and_a_logout_show_in_what_systemctl_reports() {
+        let (sys, d) = rig();
+        ctl(&sys, &["enable", "--now", "dyno-agent.service"]);
+        assert_eq!(d.restarts(), 0);
+        d.crashes();
+        let show = ctl(&sys, &["show", "dyno-agent.service"]).stdout;
+        assert!(
+            show.contains("NRestarts=1") && show.contains("ExecMainStatus=1"),
+            "{show}"
+        );
+        assert_eq!(
+            ctl(&sys, &["is-active", "dyno-agent.service"]).stdout,
+            "activating\n"
+        );
+        d.restarted();
+        assert_eq!(
+            ctl(&sys, &["is-active", "dyno-agent.service"]).code,
+            Some(0)
+        );
+        d.restart_loop(3, true);
+        assert_eq!(d.restarts(), 4);
+        assert_eq!(
+            ctl(&sys, &["is-active", "dyno-agent.service"]).stdout,
+            "failed\n"
+        );
+
+        // Logged out without lingering: no bus, the unit is stopped; logging in starts an enabled unit again.
+        d.logout();
+        assert!(!d.bus_up());
+        let down = ctl(&sys, &["is-active", "dyno-agent.service"]);
+        assert!(
+            down.stderr.contains("Failed to connect to bus"),
+            "{}",
+            down.stderr
+        );
+        d.login();
+        assert_eq!(
+            ctl(&sys, &["is-active", "dyno-agent.service"]).code,
+            Some(0)
+        );
+
+        // Lingering keeps the manager and the unit across a logout.
+        d.set_linger(true);
+        d.logout();
+        assert!(d.bus_up());
+        assert_eq!(
+            ctl(&sys, &["is-active", "dyno-agent.service"]).code,
+            Some(0)
+        );
+    }
+}
