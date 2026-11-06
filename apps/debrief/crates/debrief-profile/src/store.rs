@@ -1132,10 +1132,14 @@ mod tests {
         bytes: std::sync::atomic::AtomicUsize,
         files: std::sync::atomic::AtomicUsize,
         /// Armed: `import_file` says it is inside (on `entered`), then waits for `release`.
-        stop: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
+        stop: Mutex<Option<Gate>>,
         /// Armed: `import_file` runs this on the path before it returns (a change made while the file is read).
-        meanwhile: Mutex<Option<Box<dyn FnOnce(&std::path::Path) + Send>>>,
+        meanwhile: Mutex<Option<Meanwhile>>,
     }
+
+    /// The two ends of a stop: `entered` is sent when the importer is inside, `release` is waited for.
+    type Gate = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+    type Meanwhile = Box<dyn FnOnce(&std::path::Path) + Send>;
 
     impl Spy {
         fn new() -> Arc<Spy> {
