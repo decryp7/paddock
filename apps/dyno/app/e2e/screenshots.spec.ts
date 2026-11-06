@@ -292,7 +292,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
       await expect(page.getByRole('option').first()).toBeVisible();
     },
   },
-  },
   {
     name: 'tray',
     path: '/#/tray',

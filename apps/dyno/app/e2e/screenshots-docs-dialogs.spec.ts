@@ -97,14 +97,14 @@ for (const scheme of ['dark', 'light'] as const) {
             await win.in.getByRole('option', { name: option, exact: true }).click();
           };
           const section = win.in.locator('dy-menu-bar-items');
-          await section.getByRole('button', { name: 'Add Line graph' }).click();
-          await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(3);
-          await section.getByRole('button', { name: 'Add Number' }).click();
-          await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(4);
-          await choose('Metric of number', 'Temperature');
-          await expect(section.getByRole('combobox', { name: /Metric of number/i })).toContainText('Temperature');
+          await section.getByRole('button', { name: /^Add (another )?Line graph/ }).click();
+          await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(5);
+          await section.getByRole('button', { name: /^Add (another )?Number/ }).click();
+          await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(6);
+          await choose('Metric of Number, position 6 of 6', 'Temperature');
+          await expect(section.getByRole('combobox', { name: /Metric of Number, position 6 of 6/i })).toContainText('Temperature');
           // A temperature is in degrees: the unit a person would type for it.
-          const unit = section.getByRole('textbox', { name: /Unit/ }).first();
+          const unit = section.getByRole('textbox', { name: /Unit of Number, position 6 of 6/ });
           await unit.fill('°C');
           await unit.press('Enter');
           // From the top of the section: its title, its description, the items and then the popup chooser with its live preview.
