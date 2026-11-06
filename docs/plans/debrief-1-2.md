@@ -2,7 +2,8 @@
 
 - Status: Plan, 2026-10-27; user decisions D1-D3 applied the same day (section 6). **Refreshed 2026-11-06 (section 9):
   the current total, critical path and schedule are there; the estimate in section 5 and the tracks in section 8 are
-  history.**
+  history.** **Release split adopted 2026-11-07 (section 10): 1.2 is the full foundation plus correctness fixes, then
+  one function per release; 510.5 raw, 612.6 with 20 %, about 2027-04-21.**
 - App: Debrief (`apps/debrief`). Rule 1 holds: Debrief is the one app; the shared work below is done for Debrief's
   release and is adopted by the demos in the same change (monorepo rules 39 and 42), not as a separate Paddock project.
 - Scope:
@@ -253,10 +254,10 @@ confirmation that shows the count and the estimated time.
 | N6 | **Video describe confirmation**: "describe all frames" kept, but a job over a selection or over all frames first shows the frame count and the estimated time and needs a confirm; no request is sent before it | implementer | none | 0.5 | 2 |
 | N2 | **Abbreviation rule in layer 1** (`How::Abbreviation`), no layer 2 needed (top-1 >= 95 %) | implementer | none | 1.5 | 3 |
 | N3 | **Names pack mechanism** (`names` `PackKind` on `paddock-packs`; user `packs/`, hot reload, health line); built-in packs ship empty or with at most a few dozen entries, added only for gaps measured on real imports after 1.2 (this is also where conventional abbreviations such as `gfx` for graphic may come from, as data and only for measured gaps: the abbreviation rule of N2 has no list in code); the 3-day curation of about 1,500 entries is dropped | designer, then implementer | none | 2 | 3 |
-| N4 | **Log-name harvest** during the catalogue build as `How::LogName` aliases with evidence (feeds P4's tally) | implementer | N3 | 2 | 4 |
-| N5 | **Explicit "Suggest names with AI"** (at most 16 names, one interactive request, review list, accepted names stored as user facts) | implementer | N1 | 1.5 | 5 |
-| N0 | **Local names coverage report** in Diagnostics (counts per layer, nothing leaves the machine) | implementer | N3, N4 | 0.5 | 6 |
-| N7 | **Synonym suggestions with Model2Vec** (questions only) | implementer | X55 `paddock-embed` (may slip to 1.3) | 1.5 | 7 |
+| N4 | **Log-name harvest** during the catalogue build as `How::LogName` aliases with evidence (feeds P4's tally) **Moved to a later release** (2026-11-07, [roadmap note](../../apps/debrief/docs/research/2026-11-07-roadmap-proposal.md) §4). | implementer | N3 | 2 | 4 |
+| N5 | **Explicit "Suggest names with AI"** (at most 16 names, one interactive request, review list, accepted names stored as user facts) **Moved to a later release** (2026-11-07, [roadmap note](../../apps/debrief/docs/research/2026-11-07-roadmap-proposal.md) §4). | implementer | N1 | 1.5 | 5 |
+| N0 | **Local names coverage report** in Diagnostics (counts per layer, nothing leaves the machine) **Moved to a later release** (2026-11-07, [roadmap note](../../apps/debrief/docs/research/2026-11-07-roadmap-proposal.md) §4). | implementer | N3, N4 | 0.5 | 6 |
+| N7 | **Synonym suggestions with Model2Vec** (questions only) **Moved to a later release** (2026-11-07, [roadmap note](../../apps/debrief/docs/research/2026-11-07-roadmap-proposal.md) §4). | implementer | X55 `paddock-embed` (may slip to 1.3) | 1.5 | 7 |
 | N8 | **Docs**: ADR amendments (Debrief ADR 0033 section 6 now: confirmation instead of a cap), rule 46, lessons, user guide | implementer | N1-N6 | 0.5 | 8 |
 
 ### Search-ready packages (import folder to search ready), slotted into the waves above
@@ -558,7 +559,7 @@ or its ADR.
 | SR4, SR5, SR1 and SR3 re-runs | Ordering; parse speed; quiet-machine verdicts | 0.5, 1.5, 1 | a quiet window |
 | CPU-1, NB-1 | Store CPU split; the nightly 403 MB | 1, 1.5 | L-0 |
 | Q-2, Q-3, Q-4 | Pageable analysis; trace cache; rows-read test | 3, 2, 1.5 | Q-1 for Q-4 |
-| N5, Y4, Y9 small, Y11, Y13, Y15 | As the scope plan lists them | 1.5, 3, 4, 6, 9, 2.5 | - |
+| N5, Y4, Y9 small, Y11, Y13, Y15 | As the scope plan lists them. **N5, Y9's small items and Y13 moved to a later release** (section 10); Y4, Y11, Y15 stay | 1.5, 3, 4, 6, 9, 2.5 | - |
 | Y3 rest | Quack question, DuckDB 2 columnar append against the fan-out, hybrid fan-out then native (the DuckLake trial is out) | 3 | IX-M |
 
 **Layer 3: the plugin platform chain (critical; about T+2 to T+19)**
@@ -606,10 +607,10 @@ or its ADR.
 | 2.1, 2.7, 2.4, 3.3, 4.1, 4.5, 3.7, 4.2 rest | Virtual primitive; adoption; lanes; timeline engine and UI; lists; grid; bounded queries (2 left) | 4, 2.5, 3, 3, 3.5, 4, 3, 2 | 1.3; 2.1; 2.1; 2.5; 2.4, 3.3, M3a; 2.7, 2.5, M3b; 1.3, 2.1, 3.3; 2.5, 3.3 |
 | Drawing build, W0 | Pixels, not events; the binary wire gate | 6.5, 3 | before 2.4 and 4.1; before 3.3's reply shape |
 | Y12 | Workbench move (0a, baseline retake, phases 1, 2b, 2c, 3) | 15 | M1 |
-| N3, N4, N0, N7, N8, Y2 (with X55), Y1 | Packs; harvest; coverage; synonyms; docs; semantic search; AI memory | 2, 2, 0.5, 1.5, 0.5, 9.5, 10.5 | -; N3; N3, N4; X55; N1 to N6; -; M3b for M3 and M6 |
+| N3, N4, N0, N7, N8, Y2 (with X55), Y1 | Packs; harvest; coverage; synonyms; docs; semantic search; AI memory. **N4, N0, N7, Y2 and Y1 moved to a later release** (section 10); N3 and N8 stay | 2, 2, 0.5, 1.5, 0.5, 9.5, 10.5 | -; N3; N3, N4; X55; N1 to N6; -; M3b for M3 and M6 |
 | MEM-6 ADR | Capture formats, measured; the 8 to 12 day build is the user's call | 3 | MEM-2 |
-| X2, X3, X4, X6, X8, X9, Y5, Y16 | Per-machine install; ADR 0052 and 0054 gates; logging ADR and adoption; copies and driver; release path; tray; About and deps | 3, 1.75, 2.5, 4, 7.5, 2, 5, 15 | Dyno's versions on main |
-| Y6, Y7, Y8, Y10, Y14 | Architecture check; screenshot determinism; test architecture; rule 47 views; the redesign's rest | 3, 2, 8, 18.5, 14 | M3b for Y10 |
+| X2, X3, X4, X6, X8, X9, Y5, Y16 | **Y5 moved to a later release** (section 10). Per-machine install; ADR 0052 and 0054 gates; logging ADR and adoption; copies and driver; release path; tray; About and deps | 3, 1.75, 2.5, 4, 7.5, 2, 5, 15 | Dyno's versions on main |
+| Y6, Y7, Y8, Y10, Y14 | Architecture check; screenshot determinism; test architecture; rule 47 views (**Y10 stays in 1.2, start by 2026-12-01**, section 10); the redesign's rest (**Y14's R5 UI items, 8, moved to a later release**; R0 and R3 stay) | 3, 2, 8, 18.5, 14 | M3b for Y10 |
 | SI-15, SI-16, F12 | Bundle acceptance (14,000 files, 7.6 GiB, 1 billion events nightly); old traits deleted; folder acceptance | 3, 6, 3 | all of ADR 0064; SI-15; all of ADR 0067 |
 
 **Layer 6: release (last, about 8 days serial)**
@@ -635,6 +636,14 @@ capacity were unlimited**.
 - The shell chain 0.4 → M1 → M2c → M2b → M3a → M3b → M4 is about 17.5 days; with Y12's phases (about 10 of its 15
   serial [J]) about T+28.
 - The store agent's ST and Q-1 (21 days on one agent) ends about T+21, plus the 1 billion run in a quiet window.
+
+**PH4 is missing from the chain above** (2026-11-07, [roadmap note](../../apps/debrief/docs/research/2026-11-07-roadmap-proposal.md) §2.1): §9.2 makes 3.4 + SI-10 depend on
+PH2b, PH4, SI-8 and 2.6d. Counted, the chain is 0.5 → 1.4 → 2.6a and 0.5 → IP1 → 2.6b → SI-8, with 0.4 → PH1 → PH2a,
+into PH2b (about T+14) → PH4 + SI-9 (about T+18) → 3.4 + SI-10: the 1.43 GiB event log opens at **about T+23**, not
+T+19, if nothing is written before T. With 0.5 reviewed before T and 1.4, IP1, 2.6c and PH1 pre-written under section
+10's conditions (R1): PH2b about T+9 to T+10, PH4 + SI-9 about T+14, the event log about **T+19**, or about **T+17** when
+3.4's host side is built against `debrief-plugin-test` from PH2b while PH4 runs. The tag path moves by the same amount
+(about T+37 counted, if capacity were unlimited) [calc].
 
 **What sets the end is capacity, not this path**: about 641 agent-days with the buffer against a 33-day path, so about
 90 working days are float. The schedule therefore runs the path's packages first, with the user's priorities (import
@@ -705,6 +714,10 @@ is the integrator's (an implementer under the coordinator), never the author's.
 | **Total** | **about 534 raw** | [calc] |
 | **With 20 %** | **about 641** | [calc]; ADR 0064's store-side allowance of up to 5 is inside it |
 | Without D2's 41 | about 493 raw, 592 with 20 % | [calc] |
+| **Release split, 2026-11-07 (section 10)**: functions moved out (N4, N5, N0, N7, Y1, Y2, Y5, Y9 small, Y13, Y14 R5) | -52 | [P] rows above |
+| New foundation packages FD-U to FD-M and ADR 0068 WP-1 | +22.5 | [J], WP-1 [P] |
+| Correctness packages C1 to C5 | +6 | [J] |
+| **Total after the split** | **510.5 raw, 612.6 with 20 %** | [calc] |
 
 **Calendar from Monday 2026-11-09** [calc; J for capacity]; no holidays or CI queues counted:
 
@@ -715,6 +728,7 @@ is the integrator's (an implementer under the coordinator), never the author's.
 | 5.0 (the lock binds harder) | 128 + 6.5 = about 135 | about 2027-05-14 |
 | 4.25 (the scope plan's 5 agents) | 151 + 6.5 = about 157 | about 2027-06-16 |
 | 5.5, without D2's 41 | 107.5 + 6.5 = about 114 | about 2027-04-15 |
+| **5.5, after the release split (section 10)** | 612.6 / 5.5 = 111.4, plus 6.5: **about 118** | **about 2027-04-21** |
 
 Against the scope plan's about 2027-04-01 for 427 with the buffer: the work grew by about 214 agent-days with the buffer
 (the four ADRs, the logging package and the 2026-11-05 items), and the higher capacity takes most of it back, so the end
@@ -749,3 +763,72 @@ that ADR 0064's D7 asked to update (superseded by 9.3 here).
   2.1's windowed rows, about 1 to 2 days each; counted twice on purpose until their designs say otherwise.
 - **The 1 billion event target** (ST-5, SI-15) is the first real measurement at that size; the index at 1B is only
   extrapolated (about 60 GB and 50 minutes, `mem:debrief-storage-decisions`).
+
+## 10. Release split (adopted by the user, 2026-11-07)
+
+The user decided on 2026-11-07: **the full foundation in 1.2, then one function per release.** The analysis is in the
+[roadmap note](../../apps/debrief/docs/research/2026-11-07-roadmap-proposal.md) §4 and the [usefulness audit](../../apps/debrief/docs/research/2026-11-07-analysis-usefulness.md)
+(both on `docs/debrief-analysis-usefulness`); the designs are [ADR 0068](../../apps/debrief/docs/adr/0068-dump-checks-crash-hang-memory.md)
+(dump checks, Accepted, `1ba8e4ecd` on `docs/debrief-dump-analysis-adr`) and
+[ADR 0069](../../apps/debrief/docs/adr/0069-umdh-leak-analysis-over-a-series.md) (UMDH over a series, Accepted, on
+`docs/debrief-analysis-usefulness`). Only release placement changes; no design changes.
+
+- **1.2** = everything in §9.2 except the functions listed in 10.3, plus the packages of 10.1 and 10.2: **510.5 raw,
+  612.6 with 20 %, about 2027-04-21** at 5.5 agent-days a day (§9.5).
+- **Order inside 1.2: the streaming and folder-open chain first** (§9.3 with PH4 counted), then the rest by capacity.
+
+### 10.1 New foundation packages (in 1.2)
+
+| # | Package | Role | Depends | Days | Failing test first |
+|---|---|---|---|---|---|
+| FD-U | `EventId` (u64) on every DTO, the generated TypeScript and the wire; `sample_id()` removed. The TypeScript encoding is decided with ADR 0063: a declared bound (ids below 2^53, checked at the sink with a typed error) is recommended over string or bigint | implementer | ADR 0063 decided | 3 | An event id above `u32::MAX` round-trips through a QL result, anomaly and outlier `sample_ids`, a report events block and an AI citation; an id at 2^53 is refused at the sink |
+| FD-P | `ProcessInstance` in `debrief-core` (pid, start time with ADR 0066 provenance, main image identity, confirmed or not with the reason); UMDH on it; ADR 0068 WP-6 builds the dumps' check on it | implementer | ADR 0068 §1 | 0.5 | Same pid, different start time: two instances; no start time: unconfirmed with its reason |
+| FD-E1 | Evidence reference ADR: one `EvidenceRef` (stable source id, locator, content hash, time, id hint) for notes, reports, AI citations and findings; found, moved or gone | designer, then reviewer | ADR 0051, 0066 | 2 | (design) its test list below |
+| FD-E2 | `EvidenceRef` and its resolver; notes, report blocks and AI citations moved onto it | implementer | FD-E1, FD-U, FD-B | 3 | A cited event survives a reload and a re-time (found or moved); a removed source gives gone with the kept excerpt; `EventsRequest` reports the ids it could not resolve instead of dropping them |
+| FD-B | Ordinal per source: `line` for text sources, a declared ordinal for the rest (EVTX record id, CSV row, OTLP record, video frame), uniqueness checked at the sink (ADR 0062 amendment) | designer, then implementer | IX-B1 | 1.5 | Two events with the same time keep one order across reloads; a non-text importer without a declared ordinal fails its contract test; a duplicate `(source, ordinal)` is refused |
+| WP-1 | ADR 0068's model, wire, limits and the `CheckReport` contract (ADR 0068 work package WP-1; the rest of ADR 0068 moves out, 10.3) | implementer | - | 4 | As ADR 0068's test plan lists for WP-1 |
+| FD-I | ADR 0068's `CheckReport` as the shared finding: health, profiling and heap findings mapped; the report's Finding block typed | implementer | WP-1 | 1 | Each producer's findings map without loss; a report Finding block round-trips its typed verdict, confidence and evidence |
+| FD-F | Analyses at scale ADR: which analyses are import-time accumulated, store-side over all rows or sampled with a stated coverage; the query language's refusal over 2M matches (`qlang.rs:66-77`) with known issues and playbooks on store-side counts; Parallelism and cost per class | researcher, then reviewer | Q-1, 4.3 | 3 | (design) measurements on the 4.3 corpus, recorded per rule 48 |
+| FD-G | MEM-6 ADR's scope widened to dump and UMDH documents (a byte budget instead of `MAX_DOCS = 32`) | designer | MEM-6 ADR | 1 | (design) |
+| FD-K | Analysis run log lines: kind, query hash, coverage, Settings hash, duration; no user content (ER-27) | implementer | FD-F | 0.5 | A run's log line has the five fields and no message text |
+| FD-M | Planted-incident generator over the 4.3 corpus (spike, leak, restart, skewed clock, deadlock dump, UMDH series) with an expected-findings file and a recall check per analysis, nightly; invented data only (ER-14) | implementer | 4.3 | 3 | The recall check fails on a planted incident that no analysis reports |
+| | **Total** | | | **22.5** | |
+
+### 10.2 Correctness packages (in 1.2)
+
+| # | Package | Role | Depends | Days | Failing test first |
+|---|---|---|---|---|---|
+| C1 | UMDH reader fixes and the series test generator (ADR 0069 U0 and U1's two fixes), landed with SI-11 or with their tests carried into it | implementer | SI-11 | 2 | ADR 0069 tests 1, 2 and 2b (aggregated entries counted with their `@` size; unindented frames kept; the same id after a restart not merged) |
+| C2 | Time shapes `+h:mm` offsets and dates with spaces (Checkpoint A) | implementer | Z1 | 1.5 | `+9:00` and a spaced date (invented examples) parse to the right instant; today `time.rs:121` rejects them |
+| C3 | Known issues and playbook queries scoped to the report's or view's window | implementer | - | 1 | A known-issue match outside an incident report's period is not counted (today `known_issues.rs:266` runs a plain query) |
+| C4 | CLI `--profile` | implementer | - | 1 | A custom extractor applies in `debrief analyze` (today `run.rs:118` always uses the default profile) |
+| C5 | Outliers: Benjamini–Hochberg over the tests of one run | implementer | - | 0.5 | On invented data with no planted effect, no outlier is reported at the default rate across 6,000 tests |
+| | **Total** | | | **6** | |
+
+### 10.3 Moved to a later release
+
+Kept in their rows above, marked; one function per release after 1.2, in the order of the roadmap note §4.2: Y1 AI
+memory (10.5), Y2 semantic search with X55 (9.5), N4, N5, N0, N7 (5.5), Y5 tray popup (5), Y9's small items (4), Y13
+formats, PML and batch queries (9), Y14's R5 UI items (8): **52**. Also the approved functions (citations and report
+blocks 1.3, thread/sequence view 1.5, Pitwall drafting 1.6) and ADR 0068's checks except WP-1 (crash and hang 1.4,
+memory 1.7, .NET 1.9); ADR 0069's series in 1.8. Dates: roadmap note §4.2 (1.3 about 2027-04-30 to 1.16 about
+2027-09-16).
+
+### 10.4 Rule 47 views (Y10) and 2026-12-31
+
+Y10 stays in 1.2 (the user's 2026-11-05 decision: no waiver extension past 2026-12-31). No conformance check or waiver
+covers rule 47 today (`paddock.waivers.toml` on `origin/main` `87c9b8449`; `conformance/`, `eslint/`, `lint/`), so
+there is no date gate; the user wants it done by 2026-12-31 anyway. 18.5 days on two agents is about 11 working days:
+**start by 2026-12-01** (2026-12-14 at the latest). It is Angular-only work; its sub-packages start with views that 2.7
+and 4.5 do not rewrite. The waiver sweep **X7 must land by 2026-12-31** regardless (14 Debrief entries for C36, C39 and
+C53 expire then; §9.2 targets 2026-12-19).
+
+### 10.5 Packages written before the Dyno tag (R1)
+
+The waiting packages of the chain (1.4 + B1, IP1, 2.6c, PH1, 2.2, 1.3) may be written on branches before T only:
+
+- after 0.5 (the shared API design) is reviewed, since all of them depend on it; PH1 also needs 0.4, which lands after T;
+- one branch per crate;
+- merged, not rebased, after the tag;
+- on spare agents only (wave 0 uses all seven, §9.4), so the gain is bounded by the working days between 0.5's review
+  and T.
