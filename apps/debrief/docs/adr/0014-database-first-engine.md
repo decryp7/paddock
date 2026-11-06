@@ -884,11 +884,15 @@ The store runs on DuckDB 2.0.0 (released 2026-10-21, an LTS release) through duc
 - **`default-features = false` stays**: the pinned, checksummed prebuilt library is the only one linked. The release assets are
   now `duckdb-shared-libs-<platform>.tar.gz` (the fetch script, `libduckdb.mjs` and `cargo xtask libduckdb` read the pins from
   `fetch-libduckdb.sh`). No extension is bundled and none is loaded (the console sandbox forbids it).
-- **Storage format pinned at open.** `open_db` sets `storage_compatibility_version = 'v1.5.0'` (and `COPY FROM DATABASE` for a
-  shared project attaches its target with `STORAGE_VERSION 'v1.5.0'`), so a catalog created now is still readable by Debrief on
-  DuckDB 1.5. 2.0 keeps the version of a 1.x file it opens (tested with a catalog written by the 1.5.6 CLI). DuckDB's "version
-  number N" error for a catalog written by something newer becomes the existing "saved by a newer Debrief" message. The pin is
-  lifted by a `FORMAT_VERSION` bump that rebuilds the catalog.
+- **Storage format pinned at open (amended 2026-11-06).** `open_db` sets `storage_compatibility_version = 'v2.0.0'` (and
+  `COPY FROM DATABASE` for a shared project attaches its target with `STORAGE_VERSION 'v2.0.0'`), the explicit DuckDB 2.0
+  format named in [the storage page](https://duckdb.org/docs/2.0/internals/storage.html) (read 2026-11-06), so a later
+  DuckDB cannot move it. A new catalogue or shared project therefore needs a DuckDB 2.0 client to open it; a 1.x client
+  reports a "version 69" error. A store written by Debrief 1.1.x or older (storage version 64 to 68) is
+  refused, never converted (user decision 2026-11-06, no migration before v1): `DuckStore::open` reads the version from the file
+  header before the engine opens it, logs the found and expected versions, and fails with "This project was made with an older
+  Debrief ... cannot be opened. Import the files again into a new project." The old files are not touched. DuckDB's "version number N" error for a catalogue written by something newer becomes the existing "saved by a newer
+  Debrief" message.
 - **`async_threads`** (DuckDB 2.0's I/O pool for Parquet and CSV, four per core by default, independent of `threads`) is set to
   the Performance threads setting for the store and for the console sandbox.
 - **macOS is Apple silicon only** (DuckDB 2.1 drops Intel; user decision 2026-10-27): the fetch scripts refuse Intel Macs and the
@@ -923,7 +927,7 @@ cover. The duckdb-rs `CHANGELOG.md` path returned 404; the release notes were us
 | Zone maps and Bloom filters for more types, `IN` and function predicates | id lookups, source filters over many segments | Automatic |
 | Lazy column metadata | Wide `events_wide` views, many segments | Automatic |
 | Aggregations spill to disk (#24499) | Old out-of-memory work-arounds in ADR 0014 (distinct counts, lanes) | **Now, re-tested** (below): the all-keys distinct count no longer runs out of memory but peaks 70 to 100 MB higher, so the one-key-per-statement work-around stays; the window-operator and lane work-arounds were not re-tested |
-| `DICT_FSST` string compression, compact deletes, storage v2.0.0 | Only the small catalog is DuckDB storage | **Later**: lifting the `v1.5.0` pin with a `FORMAT_VERSION` bump; the catalog is too small to gain |
+| `DICT_FSST` string compression, compact deletes, storage v2.0.0 | Only the small catalog is DuckDB storage | **Done 2026-11-06**: new stores use storage v2.0.0; older stores are refused (above) |
 | Non-blocking checkpoints (1.5) | Catalog checkpoints are tiny | Not relevant |
 | Native time zones instead of ICU (2.2x on `AT TIME ZONE`) | Few time-zone expressions | Automatic |
 | `VARIANT` with shredding, `variant_*` functions, VARIANT in Parquet | `extra` is a `MAP(VARCHAR, VARCHAR)` | **Later**: research whether typed shredded extras beat promoted columns |

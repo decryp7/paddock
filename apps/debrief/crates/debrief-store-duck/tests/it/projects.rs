@@ -176,7 +176,7 @@ fn projects_open_without_their_files_and_degrade_source_context() {
     let archive = dir.0.join("incident.debriefz");
     assert!(store.export_project(&mut manifest, &archive).unwrap() > 0);
     drop(store);
-    // The shared catalog is in the storage format the previous Debrief (DuckDB 1.5: versions 64 to 68) still opens.
+    // The shared catalog is in the DuckDB 2.0 storage format (newer than 64 to 68, which DuckDB 1.5 reads).
     {
         use std::io::Read;
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&archive).unwrap()).unwrap();
@@ -184,7 +184,7 @@ fn projects_open_without_their_files_and_degrade_source_context() {
         zip.by_name("data.duckdb").unwrap().read_exact(&mut header).unwrap();
         assert_eq!(&header[8..12], b"DUCK");
         let version = u64::from_le_bytes(header[12..20].try_into().unwrap());
-        assert!((64..=68).contains(&version), "storage version {version}");
+        assert!(version > 68, "storage version {version}");
     }
     // The project is shared: the original files are gone.
     std::fs::remove_dir_all(&logs).unwrap();
@@ -233,45 +233,34 @@ fn projects_open_without_their_files_and_degrade_source_context() {
 }
 
 /// `tests/fixtures/store-written-by-duckdb-1.5.6/data.duckdb` is a real catalog written by the DuckDB 1.5.6 CLI (storage
-/// version 64): an empty store (`COPY FROM DATABASE` of a fresh Debrief catalog). A user's project from Debrief 1.1 is
-/// such a file, and Debrief on DuckDB 2.0 must open it, keep it readable for 1.x and not rewrite it in the new format.
+/// version 64): an empty store. A user's project from Debrief 1.1 is such a file; there is no migration (user decision
+/// 2026-11-06), so Debrief refuses it with a next step and leaves the files as they are.
 #[test]
-fn a_store_written_by_duckdb_1_x_opens_and_stays_readable_for_it() {
+fn a_store_written_by_duckdb_1_x_is_refused_and_left_untouched() {
     let dir = TempDir::new("old-store");
     let store_dir = dir.0.join("store");
     std::fs::create_dir_all(&store_dir).unwrap();
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/store-written-by-duckdb-1.5.6/data.duckdb");
     let db = store_dir.join(debrief_store_duck::DB_FILE);
     std::fs::copy(&fixture, &db).unwrap();
-    let version = |file: &std::path::Path| {
-        let mut header = [0u8; 20];
-        std::io::Read::read_exact(&mut std::fs::File::open(file).unwrap(), &mut header).unwrap();
-        assert_eq!(&header[8..12], b"DUCK");
-        u64::from_le_bytes(header[12..20].try_into().unwrap())
-    };
-    assert_eq!(version(&db), 64, "the fixture is a DuckDB 1.5 file");
-    let store = DuckStore::open(&store_dir, Profile::default_profile(), PluginRegistry::new()).expect("a 1.x store opens");
-    assert!(store.summary().unwrap().total == 0, "an empty store");
-    // Importing writes to the catalog (a checkpoint included): the old storage version stays, so Debrief 1.1 still opens it.
-    store.open(&[logs(&dir)]).unwrap().wait().unwrap();
-    let found = |store: &DuckStore| {
-        let query = Filter {
-            text: "started".into(),
-            ..Filter::default()
-        };
-        store
-            .page(&PageQuery {
-                query,
-                limit: 5,
-                ..PageQuery::default()
-            })
-            .unwrap()
-            .rows
-            .len()
-    };
-    assert!(found(&store) > 0);
-    drop(store);
-    assert!((64..=68).contains(&version(&db)), "storage version {} after use", version(&db));
-    let again = DuckStore::open(&store_dir, Profile::default_profile(), PluginRegistry::new()).expect("and reopens");
-    assert!(found(&again) > 0);
+    let before = std::fs::read(&db).unwrap();
+    match DuckStore::open(&store_dir, Profile::default_profile(), PluginRegistry::new()) {
+        Err(StoreError::Invalid(m)) => {
+            assert!(
+                m.contains("older Debrief") && m.contains("Import the files again into a new project"),
+                "{m}"
+            );
+            assert!(m.contains("64"), "{m}");
+        }
+        Err(e) => panic!("{e}"),
+        Ok(_) => panic!("a 1.x store was opened"),
+    }
+    assert_eq!(std::fs::read(&db).unwrap(), before);
+    let mut names: Vec<_> = std::fs::read_dir(&store_dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [std::ffi::OsString::from(debrief_store_duck::DB_FILE)],
+        "no wal or tmp left behind"
+    );
 }

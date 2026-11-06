@@ -233,12 +233,25 @@ pub const PREAGGREGATE_ABOVE: u64 = 1_000_000;
 /// File name of the database in a store folder.
 pub const DB_FILE: &str = "data.duckdb";
 
-/// The DuckDB storage version new catalogs are written in (`storage_compatibility_version`, set when the database is
-/// opened: the main file is created in it, a later `SET` does not change it). DuckDB 2.0 would otherwise write a
-/// format DuckDB 1.x cannot open, so a project shared from this Debrief would not open in the previous release. The
-/// catalog is small and needs none of the newer storage features. Lift it only with a `FORMAT_VERSION` bump that
-/// rebuilds the catalog (`COPY FROM DATABASE`, then swap).
-pub(crate) const STORAGE_VERSION: &str = "v1.5.0";
+/// The DuckDB storage format new catalogs are written in (`storage_compatibility_version`, set when the database is
+/// opened: the main file is created in it, a later `SET` does not change it). It is the explicit 2.0 format, named
+/// by the "v2.0.0 storage format" in DuckDB's storage documentation (https://duckdb.org/docs/2.0/internals/storage.html,
+/// read 2026-11-06), so a later DuckDB cannot move it. Stores written by Debrief 1.1.x (format v1.5.0) are refused
+/// by `open_with` (no migration, user decision 2026-11-06).
+pub(crate) const STORAGE_VERSION: &str = "v2.0.0";
+
+/// The lowest storage version number of the DuckDB 2.0 format (`v2.0.0`); DuckDB 1.5 reads 64 to 68. A project below it
+/// was made by Debrief 1.1 or older and is refused (user decision 2026-11-06: no migration).
+pub(crate) const MIN_STORAGE_VERSION: u64 = 69;
+
+/// The storage version in a database file's header (8 bytes of checksum, "DUCK", then the version), or `None` when the
+/// file is missing, too short or not a DuckDB file (the engine then reports its own error).
+pub(crate) fn read_storage_version(file: &Path) -> Option<u64> {
+    use std::io::Read;
+    let mut header = [0u8; 20];
+    std::fs::File::open(file).ok()?.read_exact(&mut header).ok()?;
+    (&header[8..12] == b"DUCK").then(|| u64::from_le_bytes(header[12..20].try_into().expect("8 bytes")))
+}
 
 /// Idle connections kept for reuse.
 const POOL: usize = 8;
@@ -902,6 +915,15 @@ impl DuckStore {
         if !dir.join(DB_FILE).is_file() {
             return Err(StoreError::NotFound(format!("no store in {}", dir.display())));
         }
+        if let Some(found) = read_storage_version(&dir.join(DB_FILE)).filter(|v| *v < MIN_STORAGE_VERSION) {
+            log::warn!(
+                "refusing {}: storage version {found}, expected {MIN_STORAGE_VERSION} or newer ({STORAGE_VERSION}); the project was made by Debrief 1.1 or older",
+                dir.display()
+            );
+            return Err(StoreError::Invalid(format!(
+                "This project was made with an older Debrief (database format {found}) and cannot be opened. Import the files again into a new project."
+            )));
+        }
         registry.resolve();
         let parsers = registry.compile_parsers(&profile, &ParserSetup::builtins()).map_err(invalid)?;
         let conn = open_db(dir, &opts)?;
@@ -1461,27 +1483,83 @@ mod tests {
     }
 
     #[test]
-    fn a_new_catalog_is_written_in_the_storage_format_the_previous_release_reads() {
+    fn a_project_in_the_duckdb_1_storage_format_is_refused_with_a_next_step_and_left_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("old");
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = Config::default().with("storage_compatibility_version", "v1.5.0").unwrap();
+        let conn = Connection::open_with_flags(dir.join(DB_FILE), old).unwrap();
+        conn.execute_batch("CREATE TABLE t(x INTEGER); INSERT INTO t VALUES (1); CHECKPOINT")
+            .unwrap();
+        drop(conn);
+        let file = dir.join(DB_FILE);
+        let before = std::fs::read(&file).unwrap();
+        let found = storage_version(&file);
+        assert!((64..=68).contains(&found), "the fixture is not a 1.x file: {found}");
+        let e = match DuckStore::open(&dir, Profile::default_profile(), PluginRegistry::new()) {
+            Err(e) => e,
+            Ok(_) => panic!("a 1.x store must be refused"),
+        };
+        match &e {
+            StoreError::Invalid(m) => {
+                assert!(m.contains("older Debrief") && m.contains("cannot be opened"), "{m}");
+                assert!(m.contains("Import the files again into a new project"), "{m}");
+                assert!(m.contains(&found.to_string()), "the message names the found version: {m}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(!e.is_retryable());
+        assert_eq!(std::fs::read(&file).unwrap(), before, "the old files must stay untouched");
+        assert!(!dir.join(format!("{DB_FILE}.wal")).exists());
+    }
+
+    #[test]
+    fn only_storage_versions_below_the_2_0_format_are_refused_as_older() {
+        let tmp = tempfile::tempdir().unwrap();
+        let refused = |version: u64| {
+            let dir = tmp.path().join(format!("v{version}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            let mut header = vec![0u8; 8];
+            header.extend_from_slice(b"DUCK");
+            header.extend_from_slice(&version.to_le_bytes());
+            header.resize(4096, 0);
+            std::fs::write(dir.join(DB_FILE), header).unwrap();
+            matches!(
+                DuckStore::open(&dir, Profile::default_profile(), PluginRegistry::new()),
+                Err(StoreError::Invalid(m)) if m.contains("older Debrief")
+            )
+        };
+        assert!(refused(MIN_STORAGE_VERSION - 1));
+        assert!(!refused(MIN_STORAGE_VERSION));
+        assert!(!refused(999));
+    }
+
+    #[test]
+    fn the_storage_version_is_read_from_the_header_and_unreadable_files_have_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("new");
+        drop(open_db(&dir, &StoreOptions::default()).unwrap());
+        let v = read_storage_version(&dir.join(DB_FILE)).unwrap();
+        assert!(v >= MIN_STORAGE_VERSION, "{v}");
+        let junk = tmp.path().join("junk");
+        std::fs::write(&junk, b"short").unwrap();
+        assert_eq!(read_storage_version(&junk), None);
+        std::fs::write(&junk, [0u8; 64]).unwrap();
+        assert_eq!(read_storage_version(&junk), None, "no DUCK magic");
+        assert_eq!(read_storage_version(&tmp.path().join("missing")), None);
+    }
+
+    #[test]
+    fn a_new_catalog_is_written_in_the_duckdb_2_storage_format() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("pin");
         let conn = open_db(&dir, &StoreOptions::default()).unwrap();
         conn.execute_batch("CREATE TABLE t(x INTEGER); INSERT INTO t VALUES (1); CHECKPOINT")
             .unwrap();
         drop(conn);
-        // DuckDB 1.5 reads storage versions 64 to 68; a file created by 2.0 without the pin is version 69.
-        let pinned = storage_version(&dir.join(DB_FILE));
-        assert!((64..=68).contains(&pinned), "storage version {pinned}");
-        // The control: the same file created without the pin is newer, so the test would notice the pin going.
-        let unpinned_file = dir.join("unpinned.duckdb");
-        let latest = Config::default().with("storage_compatibility_version", "latest").unwrap();
-        let unpinned = Connection::open_with_flags(&unpinned_file, latest).unwrap();
-        unpinned.execute_batch("CREATE TABLE t(x INTEGER); CHECKPOINT").unwrap();
-        drop(unpinned);
-        assert!(
-            storage_version(&unpinned_file) > 68,
-            "the control file is not newer than DuckDB 1.5 reads"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
+        // DuckDB 1.5 reads storage versions 64 to 68; the 2.0 format is newer.
+        let version = storage_version(&dir.join(DB_FILE));
+        assert!(version > 68, "storage version {version}");
     }
 
     #[test]
