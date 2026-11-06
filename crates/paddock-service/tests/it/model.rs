@@ -32,10 +32,6 @@ use std::time::{Duration, Instant};
 
 const LABEL: &str = "net.model.agent";
 
-/// Fewer states than this means the exploration was cut short or the alphabet shrank: the test fails.
-const STATES_FLOOR: usize = 100_000;
-/// Fewer edges than this, the same.
-const EDGES_FLOOR: u64 = 3_000_000;
 /// Safety net: the space is finite, so this is never reached unless a bucket is missing from the key.
 const STATES_CEILING: usize = 400_000;
 
@@ -1776,11 +1772,102 @@ fn a_named_configuration_of_the_long_run_runs_alone_with_the_default_bounds() {
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
 const KNOWN_FAILING: &[(&str, &str)] = &[];
 
+/// What one default-run configuration must at least reach, so a shrunken alphabet or a cut-short exploration fails its test. The
+/// floors sit at about 70 % of the measured size (2026-11-07: Mac/Fast 77250 states and 2.23 M edges, Mac/Never 85548 and 2.35 M,
+/// Mac/RefusedAlways 63282 and 1.87 M, Linux/Never 76572 and 2.36 M, NoAuto/Fast 27632 and 0.64 M).
+struct Floor {
+    states: usize,
+    edges: u64,
+}
+
+/// The faults a configuration can inject (measured 2026-11-07): `NoAuto` has no automatic registration, so it has the elevation
+/// faults and never `RegNeedsApproval`; the others have `RegNeedsApproval` and not the elevation faults.
+fn faults_of(caps: Caps) -> Vec<Fault> {
+    FAULTS
+        .iter()
+        .copied()
+        .filter(|f| match f {
+            Fault::RegNeedsElevation | Fault::RegDeclined => caps == Caps::NoAuto,
+            Fault::RegNeedsApproval => caps != Caps::NoAuto,
+            _ => true,
+        })
+        .collect()
+}
+
+/// One test per default-run configuration: each explores its own state space to a fixed point on its own thread of the test
+/// runner, so none is near the 60 s limit of the ci profile (the five together in one test were 58 s).
+macro_rules! model_test {
+    ($name:ident, $caps:ident, $resp:ident, $states:expr, $edges:expr) => {
+        #[test]
+        fn $name() {
+            check_model(
+                &[(Caps::$caps, Resp::$resp)],
+                Some(Floor {
+                    states: $states,
+                    edges: $edges,
+                }),
+            );
+        }
+    };
+}
+
+model_test!(
+    the_crash_model_mac_fast_reaches_a_fixed_point_and_the_invariants_hold_in_every_state,
+    Mac,
+    Fast,
+    54_000,
+    1_500_000
+);
+model_test!(
+    the_crash_model_mac_never_reaches_a_fixed_point_and_the_invariants_hold_in_every_state,
+    Mac,
+    Never,
+    60_000,
+    1_600_000
+);
+model_test!(
+    the_crash_model_mac_refused_always_reaches_a_fixed_point_and_the_invariants_hold_in_every_state,
+    Mac,
+    RefusedAlways,
+    44_000,
+    1_300_000
+);
+model_test!(
+    the_crash_model_linux_never_reaches_a_fixed_point_and_the_invariants_hold_in_every_state,
+    Linux,
+    Never,
+    54_000,
+    1_600_000
+);
+model_test!(
+    the_crash_model_noauto_fast_reaches_a_fixed_point_and_the_invariants_hold_in_every_state,
+    NoAuto,
+    Fast,
+    19_000,
+    450_000
+);
+
+/// The long run (`MODEL_DEEP=1 MODEL_CONFIG=Mac/Slow`): the named configuration of any of the eight, with the long bounds and no
+/// floors. Without `MODEL_CONFIG` it says so and explores nothing: the five default configurations are the tests above.
 #[test]
-fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {
+fn the_crash_model_explores_the_configuration_named_in_the_environment() {
+    let Ok(named) = std::env::var("MODEL_CONFIG") else {
+        eprintln!(
+            "MODEL_CONFIG is not set: no long-run configuration requested (e.g. MODEL_DEEP=1 MODEL_CONFIG=Mac/Slow)"
+        );
+        return;
+    };
+    let configs = configs_for(deep(), Some(&named));
+    assert!(
+        !configs.is_empty(),
+        "MODEL_CONFIG={named} names no configuration (Caps/Resp, e.g. Mac/Slow)"
+    );
+    check_model(&configs, None);
+}
+
+fn check_model(configs: &[(Caps, Resp)], floor: Option<Floor>) {
     silence_crashes();
     let started = Instant::now();
-    let configs = configs_for(deep(), std::env::var("MODEL_CONFIG").ok().as_deref());
     let results: Vec<(Caps, Resp, Explored)> = std::thread::scope(|sc| {
         let handles: Vec<_> = configs
             .iter()
@@ -1846,37 +1933,38 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
         out += &format!("- {k}: {n} edges or states\n    MODEL_REPLAY='{replay}'\n    {why}\n");
     }
     println!("{out}");
-    // The alphabet is not silently trimmed: every event, fault and interruption was taken, and the floors hold. A run of one
-    // named configuration takes only what that configuration can (the elevation faults are NoAuto's).
-    if std::env::var("MODEL_CONFIG").is_err() {
+    // The alphabet is not silently trimmed: in a default-run configuration every event and every fault it can inject was taken,
+    // and the floors hold. A long-run configuration (no floor) is judged on the invariants only.
+    if let Some(floor) = &floor {
         for e in ALL_EVS {
             assert!(
                 by_event.get(&format!("{e:?}")).copied().unwrap_or(0) > 0,
                 "event {e:?} was never taken\n{out}"
             );
         }
-        for f in FAULTS {
-            assert!(
-                by_fault.get(&format!("{f:?}")).copied().unwrap_or(0) > 0,
-                "fault {f:?} was never injected\n{out}"
-            );
+        for &(c, _) in configs {
+            for f in faults_of(c) {
+                assert!(
+                    by_fault.get(&format!("{f:?}")).copied().unwrap_or(0) > 0,
+                    "fault {f:?} was never injected\n{out}"
+                );
+            }
         }
+        assert!(
+            states >= floor.states,
+            "only {states} states (floor {})\n{out}",
+            floor.states
+        );
+        assert!(
+            edges >= floor.edges,
+            "only {edges} edges (floor {})\n{out}",
+            floor.edges
+        );
     }
     for i in ["CrashBefore", "CrashAfter", "Cancel", "WritesFail"] {
         assert!(
             by_intr.get(i).copied().unwrap_or(0) > 0,
             "interruption {i} was never taken\n{out}"
-        );
-    }
-    // The floors are for the whole default run; one named configuration is a part of it.
-    if std::env::var("MODEL_CONFIG").is_err() {
-        assert!(
-            states >= STATES_FLOOR,
-            "only {states} states (floor {STATES_FLOOR})\n{out}"
-        );
-        assert!(
-            edges >= EDGES_FLOOR,
-            "only {edges} edges (floor {EDGES_FLOOR})\n{out}"
         );
     }
     let known: Vec<&str> = KNOWN_FAILING.iter().map(|(k, _)| *k).collect();
