@@ -15,7 +15,7 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
 
 ## What a build contains
 
-- **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-user).
+- **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-machine in Program Files since 1.1.0).
 - **macOS:** `Dyno_<version>_aarch64.dmg`, and with signing secrets also the `.app.tar.gz` the updater installs. The bundle is
   **ad-hoc signed** (`signingIdentity "-"` in `tauri.macos.conf.json`): `SMAppService` and launch agents refuse a
   linker-signed bundle. It is not notarised: users open it once through Privacy & Security > Open Anyway (twice, then an administrator password; macOS 26). Developer ID signing and

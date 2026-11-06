@@ -29,9 +29,10 @@ your shell profile or system folders for you; here is how to do it yourself, onc
 | `dyno counters search WORDS... [--json]` | Counters matching all the words |
 | `dyno counters get PATH... [--json]` | Reads counters now; paths look like `\Memory\Free` or `\Network Interface(en0)\Bytes Sent`. Rates are read twice a second apart |
 | `dyno awake [on\|off\|status] [--for 90m\|2h] [--until 18:30] [--busy cpu,network,disk] [--while-pid N] [--display]` | Keeps the computer awake; `on` without `--for` or `--until` lasts until `awake off` |
-| `dyno idle [status\|cancel\|snooze MIN]` | The sleep and shut-down rules: what they wait for; cancels or snoozes a countdown |
+| `dyno idle [status\|cancel\|snooze MIN]` | The sleep and shut-down rules: what they wait for; cancels a countdown or snoozes it for 1 to 1440 minutes |
 | `dyno wake NAME\|ADDRESS [--test] [--json]` | Wakes a saved computer with Wake-on-LAN; `--test` waits for it to answer |
-| `dyno wake-schedule list\|add NAME --at 07:30 [...]\|cancel NAME\|ID` | Lists, adds or cancels scheduled wakes of this computer |
+| `dyno wake-schedule list\|add NAME --at 07:30 [--repeat once\|daily\|weekdays\|weekends] [--stay 30m] [--device NAME]... [--job software]\|cancel NAME\|ID` | Lists, adds or cancels scheduled wakes of this computer; `--stay` keeps it awake after the wake, `--device` wakes saved computers too, `--job software` lists the installed software |
+| `dyno agent COMMAND...` | The agent's own commands (`--version`, `status`, `stop`, `once`, `service install\|uninstall\|status\|ensure`); on Windows the agent program has no console, so this shows its output and exit code |
 | `dyno mcp` | Speaks MCP on stdin and stdout for a host (key in `DYNO_MCP_KEY`; Dyno must be open) |
 
 `--json` output is data in camelCase, the same shapes as the app's contract (`status` and `top` have their own small stable shapes).

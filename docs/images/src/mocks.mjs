@@ -163,7 +163,7 @@ function reccePanel(kind) {
       return (i === 0 ? r(144, y - 4, 384, 34, 'mact', 8) : '') + r(160, y + 2, 22, 22, i === 0 ? 'maccf' : 'mfield', 6) + t(171, y + 17.5, g, i === 0 ? 'mtw' : 'mm', 'middle') + t(196, y + 18, s, 'mt') + t(512, y + 18, k, 'mm', 'end'); }).join('');
 }
 
-// ---- Scrutineer (planned code-signing certificate tool): certificates with their state, a chain, sign, verify, install ----
+// ---- Scrutineer (code-signing certificate tool, dropped 2026-11-05; kept as a record): certificates with their state, a chain, sign, verify, install ----
 const CERTS = [
   ['Release signing', 'Code signing · RSA 3072', 'Expires 2027-11-04', 'Trusted', true],
   ['Nightly builds', 'Code signing · ECDSA P-256', 'Expires in 20 days', 'Renew soon', false],

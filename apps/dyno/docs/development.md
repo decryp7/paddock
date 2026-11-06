@@ -7,7 +7,6 @@ Machine setup shared by every Paddock app (tools, build cache, worktrees, test r
 ```
 crates/dyno-core         pure core: model, grouping, diagnosis, health, alarms, protocol, ports
 crates/dyno-platform     OS adapters (windows/, macos/, linux/) and test fakes
-crates/dyno-ipc          the one local IPC (frames, token handshake, host/child)
 crates/dyno-agent        the agent: sampler, server, handlers, store, rollup, service, cli
 crates/dyno-helper       the optional privileged helper (ADR 0027): closed request list, per-OS install through paddock-service
 crates/dyno-plugin-api   what a plugin depends on; crates/dyno-plugin-host guards plugins

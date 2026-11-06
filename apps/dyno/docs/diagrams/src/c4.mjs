@@ -18,7 +18,7 @@ function column(d, x, w, y0, H, list) {
   const left = [
     ['owner', 'process', 0, { name: 'PC owner', tech: 'Person', desc: 'Watches the machine, asks why it is slow, gets alarms, runs benchmarks on a click.', person: true }],
     ['data', 'process', 0, { name: 'Local data', tech: 'SQLite + JSON in the user data folder', desc: 'History, settings, alarms and notes, snapshots, baselines. Never uploaded.' }],
-    ['os', 'process', 0, { name: 'Operating system', tech: 'Windows · macOS · Linux', desc: 'Counters, process table, /proc and /sys, OS logs, launchd, systemd, registry. Figures it shows only to administrators are marked Unavailable.' }],
+    ['os', 'process', 0, { name: 'Operating system', tech: 'Windows · macOS · Linux', desc: 'Counters, process table, /proc and /sys, OS logs, launchd, systemd, registry; sleep, hibernate, shut down; wake timers (helper on macOS, Linux). Admin-only figures are Unavailable without the helper.' }],
   ];
   const right = [
     ['hosts', 'external', 0, { name: 'Release host', tech: 'Gitea releases, HTTPS', desc: 'Signed installers and latest.json for Dyno\'s own opt-in updates.' }],
@@ -38,9 +38,9 @@ function column(d, x, w, y0, H, list) {
   const ht = oy + oh - 12 - hh, at = (f) => (oy + oh * f - ht) / hh;
   d.node('helper', 552, ht, 240, hh, 'accent', hd);
   hub(d, 'sys', 'L', 'owner', 'R', { rev: true, label: 'Views, asks' });
-  link(d, 'sys', 'L', 'os', 'R', { label: 'Reads, asks to sleep', t: [(oy + oh * 0.15 - y0) / H, 0.15] });
+  link(d, 'sys', 'L', 'os', 'R', { label: 'Reads, asks', t: [(oy + oh * 0.15 - y0) / H, 0.15] });
   link(d, 'helper', 'L', 'os', 'R', { label: 'Reads as admin', t: [at(0.5), 0.5] });
-  link(d, 'helper', 'L', 'os', 'R', { label: 'Sets wakes (macOS, Linux)', t: [at(0.82), 0.82] });
+  link(d, 'helper', 'L', 'os', 'R', { label: 'Sets wakes', t: [at(0.82), 0.82] });
   hub(d, 'sys', 'L', 'data', 'R', { label: 'Reads, writes' });
   hub(d, 'sys', 'R', 'hosts', 'L', { label: 'Checks', dash: true });
   hub(d, 'sys', 'R', 'debrief', 'L', { label: 'Exports', dash: true });

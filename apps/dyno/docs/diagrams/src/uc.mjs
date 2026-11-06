@@ -16,7 +16,7 @@ function actor(d, id, x, y, name) {
 function useCases(file, { title, desc, owner, rows, ext }) {
   const UW = 360, UH = 56, PITCH = 72, y0 = 144, bx = 248;
   const bw = 24 + UW + 96 + 24, bh = 40 + rows.length * PITCH - (PITCH - UH) + 24;
-  const d = P({ title, kind: 'UML · Use case diagram', desc, w: bx + bw + (ext ? 232 : 48) });
+  const d = P({ title, kind: 'UML · Use case diagram', desc, w: bx + bw + (ext ? 264 : 48) });
   d.group('b', bx, y0, bw, bh, 'Dyno');
   const cy = (i) => y0 + 40 + i * PITCH + UH / 2;
   rows.forEach(([t, p], i) => ellipse(d, `u${i}`, bx + 24, y0 + 40 + i * PITCH, UW, UH, t, p));
@@ -29,7 +29,7 @@ function useCases(file, { title, desc, owner, rows, ext }) {
     actor(d, 'x', ex, ay - 32, ext.name);
     rs.forEach((i) => d.edge('x', `u${i}`, [ex, ay], [bx + 24 + UW, cy(i)], { arrow: 'none', via: ay === cy(i) ? [] : [[bus, ay], [bus, cy(i)]] }));
   }
-  d.legend([{ kind: 'accent', label: 'Use case' }, ...(rows.some(([, p]) => p) ? [{ kind: 'planned', label: 'Planned' }] : []), { kind: 'line', label: 'Association', arrow: 'none' }]);
+  d.legend([{ kind: 'accent', label: 'Use case', ellipse: true }, ...(rows.some(([, p]) => p) ? [{ kind: 'planned', label: 'Planned', ellipse: true }] : []), { kind: 'line', label: 'Association', arrow: 'none' }]);
   save(file, d, y0 + bh);
 }
 useCases('uml-use-cases-observe', {

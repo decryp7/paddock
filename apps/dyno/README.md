@@ -6,7 +6,7 @@
 
 **Watches your PC.** A background agent samples the machine and keeps its history while the window is
 closed; the app shows what is happening, says in plain words why it is slow, raises alarms, maps the disk and runs
-benchmarks on click. When you set it up, it keeps the computer awake, wakes other computers or sleeps, hibernates (Windows and Linux) or shuts down after idle or at a set time ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). On **Windows, macOS
+benchmarks on click. When you set it up, it keeps the computer awake and wakes other computers, and it can sleep, hibernate (Windows and Linux) or shut down the computer after idle or at a set time ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). On **Windows, macOS
 and Linux**.
 
 A dynamometer measures an engine under load and shows where the power goes: Dyno does that for your computer.
@@ -16,7 +16,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 ![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=3af1d14e)
 
 
-> **Status: 1.1.0.** Dyno is a monitor: live and history, processes and why it is slow,
+> **Status: 1.0.0 released, 1.1.0 in progress.** Dyno is a monitor: live and history, processes and why it is slow,
 > alarms, issues, a disk map, counters, extras, benchmarks and the command line, plus opt-in keep awake, Wake-on-LAN, scheduled wakes, sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time, and the administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values and, only if you allow each one, wake a saved computer or keep this one awake for up to 12 hours). Taming, cleanup and tuning are dropped, not postponed
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
@@ -110,19 +110,27 @@ Dyno 1.0.0 is released on the repository's releases page, and 1.1.0 is in progre
 
 Run the NSIS installer (`Dyno_<version>_x64-setup.exe`). It installs once for every user of the PC, in Program Files, after one User Account Control prompt. Dyno registers its agent as
 a per-user **Run** entry (not a service: a service lives in session 0 and cannot see your idle time, foreground window
-or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). After the install Dyno runs with your own rights; only the optional administrator helper runs elevated. Without it, figures Windows shows only to administrators are marked *Unavailable* with the reason.
+or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)).
+
+Coming from 1.0.0, update by hand once, because 1.0.0 does not look at these releases and was installed per user:
+
+1. Run the 1.1.0 setup. It stops and says "Uninstall the older Dyno first (Settings › Apps), then run this installer again."
+2. Uninstall Dyno 1.0.0 in Settings > Apps. Your history stays: the data folder is per user.
+3. Run the 1.1.0 setup again and answer the User Account Control prompt.
+
+After the install Dyno runs with your own rights; only the optional administrator helper runs elevated. Without it, figures Windows shows only to administrators are marked *Unavailable* with the reason.
 
 ### macOS (13 or newer)
 
 The build is **not notarised**; it is signed ad hoc. Open the `.dmg`, drag Dyno to Applications and open it from there. The first time macOS says "Not Opened": choose Done, then
 System Settings > Privacy & Security > **Open Anyway**, **Open Anyway** again in the "Open “Dyno”?" dialog, and enter an
-administrator's name and password (macOS 26 flow, once). Turn on **Settings > Launch at login**: Dyno registers its launch agent with `SMAppService` and
+administrator's name and password (macOS 26 flow, once). Turn on **Settings > Start Dyno at login**: Dyno registers its launch agent with `SMAppService` and
 macOS may ask you to allow it under **System Settings > General > Login Items & Extensions**. Details and verification:
 [docs/macos.md](docs/macos.md).
 
 ### Linux (systemd, x86-64 or ARM64)
 
-Install the `.deb` (`sudo apt install ./Dyno_<version>_amd64.deb`) or run the AppImage. **Settings > Launch at login**
+Install the `.deb` (`sudo apt install ./Dyno_<version>_amd64.deb`) or run the AppImage. **Settings > Start Dyno at login**
 installs a systemd **user** unit (`~/.config/systemd/user/dyno-agent.service`); no root needed. The tray needs a
 status-notifier host (GNOME: the AppIndicator extension). Details: [docs/linux.md](docs/linux.md).
 

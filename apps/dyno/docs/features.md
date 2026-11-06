@@ -352,11 +352,11 @@ Dyno's own Copy menu, no browser keys.
 
 ## Power
 
-**Built** (1.1.0, [ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). The Power page, the tray menu and the commands `dyno awake`, `dyno idle`, `dyno wake`
+**Built** (1.1.0, [ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). The Power page (tabs Keep awake, Sleep and shut down, Schedule, Wake devices), the tray menu and the commands `dyno awake`, `dyno idle`, `dyno wake`
 and `dyno wake-schedule`.
 
-- **Keep awake:** hold the computer awake for 30 minutes to 7 days, until a time of day, until you stop it, while a program
-  runs, or while the computer is busy. The hold ends if Dyno restarts.
+- **Keep awake:** hold the computer awake for 30 minutes, 1, 2 or 4 hours, until a time of day, until you stop it,
+  while a program runs, or while the computer is busy (up to 7 days with `dyno awake on --for`). The hold ends if Dyno restarts.
 - **Idle and timed actions:** sleep, hibernate (Windows and Linux) or shut down after the computer has been truly idle for a
   while, or at a time of day, by the OS's normal path and never forced. Off by default; a countdown with Cancel comes first.
 - **Scheduled wakes:** wake this computer at a time you choose, keep it awake for a while, wake chosen computers and run one
@@ -366,7 +366,7 @@ and `dyno wake-schedule`.
 
 ## AI access
 
-**Built** (1.1.0, ADR 0007 and ADR 0032 decision D7). **Settings > AI access**, off by default, lets a program on this
+**Built** (1.1.0, family [ADR 0007](../../../docs/adr/0007-mcp-servers-across-the-family.md) and ADR 0032 decision D7). **Settings > AI access**, off by default, lets a program on this
 computer that speaks MCP read eight reading tools (a system summary, CPU and memory, disks with drive health, the top
 programs, a network summary, alarms, the history of one metric, sensors) and two power readings (power state, saved
 computers). Two actions, waking a saved computer and keeping this one awake for up to 12 hours, stay hidden until you allow

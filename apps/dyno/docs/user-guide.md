@@ -1,6 +1,6 @@
 # User guide
 
-Dyno measures your PC and explains why it is slow. When you set it up, it also keeps the computer awake, wakes other computers or sleeps, hibernates (Windows and Linux) or shuts down after idle or at a set time ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This guide covers what works today; screens
+Dyno measures your PC and explains why it is slow. When you set it up, it also keeps the computer awake and wakes other computers. It can also sleep, hibernate (Windows and Linux) or shut down the computer after idle or at a set time ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This guide covers what works today; screens
 marked *placeholder* are described in [features.md](features.md) and [roadmap.md](roadmap.md).
 
 ## Glossary
@@ -16,7 +16,7 @@ marked *placeholder* are described in [features.md](features.md) and [roadmap.md
 
 Per OS in the [README](../README.md#quick-start); macOS in [macos.md](macos.md), Linux in [linux.md](linux.md). After
 installing, open Dyno. The window starts with a short splash and then the dashboard. If no agent is running, the app starts
-one; **Launch at login** is on by default: the first time Dyno runs it registers itself (this registers the agent with the OS:
+one; **Start Dyno at login** is on by default: the first time Dyno runs it registers itself (this registers the agent with the OS:
 `SMAppService` on macOS, a systemd user unit on Linux, a per-user Run entry on Windows), starts in the tray at login and keeps measuring. Turn it off under **Settings > Launch at login**; Dyno never turns it on again.
 
 ## First run
@@ -130,16 +130,16 @@ page says about how long the run takes and the most it writes to each drive.
 
 The **Power** page and the tray menu hold these. Each starts only when you use it or turn it on.
 
-1. To keep the computer awake, open the Power page, choose how long (30 minutes to 7 days, until a time of day, until you
-   stop it, while a program runs or while the computer is busy) and start the hold. From a terminal, `dyno awake on --for 2h`
+1. To keep the computer awake, open the Power page, choose how long (30 minutes, 1, 2 or 4 hours, Until I stop it, a time of day,
+   while a program runs or while the computer is busy; up to 7 days only with `dyno awake on --for 7d`) and start the hold. From a terminal, `dyno awake on --for 2h`
    starts it and `dyno awake off` ends it. The hold ends if Dyno restarts, and the page says so.
-2. To sleep, hibernate or shut down the computer, set a rule on the Power page under **When the computer is idle** or **At a
+2. To sleep, hibernate or shut down the computer, set a rule on the **Sleep and shut down** tab under **When the computer is idle** or **At a
    time of day**. Hibernate works on Windows and Linux; macOS decides by itself when to hibernate. Dyno uses the OS's normal
    path and never forces it. A countdown with Cancel comes first; `dyno idle cancel` or `dyno idle snooze 30` stops or delays it.
-3. To wake this computer at a set time, turn on scheduled wakes in Settings, then add one under **Scheduled wakes** or run
+3. To wake this computer at a set time, turn on scheduled wakes in Settings, then add one on the **Schedule** tab or run
    `dyno wake-schedule add NAME --at 07:30`. On macOS and Linux the administrator helper sets the wake. A missed wake is shown
    as missed and never run late, and nothing can wake a computer that is shut down.
-4. To wake another computer, save it under **Your computers** and wake it there, from the tray menu or with `dyno wake NAME`.
+4. To wake another computer, save it on the **Wake devices** tab and wake it there, from the tray menu or with `dyno wake NAME`.
    The check under **This computer** says whether this computer can be woken over the network and what to change.
 
 ## Settings
