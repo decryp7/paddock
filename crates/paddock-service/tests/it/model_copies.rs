@@ -49,6 +49,10 @@ impl System for Launchd {
             _ => Output::ok(""),
         })
     }
+    fn process(&mut self, _pid: u32) -> Option<paddock_proc::ProcessId> {
+        // The fake machine's pids are not the host's: no process is looked up on the machine the test runs on (ER-14).
+        None
+    }
     fn spawn(&mut self, _p: &Path, _a: &[String]) -> Result<(), String> {
         Ok(())
     }
