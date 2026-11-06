@@ -2,6 +2,8 @@
 //! their full-text indexes. [`server`] is the worker side and [`plugins`] the importer plugins it starts; Debrief's
 //! side (the protocol, the supervisor and `RemoteStore`) is `debrief-store-client`, which links no database.
 
+pub mod activity;
+pub mod logging;
 pub mod plugins;
 pub mod server;
 
@@ -21,8 +23,17 @@ pub fn main() {
         }
         return;
     }
+    // The log comes first: everything after it (the start, a failed connect, the stores) is on the record. Without a log
+    // folder on the command line (the CLI, tests) the worker logs nothing, as before; standard error stays the second channel.
+    let _ = logging::elapsed_ms();
+    let log_args = protocol::LogArgs::from_args(std::env::args());
+    let _log = log_args.as_ref().and_then(logging::install);
     let mode = MemoryMode::from_args(std::env::args());
     let tuning = StoreTuning::from_args(std::env::args());
+    if let (Some(args), Some(_)) = (&log_args, &_log) {
+        logging::log_start(mode == MemoryMode::Low, &tuning, args.level);
+        logging::note_previous_panic(args);
+    }
     if mode == MemoryMode::Low {
         debrief_alloc::purge_at_once();
     }

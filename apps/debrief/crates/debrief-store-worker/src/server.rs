@@ -27,7 +27,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -42,6 +42,84 @@ fn reply<T: Serialize>(v: &T) -> StoreResult<serde_json::Value> {
 }
 
 pub use crate::plugins::install_plugins;
+
+/// The request's name for the log: the variant, or the operation of a call. Never a parameter (a path, a query, a value).
+pub fn request_name(req: &StoreRequest) -> &'static str {
+    match req {
+        StoreRequest::OpenStore(_) => "OpenStore",
+        StoreRequest::CloseStore { .. } => "CloseStore",
+        StoreRequest::Status => "Status",
+        StoreRequest::Call { op, .. } => op.name(),
+        StoreRequest::Scan { .. } => "Scan",
+        StoreRequest::OpenProject(_) => "OpenProject",
+        StoreRequest::SetPlugins(_) => "SetPlugins",
+    }
+}
+
+/// Requests that legitimately take long (imports, exports, rebuilds, maintenance): logged as slow after
+/// [`SLOW_LONG`], not [`SLOW`].
+const LONG_REQUESTS: &[&str] = &[
+    "OpenStore",
+    "OpenProject",
+    "Open",
+    "OpenAtEnd",
+    "Reload",
+    "Refresh",
+    "Restore",
+    "RemoveSource",
+    "SetProfile",
+    "SetParsers",
+    "RereadParsers",
+    "AssignParser",
+    "SetSourceEncoding",
+    "Export",
+    "ExportProject",
+    "ExportRedactedProject",
+    "SqlExport",
+    "StoreMaintain",
+    "SetClockOffsets",
+    "SetSourceOffset",
+];
+
+/// A request over this is logged at info as slow.
+pub const SLOW: Duration = Duration::from_secs(1);
+/// The same for [`LONG_REQUESTS`].
+pub const SLOW_LONG: Duration = Duration::from_secs(10);
+
+/// How long `name` may take before it is logged as slow.
+pub fn slow_after(name: &str) -> Duration {
+    if LONG_REQUESTS.contains(&name) {
+        SLOW_LONG
+    } else {
+        SLOW
+    }
+}
+
+/// `store.request.slow` at info for a request over its limit, every request at debug.
+fn log_request(name: &'static str, took: Duration) {
+    let took_ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX);
+    if took > slow_after(name) {
+        log::info!(EventId = "store.request.slow", Request = name, Ms = took_ms; "Store request {name} was slow");
+    } else {
+        log::debug!(EventId = "store.request", Request = name, Ms = took_ms; "Store request {name}");
+    }
+}
+
+/// The `store.open` line: the store as a fingerprint of its folder (never the path, which names the user's project), how long
+/// the open took, and what the store holds.
+fn log_opened(dir: &std::path::Path, store: &DuckStore, kind: &'static str, took: Duration) {
+    let counts = store.open_counts();
+    log::info!(
+        EventId = "store.open",
+        Store = paddock_log::fingerprint(&dir.to_string_lossy()).as_str(),
+        Kind = kind,
+        Ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX),
+        Segments = counts.map_or(0, |c| c.segments),
+        Waiting = counts.map_or(0, |c| c.waiting),
+        DataVersion = counts.map_or(0, |c| c.data_version);
+        "Store opened"
+    );
+}
 
 /// The stores of this worker.
 pub struct Worker {
@@ -132,6 +210,7 @@ impl Worker {
         }
         let opts = self.options(req.limits);
         let registry = self.registry(&req.disabled_plugins, req.safe_mode, &req.third_party);
+        let opening = Instant::now();
         let store = if req.create {
             DuckStore::create_with(&dir, req.profile, registry, opts)?
         } else {
@@ -140,6 +219,7 @@ impl Worker {
         if let Some(setup) = &req.parsers {
             debrief_core::ports::Profiles::set_parsers(&store, setup)?;
         }
+        log_opened(&dir, &store, if req.create { "create" } else { "open" }, opening.elapsed());
         let h = self.next.fetch_add(1, Ordering::SeqCst) + 1;
         lock(&self.stores).insert(h, (dir, store));
         Ok(Handle {
@@ -151,6 +231,7 @@ impl Worker {
     fn open_project(&self, req: OpenProject) -> StoreResult<OpenedProject> {
         std::fs::create_dir_all(&req.dest_root)?;
         let registry = self.registry(&req.disabled_plugins, req.safe_mode, &req.third_party);
+        let opening = Instant::now();
         let (store, manifest) = DuckStore::open_project(&req.path, &req.dest_root, req.profile, registry)?;
         if let Some(setup) = &req.parsers {
             debrief_core::ports::Profiles::set_parsers(&store, setup)?;
@@ -159,6 +240,7 @@ impl Worker {
             store.configure(self.options(req.limits))?;
         }
         let dir = std::fs::canonicalize(store.dir()).map_err(|e| StoreError::Io(format!("{}: {e}", store.dir().display())))?;
+        log_opened(&dir, &store, "project", opening.elapsed());
         let mut stores = lock(&self.stores);
         stores.retain(|_, (d, _)| *d != dir);
         let h = self.next.fetch_add(1, Ordering::SeqCst) + 1;
@@ -180,12 +262,19 @@ impl Worker {
         probe: Option<CancelProbe>,
         items: &mut dyn FnMut(Vec<u8>) -> bool,
     ) -> StoreResult<serde_json::Value> {
-        catch_unwind(AssertUnwindSafe(|| self.dispatch(req, probe, items))).unwrap_or_else(|p| {
+        let name = request_name(&req);
+        let started = Instant::now();
+        let result = catch_unwind(AssertUnwindSafe(|| self.dispatch(req, probe, items))).unwrap_or_else(|p| {
+            // The panic hook wrote the panic itself (with its backtrace); this line says which request it was, without the
+            // message, which may name data.
+            log::error!(EventId = "store.request.panicked", Request = name; "A store request panicked: {name}");
             Err(StoreError::Engine(format!(
                 "the store worker hit an internal error: {}",
                 debrief_core::guard::panic_message(p.as_ref())
             )))
-        })
+        });
+        log_request(name, started.elapsed());
+        result
     }
 
     fn dispatch(
@@ -203,7 +292,18 @@ impl Worker {
                 reply(&())
             }
             StoreRequest::CloseStore { store } => {
-                lock(&self.stores).remove(&store);
+                let removed = lock(&self.stores).remove(&store);
+                if let Some((dir, closing)) = removed {
+                    // Dropping the last handle stops the store's background loops and waits for them.
+                    let began = Instant::now();
+                    drop(closing);
+                    log::info!(
+                        EventId = "store.close",
+                        Store = paddock_log::fingerprint(&dir.to_string_lossy()).as_str(),
+                        Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
+                        "Store closed"
+                    );
+                }
                 reply(&())
             }
             StoreRequest::Status => reply(&WorkerStatus {
@@ -415,16 +515,167 @@ fn tuned(base: StoreOptions, tuning: &StoreTuning) -> StoreOptions {
 /// `mode` is how the worker uses memory (its command line, see [`MemoryMode::from_args`]) and `tuning` the knobs of
 /// Settings ▸ Performance ([`StoreTuning::from_args`]).
 pub fn run(plugins: Arc<dyn PluginSource>, mode: MemoryMode, tuning: StoreTuning) -> std::io::Result<()> {
-    debrief_ipc::child::child_main("Debrief", move |_| {
-        Arc::new(StoreHandler::new(Arc::new(
-            Worker::with_mode(plugins.clone(), mode).with_tuning(tuning.clone()),
-        )))
-    })
+    let connected = Arc::new(AtomicBool::new(false));
+    let seen = connected.clone();
+    let result = debrief_ipc::child::child_main_hooked(
+        "Debrief",
+        debrief_ipc::frame::ProtocolVersion::UNVERSIONED,
+        move |_| {
+            Arc::new(StoreHandler::new(Arc::new(
+                Worker::with_mode(plugins.clone(), mode).with_tuning(tuning.clone()),
+            )))
+        },
+        move |_, _| {
+            seen.store(true, Ordering::SeqCst);
+            crate::logging::log_ready();
+            crate::activity::start(crate::activity::EVERY);
+        },
+        || crate::logging::log_exit(crate::logging::ExitWhy::StdinClosed, 0, None),
+    );
+    match &result {
+        Ok(()) => crate::logging::log_exit(crate::logging::ExitWhy::PeerClosed, 0, None),
+        Err(e) => {
+            let why = if connected.load(Ordering::SeqCst) {
+                crate::logging::ExitWhy::Error
+            } else {
+                crate::logging::ExitWhy::ConnectFailed
+            };
+            crate::logging::log_exit(why, 1, Some(e));
+        }
+    }
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn wait_for(event: &str, wanted: impl Fn(&debrief_store_duck::testlog::Record) -> bool) -> debrief_store_duck::testlog::Record {
+        debrief_store_duck::testlog::wait_for(event, Duration::from_secs(10), wanted).unwrap_or_else(|| panic!("no {event} line"))
+    }
+
+    #[test]
+    fn a_store_opens_and_closes_with_a_line_that_names_it_by_fingerprint_only() {
+        debrief_store_duck::testlog::install();
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("secret-project");
+        let w = Worker::default();
+        let open = StoreRequest::OpenStore(debrief_ipc::Json(
+            serde_json::to_value(OpenStore {
+                dir: dir.clone(),
+                profile: Profile::default_profile(),
+                create: true,
+                disabled_plugins: Vec::new(),
+                safe_mode: false,
+                third_party: Vec::new(),
+                limits: None,
+                parsers: None,
+            })
+            .unwrap(),
+        ));
+        let handle: Handle = serde_json::from_value(w.handle(open, None, &mut none).unwrap()).unwrap();
+        let canonical = std::fs::canonicalize(&dir).unwrap();
+        let fingerprint = paddock_log::fingerprint(&canonical.to_string_lossy());
+        let opened = wait_for("store.open", |r| r.props["Store"] == fingerprint.as_str());
+        assert_eq!((opened.level, opened.props["Kind"].as_str()), (log::Level::Info, Some("create")));
+        assert!(opened.props["Ms"].is_u64() && opened.props["Segments"].is_u64() && opened.props["Waiting"].is_u64());
+        assert!(opened.props["DataVersion"].is_u64());
+        assert!(!format!("{opened:?}").contains("secret-project"), "{opened:?}");
+        w.handle(StoreRequest::CloseStore { store: handle.store }, None, &mut none).unwrap();
+        let closed = wait_for("store.close", |r| r.props["Store"] == fingerprint.as_str());
+        assert!(closed.props["Ms"].is_u64());
+        // Closing a store that is not open is not an event.
+        let before = debrief_store_duck::testlog::records("store.close").len();
+        w.handle(StoreRequest::CloseStore { store: handle.store }, None, &mut none).unwrap();
+        assert_eq!(debrief_store_duck::testlog::records("store.close").len(), before);
+    }
+
+    #[test]
+    fn a_slow_request_is_an_info_line_with_its_name_and_a_quick_one_a_debug_line() {
+        debrief_store_duck::testlog::install();
+        log_request("TestSlowRequest", Duration::from_secs(2));
+        let slow = wait_for("store.request.slow", |r| r.props["Request"] == "TestSlowRequest");
+        assert_eq!((slow.level, slow.props["Ms"].as_u64()), (log::Level::Info, Some(2000)));
+        log_request("TestQuickRequest", Duration::from_millis(5));
+        let quick = wait_for("store.request", |r| r.props["Request"] == "TestQuickRequest");
+        assert_eq!((quick.level, quick.props["Ms"].as_u64()), (log::Level::Debug, Some(5)));
+        // Exactly at the limit is not slow.
+        log_request("TestLimitRequest", SLOW);
+        wait_for("store.request", |r| r.props["Request"] == "TestLimitRequest");
+        assert!(debrief_store_duck::testlog::records("store.request.slow")
+            .iter()
+            .all(|r| r.props["Request"] != "TestLimitRequest"));
+        // The limit is per kind of request: 4 s is slow for a lookup, not for an import.
+        log_request("Open", Duration::from_secs(4));
+        assert!(debrief_store_duck::testlog::records("store.request.slow")
+            .iter()
+            .all(|r| r.props["Request"] != "Open"));
+        log_request("Open", Duration::from_secs(11));
+        wait_for("store.request.slow", |r| r.props["Request"] == "Open");
+    }
+
+    /// A plugin source that panics when the worker asks it for a registry.
+    struct Panicking;
+
+    impl PluginSource for Panicking {
+        fn registry(&self, _: &PluginChoice<'_>) -> PluginRegistry {
+            panic!("bad value customer-4711");
+        }
+
+        fn set_third_party(&self, _: &[ThirdPartyPlugin]) {}
+    }
+
+    #[test]
+    fn a_request_that_panics_says_which_one_without_its_message() {
+        debrief_store_duck::testlog::install();
+        let root = tempfile::tempdir().unwrap();
+        let w = Worker::new(Arc::new(Panicking));
+        let open = StoreRequest::OpenStore(debrief_ipc::Json(serde_json::json!({
+            "dir": root.path().join("store"),
+            "profile": Profile::default_profile(),
+            "create": true,
+        })));
+        let err = w.handle(open, None, &mut none).unwrap_err();
+        assert!(
+            matches!(err, StoreError::Engine(_)),
+            "the panic is an engine error of the call: {err:?}"
+        );
+        let line = wait_for("store.request.panicked", |r| r.props["Request"] == "OpenStore");
+        assert_eq!(line.level, log::Level::Error);
+        assert!(
+            !format!("{line:?}").contains("customer-4711"),
+            "the message may name data: {line:?}"
+        );
+    }
+
+    #[test]
+    fn a_request_is_named_by_its_variant_or_operation_never_by_a_parameter() {
+        assert_eq!(request_name(&StoreRequest::Status), "Status");
+        assert_eq!(request_name(&StoreRequest::CloseStore { store: 1 }), "CloseStore");
+        let call = StoreRequest::Call {
+            store: 1,
+            op: protocol::StoreOp::Summary,
+            body: debrief_ipc::Json(serde_json::json!({"text": "customer-4711"})),
+        };
+        assert_eq!(request_name(&call), "Summary");
+    }
+
+    #[test]
+    fn imports_and_exports_are_slow_later_than_lookups() {
+        assert_eq!(slow_after("Page"), SLOW);
+        assert_eq!(slow_after("Open"), SLOW_LONG);
+        assert_eq!(slow_after("ExportProject"), SLOW_LONG);
+        assert_eq!(slow_after("StoreMaintain"), SLOW_LONG);
+        assert!(SLOW < SLOW_LONG);
+        // Every name on the long list is a request that exists.
+        let ops: Vec<&str> = protocol::StoreOp::ALL.iter().map(|o| o.name()).collect();
+        for name in LONG_REQUESTS {
+            assert!(
+                ops.contains(name) || ["OpenStore", "OpenProject"].contains(name),
+                "{name} is not a request"
+            );
+        }
+    }
 
     fn none(_: Vec<u8>) -> bool {
         true

@@ -23,7 +23,10 @@ debrief-ipc = { path = "../debrief-ipc" }
 debrief-store-client = { path = "../debrief-store-client" }
 debrief-store-duck = { path = "../debrief-store-duck" }
 debrief-plugin-host = { path = "../debrief-plugin-host" }
-log.workspace = true
+log = { workspace = true, features = ["kv"] }
+paddock-env = { path = "../../../../crates/paddock-env" }
+paddock-log = { path = "../../../../crates/paddock-log" }
+paddock-proc = { path = "../../../../crates/paddock-proc" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
 
@@ -34,7 +37,9 @@ chrono.workspace = true
 debrief-plugin-api = { path = "../debrief-plugin-api" }
 tempfile.workspace = true
 sysinfo = { workspace = true, features = ["system"] }
-paddock-proc = { path = "../../../../crates/paddock-proc" }
+paddock-diag = { path = "../../../../crates/paddock-diag" }
+# `testlog`: the records the worker logs, for its unit tests.
+debrief-store-duck = { path = "../debrief-store-duck", features = ["test-support"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 libc.workspace = true

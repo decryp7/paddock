@@ -36,10 +36,10 @@ const QUERY_BUDGET_MB: u64 = if cfg!(target_os = "macos") { 630 } else { 320 };
 const CLIENT_GROWTH_MB: u64 = 64;
 
 /// A fresh folder under the system temp folder, removed on drop.
-struct TempDir(PathBuf);
+pub(super) struct TempDir(pub(super) PathBuf);
 
 impl TempDir {
-    fn new(tag: &str) -> TempDir {
+    pub(super) fn new(tag: &str) -> TempDir {
         let mut b = [0u8; 8];
         getrandom::fill(&mut b).unwrap();
         let p = std::env::temp_dir().join(format!("debrief-worker-{tag}-{}-{:x}", std::process::id(), u64::from_le_bytes(b)));
@@ -148,7 +148,7 @@ thread_local! {
 /// plugins' sockets (`debrief-plugin-*`, made before the handshake); they go with the folder instead of staying in a
 /// shared one (see `debrief_ipc::testing`).
 #[cfg(unix)]
-fn confined(exe: &str) -> WorkerConfig {
+pub(super) fn confined(exe: &str) -> WorkerConfig {
     let mut cfg = WorkerConfig::new(exe);
     let dir = debrief_ipc::testing::confined_tmp();
     cfg.env.extend(dir.env());
@@ -158,7 +158,7 @@ fn confined(exe: &str) -> WorkerConfig {
 
 /// Elsewhere (Windows) the worker's endpoint is a named pipe, not a folder, so nothing is left to confine.
 #[cfg(not(unix))]
-fn confined(exe: &str) -> WorkerConfig {
+pub(super) fn confined(exe: &str) -> WorkerConfig {
     WorkerConfig::new(exe)
 }
 
@@ -428,7 +428,7 @@ fn kill(w: &StoreWorker) -> u32 {
 /// answer a call (a busy machine stretches that window), so a test that asks "which worker answers now?" waits here.
 /// `waitid` with `WNOWAIT` blocks until the child (the worker is this process's child) has exited and leaves it
 /// unreaped, so the supervisor still collects its exit status; `ECHILD` means the supervisor reaped it already.
-fn kill_and_wait(w: &StoreWorker) {
+pub(super) fn kill_and_wait(w: &StoreWorker) {
     let pid = kill(w);
     #[cfg(unix)]
     {
