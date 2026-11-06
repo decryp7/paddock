@@ -602,7 +602,7 @@ mod mac {
     pub static CANCEL: AtomicBool = AtomicBool::new(false);
 
     /// The process-wide cancel of the service's work.
-    fn never() -> &'static AtomicBool {
+    pub(super) fn never() -> &'static AtomicBool {
         &CANCEL
     }
 
@@ -1526,5 +1526,30 @@ mod tests {
     fn without_a_stale_entry_the_apps_entry_is_left_alone() {
         assert_eq!(upgrade(false, true), (Ok(false), vec!["repair".to_string()]));
         assert_eq!(upgrade(false, false), (Ok(false), vec!["repair".to_string()]));
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn the_cancel_of_the_services_work_follows_the_switch_and_quit_stays_cancelled() {
+        // Each test runs in its own process under nextest, so the process-wide flags start clean.
+        assert!(!service_work_cancelled());
+        cancel_service_work_for_switch();
+        assert!(service_work_cancelled(), "a changed switch stops the work in hand");
+        begin_service_work();
+        assert!(!service_work_cancelled(), "the next change starts clean");
+        cancel_service_work();
+        assert!(service_work_cancelled(), "quit stops the work");
+        begin_service_work();
+        assert!(service_work_cancelled(), "a change after quit does not clear the cancel");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_cancel_the_mac_service_hands_to_the_shared_manager_is_the_process_wide_one() {
+        use std::sync::atomic::Ordering;
+        mac::CANCEL.store(true, Ordering::SeqCst);
+        assert!(mac::never().load(Ordering::SeqCst));
+        mac::CANCEL.store(false, Ordering::SeqCst);
+        assert!(!mac::never().load(Ordering::SeqCst));
     }
 }

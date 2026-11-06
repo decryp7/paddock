@@ -1254,3 +1254,42 @@ fn a_first_run_leaves_a_lingering_job_alone_and_remembers_what_this_version_was_
     assert!(matches!(m.install_unattended(&never()), Ok(RepairOutcome::Recovered)));
     assert_eq!(m.recorded().registered_version.as_deref(), Some("1.1.0"));
 }
+
+#[test]
+fn a_wait_ends_when_the_os_runs_the_job_even_if_the_service_has_not_answered_yet() {
+    let dir = tempfile::tempdir().unwrap();
+    RecordFile::new(dir.path(), LABEL).save("1.0.0", None).unwrap();
+    RecordFile::new(dir.path(), LABEL)
+        .set_state(crate::record::State::Attempting {
+            version: "1.1.0".into(),
+            attempts: 1,
+            phase: crate::record::Phase::Awaiting,
+        })
+        .unwrap();
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sys = FakeSystem::new();
+    wire(&sim, &sys);
+    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
+    let mut m = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", || false);
+    let started = m.on_start(&never());
+    assert!(calls(&sim).is_empty(), "nothing is registered or removed: {:?} {started:?}", calls(&sim));
+    assert!(sys.now() < Duration::from_secs(6), "it did not wait out the time: {:?}", sys.now());
+}
+
+#[test]
+fn a_wait_ends_at_once_when_the_os_refuses_the_job() {
+    let dir = tempfile::tempdir().unwrap();
+    RecordFile::new(dir.path(), LABEL).save("1.0.0", None).unwrap();
+    RecordFile::new(dir.path(), LABEL)
+        .set_state(crate::record::State::Attempting {
+            version: "1.1.0".into(),
+            attempts: 1,
+            phase: crate::record::Phase::Awaiting,
+        })
+        .unwrap();
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Refused);
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    let _ = m.on_start(&never());
+    assert!(sys.now() < Duration::from_secs(6), "a refusal is not waited out: {:?}", sys.now());
+}

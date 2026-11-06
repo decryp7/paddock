@@ -1758,3 +1758,89 @@ fn a_run_value_replaced_by_another_copy_stops_the_agent_the_old_value_started() 
         .collect();
     assert_eq!(stops, [format!("{old} stop")], "the old agent is asked to stop once the new value is written");
 }
+
+#[test]
+fn a_cancelled_replace_puts_the_record_back_even_when_it_held_another_versions_attempt() {
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, Some(1));
+    let sys = FakeSystem::new();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4");
+    let before = crate::record::State::Attempting {
+        version: "1.0.3".into(),
+        attempts: 1,
+        phase: crate::record::Phase::Awaiting,
+    };
+    crate::record::RecordFile::new(d.path(), LABEL).save("1.0.3", None).unwrap();
+    crate::record::RecordFile::new(d.path(), LABEL).set_state(before.clone()).unwrap();
+    let cancel = AtomicBool::new(true);
+    assert_eq!(
+        m.on_start(&cancel),
+        Started::Repaired(Reason::Refused, RepairOutcome::Cancelled)
+    );
+    assert_eq!(m.recorded().state, before, "a cancel before anything was changed leaves the record as it was");
+    assert!(changes(&sys).is_empty());
+}
+
+#[test]
+fn a_failed_register_is_recorded_as_such_the_moment_it_fails() {
+    use crate::record::{FailKind, Phase, RecordFile, State};
+    // A disk that fills up part-way: whatever write number it stops at, the last record written says what happened.
+    let mut seen_failed = false;
+    for allowed_writes in 1..10 {
+        let d = tempfile::tempdir().unwrap();
+        let sim = launchd(2, Some(1));
+        sim.lock().unwrap().register_error = Some(RegisterError::Other("denied".into()));
+        let sys = FakeSystem::new();
+        let record = RecordFile::memory();
+        let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+        record.mark("1.0.3", None).unwrap();
+        record.memory_handle().unwrap().fail_writes_after(allowed_writes);
+        let _ = m.on_start(&no_cancel());
+        if matches!(record.load().state, State::Attempting { phase: Phase::RegisterFailed(FailKind::Other), .. }) {
+            seen_failed = true;
+        }
+    }
+    assert!(seen_failed, "a register that failed is on record before the next step begins");
+}
+
+#[test]
+fn what_this_version_registered_and_waited_for_is_recorded_as_its_own_when_it_is_replaced() {
+    use crate::record::{Phase, RecordFile, State};
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, Some(2));
+    let sys = FakeSystem::new();
+    let record = RecordFile::memory();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+    // This version registered it and waits (the record names no registered version); the user asks for a repair.
+    record
+        .set_state(State::Attempting { version: "1.0.4".into(), attempts: 1, phase: Phase::Awaiting })
+        .unwrap();
+    // One write is allowed: the first state of the replace. Nothing else is written, so nothing else is done.
+    record.memory_handle().unwrap().fail_writes_after(1);
+    let _ = m.install(&no_cancel());
+    assert!(
+        matches!(
+            record.load().state,
+            State::Attempting { phase: Phase::RemovingOld { ours: true, .. }, .. }
+        ),
+        "{:?}",
+        record.load().state
+    );
+}
+
+#[test]
+fn a_first_registration_with_nothing_to_remove_starts_at_registering_not_at_a_removal() {
+    use crate::record::{Phase, RecordFile, State};
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, None);
+    let sys = FakeSystem::new();
+    let record = RecordFile::memory();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+    record.memory_handle().unwrap().fail_writes_after(1);
+    let _ = m.install(&no_cancel());
+    assert!(
+        matches!(record.load().state, State::Attempting { phase: Phase::Registering, .. }),
+        "{:?}",
+        record.load().state
+    );
+}
