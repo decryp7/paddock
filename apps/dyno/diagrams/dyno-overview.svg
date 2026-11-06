@@ -41,9 +41,8 @@
 <text x="88" y="514" class="t">stays when the window closes.</text>
 <rect x="72" y="568" width="256" height="88" rx="6" class="n acc"/>
 <text x="88" y="596" class="h">dyno command</text>
-<text x="88" y="618" class="t">Readings, plus awake, idle, wake,</text>
-<text x="88" y="634" class="t">wake-schedule; mcp bridges to the</text>
-<text x="88" y="650" class="t">app.</text>
+<text x="88" y="618" class="t">Readings and power commands; mcp</text>
+<text x="88" y="634" class="t">bridges to the app.</text>
 <path d="M96 296 L96 328" class="e" marker-end="url(#a)"/>
 <text x="106" y="316" class="m">commands</text>
 <path d="M96 416 L96 448" class="e" marker-end="url(#a)"/>
@@ -70,8 +69,8 @@
 <text x="512" y="754" class="t">notify; issues; ten-minute flight recorder.</text>
 <rect x="496" y="808" width="368" height="88" rx="6" class="n acc"/>
 <text x="512" y="836" class="h">Power</text>
-<text x="512" y="858" class="t">Keep awake; sleep, hibernate or shut down after idle</text>
-<text x="512" y="874" class="t">or at a set time; scheduled wakes; Wake-on-LAN.</text>
+<text x="512" y="858" class="t">Keep awake; sleep, hibernate (Windows, Linux) or shut</text>
+<text x="512" y="874" class="t">down on idle or a timer; wakes; Wake-on-LAN.</text>
 <rect x="1032" y="208" width="224" height="88" rx="6" class="n acc"/>
 <text x="1048" y="236" class="h">Platform adapters</text>
 <text x="1048" y="258" class="t">Windows, macOS, Linux behind</text>

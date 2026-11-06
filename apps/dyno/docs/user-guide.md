@@ -1,6 +1,6 @@
 # User guide
 
-Dyno measures your PC and explains why it is slow. When you set it up, it also keeps the computer awake, wakes other computers or sleeps, hibernates or shuts down after idle or at a set time ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This guide covers what works today; screens
+Dyno measures your PC and explains why it is slow. When you set it up, it also keeps the computer awake, wakes other computers or sleeps, hibernates (Windows and Linux) or shuts down after idle or at a set time ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This guide covers what works today; screens
 marked *placeholder* are described in [features.md](features.md) and [roadmap.md](roadmap.md).
 
 ## Glossary
@@ -126,6 +126,22 @@ page says about how long the run takes and the most it writes to each drive.
   more than 10 % is marked "Unsteady". There is no single score. Runs are compared only when measured the same way on the same drive.
   On battery Dyno asks first; leave the computer otherwise idle while a run is going.
 
+## Power (Dyno 1.1)
+
+The **Power** page and the tray menu hold these. Each starts only when you use it or turn it on.
+
+1. To keep the computer awake, open the Power page, choose how long (30 minutes to 7 days, until a time of day, until you
+   stop it, while a program runs or while the computer is busy) and start the hold. From a terminal, `dyno awake on --for 2h`
+   starts it and `dyno awake off` ends it. The hold ends if Dyno restarts, and the page says so.
+2. To sleep, hibernate or shut down the computer, set a rule on the Power page under **When the computer is idle** or **At a
+   time of day**. Hibernate works on Windows and Linux; macOS decides by itself when to hibernate. Dyno uses the OS's normal
+   path and never forces it. A countdown with Cancel comes first; `dyno idle cancel` or `dyno idle snooze 30` stops or delays it.
+3. To wake this computer at a set time, turn on scheduled wakes in Settings, then add one under **Scheduled wakes** or run
+   `dyno wake-schedule add NAME --at 07:30`. On macOS and Linux the administrator helper sets the wake. A missed wake is shown
+   as missed and never run late, and nothing can wake a computer that is shut down.
+4. To wake another computer, save it under **Your computers** and wake it there, from the tray menu or with `dyno wake NAME`.
+   The check under **This computer** says whether this computer can be woken over the network and what to change.
+
 ## Settings
 
 | Setting | Meaning |
@@ -142,8 +158,8 @@ Settings are versioned and saved with a backup; a damaged file falls back to the
 
 ## AI access (Dyno 1.1)
 
-**Settings > AI access** lets a program on this computer that speaks MCP (the Model Context Protocol), such as Pitwall or another
-AI client, ask Dyno about this computer. It is off until you turn it on, it listens only on this computer, and a client needs a
+**Settings > AI access** lets a program on this computer that speaks MCP (the Model Context Protocol), such as an AI client
+(planned for Pitwall 1.1), ask Dyno about this computer. It is off until you turn it on, it listens only on this computer, and a client needs a
 key that you issue there and can revoke. Once it is on, every reading tool is on until you switch it off, and every tool has its own switch, and the page lists every call a client made (the time,
 the client, the tool, the choices it passed and how big the answer was, never the answer itself).
 
@@ -225,9 +241,7 @@ disappeared shows *Unavailable* with the reason. Rates (per second) need two rea
 
 ## Running with your own rights
 
-Dyno 1.0 has no privileged helper. The app and the agent run with your own rights, register no system service, and never need
-administrator rights to run. Installing needs none either, except that on Linux the `.deb` is a system package, so `apt` asks for
-root (the AppImage needs none). What the OS shows only to administrators, or only to the account that owns a
+Installing Dyno needs one administrator step: on Windows a User Account Control prompt (Dyno installs once for every user, in Program Files); on Linux `apt` asks for root for the `.deb` (the AppImage needs none); on macOS the first open may ask for an administrator under Privacy & Security. After that the app and the agent run with your own rights. The optional administrator helper is a system service that you turn on in Settings ([Administrator readings](#administrator-readings-dyno-11)); without it, what the OS shows only to administrators, or only to the account that owns a
 process, is never guessed and never shown as zero: the figure says *Unavailable* with a plain reason (for example "Windows
 shows this only to administrators").
 

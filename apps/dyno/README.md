@@ -6,18 +6,18 @@
 
 **Watches your PC.** A background agent samples the machine and keeps its history while the window is
 closed; the app shows what is happening, says in plain words why it is slow, raises alarms, maps the disk and runs
-benchmarks on click. When you set it up, it keeps the computer awake, wakes other computers or sleeps, hibernates or shuts down after idle or at a set time ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). On **Windows, macOS
+benchmarks on click. When you set it up, it keeps the computer awake, wakes other computers or sleeps, hibernates (Windows and Linux) or shuts down after idle or at a set time ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). On **Windows, macOS
 and Linux**.
 
 A dynamometer measures an engine under load and shows where the power goes: Dyno does that for your computer.
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=7daa4ba0)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=3af1d14e)
 
 
 > **Status: 1.1.0.** Dyno is a monitor: live and history, processes and why it is slow,
-> alarms, issues, a disk map, counters, extras, benchmarks and the command line, plus opt-in keep awake, Wake-on-LAN, scheduled wakes, sleep, hibernate or shut-down after idle or at a set time, and the administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values and, only if you allow each one, wake a saved computer or keep this one awake for up to 12 hours). Taming, cleanup and tuning are dropped, not postponed
+> alarms, issues, a disk map, counters, extras, benchmarks and the command line, plus opt-in keep awake, Wake-on-LAN, scheduled wakes, sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time, and the administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values and, only if you allow each one, wake a saved computer or keep this one awake for up to 12 hours). Taming, cleanup and tuning are dropped, not postponed
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
 
@@ -50,9 +50,9 @@ does the second:
 
 ## Key features
 
-![Dyno features](docs/images/dyno-features.svg?v=3a440d16)
+![Dyno features](docs/images/dyno-features.svg?v=be3ece4f)
 
-![How Dyno works](docs/images/dyno-how-it-works.svg?v=e5f4b957)
+![How Dyno works](docs/images/dyno-how-it-works.svg?v=30359563)
 
 Every feature, with its state, is in [docs/features.md](docs/features.md). Built today:
 
@@ -77,11 +77,16 @@ Every feature, with its state, is in [docs/features.md](docs/features.md). Built
 9. **Tray** with a live metric and a compact dropdown; closing the window keeps Dyno measuring.
 10. **Native feel** ([ADR 0009](docs/adr/0009-native-feel.md)), light and dark themes, a colour-vision-checked palette
     ([ADR 0011](docs/adr/0011-design-system.md)).
-11. **The `dyno` command line:** `status`, `why-slow`, `top`, `alarms`, `snapshot` and `counters` ([docs/cli.md](docs/cli.md)),
-    shipped in the installers.
+11. **The `dyno` command line:** `status`, `why-slow`, `top`, `alarms`, `snapshot`, `counters`, `awake`, `idle`, `wake`,
+    `wake-schedule` and `mcp` ([docs/cli.md](docs/cli.md)), shipped in the installers.
 12. **Extensible with sensors:** the core and out-of-process Rust plugins that add sensors
     ([ADR 0007](docs/adr/0007-extensibility-three-tiers.md), [docs/plugins.md](docs/plugins.md)).
 13. **Updates itself** with the Tauri updater: signed, opt-in ([docs/releasing.md](docs/releasing.md)).
+14. **Power** (1.1.0): keep awake, sleep, hibernate (Windows and Linux) or shut down after idle or at a set time, scheduled
+    wakes and Wake-on-LAN, each only when you use it or turn it on ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)).
+15. **AI access** (1.1.0, off by default): a local MCP client reads eight reading tools and two power readings; it can wake a
+    saved computer or keep this one awake for up to 12 hours only if you allow each action. Dyno must be open; `dyno mcp`
+    bridges a client that starts commands.
 
 Later, after 1.0 (see the roadmap): the disk map's largest, oldest and duplicate-hint lists and its hidden-space breakdown; "start as administrator at login"; declarative read-only packs, an optional local web API, "Explain this" via Pitwall,
 suite tie-ins, session recording, a multi-PC view.
@@ -130,7 +135,7 @@ status-notifier host (GNOME: the AppIndicator extension). Details: [docs/linux.m
 | Platform adapters | macOS and Linux: sensors, details, locks, startup, facts, user activity (macOS tested on a real Mac, Linux in a container with `scripts/linux-verify.sh`). Windows: sensors and user activity; details, locks, startup and facts are not wired yet. |
 | App | Dashboard, processes, why slow, alarms, issues, reports, counters, extras, benchmarks, network, settings, tray, native feel against the real agent through the shell. |
 | Privileges | Everything runs with your own rights; unreadable figures say why and other users' processes are one "Other users" row. 1.1.0 adds the optional administrator helper (ADR 0027); "start as administrator at login" comes later. |
-| Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on `dyno-v*` tags, nightly and manual runs. Not yet published. |
+| Installers | CI builds NSIS, `.dmg`, `.deb` and AppImage on `dyno-v*` tags, nightly and manual runs. 1.0.0 is published; 1.1.0 is in progress. |
 
 ## Roadmap
 

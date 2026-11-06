@@ -62,7 +62,7 @@ group(CX, top, CW, gh(6), 'Around the agent');
 box(AX + 24, y(0), AW - 48, BH, 'ui', 'Window', 'Angular 22: live and history, processes, why slow, alarms, disk map, counters, benchmarks.');
 box(AX + 24, y(1), AW - 48, BH, 'accent', 'Tauri shell', 'Commands; validates every request and speaks to the agent.');
 box(AX + 24, y(2), AW - 48, BH, 'accent', 'Tray', 'A live metric and a compact menu; stays when the window closes.');
-box(AX + 24, y(3), AW - 48, BH, 'accent', 'dyno command', 'Readings, plus awake, idle, wake, wake-schedule; mcp bridges to the app.');
+box(AX + 24, y(3), AW - 48, BH, 'accent', 'dyno command', 'Readings and power commands; mcp bridges to the app.');
 varrow(AX + 48, y(0) + BH, y(1), 'commands');
 varrow(AX + 48, y(1) + BH, y(2), 'status');
 // agent
@@ -72,7 +72,7 @@ box(bx, y(1), bw, BH, 'accent', 'IPC server and handlers', 'One thread per conne
 box(bx, y(2), bw, BH, 'accent', 'Plugin host', 'Starts sensor plugins on first use; a plugin that crashes is quarantined.');
 box(bx, y(3), bw, BH, 'accent', 'Benchmarks', 'Only on a click, one kind at a time, in a child process with a timeout.');
 box(bx, y(4), bw, BH, 'accent', 'History, alarms, recorder', 'SQLite rollups (min, average, max); alarms that notify; issues; ten-minute flight recorder.');
-box(bx, y(5), bw, BH, 'accent', 'Power', 'Keep awake; sleep, hibernate or shut down after idle or at a set time; scheduled wakes; Wake-on-LAN.');
+box(bx, y(5), bw, BH, 'accent', 'Power', 'Keep awake; sleep, hibernate (Windows, Linux) or shut down on idle or a timer; wakes; Wake-on-LAN.');
 // around
 const cx = CX + 24, cw = CW - 48;
 box(cx, y(0), cw, BH, 'accent', 'Platform adapters', 'Windows, macOS, Linux behind the core\'s ports.');

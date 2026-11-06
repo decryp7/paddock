@@ -17,7 +17,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
 hero [light](images/paddock-ecosystem-light.png?v=d79c0ef6) and [dark](images/paddock-ecosystem-dark.png?v=46a96a3f), integrations
-[light](images/paddock-integrations-light.png?v=a9a7c6fa) and [dark](images/paddock-integrations-dark.png?v=38cb6fd5), hand-offs
+[light](images/paddock-integrations-light.png?v=c9ff667e) and [dark](images/paddock-integrations-dark.png?v=2619c8a2), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
 `CHROME` to override).
@@ -87,8 +87,8 @@ Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 **For.** People who want to know what a machine is doing, now and over time.
 - A background agent keeps history while the window is closed.
 - Live and history views grouped by application, alarms, system facts, a disk map and benchmarks.
-- No tuning or cleanup; power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate or shut-down after idle or at a set time) run as the owner sets them up. An optional administrator helper, turned on in Settings, reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log.
-- Extensible with validated declarative packs, no code.
+- No tuning or cleanup; power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time) run as the owner sets them up. An optional administrator helper, turned on in Settings, reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log.
+- Planned: validated declarative packs, no code.
 - An opt-in MCP server in the app (Settings > AI access; Dyno must be open) in 1.1.0: eight reading tools, two power readings and two opt-in actions (wake a saved computer, keep awake for up to 12 hours). Pitwall 1.1 is planned to call it.
 
 Status: v1.0.0 released, 1.1.0 in progress (the administrator helper's readings, per-machine Windows installs, OS lifecycle checks). Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
@@ -143,7 +143,7 @@ Status: **planned**, last in the order of 2026-11-04, after Dyno 1.1.0, Spotter 
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=21b8a969" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter, Dyno and Recce reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app (Spotter, Dyno and Recce later); Pitwall runs llama.cpp as a child process and keeps keys in the OS credential store; its tool router, planned for Pitwall 1.1 as MCP client and host, calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno (opt-in, on Dyno's unreleased 1.1 line) and Recce, which other MCP clients can use too" width="100%">
+  <img src="images/paddock-integrations.svg?v=f9531a05" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter, Dyno and Recce reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app (Spotter, Dyno and Recce later); Pitwall runs llama.cpp as a child process and keeps keys in the OS credential store; its tool router, planned for Pitwall 1.1 as MCP client and host, calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno (opt-in, on Dyno's unreleased 1.1 line) and Recce, which other MCP clients can use too" width="100%">
 </picture>
 
 <picture>
@@ -180,7 +180,7 @@ planned for Pitwall 1.1: Pitwall calls the MCP servers of Pacenotes, Debrief, Si
   Pitwall, release checks you configure in Spotter, updates of the apps themselves (signed, from `latest.json`).
 - Pitwall listens on loopback only and requires a key per app; keys live in the OS credential store.
 - Apps treat input as hostile: parsers never panic, limits are enforced, UIs never render untrusted text as HTML.
-- Dyno's optional administrator helper answers an allow-listed set of questions, so it can see every process and the privileged counters.
+- Dyno's optional administrator helper answers a closed list of requests: it reads every process and the privileged counters, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool (Windows), with an audit log.
 
 ## Pitwall is optional
 

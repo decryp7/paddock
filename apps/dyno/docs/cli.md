@@ -2,7 +2,7 @@
 
 `dyno` talks to the running Dyno agent over the same local protocol as the app (ADR 0014): it reads `agent.json` in the data folder
 (`DYNO_DATA_DIR`, else `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno` or `~/.local/share/dyno`), connects with the
-per-launch token and asks the same requests. It never links the platform adapters, so it is small. The `awake`, `idle`, `wake` and `wake-schedule` commands ask the agent to act, and the agent validates each request ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). Build it with `cargo build -p dyno-cli` (the binary is named `dyno`).
+per-launch token and asks the same requests. It never links the platform adapters, so it is small. The `awake`, `idle`, `wake` and `wake-schedule` commands ask the agent to act, and the agent validates each request ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). The agent binary's own `dyno-agent stop` and `dyno-agent service install|uninstall` act too: they stop the agent or register it to start at login. Build it with `cargo build -p dyno-cli` (the binary is named `dyno`).
 
 ## Installing and putting it on your PATH
 
@@ -14,7 +14,7 @@ your shell profile or system folders for you; here is how to do it yourself, onc
 | --- | --- | --- |
 | Linux (`.deb`) | `/usr/bin/dyno` | Nothing to do: `/usr/bin` is already on PATH |
 | macOS | `Dyno.app/Contents/MacOS/dyno` | `sudo ln -s /Applications/Dyno.app/Contents/MacOS/dyno /usr/local/bin/dyno`, or add `export PATH="$PATH:/Applications/Dyno.app/Contents/MacOS"` to `~/.zshrc` |
-| Windows (installer) | `%LOCALAPPDATA%\Programs\Dyno\dyno.exe` | Settings, System, About, Advanced system settings, Environment Variables: add that folder to your user `Path`; or run `dyno.exe` by its full path |
+| Windows (installer) | `C:\Program Files\Dyno\dyno.exe` | Settings, System, About, Advanced system settings, Environment Variables: add that folder to your user `Path`; or run `dyno.exe` by its full path |
 
 ## Commands
 

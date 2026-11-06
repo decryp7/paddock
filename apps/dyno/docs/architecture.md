@@ -1,7 +1,7 @@
 # Dyno architecture
 
 Dyno is built from a pure Rust core, thin OS adapters, a per-user agent that measures and keeps history, a Tauri app that
-shows it. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate or shut-down after idle or at a set time) run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This page describes how the pieces fit and what is true today; the diagrams
+shows it. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time) run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This page describes how the pieces fit and what is true today; the diagrams
 are in [design.md](design.md) and the reasoning is in the [ADRs](adr/README.md). Anything marked *planned* is not in the
 code.
 

@@ -13,7 +13,7 @@ function column(d, x, w, y0, H, list) {
 // ---------- C4 level 1 ----------
 {
   const d = P({ title: 'Dyno — system context', kind: 'C4 · Level 1 — System context', w: 1344,
-    desc: 'Dyno measures and explains one PC for its owner. It also keeps the computer awake, wakes other computers, and sleeps, hibernates or shuts down after idle or at a set time, as the owner sets it up. Sister apps and the release host are reached only on a click or an opt-in.' });
+    desc: 'Dyno measures and explains one PC for its owner. It also keeps the computer awake, wakes other computers, and sleeps, hibernates (Windows, Linux) or shuts down after idle or at a set time, as the owner sets it up. Sister apps and the release host are reached only on a click or an opt-in.' });
   const W = 288, y0 = 144;
   const left = [
     ['owner', 'process', 0, { name: 'PC owner', tech: 'Person', desc: 'Watches the machine, asks why it is slow, gets alarms, runs benchmarks on a click.', person: true }],
@@ -40,14 +40,14 @@ function column(d, x, w, y0, H, list) {
   hub(d, 'sys', 'L', 'owner', 'R', { rev: true, label: 'Views, asks' });
   link(d, 'sys', 'L', 'os', 'R', { label: 'Reads, asks to sleep', t: [(oy + oh * 0.15 - y0) / H, 0.15] });
   link(d, 'helper', 'L', 'os', 'R', { label: 'Reads as admin', t: [at(0.5), 0.5] });
-  link(d, 'helper', 'L', 'os', 'R', { label: 'Sets wakes', t: [at(0.82), 0.82] });
+  link(d, 'helper', 'L', 'os', 'R', { label: 'Sets wakes (macOS, Linux)', t: [at(0.82), 0.82] });
   hub(d, 'sys', 'L', 'data', 'R', { label: 'Reads, writes' });
   hub(d, 'sys', 'R', 'hosts', 'L', { label: 'Checks', dash: true });
   hub(d, 'sys', 'R', 'debrief', 'L', { label: 'Exports', dash: true });
   hub(d, 'sys', 'R', 'mcp', 'L', { rev: true, label: 'Reads, asks', dash: true });
   hub(d, 'sys', 'R', 'pitwall', 'L', { rev: true, label: 'Reads', dash: true });
   hub(d, 'sys', 'R', 'lan', 'L', { label: 'Wakes', dash: true });
-  d.legend([{ kind: 'process', label: 'Person · OS · data' }, { kind: 'accent', label: 'Dyno' }, { kind: 'external', label: 'External system' }, { kind: 'tag', label: 'Planned', role: 'external' }, { kind: 'line', label: 'Uses' }]);
+  d.legend([{ kind: 'process', label: 'Person · OS · data' }, { kind: 'accent', label: 'Dyno' }, { kind: 'external', label: 'External system' }, { kind: 'tag', label: 'Planned', role: 'external' }, { kind: 'line', label: 'Uses' }, { kind: 'dashline', label: 'Opt-in, on a click or planned' }]);
   save('c4-1-context', d, y0 + H);
 }
 

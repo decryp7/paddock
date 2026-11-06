@@ -27,8 +27,7 @@ updates. Debrief (open a time window) and Pitwall (explain on click) are planned
 
 ![Containers](../diagrams/svg/c4-2-containers.svg)
 
-The app (Angular UI in a Tauri shell) and the agent run as the user; every arrow between Dyno processes is the one
-`dyno-ipc` crate. The agent is the single writer of the data folder. Plugins run out of process. There is no helper in 1.0.
+The app (Angular UI in a Tauri shell) and the agent run as the user; Dyno's processes talk over `paddock-ipc`, and the agent asks the optional administrator helper, a system service. The Tauri app also serves MCP to local AI clients while it is open. The agent is the single writer of the data folder. Plugins run out of process.
 
 ### Level 3 — core components
 
@@ -68,7 +67,7 @@ unit, a per-user `Run` entry on Windows), the agent process and the data folder.
 
 ![Use cases: power and access](../diagrams/svg/uml-use-cases-power.svg)
 
-What the owner runs or sets up. Benchmarks start only on a click; Explain this in Pitwall is still planned (dashed). Keep awake, Wake-on-LAN, scheduled wakes and sleep, hibernate or shut-down run as the owner set them up (ADR 0032); they and AI access are in the power and access diagram. The disk map is in scope for 1.0.
+What the owner runs or sets up. Benchmarks start only on a click; Explain this in Pitwall is still planned (dashed). Keep awake, Wake-on-LAN, scheduled wakes and sleep, hibernate (Windows and Linux) or shut-down run as the owner set them up (ADR 0032); they and AI access are in the power and access diagram. The disk map is in scope for 1.0.
 
 ## Domain model
 

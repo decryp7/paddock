@@ -44,6 +44,6 @@ useCases('uml-use-cases-setup', {
 
 useCases('uml-use-cases-power', {
   title: 'Use cases — power and access', desc: 'What the PC owner turns on or asks Dyno to do. An AI client on this PC may keep it awake or wake a saved computer only if the owner allows each action.', owner: 'PC owner',
-  rows: [['Sleep, hibernate or shut down on idle or a timer'], ['Schedule a wake of this computer'], ['Turn on the administrator helper'], ['Turn on AI access for a local AI app'], ['Keep the computer awake'], ['Wake another computer (Wake-on-LAN)']],
+  rows: [['Sleep, hibernate (Windows, Linux) or shut down on idle or a timer'], ['Schedule a wake of this computer'], ['Turn on the administrator helper'], ['Turn on AI access for a local AI app'], ['Keep the computer awake'], ['Wake another computer (Wake-on-LAN)']],
   ext: { name: 'AI client (if allowed)', rows: [4, 5] },
 });

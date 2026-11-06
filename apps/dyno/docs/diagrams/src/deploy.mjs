@@ -22,7 +22,7 @@ function deployment(file, os, o) {
 deployment('uml-deployment-macos', { name: 'macOS', ver: 'macOS 13 or newer, Apple Silicon and Intel' }, {
   desc: 'The app and the agent are separate processes of the same user; a launch agent starts the agent. The optional helper is a launchd system daemon, turned on in Settings.',
   app: { name: 'Dyno.app', tech: 'ad-hoc signed bundle, .dmg', desc: 'Tauri shell and Angular UI on WKWebView; dyno-agent and the dyno command bundled inside.' },
-  sm: { name: 'launchd', tech: 'gui/<uid> domain', desc: 'net.decryptology.dyno.agent.plist in ~/Library/LaunchAgents runs dyno-agent run; KeepAlive.' },
+  sm: { name: 'launchd', tech: 'gui/<uid> domain', desc: 'SMAppService registers the agent plist inside Dyno.app; launchd runs dyno-agent run; KeepAlive.' },
   agent: { name: 'dyno-agent', tech: 'user process', desc: 'Samples, keeps history, raises alarms. Log in ~/Library/Logs/Dyno/agent.log.' },
   helper: { name: 'dyno-helper', tech: 'launchd daemon, optional', desc: '/Library/PrivilegedHelperTools/\u200bnet.decryptology.dyno.helper. Reads what needs administrator rights and sets Dyno\'s scheduled wakes (pmset), with an audit log.' },
   data: { name: 'Data folder', tech: '~/Library/Application Support/Dyno', desc: 'dyno.db, settings.json, agent.json: Dyno\'s own data only.' },
