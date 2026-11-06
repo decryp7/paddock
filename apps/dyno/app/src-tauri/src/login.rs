@@ -918,8 +918,35 @@ impl Autostart for NoAutostart {
 
 #[cfg(test)]
 mod tests {
+    /// The service's cancel flags are process-wide. A test that sets or reads them holds this lock and starts and
+    /// ends with them clear, so no other test meets a cancel it did not ask for (a leaked one failed the Linux
+    /// wiring tests whenever the cancel test ran first).
+    static CANCEL_FLAGS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct CleanCancel(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+    impl CleanCancel {
+        fn hold() -> Self {
+            let guard = CANCEL_FLAGS.lock().unwrap_or_else(|p| p.into_inner());
+            Self::clear();
+            Self(guard)
+        }
+
+        fn clear() {
+            super::QUITTING.store(false, std::sync::atomic::Ordering::SeqCst);
+            super::set_platform_cancel(false);
+        }
+    }
+
+    impl Drop for CleanCancel {
+        fn drop(&mut self) {
+            Self::clear();
+        }
+    }
+
     #[test]
     fn a_cancel_stops_the_switch_change_and_it_ends_as_a_cancelled_job() {
+        let _clean = CleanCancel::hold();
         use paddock_jobs::{CancelReason, JobState};
         use std::sync::{mpsc, Arc, Mutex};
         let worker = Arc::new(SwitchWorker::default());
@@ -967,6 +994,7 @@ mod tests {
 
     #[test]
     fn the_switch_returns_at_once_while_the_os_step_is_blocked_and_reports_as_a_job() {
+        let _clean = CleanCancel::hold();
         use paddock_jobs::JobState;
         use std::sync::{mpsc, Arc, Mutex};
         let worker = SwitchWorker::default();
@@ -1081,6 +1109,7 @@ mod tests {
         const EXE: &str = "/opt/dyno/dyno-agent";
 
         struct Rig {
+        _clean: super::CleanCancel,
             sys: FakeSystem,
             ctl: FakeSystemd,
             unit: PathBuf,
@@ -1094,7 +1123,7 @@ mod tests {
                 let sys = FakeSystem::new();
                 sys.put_program(EXE);
                 let ctl = FakeSystemd::new(&sys, "dyno-agent.service", &unit);
-                Rig { sys, ctl, unit, data: tempfile::tempdir().unwrap() }
+                Rig { _clean: super::CleanCancel::hold(), sys, ctl, unit, data: tempfile::tempdir().unwrap() }
             }
 
             fn service(&self) -> LinuxService {
