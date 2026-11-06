@@ -800,6 +800,7 @@ fn recover(conn: &Connection, dir: &Path, schema: &EventSchema) -> anyhow::Resul
     for left in segments::sweep(&seg_dir, &listed) {
         // Relative to the store folder: the folder's own path names the user's project.
         let shown = left.strip_prefix(dir).unwrap_or(&left);
+        // log-allow: `shown` is relative to the store folder (a segment file name), never the folder itself
         log::warn!(EventId = "store.sweep.not_deleted"; "could not delete {}", shown.display());
     }
     compact::empty_trash(conn)?;
