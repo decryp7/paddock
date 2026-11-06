@@ -890,7 +890,14 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
             w.cur = Ver::V1;
             w.ghost = 0;
         }
-        Ev::FirstRun | Ev::Install => w.wanted = Some(true),
+        Ev::FirstRun | Ev::Install => {
+            // The switch was off and is on again: that is a user asking for the service again, so the count starts over (the
+            // removal that followed the switch going off cleared the attempts in the record).
+            if w.wanted == Some(false) {
+                w.ghost = 0;
+            }
+            w.wanted = Some(true);
+        }
         Ev::Uninstall => {
             // The user's switch off and on again tries again (the log of a hold says so), so the count starts over.
             w.wanted = Some(false);
@@ -1714,20 +1721,7 @@ fn configs() -> &'static [(Caps, Resp)] {
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
-const KNOWN_FAILING: &[(&str, &str)] = &[
-    (
-        "more unattended registers across starts than the cap allows",
-        "open: MODEL_REPLAY='Mac/Never/Fresh|FirstRun+RegNotAsWritten;SettingsOff;Start;FirstRun' makes 4 registers: the count is not started over by the switch going off (SettingsOff) and a first run, although the user's switch off and on again is consent. To decide with the model's own reset rule (it resets on Uninstall only).",
-    ),
-    (
-        "the record says this version is registered but the OS holds another registration",
-        "P1-4, the plan's side: MODEL_REPLAY='Mac/Fast/Healthy|Update+LingeringJob;Start' - the next Start's plan settles an accepted registration on `Job::Running` (plan(): `accepted && (answers || Running)`) although the job is the old build's. The identity check works inside the replace's wait (repair.rs); the plan needs the same, which means keeping the time of the register in the state (a format change) or asking `job_process` against it.",
-    ),
-    (
-        "the user's service was lost",
-        "open: MODEL_REPLAY='Mac/Fast/OldRefused|Start+LingeringJob;Install@CrashAfter(4)' - a crash after the register with the old job lingering leaves nothing registered and Leave(Refused(3)); the same lingering-job case as the entry above.",
-    ),
-];
+const KNOWN_FAILING: &[(&str, &str)] = &[];
 
 #[test]
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {

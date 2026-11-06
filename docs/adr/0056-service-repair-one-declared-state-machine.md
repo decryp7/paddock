@@ -209,6 +209,16 @@ register that fails leaves the old service working. Where the OS needs the old r
 that keeps failing after the removal leaves nothing registered. That is an allowed outcome, not a lost service: the hold says the
 background service could not be registered, with the cause, and Repair tries again; the model records it as allowed.
 
+**Attempts start over when the user asks again.** The cap is for unattended registers. A user's switch off and on again is a request for the
+service: the removal that follows the switch going off clears the attempts in the record, so the first run after it counts from
+zero. The model's count follows the same rule (it resets when the switch goes from off to on, as it already did on Uninstall).
+
+**The register time.** The record (format 3, `registeredAt`) keeps the time of the attempt's register call. At the next start the plan
+settles an accepted registration on a running job only when the job started at or after it (`job_process`); a job that started
+before is the old build's that outlived the removal and settles nothing. Format 3 is the first release's: a record of an earlier
+format (2) is read as it is with no register time, which falls back to today's reading; a damaged or newer file falls back to
+defaults as before.
+
 **R1.** `Looked(answers | refused | settled)` is an event for a look during a wait, and a failed `unregister` or `evict` is an
 event too. **R2.** Settling by `Running` needs the same pid and start time on two looks of a process that started after the
 register; `Registering` is entered only on a confirmed `Unregistered` or `GoneTimedOut` (recorded which). **R3.** `wanted` is

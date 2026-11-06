@@ -132,6 +132,9 @@ pub struct Facts<'a> {
     pub location_ok: bool,
     /// The state file is there but cannot be used (damaged, unreadable, a newer app's): a service that answers is adopted.
     pub record_damaged: bool,
+    /// Whether the running job started at or after this attempt's register call (`None`: the OS cannot say, or no register time
+    /// is recorded). `Some(false)` is the old build's job that outlived the removal: it does not settle the new registration.
+    pub job_after_register: Option<bool>,
 }
 
 /// How many register calls are allowed per version before the service is held.
@@ -339,7 +342,7 @@ pub fn plan(f: &Facts<'_>) -> Plan {
         }
     }
     // The registration of this version was accepted and the service is up: settled, whatever the attempts were.
-    if accepted && (f.answers || i.job == Job::Running) {
+    if accepted && (f.answers || i.job == Job::Running) && f.job_after_register != Some(false) {
         return Plan::MarkCurrent;
     }
     if i.program_exists == Some(false) {
@@ -527,6 +530,7 @@ mod tests {
             first_run_done: false,
             location_ok: true,
             record_damaged: false,
+            job_after_register: None,
         }
     }
 
@@ -943,6 +947,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
+            job_after_register: None,
             }
         }
         // (a) not registered, `launchctl print` timed out, no record: not installed.
@@ -1020,6 +1025,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
+            job_after_register: None,
             })
         };
         let awaiting = |n| attempting("1.0.4", n, Phase::Awaiting);
@@ -1130,6 +1136,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
+            job_after_register: None,
             })
         };
         assert_eq!(with(UAC), Plan::MarkCurrent, "a current definition needs no replacement");
@@ -1153,6 +1160,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
+            job_after_register: None,
             })
         };
         assert_eq!(stale_with(UAC), Plan::Offer(Reason::VersionChanged));

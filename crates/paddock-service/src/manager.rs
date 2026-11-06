@@ -163,6 +163,12 @@ impl Manager {
         let answers = (self.answers)();
         let covered = (self.cover)();
         let (recorded, record_damaged) = self.record.peek();
+        // The job that runs must be the one this attempt's register call started (not the old build's that outlived the removal).
+        let job_after_register = recorded.registered_at.and_then(|at| {
+            self.backend
+                .job_process()
+                .map(|p| p.started().as_micros() >= at)
+        });
         self.backend.know_copy(self.program.as_deref(), recorded.registered_program.as_deref());
         let inspection = self.backend.inspect();
         let p = plan(&Facts {
@@ -184,6 +190,7 @@ impl Manager {
             first_run_done: (self.first_run_done)(),
             location_ok: (self.location_ok)(),
             record_damaged,
+            job_after_register,
         });
         (inspection, answers, p)
     }
@@ -331,6 +338,9 @@ impl Manager {
                 let phase = match step {
                     Step::Removing => Some(removing),
                     Step::Registering => {
+                        if let Err(e) = record.set_registered_at(Some(crate::repair::wall_clock().as_micros())) {
+                            log::warn!(error:% = e; "the time of the register call could not be recorded");
+                        }
                         if free_register {
                             free_register = false;
                         } else {

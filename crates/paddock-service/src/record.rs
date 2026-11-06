@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// The state file's format (1: version and attempt counter; 2: the declared [`State`]).
-pub const FORMAT: u32 = 2;
+/// The state file's format (1: version and attempt counter; 2: the declared [`State`]; 3: adds `registeredAt`).
+pub const FORMAT: u32 = 3;
 
 /// How far a replace has got; written before the step it names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +93,10 @@ pub struct Recorded {
     /// What is in progress.
     #[serde(default)]
     pub state: State,
+    /// When the register call of the attempt in progress was made (microseconds since the Unix epoch, the unit of a process start
+    /// time): a job that started before it is the old build's, not the one this registration started. Cleared with the attempt.
+    #[serde(default)]
+    pub registered_at: Option<u64>,
 }
 
 impl Recorded {
@@ -198,7 +202,8 @@ impl RecordFile {
         Self {
             store: Store::File {
                 file: VersionedFile::new(data_dir.join(format!("service-{label}.json")), FORMAT)
-                    .with_migration(1, migrate_1),
+                    .with_migration(1, migrate_1)
+                    .with_migration(2, Ok),
                 lock: data_dir.join(format!("service-{label}.lock")),
                 dir: data_dir.to_path_buf(),
                 label: label.to_string(),
@@ -327,6 +332,7 @@ impl RecordFile {
         r.registered_version = Some(version.to_string());
         r.registered_program = program.map(str::to_string);
         r.state = State::Idle;
+        r.registered_at = None;
         self.store(&r)
     }
 
@@ -369,12 +375,23 @@ impl RecordFile {
         self.store(&r)
     }
 
+    /// Records (or clears) when the register call of the attempt in progress was made, keeping the rest.
+    ///
+    /// # Errors
+    /// [`ServiceError::Failed`] when it could not be saved.
+    pub fn set_registered_at(&self, at: Option<u64>) -> Result<(), ServiceError> {
+        let mut r = self.load();
+        r.registered_at = at;
+        self.store(&r)
+    }
+
     /// Forgets the registration (after an uninstall): nothing is registered, nothing is in progress.
     pub fn forget(&self) -> Result<(), ServiceError> {
         let mut r = self.load();
         r.registered_version = None;
         r.registered_program = None;
         r.state = State::Idle;
+        r.registered_at = None;
         self.store(&r)
     }
 
