@@ -263,11 +263,12 @@ impl Manager {
         };
         // Only this version's own replace that was begun (a crash after the removal, before or during the register call) is a
         // free finish: its register call was already counted or never made. Another version's attempts are not this one's.
-        let finishing = nothing_to_remove
-            && matches!(
-                before.phase_of(&self.version),
-                Some(Phase::Registering | Phase::RemovingOld { .. })
-            );
+        let finishing = match before.phase_of(&self.version) {
+            Some(Phase::Registering) => nothing_to_remove,
+            // A removal begun at the cap was a request: finishing it is one register call more, whatever job still lingers.
+            Some(Phase::RemovingOld { .. }) => nothing_to_remove || attempts0 >= MAX_ATTEMPTS,
+            _ => false,
+        };
         // Where registering over what is there replaces it in one step (no pinned build identity: systemd, the Windows Run value), the
         // new registration is made first and the old one is not removed, so a register that fails leaves the old service working.
         let register_first = !self.backend.capabilities().pinned_identity
