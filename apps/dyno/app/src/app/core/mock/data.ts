@@ -211,7 +211,7 @@ export function demoSettings(): Settings {
     alarms: { quiet: { enabled: false, startMinute: 22 * 60, endMinute: 7 * 60, criticalBypass: true }, chatterTransitions: 6, chatterWindowMinutes: 30, maxAlarms: 500, keepClearedDays: 14 },
     flightRecorder: true,
     customAlerts: [{ id: 'gpu-load', name: 'GPU load', metric: 'gpuLoad', op: 'above', limit: 90, forSecs: 120, severity: 'warning', enabled: true }],
-    networkAlerts: { newExposedListener: false, newRemoteHost: false },
+    networkAlerts: { newExposedListener: true, newRemoteHost: false },
     notifications: true,
     baselines: { enabled: true, learningDays: 7, alarms: false },
     hardwareAlarms: { throttling: true, lifespan: true },

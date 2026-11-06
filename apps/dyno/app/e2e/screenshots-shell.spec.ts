@@ -1,5 +1,5 @@
 import { mkdirSync } from 'node:fs';
-import { dialogWindowUrl, test } from '@decryp7/paddock-e2e';
+import { dialogWindowUrl, expect, test } from '@decryp7/paddock-e2e';
 
 // Every Dyno page and shell surface, light and dark, for the independent review (rule 22). The dialogs are in
 // screenshots-dialogs.spec.ts (contract widths, both button orders). Only on request:
@@ -44,14 +44,23 @@ test.describe('Dyno shell screenshots', () => {
       }
       test('notification centre and jobs', async ({ page }) => {
         mkdirSync(OUT, { recursive: true });
-        await page.goto('/?latency=0#/dashboard');
-        await page.waitForTimeout(1500);
-        await page.getByRole('button', { name: /notifications/i }).first().click();
-        await page.waitForTimeout(600);
+        // A real job, held at its first step by the mock: the Jobs list shows its phase and Cancel (the documentation picture is
+        // screenshots.spec.ts's `jobs`, with the window buttons).
+        await page.goto('/?latency=0&chrome=macos&menu=native&jobsteps=40&jobstepms=600000#/extras?tab=files');
+        await page.getByRole('heading', { level: 1 }).first().waitFor({ timeout: 30_000 });
+        await page.getByRole('button', { name: 'Choose a folder' }).click();
+        await expect(page.locator('pd-jobs-status button.pd-pill')).toContainText('1 running');
+        await page.getByRole('link', { name: 'Power', exact: true }).click();
+        await expect(page.getByRole('heading', { name: 'Power', level: 1 })).toBeVisible();
+        const bell = page.getByRole('button', { name: /notifications/i }).first();
+        await bell.click();
+        await expect(bell).toHaveAttribute('aria-expanded', 'true');
         await page.screenshot({ path: `${OUT}/notification-centre-${scheme}.png` });
         await page.keyboard.press('Escape');
-        await page.getByRole('button', { name: /jobs/i }).first().click();
-        await page.waitForTimeout(600);
+        await expect(bell).toHaveAttribute('aria-expanded', 'false');
+        await page.locator('pd-jobs-status button.pd-pill').click();
+        const popover = page.getByRole('region', { name: 'Jobs' });
+        await expect(popover.getByRole('button', { name: 'Cancel' })).toBeVisible();
         await page.screenshot({ path: `${OUT}/jobs-${scheme}.png` });
       });
     });

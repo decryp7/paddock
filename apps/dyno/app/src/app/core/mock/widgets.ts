@@ -87,7 +87,7 @@ const DASHBOARD_KINDS = [
   info('issues', 'Issues', 'Unusual patterns found.', 'issue', cellsRule(3, 6, [3, 6], [4, 12]), 32, 'onChange'),
   info('health', 'Health', 'The health score.', 'health', cellsRule(6, 9, [3, 12], [5, 14]), 32),
   info('cpu', 'CPU', 'Load, per-core view and details.', 'cpu', cellsRule(6, 6, [4, 12], [5, 10]), 32),
-  info('diagnosis', 'Why slow', 'What is slowing the computer, in words.', 'diagnosis', cellsRule(6, 9, [4, 12], [6, 14]), 32, { every: { secs: 10 } }),
+  info('diagnosis', 'Why slow', 'What is slowing the computer, in words.', 'diagnosis', cellsRule(6, 12, [4, 12], [6, 14]), 32, { every: { secs: 10 } }),
   info('events', 'Recent events', 'Alarms and what Dyno did.', 'events', cellsRule(6, 7, [4, 12], [4, 14]), 32, 'onChange'),
   info('history', 'History', 'A chart with events marked.', 'history', cellsRule(12, 8, [6, 12], [5, 14]), 32, 'onChange'),
   info('consumers', 'Biggest consumers', 'Biggest consumers over a day.', 'consumers', cellsRule(6, 7, [4, 12], [5, 12]), 32, { every: { secs: 60 } }),

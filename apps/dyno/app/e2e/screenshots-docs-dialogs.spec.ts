@@ -10,7 +10,7 @@ import { dialogContracts, dialogWindowUrl, expect, test, type DialogContractEntr
  * Settings is the shell's window at the size Rust opens it.
  */
 const UI = '../../../ui/projects/paddock-ui/shell';
-const CONTRACTS = dialogContracts('src/app/generated/dialog-contracts.ts', ...['about', 'confirm'].map((p) => `${UI}/${p}/generated/dialog-contracts.ts`));
+const CONTRACTS = dialogContracts('src/app/generated/dialog-contracts.ts', ...['about', 'confirm', 'diagnostics'].map((p) => `${UI}/${p}/generated/dialog-contracts.ts`));
 const OUT = process.env['SCREENSHOT_DIR'] ?? join(process.cwd(), '..', 'docs', 'screenshots');
 const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
 
@@ -20,6 +20,8 @@ test.use({ timezoneId: 'UTC', locale: 'en-GB', reducedMotion: 'reduce', deviceSc
 const FITTED: { name: string; id: string; title: string; loaded: string; payload?: unknown }[] = [
   // A text that still reads well after the redaction of the user name and the address.
   { name: 'web-search', id: 'dy.web-search', title: 'Search the web: Slack', loaded: 'input[name=query]', payload: { text: 'Slack crashed EXC_BAD_ACCESS macOS 27 alex', subject: 'Slack' } },
+  // Report a problem: the diagnostics bundle's preview, with the list of every file and its size.
+  { name: 'diagnostics-bundle', id: 'pd.report-problem', title: 'Report a problem', loaded: '[data-testid=diag-files]', payload: {} },
   { name: 'hash-search', id: 'dy.file-hash', title: 'Search the file hash on VirusTotal', loaded: 'code[aria-label="SHA-256 hash"]' },
 ];
 
@@ -97,15 +99,19 @@ for (const scheme of ['dark', 'light'] as const) {
             await win.in.getByRole('option', { name: option, exact: true }).click();
           };
           const section = win.in.locator('dy-menu-bar-items');
+          // Counts are relative to what the menu bar starts with, so a change of the default does not break the picture.
+          const items = section.locator('ul.pd-wc-list').first().getByRole('listitem');
+          const start = await items.count();
           await section.getByRole('button', { name: /^Add (another )?Line graph/ }).click();
-          await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(5);
+          await expect(items).toHaveCount(start + 1);
           await section.getByRole('button', { name: /^Add (another )?Number/ }).click();
-          await expect(section.locator('ul.pd-wc-list').first().getByRole('listitem')).toHaveCount(6);
-          await choose('Metric of Number, position 6 of 6', 'Temperature');
-          await expect(section.getByRole('combobox', { name: /Metric of Number, position 6 of 6/i })).toContainText('Temperature');
-          // A temperature is in degrees: the unit a person would type for it.
-          const unit = section.getByRole('textbox', { name: /Unit of Number, position 6 of 6/ });
-          await unit.fill('°C');
+          await expect(items).toHaveCount(start + 2);
+          const last = `position ${start + 2} of ${start + 2}`;
+          await choose(`Metric of Number, ${last}`, 'Disk activity');
+          await expect(section.getByRole('combobox', { name: new RegExp(`Metric of Number, ${last}`, 'i') })).toContainText('Disk activity');
+          // A disk's activity is a percentage: the unit a person would type for it.
+          const unit = section.getByRole('textbox', { name: new RegExp(`Unit of Number, ${last}`) });
+          await unit.fill('%');
           await unit.press('Enter');
           // From the top of the section: its title, its description, the items and then the popup chooser with its live preview.
           await win.in.getByRole('region', { name: 'Menu bar' }).evaluate((el) => el.scrollIntoView({ block: 'start' }));

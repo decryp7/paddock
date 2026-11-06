@@ -203,6 +203,11 @@ the operating system's entries and signed apps. Dyno does not enable or disable 
 
 **Benchmarks** (ADR 0030) run only on a click, as a job with phases, a Cancel that always works, and no timeout. *Quick* and *Full* presets, a *Sustained processor* run (2 to 20 minutes, with clock and temperature beside the throughput, stopped by Dyno if the processor stays close to its critical temperature) and *Custom*. The picker shows about how long the run takes and the most it writes to each drive. The disk test writes one scratch file per chosen drive with the file system's cache bypassed, removes it whatever happens, and never writes more than the amount shown. Results show the median with the spread of the repetitions and mark an unsteady metric in words; no single score.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/benchmarks-running-dark.png">
+  <img alt="A sustained processor run in progress, with its Cancel button" src="screenshots/benchmarks-running-light.png">
+</picture>
+
 **Built** ([WP-23](roadmap.md#wp-23-throttling-detector), [WP-24](roadmap.md#wp-24-disk-and-battery-life-forecasts),
 [WP-25](roadmap.md#wp-25-is-this-normal-baselines), [ADR 0018](adr/0018-throttling-lifespan-and-baselines.md)). All three only
 observe; nothing here changes a setting.

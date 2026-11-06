@@ -130,6 +130,11 @@ page says about how long the run takes and the most it writes to each drive.
 
 The **Power** page and the tray menu hold these. Each starts only when you use it or turn it on.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/power-dark.png">
+  <img alt="The Power page, keep awake on for one hour" src="screenshots/power-light.png">
+</picture>
+
 1. To keep the computer awake, open the Power page, choose how long (30 minutes, 1, 2 or 4 hours, Until I stop it, a time of day,
    while a program runs or while the computer is busy; up to 7 days only with `dyno awake on --for 168h`) and start the hold. From a terminal, `dyno awake on --for 2h`
    starts it and `dyno awake off` ends it. The hold ends if Dyno restarts, and the page says so.
@@ -265,8 +270,8 @@ holds file contents or command lines.
 ## Troubleshooting
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="screenshots/diagnostics-dark.png">
-  <img alt="The diagnostics bundle preview" src="screenshots/diagnostics-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/diagnostics-bundle-dark.png">
+  <img alt="The Report a problem window listing every file of the diagnostics bundle with its size" src="screenshots/diagnostics-bundle-light.png">
 </picture>
 
 | Symptom | What to do |
