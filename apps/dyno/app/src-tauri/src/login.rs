@@ -147,17 +147,6 @@ impl SwitchWorker {
     }
 }
 
-/// Clears the busy flag when the worker ends by a panic (a normal end clears it under the queue's lock).
-struct Clear(std::sync::Arc<std::sync::atomic::AtomicBool>, bool);
-
-impl Drop for Clear {
-    fn drop(&mut self) {
-        if self.1 {
-            self.0.store(false, std::sync::atomic::Ordering::SeqCst);
-        }
-    }
-}
-
 /// One change as a job: registered, run and ended `Done`, `Failed` with the message the work returned, or `Cancelled`.
 fn run_change((register, work, cancel): Change) {
     if cancel.is_cancelled() {
@@ -208,16 +197,18 @@ impl SwitchWorker {
         }
         let (busy, queue, slot) = (self.busy.clone(), self.queued.clone(), self.cancel.clone());
         let spawned = std::thread::Builder::new().name("dyno-login-switch".into()).spawn(move || {
-            let mut clear = Clear(busy.clone(), true);
             let mut next = Some(change);
             while let Some(change) = next.take() {
                 *slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(change.2.clone());
-                run_change(change);
+                // A change that panics (even while registering its job) ends that change only: the worker goes on with the next one
+                // and is never left busy.
+                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_change(change))).is_err() {
+                    log::warn!(target: "dyno", "a Start at login change panicked; it is dropped, the next one runs");
+                }
                 let mut queued = queue.lock().unwrap_or_else(|p| p.into_inner());
                 next = queued.take();
                 if next.is_none() {
                     busy.store(false, std::sync::atomic::Ordering::SeqCst);
-                    clear.1 = false;
                 }
             }
         });
@@ -1869,5 +1860,16 @@ mod tests {
         let (done, seen) = std::sync::mpsc::channel();
         worker.start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string())).unwrap();
         seen.recv_timeout(std::time::Duration::from_secs(5)).expect("the next change did not run");
+    }
+
+    #[test]
+    fn a_change_that_panics_before_its_job_exists_is_dropped_and_the_next_one_runs() {
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
+        let (registry, _rx) = jobs_rig();
+        worker.start(&ops, || -> paddock_jobs::JobContext { panic!("a test panic while registering") }, |_| Ok(())).unwrap();
+        let (done, seen) = std::sync::mpsc::channel();
+        worker.start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string())).unwrap();
+        seen.recv_timeout(std::time::Duration::from_secs(5)).expect("the change after the panic did not run");
+        idle(&worker);
     }
 }
