@@ -1,6 +1,6 @@
 # 67. The folder import dialog: a quick scan, one judge, a tree grid and a selection by folder
 
-- Status: Proposed, revision 2: answers the independent review of `e2402491e` (three P1s, the P2s)
+- Status: Accepted (2026-11-06, by the user; D1 to D9 as recommended, the 4 GiB plugin cap kept), revision 5. Revision 2 answered the independent review of `e2402491e` (three P1s, the P2s)
 - Date: 2026-11-05
 - Related: ADR 0014 (database-first engine), ADR 0047 (time window), ADR 0048 (watched folders), ADR 0050 and 0054 (dialog registry and kinds), ADR 0051 (streaming discovery, stable source ids), ADR 0063 (binary wire); three proposed ADRs on branches, not yet on this one: ADR 0064 (one streaming import trait, revision 3, `docs/debrief-streaming-trait` `c12864566`), ADR 0065 (bounded replies, `docs/debrief-bounded-and-timezone` `1eaa14850`), ADR 0066 (how Debrief reads times, same branch, `2f289b4c3`); family ADRs [0018](../../../../docs/adr/0018-bounded-loading-everywhere.md), [0019](../../../../docs/adr/0019-limits-explain-themselves.md), [0043](../../../../docs/adr/0043-dialogs-size-to-content.md); Paddock rules 17, 18, 21, 39, 40, 42, 47, 48, 51, 52; ER-17, ER-18, ER-19, ER-20, ER-21, ER-23, ER-27; [bundle shapes note](../../../../docs/research/2026-11-debrief-bundle-shapes.md) (`origin/docs/debrief-bundle-shapes` `fc6bdf0b7`)
 - Layout: [contact sheet](../images/folder-import-dialog/contact-sheet.png) and one image per state and theme in the same folder; the drawing's review is separate (ER-23)
