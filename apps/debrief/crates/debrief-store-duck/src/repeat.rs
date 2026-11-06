@@ -138,6 +138,21 @@ mod tests {
     }
 
     #[test]
+    fn a_cause_is_its_context_and_the_class_of_its_root_never_the_whole_text() {
+        // No context: the class alone, whatever value the text quotes.
+        assert_eq!(cause_key(&anyhow::anyhow!("IO Error: could not read value 1")), "IO Error");
+        assert_eq!(cause_key(&anyhow::anyhow!("IO Error: could not read value 2")), "IO Error");
+        // With a context (it names the segment or source): both.
+        let with = anyhow::anyhow!("IO Error: could not read value 3").context("indexing seg-0001");
+        assert_eq!(cause_key(&with), "indexing seg-0001|IO Error");
+        assert_ne!(
+            cause_key(&with),
+            cause_key(&anyhow::anyhow!("IO Error: x").context("indexing seg-0002"))
+        );
+        assert_eq!(cause_key(&anyhow::anyhow!("a plain message")), "error");
+    }
+
+    #[test]
     fn a_loop_logs_a_hundred_identical_failures_once_and_its_recovery_once() {
         crate::testlog::install();
         const TEST: Names = Names {
