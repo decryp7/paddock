@@ -37,6 +37,11 @@ pub enum Phase {
     RemovingOld {
         /// What is being removed was registered by this version.
         ours: bool,
+        /// The next register of this replace is already paid for: by the user's request that began it (Repair, Install), or by an
+        /// attempt counted when `Registering` was written. A crash anywhere in the finish keeps it paid, so it is finished past the
+        /// cap with that one register and never counted twice (ADR 0056 rule A).
+        #[serde(default)]
+        paid: bool,
     },
     /// `register` is about to be (or was) called. Registered afterwards means it may have landed: wait, never remove;
     /// absent means it did not: register again without counting another attempt.
@@ -336,6 +341,24 @@ impl RecordFile {
         self.store(&r)
     }
 
+    /// Remembers that `version` registered `program` without a proof that its service answers (a current definition on
+    /// Linux or Windows): the version only, so this version's attempts stay counted (ADR 0056 section 1).
+    ///
+    /// # Errors
+    /// [`ServiceError::Failed`] when it could not be saved.
+    pub fn mark(&self, version: &str, program: Option<&str>) -> Result<(), ServiceError> {
+        let mut r = self.load();
+        let attempts = r.attempts_of(version);
+        r.registered_version = Some(version.to_string());
+        r.registered_program = program.map(str::to_string);
+        r.state = if attempts > 0 {
+            State::Attempting { version: version.to_string(), attempts, phase: Phase::Awaiting }
+        } else {
+            State::Idle
+        };
+        self.store(&r)
+    }
+
     /// Writes `state`, keeping the rest.
     ///
     /// # Errors
@@ -491,8 +514,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let r = RecordFile::new(d.path(), "net.a.b");
         for phase in [
-            Phase::RemovingOld { ours: false },
-            Phase::RemovingOld { ours: true },
+            Phase::RemovingOld { ours: false, paid: false },
+            Phase::RemovingOld { ours: true, paid: true },
             Phase::Registering,
             Phase::Awaiting,
             Phase::RegisterFailed(FailKind::Other),

@@ -273,9 +273,8 @@ impl Manager {
         if present {
             // Something is registered: a first run removes nothing. Up (and this version's): remembered; otherwise the
             // start's plan decides what the registration needs.
-            let at = recorded.registered_at;
-            let ours = self.job_after_register(at) != Some(false);
-            let up = ours && ((self.answers)() || inspection.job == Job::Running);
+            let answers = (self.answers)();
+            let up = self.proves_ours(&inspection, answers);
             if up && here {
                 self.remember();
             }

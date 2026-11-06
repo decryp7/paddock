@@ -124,6 +124,11 @@ impl FakeSystemd {
                 Self::start(&mut w);
                 Output::code(0)
             }
+            "restart" => {
+                w.known = true;
+                Self::start(&mut w);
+                Output::code(0)
+            }
             "disable" => {
                 if !w.known {
                     return Output {

@@ -564,6 +564,12 @@ impl Backend for SimBackend {
                     } else if w.job != Job::Running {
                         w.job = Job::NotRunning;
                         w.start_in = w.resp.delay();
+                    } else if !caps_of(w.caps).pinned_identity && w.job_ver != w.cur {
+                        // Registering over a running old build (systemd, the Windows Run value): the unit is restarted so the
+                        // new version runs, and the old agent is replaced by the new one.
+                        w.job = Job::NotRunning;
+                        w.job_ver = w.cur;
+                        w.start_in = w.resp.delay();
                     }
                     let look = Self::look(&s.w);
                     if fault == Fault::RegNotAsWritten {
@@ -995,12 +1001,15 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
     }
 }
 
-/// The register a crash after the removal leaves is free (its attempt was never counted), by design (ADR 0056 section 1).
+/// The register a crash after the removal leaves is free (its attempt was never counted), by design (ADR 0056 section 1), and
+/// so is the finish of a removal the user asked for.
 fn free_finish(entry: &World) -> u32 {
     let nothing_to_remove =
         entry.reg == Reg::Absent && matches!(entry.job, Job::Absent | Job::Unknown);
     u32::from(match entry.rec.phase_of(entry.cur.s()) {
         Some(Phase::Registering) => true,
+        // Paid for already: by the user's request that began it, or by the attempt counted when `Registering` was written.
+        Some(Phase::RemovingOld { paid: true, .. }) => true,
         Some(Phase::RemovingOld { .. }) => nothing_to_remove,
         _ => false,
     })
@@ -1187,7 +1196,10 @@ fn edge_checks(
     // The record only says a version is registered when the OS holds that version's registration.
     if entry.rec.registered_version.as_deref() != Some(cur)
         && after.rec.registered_version.as_deref() == Some(cur)
-        && !(after.reg == Reg::Registered && after.owner == after.cur && !(after.job == Job::Running && after.job_ver != after.cur))
+        // Where the build is pinned (macOS) a running old job is the old registration; elsewhere the definition is what is registered.
+        && !(after.reg == Reg::Registered
+            && after.owner == after.cur
+            && !(caps_of(after.caps).pinned_identity && after.job == Job::Running && after.job_ver != after.cur))
         // An unusable record on a Mac: the version cannot be told, so the app adopts a service that answers (ADR 0056).
         && !(entry.rec_damaged && entry.caps == Caps::Mac)
     {
@@ -1313,10 +1325,10 @@ fn state_checks(w: &World) -> Vec<Viol> {
         && matches!(w.reg, Reg::Absent | Reg::Registered)
         && !w.program_gone
         && !(hold && w.reg == Reg::Registered)
-        // Allowed outcome (ADR 0056): where the OS needs the old registration removed before the new one is made (macOS, R03), a
-        // register that keeps failing after the removal leaves nothing. The hold says the service could not be registered, with
-        // the cause, and Repair tries again.
-        && !(w.caps == Caps::Mac && matches!(plan, Plan::Leave(Hold::RegisterFailed(_))))
+        // Allowed outcome (ADR 0056): a register that keeps failing after the old registration was removed (macOS, R03, and any
+        // replace that had to remove first) leaves nothing. The hold says the service could not be registered, with the cause, and
+        // Repair tries again.
+        && !matches!(plan, Plan::Leave(Hold::RegisterFailed(_)))
     {
         let after = run_chain(&cooperative(w), &[Ev::Start, Ev::Wait, Ev::Start, Ev::Wait]);
         if after.reg == Reg::Absent {
@@ -1735,20 +1747,7 @@ fn configs() -> &'static [(Caps, Resp)] {
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
-const KNOWN_FAILING: &[(&str, &str)] = &[
-    (
-        "more unattended registers across starts than the cap allows",
-        "open: MODEL_REPLAY='Linux/Never/Fresh|FirstRun;Start;Install+RegNeedsApproval;Start+RegNotAsWritten' makes 4 registers. A requested Install that stops at an approval leaves the state of a replace that was begun; the next unattended Start then counts one register too many. Whether the Install's register belongs to the attempts (it is the user's) or the model should not count it needs the model owner's trace.",
-    ),
-    (
-        "the record says this version is registered but the OS holds another registration",
-        "open: MODEL_REPLAY='Mac/RefusedAlways/Fresh|CopyOlder;Start@CrashBefore(6);FirstRun' - an older copy's registration is in the OS while the record says this version registered it. The identity check by register time does not apply (no register of this version was made); the plan's copy identity (`program`/`points_here`) is what must catch it.",
-    ),
-    (
-        "the user's service was lost",
-        "open: MODEL_REPLAY='Mac/Fast/OldRefused|Start+LingeringJob;Install@CrashAfter(4)' - a request past the cap crashes after the removal with the refused old job lingering; the state is RemovingOld at the cap and the plan holds (a removal begun at the cap was a request, so its finish should carry the consent). I tried that rule (finish with one register more) and it made the registers count one over the budget in three other sequences; the budget has to count the finish of a request to allow it.",
-    ),
-];
+const KNOWN_FAILING: &[(&str, &str)] = &[];
 
 #[test]
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {

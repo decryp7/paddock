@@ -124,6 +124,11 @@ impl Backend for WindowsRun {
     fn register(&mut self) -> Result<Inspection, RegisterError> {
         let name = self.spec.name().to_string();
         let value = self.definition();
+        // The agent the old value started (if any): it is stopped once the new value is written, so the new one replaces it.
+        let old_program = match self.registered_program() {
+            Ok(Some((p, _))) if !p.is_empty() => Some(PathBuf::from(p)),
+            _ => None,
+        };
         match self.sys.run(
             REG,
             &[
@@ -141,6 +146,11 @@ impl Backend for WindowsRun {
             Ok(o) if o.success() => {}
             Ok(o) => return Err(RegisterError::Other(format!("reg add: {}", o.reason()))),
             Err(e) => return Err(RegisterError::Other(format!("reg.exe {e}"))),
+        }
+        if let Some(old) = old_program.filter(|p| self.sys.is_program(p)) {
+            if let Err(e) = self.sys.run(&old.to_string_lossy(), &[Verb::Stop.word()]) {
+                log::warn!(error:% = e, program = old.display().to_string().as_str(); "windows: the old agent could not be asked to stop");
+            }
         }
         // Windows starts it at the next log-in; start it now too.
         let exe = self.target.exe.clone();

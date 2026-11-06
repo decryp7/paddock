@@ -219,6 +219,21 @@ before is the old build's that outlived the removal and settles nothing. Format 
 format (2) is read as it is with no register time, which falls back to today's reading; a damaged or newer file falls back to
 defaults as before.
 
+**Rule A: the attempt count only rises between proofs.** Every register call adds one to the version's attempts, the user's request
+included. Only a proof that the service answers, a version change, or the switch going off resets the count. The next register of
+an interrupted replace is paid once (`Phase::RemovingOld { ours, paid }`: paid by the request that began it, or by the attempt counted
+when `Registering` was written), so a paid finish may run past the cap by one register and is never counted twice. A removal with
+nothing registered afterwards (an approval, unavailable, declined) records "removal unfinished" with the count before that register.
+
+**Rule B: only a proof that names both the time and the copy says "this version registered it".** The job answers or runs, it
+started at or after `registeredAt`, and `points_here` is not `Some(false)`. One check (`Manager::proves_ours`) guards the plan's
+settle, a start's mark and a first run's remember. A job that outlived its registration names nobody.
+
+**Registering over a running old service.** On systemd and the Windows `Run` value, after the new registration succeeds the old service is
+replaced by the new one: the unit is restarted when its text changed, and the old agent is asked to stop before the new one is
+spawned. A register that fails first leaves the old service working. The "register keeps failing after the old registration was
+removed" outcome (a hold with the cause, and Repair) is allowed on every platform; the model records it as allowed.
+
 **R1.** `Looked(answers | refused | settled)` is an event for a look during a wait, and a failed `unregister` or `evict` is an
 event too. **R2.** Settling by `Running` needs the same pid and start time on two looks of a process that started after the
 register; `Registering` is entered only on a confirmed `Unregistered` or `GoneTimedOut` (recorded which). **R3.** `wanted` is
