@@ -1493,8 +1493,9 @@ fn a_running_job_named_by_two_looks_of_the_wait_settles_it_without_waiting_out_t
     use crate::manager::Started;
     let dir = tempfile::tempdir().unwrap();
     let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
-    sim.lock().unwrap().pid = Some(std::process::id());
+    sim.lock().unwrap().pid = Some(SERVICE_PID);
     let sys = FakeSystem::new();
+    put_job_processes(&sys);
     let mut m = awaiting_unanswered(dir.path(), &sim, &sys, || false)
         .with_timings(Timings { start_wait: Duration::from_secs(60), ..Timings::default() });
     let started = m.on_start(&never());
@@ -1518,8 +1519,14 @@ fn awaiting_unanswered(dir: &Path, sim: &Sim, sys: &FakeSystem, answers: impl Fn
     Manager::new("Dyno", Box::new(backend), dir, LABEL, "1.1.0", answers)
 }
 
-fn parent_pid() -> u32 {
-    std::os::unix::process::parent_id()
+/// Two processes of the fake machine (the `System::process` seam: what the tests see never depends on the real processes, ER-14).
+const SERVICE_PID: u32 = 4_000_001;
+const OTHER_PID: u32 = 4_000_002;
+
+fn put_job_processes(sys: &FakeSystem) {
+    for (pid, started) in [(SERVICE_PID, 1_000), (OTHER_PID, 2_000)] {
+        sys.put_process(paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(started)));
+    }
 }
 
 #[test]
@@ -1527,18 +1534,19 @@ fn a_job_that_runs_proves_the_service_only_when_two_looks_name_the_same_process(
     use crate::backend::{Inspection, Job};
     let dir = tempfile::tempdir().unwrap();
     let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
-    sim.lock().unwrap().pid = Some(std::process::id());
+    sim.lock().unwrap().pid = Some(SERVICE_PID);
     let sys = FakeSystem::new();
+    put_job_processes(&sys);
     let mut m = awaiting_unanswered(dir.path(), &sim, &sys, || false);
     let running = Inspection { job: Job::Running, ..Inspection::absent() };
     assert!(!m.proves_ours(&running, false), "one look of a running job is a crash loop's first start as much as a service");
     assert!(m.proves_ours(&running, false), "the second look names the same process");
     // A different process on the next look starts the count again.
-    sim.lock().unwrap().pid = Some(parent_pid());
+    sim.lock().unwrap().pid = Some(OTHER_PID);
     assert!(!m.proves_ours(&running, false), "another process is a first look");
     assert!(m.proves_ours(&running, false));
     // A service that answers needs no second look.
-    sim.lock().unwrap().pid = Some(std::process::id());
+    sim.lock().unwrap().pid = Some(SERVICE_PID);
     assert!(m.proves_ours(&running, true));
 }
 
@@ -1547,8 +1555,9 @@ fn a_job_seen_running_once_and_then_gone_neither_resets_the_attempts_nor_counts_
     use crate::manager::Started;
     let dir = tempfile::tempdir().unwrap();
     let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
-    sim.lock().unwrap().pid = Some(std::process::id());
+    sim.lock().unwrap().pid = Some(SERVICE_PID);
     let sys = FakeSystem::new();
+    put_job_processes(&sys);
     // The job is there at the start's first look and gone before the wait can look again (a crash loop's first start).
     let (world_of, asked) = (sim.clone(), Arc::new(std::sync::atomic::AtomicU32::new(0)));
     let mut m = awaiting_unanswered(dir.path(), &sim, &sys, move || {
