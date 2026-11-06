@@ -203,10 +203,10 @@ section 2) defines the report every dump check returns. The UMDH series returns 
 leak is a verdict it may or may not reach) so the UI, the report block and Pitwall read one shape:
 
 1. **Verdict** from a closed set: `Leak { call_sites }` (steady growth, three or more snapshots only), `CacheWarming`,
-   `GrewOnce` (one step then flat: ADR 0068's name, its revision 2 §4), `Grew { delta }` (two snapshots, never more than that), `NoGrowth`, `NotNtHeap` (D8), `ManagedHeap` (D8),
+   `GrewOnce` (one step then flat: the one name for this verdict, ADR 0068 revision 3 §4 and D13), `Grew { delta }` (two snapshots, never more than that), `NoGrowth`, `NotNtHeap` (D8), `ManagedHeap` (D8),
    and `CannotTell` when the data for a verdict is missing (ADR 0068's rule: no weak verdict from a probe that cannot
    see; ER-33). **Two logs give only `Grew` with Not checked `NeedsMore { of: Snapshots, have: 2, need: 3 }`, `NoGrowth`,
-   `NotNtHeap` or `CannotTell`**, the one closed reason ADR 0068 shares with this ADR (`NeedsMore { of: Dumps | Snapshots, have, need }`, announced for ADR 0068's next revision; its revision 2 `a8bc78a53` still says `NeedsMoreDumps`). Confidence follows D3's table.
+   `NotNtHeap` or `CannotTell`**, the one closed reason ADR 0068 shares with this ADR (`NeedsMore { of: Dumps | Snapshots, have, need }`, ADR 0068 revision 3 `4b91eb4a4` §1 and its D13). Confidence follows D3's table.
 2. **Confidence** `High`, `Medium` or `Low` with the reasons that set it (class, number of snapshots, time provenance,
    share of growth named, truncated stacks), computed by rules, never an unexplained score.
 3. **Evidence**: typed links: the series, a call site, a snapshot, a size signature (D6), a Private Bytes series, a log
