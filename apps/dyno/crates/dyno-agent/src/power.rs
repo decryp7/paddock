@@ -14,7 +14,6 @@ use dyno_core::power::energy::{PowerLogEntry, PowerLogKind, ALIVE_EVERY};
 use dyno_core::power::idle::{IdleAction, IdleEffect, IdleEvent, IdleInputs, IdleMachine};
 use dyno_core::power::{Capability, PowerCaps, PowerView};
 use dyno_core::process::{Measured, ProcessSample};
-use dyno_core::protocol::Message;
 use dyno_core::time::Timestamp;
 use paddock_power::{HoldRequest, KeepAwake, PowerError, PowerEvent, PowerOs, Scope, SleepWakeSource};
 use std::collections::VecDeque;
@@ -178,7 +177,7 @@ impl PowerCentre {
         }
         let after = self.view();
         if before != after {
-            shared.broadcast(&Message::PowerChanged(Box::new(after.clone())));
+            shared.broadcast_power(&after);
         }
         after
     }
@@ -387,7 +386,7 @@ impl PowerCentre {
         }
         let after = self.view();
         if before != after {
-            shared.broadcast(&Message::PowerChanged(Box::new(after)));
+            shared.broadcast_power(&after);
         }
     }
 
@@ -424,7 +423,7 @@ impl PowerCentre {
                 core.save_settings(&shared.dirs);
                 drop(core);
                 let v = self.view();
-                shared.broadcast(&Message::PowerChanged(Box::new(v)));
+                shared.broadcast_power(&v);
             }
         }
         let inputs = self.idle_inputs(shared);

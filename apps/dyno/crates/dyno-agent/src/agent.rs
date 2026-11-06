@@ -7,6 +7,7 @@ use crate::paths::Dirs;
 use crate::rollup::HistoryWriter;
 use crate::store::Store;
 use dyno_core::activity::{ActivityEntry, ActivityKind};
+use dyno_core::alarms::AlarmChange;
 use dyno_core::alerts::Alerts;
 use dyno_core::facts::SystemFacts;
 use dyno_core::grouping::AppGroup;
@@ -109,6 +110,156 @@ impl VolumesSlot {
     }
 }
 
+/// The newest value of one whole-state event, waiting for a connection's push thread: it replaces an older one that was not sent yet, so
+/// a full queue can never lose it (a lost push left a window showing an old state until it asked again).
+pub struct LatestSlot<T>(Mutex<Option<T>>);
+
+impl<T> Default for LatestSlot<T> {
+    fn default() -> Self {
+        LatestSlot(Mutex::new(None))
+    }
+}
+
+impl<T> LatestSlot<T> {
+    /// Keeps `value` as the one waiting, replacing an older one.
+    pub fn put(&self, value: T) {
+        *lock(&self.0) = Some(value);
+    }
+
+    /// The value waiting, if any; the slot is empty afterwards.
+    pub fn take(&self) -> Option<T> {
+        lock(&self.0).take()
+    }
+}
+
+/// Most alarms with changes waiting for one connection (a few per rule; a slow app that falls further behind loses the oldest).
+pub const MAX_PENDING_ALARMS: usize = 4096;
+
+#[derive(Default)]
+struct PendingAlarms {
+    /// Per alarm id: the first change that asks to notify the user, and the latest change.
+    by_id: std::collections::BTreeMap<u64, (Option<AlarmChange>, AlarmChange)>,
+    lost: u32,
+}
+
+/// Alarm changes waiting for one connection, per alarm: the first one that notifies (so "raised, then cleared before the app read
+/// either" still notifies) and the latest one (so the tray ends with the final state). At most [`MAX_PENDING_ALARMS`] alarms.
+#[derive(Default)]
+pub struct AlarmSlot(Mutex<PendingAlarms>);
+
+impl AlarmSlot {
+    /// Adds a change.
+    pub fn put(&self, change: AlarmChange) {
+        let mut pending = lock(&self.0);
+        let id = change.alarm.id;
+        if let Some(entry) = pending.by_id.get_mut(&id) {
+            if change.notify && entry.0.is_none() {
+                entry.0 = Some(change.clone());
+            }
+            entry.1 = change;
+            return;
+        }
+        if pending.by_id.len() >= MAX_PENDING_ALARMS {
+            pending.by_id.pop_first();
+            pending.lost = pending.lost.saturating_add(1);
+        }
+        pending.by_id.insert(id, (change.notify.then(|| change.clone()), change));
+    }
+
+    /// The waiting changes in alarm order (the notifying one before the latest), and how many alarms were given up.
+    pub fn take(&self) -> (Vec<AlarmChange>, u32) {
+        let mut pending = lock(&self.0);
+        let lost = std::mem::take(&mut pending.lost);
+        let mut out = Vec::new();
+        for (_, (first, last)) in std::mem::take(&mut pending.by_id) {
+            if let Some(first) = first.filter(|f| *f != last) {
+                out.push(first);
+            }
+            out.push(last);
+        }
+        (out, lost)
+    }
+}
+
+/// Most events (activity rows and alerts) waiting for one connection.
+pub const EVENT_QUEUE: usize = 64;
+
+#[derive(Default)]
+struct PendingEvents {
+    items: std::collections::VecDeque<Message>,
+    activity: u32,
+    alerts: u32,
+}
+
+/// Events that are appended, never merged (activity rows, alerts), waiting for one connection: in order, at most [`EVENT_QUEUE`]; when a
+/// slow app falls further behind the oldest are given up and counted.
+#[derive(Default)]
+pub struct EventQueue(Mutex<PendingEvents>);
+
+impl EventQueue {
+    /// Appends an event (`Message::Activity` or `Message::Alert`).
+    pub fn push(&self, event: Message) {
+        let mut q = lock(&self.0);
+        if q.items.len() >= EVENT_QUEUE {
+            match q.items.pop_front() {
+                Some(Message::Activity(_)) => q.activity = q.activity.saturating_add(1),
+                Some(Message::Alert(_)) => q.alerts = q.alerts.saturating_add(1),
+                _ => {}
+            }
+        }
+        q.items.push_back(event);
+    }
+
+    /// The waiting events in order, and how many activity rows and alerts were given up.
+    pub fn take(&self) -> (Vec<Message>, u32, u32) {
+        let mut q = lock(&self.0);
+        let (activity, alerts) = (std::mem::take(&mut q.activity), std::mem::take(&mut q.alerts));
+        (std::mem::take(&mut q.items).into(), activity, alerts)
+    }
+}
+
+/// Everything one connection has waiting that does not travel through its bounded queue: the queue message only wakes the push thread,
+/// which then takes the newest of each state and every waiting event from here, so a full queue loses nothing but what the bounds give up.
+#[derive(Default)]
+pub struct Pending {
+    /// The Wake-on-LAN list.
+    pub wol: LatestSlot<dyno_core::wol::WolView>,
+    /// The power view.
+    pub power: LatestSlot<dyno_core::power::PowerView>,
+    /// The scheduled wakes.
+    pub wakes: LatestSlot<dyno_core::power::schedule::WakesView>,
+    /// A surface's widget layout (the newest edit of any window).
+    pub layout: LatestSlot<dyno_core::widgets::DynoSurface>,
+    /// Alarm changes.
+    pub alarms: AlarmSlot,
+    /// Activity rows and alerts.
+    pub events: EventQueue,
+}
+
+impl Pending {
+    /// Sends everything waiting, in a fixed order, through `send`; false when `send` says the app is gone. When a bound gave events up,
+    /// a final [`Message::EventsLost`] says how many.
+    pub fn drain(&self, send: &mut impl FnMut(Message) -> bool) -> bool {
+        let mut lost = dyno_core::protocol::LostEvents::default();
+        let mut messages = Vec::new();
+        messages.extend(self.wol.take().map(|v| Message::WolChanged(Box::new(v))));
+        messages.extend(self.power.take().map(|v| Message::PowerChanged(Box::new(v))));
+        messages.extend(self.wakes.take().map(|v| Message::WakesChanged(Box::new(v))));
+        messages.extend(self.layout.take().map(Message::WidgetLayoutChanged));
+        let (alarms, lost_alarms) = self.alarms.take();
+        messages.extend(alarms.into_iter().map(Message::Alarm));
+        let (events, lost_activity, lost_alerts) = self.events.take();
+        messages.extend(events);
+        lost.alarms = lost_alarms;
+        lost.activity = lost_activity;
+        lost.alerts = lost_alerts;
+        if lost != dyno_core::protocol::LostEvents::default() {
+            messages.push(Message::EventsLost(lost));
+        }
+        messages.into_iter().all(send)
+    }
+}
+
 /// The value [`Sub::detail`] holds for `detail` (0 is "not subscribed yet").
 pub fn detail_code(detail: LiveDetail) -> u8 {
     match detail {
@@ -132,6 +283,8 @@ pub struct Sub {
     pub volumes: Arc<VolumesSlot>,
     /// Job statuses, latest per job, same reason.
     pub jobs: Arc<JobSlot>,
+    /// Whole states and events that must not be lost to a full queue.
+    pub pending: Arc<Pending>,
 }
 
 impl Sub {
@@ -727,7 +880,55 @@ impl Shared {
         }
     }
 
-    /// Sends `m` to every connected app (dropping it for a slow one).
+    /// Hands `wake` to every connected app after `store` put the event into that connection's [`Pending`]: the message only wakes the
+    /// connection's push thread, so a full queue cannot lose the event.
+    fn publish(&self, store: impl Fn(&Pending), wake: &Message) {
+        for s in lock(&self.subs).iter() {
+            store(&s.pending);
+            let _ = s.tx.try_send(wake.clone());
+        }
+    }
+
+    /// The Wake-on-LAN list changed; the newest replaces an older one that was not sent yet.
+    pub fn broadcast_wol(&self, view: &dyno_core::wol::WolView) {
+        self.publish(|p| p.wol.put(view.clone()), &Message::WolChanged(Box::new(view.clone())));
+    }
+
+    /// The power view changed; the newest replaces an older one that was not sent yet.
+    pub fn broadcast_power(&self, view: &dyno_core::power::PowerView) {
+        self.publish(|p| p.power.put(view.clone()), &Message::PowerChanged(Box::new(view.clone())));
+    }
+
+    /// The scheduled wakes changed; the newest replaces an older one that was not sent yet.
+    pub fn broadcast_wakes(&self, view: &dyno_core::power::schedule::WakesView) {
+        self.publish(|p| p.wakes.put(view.clone()), &Message::WakesChanged(Box::new(view.clone())));
+    }
+
+    /// A surface's widget layout changed; the newest replaces an older one that was not sent yet.
+    pub fn broadcast_layout(&self, surface: &dyno_core::widgets::DynoSurface) {
+        self.publish(|p| p.layout.put(*surface), &Message::WidgetLayoutChanged(*surface));
+    }
+
+    /// An alarm changed: every connection keeps the first change that notifies and the latest one, per alarm.
+    pub fn broadcast_alarm(&self, change: &AlarmChange) {
+        self.publish(|p| p.alarms.put(change.clone()), &Message::Alarm(change.clone()));
+    }
+
+    /// An activity row was appended: every connection queues it, in order, up to [`EVENT_QUEUE`].
+    pub fn broadcast_activity(&self, entry: &dyno_core::activity::ActivityEntry) {
+        self.publish(
+            |p| p.events.push(Message::Activity(entry.clone())),
+            &Message::Activity(entry.clone()),
+        );
+    }
+
+    /// An alert fired: every connection queues it, in order, up to [`EVENT_QUEUE`].
+    pub fn broadcast_alert(&self, alert: &dyno_core::alerts::Alert) {
+        self.publish(|p| p.events.push(Message::Alert(alert.clone())), &Message::Alert(alert.clone()));
+    }
+
+    /// Sends `m` to every connected app, dropping it for a slow one: only for frames that are re-sent anyway (the live update). State and
+    /// events go through the `broadcast_*` functions above (a test keeps it that way).
     pub fn broadcast(&self, m: &Message) {
         for s in lock(&self.subs).iter() {
             let _ = s.tx.try_send(m.clone());

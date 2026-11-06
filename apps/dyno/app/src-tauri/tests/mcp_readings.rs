@@ -175,7 +175,7 @@ fn the_ai_access_settings_list_every_tool_with_its_own_switch() {
         true,
     )
     .unwrap();
-    let control = mcp::control(&dirs, "Dyno", "1.1.0", false, Arc::new(|_| {}), Arc::new(Script));
+    let control = mcp::control(&dirs, "Dyno", "1.1.0", Arc::new(|_| {}), Arc::new(Script));
     let view = control.get();
     assert!(!view.settings.enabled, "off by default");
     let mut names: Vec<&str> = view.tools.iter().filter(|t| !t.action).map(|t| t.name.as_str()).collect();

@@ -1,24 +1,24 @@
 //! The engine side of the app's "AI access (MCP)" settings page: the saved settings, the tools and their exposure, the clients'
-//! keys (issued once, persisted in the credential store, revocable), and the audit log. Pure Rust; the Tauri adapter
+//! keys (issued once, only a hash kept in an owner-only file in the config folder, revocable), and the audit log. Pure Rust; the Tauri adapter
 //! ([`crate::tauri`]) maps its commands and event onto this.
 //!
-//! Every method is quick and bounded (a small file, one credential entry): none needs a job (rule 10). Nothing here ever returns
+//! Every method is quick and bounded (a small file): none needs a job (rule 10). Nothing here ever returns
 //! a key except [`McpControl::issue_key`], once.
 
 use crate::audit::{AuditEntry, AuditLog, Outcome};
-use crate::keys::{KeyEntry, KeyStore};
+use crate::key_list::KeyListStore;
+use crate::keys::KeyStore;
 use crate::listener::{Listener, ListenerView};
 use crate::registry::{Access, Policy};
 use crate::server::Server;
 use paddock_env::VersionedFile;
-use paddock_secrets::{Name, Secret, Secrets};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
-/// Most client keys one app keeps (the entries must fit one credential: a few hundred bytes each).
+/// Most client keys one app keeps (the file stays small).
 pub const MAX_KEYS: usize = 16;
 /// Longest client name.
 const MAX_CLIENT_CHARS: usize = 64;
@@ -160,6 +160,9 @@ pub struct McpView {
     pub max_keys: u32,
     /// Whether and where the loopback listener serves.
     pub listener: ListenerView,
+    /// Why the saved keys are not in use (the key file was damaged, unreadable, from a newer version or writable by others), with the
+    /// next step; `None` when the list is fine. While it is set every client is refused.
+    pub keys_problem: Option<String>,
 }
 
 /// The reply of `mcp_issue_key`: the key, shown once.
@@ -209,7 +212,7 @@ pub struct AuditRow {
 pub enum ErrorCode {
     /// The input is not acceptable; the message says what to fix.
     Invalid,
-    /// The credential store or the settings file could not be used.
+    /// The settings file or the keys file could not be used.
     StoreUnavailable,
     /// Anything else.
     Failed,
@@ -274,15 +277,12 @@ pub struct McpControl {
     audit: Arc<AuditLog>,
     keys: Arc<KeyStore>,
     store: Arc<dyn SettingsStore>,
-    secrets: Arc<dyn Secrets>,
+    key_list: Arc<dyn KeyListStore>,
+    keys_problem: Mutex<Option<String>>,
     emit: Emit,
     now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
     write: Mutex<()>,
     listener: OnceLock<Arc<Listener>>,
-}
-
-fn keys_name() -> Result<Name, McpError> {
-    Name::new("mcp", "keys").map_err(|e| McpError::new(ErrorCode::Failed, e.to_string(), false))
 }
 
 impl McpControl {
@@ -298,7 +298,7 @@ impl McpControl {
         audit: Arc<AuditLog>,
         keys: Arc<KeyStore>,
         store: Arc<dyn SettingsStore>,
-        secrets: Arc<dyn Secrets>,
+        key_list: Arc<dyn KeyListStore>,
         emit: Emit,
         now_ms: Arc<dyn Fn() -> i64 + Send + Sync>,
     ) -> McpControl {
@@ -307,7 +307,8 @@ impl McpControl {
             audit,
             keys,
             store,
-            secrets,
+            key_list,
+            keys_problem: Mutex::new(None),
             emit,
             now_ms,
             write: Mutex::new(()),
@@ -319,24 +320,33 @@ impl McpControl {
     }
 
     fn load_keys(&self) {
-        // An unreadable or damaged key entry means no keys work until new ones are issued: failing closed.
-        let entries = keys_name()
-            .ok()
-            .and_then(|n| self.secrets.get(&n).ok().flatten())
-            .and_then(|s| serde_json::from_str::<Vec<KeyEntry>>(s.expose()).ok())
-            .unwrap_or_default();
-        self.keys.import(entries);
+        // An unreadable or damaged list means no keys work until new ones are issued: failing closed. The store has already
+        // emptied the list and worded the cause and the next step.
+        let loaded = self.key_list.load();
+        *self
+            .keys_problem
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = loaded.problem.clone();
+        match &loaded.problem {
+            Some(problem) => log::error!("mcp keys: {problem}"),
+            None => log::info!("mcp keys: {} saved key(s) loaded", loaded.entries.len()),
+        }
+        self.keys.import(loaded.entries);
     }
 
     fn persist_keys(&self) -> Result<(), McpError> {
-        let text = serde_json::to_string(&self.keys.export())
-            .map_err(|e| McpError::new(ErrorCode::Failed, e.to_string(), false))?;
-        let secret = Secret::new(text)
-            .map_err(|e| McpError::new(ErrorCode::Invalid, e.to_string(), false))?;
-        self.secrets.set(&keys_name()?, &secret).map_err(|e| {
+        let saved = self.key_list.save(&self.keys.export());
+        if saved.is_ok() {
+            // A saved list is the list in use now, whatever was wrong with the old file.
+            *self
+                .keys_problem
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = None;
+        }
+        saved.map_err(|e| {
             McpError::new(
                 ErrorCode::StoreUnavailable,
-                format!("The client keys could not be saved: {e}. Check the credential store."),
+                format!("The client keys could not be saved: {e}. Check that the app's settings folder is writable, or update the app."),
                 true,
             )
         })
@@ -404,6 +414,11 @@ impl McpControl {
                 .listener
                 .get()
                 .map_or(ListenerView::Unavailable, |l| l.view()),
+            keys_problem: self
+                .keys_problem
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clone(),
             settings,
         }
     }
@@ -462,7 +477,7 @@ impl McpControl {
         Ok(self.view())
     }
 
-    /// Issues a key for `client` and returns it; the engine keeps only its hash. Persists the key list in the credential store; if
+    /// Issues a key for `client` and returns it; the engine keeps only its hash. Persists the key list in the owner-only keys file; if
     /// that fails the key is not issued.
     pub fn issue_key(&self, client: &str) -> Result<IssuedKey, McpError> {
         let client = client.trim();

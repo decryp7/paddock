@@ -37,14 +37,12 @@ const NEEDLES: [&str; 24] = [
 ];
 
 /// Where the real ones are defined or chosen: the production code of exactly these files.
-const ALLOWED: [&str; 6] = [
+const ALLOWED: [&str; 5] = [
     "crates/dyno-agent/src/disk/volumes.rs",
     "crates/dyno-agent/src/disk/mod.rs",
     "crates/dyno-agent/src/disk/centre.rs",
     "crates/dyno-agent/src/cli.rs",
     "crates/dyno-agent/src/lib.rs",
-    // The real credential store of the AI access keys is chosen here; its tests use the memory vault.
-    "app/src-tauri/src/mcp.rs",
 ];
 
 /// This file names the needles to look for them.

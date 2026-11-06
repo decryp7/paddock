@@ -1138,6 +1138,18 @@ impl From<crate::ports::PlatformError> for AgentError {
     }
 }
 
+/// How many events one connection missed: the oldest of a bounded queue are given up when an app reads too slowly.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LostEvents {
+    /// Activity rows.
+    pub activity: u32,
+    /// Alerts.
+    pub alerts: u32,
+    /// Alarm changes.
+    pub alarms: u32,
+}
+
 /// A body on the app ↔ agent link: a request, its outcome, or a pushed event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1168,6 +1180,9 @@ pub enum Message {
     WolChanged(Box<crate::wol::WolView>),
     /// Agent -> app: the scheduled wakes changed (a save, a cancel, or a schedule that ran). Appended.
     WakesChanged(Box<crate::power::schedule::WakesView>),
+    /// Agent -> app: events the agent gave up for this connection because the app read too slowly (its queues are bounded). The app
+    /// re-reads the activity log, the alerts and the alarms and logs how many were lost. Appended.
+    EventsLost(LostEvents),
 }
 
 #[cfg(test)]

@@ -208,7 +208,7 @@ impl Sampler {
                     kind: TimelineEventKind::Alert,
                     label: a.title.clone(),
                 });
-                shared.broadcast(&Message::Alert(a));
+                shared.broadcast_alert(&a);
             }
         }
         let custom_rules = core.settings.custom_alerts.clone();
@@ -261,7 +261,7 @@ fn drop_pressure_unused(_: MemoryPressure) {}
 /// Pushes alarm changes to every connected app.
 pub fn push_alarm_changes(shared: &Shared, changes: Vec<dyno_core::alarms::AlarmChange>) {
     for c in changes {
-        shared.broadcast(&Message::Alarm(c));
+        shared.broadcast_alarm(&c);
     }
 }
 

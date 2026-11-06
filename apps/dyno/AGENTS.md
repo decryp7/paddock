@@ -85,7 +85,9 @@ Dyno reads untrusted data (process names, command lines, file names, plugin outp
 - Long-running work (scans, details, facts) runs off the sampling thread and off the UI thread; results are paged or
   capped.
 - Logs never contain file contents, command lines or secrets by default; any crash reporting is opt-in. Secrets
-  (the local web API key) live only in the OS credential store.
+  (the local web API key) live only in the OS credential store; on macOS nothing of Dyno's reads the Keychain (a read waits behind a
+  password dialog after every update of an ad-hoc signed build), so the Wake-on-LAN SecureOn passwords are owner-only files
+  (`<data folder>/secrets`, out of backups) and the AI access key list is `mcp-keys.json`.
 
 ## Languages
 

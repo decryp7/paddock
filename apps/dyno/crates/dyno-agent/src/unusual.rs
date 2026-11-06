@@ -6,7 +6,7 @@ use crate::agent::{lock, now, Shared};
 use dyno_core::activity::ActivityKind;
 use dyno_core::os::Os;
 use dyno_core::process::ProcessSample;
-use dyno_core::protocol::{AgentError, ErrorCode, Message};
+use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::startup::StartupState;
 use dyno_core::unusual::baseline::{Baseline, Observed, StartupObs, UnusualOverview};
 use dyno_core::unusual::{program_key, Signing};
@@ -119,7 +119,7 @@ impl UnusualCentre {
                     item.reasons.join(", ")
                 ),
             );
-            shared.broadcast(&Message::Activity(entry));
+            shared.broadcast_activity(&entry);
         }
     }
 

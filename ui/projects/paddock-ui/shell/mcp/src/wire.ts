@@ -64,7 +64,7 @@ export function parseMcpView(v: unknown): McpView | null {
   const tools = (v['tools'] as unknown[]).map(parseTool);
   const keys = (v['keys'] as unknown[]).map(parseKey);
   if (tools.includes(null) || keys.includes(null)) return null;
-  return { settings, tools: tools as ToolInfo[], keys: keys as KeyInfo[], maxKeys: v['maxKeys'], listener: parseListener(v['listener']) };
+  return { settings, tools: tools as ToolInfo[], keys: keys as KeyInfo[], maxKeys: v['maxKeys'], listener: parseListener(v['listener']), keysProblem: typeof v['keysProblem'] === 'string' && v['keysProblem'] !== '' ? v['keysProblem'] : null };
 }
 
 /** The key `mcp_issue_key` answered with, or null. It is shown once and kept nowhere. */

@@ -50,4 +50,19 @@ Decided and built for 1.1.0:
   than 30 s (three times the slowest no-window pace); tool calls wait at most 8 s for the agent (under the 10 s call limit); an answer over
   its byte bound is shortened to valid JSON that says it was cut; a mount point is only `/` or a drive letter and the user-name segment of
   paths in labels is replaced; alarm titles carry no port.
+- **SecureOn passwords in files on macOS (2026-11-05, D6 amended; user decision).** `dyno_platform::wol::os_store` returns
+  `FileSecrets` over `<data folder>/secrets` on macOS (0600 files, folder 0700, marked out of Time Machine backups only by the agent at start; other backup tools may still copy it), the
+  OS credential store elsewhere. `paddock-secrets`'s `keyring` feature is enabled for non-macOS targets only, so the Keychain adapter
+  is not in a macOS build at all (`cargo tree -i keyring --target aarch64-apple-darwin` finds nothing). The reason: a wake job
+  reading the Keychain after an update waits behind a password dialog with no limit (measured at 15 minutes in a launchd agent), and a
+  scheduled wake would wait for nobody. No migration and the old item is never read (a read prompts); Dyno 1.0.0 has no Wake-on-LAN,
+  so only a pre-release 1.1.0 build could have written one, and it is left in the Keychain. A device that says it has a password
+  whose file is missing is not woken: the job fails with "The SecureOn password for this computer is missing. Edit the computer in
+  Wake devices and enter it again." Anyone with the file's owner rights can read it, as with any file in the user's folder.
+- **Keys in a file, not the Keychain (2026-11-05).** The key list (id, client name, SHA-256, time, revoked flag; never a key) is
+  `mcp-keys.json` in the config folder, a `VersionedFile` written owner-only (0600 on Unix; on Windows the per-user config folder is
+  already private). Opening a Keychain item that another ad-hoc signed build created blocks the process in
+  `SecKeychainFindGenericPassword` behind a SecurityAgent prompt before the first window (measured in a macOS VM). A damaged,
+  unreadable or newer file means no key works and the log says why; a damaged file is kept aside and never restored from its backup,
+  which may still hold a revoked key. There is no migration: AI access is new in 1.1.0 and 1.0.0 has no such entry.
 - **Logging (ER-27).** Start, stop and failure of the listener are `paddock_mcp` log lines with the port, the discovery file and the duration.

@@ -866,7 +866,7 @@ rules sit on top and are not relaxed. `client` has the request builders and type
 shared. The contract test pins the message shapes against the specification's JSON Schema. `notifications/cancelled` stops a running call; a
 connection runs up to 4 tool calls at once and answers them as they finish. With the `tauri` feature, `McpControl` + `paddock_mcp::tauri`
 are the settings page's engine (`Builder::mcp` in the shell): the on/off switch, tools shown, actions allowed by name, client keys (issued
-once, only the hash kept, the list persisted through `paddock-secrets`), the audit log and its `paddock://mcp` event. Not built: `prompts`, subscriptions,
+once, only the hash kept, the list in an owner-only `KeyListStore` file (`FileKeys`), never the credential store; a damaged, unreadable, newer or world-writable file leaves no key working and `McpView.keysProblem` says why), the audit log and its `paddock://mcp` event. Not built: `prompts`, subscriptions,
 sampling, HTTP transport (stdio and loopback only, as ADR 0007 decides).
 ## `paddock-archive` (plan X24)
 

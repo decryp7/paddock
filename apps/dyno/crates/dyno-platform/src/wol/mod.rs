@@ -6,11 +6,13 @@
 mod neighbours;
 mod ping;
 mod readiness;
+mod secrets;
 mod udp;
 
 pub use neighbours::OsNeighbours;
 pub use ping::OsProber;
 pub use readiness::OsReadiness;
+pub use secrets::os_store;
 pub use udp::{OsInterfaces, OsUdp};
 
 use crate::runner::{SystemRunner, ToolRunner};
@@ -111,7 +113,7 @@ impl dyno_core::wol::WolClock for RealClock {
 
 impl WolPorts {
     /// This machine's own adapters. Only the real wiring of each OS uses it, never a test (ER-14).
-    pub fn os() -> WolPorts {
+    pub fn os(secrets_dir: &std::path::Path) -> WolPorts {
         let runner = || -> Box<dyn ToolRunner> { Box::new(SystemRunner) };
         WolPorts {
             udp: Arc::new(OsUdp),
@@ -119,7 +121,7 @@ impl WolPorts {
             neighbours: Arc::new(OsNeighbours::new(runner())),
             prober: Arc::new(OsProber::new(runner())),
             readiness: Arc::new(OsReadiness::new(runner())),
-            secrets: Arc::new(paddock_secrets::KeyringSecrets::os("Dyno")),
+            secrets: os_store(secrets_dir),
             clock: Arc::new(RealClock::new()),
             wake_timer: real_wake_timer(),
         }

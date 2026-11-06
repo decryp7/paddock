@@ -94,7 +94,12 @@ maxKeys: number,
 /**
  * Whether and where the loopback listener serves.
  */
-listener: ListenerView, };
+listener: ListenerView, 
+/**
+ * Why the saved keys are not in use (the key file was damaged, unreadable, from a newer version or writable by others), with the
+ * next step; `None` when the list is fine. While it is set every client is refused.
+ */
+keysProblem: string | null, };
 
 export type IssuedKey = { 
 /**

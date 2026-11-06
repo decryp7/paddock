@@ -30,6 +30,11 @@ struct Harness {
 
 impl Harness {
     fn start() -> Harness {
+        Harness::start_with_timer(|t| t)
+    }
+
+    /// A harness whose OS wake timer is `wrap` of the recording one (the recording one stays what `timer` lists).
+    fn start_with_timer(wrap: impl FnOnce(Arc<FakeWakeTimer>) -> Arc<dyn WakeScheduler>) -> Harness {
         let tmp = tempfile::tempdir().unwrap();
         let dirs = Dirs::at(tmp.path().join("data"));
         std::fs::create_dir_all(dirs.root()).unwrap();
@@ -41,7 +46,7 @@ impl Harness {
         let mut platform = fake.platform();
         let base = WolPorts::fake();
         platform.wol = WolPorts {
-            wake_timer: Some(timer.clone()),
+            wake_timer: Some(wrap(timer.clone())),
             udp: udp.clone(),
             ..base
         };
@@ -144,6 +149,72 @@ fn a_schedule_is_armed_the_os_wake_is_set_through_the_route_and_cancel_clears_it
     let v = view(ask(&c, Request::PowerCancelWake { id: 1 }).unwrap());
     assert!(v.rows.is_empty());
     assert!(h.timer.list().unwrap().is_empty());
+}
+
+/// An OS wake timer whose `list` waits at a gate when the sync thread of the test calls it, so a test can hold that sync between reading
+/// the saved schedules and listing the OS wakes.
+struct GatedTimer {
+    inner: Arc<FakeWakeTimer>,
+    reached: std::sync::mpsc::Sender<()>,
+    open: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl WakeScheduler for GatedTimer {
+    fn schedule(&self, tag: &WakeTag, at_utc: i64) -> Result<(), dyno_core::ports::PlatformError> {
+        self.inner.schedule(tag, at_utc)
+    }
+    fn cancel(&self, tag: &WakeTag) -> Result<bool, dyno_core::ports::PlatformError> {
+        self.inner.cancel(tag)
+    }
+    fn list(&self) -> Result<Vec<dyno_core::wake::WakeEntry>, dyno_core::ports::PlatformError> {
+        if std::thread::current().name() == Some("gated-sync") {
+            let _ = self.reached.send(());
+            let _ = self.open.lock().unwrap().recv();
+        }
+        self.inner.list()
+    }
+}
+
+/// The agent's wake thread syncs every OS wake from the saved schedules when it starts (a settings change does the same) and cancels
+/// the wakes no schedule owns. That sync read the schedules, then listed the OS wakes: a change saved in between lost its wake, because
+/// the sync still thought nothing owned it. `a_schedule_is_armed...` failed once beside a build with an empty list after a change.
+#[test]
+fn a_sync_held_between_reading_and_listing_never_cancels_a_wake_set_meanwhile() {
+    let (reached_tx, reached_rx) = std::sync::mpsc::channel();
+    let (open_tx, open_rx) = std::sync::mpsc::channel();
+    let h = Harness::start_with_timer(|inner| {
+        Arc::new(GatedTimer {
+            inner,
+            reached: reached_tx,
+            open: std::sync::Mutex::new(open_rx),
+        })
+    });
+    let c = h.client();
+    h.allow(&c, true);
+    // A sync that has read the (empty) schedules and waits just before it lists the OS wakes.
+    let shared = h.shared();
+    let syncer = std::thread::Builder::new()
+        .name("gated-sync".into())
+        .spawn(move || shared.wakes.sync_all(&shared))
+        .unwrap();
+    reached_rx
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .expect("the sync reaches its list of OS wakes");
+    // A schedule is added meanwhile. Done at once without the fix; it waits for the sync with it.
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let adder = std::thread::spawn(move || {
+        set(&c, input("Morning")).unwrap();
+        let _ = done_tx.send(());
+    });
+    let _finished_before_the_sync = done_rx.recv_timeout(std::time::Duration::from_secs(3)).is_ok();
+    open_tx.send(()).unwrap();
+    syncer.join().unwrap();
+    adder.join().unwrap();
+    assert_eq!(
+        h.timer.list().unwrap().len(),
+        1,
+        "the sync cancelled the OS wake of a schedule saved while it ran"
+    );
 }
 
 #[test]
@@ -271,7 +342,9 @@ fn a_due_schedule_acts_stays_awake_wakes_the_computers_runs_its_job_and_arms_the
     let e = &v.rows[0].entry;
     let run = e.last_run.as_ref().expect("how it went is kept");
     assert!(
-        run.summary.contains("staying awake 30 min") && run.summary.contains("woke 1 computer") && run.summary.contains("started its job"),
+        run.summary.contains("staying awake 30 min")
+            && run.summary.contains("started the wake of 1 computer")
+            && run.summary.contains("started its job"),
         "{}",
         run.summary
     );

@@ -24,6 +24,7 @@ pub mod bridge;
 pub mod client;
 mod control;
 pub mod jsonrpc;
+mod key_list;
 mod keys;
 mod lines;
 pub mod listener;
@@ -39,6 +40,7 @@ pub use control::{
     AuditRow, Emit, ErrorCode, FileSettings, IssuedKey, KeyInfo, MAX_KEYS, McpControl, McpError,
     McpEvent, McpSettings, McpView, MemorySettings, SettingsStore, ToolInfo,
 };
+pub use key_list::{FileKeys, KeyListStore, KeysLoad, MemoryKeys};
 pub use keys::{KEY_PREFIX, KeyEntry, KeyStore, KeyVerifier};
 pub use lines::{serve_lines, serve_stdio};
 pub use loopback::{Serving, serve_loopback};

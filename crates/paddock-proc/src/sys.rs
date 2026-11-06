@@ -15,6 +15,12 @@ mod unix {
     use std::os::unix::process::CommandExt;
     use std::process::Command;
 
+    /// The effective user id of this process.
+    pub fn effective_uid() -> u32 {
+        // SAFETY: geteuid has no arguments and cannot fail.
+        unsafe { libc::geteuid() }
+    }
+
     /// Sends `signal` to the process group `pgid`; false when there is no such group.
     #[expect(
         clippy::disallowed_methods,

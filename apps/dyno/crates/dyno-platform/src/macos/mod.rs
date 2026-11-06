@@ -22,7 +22,7 @@ use std::path::Path;
 use std::time::Duration;
 
 /// The ports for macOS.
-pub fn platform() -> Platform {
+pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     Platform {
         sensors: Box::new(SysinfoSensors::new(Box::new(probe::MacProbe::new()))),
         processes: Box::new(SysinfoProcesses::new(Box::new(details::MacDetails::new()))),
@@ -37,7 +37,7 @@ pub fn platform() -> Platform {
         network: crate::NetworkPorts::os(),
         hardware: crate::HardwareReaders::os(),
         power: crate::PowerPorts::os(),
-        wol: crate::wol::WolPorts::os(),
+        wol: crate::wol::WolPorts::os(secrets_dir),
     }
 }
 

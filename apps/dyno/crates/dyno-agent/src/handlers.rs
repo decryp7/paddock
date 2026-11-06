@@ -495,7 +495,7 @@ fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdi
     })?;
     core.save_settings(&shared.dirs);
     drop(core);
-    shared.broadcast(&Message::WidgetLayoutChanged(surface));
+    shared.broadcast_layout(&surface);
     Ok(Reply::WidgetLayout(Box::new(view)))
 }
 

@@ -214,6 +214,7 @@ struct Recorder {
     live: AtomicUsize,
     statuses: Sender<AgentStatus>,
     stalls: Mutex<Vec<Option<Stall>>>,
+    lost: Mutex<Vec<dyno_core::protocol::LostEvents>>,
 }
 
 impl Recorder {
@@ -222,6 +223,7 @@ impl Recorder {
             live: AtomicUsize::new(0),
             statuses,
             stalls: Mutex::new(Vec::new()),
+            lost: Mutex::new(Vec::new()),
         })
     }
 
@@ -231,6 +233,10 @@ impl Recorder {
 }
 
 impl Sink for Recorder {
+    fn events_lost(&self, lost: dyno_core::protocol::LostEvents) {
+        lock(&self.lost).push(lost);
+    }
+
     fn live(&self, _: LiveUpdate) {
         self.live.fetch_add(1, Ordering::SeqCst);
     }
@@ -242,6 +248,19 @@ impl Sink for Recorder {
     fn stalled(&self, stall: Option<Stall>) {
         lock(&self.stalls).push(stall);
     }
+}
+
+#[test]
+fn a_lost_events_notice_from_the_agent_reaches_the_sink() {
+    let (tx, _rx) = std::sync::mpsc::channel();
+    let r = Recorder::new(tx);
+    let lost = dyno_core::protocol::LostEvents {
+        activity: 2,
+        alerts: 1,
+        alarms: 0,
+    };
+    super::ports::deliver(&*r, dyno_core::protocol::Message::EventsLost(lost));
+    assert_eq!(*lock(&r.lost), [lost]);
 }
 
 /// How fast the tests' links look at the world (the thresholds are counted in ticks, so only the speed changes).

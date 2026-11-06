@@ -41,7 +41,7 @@ quarantined like any plugin call.
 ### Rules for every server
 
 1. **Local only.** Transport is stdio (the host starts the app's `--mcp` mode) or loopback with a **per-client key** issued like Pitwall pairing
-   (ADR 0004): shown once, held in the OS credential store, revocable in the app. No remote listener, no tunnel.
+   (ADR 0004): shown once, only its SHA-256 kept in an owner-only file in the app's config folder (amended 2026-11-05: not the OS credential store, whose prompt after an update of an ad-hoc signed build blocked Dyno before its first window; a hash is not a secret), revocable in the app. No remote listener, no tunnel.
 2. **Off by default, per app.** The user turns it on in the app's settings; the setting says which tools are exposed and to whom.
 3. **Every call is logged and visible in the app**: time, client, tool, arguments (redacted), result size, duration, outcome. The log
    holds no file contents beyond what the arguments and a size say, and the user can clear it.
