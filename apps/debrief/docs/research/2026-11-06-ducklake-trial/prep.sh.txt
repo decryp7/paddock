@@ -1,0 +1,27 @@
+#!/bin/bash
+# DuckLake trial prep: generate the 10M corpus (invented, gen_large.py), split it into two imports, clone large10 the same
+# way, build the trial binary. Every heavy step through plock (normal lane).
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial
+P=/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock
+WT=/Volumes/d7sst7/dev-targets/wt/ducklake-trial-bench
+L=/Volumes/d7sst7/dev-targets/debrief-libduckdb/2.0.0/duckdb-shared-libs-osx-arm64
+log() { echo "$(date '+%F %T') $*" >> $T/log.txt; }
+log "prep start load $(sysctl -n vm.loadavg)"
+if [ ! -d $T/corpus10m/main ]; then
+  $P run --lane normal ducklake-trial -- nice -n 10 python3 -I $WT/apps/debrief/scripts/perf/gen_large.py $T/corpus10m/all 0.18 > $T/gen10m.log 2>&1 || { log "gen failed"; exit 1; }
+  mkdir -p $T/corpus10m/main/clef $T/corpus10m/extra/clef
+  mv $T/corpus10m/all/web $T/corpus10m/all/small $T/corpus10m/all/compressed $T/corpus10m/main/
+  for d in $T/corpus10m/all/clef/*; do case $(basename $d) in WEB12) mv $d $T/corpus10m/extra/clef/;; *) mv $d $T/corpus10m/main/clef/;; esac; done
+  log "corpus10m $(du -sh $T/corpus10m/main | cut -f1) main, $(du -sh $T/corpus10m/extra | cut -f1) extra"
+fi
+if [ ! -d $T/corpus56m/main ]; then
+  S=/Volumes/d7sst7/dev-targets/duck2-bench/large10
+  mkdir -p $T/corpus56m/main/clef $T/corpus56m/extra/clef
+  for d in web small compressed; do cp -cR $S/$d $T/corpus56m/main/$d; done
+  for d in $S/clef/*; do case $(basename $d) in WEB12) cp -cR $d $T/corpus56m/extra/clef/;; *) cp -cR $d $T/corpus56m/main/clef/;; esac; done
+  log "corpus56m cloned from large10"
+fi
+$P run --lane normal ducklake-trial -- bash -c "cd $WT/apps/debrief/crates/debrief-store-duck && CARGO_TARGET_DIR=/Volumes/d7sst7/dev-targets/target/ducklake-trial CARGO_BUILD_JOBS=2 DUCKDB_LIB_DIR=$L DUCKDB_INCLUDE_DIR=$L nice -n 10 cargo test --release --test ducklake_trial --no-run" > $T/build.log 2>&1
+B=$(sed -n 's/.*Executable .*(\(.*\))/\1/p' $T/build.log | tail -1)
+[ -x "$B" ] && cp "$B" $T/bin/ducklake_trial && log "built $(basename $B)" || { log "build failed"; exit 1; }
+log "prep end load $(sysctl -n vm.loadavg)"

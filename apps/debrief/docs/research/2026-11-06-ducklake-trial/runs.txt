@@ -1,0 +1,183 @@
+# Per-run summary (bin/table.py) of every counted run; raw output in /Volumes/d7sst7/dev-targets/scratch/ducklake-trial/out/
+l10m-adopt-1: main 0.20 s NaN ev/s fp 33 | extra 0.02 s | q-during main p50/p95/max 15.8/15.8/15.8 n=1 extra 16.3/16.3 n=1 | quiet 17.5 rows 205 | disk seg - db - idx - files 1 lake data 0.0 files 1 cat 0.2 | bg - s fp - | undo 0.021 s fp 138 | shift 0.429 s reidx - rows 1147009 fp 1332 | compact 2.230 s fp 1532 after: seg - db - files - lake 751.1 files 4 | quiet-after 24.6 rows 138 | life_fp 1538 MB
+l10m-adopt-2: main 0.20 s NaN ev/s fp 35 | extra 0.01 s | q-during main p50/p95/max 16.8/16.8/16.8 n=1 extra 13.8/13.8 n=1 | quiet 17.6 rows 205 | disk seg - db - idx - files 1 lake data 0.0 files 1 cat 0.2 | bg - s fp - | undo 0.021 s fp 140 | shift 0.395 s reidx - rows 1147009 fp 1330 | compact 2.217 s fp 1516 after: seg - db - files - lake 751.1 files 4 | quiet-after 24.3 rows 138 | life_fp 1516 MB
+l10m-adopt-3: main 0.27 s NaN ev/s fp 36 | extra 0.02 s | q-during main p50/p95/max 19.4/19.4/19.4 n=1 extra 21.7/21.7 n=1 | quiet 27.9 rows 205 | disk seg - db - idx - files 1 lake data 0.0 files 1 cat 0.2 | bg - s fp - | undo 0.037 s fp 167 | shift 0.403 s reidx - rows 1147009 fp 1328 | compact 4.965 s fp 1720 after: seg - db - files - lake 751.3 files 4 | quiet-after 40.3 rows 138 | life_fp 1726 MB
+l10m-insert-1: main 1.92 s 5094216 ev/s fp 1734 | extra 0.16 s | q-during main p50/p95/max 25.2/83.9/83.9 n=7 extra 41.6/41.6 n=1 | quiet 25.7 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.1 | bg - s fp - | undo 0.038 s fp 1740 | shift 0.418 s reidx - rows 1147009 fp 775 | compact 0.411 s fp 976 after: seg - db - files - lake 820.6 files 19 | quiet-after 21.9 rows 138 | life_fp 1751 MB
+l10m-insert-2: main 4.86 s 2018679 ev/s fp 1749 | extra 0.20 s | q-during main p50/p95/max 22.6/108.2/192.3 n=17 extra 21.1/21.1 n=1 | quiet 25.4 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.1 | bg - s fp - | undo 0.041 s fp 1764 | shift 0.874 s reidx - rows 1147009 fp 774 | compact 1.426 s fp 910 after: seg - db - files - lake 820.6 files 19 | quiet-after 23.1 rows 138 | life_fp 1767 MB
+l10m-insert-3: main 5.14 s 1907514 ev/s fp 1686 | extra 0.17 s | q-during main p50/p95/max 23.4/34.1/98.0 n=19 extra 38.4/38.4 n=1 | quiet 25.6 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.1 | bg - s fp - | undo 0.039 s fp 1701 | shift 0.521 s reidx - rows 1147009 fp 813 | compact 1.261 s fp 916 after: seg - db - files - lake 820.6 files 19 | quiet-after 21.6 rows 138 | life_fp 1703 MB
+l10m-sqlite-1: main 2.50 s 3924114 ev/s fp 1726 | extra 0.19 s | q-during main p50/p95/max 25.1/112.6/112.6 n=9 extra 24.6/24.6 n=1 | quiet 29.1 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.2 | bg - s fp - | undo 0.043 s fp 1746 | shift 0.426 s reidx - rows 1147009 fp 808 | compact 0.445 s fp 911 after: seg - db - files - lake 820.6 files 19 | quiet-after 22.1 rows 138 | life_fp 1748 MB
+l10m-sqlite-2: main 1.98 s 4956308 ev/s fp 1728 | extra 0.17 s | q-during main p50/p95/max 26.1/48.6/48.6 n=7 extra 41.6/41.6 n=1 | quiet 29.4 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.2 | bg - s fp - | undo 0.039 s fp 1741 | shift 0.441 s reidx - rows 1147009 fp 751 | compact 0.420 s fp 926 after: seg - db - files - lake 820.6 files 19 | quiet-after 22.5 rows 138 | life_fp 1744 MB
+l10m-sqlite-3: main 2.19 s 4480628 ev/s fp 1686 | extra 0.18 s | q-during main p50/p95/max 29.0/87.9/87.9 n=8 extra 41.5/41.5 n=1 | quiet 32.7 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.2 | bg - s fp - | undo 0.055 s fp 1696 | shift 0.643 s reidx - rows 1147009 fp 741 | compact 0.439 s fp 953 after: seg - db - files - lake 820.6 files 19 | quiet-after 23.8 rows 138 | life_fp 1702 MB
+l10m-sqlite-4: main 4.72 s 2074947 ev/s fp 1723 | extra 0.25 s | q-during main p50/p95/max 23.5/83.5/110.1 n=17 extra 25.9/25.9 n=1 | quiet 29.9 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.2 | bg - s fp - | undo 0.044 s fp 1724 | shift 0.490 s reidx - rows 1147009 fp 777 | compact 0.423 s fp 911 after: seg - db - files - lake 820.6 files 19 | quiet-after 23.4 rows 138 | life_fp 1738 MB
+l10m-sqlite-5: main 1.97 s 4972270 ev/s fp 1649 | extra 0.17 s | q-during main p50/p95/max 26.8/53.8/53.8 n=7 extra 38.6/38.6 n=1 | quiet 26.4 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.2 | bg - s fp - | undo 0.045 s fp 1667 | shift 0.444 s reidx - rows 1147009 fp 793 | compact 0.423 s fp 916 after: seg - db - files - lake 820.6 files 19 | quiet-after 22.8 rows 138 | life_fp 1669 MB
+l10m-sqlite-6: main 2.01 s 4886095 ev/s fp 1683 | extra 0.17 s | q-during main p50/p95/max 24.2/33.8/33.8 n=8 extra 36.0/36.0 n=1 | quiet 29.9 rows 205 | disk seg - db - idx - files 12 lake data 749.1 files 12 cat 0.2 | bg - s fp - | undo 0.044 s fp 1696 | shift 0.455 s reidx - rows 1147009 fp 766 | compact 0.454 s fp 931 after: seg - db - files - lake 820.6 files 19 | quiet-after 22.5 rows 138 | life_fp 1702 MB
+l10m-zstd-1: main 1.92 s 5111408 ev/s fp 1650 | extra 0.22 s | q-during main p50/p95/max 30.5/106.6/106.6 n=7 extra 44.5/44.5 n=1 | quiet 32.2 rows 205 | disk seg - db - idx - files 12 lake data 426.9 files 12 cat 0.1 | bg - s fp - | undo 0.038 s fp 1597 | shift 0.460 s reidx - rows 1147009 fp 762 | compact 0.362 s fp 855 after: seg - db - files - lake 467.6 files 19 | quiet-after 27.1 rows 138 | life_fp 1653 MB
+l10m-zstd-2: main 1.94 s 5060180 ev/s fp 1642 | extra 0.22 s | q-during main p50/p95/max 44.2/115.1/115.1 n=7 extra 52.5/52.5 n=1 | quiet 32.0 rows 205 | disk seg - db - idx - files 12 lake data 426.5 files 12 cat 0.1 | bg - s fp - | undo 0.037 s fp 1607 | shift 0.494 s reidx - rows 1147009 fp 731 | compact 0.363 s fp 840 after: seg - db - files - lake 467.2 files 19 | quiet-after 27.1 rows 138 | life_fp 1642 MB
+l10m-zstd-3: main 1.91 s 5119682 ev/s fp 1621 | extra 0.22 s | q-during main p50/p95/max 45.5/103.7/103.7 n=7 extra 46.7/46.7 n=1 | quiet 32.0 rows 205 | disk seg - db - idx - files 12 lake data 426.6 files 12 cat 0.1 | bg - s fp - | undo 0.036 s fp 1600 | shift 0.449 s reidx - rows 1147009 fp 751 | compact 0.362 s fp 836 after: seg - db - files - lake 467.4 files 19 | quiet-after 27.7 rows 138 | life_fp 1621 MB
+l10m-zstd768-1: main 3.33 s 2945726 ev/s fp 1417 | extra 0.41 s | q-during main p50/p95/max 28.4/195.7/195.7 n=11 extra 80.6/80.6 n=2 | quiet 30.6 rows 205 | disk seg - db - idx - files 12 lake data 426.8 files 12 cat 0.1 | bg - s fp - | undo 0.039 s fp 1426 | shift 0.869 s reidx - rows 1147009 fp 610 | compact 1.256 s fp 658 after: seg - db - files - lake 467.8 files 19 | quiet-after 39.9 rows 138 | life_fp 1432 MB
+l10m-zstd768-2: main 2.90 s 3380954 ev/s fp 1394 | extra 0.22 s | q-during main p50/p95/max 32.6/83.5/83.5 n=10 extra 40.5/40.5 n=1 | quiet 27.8 rows 205 | disk seg - db - idx - files 12 lake data 427.1 files 12 cat 0.1 | bg - s fp - | undo 0.043 s fp 1396 | shift 0.805 s reidx - rows 1147009 fp 566 | compact - s fp - after: seg - db - files - lake - files - | quiet-after - rows - | life_fp 1410 MB
+l10m-zstd768-3: main 2.53 s 3867600 ev/s fp 1327 | extra 0.21 s | q-during main p50/p95/max 37.5/117.9/117.9 n=9 extra 44.2/44.2 n=1 | quiet 27.7 rows 205 | disk seg - db - idx - files 12 lake data 426.9 files 12 cat 0.1 | bg - s fp - | undo 0.041 s fp 1340 | shift 0.684 s reidx - rows 1147009 fp 595 | compact 0.786 s fp 694 after: seg - db - files - lake 467.7 files 19 | quiet-after 26.7 rows 138 | life_fp 1348 MB
+r10m-1: main - s - ev/s fp - | extra - s | q-during main p50/p95/max -/-/- n=- extra -/- n=- | quiet - rows - | disk seg - db - idx - files - lake data - files - cat - | bg - s fp - | undo - s fp - | shift - s reidx - rows - fp - | compact - s fp - after: seg - db - files - lake - files - | quiet-after - rows - | life_fp 103 MB
+r10m-2: main - s - ev/s fp - | extra - s | q-during main p50/p95/max -/-/- n=- extra -/- n=- | quiet - rows - | disk seg - db - idx - files - lake data - files - cat - | bg - s fp - | undo - s fp - | shift - s reidx - rows - fp - | compact - s fp - after: seg - db - files - lake - files - | quiet-after - rows - | life_fp 9 MB
+r10m-3: main - s - ev/s fp - | extra - s | q-during main p50/p95/max -/-/- n=- extra -/- n=- | quiet - rows - | disk seg - db - idx - files - lake data - files - cat - | bg - s fp - | undo - s fp - | shift - s reidx - rows - fp - | compact - s fp - after: seg - db - files - lake - files - | quiet-after - rows - | life_fp 10 MB
+s10m-1: main 5.87 s 1670263 ev/s fp 916 | extra 3.03 s | q-during main p50/p95/max 88.9/282.9/387.8 n=17 extra 201.7/399.2 n=7 | quiet 146.0 rows 205 | disk seg 504.7 db 130.8 idx 258.0 files 83 lake data - files 83 cat - | bg 50.72 s fp 1073 | undo 1.397 s fp 608 | shift 7.540 s reidx 11.075 rows - fp 1129 | compact 0.037 s fp 957 after: seg 485.0 db 147.9 files 80 lake - files - | quiet-after 128.0 rows 138 | life_fp 1129 MB
+s10m-2: main 6.23 s 1573021 ev/s fp 941 | extra 2.28 s | q-during main p50/p95/max 70.6/141.8/183.8 n=20 extra 183.4/242.0 n=6 | quiet 148.3 rows 205 | disk seg 504.4 db 131.9 idx 257.2 files 84 lake data - files 84 cat - | bg 49.50 s fp 1064 | undo 1.145 s fp 634 | shift 7.324 s reidx 8.329 rows - fp 1030 | compact 0.036 s fp 878 after: seg 484.6 db 148.1 files 81 lake - files - | quiet-after 129.9 rows 138 | life_fp 1064 MB
+s10m-3: main 5.52 s 1774942 ev/s fp 937 | extra 1.73 s | q-during main p50/p95/max 87.3/199.8/465.1 n=16 extra 295.9/398.8 n=3 | quiet 151.3 rows 205 | disk seg 504.9 db 100.7 idx 257.6 files 82 lake data - files 82 cat - | bg 46.27 s fp 970 | undo 0.982 s fp 536 | shift 4.040 s reidx 6.937 rows - fp 993 | compact 0.034 s fp 818 after: seg 485.1 db 149.2 files 79 lake - files - | quiet-after 128.9 rows 138 | life_fp 993 MB
+l56m-adopt-1: main 1.05 s NaN ev/s fp 137 | extra 0.05 s | q-during main p50/p95/max 18.9/19.0/19.0 n=4 extra 20.7/20.7 n=1 | quiet 22.2 rows 205 | disk seg - db - idx - files 1 lake data 0.0 files 1 cat 1.0 | bg - s fp - | undo 0.070 s fp 151 | shift 2.189 s reidx - rows 6369152 fp 1728 | compact 8.438 s fp 2580 after: seg - db - files - lake 3908.2 files 70 | quiet-after 29.9 rows 138 | life_fp 2580 MB
+l56m-adopt-2: main 1.04 s NaN ev/s fp 130 | extra 0.06 s | q-during main p50/p95/max 18.2/19.2/19.2 n=4 extra 18.5/18.5 n=1 | quiet 22.3 rows 205 | disk seg - db - idx - files 1 lake data 0.0 files 1 cat 1.0 | bg - s fp - | undo 0.072 s fp 155 | shift 3.599 s reidx - rows 6369152 fp 1659 | compact 17.424 s fp 2561 after: seg - db - files - lake 3907.8 files 70 | quiet-after 31.3 rows 138 | life_fp 2562 MB
+l56m-adopt-3: main 1.05 s NaN ev/s fp 126 | extra 0.06 s | q-during main p50/p95/max 18.4/19.4/19.4 n=4 extra 18.7/18.7 n=1 | quiet 22.3 rows 205 | disk seg - db - idx - files 1 lake data 0.0 files 1 cat 1.0 | bg - s fp - | undo 0.074 s fp 157 | shift 2.234 s reidx - rows 6369152 fp 1571 | compact 9.025 s fp 2597 after: seg - db - files - lake 3907.3 files 70 | quiet-after 29.0 rows 138 | life_fp 2599 MB
+l56m-insert-1: main 13.42 s 4055987 ev/s fp 2032 | extra 0.70 s | q-during main p50/p95/max 25.4/126.2/131.6 n=46 extra 25.2/32.6 n=3 | quiet 32.6 rows 205 | disk seg - db - idx - files 58 lake data 4150.0 files 58 cat 0.4 | bg - s fp - | undo 0.138 s fp 2028 | shift 2.430 s reidx - rows 6369152 fp 1406 | compact 1.726 s fp 1988 after: seg - db - files - lake 4576.7 files 84 | quiet-after 27.8 rows 138 | life_fp 2043 MB
+l56m-insert-2: main 10.65 s 5111592 ev/s fp 1898 | extra 0.59 s | q-during main p50/p95/max 25.6/86.1/91.6 n=37 extra 81.8/81.8 n=2 | quiet 32.4 rows 205 | disk seg - db - idx - files 58 lake data 4150.1 files 58 cat 0.4 | bg - s fp - | undo 0.100 s fp 1290 | shift 2.436 s reidx - rows 6369152 fp 1453 | compact 1.744 s fp 1988 after: seg - db - files - lake 4576.3 files 84 | quiet-after 29.0 rows 138 | life_fp 1997 MB
+l56m-insert-3: main 10.69 s 5090907 ev/s fp 1936 | extra 0.61 s | q-during main p50/p95/max 25.6/58.6/67.6 n=38 extra 83.7/83.7 n=2 | quiet 34.8 rows 205 | disk seg - db - idx - files 58 lake data 4150.1 files 58 cat 0.4 | bg - s fp - | undo 0.101 s fp 1152 | shift 2.393 s reidx - rows 6369152 fp 1452 | compact 1.701 s fp 1783 after: seg - db - files - lake 4576.4 files 84 | quiet-after 28.2 rows 138 | life_fp 1936 MB
+l56m-sqlite-1: main 16.75 s 3250937 ev/s fp 1923 | extra 1.27 s | q-during main p50/p95/max 25.8/73.3/93.4 n=59 extra 37.6/89.1 n=5 | quiet 31.7 rows 205 | disk seg - db - idx - files 58 lake data 4150.0 files 58 cat 0.2 | bg - s fp - | undo 0.105 s fp 1184 | shift 4.366 s reidx - rows 6369152 fp 1488 | compact 5.315 s fp 1650 after: seg - db - files - lake 4575.9 files 84 | quiet-after 26.5 rows 138 | life_fp 1923 MB
+l56m-sqlite-2: main 21.41 s 2542869 ev/s fp 1903 | extra 1.51 s | q-during main p50/p95/max 23.9/47.6/92.5 n=77 extra 35.7/84.7 n=5 | quiet 33.0 rows 205 | disk seg - db - idx - files 58 lake data 4150.1 files 58 cat 0.2 | bg - s fp - | undo 0.110 s fp 1129 | shift 5.105 s reidx - rows 6369152 fp 1449 | compact 7.118 s fp 1856 after: seg - db - files - lake 4575.7 files 84 | quiet-after 24.9 rows 138 | life_fp 1903 MB
+l56m-sqlite-3: main 28.21 s 1930177 ev/s fp 1953 | extra 1.33 s | q-during main p50/p95/max 24.7/67.5/96.7 n=99 extra 32.6/82.5 n=5 | quiet 29.7 rows 205 | disk seg - db - idx - files 58 lake data 4150.1 files 58 cat 0.2 | bg - s fp - | undo 0.101 s fp 1194 | shift 4.828 s reidx - rows 6369152 fp 1459 | compact 5.539 s fp 1764 after: seg - db - files - lake 4575.9 files 84 | quiet-after 23.9 rows 138 | life_fp 1958 MB
+l56m-zstd-1: main 20.22 s 2692244 ev/s fp 1880 | extra 1.01 s | q-during main p50/p95/max 31.0/110.9/117.8 n=66 extra 73.2/101.3 n=4 | quiet 39.7 rows 205 | disk seg - db - idx - files 58 lake data 2376.4 files 58 cat 0.4 | bg - s fp - | undo 0.103 s fp 1121 | shift 3.947 s reidx - rows 6369152 fp 1322 | compact 4.266 s fp 1733 after: seg - db - files - lake 2608.2 files 82 | quiet-after 25.8 rows 138 | life_fp 1880 MB
+l56m-zstd-2: main 19.68 s 2766436 ev/s fp 1899 | extra 1.06 s | q-during main p50/p95/max 28.1/104.0/118.9 n=67 extra 97.2/97.4 n=4 | quiet 43.1 rows 205 | disk seg - db - idx - files 58 lake data 2376.0 files 58 cat 0.4 | bg - s fp - | undo 0.098 s fp 1916 | shift 3.959 s reidx - rows 6369152 fp 1326 | compact 4.499 s fp 1710 after: seg - db - files - lake 2608.3 files 82 | quiet-after 28.3 rows 138 | life_fp 1943 MB
+l56m-zstd-3: main 18.35 s 2966626 ev/s fp 1887 | extra 0.88 s | q-during main p50/p95/max 43.6/79.5/84.6 n=62 extra 51.4/88.1 n=3 | quiet 38.6 rows 205 | disk seg - db - idx - files 58 lake data 2376.5 files 58 cat 0.4 | bg - s fp - | undo 0.102 s fp 1924 | shift 3.600 s reidx - rows 6369152 fp 1415 | compact 3.919 s fp 1660 after: seg - db - files - lake 2608.3 files 82 | quiet-after 27.9 rows 138 | life_fp 1926 MB
+r56m-1: main - s - ev/s fp - | extra - s | q-during main p50/p95/max -/-/- n=- extra -/- n=- | quiet - rows - | disk seg - db - idx - files - lake data - files - cat - | bg - s fp - | undo - s fp - | shift - s reidx - rows - fp - | compact - s fp - after: seg - db - files - lake - files - | quiet-after - rows - | life_fp 103 MB
+r56m-2: main - s - ev/s fp - | extra - s | q-during main p50/p95/max -/-/- n=- extra -/- n=- | quiet - rows - | disk seg - db - idx - files - lake data - files - cat - | bg - s fp - | undo - s fp - | shift - s reidx - rows - fp - | compact - s fp - after: seg - db - files - lake - files - | quiet-after - rows - | life_fp 102 MB
+r56m-3: main - s - ev/s fp - | extra - s | q-during main p50/p95/max -/-/- n=- extra -/- n=- | quiet - rows - | disk seg - db - idx - files - lake data - files - cat - | bg - s fp - | undo - s fp - | shift - s reidx - rows - fp - | compact - s fp - after: seg - db - files - lake - files - | quiet-after - rows - | life_fp 101 MB
+s56m-1: main 37.24 s 1461806 ev/s fp 1280 | extra 6.40 s | q-during main p50/p95/max 176.9/819.1/2163.6 n=67 extra 1458.6/3040.2 n=4 | quiet 476.0 rows 205 | disk seg 2808.2 db 389.6 idx 1423.6 files 446 lake data - files 446 cat - | bg 266.08 s fp 1648 | undo 5.131 s fp 1012 | shift 23.768 s reidx 40.617 rows - fp 1391 | compact 0.163 s fp 1039 after: seg 2698.0 db 629.7 files 428 lake - files - | quiet-after 452.0 rows 138 | life_fp 1671 MB
+s56m-2: main 28.36 s 1919968 ev/s fp 1268 | extra 6.13 s | q-during main p50/p95/max 483.4/884.5/2108.5 n=40 extra 1445.5/3074.1 n=4 | quiet 484.5 rows 205 | disk seg 2813.5 db 496.3 idx 1422.7 files 442 lake data - files 442 cat - | bg 267.00 s fp 1500 | undo 5.067 s fp 921 | shift 22.807 s reidx 39.244 rows - fp 1054 | compact 0.157 s fp 895 after: seg 2703.3 db 629.4 files 424 lake - files - | quiet-after 461.1 rows 138 | life_fp 1601 MB
+s56m-3: main 27.92 s 1949890 ev/s fp 1287 | extra 6.20 s | q-during main p50/p95/max 221.1/883.1/2171.1 n=41 extra 1423.0/3066.5 n=4 | quiet 484.2 rows 205 | disk seg 2816.7 db 494.4 idx 1423.3 files 441 lake data - files 441 cat - | bg 268.93 s fp 875 | undo 5.106 s fp 926 | shift 22.230 s reidx 38.265 rows - fp 1361 | compact 0.164 s fp 1089 after: seg 2706.6 db 630.2 files 422 lake - files - | quiet-after 458.7 rows 138 | life_fp 1361 MB
+r10m-1: quiet_query_raw_segments queries=21 p50_ms=19.3 p95_ms=19.7 max_ms=23.5 rows_last=205
+r10m-2: quiet_query_raw_segments queries=21 p50_ms=19.4 p95_ms=19.9 max_ms=22.5 rows_last=205
+r10m-3: quiet_query_raw_segments queries=21 p50_ms=19.2 p95_ms=19.7 max_ms=22.3 rows_last=205
+r56m-1: quiet_query_raw_segments queries=21 p50_ms=54.9 p95_ms=56.7 max_ms=61.8 rows_last=205
+r56m-2: quiet_query_raw_segments queries=21 p50_ms=55.2 p95_ms=57.1 max_ms=61.7 rows_last=205
+r56m-3: quiet_query_raw_segments queries=21 p50_ms=54.3 p95_ms=55.3 max_ms=61.0 rows_last=205
+
+# Load and macOS CI per run (log.txt)
+2026-11-07 01:15:23 cal10m start load1 7.22 mac_ci=none
+2026-11-07 01:16:39 cal10m end rc=0 load1 9.63 maxload1 10.40 mac_ci=none
+2026-11-07 01:20:17 cal10m-lake start load1 6.93 mac_ci=none
+2026-11-07 01:20:27 cal10m-lake end rc=0 load1 7.00 maxload1 7.17 mac_ci=none
+2026-11-07 01:22:50 s10m-1 start load1 6.74 mac_ci=none
+2026-11-07 01:24:10 s10m-1 end rc=0 load1 5.92 maxload1 8.27 mac_ci=none
+2026-11-07 01:26:22 s10m-2 start load1 9.48 mac_ci=none
+2026-11-07 01:27:37 s10m-2 end rc=0 load1 6.65 maxload1 9.48 mac_ci=none
+2026-11-07 01:29:39 s10m-3 start load1 4.28 mac_ci=none
+2026-11-07 01:30:49 s10m-3 end rc=0 load1 5.65 maxload1 6.91 mac_ci=none
+2026-11-07 01:33:36 l10m-insert-1 start load1 3.03 mac_ci=none
+2026-11-07 01:33:41 l10m-insert-1 end rc=0 load1 2.86 maxload1 3.03 mac_ci=none
+2026-11-07 01:54:25 l10m-insert-2 start load1 3.99 mac_ci=none
+2026-11-07 01:54:40 l10m-insert-2 end rc=0 load1 3.35 maxload1 3.99 mac_ci=none
+2026-11-07 01:54:41 l10m-insert-3 start load1 3.24 mac_ci=none
+2026-11-07 01:54:51 l10m-insert-3 end rc=0 load1 3.43 maxload1 3.30 mac_ci=none
+2026-11-07 01:54:51 l10m-adopt-1 start load1 3.43 mac_ci=none
+2026-11-07 01:54:56 l10m-adopt-1 end rc=0 load1 3.16 maxload1 3.43 mac_ci=none
+2026-11-07 01:54:56 l10m-adopt-2 start load1 3.16 mac_ci=none
+2026-11-07 01:55:01 l10m-adopt-2 end rc=0 load1 3.63 maxload1 3.16 mac_ci=none
+2026-11-07 01:55:01 l10m-adopt-3 start load1 3.63 mac_ci=none
+2026-11-07 01:55:12 l10m-adopt-3 end rc=0 load1 4.54 maxload1 3.98 mac_ci=none
+2026-11-07 02:02:02 l10m-sqlite-1 start load1 14.74 mac_ci=none
+2026-11-07 02:02:13 l10m-sqlite-1 end rc=0 load1 13.14 maxload1 14.74 mac_ci=none
+2026-11-07 02:04:14 l10m-sqlite-2 start load1 14.03 mac_ci=none
+2026-11-07 02:04:20 l10m-sqlite-2 end rc=0 load1 13.79 maxload1 14.03 mac_ci=none
+2026-11-07 02:04:20 l10m-sqlite-3 start load1 13.79 mac_ci=none
+2026-11-07 02:04:30 l10m-sqlite-3 end rc=0 load1 13.45 maxload1 13.79 mac_ci=none
+2026-11-07 02:08:28 r10m-1 start load1 5.99 mac_ci=none
+2026-11-07 02:08:34 r10m-1 end rc=0 load1 5.51 maxload1 5.99 mac_ci=none
+2026-11-07 02:08:44 r10m-2 start load1 4.89 mac_ci=none
+2026-11-07 02:08:49 r10m-2 end rc=0 load1 4.58 maxload1 4.89 mac_ci=none
+2026-11-07 02:08:49 r10m-3 start load1 4.58 mac_ci=none
+2026-11-07 02:08:54 r10m-3 end rc=0 load1 4.21 maxload1 4.58 mac_ci=none
+2026-11-07 02:08:54 l10m-zstd-1 start load1 4.21 mac_ci=none
+2026-11-07 02:09:04 l10m-zstd-1 end rc=0 load1 3.80 maxload1 4.21 mac_ci=none
+2026-11-07 02:09:05 l10m-zstd-2 start load1 3.80 mac_ci=none
+2026-11-07 02:09:15 l10m-zstd-2 end rc=0 load1 3.88 maxload1 4.22 mac_ci=none
+2026-11-07 02:09:15 l10m-zstd-3 start load1 3.88 mac_ci=none
+2026-11-07 02:09:25 l10m-zstd-3 end rc=0 load1 3.67 maxload1 3.88 mac_ci=none
+2026-11-07 02:09:40 l10m-zstd768-1 start load1 3.25 mac_ci=none
+2026-11-07 02:09:50 l10m-zstd768-1 end rc=0 load1 7.01 maxload1 5.71 mac_ci=none
+2026-11-07 02:09:51 l10m-zstd768-2 start load1 7.01 mac_ci=none
+2026-11-07 02:10:01 l10m-zstd768-2 end rc=101 load1 7.94 maxload1 8.37 mac_ci=none
+2026-11-07 02:17:26 l10m-zstd768-3 start load1 8.45 mac_ci=none
+2026-11-07 02:17:36 l10m-zstd768-3 end rc=0 load1 9.15 maxload1 8.82 mac_ci=none
+2026-11-07 02:17:53 s56m-1 start load1 6.83 mac_ci=none
+2026-11-07 02:24:20 s56m-1 end rc=0 load1 6.65 maxload1 15.57 mac_ci=none
+2026-11-07 02:24:20 s56m-2 start load1 6.65 mac_ci=none
+2026-11-07 02:30:56 s56m-2 end rc=0 load1 8.24 maxload1 20.12 mac_ci=none
+2026-11-07 02:30:57 s56m-3 start load1 7.74 mac_ci=none
+2026-11-07 02:37:58 s56m-3 end rc=0 load1 16.42 maxload1 70.93 mac_ci=none
+2026-11-07 02:38:09 l56m-insert-1 start load1 14.77 mac_ci=none
+2026-11-07 02:38:34 l56m-insert-1 end rc=0 load1 13.08 maxload1 16.23 mac_ci=none
+2026-11-07 02:38:34 l56m-insert-2 start load1 13.08 mac_ci=none
+2026-11-07 02:38:54 l56m-insert-2 end rc=0 load1 11.25 maxload1 13.08 mac_ci=none
+2026-11-07 02:38:54 l56m-insert-3 start load1 11.25 mac_ci=none
+2026-11-07 02:39:14 l56m-insert-3 end rc=0 load1 9.64 maxload1 11.31 mac_ci=none
+2026-11-07 02:39:15 l56m-adopt-1 start load1 9.64 mac_ci=none
+2026-11-07 02:39:30 l56m-adopt-1 end rc=0 load1 8.66 maxload1 9.64 mac_ci=none
+2026-11-07 02:39:30 l56m-adopt-2 start load1 8.66 mac_ci=none
+2026-11-07 02:39:45 l56m-adopt-2 end rc=0 load1 7.77 maxload1 8.66 mac_ci=none
+2026-11-07 02:39:45 l56m-adopt-3 start load1 7.77 mac_ci=none
+2026-11-07 02:40:15 l56m-adopt-3 end rc=0 load1 5.80 maxload1 7.77 mac_ci=none
+2026-11-07 02:40:15 l56m-sqlite-1 start load1 5.80 mac_ci=none
+2026-11-07 02:41:01 l56m-sqlite-1 end rc=0 load1 21.04 maxload1 9.90 mac_ci=none
+2026-11-07 02:50:19 l56m-sqlite-2 start load1 14.98 mac_ci=none
+2026-11-07 02:50:44 l56m-sqlite-2 end rc=0 load1 13.78 maxload1 15.38 mac_ci=none
+2026-11-07 02:50:44 l56m-sqlite-3 start load1 13.78 mac_ci=none
+2026-11-07 02:51:09 l56m-sqlite-3 end rc=0 load1 12.12 maxload1 13.88 mac_ci=none
+2026-11-07 02:51:10 r56m-1 start load1 12.12 mac_ci=none
+2026-11-07 02:51:15 r56m-1 end rc=0 load1 11.39 maxload1 12.12 mac_ci=none
+2026-11-07 02:51:15 r56m-2 start load1 11.39 mac_ci=none
+2026-11-07 02:51:20 r56m-2 end rc=0 load1 12.96 maxload1 11.39 mac_ci=none
+2026-11-07 02:51:21 r56m-3 start load1 12.96 mac_ci=none
+2026-11-07 02:51:26 r56m-3 end rc=0 load1 15.92 maxload1 12.96 mac_ci=none
+2026-11-07 02:51:31 l56m-zstd-1 start load1 14.81 mac_ci=none
+2026-11-07 02:51:51 l56m-zstd-1 end rc=0 load1 14.05 maxload1 14.81 mac_ci=none
+2026-11-07 02:51:51 l56m-zstd-2 start load1 14.05 mac_ci=none
+2026-11-07 02:52:11 l56m-zstd-2 end rc=0 load1 13.67 maxload1 14.12 mac_ci=none
+2026-11-07 02:52:12 l56m-zstd-3 start load1 13.67 mac_ci=none
+2026-11-07 02:52:32 l56m-zstd-3 end rc=0 load1 9.94 maxload1 13.67 mac_ci=none
+2026-11-07 02:52:32 l56m-zstd768-1 start load1 9.94 mac_ci=none
+2026-11-07 02:52:52 l56m-zstd768-1 end rc=101 load1 8.45 maxload1 9.94 mac_ci=none
+2026-11-07 02:52:52 l56m-zstd768-2 start load1 8.45 mac_ci=none
+2026-11-07 02:53:12 l56m-zstd768-2 end rc=101 load1 7.41 maxload1 8.48 mac_ci=none
+2026-11-07 02:53:12 l56m-zstd768-3 start load1 7.41 mac_ci=none
+2026-11-07 02:53:38 l56m-zstd768-3 end rc=101 load1 6.72 maxload1 7.88 mac_ci=none
+2026-11-07 02:54:45 s56m-1 start load1 3.45 mac_ci=none
+2026-11-07 03:01:06 s56m-1 end rc=0 load1 4.59 maxload1 6.16 mac_ci=none
+2026-11-07 03:01:06 s56m-2 start load1 4.59 mac_ci=none
+2026-11-07 03:07:18 s56m-2 end rc=0 load1 3.97 maxload1 8.05 mac_ci=none
+2026-11-07 03:07:18 s56m-3 start load1 3.97 mac_ci=none
+2026-11-07 03:13:29 s56m-3 end rc=0 load1 3.52 maxload1 7.14 mac_ci=none
+2026-11-07 03:13:29 l56m-insert-1 start load1 3.52 mac_ci=none
+2026-11-07 03:13:54 l56m-insert-1 end rc=0 load1 3.66 maxload1 3.88 mac_ci=none
+2026-11-07 03:13:55 l56m-insert-2 start load1 3.66 mac_ci=none
+2026-11-07 03:14:15 l56m-insert-2 end rc=0 load1 5.74 maxload1 4.32 mac_ci=none
+2026-11-07 03:14:15 l56m-insert-3 start load1 5.74 mac_ci=none
+2026-11-07 03:14:35 l56m-insert-3 end rc=0 load1 6.23 maxload1 6.51 mac_ci=none
+2026-11-07 03:14:35 l56m-adopt-1 start load1 6.23 mac_ci=none
+2026-11-07 03:14:50 l56m-adopt-1 end rc=0 load1 8.38 maxload1 6.69 mac_ci=none
+2026-11-07 03:14:50 l56m-adopt-2 start load1 8.38 mac_ci=none
+2026-11-07 03:15:16 l56m-adopt-2 end rc=0 load1 7.72 maxload1 8.38 mac_ci=none
+2026-11-07 03:15:16 l56m-adopt-3 start load1 7.72 mac_ci=none
+2026-11-07 03:15:31 l56m-adopt-3 end rc=0 load1 7.60 maxload1 7.72 mac_ci=none
+2026-11-07 03:15:31 l56m-sqlite-1 start load1 7.60 mac_ci=none
+2026-11-07 03:16:06 l56m-sqlite-1 end rc=0 load1 5.62 maxload1 7.89 mac_ci=none
+2026-11-07 03:16:06 l56m-sqlite-2 start load1 5.62 mac_ci=none
+2026-11-07 03:16:47 l56m-sqlite-2 end rc=0 load1 4.95 maxload1 5.62 mac_ci=none
+2026-11-07 03:16:47 l56m-sqlite-3 start load1 4.95 mac_ci=none
+2026-11-07 03:17:32 l56m-sqlite-3 end rc=0 load1 4.56 maxload1 5.43 mac_ci=none
+2026-11-07 03:17:32 r56m-1 start load1 4.36 mac_ci=none
+2026-11-07 03:17:38 r56m-1 end rc=0 load1 4.17 maxload1 4.36 mac_ci=none
+2026-11-07 03:17:38 r56m-2 start load1 4.17 mac_ci=none
+2026-11-07 03:17:43 r56m-2 end rc=0 load1 3.92 maxload1 4.17 mac_ci=none
+2026-11-07 03:17:43 r56m-3 start load1 3.92 mac_ci=none
+2026-11-07 03:17:48 r56m-3 end rc=0 load1 3.68 maxload1 3.92 mac_ci=none
+2026-11-07 03:17:48 l56m-zstd-1 start load1 3.68 mac_ci=none
+2026-11-07 03:18:23 l56m-zstd-1 end rc=0 load1 3.82 maxload1 4.24 mac_ci=none
+2026-11-07 03:18:24 l56m-zstd-2 start load1 3.82 mac_ci=none
+2026-11-07 03:18:59 l56m-zstd-2 end rc=0 load1 4.60 maxload1 4.98 mac_ci=none
+2026-11-07 03:18:59 l56m-zstd-3 start load1 4.60 mac_ci=none
+2026-11-07 03:19:29 l56m-zstd-3 end rc=0 load1 4.27 maxload1 5.28 mac_ci=none
+2026-11-07 03:19:56 l10m-sqlite-4 start load1 3.62 mac_ci=none
+2026-11-07 03:20:06 l10m-sqlite-4 end rc=0 load1 3.93 maxload1 3.62 mac_ci=none
+2026-11-07 03:20:06 l10m-sqlite-5 start load1 3.93 mac_ci=none
+2026-11-07 03:20:12 l10m-sqlite-5 end rc=0 load1 4.02 maxload1 3.93 mac_ci=none
+2026-11-07 03:20:12 l10m-sqlite-6 start load1 4.02 mac_ci=none
+2026-11-07 03:20:22 l10m-sqlite-6 end rc=0 load1 4.54 maxload1 4.42 mac_ci=none
+
+# 56M first pass with an 8 s query window (37 rows), superseded; kept in /Volumes/d7sst7/dev-targets/scratch/ducklake-trial/w8s/

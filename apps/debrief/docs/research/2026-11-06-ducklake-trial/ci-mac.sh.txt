@@ -1,0 +1,16 @@
+#!/bin/bash
+# Prints macOS CI jobs in progress (Gitea API, runs from 7630 upward until a run is missing): "mac_ci=none" or the jobs.
+python3 -I - <<'PY'
+import json, urllib.request
+out = []
+for rid in range(7630, 7700):
+    try:
+        with urllib.request.urlopen(f"https://dev.decryptology.net/api/v1/repos/decryp7/paddock/actions/runs/{rid}/jobs?limit=200", timeout=15) as r:
+            d = json.load(r)
+    except Exception:
+        break
+    for j in d.get("jobs", []):
+        if "macos-latest" in (j.get("labels") or []) and j.get("status") == "in_progress":
+            out.append(f"{rid}/{j['id']}:{j['name'][:40].replace(' ', '_')}")
+print("mac_ci=" + (",".join(out) if out else "none"))
+PY

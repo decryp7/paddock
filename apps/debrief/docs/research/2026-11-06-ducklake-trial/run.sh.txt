@@ -1,0 +1,18 @@
+#!/bin/bash
+# usage: run.sh LABEL ENV=VAL...  one trial run through plock; output in out/LABEL.txt, footprint timeline in out/LABEL.csv.
+# Logs the 1-minute load before and after, the highest 1-minute load seen during the run (5 s samples) and macOS CI jobs.
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial
+P=/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock
+L=/Volumes/d7sst7/dev-targets/debrief-libduckdb/2.0.0/duckdb-shared-libs-osx-arm64
+LABEL=$1; shift
+$P run --lane normal ducklake-trial -- bash -c "
+  l1() { sysctl -n vm.loadavg | awk '{print \$2}'; }
+  echo \"\$(date '+%F %T') $LABEL start load1 \$(l1) \$($T/bin/ci-mac.sh)\" >> $T/log.txt
+  env DYLD_LIBRARY_PATH=$L TRIAL_EXT_DIR=$T/dl/ext $* $T/bin/ducklake_trial --nocapture --test-threads 1 > $T/out/$LABEL.txt 2>&1 &
+  PID=\$!
+  python3 -I /Volumes/d7sst7/dev-targets/research-data/scripts/procsample.py \$PID $T/out/$LABEL.csv 0.5 &
+  ( m=0; while kill -0 \$PID 2>/dev/null; do m=\$(awk -v a=\$m -v b=\$(l1) 'BEGIN{print (b>a)?b:a}'); echo \$m > $T/out/$LABEL.maxload; perl -e 'select(undef,undef,undef,5)'; done ) &
+  wait \$PID; RC=\$?; wait
+  echo \"\$(date '+%F %T') $LABEL end rc=\$RC load1 \$(l1) maxload1 \$(cat $T/out/$LABEL.maxload) \$($T/bin/ci-mac.sh)\" >> $T/log.txt
+" > /dev/null 2>&1
+grep '^trial:' $T/out/$LABEL.txt | sed "s/^/$LABEL /" >> $T/results.txt

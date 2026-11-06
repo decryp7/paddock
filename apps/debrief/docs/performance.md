@@ -83,6 +83,98 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-06, DuckLake trial (branch `docs/debrief-ducklake-trial`)
+
+Quoted by [research/2026-11-06-ducklake-trial.md](research/2026-11-06-ducklake-trial.md). Runs taken 2026-11-07 01:15 to
+03:20.
+
+- **Commit:** store at `origin/feat/debrief-duckdb2-storage-format` 19aff3b83 (`debrief/1.2-int` plus the DuckDB 2.0
+  storage format) with the trial harness `tests/ducklake_trial.rs` added, not committed to the crate (copy:
+  [ducklake_trial.rs.txt](research/2026-11-06-ducklake-trial/ducklake_trial.rs.txt))
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; data and build on d7 (APFS)
+- **Load:** the 1-minute load at the start and end of every run and its highest 5-second sample are in
+  [runs.txt](research/2026-11-06-ducklake-trial/runs.txt). Counted runs: highest 1-minute load 3.0 to 9.5, except
+  `l10m-sqlite-1..3` (13.1 to 14.7: flagged, replaced by `l10m-sqlite-4..6` at 3.6 to 4.5). No macOS CI job was in
+  progress at any run's start or end (Gitea API, runs 7630 onwards). A first 56M pass used a query window that matched 37
+  rows; it was discarded and rerun (one of its store runs peaked at load 70.9).
+- **Build:** release (`cargo test --release --test ducklake_trial --no-run`, `CARGO_BUILD_JOBS=2`), mimalloc (the store
+  worker's allocator), duckdb-rs 1.20000.0 with the official prebuilt libduckdb 2.0.0 (osx-arm64), `ducklake` extension
+  `417a9117f5` (spec 1.1) and `sqlite_scanner` for DuckDB v2.0.0, loaded by path with autoinstall and autoload off. Store
+  defaults: 8 parse threads, 4 DuckDB threads, DuckDB limit 192 MB (768 MB while an import compacts and orders). DuckLake
+  runs: 8 DuckDB threads, no memory limit unless stated.
+- **Corpus:** invented. 10M: `gen_large.py OUT 0.18` (1.45 GB), 10,108,925 events in 126 files. 56M: the kept `large10`
+  (`gen_large.py OUT 1.0`, 7.2 GB), 56,152,132 events in 618 files. Each split into two imports: everything except
+  `clef/WEB12` (9,801,191 and 54,441,640 events), then `clef/WEB12` (307,734 and 1,710,492 events, one CLEF file).
+- **Command:** each run went through plock (normal lane) via `run.sh LABEL ENV...`. The series were `series.sh 10m`,
+  `extra.sh 10m 1791936600000 1791936645000`, `series.sh 56m` and `NO768=1 extra.sh 56m 1791936600000 1791936645000`
+  (scripts kept as `.txt` copies in [research/2026-11-06-ducklake-trial/](research/2026-11-06-ducklake-trial/)). Modes:
+  - `TRIAL_MODE=store`: the store imports import 1, then import 2, each with a query thread every 250 ms; waits for the
+    index and the catalogue; runs `remove_source` on import 2 (undo); runs `set_source_offset` +1 h on the largest
+    sources whose share is nearest 10% of the rows (11.3% here); waits for the index again; runs `compact`.
+  - `TRIAL_MODE=lake`: a DuckLake table is filled from the first store run's kept segments (INSERT, or
+    `ducklake_add_data_files` for "adopt"), with the same query thread. Then a DELETE of import 2's sources, an UPDATE of
+    `ts` on the same sources as the store, and `ducklake_rewrite_data_files`, `_merge_adjacent_files`,
+    `_expire_snapshots` and `_cleanup_old_files`.
+  - `TRIAL_MODE=raw`: the same SQL as the lake runs, over the store's segment files.
+  - Query: events from 2026-10-14 00:10:00 to 00:10:45 UTC where field `Command` = `Reserve` (205 rows; 138 after the
+    undo).
+- **Runs:** 3 per cell; each cell gives the range over its 3 runs.
+- **Numbers (10M):**
+
+  | Measure | Store (today) | DuckLake insert, snappy | DuckLake insert, zstd | DuckLake adopt | DuckLake, SQLite catalog |
+  |---|---|---|---|---|---|
+  | Import 1 (9.8M) | 5.52–6.23 s, 1.57–1.77M events/s, parsing included | write only: 1.92–5.14 s, 1.91–5.09M/s | write only: 1.91–1.94 s, 5.06–5.12M/s | register 80 files: 0.20–0.27 s | write only: 1.97–4.72 s |
+  | Import 2 (0.31M) | 1.73–3.03 s | 0.16–0.20 s | 0.22 s | 0.01–0.02 s | 0.17–0.25 s |
+  | Query during import 1, p50 / p95 / max | page: 70.6–88.9 / 141.8–282.9 / 183.8–465.1 ms | SQL: 22.6–25.2 / 34.1–108.2 / 83.9–192.3 ms | 30.5–45.5 / 103.7–115.1 / 103.7–115.1 ms | 15.8–19.4 ms (1 query each) | 23.5–26.8 / 33.8–83.5 / 33.8–110.1 ms |
+  | Quiet query, p50 | page: 146.0–151.3 ms; same SQL over the segments (raw): 19.2–19.4 ms | 25.4–25.7 ms | 32.0–32.2 ms | 17.5–27.9 ms | 26.4–29.9 ms |
+  | Disk after the imports | segments 504.4–504.9 MB in 82–84 files, data.duckdb 100.7–131.9 MB (full-text index 257.2–258.0 MB, needed by both) | 749.1 MB in 12 files, catalog 0.1 MB | 426.5–426.9 MB in 12 files | no new data (the segments, hard-linked), catalog 0.2 MB | 749.1 MB, catalog 0.2 MB |
+  | Index and catalogue after the import | 46.3–50.7 s | n/a (not part of DuckLake) | | | |
+  | Undo import 2 | 0.98–1.40 s (space freed at once) | 0.038–0.041 s (DELETE; no space freed) | 0.036–0.038 s | 0.021–0.037 s | 0.044–0.045 s |
+  | Time shift, 1,147,009 rows (11.3%) | 4.04–7.54 s; searchable again after 6.94–11.08 s | 0.418–0.874 s (UPDATE; no index or positions) | 0.449–0.494 s | 0.395–0.429 s | 0.444–0.490 s |
+  | Compaction | 0.034–0.037 s (nothing left to merge) | 0.41–1.43 s | 0.36 s | 2.22–4.97 s (rewrites the adopted segments as snappy) | 0.42–0.45 s |
+  | Disk after compaction | segments 484.6–485.1 MB in 79–81 files, data.duckdb 147.9–149.2 MB | 820.6 MB in 19 files | 467.2–467.6 MB in 19 files | 751.1–751.3 MB in 4 files | 820.6 MB in 19 files |
+  | Peak footprint, whole run | 993–1,129 MB (import phase 916–941 MB) | 1,703–1,767 MB | 1,621–1,653 MB | 1,516–1,726 MB (registration 33–36 MB) | 1,669–1,738 MB |
+
+  With a 768 MB DuckDB limit and zstd (the closest to the store's import budget): the write took 2.53–3.33 s, the peak
+  was 1,348–1,432 MB, and 1 of 3 runs failed with "Out of Memory Error" in `ducklake_merge_adjacent_files`.
+
+- **Numbers (56M):**
+
+  | Measure | Store (today) | DuckLake insert, snappy | DuckLake insert, zstd | DuckLake adopt | DuckLake, SQLite catalog |
+  |---|---|---|---|---|---|
+  | Import 1 (54.4M) | 27.92–37.24 s, 1.46–1.95M events/s, parsing included | write only: 10.65–13.42 s, 4.06–5.11M/s | write only: 18.35–20.22 s, 2.69–2.97M/s | register 428 files (2.5 GB): 1.04–1.05 s | write only: 16.75–28.21 s, 1.93–3.25M/s |
+  | Import 2 (1.7M) | 6.13–6.40 s | 0.59–0.70 s | 0.88–1.06 s | 0.05–0.06 s | 1.27–1.51 s |
+  | Query during import 1, p50 / p95 / max | page: 176.9–483.4 / 819.1–884.5 / 2,108.5–2,171.1 ms | SQL: 25.4–25.6 / 58.6–126.2 / 67.6–131.6 ms | 28.1–43.6 / 79.5–110.9 / 84.6–118.9 ms | 18.2–18.9 ms (4 queries each) | 23.9–25.8 / 47.6–73.3 / 92.5–96.7 ms |
+  | Query during import 2, p50 | page: 1,423.0–1,458.6 ms (p95 up to 3,074.1 ms) | 25.2–83.7 ms | 51.4–97.2 ms | 18.5–20.7 ms | 32.6–37.6 ms |
+  | Quiet query, p50 | page: 476.0–484.5 ms; raw SQL over the segments: 54.3–55.2 ms | 32.4–34.8 ms | 38.6–43.1 ms | 22.2–22.3 ms | 29.7–33.0 ms |
+  | Disk after the imports | segments 2,808.2–2,816.7 MB in 441–446 files, data.duckdb 389.6–496.3 MB (index 1,422.7–1,423.6 MB) | 4,150.0–4,150.1 MB in 58 files, catalog 0.4 MB | 2,376.0–2,376.5 MB in 58 files | no new data, catalog 1.0 MB | 4,150.0–4,150.1 MB, catalog 0.2 MB |
+  | Index and catalogue after the import | 266.1–268.9 s | n/a | | | |
+  | Undo import 2 | 5.07–5.13 s | 0.100–0.138 s (no space freed) | 0.098–0.103 s | 0.070–0.074 s | 0.101–0.110 s |
+  | Time shift, 6,369,152 rows (11.3%) | 22.23–23.77 s; searchable again after 38.27–40.62 s | 2.39–2.44 s (no index or positions) | 3.60–3.96 s | 2.19–3.60 s | 4.37–5.11 s |
+  | Compaction | 0.157–0.164 s (nothing left to merge) | 1.70–1.74 s | 3.92–4.50 s | 8.44–17.42 s | 5.32–7.12 s |
+  | Disk after compaction | segments 2,698.0–2,706.6 MB in 422–428 files, data.duckdb 629.4–630.2 MB | 4,576.3–4,576.7 MB in 84 files | 2,608.2–2,608.3 MB in 82 files | 3,907.3–3,908.2 MB in 70 files | 4,575.7–4,575.9 MB in 84 files |
+  | Peak footprint, whole run | 1,361–1,671 MB (import phase 1,268–1,287 MB) | 1,936–2,043 MB | 1,880–1,943 MB | 2,562–2,599 MB (in compaction; registration 126–137 MB) | 1,903–1,958 MB |
+
+  With a 768 MB limit and zstd at 56M (the discarded first pass): 3 of 3 runs failed with "Out of Memory Error" in the
+  time-shift UPDATE.
+
+- **Memory measure:** physical footprint (`ri_phys_footprint`), sampled every 20 ms in the process for the phase peaks
+  and every 0.5 s by `procsample.py` for the whole-run peak.
+- **Notes:**
+  - The DuckLake "write only" cells start from rows that are already parsed into Parquet segments. They leave out
+    parsing, and also the ordering into time positions and the catalogue, which a store built on DuckLake would still
+    need. The store column includes all of that, so the "write only" cells are not end-to-end import rates.
+  - The store's query goes through `Query::page` (the events grid); the DuckLake and raw cells run one SQL statement.
+    Compare the raw cells with the DuckLake cells for the storage layer, and use the page cells for what the app shows
+    today.
+  - DuckLake's DELETE and UPDATE leave the old rows in their files, and the default `ducklake_rewrite_data_files`
+    rewrote nothing here, so the disk after compaction is larger than after the import. A lower delete threshold was not
+    tried.
+  - An Appender into a DuckLake table works (1,000 rows into a probe table); a path that parses straight into an
+    Appender was not measured.
+  - Raw output is in `/Volumes/d7sst7/dev-targets/scratch/ducklake-trial/out/`, and the discarded first 56M pass is in
+    `w8s/`.
+
 ### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
 
 - **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`

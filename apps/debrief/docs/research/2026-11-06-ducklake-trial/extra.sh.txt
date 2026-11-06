@@ -1,0 +1,11 @@
+#!/bin/bash
+# usage: extra.sh SIZE QFROM QTO: raw SQL over the kept segments x3, DuckLake insert with zstd x3, zstd + 768MB limit x3.
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial; Z=$1
+Q="TRIAL_Q_FROM=$2 TRIAL_Q_TO=$3 TRIAL_Q_FIELD=Command TRIAL_Q_VALUE=Reserve"
+O=$T/out/s$Z-1.txt
+EX=$(sed -n 's/^trial: extra_sources=//p' $O); SH=$(sed -n 's/^trial: shift_sources=\([0-9,]*\).*/\1/p' $O)
+stop() { [ $(date +%H%M) -ge 0530 ] && [ $(date +%H%M) -lt 1200 ] && { echo "$(date '+%F %T') stop: 05:30 reached" >> $T/log.txt; exit 0; }; }
+for i in 1 2 3; do stop; $T/bin/run.sh r$Z-$i TRIAL_MODE=raw TRIAL_KEEP=$T/keep/s$Z-1 $Q; done
+for i in 1 2 3; do stop; $T/bin/run.sh l$Z-zstd-$i TRIAL_MODE=lake TRIAL_ZSTD=1 TRIAL_KEEP=$T/keep/s$Z-1 TRIAL_LAKE=$T/lake/l$Z-zstd-$i TRIAL_EXTRA_SOURCES=$EX TRIAL_SHIFT=$SH $Q; done
+[ -n "$NO768" ] || for i in 1 2 3; do stop; $T/bin/run.sh l$Z-zstd768-$i TRIAL_MODE=lake TRIAL_ZSTD=1 TRIAL_MEMORY_LIMIT=768MB TRIAL_KEEP=$T/keep/s$Z-1 TRIAL_LAKE=$T/lake/l$Z-zstd768-$i TRIAL_EXTRA_SOURCES=$EX TRIAL_SHIFT=$SH $Q; done
+echo "$(date '+%F %T') extra $Z done" >> $T/log.txt

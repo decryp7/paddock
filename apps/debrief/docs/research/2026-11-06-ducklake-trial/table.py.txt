@@ -1,0 +1,33 @@
+"""Summarises out/<label>.txt trial lines and the footprint CSVs into one row per run."""
+import csv, glob, os, re, sys
+T = "/Volumes/d7sst7/dev-targets/scratch/ducklake-trial"
+pat = sys.argv[1]
+def kv(line):
+    return dict(re.findall(r"(\w+)=([^\s]+)", line))
+for f in sorted(glob.glob(f"{T}/out/{pat}.txt")):
+    lab = os.path.basename(f)[:-4]
+    d = {}
+    for line in open(f):
+        line = line.replace("test ducklake_trial ... ", "")
+        if not line.startswith("trial: "): continue
+        rest = line[7:].strip(); key = rest.split()[0]
+        if key == "compact_step": continue
+        d[key] = kv(rest)
+    life = 0
+    try:
+        for r in csv.DictReader(open(f"{T}/out/{lab}.csv")):
+            for k in ("max_footprint",):
+                if k in r and r[k]: life = max(life, int(float(r[k])))
+    except Exception: pass
+    g = lambda k, f: d.get(k, {}).get(f, "-")
+    im, ie = d.get("import_main", {}), d.get("import_extra", {})
+    print(f"{lab}: main {g('import_main','s')} s {g('import_main','events_per_s')} ev/s fp {g('import_main','peak_fp_mb')} | extra {g('import_extra','s')} s"
+          f" | q-during main p50/p95/max {g('import_main_query','p50_ms')}/{g('import_main_query','p95_ms')}/{g('import_main_query','max_ms')} n={g('import_main_query','queries')}"
+          f" extra {g('import_extra_query','p50_ms')}/{g('import_extra_query','p95_ms')} n={g('import_extra_query','queries')}"
+          f" | quiet {g('quiet_query_after_import','p50_ms')} rows {g('quiet_query_after_import','rows_last')}"
+          f" | disk seg {g('disk_after_import','segments_mb')} db {g('disk_after_import','db_mb')} idx {g('disk_after_import','index_mb')} files {g('disk_after_import','files')}"
+          f" lake data {g('disk_after_import','data_mb')} files {g('disk_after_import','files')} cat {g('disk_after_import','catalog_mb')}"
+          f" | bg {g('background_index_and_catalogue','s')} s fp {g('background_index_and_catalogue','peak_fp_mb')}"
+          f" | undo {g('undo_import','s')} s fp {g('undo_import','peak_fp_mb')} | shift {g('time_shift','s')} s reidx {g('time_shift','reindexed_by_s')} rows {g('time_shift','rows')} fp {g('time_shift','peak_fp_mb')}"
+          f" | compact {g('compact','s')} s fp {g('compact','peak_fp_mb')} after: seg {g('compact','segments_mb')} db {g('compact','db_mb')} files {g('compact','files')} lake {g('disk_after_compact','data_mb')} files {g('disk_after_compact','files')}"
+          f" | quiet-after {g('quiet_query_after_compact','p50_ms')} rows {g('quiet_query_after_compact','rows_last')} | life_fp {life>>20} MB")

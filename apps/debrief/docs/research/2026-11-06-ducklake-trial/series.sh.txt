@@ -1,0 +1,18 @@
+#!/bin/bash
+# usage: series.sh SIZE (10m|56m): 3 store runs, then 3 DuckLake insert, 3 adopt, 3 SQLite-catalog insert runs on the first store run's kept segments.
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial; Z=$1; C=$T/corpus$Z
+case $Z in
+  10m) Q="TRIAL_Q_FROM=1791936600000 TRIAL_Q_TO=1791936645000 TRIAL_Q_FIELD=Command TRIAL_Q_VALUE=Reserve";;
+  56m) Q="TRIAL_Q_FROM=$QF TRIAL_Q_TO=$QT TRIAL_Q_FIELD=Command TRIAL_Q_VALUE=Reserve";;
+esac
+stop() { [ $(date +%H%M) -ge 0530 ] && [ $(date +%H%M) -lt 1200 ] && { echo "$(date '+%F %T') stop: 05:30 reached" >> $T/log.txt; exit 0; }; }
+for i in 1 2 3; do stop; $T/bin/run.sh s$Z-$i TRIAL_MODE=store TRIAL_MAIN=$C/main TRIAL_EXTRA=$C/extra TRIAL_STORE=$T/st/s$Z-$i TRIAL_KEEP=$T/keep/s$Z-$i $Q; done
+O=$T/out/s$Z-1.txt
+EX=$(sed -n 's/^trial: extra_sources=//p' $O); SH=$(sed -n 's/^trial: shift_sources=\([0-9,]*\).*/\1/p' $O)
+for mode in insert adopt; do for i in 1 2 3; do stop
+  $T/bin/run.sh l$Z-$mode-$i TRIAL_MODE=lake TRIAL_LAKE_IMPORT=$mode TRIAL_KEEP=$T/keep/s$Z-1 TRIAL_LAKE=$T/lake/l$Z-$mode-$i TRIAL_EXTRA_SOURCES=$EX TRIAL_SHIFT=$SH $Q
+done; done
+for i in 1 2 3; do stop
+  $T/bin/run.sh l$Z-sqlite-$i TRIAL_MODE=lake TRIAL_CATALOG=sqlite TRIAL_KEEP=$T/keep/s$Z-1 TRIAL_LAKE=$T/lake/l$Z-sqlite-$i TRIAL_EXTRA_SOURCES=$EX TRIAL_SHIFT=$SH $Q
+done
+echo "$(date '+%F %T') series $Z done" >> $T/log.txt
