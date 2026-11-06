@@ -1,8 +1,10 @@
 # 68. Dump checks: "Check crash", "Check hang", "Check memory", with .NET managed state
 
-- Status: Proposed (2026-11-07), revision 2. Revision 2 answers the independent review of `a92474647` (four P1s: range
-  reads after open, the unwind route, two-dump growth verdicts, the .NET adapter; the factual slips; the P2s). Design only:
-  no product code, no builds or test runs for this ADR.
+- Status: Proposed (2026-11-07), revision 3. Revision 2 answered the independent review of `a92474647` (four P1s: range
+  reads after open, the unwind route, two-dump growth verdicts, the .NET adapter; the factual slips; the P2s); revision 3
+  folds in the P2s of the re-review of `a8bc78a53` (approved, no P1): DAC signatures, capture privacy, package order,
+  the helper's place and evidence, sizes, one reason shared with ADR 0069, file grants and memory caps. Design only: no
+  product code, no builds or test runs for this ADR.
 - Date: 2026-11-07
 - Related: ADR 0023 (dumps and UMDH: the reader plugin, `debrief-dump`, problem-first findings), ADR 0036 (symbols by PDB
   identity), ADR 0017 (out-of-process plugins, sandbox, lent files), ADR 0019 (problem-first findings, "Explain with AI"),
@@ -53,7 +55,7 @@ checked**.
 The ADR also lists every analysis a minidump can support ([Catalogue of analyses](#catalogue-of-analyses)) with what each
 needs, its value, its size and a recommendation, and what a minidump cannot give at all.
 
-Work packages total **93 days raw** (judgement-sized, [J]); open decisions D1 to D13 are at the end.
+Work packages total **99 days raw** (judgement-sized, [J]); open decisions D1 to D13 are at the end.
 
 ## Context
 
@@ -162,7 +164,8 @@ into. A check is an engine operation that returns one `CheckReport` (section 10)
 The engine picks the primary button (`suggested_check` in the overview): an exception stream that is not a debugger
 break-in (section 2) makes Check crash primary; otherwise Check hang. Any check can run on any dump.
 
-**Thread classes replace thread states.** `api::ThreadState` and `views::thread_state` are removed; the Threads tab, the
+**Thread classes replace thread states.** `api::ThreadState` and `views::thread_state` are removed in WP-5, once its
+classifier exists (WP-1 only adds the new type); then the Threads tab, the
 findings and the checks all use one `ThreadClass` computed once per document and symbol generation (section 3). No shim
 (memory decision 2026-11-06).
 
@@ -178,7 +181,8 @@ Every report has the same parts:
 3. **Evidence**: typed links (thread and frame, module, memory region, handle, managed type, log event).
 4. **Not checked**: what this check would look at but could not, with a reason from a closed set (`StreamMissing(kind)`,
    `MemoryNotInDump`, `NoSymbols(modules)`, `NoUnwindInfo(modules)`, `ToolUnavailable`, `DacUnavailable`, `OverBudget`,
-   `DifferentProcess`, `NeedsMoreDumps { have, need }`, `FileChanged`, `Unsupported(arch)`) and a `NextStep`. **When the
+   `DifferentProcess`, `NeedsMore { of: Dumps | Snapshots, have, need }`, `FileChanged`, `Unsupported(arch)`) and a
+   `NextStep`. `NeedsMore` is shared with ADR 0069 (`Snapshots` for UMDH series), so both ADRs use one closed reason. **When the
    data for a verdict is missing, the verdict is `CannotTell` with this list, not a weak verdict** (ER-33's spirit).
 5. **Around the dump**: the log events around the dump's time (section 6).
 6. **Left out**: what the bounds cut (ADR 0065's shape).
@@ -262,9 +266,10 @@ managed heap through the .NET helper.
   committed; free space and the largest free block; thread count; handles by type. Private memory is labelled "private
   (heaps and other allocations)" unless the heap list was readable [J]. The report lists **suspects**, never "leak".
 - **Two dumps: `Grew { what, delta }` at most, confidence at most `Medium`, and always a Not checked item
-  `NeedsMoreDumps { have: 2, need: 3 }`**: one step cannot tell a leak from a cache filling or a burst of work.
+  `NeedsMore { of: Dumps, have: 2, need: 3 }`**: one step cannot tell a leak from a cache filling or a burst of work.
 - **Three or more dumps: `Growing { what, rate }`** only when the item grew in **every** step, with the rate per minute;
-  `GrewOnce` when one step grew and the rest are flat; `NoGrowth`; `CannotTell`. Items: categories, region groups (matched
+  `GrewOnce` when one step grew and the rest are flat (the one name for this verdict; ADR 0069's `OneStep` follows it);
+  `NoGrowth`; `CannotTell`. Items: categories, region groups (matched
   by allocation base, type and protection), handle types, thread count, module set, managed types.
 - **Native per-allocation stacks are not in a dump**: the report points to UMDH (ADR 0069).
 
@@ -281,13 +286,19 @@ managed heap through the .NET helper.
   handle across the series (rule 53), files `<exe>.<pid>.<kind>.<UTC stamp>.<n>.dmp`, opened as one group. Presets with
   purpose: **For a crash** (ProcDump `-e` or WER local dumps), **For a hang** (Minidump with heap, 3 dumps 5 s apart),
   **For memory** (Full dump, 3 or more dumps minutes apart, or UMDH).
-- **Capture flags (decision D9).** Added to every kind: `MiniDumpWithTokenInformation` (0x40000: integrity level and
-  elevation) and `MiniDumpWithProcessThreadData` (0x100: PEB and TEBs, so the UI thread's TEB and the command line are
-  readable later). Added to Minidump and Minidump with heap: `MiniDumpWithModuleHeaders` (0x80000: module header pages)
-  [U: whether this carries `.pdata`; WP-11 measures]. **Not** added by default: `MiniDumpWithCodeSegs` (0x2000), which
-  writes every module's code and makes a minidump many times larger [J; size measured in WP-11 before any number is quoted];
-  unwind data comes from the symbol folders instead (section 8). WP-11 records each flag's size cost on invented processes
-  in `performance.md` (rule 48).
+- **Capture flags (decision D9).** Two flags put user content into the dump: `MiniDumpWithProcessThreadData` (0x100: PEB
+  and TEBs, which hold the command line and the environment) and `MiniDumpWithTokenInformation` (0x40000: the token, with
+  the user's and groups' SIDs). So: **Minidump never sets them**, the dump a user is most likely to send on. **Minidump with
+  heap and Full dump offer them as one capture option, "Include process details (command line, environment, user and group
+  ids)", off by default**, with a one-line note under it: "These details can include paths, user names and secrets; leave
+  this off if you will share the dump." (A heap or full dump already holds the process's memory, which may contain the
+  same; the note says what this option adds.) Added to Minidump and Minidump with heap: `MiniDumpWithModuleHeaders`
+  (0x80000: module header pages) [U: whether this carries `.pdata`; WP-11 measures]. **Not** added by default:
+  `MiniDumpWithCodeSegs` (0x2000), which writes every module's code and makes a minidump many times larger [J; measured in
+  WP-11 before any number is quoted]; unwind data comes from the symbol folders instead (section 8). WP-11 records, on
+  invented processes in `performance.md` (rule 48), each flag's size cost and which streams it adds that carry user
+  content. Debrief reads the environment from such dumps only to say it is there; it never shows, logs or sends it in
+  1.2 (catalogue: "Environment variables: no").
 - **Which dump to take.** Every Not checked item carries its `NextStep`; the overview shows "This dump holds: …; not: …"
   from `DumpCapabilities`.
 
@@ -318,11 +329,15 @@ The checks need dump memory the model does not keep: critical sections, the PEB 
   name, do not re-open by path), with share modes that allow other readers. For a query, the host lends that handle by
   ranges to the plugin exactly as for an import (`Lent::ranges` over the host's `RangeRead`), for the query's duration only.
   If the handle could not be held (a session restored from a project, a file on a share that drops handles), the host
-  re-opens by path and **re-verifies the identity** (file id, size, modification time, header and directory hash) against
+  re-opens by path, which **needs the window's file grant again**: a restored session re-grants only the paths the session
+  file names and the user confirmed on restore (the existing path-grant rules, `paths.rs`); without a grant the query is
+  refused with "Open the dump again to read from it" and nothing is read. With a grant the host **re-verifies the
+  identity** (file id, size, modification time, header and directory hash) against
   the values stored at open; a mismatch is `FileChanged` with "The dump file changed since it was opened; open it again."
 - **Plugin lifetime.** Queries are stateless for correctness: each carries the document's memory index slice it needs, so a
   restarted or quarantined-then-released plugin answers the same. For speed the plugin keeps the parsed prefix of the last
-  two documents (LRU, bounded by the prefix limit, 512 MiB each at most) [J]. A quarantined plugin makes every pending
+  two documents (LRU, bounded by the prefix limit, 512 MiB each at most) [J]; it counts against the reader's memory cap
+  (section 12) and is dropped first when an import needs the room. A quarantined plugin makes every pending
   query `ToolUnavailable`, and the checks degrade to their no-memory verdicts.
 - **Bounds** (new `Limits` fields): per query at most 4,096 ranges and 16 MiB; per check at most 64 queries and 256 MiB;
   unwind tables at most 16 MiB per module. Each bound that cuts reports in Left out.
@@ -386,10 +401,22 @@ heap memory and can fail for a dump taken mid-GC (`CanWalkHeap`) [D: same page].
 | D. Rust reader of the runtime's contract descriptors (cDAC) | MIT | all | no DAC | ours | XL; status in released runtimes unconfirmed [R; U] | **Later**, watch |
 | E. WinDbg/CDB with SOS | Microsoft terms, not permissive | Windows | not redistributable | — | — | **No** |
 
-**Decision: B.** A C# helper, `debrief-clr-inspect`, in the repository under `tools/` (not in the app), built by CI as a
-self-contained single-file executable for win-x64, win-x86 and win-arm64, published to the Gitea package registry, pinned
-by hash in `paddock-tools`' catalogue (ADR 0051: pins of the build only), and installed on demand; it is **never linked**
-into Debrief. This needs D3: an amendment to Debrief's "Languages" rule allowing a C# external tool outside the app.
+**Decision: B.** A C# helper, `debrief-clr-inspect`, in **`apps/debrief/tools/debrief-clr-inspect/`**, beside the existing
+C# sample generator `apps/debrief/tools/dotnet-sample-gen/` [S: on `origin/debrief/1.2-int`], not in the app. CI builds it
+as a self-contained single-file executable for win-x64, win-x86 and win-arm64; self-contained publishing for Windows RIDs
+runs on a Linux runner [J; U: confirm in WP-0], so D8 needs Windows only for the .NET fixtures and dumps. It is published
+to the Gitea package registry, pinned by hash in `paddock-tools`' catalogue (ADR 0051: pins of the build only) and
+installed on demand; it is **never linked** into Debrief. This needs D3: an amendment to Debrief's "Languages" rule allowing
+a C# external tool outside the app.
+
+- **Evidence for a first-party, unsigned build.** ADR 0051's evidence kinds are `openpgp`, `authenticode`, `minisign`,
+  `upstream-digest` and `mirror-of` (its D9) [R]; none describes our own CI output, and the family dropped code signing on
+  2026-11-05. This ADR asks ADR 0051 for one more closed kind, **`ci-artifact { workflow, run_id, commit, sha256 }`**,
+  written by `./dev tools pin` from the CI run that built the artifact and checked against the package's SHA-256 at run
+  time (size plus SHA-256 is the gate, as for every pin). The amendment is part of WP-12.
+- **Notices.** The self-contained helper bundles the .NET runtime and ClrMD: both licences (MIT) and the runtime's
+  third-party notices reach About and the notices through `paddock-deps`' "downloaded on request" class (ADR 0051 D9),
+  generated from the helper's own dependency list in WP-12.
 
 - **Contract.** `debrief-clr-inspect --dump <path> --dac <path> --request <json>` writes one JSON document to stdout with
   `schema: 1` and sections `threads`, `exceptions`, `stacks`, `heapStats`, `syncBlocks`, `threadPool`, `finalizer`, each
@@ -404,8 +431,14 @@ into Debrief. This needs D3: an amendment to Debrief's "Languages" rule allowing
   the dump's module list. The host looks for the DAC: (1) a folder the user added to the .NET DAC folders setting, searched
   by that identity in symbol-store layout; (2) a matching locally installed runtime (`shared/Microsoft.NETCore.App/<version>/`
   or the .NET Framework folder), accepted only if its PE identity matches; (3) **Microsoft's public symbol server by that PE
-  identity, only when the symbol-server switch is on (the same switch as D6)**, into Debrief's symbol cache. The found path
-  is passed explicitly (`--dac`, ClrMD's `CreateRuntime(dacPath)`); the helper is started with ClrMD's own symbol lookups
+  identity, only when the symbol-server switch is on (the same switch as D6)**, into Debrief's symbol cache. The user's
+  symbol servers may be internal mirrors or other non-Microsoft servers, so where a DAC came from proves nothing.
+  **Before any DAC from steps 1 to 3 is passed on, the host checks its Authenticode signature** with ADR 0051's check (U5:
+  `WinVerifyTrust` with no network, a timestamp required, match by certificate thumbprint, typed `SignatureFault`
+  outcomes), with a signer policy instead of a per-file pin: the chain's root must be one of Microsoft's code-signing roots
+  listed in a built-in TOML pack (rule 21) and the leaf's subject organisation Microsoft Corporation. Any other outcome is
+  `DacUnavailable` with "unsigned or wrong signer" and the `SignatureFault`, and the outcome is logged (section 14). The
+  check is Windows only, which is where the helper runs. The found path is passed explicitly (`--dac`, ClrMD's `CreateRuntime(dacPath)`); the helper is started with ClrMD's own symbol lookups
   disabled, so it never reaches the network itself. **Offline, with the switch off and no matching runtime installed, the
   managed part of every check reports `DacUnavailable` with the next step "Turn on symbol servers, or add a folder with
   mscordaccore.dll for .NET <version>".** That will be the common case for dumps from other machines, and the report says
@@ -483,6 +516,11 @@ check (rule 12); engine-side budgets end in `OverBudget` Not checked items.
 
 - **Reader**: ADR 0023's bounds, plus memory regions at most 65,536 (summarised beyond), handle object records at most
   65,536, the memory index (section 7), the range-read caps (section 7), `max_check_docs` 16.
+- **What counts against which cap.** The memory index (at most 4 Mi entries, about 96 MiB) is part of the decoded model,
+  so it counts against the 512 MiB encoded-document cap (`limits.rs:45`); a dump whose index would not fit keeps a partial
+  index and says so. In the reader process, one open's prefix (512 MiB) and kept stacks (256 MiB) plus the prefix LRU (two
+  prefixes, 1 GiB) plus the index while it is built come to about 1.9 GiB in the worst case, under the 3 GiB cap
+  (`plugin.rs:27`) [calc]; the LRU is the first thing dropped under pressure.
 - **Heap dumps by ranges (D5).** `source.rs`'s prefix-plus-ranges path is extended to dumps whose memory is in the 32-bit
   `MemoryListStream`: keep the directory and metadata and the thread stacks, index the rest, read on demand. The 1 GiB
   refusal goes and ADR 0064's `WholeReason::DumpWithoutMemoryList` is dropped (an amendment to ADR 0064, WP-8).
@@ -515,7 +553,8 @@ present), thread and module counts; **the cache key's document set and whether t
 pairing decision with its reason code** (`PidDiffers`, `CreateTimeDiffers`, `CreateTimeMissing`, `MainModuleDiffers`,
 `Same`); range reads as queries, ranges, bytes and missing counts, and `FileChanged` with which identity field differed;
 walk results as counts per trust kind and the budget if hit; symbols and binaries found, missing, downloaded as counts; DAC
-lookup outcome per step (folder, local runtime, server, off); the helper's command with the dump path replaced by a hash of
+lookup outcome per step (folder, local runtime, server, off) and the DAC's signature outcome (`SignatureFault` or ok, the
+`WinVerifyTrust` HRESULT, the signer's subject shown, not trusted); the helper's command with the dump path replaced by a hash of
 its file name, its pin, exit code, duration, peak job memory, the JSON sections' statuses, and the last 20 lines of stderr;
 the verdict kind, confidence level and every Not checked reason code. No user content by default: file names only, no
 function names, no exception messages, no command line, no environment, no log text.
@@ -569,7 +608,7 @@ means already in Debrief at the base commit [S].
 | Unexpected modules: injected hooks, antivirus, user-writable paths, duplicate versions | module list; a TOML pack of known injectors (rule 21) | third-party DLLs behind odd crashes | M | **1.2** (WP-16) |
 | Unsigned modules | signatures live in the files | — | — | **cannot** from the dump; with binaries **later** |
 | Process info: pid, start time, uptime | misc info | context | S | **1.2** |
-| Integrity level, elevation | token stream (19), `MiniDumpWithTokenInformation` | "ran elevated or not" explains access errors | S | **1.2** (with D9) |
+| Integrity level, elevation | token stream (19), `MiniDumpWithTokenInformation` | "ran elevated or not" explains access errors | S | **1.2** for heap and full dumps captured with D9's opt-in; Minidump never has it |
 | Command line | PEB by range reads (heap, full, or `WithProcessThreadData`) | which instance and options | M | **later** (D11); user content, on demand |
 | Environment variables | PEB | often secrets | M | **no** for 1.2 |
 | System info: OS build, CPU, processors | system info | context; today | S | **1.2** |
@@ -663,7 +702,7 @@ No real user dump is ever used in tests, fixtures, docs or commits.
   and asserts on the share range, not on wall-clock sleeps. Mutant payload layout tests run on named builds: the Windows
   CI runner's stable build, plus local VMs with Windows 10 22H2 and Windows 11 24H2 [J: the builds the VMs hold are listed
   in WP-14 when it runs]. Children end through `paddock_proc` by held handle.
-- **.NET** (Windows runner, D8): invented console programs in `tools/debrief-clr-inspect/fixtures/` (managed exception,
+- **.NET** (Windows runner, D8): invented console programs in `apps/debrief/tools/debrief-clr-inspect/fixtures/` (managed exception,
   `Monitor` deadlock, thread-pool starvation, growing `List<T>`), command-driven like the native ones, built with the pinned
   .NET SDK, dumped with the capture tool; the helper's JSON is validated against the generated schema; the Rust decoder is
   tested on every OS from committed JSON outputs of those invented dumps (no dumps committed).
@@ -676,30 +715,35 @@ Judgement-sized raw days [J]; firm estimates after WP-0 and the WP-3 spike repor
 
 | WP | Scope | Files | Days | Depends |
 | --- | --- | --- | --- | --- |
-| WP-0 | .NET helper spike against the fixed exit criteria of section 9; record peak memory and time (rule 48) | `tools/debrief-clr-inspect` (spike), notes | 3 | — |
-| WP-1 | Model, wire, limits, the `CheckReport` contract with ts-rs output, `ThreadClass` replacing `ThreadState` and `views::thread_state`, confidence and Not checked framework, memory index type, cache key | `debrief-dump/src/{model,api,limits,wire,views}.rs`, new `checks/` | 4 | — |
+| WP-0 | .NET helper spike against the fixed exit criteria of section 9; record peak memory and time (rule 48) | `apps/debrief/tools/debrief-clr-inspect` (spike), notes | 3 | — |
+| WP-1 | Model, wire, limits, the `CheckReport` contract with ts-rs output, the `ThreadClass` type (added beside today's `ThreadState`, which stays until WP-5), confidence and Not checked framework, memory index type, cache key | `debrief-dump/src/{model,api,limits,wire}.rs`, new `checks/` | 4 | — |
 | WP-2 | Reader: thread info, handle object payloads, memory regions, unloaded ranges and times, misc info process times and time zone, token, function tables, comment, VM counters, memory index, `DumpCapabilities` | `debrief-plugin-dumps/src/dump_reader.rs`, `synth.rs` | 4 | WP-1 |
-| WP-RR | Range reads after open: `DumpQuery` operation and typed decoders, held file handle and identity re-verification in the host, lending by ranges per query, plugin prefix LRU, caps, `FileChanged` | `debrief-plugin-dumps`, `debrief-plugin-api` (one declared variant), `app/src-tauri/src/dumps.rs` | 5 | WP-1, WP-2 |
+| WP-RR | Range reads after open: `DumpQuery` operation and typed decoders, held file handle and identity re-verification in the host, lending by ranges per query, plugin prefix LRU counted against the reader cap, caps, `FileChanged`, re-grant on a restored session | `debrief-plugin-dumps`, `debrief-plugin-api` (one declared variant), `app/src-tauri/src/{dumps,paths}.rs` | 8 | WP-1, WP-2 |
 | WP-8 | Heap dumps by ranges; ADR 0064 amendment | `source.rs`, ADR 0064 | 3 | WP-RR |
 | WP-3 | Debrief's unwinder: `SymbolProvider::walk_frame` over framehop from bytes; images by range reads; binaries from symbol folders by code id; host fetch when servers are on; function tables; x86 FPO; parallel re-walk of improvable threads; spike first | `dump_reader.rs`, new `unwind.rs`, `pdb_symbols.rs`, `app/src-tauri/src/symbols.rs`, `debrief-symbols` | 12 | WP-RR, WP-8 |
 | WP-4 | Check crash, break-in detection | `checks/crash.rs` | 3 | WP-1, WP-2 |
-| WP-5 | Check hang, one dump: thread classes incl. syscall stubs and nested loops, UI thread, owner edges (mutant payloads, register handles, critical sections by range reads), cycle search | `checks/hang.rs` | 8 | WP-3, WP-RR, WP-8 |
+| WP-5 | Check hang, one dump: thread classes incl. syscall stubs and nested loops, UI thread, owner edges (mutant payloads, register handles, critical sections by range reads), cycle search; then **removes `api::ThreadState` and `views::thread_state`** and moves the Threads tab and the findings to `ThreadClass` | `checks/hang.rs`, `debrief-dump/src/{api,views,findings}.rs`, `app/src/app/dumps/dump-view.ts` and its spec, the mock backend | 8 | WP-3, WP-RR, WP-8 |
 | WP-6 | Series: same-process check with reason codes, picker groups, hang versus progress, spin with gap ranges, growth framework with the two-versus-three rule | `checks/series.rs`, `store.rs` | 4 | WP-4, WP-5 |
 | WP-7 | Check memory: composition, suspects, growth rows | `checks/memory.rs` | 4 | WP-1, WP-6 |
 | WP-9 | Events around the dump | `debrief-core` query, `checks/around.rs` | 3 | WP-1 |
-| WP-10 | Shell: `dumps_check` job, phases, Cancel, cache, commands, logs per section 14 | `app/src-tauri/src/dumps.rs`, command table | 3 | WP-1, WP-RR |
+| WP-10 | Shell: `dumps_check` job, phases, Cancel, cache, commands, logs per section 14 | `app/src-tauri/src/dumps.rs`, command table | 3 | WP-1, WP-RR, WP-18 |
 | WP-11 | Capture: series, presets, flags of D9 with their size cost measured and recorded | `capture.rs`, `plugin.rs`, `create-dump-view.ts`, `docs/performance.md` | 3 | — |
-| WP-12 | .NET: the helper (C#, ClrMD, schema 1, bounds), its CI build and Gitea package, the `paddock-tools` pin, the `dumps.dotnet` plugin, DAC acquisition, the per-query path grant, the Rust decoder and fuzz target, feeding the three checks | `tools/debrief-clr-inspect/`, new plugin crate, `debrief-dump/src/managed.rs`, `.gitea/` (integrator) | 12 | WP-0, WP-1, WP-RR, ADR 0051's crate |
-| WP-13 | UI: Checks strip, report view, pair picker, capability line, Explain with AI on a report; Material first, every state designed | `app/src/app/dumps/` | 6 | WP-10 |
+| WP-12 | .NET: the helper (C#, ClrMD, schema 1, bounds), its CI build and Gitea package, the `paddock-tools` pin, the `dumps.dotnet` plugin, DAC acquisition with the Authenticode signer policy and its root pack, the per-query path grant, the ADR 0051 amendment for `ci-artifact` evidence, the notices through `paddock-deps`, the Rust decoder and fuzz target, feeding the three checks | `apps/debrief/tools/debrief-clr-inspect/`, new plugin crate, `debrief-dump/src/managed.rs`, `.gitea/` (integrator) | 15 | WP-0, WP-1, WP-RR, ADR 0051's crate |
+| WP-13 | UI: Checks strip, report view, pair picker, capability line, Explain with AI on a report; Material first, every state designed; the capture dialog's privacy option and note | `app/src/app/dumps/` | 6 | WP-10, WP-18 |
 | WP-14 | Tests not inside a package: command-driven Windows fixtures, named-build mutant tests, the properties of the test plan, Playwright; first measurements in `performance.md` | tests, `docs/performance.md` | 8 | all |
 | WP-15 | Docs: user guide (which dump for which question), features, ADR 0023 amendment (CFI statement, §11), the Languages rule amendment of D3, independent review of the report screens (rule 22) and of this ADR's revision | `docs/`, `apps/debrief/AGENTS.md` | 2 | WP-13 |
 | WP-16 | Unexpected-modules pack: TOML pack of known injectors and hook DLLs (built-in plus user `packs/`, rule 21), its parser with limits, the finding | `debrief-dump`, `packs/` | 2 | WP-2 |
 | WP-17 | One minidump reader: the Windows plugin's log importer over `debrief-dump`; delete its parser; `known-copies.toml` entry until then | `debrief-plugin-windows/src/minidump_import.rs`, `docs/known-copies.toml` | 3 | WP-2 |
 | WP-18 | `NextStep` variants in `paddock-jobs` (shared change, all users updated) | `crates/paddock-jobs` (integrator) | 1 | ADR 0052's crate change |
-| | **Total** | | **93** | |
+| | **Total** | | **99** | |
 
 Order: WP-0, WP-1 and WP-11 first; then WP-2, WP-RR, WP-8; WP-3 and the checks; WP-12 after WP-0. Without .NET (WP-0,
-WP-12) the native checks are 78 days [calc].
+WP-12) the native checks are 81 days [calc].
+
+**If ADR 0052's crate change has not landed when WP-10 and WP-13 are reached**, they wait for it and the coordinator
+schedules WP-18 with ADR 0052's own package; the engine work (WP-1 to WP-9) does not depend on it. No local `NextStep`
+enum is written in Debrief as a stand-in: it would be a second implementation of a shared mechanism (rule 55) that
+WP-18 would then have to remove.
 
 ## Open decisions for the user
 
@@ -707,14 +751,14 @@ WP-12) the native checks are 78 days [calc].
 | --- | --- | --- |
 | D1 | .NET adapter | **B: our ClrMD helper with a versioned JSON schema**, external and pinned; A (scraping `dotnet-dump`) rejected as a stop-gap |
 | D2 | .NET in its own plugin or inside the dumps reader | **Its own plugin** (`RunPrograms`); the reader keeps no programs and no network |
-| D3 | Allow a C# helper outside the app (amend Debrief's "Languages" rule for external tools built in `tools/`, never linked) | **Yes, now**, so WP-0 can start |
+| D3 | Allow a C# helper outside the app: amend Debrief's "Languages" rule for external tools in `apps/debrief/tools/` (beside `dotnet-sample-gen`), never linked, pinned with `ci-artifact` evidence, notices through `paddock-deps` | **Yes, now**, so WP-0 can start |
 | D4 | DAC acquisition | **User DAC folders, then a matching local runtime by PE identity, then Microsoft's symbol server by PE identity under the symbol-server switch (same as D6)**; otherwise `DacUnavailable` |
 | D5 | Read heap dumps by ranges (drop ADR 0064's whole-read exception and the 1 GiB refusal) | **Yes**, in 1.2 |
-| D6 | Fetch module binaries (unwind data) and DACs from the user's symbol servers when servers are on | **Yes**, same switch as PDBs; nothing by default |
+| D6 | Fetch module binaries (unwind data) and DACs from the user's symbol servers when servers are on (servers may be non-Microsoft mirrors; DACs are accepted only with a Microsoft Authenticode signature) | **Yes**, same switch as PDBs; nothing by default |
 | D7 | Capture series in Debrief's capture tool | **Yes** |
-| D8 | Install the pinned .NET SDK on the Windows CI runner for the helper and its invented fixtures | **Yes** |
-| D9 | Capture flags | **Add `WithTokenInformation` and `WithProcessThreadData` to every kind, `WithModuleHeaders` to mini and heap; not `WithCodeSegs` by default**; WP-11 measures and records the size cost |
+| D8 | Pinned .NET SDK in CI: on a Linux runner for the helper's self-contained Windows builds, and on the Windows runner for the invented .NET fixtures and their dumps | **Yes** |
+| D9 | Capture flags | **Minidump: add `WithModuleHeaders` only. Heap and Full: `WithModuleHeaders` (heap) and an opt-in "Include process details" option (`WithProcessThreadData` + `WithTokenInformation`), off by default, with a privacy note. Never `WithCodeSegs` by default**; WP-11 records size cost and which streams carry user content |
 | D10 | Fold the Windows plugin's minidump reader into `debrief-dump` (rule 55) | **Yes, in 1.2**, registered as a copy until then |
 | D11 | Command line from the PEB | **Later**: user content; range reads make it a small step |
 | D12 | Crash grouping across many dumps | **Later (1.3)** |
-| D13 | ADR 0069's check name | **`CheckKind::HeapGrowth`**, not `Leak` |
+| D13 | ADR 0069's check name and shared words | **`CheckKind::HeapGrowth`**, not `Leak`; both ADRs use one Not checked reason `NeedsMore { of: Dumps \| Snapshots, have, need }` and one verdict `GrewOnce` (ADR 0069's `OneStep` is renamed) |
