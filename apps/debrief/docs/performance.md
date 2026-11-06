@@ -140,6 +140,36 @@ some fields; "n/s" means the source does not state them.
   importer SDK is a larger change, `serve.rs` `ImportProfile`), under its memory cap. Red run of the lock test: with the old
   flow it fails ("the open captures were readable while the second one was imported").
 
+### 2026-11-06, the name rebuild's look-alike reads on a 10-million-event store (branch `debrief/p0-idle`)
+
+- **Commit:** measured on the working tree of `debrief/p0-idle` on top of ed8e6005a (the bench is `tests/bench_name_reads.rs`; the reads are the ones in `names/build.rs`, before the time bound below was added to them)
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2
+- **Load:** 1-minute load 8-24 during the runs (other agents' builds); the first run and the second differ only by that and by the file cache
+- **Build:** release; libduckdb 2.0.0; the store worker's allocator (mimalloc)
+- **Corpus:** 10,033,335 events: the samples repeated to 10 M (`corpus()`, 360 copies, as `bench_reads`), imported in 21.9 s, with invented names of 5, 30, 300, 3,000 and 30,000 events spread evenly over the copies, one name of 5 events within a 4-minute window, and the full-text index built; synthetic
+- **Command:** `DEBRIEF_NAME_BENCH_EVENTS=10000000 DEBRIEF_NAME_BENCH_STORE=<folder> cargo test --release -p debrief-store-duck --test bench_name_reads -- --ignored --nocapture`
+- **Runs:** two (a third run of each read inside each); the figures are the runs' range
+- **Numbers:** one read is the first 30 events that hold a name:
+
+  | Events holding the name | Substring search | Phrase search through the index | Verdict |
+  |---|---|---|---|
+  | 5 (a scan of every event: 30 hits are never reached) | 303-415 ms | 576-638 ms | substring is cheaper |
+  | 30 | 627-645 ms | 873-889 ms | substring is cheaper |
+  | 300 | 458-470 ms | 679-779 ms | substring is cheaper |
+  | 3,000 | 333-747 ms | 552-943 ms | substring is cheaper |
+  | 30,000 | 313-403 ms | 583-710 ms | substring is cheaper |
+  | 5, all within 4 minutes: unbounded / bounded to the name's time range | 303-415 ms / 87-90 ms | | the bound is 3.4 times cheaper |
+
+  | Side by side (16 reads of the 3,000-event name) | Wall | Failed reads |
+  |---|---|---|
+  | 1 thread | 5.3-7.2 s | 0 |
+  | 2 threads | 3.9-4.6 s | 0 |
+  | 4 threads | 2.9-4.2 s | 0 |
+  | 8 threads | 2.7 s | 7 of 16: "Out of Memory Error: failed to allocate data of size 1.0 MiB (182.1 MiB/183.1 MiB used)" |
+
+- **Memory measure:** not measured (the failure above is the store's query memory budget, about 183 MiB)
+- **Notes:** the two questions of rule 51, answered for a rare name. Cheaper: the index does not help a rare name here. The phrase search through the index was slower than the substring search for every frequency from 5 to 30,000 events, so a rare name is not routed to it. A name with fewer than thirty events costs a scan of every event, 0.3-0.4 s per 10 million events (about 36 ns an event), which is why the scan is now bounded by the time range the catalogue saw the group in (`first_ts` and `last_ts`): a name seen in four minutes took 88 ms instead of 303 ms. A name spread over all the time (as these are) has no gain from it. At the 1 billion events the roadmap names, an unbounded scan would be 30-40 s a read: the next step for it is one scan for all the rare names together (an OR of their texts; the first scan reads everything anyway), not measured here. More threads: 4 side by side cut the 16 reads to 41 % (first run) and 80 % (second run, load 20) of one thread; 8 fail on the store's query memory budget, so the bound of 4 (`MAX_READ_THREADS`) is that budget's, and a read that fails ends the best-effort join. The bound of the time range excludes events without a time from the read (the catalogue's range comes from timed events only); a name that appears only in untimed events has no range and is read as before.
+
 ### 2026-11-05, rule 51 for the name rebuild: side-by-side reads of cheaper searches (branch `debrief/p0-idle`)
 
 - **Commit:** A/B: base 7b0c2421e (NR1, one phrase search per look-alike name, one after the other) against the change on top of it
@@ -199,10 +229,11 @@ some fields; "n/s" means the source does not state them.
 - **Memory measure:** not measured
 - **Notes:** the generated log has only 38 distinct names (one chunk repeated), so the sample cannot show what a real
   550 MB Event Viewer export does to the name table; the 8,000-group row is the measurement of that part, and on the
-  sample the two sides are equal because there is nothing to join. What the user saw (1-2 cores for minutes after the
-  import) came from the app: the name watcher read the whole catalogue every 500 ms while the catalogue was built
-  (P3's test: 20 whole reads in 20 refreshes, now 0), and the quadratic join ran inside it. The watcher is now a quiet job
-  ("Updating names") that blocks inside the store on `catalogue_status` until the catalogue commits, with no timer. It is
+  sample the two sides are equal because there is nothing to join. A candidate cause of what the user saw (1-2 cores for
+  minutes after the import), not confirmed: the app's name watcher read the whole catalogue every 500 ms while the
+  catalogue was built (P3's test: 20 whole reads in 20 refreshes, now 0), and the quadratic join ran inside it. The watcher
+  is now a quiet job ("Updating names") that blocks inside the store on `catalogue_status` until the catalogue commits; it
+  asks again every 10 s (one status statement) to notice a cancel, a closed window or a replaced store. It is
   covered by app tests with a store double (one wait, woken once, never reading names while unbuilt), not by this
   engine-level run, which does not start the app. The 3.1 CPU-s the rebuild takes on 30 groups is the
   "Comparing look-alike names" phase: 2.89 of its 2.90 s is the page query that reads the events of each look-alike
