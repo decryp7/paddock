@@ -174,7 +174,8 @@ Quoted by [research/2026-11-06-ducklake-trial.md](research/2026-11-06-ducklake-t
     3.46–3.51 s and compaction 2.87–2.96 s, leaving 2,606.0–2,607.0 MB. The peak was 1,206–1,269 MB.
 
   At 4 DuckDB threads, the quiet query over the store's 441–446 segments took 62.6–63.8 ms as plain SQL
-  (`r56m-t4-1..3`) and 31.4–31.5 ms through DuckLake adopting the same files (`l56m-adopt-t4-1..3`).
+  (`r56m-t4-1..3`) and 31.4–31.5 ms through DuckLake adopting the same files (`l56m-adopt-t4-1..3`). The adopt runs at 4
+  threads (no memory limit) peaked at 1,371–1,568 MB, in the time shift and compaction.
 
 - **Budgets and verdicts** (`docs/performance.md`, Budgets):
 

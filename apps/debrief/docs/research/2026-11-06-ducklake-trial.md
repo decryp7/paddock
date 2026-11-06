@@ -112,7 +112,8 @@ What the numbers say:
   The 56M 3-of-3 failures (in the time-shift UPDATE) come only from the discarded first 56M pass. With 768 MB, 4 threads
   and `preserve_insertion_order = false`, all 6 runs passed: 940–986 MB peak at 10M (store 993–1,129 MB) and
   1,206–1,269 MB at 56M (store 1,361–1,671 MB). The write stage took 2.79–2.81 s and 14.95–15.04 s, and the quiet query 42–43 ms and 54 ms.
-  Under a like-for-like cap, DuckLake used no more memory than the store.
+  Under a like-for-like cap, DuckLake used about the same as the store's import phase (916–941 MB at 10M), without
+  parsing or indexing.
 - **Catalogs:** SQLite worked; its write stage was slower and more variable (16.8–28.2 s at 56M) than with a DuckDB
   file. Multi-process access, the reason to choose SQLite, was not exercised. Debrief's store worker is one process.
 - **Unexplained spreads** (reported as ranges, not explained): the 10M snappy write took 1.92 s in run 1 and 4.86–5.14 s
