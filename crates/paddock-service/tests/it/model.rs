@@ -38,7 +38,7 @@ const STATES_CEILING: usize = 400_000;
 // ---------------------------------------------------------------------------------------------------------------------
 // The alphabet
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 enum Ver {
     /// Older than this app (a downgrade, or the other copy).
     V0,
@@ -114,7 +114,7 @@ impl Resp {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Reg {
     Absent,
     Registered,
@@ -232,6 +232,12 @@ fn depth_cap() -> u32 {
 fn deep() -> bool {
     static DEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *DEEP.get_or_init(|| std::env::var("MODEL_DEEP").is_ok())
+}
+
+/// `MODEL_REAL_CRASHES=1`: every crash is a real panic unwound through the manager, as before the edges of crashes were taken
+/// from a running run (the two give the same states and edges: the fingerprint of the states in the output says so).
+fn real_crashes() -> bool {
+    std::env::var_os("MODEL_REAL_CRASHES").is_some()
 }
 
 /// Events that matter in combination with the core alphabet but not with each other: a path takes at most one of them, so
@@ -363,6 +369,7 @@ fn mutating(label: &str) -> bool {
     matches!(label, "register" | "unregister" | "evict")
 }
 
+#[derive(Clone)]
 struct Sim {
     w: World,
     fault: Fault,
@@ -377,6 +384,29 @@ struct Sim {
     counted: u32,
     prompts: u32,
     reg_while_off: u32,
+    /// Set when the run is to hand out the edges of the crashes at its mutating calls without panicking (see [`Capture`]).
+    capture: Option<Arc<Mutex<Capture>>>,
+}
+
+/// What a crash at a mutating call leaves, taken at that moment of a run that goes on: a process that dies there stops
+/// everything after it, so the state it leaves is the state of the run at that point. Unwinding a panic through the
+/// manager to find out is the dearest thing the exploration does (some 40 us a crash on macOS, where libunwind asks dyld
+/// about every frame, and far more on Windows), and there are hundreds of thousands of crashes.
+struct Capture {
+    rec: RecordFile,
+    snaps: Vec<(Intr, Sim, Recorded, bool)>,
+}
+
+impl Capture {
+    /// Takes the state at a crash `intr` of the run `s`; the line is what the trace of a real crash says.
+    fn take(&mut self, intr: Intr, s: &Sim, line: &str) {
+        let mut at = s.clone();
+        at.intr = intr;
+        at.capture = None;
+        at.trace.push(line.into());
+        let (rec, damaged) = self.rec.peek();
+        self.snaps.push((intr, at, rec, damaged));
+    }
 }
 
 fn lk(s: &Mutex<Sim>) -> std::sync::MutexGuard<'_, Sim> {
@@ -437,6 +467,15 @@ impl SimBackend {
             s.w.reg, s.w.owner, s.w.job, s.w.stale
         );
         s.trace.push(line);
+        if let Some(c) = s.capture.clone()
+            && mutating(label)
+        {
+            c.lock().unwrap_or_else(|e| e.into_inner()).take(
+                Intr::CrashBefore(k),
+                &s,
+                "  -- crash before the effect",
+            );
+        }
         match s.intr {
             Intr::Cancel(n) if n == k => s.cancel.store(true, Ordering::SeqCst),
             Intr::WritesFail(n) if n == k => s.mem.fail_writes(true),
@@ -452,6 +491,15 @@ impl SimBackend {
 
     fn leave(&self, k: u32) {
         let mut s = lk(&self.s);
+        if let Some(c) = s.capture.clone()
+            && s.ops.iter().any(|o| o.k == k && mutating(o.label))
+        {
+            c.lock().unwrap_or_else(|e| e.into_inner()).take(
+                Intr::CrashAfter(k),
+                &s,
+                "  -- crash after the effect",
+            );
+        }
         if s.intr == Intr::CrashAfter(k) {
             s.trace.push("  -- crash after the effect".into());
             drop(s);
@@ -719,6 +767,7 @@ fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<S
         counted: 0,
         prompts: 0,
         reg_while_off: 0,
+        capture: None,
     }))
 }
 
@@ -878,19 +927,35 @@ fn describe_panic(p: &(dyn std::any::Any + Send)) -> Option<String> {
 
 /// Applies one event (with a fault and an interruption for an entry point) to `w0` and checks the edge invariants.
 fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
+    run(w0, ev, fault, intr, false).0
+}
+
+/// A run without an interruption, and with it the edges of the crashes at its mutating calls (see [`Capture`]).
+fn apply_with_crashes(w0: &World, ev: Ev, fault: Fault) -> (Edge, Vec<(Intr, Edge)>) {
+    run(w0, ev, fault, Intr::None, true)
+}
+
+fn run(
+    w0: &World,
+    ev: Ev,
+    fault: Fault,
+    intr: Intr,
+    with_crashes: bool,
+) -> (Edge, Vec<(Intr, Edge)>) {
     let mut w = w0.clone();
     if is_rare(ev) {
         w.rare_used = true;
     }
     if !is_entry(ev) {
         environment(&mut w, ev);
-        return Edge {
+        let edge = Edge {
             after: w,
             crashed: false,
             ops: Vec::new(),
             trace: Vec::new(),
             viols: Vec::new(),
         };
+        return (edge, Vec::new());
     }
     match ev {
         Ev::Update => {
@@ -921,6 +986,13 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
     rec.store(&w.rec)
         .expect("the memory store takes the first write");
     let sim = new_sim(&w, fault, intr, &rec);
+    let capture = with_crashes.then(|| {
+        Arc::new(Mutex::new(Capture {
+            rec: rec.reopen(),
+            snaps: Vec::new(),
+        }))
+    });
+    lk(&sim).capture.clone_from(&capture);
     let other_holder = if fault == Fault::LockHeld {
         rec.lock()
     } else {
@@ -959,9 +1031,61 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
         }
     };
     let s = lk(&sim);
+    let (recorded, damaged) = rec.peek();
+    let edge = conclude(
+        &entry,
+        ev,
+        fault,
+        intr,
+        &s,
+        recorded,
+        damaged,
+        out.as_ref(),
+        crashed,
+        viols,
+    );
+    let crashes = capture.map_or_else(Vec::new, |c| {
+        let snaps = std::mem::take(&mut c.lock().unwrap_or_else(|e| e.into_inner()).snaps);
+        snaps
+            .into_iter()
+            .map(|(at, sim, recorded, damaged)| {
+                let e = conclude(
+                    &entry,
+                    ev,
+                    fault,
+                    at,
+                    &sim,
+                    recorded,
+                    damaged,
+                    None,
+                    true,
+                    Vec::new(),
+                );
+                (at, e)
+            })
+            .collect()
+    });
+    (edge, crashes)
+}
+
+/// The edge a run left: the world after it, and the invariants of the step. `s` is the simulated OS as the run ended (or as it
+/// stood at a crash), `recorded` and `damaged` what the record file then held.
+#[allow(clippy::too_many_arguments)]
+fn conclude(
+    entry: &World,
+    ev: Ev,
+    fault: Fault,
+    intr: Intr,
+    s: &Sim,
+    recorded: Recorded,
+    damaged: bool,
+    out: Option<&Out>,
+    crashed: bool,
+    mut viols: Vec<Viol>,
+) -> Edge {
     let mut after = s.w.clone();
-    after.rec = rec.load();
-    after.rec_damaged = rec.peek().1;
+    after.rec = recorded;
+    after.rec_damaged = damaged;
     if matches!(ev, Ev::FirstRun | Ev::Install) && matches!(out, Some(Out::Install(Ok(_)))) {
         // Dyno writes its first-run marker after a registration that did not fail.
         after.first_run_done = true;
@@ -971,7 +1095,7 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
     if unattended(ev) && !after.rare_used && matches!(entry.resp, Resp::Never | Resp::RefusedAlways)
     {
         let registers = s.counted;
-        let free = free_finish(&entry) + u32::from(ev == Ev::Resume);
+        let free = free_finish(entry) + u32::from(ev == Ev::Resume);
         after.ghost =
             (u32::from(entry.ghost) + registers.saturating_sub(free)).min(MAX_ATTEMPTS + 1) as u8;
     }
@@ -980,17 +1104,7 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
     }
     let ops = s.ops.clone();
     let trace = s.trace.clone();
-    edge_checks(
-        &entry,
-        &after,
-        ev,
-        fault,
-        intr,
-        &s,
-        out.as_ref(),
-        crashed,
-        &mut viols,
-    );
+    edge_checks(entry, &after, ev, fault, intr, s, out, crashed, &mut viols);
     Edge {
         after,
         crashed,
@@ -1369,33 +1483,59 @@ fn normalized(rec: &Recorded) -> Recorded {
     r
 }
 
-fn key(w: &World) -> String {
-    format!(
-        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{}|{:?}",
-        w.reg,
-        w.owner,
-        w.other_copy,
-        w.program_gone,
-        w.job,
-        w.stale,
-        bucket(w.start_in),
-        w.linger > 0,
-        w.cur,
-        w.wanted,
-        w.first_run_done,
-        w.location_ok,
-        w.ro,
-        w.rec_damaged,
-        if w.job == Job::Running && w.job_ver != w.owner {
+/// A state of the graph as the exploration tells states apart: every field that matters, compared and hashed as it is (no
+/// formatting, no allocation but the record's own strings), so two worlds are one state exactly when the fields agree. The
+/// time of the register call is the wall clock, which differs on every run, so only whether there is one counts.
+#[derive(PartialEq, Eq, Hash, Debug)]
+struct StateKey {
+    reg: Reg,
+    owner: Ver,
+    other_copy: bool,
+    program_gone: bool,
+    job: Job,
+    stale: bool,
+    start_in: &'static str,
+    lingers: bool,
+    cur: Ver,
+    wanted: Option<bool>,
+    first_run_done: bool,
+    location_ok: bool,
+    ro: bool,
+    rec_damaged: bool,
+    /// The version of a running job that is not the owner's.
+    foreign_job: Option<Ver>,
+    ghost: u8,
+    mark_unreadable: bool,
+    rare_used: bool,
+    rec: Recorded,
+}
+
+fn key(w: &World) -> StateKey {
+    StateKey {
+        reg: w.reg,
+        owner: w.owner,
+        other_copy: w.other_copy,
+        program_gone: w.program_gone,
+        job: w.job,
+        stale: w.stale,
+        start_in: bucket(w.start_in),
+        lingers: w.linger > 0,
+        cur: w.cur,
+        wanted: w.wanted,
+        first_run_done: w.first_run_done,
+        location_ok: w.location_ok,
+        ro: w.ro,
+        rec_damaged: w.rec_damaged,
+        foreign_job: if w.job == Job::Running && w.job_ver != w.owner {
             Some(w.job_ver)
         } else {
             None
         },
-        w.ghost,
-        w.mark_unreadable,
-        w.rare_used,
-        normalized(&w.rec)
-    )
+        ghost: w.ghost,
+        mark_unreadable: w.mark_unreadable,
+        rare_used: w.rare_used,
+        rec: normalized(&w.rec),
+    }
 }
 
 fn seeds(caps: Caps, resp: Resp) -> Vec<(&'static str, World)> {
@@ -1528,6 +1668,8 @@ struct Explored {
     by_intr: BTreeMap<&'static str, u64>,
     kinds: BTreeMap<&'static str, Found>,
     finished: bool,
+    /// The sum of the hashes of all states, so a change that explores other states shows even when their number is the same.
+    fingerprint: u64,
 }
 
 struct Node {
@@ -1553,10 +1695,21 @@ fn path_of(nodes: &[Node], mut i: usize) -> Vec<String> {
     v
 }
 
+/// The edge of the crash `intr` that the run of `fault` without an interruption handed out.
+fn take_crash(
+    crashes: &mut [(Fault, Vec<(Intr, Edge)>)],
+    fault: Fault,
+    intr: Intr,
+) -> Option<Edge> {
+    let (_, at) = crashes.iter_mut().find(|(f, _)| *f == fault)?;
+    let i = at.iter().position(|(i, _)| *i == intr)?;
+    Some(at.swap_remove(i).1)
+}
+
 fn explore_config(caps: Caps, resp: Resp) -> Explored {
     let mut ex = Explored::default();
     let mut nodes: Vec<Node> = Vec::new();
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    let mut seen: HashMap<StateKey, usize> = HashMap::new();
     let mut queue: VecDeque<usize> = VecDeque::new();
     let mut roots: Vec<&'static str> = Vec::new();
     for (name, mut w) in seeds(caps, resp) {
@@ -1630,12 +1783,24 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
             // After a rare event only the plain edges are taken (and the interruptions of a start): the faults and the
             // interruptions of every entry point are covered from the core states.
             let light = w.rare_used && !deep();
+            let mut crashes: Vec<(Fault, Vec<(Intr, Edge)>)> = Vec::new();
             let mut idx = 0;
             while idx < tries.len() {
                 let (fault, intr) = tries[idx];
                 let first = idx == 0;
                 idx += 1;
-                let e = apply(&w, ev, fault, intr);
+                let e = if matches!(intr, Intr::CrashBefore(_) | Intr::CrashAfter(_)) {
+                    // Handed out by the run of this fault without an interruption, which came first in `tries`; a crash that
+                    // run did not reach (an error before the effect was left) is run for real.
+                    take_crash(&mut crashes, fault, intr)
+                        .unwrap_or_else(|| apply(&w, ev, fault, intr))
+                } else if intr == Intr::None && !real_crashes() {
+                    let (e, at) = apply_with_crashes(&w, ev, fault);
+                    crashes.push((fault, at));
+                    e
+                } else {
+                    apply(&w, ev, fault, intr)
+                };
                 ex.edges += 1;
                 if e.crashed {
                     ex.crash_edges += 1;
@@ -1722,6 +1887,14 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
             }
         }
     }
+    ex.fingerprint = seen
+        .keys()
+        .map(|k| {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            std::hash::Hash::hash(k, &mut h);
+            std::hash::Hasher::finish(&h)
+        })
+        .fold(0u64, u64::wrapping_add);
     ex.states = nodes.len();
     ex.core = nodes.iter().filter(|n| !n.w.rare_used).count();
     ex
@@ -1751,6 +1924,79 @@ fn configs_for(deep: bool, only: Option<&str>) -> Vec<(Caps, Resp)> {
         .copied()
         .filter(|(c, r)| only.is_none_or(|o| o == format!("{c:?}/{r:?}")))
         .collect()
+}
+
+/// What two edges must agree on to be the same step.
+fn same_edge(a: &Edge, b: &Edge) -> bool {
+    let ops = |e: &Edge| e.ops.iter().map(|o| (o.k, o.label)).collect::<Vec<_>>();
+    key(&a.after) == key(&b.after)
+        && a.crashed == b.crashed
+        && ops(a) == ops(b)
+        && a.trace == b.trace
+        && a.viols == b.viols
+}
+
+/// The edge of a crash taken from a run that goes on is the edge a real panic unwound through the manager leaves: the same
+/// state, the same calls, the same trace and the same findings, for every crash of every entry point and fault, over the
+/// first states of three configurations.
+#[test]
+fn a_crash_taken_from_a_running_run_is_the_edge_a_real_panic_leaves() {
+    silence_crashes();
+    let mut compared = 0u32;
+    for (caps, resp) in [
+        (Caps::Mac, Resp::Never),
+        (Caps::Linux, Resp::Fast),
+        (Caps::NoAuto, Resp::Fast),
+    ] {
+        let mut seen: std::collections::HashSet<StateKey> = std::collections::HashSet::new();
+        let mut queue: VecDeque<World> = VecDeque::new();
+        for (_, mut w) in seeds(caps, resp) {
+            normalize(&mut w);
+            if seen.insert(key(&w)) {
+                queue.push_back(w);
+            }
+        }
+        let mut taken = 0;
+        while let Some(w) = queue.pop_front() {
+            if taken >= 60 {
+                break;
+            }
+            taken += 1;
+            for &ev in &ALL_EVS {
+                if (ev == Ev::FirstRun && w.first_run_done) || (is_rare(ev) && w.rare_used) {
+                    continue;
+                }
+                let mut faults = vec![Fault::None];
+                if is_entry(ev) {
+                    faults.extend(faults_of(caps));
+                }
+                for fault in faults {
+                    let (plain, crashes) = apply_with_crashes(&w, ev, fault);
+                    assert!(
+                        same_edge(&plain, &apply(&w, ev, fault, Intr::None)),
+                        "{caps:?}/{resp:?} {ev:?}+{fault:?}: the run that hands out crashes is not the plain run"
+                    );
+                    for (intr, taken_edge) in crashes {
+                        let real = apply(&w, ev, fault, intr);
+                        assert!(
+                            same_edge(&taken_edge, &real),
+                            "{caps:?}/{resp:?} {ev:?}+{fault:?}@{intr:?} from {w:?}\n taken {:?} {:?}\n real  {:?} {:?}",
+                            key(&taken_edge.after),
+                            taken_edge.viols,
+                            key(&real.after),
+                            real.viols
+                        );
+                        assert!(real.crashed, "a real crash at {intr:?} crashed");
+                        compared += 1;
+                    }
+                    if fault == Fault::None && seen.insert(key(&plain.after)) {
+                        queue.push_back(plain.after);
+                    }
+                }
+            }
+        }
+    }
+    assert!(compared > 500, "only {compared} crashes compared");
 }
 
 #[test]
@@ -1888,12 +2134,13 @@ fn check_model(configs: &[(Caps, Resp)], floor: Option<Floor>) {
     let mut out = String::new();
     for (c, r, ex) in &results {
         out += &format!(
-            "{c:?}/{r:?}: {} states ({} core), {} edges ({} crashes), {} not expanded (depth bound){}\n",
+            "{c:?}/{r:?}: {} states ({} core), {} edges ({} crashes), {} not expanded (depth bound), state fingerprint {:016x}{}\n",
             ex.states,
             ex.core,
             ex.edges,
             ex.crash_edges,
             ex.depth_cut,
+            ex.fingerprint,
             if ex.finished { "" } else { "  NOT FINISHED" }
         );
         assert!(

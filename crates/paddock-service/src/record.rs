@@ -29,7 +29,7 @@ use std::sync::{Arc, Mutex};
 pub const FORMAT: u32 = 3;
 
 /// How far a replace has got; written before the step it names.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Phase {
     /// The old registration is being removed (`ours`: it is this version's own, settled or waiting, which a replace asked by
@@ -53,7 +53,7 @@ pub enum Phase {
 }
 
 /// Why `register` failed, as far as a retry cares.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FailKind {
     /// The tool or the call failed; worth another try.
@@ -63,7 +63,7 @@ pub enum FailKind {
 }
 
 /// What the app is doing about the registration, as of the last durable write.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",
@@ -88,7 +88,7 @@ pub enum State {
 }
 
 /// The remembered registration.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Recorded {
     /// The app version that last saw the service come up.

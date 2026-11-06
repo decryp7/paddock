@@ -364,26 +364,34 @@ fn a_refused_writable_list_fixed_with_chmod_is_never_overwritten_before_a_restar
     );
 }
 
+/// The write fails for any user, root included (a mode bit would not stop root, which is who CI's containers run as): the
+/// config folder is replaced by a regular file after the control is built, so the folder cannot be made and the path below
+/// it cannot be written.
 #[cfg(unix)]
 #[test]
 fn a_plain_write_failure_says_what_failed_not_that_the_file_changed() {
-    use std::os::unix::fs::PermissionsExt;
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("config");
     std::fs::create_dir(&folder).unwrap();
     let path = folder.join("mcp-keys.json");
     let c = control(&path);
-    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o500)).unwrap();
+    std::fs::remove_dir(&folder).unwrap();
+    std::fs::write(&folder, b"not a folder").unwrap();
+    // The precondition: the OS itself refuses the folder, and says why (the text the message must carry).
+    let os = std::fs::create_dir_all(&folder).unwrap_err().to_string();
+    assert!(
+        std::fs::write(&path, b"x").is_err(),
+        "the path below a file is refused"
+    );
     let e = c.issue_key("x").unwrap_err();
-    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert!(
         !e.message.contains("Restart the app") && !e.message.contains(".."),
         "{}",
         e.message
     );
     assert!(
-        e.message.to_lowercase().contains("permission denied"),
-        "{}",
+        e.message.contains(&os),
+        "the message carries the OS error text: {}",
         e.message
     );
 }

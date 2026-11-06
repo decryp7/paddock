@@ -83,7 +83,7 @@ pub enum Registration {
 }
 
 /// What the OS says about the running job.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Job {
     /// The OS has no job.
     Absent,
@@ -114,7 +114,7 @@ impl Job {
 }
 
 /// How the job's last process ended, as the OS reports it (typed, never free text).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LastExit {
     /// An exit status (systemd `ExecMainStatus`, launchd `last exit code`).
     Code(i32),
