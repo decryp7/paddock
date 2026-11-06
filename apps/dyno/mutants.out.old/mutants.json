@@ -1,0 +1,578 @@
+[
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace would_lower -> bool with true\n@@ -68,17 +68,17 @@\n /// The nice value of [`Level::Nice10`].\n #[cfg(target_os = \"linux\")]\n const NICE_BULK: i32 = 10;\n \n /// Whether moving a thread from nice value `current` to `target` lowers its priority (a higher nice value is lower). An\n /// unprivileged user may only do that; asking for a raise fails with EPERM.\n #[cfg(target_os = \"linux\")]\n const fn would_lower(current: i32, target: i32) -> bool {\n-    current < target\n+    true /* ~ changed by cargo-mutants ~ */\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "would_lower",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 77
+        },
+        "start": {
+          "column": 1,
+          "line": 72
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/dyno-platform/src/priority.rs:76:5: replace would_lower -> bool with true",
+    "package": "dyno-platform",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 76
+      },
+      "start": {
+        "column": 5,
+        "line": 76
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace would_lower -> bool with false\n@@ -68,17 +68,17 @@\n /// The nice value of [`Level::Nice10`].\n #[cfg(target_os = \"linux\")]\n const NICE_BULK: i32 = 10;\n \n /// Whether moving a thread from nice value `current` to `target` lowers its priority (a higher nice value is lower). An\n /// unprivileged user may only do that; asking for a raise fails with EPERM.\n #[cfg(target_os = \"linux\")]\n const fn would_lower(current: i32, target: i32) -> bool {\n-    current < target\n+    false /* ~ changed by cargo-mutants ~ */\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "would_lower",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 77
+        },
+        "start": {
+          "column": 1,
+          "line": 72
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/dyno-platform/src/priority.rs:76:5: replace would_lower -> bool with false",
+    "package": "dyno-platform",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 21,
+        "line": 76
+      },
+      "start": {
+        "column": 5,
+        "line": 76
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace < with == in would_lower\n@@ -68,17 +68,17 @@\n /// The nice value of [`Level::Nice10`].\n #[cfg(target_os = \"linux\")]\n const NICE_BULK: i32 = 10;\n \n /// Whether moving a thread from nice value `current` to `target` lowers its priority (a higher nice value is lower). An\n /// unprivileged user may only do that; asking for a raise fails with EPERM.\n #[cfg(target_os = \"linux\")]\n const fn would_lower(current: i32, target: i32) -> bool {\n-    current < target\n+    current == /* ~ changed by cargo-mutants ~ */ target\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "would_lower",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 77
+        },
+        "start": {
+          "column": 1,
+          "line": 72
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:76:13: replace < with == in would_lower",
+    "package": "dyno-platform",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 14,
+        "line": 76
+      },
+      "start": {
+        "column": 13,
+        "line": 76
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace < with > in would_lower\n@@ -68,17 +68,17 @@\n /// The nice value of [`Level::Nice10`].\n #[cfg(target_os = \"linux\")]\n const NICE_BULK: i32 = 10;\n \n /// Whether moving a thread from nice value `current` to `target` lowers its priority (a higher nice value is lower). An\n /// unprivileged user may only do that; asking for a raise fails with EPERM.\n #[cfg(target_os = \"linux\")]\n const fn would_lower(current: i32, target: i32) -> bool {\n-    current < target\n+    current > /* ~ changed by cargo-mutants ~ */ target\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "would_lower",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 77
+        },
+        "start": {
+          "column": 1,
+          "line": 72
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:76:13: replace < with > in would_lower",
+    "package": "dyno-platform",
+    "replacement": ">",
+    "span": {
+      "end": {
+        "column": 14,
+        "line": 76
+      },
+      "start": {
+        "column": 13,
+        "line": 76
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace < with <= in would_lower\n@@ -68,17 +68,17 @@\n /// The nice value of [`Level::Nice10`].\n #[cfg(target_os = \"linux\")]\n const NICE_BULK: i32 = 10;\n \n /// Whether moving a thread from nice value `current` to `target` lowers its priority (a higher nice value is lower). An\n /// unprivileged user may only do that; asking for a raise fails with EPERM.\n #[cfg(target_os = \"linux\")]\n const fn would_lower(current: i32, target: i32) -> bool {\n-    current < target\n+    current <= /* ~ changed by cargo-mutants ~ */ target\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "would_lower",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 77
+        },
+        "start": {
+          "column": 1,
+          "line": 72
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:76:13: replace < with <= in would_lower",
+    "package": "dyno-platform",
+    "replacement": "<=",
+    "span": {
+      "end": {
+        "column": 14,
+        "line": 76
+      },
+      "start": {
+        "column": 13,
+        "line": 76
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace current_nice -> Option<i32> with None\n@@ -76,22 +76,17 @@\n     current < target\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n-    unsafe {\n-        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n-        *libc::__errno_location() = 0;\n-        let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n-        (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n-    }\n+    None /* ~ changed by cargo-mutants ~ */\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n         Level::Normal => true,\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "current_nice",
+      "return_type": "-> Option<i32>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 90
+        },
+        "start": {
+          "column": 1,
+          "line": 79
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/dyno-platform/src/priority.rs:84:5: replace current_nice -> Option<i32> with None",
+    "package": "dyno-platform",
+    "replacement": "None",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 89
+      },
+      "start": {
+        "column": 5,
+        "line": 84
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace current_nice -> Option<i32> with Some(0)\n@@ -76,22 +76,17 @@\n     current < target\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n-    unsafe {\n-        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n-        *libc::__errno_location() = 0;\n-        let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n-        (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n-    }\n+    Some(0) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n         Level::Normal => true,\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "current_nice",
+      "return_type": "-> Option<i32>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 90
+        },
+        "start": {
+          "column": 1,
+          "line": 79
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/dyno-platform/src/priority.rs:84:5: replace current_nice -> Option<i32> with Some(0)",
+    "package": "dyno-platform",
+    "replacement": "Some(0)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 89
+      },
+      "start": {
+        "column": 5,
+        "line": 84
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace current_nice -> Option<i32> with Some(1)\n@@ -76,22 +76,17 @@\n     current < target\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n-    unsafe {\n-        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n-        *libc::__errno_location() = 0;\n-        let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n-        (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n-    }\n+    Some(1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n         Level::Normal => true,\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "current_nice",
+      "return_type": "-> Option<i32>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 90
+        },
+        "start": {
+          "column": 1,
+          "line": 79
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/dyno-platform/src/priority.rs:84:5: replace current_nice -> Option<i32> with Some(1)",
+    "package": "dyno-platform",
+    "replacement": "Some(1)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 89
+      },
+      "start": {
+        "column": 5,
+        "line": 84
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace current_nice -> Option<i32> with Some(-1)\n@@ -76,22 +76,17 @@\n     current < target\n }\n \n /// The calling thread's nice value, `None` when the system does not say.\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n-    unsafe {\n-        let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n-        *libc::__errno_location() = 0;\n-        let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n-        (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n-    }\n+    Some(-1) /* ~ changed by cargo-mutants ~ */\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n         Level::Normal => true,\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "current_nice",
+      "return_type": "-> Option<i32>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 90
+        },
+        "start": {
+          "column": 1,
+          "line": 79
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/dyno-platform/src/priority.rs:84:5: replace current_nice -> Option<i32> with Some(-1)",
+    "package": "dyno-platform",
+    "replacement": "Some(-1)",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 89
+      },
+      "start": {
+        "column": 5,
+        "line": 84
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace || with && in current_nice\n@@ -80,17 +80,17 @@\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n         let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n         *libc::__errno_location() = 0;\n         let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n-        (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n+        (nice != -1 && /* ~ changed by cargo-mutants ~ */ *libc::__errno_location() == 0).then_some(nice)\n     }\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "current_nice",
+      "return_type": "-> Option<i32>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 90
+        },
+        "start": {
+          "column": 1,
+          "line": 79
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:88:21: replace || with && in current_nice",
+    "package": "dyno-platform",
+    "replacement": "&&",
+    "span": {
+      "end": {
+        "column": 23,
+        "line": 88
+      },
+      "start": {
+        "column": 21,
+        "line": 88
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace != with == in current_nice\n@@ -80,17 +80,17 @@\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n         let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n         *libc::__errno_location() = 0;\n         let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n-        (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n+        (nice == /* ~ changed by cargo-mutants ~ */ -1 || *libc::__errno_location() == 0).then_some(nice)\n     }\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "current_nice",
+      "return_type": "-> Option<i32>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 90
+        },
+        "start": {
+          "column": 1,
+          "line": 79
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:88:15: replace != with == in current_nice",
+    "package": "dyno-platform",
+    "replacement": "==",
+    "span": {
+      "end": {
+        "column": 17,
+        "line": 88
+      },
+      "start": {
+        "column": 15,
+        "line": 88
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ delete - in current_nice\n@@ -80,17 +80,17 @@\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n         let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n         *libc::__errno_location() = 0;\n         let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n-        (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n+        (nice !=  /* ~ changed by cargo-mutants ~ */1 || *libc::__errno_location() == 0).then_some(nice)\n     }\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "current_nice",
+      "return_type": "-> Option<i32>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 90
+        },
+        "start": {
+          "column": 1,
+          "line": 79
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:88:18: delete - in current_nice",
+    "package": "dyno-platform",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 19,
+        "line": 88
+      },
+      "start": {
+        "column": 18,
+        "line": 88
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace == with != in current_nice\n@@ -80,17 +80,17 @@\n #[cfg(target_os = \"linux\")]\n fn current_nice() -> Option<i32> {\n     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a\n     // valid value, so errno is cleared first and checked after.\n     unsafe {\n         let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n         *libc::__errno_location() = 0;\n         let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n-        (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n+        (nice != -1 || *libc::__errno_location() != /* ~ changed by cargo-mutants ~ */ 0).then_some(nice)\n     }\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "current_nice",
+      "return_type": "-> Option<i32>",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 90
+        },
+        "start": {
+          "column": 1,
+          "line": 79
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:88:50: replace == with != in current_nice",
+    "package": "dyno-platform",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 52,
+        "line": 88
+      },
+      "start": {
+        "column": 50,
+        "line": 88
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace set_current_thread -> bool with true\n@@ -87,51 +87,17 @@\n         let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n         (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n     }\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n-    ROLE.with(|r| r.set(Some(role)));\n-    match level(role, Os::CURRENT) {\n-        Level::Normal => true,\n-        #[cfg(target_os = \"macos\")]\n-        Level::Utility => {\n-            // SAFETY: a plain call that sets the QoS class of the calling thread.\n-            unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0) == 0 }\n-        }\n-        #[cfg(target_os = \"linux\")]\n-        Level::Nice10 => {\n-            // SAFETY: `gettid` takes no arguments; `setpriority` with a thread id lowers only that thread (Linux threads\n-            // have their own nice value).\n-            unsafe {\n-                let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n-                // A process started under `nice -n 19` is already lower than asked; setting 10 would be a raise (EPERM\n-                // for an unprivileged user), so leave it where it is.\n-                if let Some(current) = current_nice() {\n-                    if !would_lower(current, NICE_BULK) {\n-                        log::debug!(current, target = NICE_BULK; \"thread priority: already at or below the bulk nice value, left as is\");\n-                        return true;\n-                    }\n-                }\n-                libc::setpriority(libc::PRIO_PROCESS, tid, NICE_BULK) == 0\n-            }\n-        }\n-        #[cfg(windows)]\n-        Level::BelowNormal => {\n-            use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};\n-            // SAFETY: the pseudo handle of the calling thread is always valid.\n-            unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) }.is_ok()\n-        }\n-        // A level of another OS is never chosen for this one.\n-        #[allow(unreachable_patterns)]\n-        _ => false,\n-    }\n+    true /* ~ changed by cargo-mutants ~ */\n }\n \n /// Lowers the calling thread for bulk work: [`set_current_thread`] with [`ThreadRole::Bulk`] (macOS `QOS_CLASS_UTILITY`,\n /// Linux nice 10, Windows `THREAD_PRIORITY_BELOW_NORMAL`, as Debrief's `debrief_core::threads::lower_priority`).\n ///\n /// Never an OS's starvable background level (macOS QoS `BACKGROUND`, Windows background mode): those run a thread only\n /// when the machine has nothing else to do, and the Windows mode also drops its I/O priority to the lowest, so on a busy\n /// machine work somebody waits for stalls (Debrief's report took 100 s instead of 3 s on a loaded Mac).\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "set_current_thread",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 130
+        },
+        "start": {
+          "column": 1,
+          "line": 92
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/dyno-platform/src/priority.rs:95:5: replace set_current_thread -> bool with true",
+    "package": "dyno-platform",
+    "replacement": "true",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 129
+      },
+      "start": {
+        "column": 5,
+        "line": 95
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace set_current_thread -> bool with false\n@@ -87,51 +87,17 @@\n         let nice = libc::getpriority(libc::PRIO_PROCESS, tid);\n         (nice != -1 || *libc::__errno_location() == 0).then_some(nice)\n     }\n }\n \n /// Sets the calling thread's priority for `role` on this OS ([`level`]). Returns whether the OS accepted it (true when\n /// nothing needs changing). It stays in effect until the thread ends, so call it only on threads made for this work.\n pub fn set_current_thread(role: ThreadRole) -> bool {\n-    ROLE.with(|r| r.set(Some(role)));\n-    match level(role, Os::CURRENT) {\n-        Level::Normal => true,\n-        #[cfg(target_os = \"macos\")]\n-        Level::Utility => {\n-            // SAFETY: a plain call that sets the QoS class of the calling thread.\n-            unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0) == 0 }\n-        }\n-        #[cfg(target_os = \"linux\")]\n-        Level::Nice10 => {\n-            // SAFETY: `gettid` takes no arguments; `setpriority` with a thread id lowers only that thread (Linux threads\n-            // have their own nice value).\n-            unsafe {\n-                let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n-                // A process started under `nice -n 19` is already lower than asked; setting 10 would be a raise (EPERM\n-                // for an unprivileged user), so leave it where it is.\n-                if let Some(current) = current_nice() {\n-                    if !would_lower(current, NICE_BULK) {\n-                        log::debug!(current, target = NICE_BULK; \"thread priority: already at or below the bulk nice value, left as is\");\n-                        return true;\n-                    }\n-                }\n-                libc::setpriority(libc::PRIO_PROCESS, tid, NICE_BULK) == 0\n-            }\n-        }\n-        #[cfg(windows)]\n-        Level::BelowNormal => {\n-            use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};\n-            // SAFETY: the pseudo handle of the calling thread is always valid.\n-            unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) }.is_ok()\n-        }\n-        // A level of another OS is never chosen for this one.\n-        #[allow(unreachable_patterns)]\n-        _ => false,\n-    }\n+    false /* ~ changed by cargo-mutants ~ */\n }\n \n /// Lowers the calling thread for bulk work: [`set_current_thread`] with [`ThreadRole::Bulk`] (macOS `QOS_CLASS_UTILITY`,\n /// Linux nice 10, Windows `THREAD_PRIORITY_BELOW_NORMAL`, as Debrief's `debrief_core::threads::lower_priority`).\n ///\n /// Never an OS's starvable background level (macOS QoS `BACKGROUND`, Windows background mode): those run a thread only\n /// when the machine has nothing else to do, and the Windows mode also drops its I/O priority to the lowest, so on a busy\n /// machine work somebody waits for stalls (Debrief's report took 100 s instead of 3 s on a loaded Mac).\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "set_current_thread",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 130
+        },
+        "start": {
+          "column": 1,
+          "line": 92
+        }
+      }
+    },
+    "genre": "FnValue",
+    "name": "crates/dyno-platform/src/priority.rs:95:5: replace set_current_thread -> bool with false",
+    "package": "dyno-platform",
+    "replacement": "false",
+    "span": {
+      "end": {
+        "column": 6,
+        "line": 129
+      },
+      "start": {
+        "column": 5,
+        "line": 95
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ delete match arm Level::Nice10 in set_current_thread\n@@ -95,33 +95,17 @@\n     ROLE.with(|r| r.set(Some(role)));\n     match level(role, Os::CURRENT) {\n         Level::Normal => true,\n         #[cfg(target_os = \"macos\")]\n         Level::Utility => {\n             // SAFETY: a plain call that sets the QoS class of the calling thread.\n             unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0) == 0 }\n         }\n-        #[cfg(target_os = \"linux\")]\n-        Level::Nice10 => {\n-            // SAFETY: `gettid` takes no arguments; `setpriority` with a thread id lowers only that thread (Linux threads\n-            // have their own nice value).\n-            unsafe {\n-                let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n-                // A process started under `nice -n 19` is already lower than asked; setting 10 would be a raise (EPERM\n-                // for an unprivileged user), so leave it where it is.\n-                if let Some(current) = current_nice() {\n-                    if !would_lower(current, NICE_BULK) {\n-                        log::debug!(current, target = NICE_BULK; \"thread priority: already at or below the bulk nice value, left as is\");\n-                        return true;\n-                    }\n-                }\n-                libc::setpriority(libc::PRIO_PROCESS, tid, NICE_BULK) == 0\n-            }\n-        }\n+         /* ~ changed by cargo-mutants ~ */\n         #[cfg(windows)]\n         Level::BelowNormal => {\n             use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};\n             // SAFETY: the pseudo handle of the calling thread is always valid.\n             unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) }.is_ok()\n         }\n         // A level of another OS is never chosen for this one.\n         #[allow(unreachable_patterns)]\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "set_current_thread",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 130
+        },
+        "start": {
+          "column": 1,
+          "line": 92
+        }
+      }
+    },
+    "genre": "MatchArm",
+    "name": "crates/dyno-platform/src/priority.rs:103:9: delete match arm Level::Nice10 in set_current_thread",
+    "package": "dyno-platform",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 10,
+        "line": 119
+      },
+      "start": {
+        "column": 9,
+        "line": 103
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ delete ! in set_current_thread\n@@ -104,17 +104,17 @@\n         Level::Nice10 => {\n             // SAFETY: `gettid` takes no arguments; `setpriority` with a thread id lowers only that thread (Linux threads\n             // have their own nice value).\n             unsafe {\n                 let tid = libc::syscall(libc::SYS_gettid) as libc::id_t;\n                 // A process started under `nice -n 19` is already lower than asked; setting 10 would be a raise (EPERM\n                 // for an unprivileged user), so leave it where it is.\n                 if let Some(current) = current_nice() {\n-                    if !would_lower(current, NICE_BULK) {\n+                    if  /* ~ changed by cargo-mutants ~ */would_lower(current, NICE_BULK) {\n                         log::debug!(current, target = NICE_BULK; \"thread priority: already at or below the bulk nice value, left as is\");\n                         return true;\n                     }\n                 }\n                 libc::setpriority(libc::PRIO_PROCESS, tid, NICE_BULK) == 0\n             }\n         }\n         #[cfg(windows)]\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "set_current_thread",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 130
+        },
+        "start": {
+          "column": 1,
+          "line": 92
+        }
+      }
+    },
+    "genre": "UnaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:112:24: delete ! in set_current_thread",
+    "package": "dyno-platform",
+    "replacement": "",
+    "span": {
+      "end": {
+        "column": 25,
+        "line": 112
+      },
+      "start": {
+        "column": 24,
+        "line": 112
+      }
+    }
+  },
+  {
+    "diff": "--- crates/dyno-platform/src/priority.rs\n+++ replace == with != in set_current_thread\n@@ -109,17 +109,17 @@\n                 // A process started under `nice -n 19` is already lower than asked; setting 10 would be a raise (EPERM\n                 // for an unprivileged user), so leave it where it is.\n                 if let Some(current) = current_nice() {\n                     if !would_lower(current, NICE_BULK) {\n                         log::debug!(current, target = NICE_BULK; \"thread priority: already at or below the bulk nice value, left as is\");\n                         return true;\n                     }\n                 }\n-                libc::setpriority(libc::PRIO_PROCESS, tid, NICE_BULK) == 0\n+                libc::setpriority(libc::PRIO_PROCESS, tid, NICE_BULK) != /* ~ changed by cargo-mutants ~ */ 0\n             }\n         }\n         #[cfg(windows)]\n         Level::BelowNormal => {\n             use windows::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL};\n             // SAFETY: the pseudo handle of the calling thread is always valid.\n             unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) }.is_ok()\n         }\n",
+    "file": "crates/dyno-platform/src/priority.rs",
+    "function": {
+      "function_name": "set_current_thread",
+      "return_type": "-> bool",
+      "span": {
+        "end": {
+          "column": 2,
+          "line": 130
+        },
+        "start": {
+          "column": 1,
+          "line": 92
+        }
+      }
+    },
+    "genre": "BinaryOperator",
+    "name": "crates/dyno-platform/src/priority.rs:117:71: replace == with != in set_current_thread",
+    "package": "dyno-platform",
+    "replacement": "!=",
+    "span": {
+      "end": {
+        "column": 73,
+        "line": 117
+      },
+      "start": {
+        "column": 71,
+        "line": 117
+      }
+    }
+  }
+]

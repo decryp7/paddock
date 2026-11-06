@@ -1,0 +1,25 @@
+--- crates/dyno-platform/src/priority.rs
++++ replace nice_result -> Option<i32> with Some(-1)
+@@ -75,21 +75,17 @@
+ const fn would_lower(current: i32, target: i32) -> bool {
+     current < target
+ }
+ 
+ /// The nice value from a `getpriority` return value and errno: -1 is both a valid value and the error marker, so it counts
+ /// only when errno is 0.
+ #[cfg(target_os = "linux")]
+ const fn nice_result(raw: i32, errno: i32) -> Option<i32> {
+-    if raw == -1 && errno != 0 {
+-        None
+-    } else {
+-        Some(raw)
+-    }
++    Some(-1) /* ~ changed by cargo-mutants ~ */
+ }
+ 
+ /// The calling thread's nice value, `None` when the system does not say.
+ #[cfg(target_os = "linux")]
+ fn current_nice() -> Option<i32> {
+     // SAFETY: `gettid` takes no arguments; `getpriority` with a thread id reads only that thread's nice value. -1 is a
+     // valid value, so errno is cleared first and checked after.
+     unsafe {
