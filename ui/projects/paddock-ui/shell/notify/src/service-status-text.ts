@@ -50,6 +50,7 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'pitwall.noModel': () => $localize`:@@pd.health.state.no-model:no suitable model`,
   'pitwall.unavailable': () => $localize`:@@pd.health.state.unavailable:not available`,
   'service.switchOn': () => $localize`:@@pd.health.state.stopped:stopped`,
+  'service.busy': () => $localize`:@@pd.health.state.busy:busy`,
   'service.repairFailed': () => $localize`:@@pd.health.state.stopped:stopped`,
   'packs.refused': () => $localize`:@@pd.health.state.stopped:stopped`,
   'pd.settings.file-problem': () => $localize`:@@pd.health.state.stopped:stopped`,

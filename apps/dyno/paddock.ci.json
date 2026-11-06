@@ -8,6 +8,12 @@
   ],
   "angularDir": "app",
   "windowsClippy": true,
+  "prepare": [
+    "cd apps/dyno",
+    "cargo fetch --locked --target aarch64-apple-darwin",
+    "cargo fetch --locked --target x86_64-apple-darwin",
+    "cargo fetch --locked --target x86_64-pc-windows-msvc"
+  ],
   "processPatterns": [
     "{build}[/\\\\]debug[/\\\\](dyno-test-plugin|dyno-bench|dyno-bench-gpu)(\\.exe)?( |$)",
     "{tmp}[/\\\\]dyno-it-plugins-[A-Za-z0-9]+[/\\\\][^/\\\\]+[/\\\\]plugin(\\.exe)?( |$)"

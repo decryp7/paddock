@@ -88,9 +88,12 @@ crossbeam-utils = { version = "0.8", default-features = false, features = ["std"
 digest = { version = "0.11", features = ["alloc", "mac", "oid"] }
 futures-core = { version = "0.3" }
 getrandom-9fbad63c4bcf4a8f = { package = "getrandom", version = "0.4", default-features = false, features = ["std", "sys_rng"] }
+gio = { version = "0.18", default-features = false, features = ["v2_70"] }
 gio-sys = { version = "0.18", default-features = false, features = ["v2_70"] }
+glib = { version = "0.18", features = ["v2_70"] }
 glib-sys = { version = "0.18", default-features = false, features = ["v2_70"] }
 gobject-sys = { version = "0.18", default-features = false, features = ["v2_70"] }
+gtk = { version = "0.18", default-features = false, features = ["v3_24"] }
 libc = { version = "0.2" }
 linux-raw-sys = { version = "0.12", default-features = false, features = ["auxvec", "elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "xdp"] }
 mio = { version = "1", features = ["net", "os-ext"] }

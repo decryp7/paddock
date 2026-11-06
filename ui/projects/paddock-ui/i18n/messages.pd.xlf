@@ -848,6 +848,9 @@
       <trans-unit id="pd.health.see-what-happened" datatype="html">
         <source>See what happened</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.busy" datatype="html">
+        <source>busy</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.degraded" datatype="html">
         <source>limited</source>
       </trans-unit>

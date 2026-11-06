@@ -119,11 +119,13 @@ test.describe('dashboard grid', () => {
     const scrollTop = (): Promise<number> => main.evaluate((m) => m.scrollTop);
     expect(await scrollTop()).toBe(0);
     const first = await box(cells(page).first());
-    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
+    // Press near the top of the cell: the tall tiles (diagnosis, health: h12) have their centre below a 600 px viewport.
+    const y0 = first.y + Math.min(first.height / 2, 40);
+    await page.mouse.move(first.x + first.width / 2, y0);
     await page.mouse.down();
     const area = await main.boundingBox();
     if (!area) throw new Error('the page has no box');
-    await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2 + 40, { steps: 5 });
+    await page.mouse.move(first.x + first.width / 2, y0 + 40, { steps: 5 });
     await page.mouse.move(first.x + first.width / 2, area.y + area.height - 6, { steps: 8 });
     await expect.poll(scrollTop, { timeout: 15_000 }).toBeGreaterThan(0);
     // Back up: near the top edge it scrolls the other way.

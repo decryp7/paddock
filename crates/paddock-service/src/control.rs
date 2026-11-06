@@ -319,12 +319,12 @@ impl ServiceControl {
             .code("service.switchOn"));
         }
         self.run(Request::Repair).map(drop).map_err(|e| {
-            let code = if matches!(e, ServiceError::Busy) {
-                "service.busy"
+            // Literal codes, so the cause-code scan (cause-codes.spec.ts) sees both.
+            if matches!(e, ServiceError::Busy) {
+                Cause::new(e.to_string()).code("service.busy")
             } else {
-                "service.repairFailed"
-            };
-            Cause::new(e.to_string()).code(code)
+                Cause::new(e.to_string()).code("service.repairFailed")
+            }
         })
     }
 

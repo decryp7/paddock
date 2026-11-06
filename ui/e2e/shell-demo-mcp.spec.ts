@@ -18,7 +18,7 @@ test.describe('AI access (MCP) (plan X22)', () => {
   test('turn it on, allow an action, add a client (the key is shown once), revoke it, read and clear the log', async ({ app, page, pageErrors }) => {
     await openPage(page, app, '');
     await expect(page.getByTestId('mcp-enabled').getByRole('switch')).not.toBeChecked();
-    await expect(page.getByText('AI access is off')).toBeVisible();
+    await expect(page.getByTestId('mcp-enabled').getByText('AI access is off')).toBeVisible();
     // Tools are read-only; the action is a separate, off-by-default permission with a warning.
     await expect(page.getByTestId('mcp-tools')).not.toContainText('Export a report');
     await expect(page.getByTestId('mcp-actions-warning')).toContainText('change something');

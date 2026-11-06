@@ -141,47 +141,49 @@ fn only_tables_for_other_systems_turn_the_keychain_adapter_on() {
 }
 
 /// Whether `cargo tree -i <krate>` finds the crate in what `apps/dyno` builds for `target`, with every feature on so that an optional
-/// one cannot hide it. Packages that are not fetched yet are fetched with `cargo fetch --locked`. `Err` means the probe could not run.
+/// one cannot hide it. The probe never fetches (no network inside a 60 s test): packages that are not fetched are `Err`, "check broken"
+/// (ER-33), and the gate's prepare step (`paddock.ci.json`) runs `cargo fetch --locked` for each target first. Each phase prints its
+/// duration to stderr (ER-27). `Err` means the probe could not run.
 fn tree_has(krate: &str, target: &str) -> Result<bool, String> {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let manifest = root().join("apps/dyno/Cargo.toml");
-    let tree = || {
-        let mut cmd = dyno_platform::process::command(&cargo);
-        cmd.args([
-            "tree",
-            "--offline",
-            "--locked",
-            "--all-features",
-            "--invert",
-            krate,
-            "--prefix",
-            "none",
-            "--target",
-            target,
-            "--manifest-path",
-        ])
-        .arg(&manifest);
-        dyno_platform::process::run_with_timeout(cmd, Duration::from_secs(120)).map_err(|e| format!("cargo tree could not run: {e}"))
-    };
-    let verdict = |out: &std::process::Output| {
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        if stdout.lines().any(|l| l.starts_with(&format!("{krate} v"))) {
-            return Some(true);
-        }
-        (out.status.success() || stderr.contains("did not match any packages") || stderr.contains("nothing to print")).then_some(false)
-    };
-    let first = tree()?;
-    if let Some(found) = verdict(&first) {
-        return Ok(found);
+    let started = std::time::Instant::now();
+    let mut cmd = dyno_platform::process::command(&cargo);
+    cmd.args([
+        "tree",
+        "--offline",
+        "--locked",
+        "--all-features",
+        "--invert",
+        krate,
+        "--prefix",
+        "none",
+        "--target",
+        target,
+        "--manifest-path",
+    ])
+    .arg(&manifest);
+    let out =
+        dyno_platform::process::run_with_timeout(cmd, Duration::from_secs(120)).map_err(|e| format!("cargo tree could not run: {e}"))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let found = stdout.lines().any(|l| l.starts_with(&format!("{krate} v")));
+    let clean = out.status.success() || stderr.contains("did not match any packages") || stderr.contains("nothing to print");
+    eprintln!(
+        "cargo tree --invert {krate} --target {target}: exit {:?}, found {found}, {:?}",
+        out.status.code(),
+        started.elapsed()
+    );
+    if found {
+        return Ok(true);
     }
-    let mut fetch = dyno_platform::process::command(&cargo);
-    fetch
-        .args(["fetch", "--locked", "--target", target, "--manifest-path"])
-        .arg(&manifest);
-    dyno_platform::process::run_with_timeout(fetch, Duration::from_secs(900)).map_err(|e| format!("cargo fetch could not run: {e}"))?;
-    let second = tree()?;
-    verdict(&second).ok_or_else(|| format!("cargo tree failed for {target}: {}", String::from_utf8_lossy(&second.stderr).trim()))
+    if clean {
+        return Ok(false);
+    }
+    Err(format!(
+        "packages not fetched (or cargo tree failed) for {target}; run `cargo fetch --locked --target {target} --manifest-path apps/dyno/Cargo.toml` first: {}",
+        stderr.trim()
+    ))
 }
 
 #[test]
