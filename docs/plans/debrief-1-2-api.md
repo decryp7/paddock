@@ -1,13 +1,12 @@
 # Debrief 1.2 API design (package 0.5): the foundation
 
 - Status: **Proposed**, 2026-11-07, for an independent review before wave 1 starts (plan row 0.5).
-- Scope, by the user's decision of 2026-11-07 (relayed by the coordinator): **Debrief 1.2 is the foundation release**;
-  features come one by one in later releases. This file designs the **foundation APIs fully** and, for feature packages,
-  names only the **extension points** they will need, without designing their APIs. Section 0 lists which plan packages
-  were treated as feature.
+- Scope, by the user's decision of 2026-11-07 (plan §10, "full foundation in 1.2, then one function per release"):
+  every package of the plan that §10.3 does not move out has its API here. Revision 2 (same day) extends revision 1,
+  which had wrongly limited itself to a narrower foundation, to that scope; §3 to §6 are unchanged.
 - The dialogs part is [debrief-1-2-api-dialogs.md](debrief-1-2-api-dialogs.md) (ADR 0026, accepted 2026-10-28), unchanged.
 - Base: `docs/debrief-1-2-api` from `origin/docs/debrief-1-2-plan-refresh` `abac43c0c` (which contains
-  `origin/debrief/1.2-int` `852b35ac0`). No `origin/docs/debrief-1-2-api` existed before this branch.
+  `origin/debrief/1.2-int` `852b35ac0`), with that branch's `ac85e26c7` (the release split, plan §10) merged in.
 
 **Read for this design** (all on the named commits; nothing was built or run):
 
@@ -33,7 +32,7 @@ ADR, the correction is listed in §17 with a recommendation and is not applied s
 
 ## Contents
 
-0. [Scope: foundation and feature packages](#0-scope-foundation-and-feature-packages)
+0. [Scope: what is in 1.2](#0-scope-what-is-in-12)
 1. [Rules every API here follows](#1-rules-every-api-here-follows)
 2. [Ids, ordinals, evidence references, process instances](#2-ids-ordinals-evidence-references-process-instances)
 3. [Streaming import (ADR 0064)](#3-streaming-import-adr-0064)
@@ -47,41 +46,47 @@ ADR, the correction is listed in §17 with a recommendation and is not applied s
 11. [Findings: the shared `Finding` from ADR 0068's check report](#11-findings-the-shared-finding-from-adr-0068s-check-report)
 12. [Logs (ER-27)](#12-logs-er-27)
 13. [Engine-to-UI contract](#13-engine-to-ui-contract)
-14. [Extension points for feature packages](#14-extension-points-for-feature-packages)
+14. [The rest of 1.2: lists, timeline, shell, UI on foundation types, performance, analyses, correctness](#14-the-rest-of-12-lists-timeline-shell-ui-on-foundation-types-performance-analyses-correctness)
 15. [Package index: which section each package cites](#15-package-index-which-section-each-package-cites)
 16. [Settings introduced or touched](#16-settings-introduced-or-touched)
 17. [Open questions, corrections, recommendations](#17-open-questions-corrections-recommendations)
 18. [Completeness](#18-completeness)
 
-## 0. Scope: foundation and feature packages
+## 0. Scope: what is in 1.2
 
-**Foundation** is what later features stand on and what would be expensive to change after release: the import path,
-the plugin platform and its wire, folder open, the store's identities, memory bounds, jobs, the time model, ids and
-references, the finding type, logs and the engine-to-UI contract (the roadmap's layers A to E and G to L). These are
-designed in full in §2 to §13.
+The user decided on 2026-11-07: **the full foundation in 1.2, then one function per release** (plan §10 on
+`origin/docs/debrief-1-2-plan-refresh` `ac85e26c7`, merged into this branch). So every package of the plan that §10.3
+does not mark as moved is in 1.2 and has its API here.
 
-**Feature** is a user-facing capability built on that foundation. For these, §14 names the extension point (a reserved
-namespace, a port method shape, a type it must use) and nothing more.
+**Moved out of 1.2, not designed here** (plan §10.3): Y1 AI memory, Y2 semantic search (with X55), N4, N5, N0, N7, Y5
+tray popup, Y9's small items, Y13 (format gaps, PML, batch queries), Y14's R5 UI items, citations and report blocks,
+the thread/sequence view, Pitwall report drafting, ADR 0068's checks except WP-1, ADR 0069's series (the UMDH redesign).
+§14.12 names the foundation type each of them will build on, so that nothing in 1.2 has to change when they come.
 
-| Treated as **feature** (extension point only, §14) | Why |
+**Where each part of 1.2 is designed:**
+
+| Part | Sections |
 |---|---|
-| 2.1, 2.7 virtual primitive and its adoption; 1.3 list identity; 4.5 Debrief's lists; 3.7 grid and Hotspots | UI components; they consume `Bounded` (§13.3) and keyed rows (§2.1) |
-| 2.4 lane canvas and Lanes picker; 3.3 timeline engine; 4.1 timeline UI; the drawing build | Timeline feature; §14.1 gives the canvas vs DOM measurement plan the plan row asks for |
-| M1 to M5, Y12 (shell and workbench move) | Presentation move; the shell contract is ADR 0026 and workbench.md, not this file |
-| 1.1, 1.2, M2b (dialogs) | Designed in [debrief-1-2-api-dialogs.md](debrief-1-2-api-dialogs.md) |
-| 2.3 `LimitNotice` UI, B2 `pd-limit-note` | UI of a foundation type; the types are §4.6; the components are named in §14.4 |
-| 3.2 cap UI, 4.4 plugin manager UI (its UI half) | UI over §4.2's status and §4.5's process table |
-| ADR 0068 dump checks (WP-0 to WP-18 except WP-1's contract), ADR 0069 UMDH series | Features; their shared type is §11 and their wire room is §5.9 |
-| Citations, report blocks, Pitwall drafting, thread/sequence view, analyses at scale (FD-F build), N0 to N8, Y1 to Y16, MEM-6 build, ST-*, Q-*, IX-*, SR-*, P2 to P5, NR1, CPU-1, NB-1 | Features or performance work that uses foundation types unchanged; §14 lists what each must use |
-| 4.2's Limits group in Settings, 3.6's Help ▸ Limits page | UI; the registry is §4.6 |
+| Ids, references, process instances (FD-U, FD-B, FD-P, FD-E1, FD-E2) | §2 |
+| Streaming import (SI-0 to SI-18, 3.4, 3.5, MEM-3, MEM-4, PH4) | §3 |
+| Shared plugin platform (1.4 + B1, 2.2, 2.6a to 2.6d, IP1, PH1, SI-4, SI-7, J1, P1, BP1) | §4 |
+| The `debrief.*` namespace (PH2a, PH2b, PH3, SI-8) | §5 |
+| Folder open (F1 to F12, FM, FR) | §6 |
+| Store, memory bounds, jobs, time, findings, logs, engine-to-UI (§7 to §13) | §7 to §13 |
+| Lists and the virtual primitive (1.3, 2.1, 2.7, 4.5, 3.7) | §14.1 |
+| Timeline and the drawing build (2.4, 3.3, 4.1, M0, the flame and chart fixes), with the canvas vs DOM measurement plan | §14.2 |
+| Shell and workbench move (M1 to M5, Y12); dialogs (1.1, 1.2, M2b) by reference to [debrief-1-2-api-dialogs.md](debrief-1-2-api-dialogs.md) | §14.3 |
+| UI on foundation types (2.3, B2, 3.2, 4.4, 4.2's Limits group, 3.6's Help page) | §14.4 |
+| Store and query performance (ST, Q, Y11, Y4, Y15, SR, IX, P2 to P5, NR1, CPU-1, NB-1, D-0, 4.3, 5.1, 5.2, D-b, B1 bench gates, Y3's rest) | §14.5 |
+| Analyses at scale (FD-F, FD-K, FD-M) and correctness (C1 to C5) | §14.6, §14.7 |
+| Memory (MEM-5, MEM-6 ADR, FD-G) | §14.8 |
+| Names, packs, AI that stays (N1, N2, N3, N6, N8) | §14.9 |
+| Family obligations (X1 to X11, Y6, Y7, Y8, Y16, A1's checks) | §14.10 |
+| Rule 47 in Debrief's views (Y10) | §14.11 |
+| What remains of Y9 and Y14 (the job service on the executor, R0 and R3) | §9.5, §14.10 |
 
-**Foundation packages this file serves** (each cites its section in §15): 0.4, 1.4 + B1, 2.2, 2.5 (rest), 2.6a to 2.6d,
-IP1, PH1, PH2a, PH2b, PH3, PH4, 3.4, 3.5, 3.6 (registry rows), 4.2 (port shapes), J1, BP1, LV1, LV2, P1, SI-0 to SI-18,
-MEM-3, MEM-4, F1 to F12, FM, FR, B3 to B8, Z0 to Z13, FD-U, FD-B, FD-P, FD-E1, FD-E2, FD-I, FD-K, WP-SL1, D-a, D-b,
-ADR 0068 WP-1 (the contract half).
-
-**Priority order used** (the user's): streaming import and folder open first: §3, §4, §5, §6 were written to completion
-before §7 to §13. §18 says what is complete.
+**Priority order used** (the user's): streaming import and folder open first: §3 to §6 were written to completion
+first and are unchanged by the scope correction. §18 says what is complete.
 
 ## 1. Rules every API here follows
 
@@ -1301,8 +1306,8 @@ Where each bound is enforced, so no package invents another (roadmap layer G).
 | Spool | 16 GiB per import, 2 GiB disk left | `Spool` | §4.8 |
 | Archive expansion | ratio 200, floor 64 MiB | `paddock-archive` guard | §4.8 |
 | Scan table | `folder.scan_entries` 500,000 (about 33 MB) | `ScanTable::from_listing` | §6.3 |
-| Documents (dumps, captures) | 512 MiB encoded per document; reader 3 GiB | ADR 0023 limits, ADR 0068 §12 | §14.6 |
-| Open documents | `MAX_DOCS` 32 by count today | MEM-2's byte budget; MEM-6 widened (FD-G) | §14.6 |
+| Documents (dumps, captures) | 512 MiB encoded per document; reader 3 GiB | ADR 0023 limits, ADR 0068 §12 | §14.8 |
+| Open documents | `MAX_DOCS` 32 by count today | MEM-2's byte budget; MEM-6 widened (FD-G) | §14.8 |
 | UI process | no import parsing in the app process (MEM-1) | conformance C<whole-file-read> over `app/src-tauri/src/{profiling,dumps}.rs` | §3.9 |
 
 Footprint is physical memory per rule 26 (macOS footprint, Linux PSS, Windows private bytes, recorded by 2.2).
@@ -1351,6 +1356,30 @@ pub enum Submitted { Started(JobId), Joined(JobId) }    // two identical submits
 | Plugin calls | files in flight | none (derived) | sniff memo and batch |
 | Spool | one per file in flight | `import.spool_bytes` | sequential members never spool |
 | Evidence resolve | one query per 1,000 refs | none | id hint first, locator second, hash last |
+
+### 9.5 The job service on the shared executor (Y9, the part that stays)
+
+Y9's 8-day item stays in 1.2: Debrief's job service (`app/src-tauri/src/jobs/service.rs`) runs on family ADR 0020's
+executor, which means ADR 0020's WP-1 to WP-3 and the `jobs/service.rs` part of WP-8 (`Timetable` and `ManualExecutor`
+exist on no branch yet) [S: scope plan's Y9 row]. The executor's API is ADR 0020 §"API" [A]; what Debrief adds:
+
+```rust
+// app/src-tauri/src/jobs/service.rs, after Y9
+pub struct JobService { exec: paddock_jobs::exec::Executor, registry: paddock_jobs::JobRegistry, queues: QueueTable }
+impl JobService {
+    /// One queue per `JobKind` (§9.1) with its concurrency; every job is an executor task with its `TaskSpec`.
+    pub fn submit(&self, kind: JobKind, key: Option<IdempotencyKey>, role: WorkRole, run: JobFn) -> Submitted;
+}
+/// Rule 52 mapping, the only place it is decided: Live → Class::User; Bulk → Class::User with the thread at the gentle
+/// level (`paddock_proc::priority::for_role`). `Class::Background` and `Class::Idle` only for work nobody waits on,
+/// with the C54 comment.
+pub fn class_for(role: WorkRole) -> paddock_jobs::exec::Class;
+```
+
+- Tests run on `ManualExecutor` with a fake clock (no sleeps): `app/src-tauri/src/jobs/tests.rs`.
+- ADR 0020's `submit_child(.., cap: paddock_proc::MemoryCap)` predates `MemoryPolicy` (§4.5): §17, Q16.
+- The executor is `paddock-jobs`' module `exec` (ADR 0020 §"Decision") [A], so J1's `submit_keyed` (§9.3) and the
+  executor live in one crate.
 
 ## 10. Time model (ADR 0066)
 
@@ -1511,88 +1540,448 @@ Nothing in this file depends on ADR 0063's outcome: `Bounded` travels in the Mes
 §7], ids stay below 2^53 either way (§2.1). The roadmap's advice stands: decide 0063 before 3.3 and 4.5 build their reply
 shapes (§17, Q1).
 
-## 14. Extension points for feature packages
+## 14. The rest of 1.2: lists, timeline, shell, UI on foundation types, performance, analyses, correctness
 
-Not designed here; each entry names what the feature must build on.
+These packages build on §2 to §13 and add no second mechanism for anything those sections define. Each subsection gives
+the entry points, names, Settings and test homes; where a family ADR already fixes an API (ADR 0017's list identity,
+ADR 0018's lanes, workbench.md's contributions, ADR 0020's executor, ADR 0026's dialogs), the subsection names the ADR
+and adds only what Debrief 1.2 needs from it.
 
-### 14.1 Timeline: lane canvas and Lanes picker (2.4, 3.3, 4.1), with the measurement plan
+### 14.1 Lists and the virtual primitive (1.3, 2.1, 2.7, 4.5, 3.7, F10b, SI-17)
 
-**Extension point:** 3.3's lane endpoint is `Bounded` (top N plus a paged catalogue: `Bounded::ranked` then
-`Bounded::page`); per-lane summaries take `Buckets` (§4.6); lane identity uses `ProcessInstance` where the lane is a
-process (§2.5).
+**List identity (1.3), in `ui/projects/paddock-ui/list/` (new entry point),** as ADR 0017 decisions 1 to 5 [A]:
 
-**Canvas vs DOM, the measurement plan (rule 48; run by 2.4 before the choice is made):**
+```ts
+export type RowKey = string | number;                       // EventId is a number (§2.1)
+export interface KeySelection<K extends RowKey> {
+  readonly keys: ReadonlySet<K>; readonly anchor: K | null; readonly focus: K | null;
+}
+export const KeySelection: {
+  empty<K extends RowKey>(): KeySelection<K>;
+  only<K extends RowKey>(k: K): KeySelection<K>;
+  toggle<K extends RowKey>(s: KeySelection<K>, k: K): KeySelection<K>;
+  range<K extends RowKey>(s: KeySelection<K>, to: K, order: (k: K) => number | null): KeySelection<K>;
+  retain<K extends RowKey>(s: KeySelection<K>, present: (k: K) => boolean): KeySelection<K>;   // after a refresh
+};
+export interface ViewportAnchor<K extends RowKey> { readonly key: K; readonly offsetPx: number }
+export type ChangeReason = 'query' | 'refresh' | 'append' | 'dialog-result';
+export function classifyChange(prev: QueryKey, next: QueryKey, reason: ChangeReason): 'navigate' | 'refresh' | 'append';
+export function anchoredViewport<K extends RowKey>(o: {
+  keyOf: (i: number) => K | null; indexOf: (k: K) => number | null; neighbourOf: (k: K) => K | null;
+}): AnchoredViewport<K>;                                        // capture() and restore(anchor) for a scroller
+export interface DataListRegistration { id: string; component: Type<unknown>; contract: 'list' | 'table' | 'tree' | 'grid' }
+export const PD_DATA_LIST: InjectionToken<readonly DataListRegistration[]>;  // multi provider
+export function provideDataList(r: DataListRegistration): Provider;
+```
 
-| Step | What | Pass |
+Contract test (1.3): `ui/projects/paddock-ui/testing/src/list-contract.ts`, `runListContract(harness)` with ADR 0017's
+10,000-row script; conformance `conformance/src/data-lists.mjs` (registered count = visited count).
+
+**The virtual primitive (2.1), `ui/projects/paddock-ui/virtual/` (new entry point):**
+
+```ts
+/** A window over rows the app holds or fetches. ONE type for 2.1 and ADR 0067's T4 (F10b): rule 55. */
+export interface PdRowWindow<T> {
+  readonly count: number;                       // aria-rowcount
+  row(i: number): T | null;                     // null: not loaded; a focusable placeholder is drawn
+  place?(i: number): { level: number; posinset: number; setsize: number; expanded?: boolean } | null;
+  parent?(i: number): number | null;
+}
+@Component({ selector: 'pd-virtual-list' })  inputs: rows?: readonly T[]; window?: PdRowWindow<T>; rowKey: (r: T) => RowKey;
+  height: 'measured' | number; overscan = 1 (screens); selection: KeySelection; anchor: ViewportAnchor | null;
+  outputs: rangeChange: { start: number; end: number }; anchorChange; selectionChange; activate
+// pd-virtual-table and pd-virtual-tree: the same inputs plus columns (as PdTable) and sticky headers
+export function boundedSlice<T>(items: readonly T[], limit: LimitValue, of: string): Bounded<T[]>;    // ADR 0065
+@Component({ selector: 'pd-scroll-markers' })  input: markers: Bounded<MarkerBuckets>; output: navigate(fraction)
+```
+
+- `PdTable` (`table/src/table.ts`) moves onto the primitive; ADR 0067's T1 to T6 inputs (`activation`, `rowSpace`,
+  `[pdRowControl]`, `fill`, `rowDescription`) are added there by F10, and its T4 *is* `window` above. **F10b does not
+  build a second windowed-rows model: it adopts 2.1's** (roadmap stop-gap table) [A].
+- Lints: `paddock/template-no-index-track`, `paddock/collections-virtualized` (2.5), warnings until 2.7 and 4.5 are clean.
+- Tests: `ui/e2e/virtual-100k.spec.ts` (frame budget, DOM rows ≤ visible + overscan), each primitive through
+  `runListContract`, axe in both themes.
+
+**Rows at 1 billion events** (the user's view rule of 2026-11-05 [mem]): a view holds the visible rows plus about one
+screen each side, never a cap on what the view covers; the scrollbar is mapped:
+
+```ts
+// core/generated/store.ts (engine type)
+export type ScrollModel =
+  | { kind: 'position'; total: number }               // exact positions: below the store's exact-position threshold
+  | { kind: 'time'; from: number; to: number };       // above it: position estimated from time
+```
+
+The engine answers it with every page (§14.5, `PageReply.scroll`); the grid's `scroll-map.ts` renders either.
+
+**Adoption.** 2.7: view `table`/`tree`, workbench Explorer, assistant turns, jobs list, notifications and settings
+lists, each `provideDataList`. 4.5: Debrief's 14 result and analysis lists onto the primitive, each reading
+`Bounded<T>.result` and showing its cuts (§13.3); `workspace/virtual-list.ts` deleted; the large mock profile
+(`core/mock/large*`) and `app/e2e/large-profile.e2e.ts`. 3.7: the events grid keeps `PagedRowsStore` behind a
+`PdRowWindow<EventView>` keyed by `EventId`; `KeySelection` replaces `row-selection.ts`; `ViewportAnchor` restored
+through `queryPage({ anchor })`; live tail's follow is `append` with `stickToEnd`; Hotspots keyed and anchored; the
+markers gutter fed by §14.2's markers query. SI-17 measures Explorer, source lists and the import report at 14,000
+sources on these primitives and fixes only what the measurement shows.
+
+### 14.2 Timeline and the drawing build (3.3, 2.4, 4.1, M0, flame and chart fixes)
+
+The design is ADR 0018 decisions 6 to 8 with its amendment (top N, a catalogue, "All", a Lanes picker) [A] and the
+drawing research's "draw pixels, not events" (`origin/docs/debrief-drawing`, `docs/research/2026-11-debrief-drawing.md`,
+decided into the plan on 2026-11-05) [A].
+
+**Engine (3.3)**, `debrief-core/src/workspace/timeline.rs` and `debrief-store-duck/src/{lanes,markers}.rs`:
+
+```rust
+pub struct LaneKey(Box<str>);                                   // the lane's group key text; stable across refreshes
+pub enum TopLanes { N(NonZeroU16 /* 1..=200 */), All }
+pub struct LanesRequest { pub query: QueryKey, pub order: LaneOrder, pub top: TopLanes, pub catalogue: Page, pub search: Option<Box<str>> }
+pub struct LanesReply {
+    pub lanes: Bounded<Vec<LaneHead>>,                          // Bounded::ranked, cut on `timeline.lanes_max` (hard, 500)
+    pub catalogue: Bounded<Vec<LaneHead>>,                      // Bounded::page, searchable, every lane
+}
+pub struct LaneHead { pub key: LaneKey, pub label: Box<str>, pub events: u64, pub errors: u64, pub process: Option<ProcessInstance> }
+pub enum LaneOrder { Events, Errors, FirstSeen, Name }
+
+/// Bulk buckets for every visible lane of one panel, on a power-of-two grid, for 3x the visible range.
+pub struct LaneBucketsRequest { pub generation: u64, pub query: QueryKey, pub lanes: Vec<LaneKey> /* ≤ 200 */,
+                                pub resolution_ms: u64 /* power of two */, pub start: i64, pub end: i64 }
+pub fn encode_lane_buckets(reply: &LaneBuckets) -> Vec<u8>;    // layout `LB` v1, little-endian, aligned columns, golden-tested
+pub struct LaneBuckets { pub generation: u64, pub resolution_ms: u64, pub start: i64, pub bucket_count: u32,
+                         pub lanes: Vec<LaneKey>, pub levels: u8, pub counts: Vec<u32> /* lanes × levels × buckets */,
+                         pub markers: MarkerColumns, pub cut: Option<Cut> }
+pub struct MarkersRequest { pub query: QueryKey, pub kinds: Vec<MarkerKindId>, pub buckets: Buckets }   // fixed count
+pub fn markers(req: &MarkersRequest) -> Bounded<MarkerBuckets>;
+```
+
+Commands: `timeline_lanes` (JSON), `timeline_lane_buckets` (raw `ipc::Response`, the one raw endpoint; §17, Q15),
+`timeline_markers` (JSON). A newer `generation` supersedes an older request through `query_cancel.rs`. One `MAX_LANES`
+for both engines (`timeline.lanes_max`). Tests: `debrief-store-duck/tests/lanes.rs` (60 lanes give 10 plus a catalogue
+of 50; paged), a differential test against the in-memory engine on `/samples`, the encoder's golden file
+`debrief-core/tests/golden/lane_buckets_v1.bin` read by `ui/projects/paddock-ui/lanes/src/decode.spec.ts`.
+
+**UI (2.4)**, `ui/projects/paddock-ui/lanes/` (new entry point), domain-free:
+
+```ts
+export interface LaneBucketsView {                           // typed arrays from the backend edge on; draw loops see nothing else
+  generation: number; resolutionMs: number; start: number; bucketCount: number;
+  lanes: readonly string[]; levels: number; counts: Uint32Array; markers: MarkerColumns; cut: Cut | null;
+}
+export function decodeLaneBuckets(buf: ArrayBuffer): LaneBucketsView;
+export interface LaneScene { range: { start: number; end: number }; widthPx: number; dpr: number; rows: readonly LaneRow[]; data: LaneBucketsView }
+export function drawLanes(ctx: CanvasRenderingContext2D, scene: LaneScene, theme: LaneTheme): void;   // snaps to device pixels
+export function hitTest(scene: LaneScene, xPx: number, yPx: number): LaneHit | null;                  // binary search, pure
+export type LaneSelection =
+  | { mode: 'top'; n: number; pinned: readonly string[]; hidden: readonly string[] }
+  | { mode: 'all'; hidden: readonly string[] }
+  | { mode: 'pinned'; pinned: readonly string[] };
+@Component({ selector: 'pd-lane-canvas' })  inputs: rows (virtual, DOM lane names as buttons), data, range;
+  outputs: rangeChange, laneFocus, markerActivate. One viewport-sized canvas per visible panel, aria-hidden;
+  the focused lane materialises real marker buttons (the flame chart's pattern).
+@Component({ selector: 'pd-lanes-picker' })  inputs: catalogue: PdRowWindow<LaneHeadView>, selection: LaneSelection, badge;
+  output: selectionChange. CDK menu with search, Top N, All, Pinned only, sort, pin; fully keyboard-accessible.
+export class LaneCache { constructor(maxBytes: number); get(key); put(key, view); }  // key (query, lane, resolution, start)
+```
+
+**UI (4.1)**, Debrief's `app/src/app/timeline/`: panels on `pd-lane-canvas` and `pd-lanes-picker`; `LaneSelection` saved
+with the project and the layout; restored panels created lazily; a hidden panel marks itself stale and issues no query
+(`visible` signal from the dock); `buildLaneVms` per lane, keyed. Tests: 0.2's 60-lane test unmarked; a unit test that a
+hidden panel issues no query; 5,000-lane mock: All within the frame budget, fewer than 100 lane rows in the DOM.
+
+**The drawing build's other packages** (drawing research §6): the flame chart fixes (hover on an overlay, no
+`canvas.width` reset per draw, visible rows only, DPR change) in `profiling/flame/`; the chart bound (the engine caps
+`query_chart` at 2 points per pixel, columns to ECharts' dataset). Their research ids `F1` and `C1` collide with plan
+packages F1 (the judge) and C1 (UMDH reader fixes): here they are **FL1** and **CH1** (§17, Q14).
+
+**Canvas vs DOM: the measurement plan (plan row 0.5; ADR 0018 decision 8 says DOM unless profiling shows DOM is the
+bottleneck; the drawing research recommends Canvas 2D).** Package M0, before 2.4; each result a rule 48 block in
+`docs/benchmarks.md` (shared code), machine load at or below 12.
+
+| Step | What | Probe first (ER-33) | Pass |
+|---|---|---|---|
+| M1a | A dev-only page in the **built app** draws the worst screen, 52,000 grouped `fillRect`s, over 60 frames, on WKWebView, WebKitGTK, WebView2 with a GPU, WebKitGTK with `LIBGL_ALWAYS_SOFTWARE=1`, and a Windows VM | `requestAnimationFrame` ticks at display rate and pixels change between frames | p95 frame time within one frame with a GPU, at most two in software |
+| M1b | **DOM control**, same scene and webviews: one absolutely positioned element per non-empty bucket run in virtual lane rows | same | recorded; it is the rule 71 control that shows the probe can see a slow renderer |
+| M2 | The wire: 500 KB, 2 MB, 16 MB through `invoke` JSON, `ipc::Response` and `Channel`: main-thread blocking, latency, app footprint | the custom protocol is up on each OS | decides raw against JSON for `timeline_lane_buckets` |
+| M3 | Baseline: pan and zoom on today's timeline at 60 lanes (0.2's fixture) | as M1 | recorded, so 4.1 has a before |
+| Rule | **Canvas** if M1a passes. If M1a fails, make it cheaper first (merge equal bars, blit during a pan) and re-run; DOM only if M1b passes where M1a failed; WebGL2 only as an opt-in after both fail | | the choice and the numbers recorded in ADR 0018's notes |
+
+Settings: `timeline.lanes_default` (10, 1 to 200, or All), `timeline.cache_mb` (16) (§16).
+
+### 14.3 Shell and workbench move (M1 to M5, Y12); dialogs
+
+The shell and workbench APIs are workbench.md §2 to §4 and the move plan
+([2026-10-29-shared-workbench-move.md](2026-10-29-shared-workbench-move.md)) [A]; dialogs are ADR 0026 and
+[debrief-1-2-api-dialogs.md](debrief-1-2-api-dialogs.md) [A]. Debrief's side is a set of contributions and a context:
+
+```ts
+// apps/debrief/app/src/app/extensions/context.ts (M1)
+export interface DebriefContext {                   // CommandContext becomes ShellContext & DebriefContext
+  readonly workspace: WorkspaceHandle;              // the window's workspace id, never the store itself
+  readonly selection: Signal<KeySelection<EventId>>;
+  readonly timeRange: Signal<TimeRange | null>;
+  readonly timeDisplay: Signal<'utc' | 'local' | 'logs'>;   // §10.4
+}
+```
+
+| Contribution (workbench.md / shell API) | Debrief registers | Package |
 |---|---|---|
-| 1 | Two prototypes in `workbench-demo`: (a) one `<canvas>` per visible lane band, drawn from bucket arrays; (b) DOM rows with one absolutely positioned `div` per bucket run, virtualized vertically | both render the same 5,000-lane mock profile |
-| 2 | Scripted fling over All (5,000 lanes) and zoom in 10 steps, Chromium and WebKit, 1440 × 900 at scale 1 and 2, on the Mac mini and one 4-core laptop class | recorded: long tasks > 50 ms, p95 frame time, DOM node count, JS heap |
-| 3 | Same at 60 lanes and 10 lanes (the default) | as above |
-| 4 | Accessibility: keyboard to each lane and bucket, screen-reader names; axe both themes | canvas needs a parallel accessible list; its cost is counted in (a) |
-| 5 | Choice rule | the DOM form wins unless it misses the frame budget (no long task at a warm start, p95 ≤ 16.7 ms) in WebKit at 5,000 lanes; ties go to DOM (less code, accessibility for free) [J] |
+| `defineStatusItem` | jobs, health chip, resource meter (`pd-resource-meter`, §14.4), time display | M1, 4.4 |
+| `defineSettingsPage` | Performance (with the Limits group, §14.4), Plugins, Time, Storage, AI, Parsers | M1, M2c |
+| `defineNotificationKind` | `limit` (`LimitNotice`), `import`, `plugin`, `folder-scan`, `time-zone` | M1, 2.3 |
+| `defineTheme` | Debrief's theme packs | M1 |
+| `defineSharedState` | selection, time range, lane selection, display zone | M1, M3a |
+| `defineView` | events grid, timeline, Explorer views, analyses, profiling views, dumps, Problems, Processes tool window | M3a, 4.4 |
+| `definePerspective` | default, Full, profiling | M3a |
+| `defineActivityItem`, `defineExplorerProvider` | Sources tree on the shared tree (virtualized, keyed); the totals row "N files not imported" (ADR 0067 §7) | M3b, F8 |
+| `definePaletteProvider` | events, fields, settings | M3b |
+| `defineAssistantContext` | the window's query and selection; Debrief's tool renderers; the llama.cpp adapter kept (workbench.md D5) | M3b |
 
-Results go in `docs/benchmarks.md` (shared) before any number is quoted.
+- **Lazy by construction** (M1): a registration file imports no store or command class; the contribution lint fails
+  otherwise. Acceptance: first-paint JS well below 1,233 kB (`scripts/window-weight.mjs`).
+- **Rust (M4):** the app registers the `paddock-shell` and `paddock-workbench` Tauri plugins; Debrief's command-table
+  rows for moved commands are deleted; `debrief://` events are renamed to the shell's names; capabilities grant what the
+  shell sets; the files the plan lists are deleted.
+- **Ports Debrief keeps:** the windowing unsaved-state port, the updater's single endpoint (Paddock `debrief-latest`,
+  the family key), `paddock-download` for its segmented downloader and `paddock-pitwall` for its Pitwall client (M2c).
+- **Y12** adds the move plan's 0a, the baseline retake, Phase 1, 2b, 2c and Phase 3 (about 15 days), with no API of
+  its own beyond the contributions above; its conformance checks are the move plan's §7.
+- Tests: the W0 baseline (`app/e2e/shell-baseline.e2e.ts`), the e2e specs each M row lists, the contribution lint, a
+  `MockRuntime` test that registers every command (M4).
 
-### 14.2 Lists and the virtual primitive (1.3, 2.1, 2.7, 4.5, 3.7, F10b)
+### 14.4 UI on foundation types (2.3, B2, 3.2, 4.4, 4.2's Limits group, 3.6's Help page)
 
-Rows keyed by `EventId` or `NodeId`; windowed rows (`PdRowWindow`, ADR 0067 T4) built as the first user of 2.1, not a
-second implementation (roadmap stop-gap table) [A].
+```ts
+// ui/projects/paddock-ui/shell/notify/src/limit-notice.ts (2.3)
+export type RaiseAction = { kind: 'setting'; path: SettingPath; preset?: unknown } | { kind: 'oneClick'; to: Quantity };
+export interface LimitNoticeData { limit: LimitExceeded; raise: RaiseAction | null; retry: (() => Promise<void>) | null }
+@Component({ selector: 'pd-limit-notice' })  input: data: LimitNoticeData   // rendered by NotificationHost, kind 'limit'
+// ui/projects/paddock-ui/shell/settings/src/deep-link.ts (2.3)
+export function openSettingsAt(path: SettingPath, preset?: unknown): Promise<void>;   // focuses the field
+// ui/projects/paddock-ui/limit-note/ (B2)
+@Component({ selector: 'pd-limit-note' })  input: cuts: readonly Cut[]; outputs: showMore(cut), raise(cut)
+export function formatCut(cut: Cut, i18n: I18n): string;      // one ICU message per LimitId × Selection (ADR 0065 §4)
+// ui/projects/paddock-ui/image/ (2.3)
+@Component({ selector: 'pd-image-viewer' })  inputs: src, alt; fits before first paint, never upscales
+```
 
-### 14.3 Citations, report blocks, Pitwall drafting
+- **Words** for every `LimitId` and `Selection` come from i18n keys the registry generator lists; the i18n check fails on
+  a missing one.
+- **3.2 cap UI:** command `performance_ceiling() -> MemoryCeiling { physical, ceiling, machine_floor }`; Settings ▸
+  Performance shows the ceiling; Plugins ▸ Memory cap offers "No cap" with a warning icon and the floor; an import's
+  `LimitExceeded { plugin.memory }` notice presets Raise it to the suggested value.
+- **4.4 plugin manager UI:** commands `plugins_status() -> Bounded<Vec<PluginStatus>>` (§4.2), `process_table() ->
+  ProcessTable` (§4.5); event `processes:tick` at 1 Hz while a consumer is visible, none otherwise. Shared
+  `<pd-resource-meter [table]>` and `<pd-process-table [table]>` in `ui/projects/paddock-ui/shell/processes/` (2.6a);
+  Debrief contributes the meter as a status item and Processes as a tool window. Settings "Start plugins" and "Stop idle
+  plugins after N minutes" (§16).
+- **4.2's Limits group** is generated: every registry row whose value is a Setting becomes a field of Settings ▸
+  Performance ▸ Limits, with unit, bounds and default from the row; no hand-written list. The registry test resolves each
+  path against the schema (ADR 0065 §3) [A].
+- **3.6's Help ▸ Limits** is generated by `xtask limits-help` into `app/src/app/help/limits.generated.ts` from the
+  registry rows and their message keys.
+- **Rules 44 and 45 (2.3):** `paddock-settings`' test that every registered section has a setting (plugin-fallback
+  exemption); Debrief's Video page moves to its view or gains a setting (M2c).
+- Tests: shell-demo Playwright per `LimitId` kind (text, Raise it opens the field, Retry re-runs); a planted empty
+  section fails the section test; the viewer opens a 4000 × 3000 image whole and never upscales a small one.
 
-Use `EvidenceRef` (§2.4) and `AnyFinding` (§11); never `u32` ids.
+### 14.5 Store and query performance (ST, Q, Y11, Y4, Y15, SR, IX, P2 to P5, NR1, CPU-1, NB-1, D-0, 4.3, 5.1, 5.2, D-b, bench gates, Y3)
 
-### 14.4 `LimitNotice` and `pd-limit-note` (2.3, B2)
+Most of this is inside `debrief-store-duck` and changes no port. The parts that do:
 
-Render `LimitExceeded` and `Cut` (§4.6); Raise it deep-links `SettingPath`.
+```rust
+// debrief-core::ports::dto (ST-2/ST-3 with Q-1: keyset paging replaces deep OFFSET)
+pub struct PageQuery { pub query: QueryKey, pub anchor: PageAnchor, pub before: u32, pub after: u32 }   // before + after ≤ 512
+pub enum PageAnchor {
+    Start, End,
+    Key { ts: Option<i64>, source: SourceId, ordinal: u64, id: EventId },  // the `(ts, source, line, id)` order (ADR 0062)
+    Position(u64),                                                         // only below the exact-position threshold
+    Time(i64),
+}
+pub struct PageReply { pub rows: Bounded<Vec<EventView>>, pub scroll: ScrollModel, pub generation: u64 }
+pub enum ScrollModel { Position { total: u64 }, Time { from: i64, to: i64 } }
+```
 
-### 14.5 Thread/sequence view
+- **ST-1:** segment pruning by the histogram table (it passed the mixed-segment gate; min/max zone maps did not) [mem];
+  internal `trait SegmentPruner { fn select(&self, p: &PrunePredicate) -> SegmentSet }` with the histogram as its one
+  implementation. **ST-5:** the 1 billion event bench (`debrief-bench.yml`, a quiet window), including a sort by a
+  non-time column. **ST-6:** its content was not found in the sources read [U]; its owner names it before it starts.
+- **Exact positions below a threshold:** `store.exact_positions_max`, 100M by the user's decision of 2026-11-05 [mem],
+  pending ST-5's numbers (plan §9.6 D7): a registry row, `hard` until then.
+- **Q-2 pageable analysis results:** `AnalysisRunId` (§14.6) plus `Page`; results kept per run until superseded (Q-3's
+  cache), `Bounded<T>` per page. **Q-3:** traces and requests cached by `(QueryKey, generation)`; Moment does not wait
+  for anomalies. **Q-4:** a `rows_read` counter on the store under `cfg(feature = "test-stats")` and a test per view that
+  rows read ≤ k × rows shown (k per view, recorded).
+- **P3:** `catalogue_status() -> CatalogueStatus { built: bool, generation: u64, sources_pending: u32 }`, blocking until
+  a commit changes it (no polling), one row in the port table. **NR1:** the names rebuild is a job keyed on the catalogue
+  generation through J1 (§9.3); requests never rebuild. **P2, P5:** no polling loops (store loops; the plugin serve loop
+  blocks on its read and the host's liveness, §4.4).
+- **IX-S Settings** (§16): index reader threads, index writer threads, catalogue workers (Auto, within cores − 1 beside
+  the parse threads), tee memory share (240 MB) inside the import memory; the index commits about every 10 s during an
+  import (user decision 2026-10-30) [A].
+- **Y11:** first page of 10M events under 0.5 s (a bench gate); "sticky field promotion" was not found in the sources
+  read [U]: its owner confirms the scope first. **Y4:** the search budget (`search.budget_ms`, a registry row), the index
+  repair path as `MaintenanceAction::RepairIndex` (existing enum), the kept-profile quit and the two waits on the judge
+  (§4.4). **Y15:** the Overview freeze measured, then fixed, with its block in `performance.md`.
+- **Bench gates (B1 of plan §2, not ADR 0065's B1):** `apps/debrief/bench/budgets.toml` holds D7's budgets as rows
+  `{ id, metric, unit, max, corpus }`; `paddock-bench check` fails on a planted 2× regression (X5's positive control).
+- **4.3 corpus:** `cargo xtask corpus --shape <large10|bundle|planted> --out <tmp>`; invented data only (ER-14).
+- **CPU-1, NB-1, D-0, 5.1, 5.2, D-b, SR1, SR3, SR4, SR5, IX-B1, IX-B2, IX-C, IX-M, Y3's rest:** no API change; their
+  results are rule 48 blocks; 5.2's deferral uses the import job's phases (§9.2).
 
-Order by `(source, ordinal)` (§2.2); thread ids only within a `ProcessInstance` (§2.5).
+### 14.6 Analyses at scale (FD-F, FD-K, FD-M)
 
-### 14.6 Dump checks (ADR 0068), UMDH series (ADR 0069), MEM-6
+FD-F is an ADR; this fixes the API it must fill, so that 1.3's builds have one shape:
 
-`CheckReport` on `Finding` (§11); range reads through `debrief.dumpquery.v1` and `HostFiles::lend_ranges` (§5.9,
-§4.2); times as `StampedTime` (§10.3); document memory by byte budget (MEM-6, FD-G).
+```rust
+// debrief-core::analysis::scale
+pub enum AnalysisClass {
+    /// Accumulated during the import (as ADR 0062 does for the catalogue), finished per query.
+    ImportAccumulated,
+    /// Computed in the store over all rows (counts, SQL).
+    StoreSide,
+    /// Over a sample, with the coverage as an `analysis.events` cut (ADR 0065).
+    Sampled { limit: LimitId },
+}
+pub trait Analysis: Send + Sync + 'static {
+    const KIND: &'static str;                    // "patterns", "exception_groups", "known_issues", ...
+    const CLASS: AnalysisClass;
+    type Request: Serialize + DeserializeOwned;
+    type Result: Serialize;
+    fn run(&self, req: &Self::Request, ctx: &AnalysisCtx) -> Result<AnalysisRun<Self::Result>, AnalysisError>;
+}
+pub struct AnalysisRunId(u64);
+pub struct AnalysisRun<T> { pub id: AnalysisRunId, pub result: Bounded<T>, pub findings: Vec<AnyFinding> }   // §11
+```
 
-### 14.7 Analyses at scale (FD-F)
+- Every analysis runs as an `Analysis` job (§9.1); the old result stays until the new one is complete.
+- The query language's refusal over 2M matches (`qlang.rs:66-77`) becomes a `Bounded` cut or a store-side count, as
+  FD-F decides per stage; known issues and playbook checks move to store-side counts.
+- **FD-K:** the `Analysis run` log line (§12.2), emitted by `AnalysisCtx` for every run, so no analysis can skip it.
+- **FD-M:** `cargo xtask corpus --shape planted --incidents <spec.toml>` writes the corpus and `expected-findings.toml`
+  (`{ incident, analysis, finding_kind, window }`); `debrief-core/tests/it/recall.rs` (nightly) fails when a planted
+  incident has no matching finding.
 
-Output is `Finding<_>` or `Bounded<_>` with an `analysis.events` cut; long runs are `Analysis` jobs with phases;
-`Analysis run` log line (§12.2).
+### 14.7 Correctness (C1 to C5)
 
-### 14.8 Plugin analysis contributions (later)
+| # | API change | Test home |
+|---|---|---|
+| C1 | UMDH reader on SI-11's `Lines` loop: `UmdhReader::read(input: Lines<'_>, sink: &mut dyn UmdhSink, limits: &UmdhLimits) -> Result<UmdhEnd, ImportError>`; aggregated entries counted with their `@` size; unindented frames kept; the same id after a restart not merged (uses `ProcessInstance`, §2.5) | `debrief-plugin-dumps/tests/umdh_reader.rs` (ADR 0069 tests 1, 2, 2b) |
+| C2 | `TimestampParser::parse_offset` accepts `+h:mm`; dates with spaces in the template set; both through ADR 0066's corpus shapes | `debrief-plugin-ext/src/time/tests.rs`, `debrief-plugins/tests/it/time_corpus.rs` |
+| C3 | `KnownIssuesRequest { query, window: Option<TimeRange> }` and the playbook run take the report's or view's window | `debrief-core/src/known_issues/tests.rs` |
+| C4 | `debrief analyze --profile <name-or-path>` in `debrief-cli`; an unknown name fails with the list of profiles | `debrief-cli/tests/it/profile.rs` |
+| C5 | `pub fn benjamini_hochberg(p: &[f64], q: f64) -> Vec<bool>` (pure) in `analysis/outliers.rs`, applied over the tests of one run; `q` is the constant `OUTLIER_FDR = 0.05` [J], a Setting only in 1.3 (analysis thresholds as Settings moved there) | `debrief-core/src/analysis/outliers/tests.rs`, 6,000 tests with no planted effect |
 
-`debrief.analysis.v1` (§5.9), reply `AnyFinding`.
+### 14.8 Memory (MEM-5, MEM-6 ADR, FD-G)
+
+- **MEM-5:** the PDB cache by bytes: `SymbolCache::new(budget_bytes: u64)`, LRU by identity; Setting
+  `performance.symbols_cache_mb` (§16); a limit row `symbols.cache_bytes`.
+- **MEM-6 ADR, widened by FD-G:** decides file-backed models (Parquet for samples and stacks, a rebuildable
+  memory-mapped cache for heap graphs) [mem] and a byte budget for **all** open documents (dumps, UMDH, profiles),
+  replacing `MAX_DOCS = 32` (`debrief-dump/src/store.rs:13`). The API it must fill:
+
+```rust
+// debrief-core::documents (MEM-2's budget, done on `debrief/p0-idle`, generalised)
+pub struct DocumentBudget { pub bytes: u64 }                      // Setting performance.documents_mb
+pub trait OpenDocuments: Send + Sync {
+    fn admit(&self, key: DocumentKey, bytes: u64) -> Result<DocLease, LimitExceeded>;   // evicts LRU first
+    fn touch(&self, key: &DocumentKey);
+}
+pub struct DocLease { /* frees on drop */ }
+```
+
+  The 8 to 12 day build stays the user's call after the ADR's numbers [mem].
+
+### 14.9 Names, packs and the AI that stays (N1, N2, N3, N6, N8)
+
+- **N3:** `PackKind::Names` on `paddock-packs` (hot reload, user `packs/`, a health line); built-in packs empty or a few
+  dozen entries; schema `{ alias, canonical, how = "pack", evidence }`.
+- **N1, N2, N6** change no API beyond removals (`schedule_alias_job`, the `name_aliases` setting) and the abbreviation
+  rule (`How::Abbreviation`); N6's confirmation is a decision dialog in the registry.
+- **N8:** docs only.
+
+### 14.10 Family obligations and checks (X1 to X11, Y6, Y7, Y8, Y16, A1, Y14's R0 and R3)
+
+Each has its API in its own ADR; this file only routes:
+
+| Package | API owner | Debrief's side |
+|---|---|---|
+| X1 bundle privacy | `paddock-diag`'s `Redactor` | logs and child logs through it; screenshots off by default with a per-report checkbox |
+| X2 per-machine install | ADR 0053 | guard, start check, notes |
+| X3, X4 | ADR 0052 (wired, outcome, layout), ADR 0054 A-1 | adoption |
+| X5 | rule 71 | a positive control per bench gate and VM row (§14.5) |
+| X6 logging | the family logging ADR (F3) | §12's lines on its API |
+| X7 waivers | `paddock.waivers.toml` | C36, C39, C53, C54 sites by 2026-12-19 |
+| X8 copies and the driver | `docs/known-copies.toml`, the driver ADR (`paddock-chromium`) | every `delete_by = debrief-v1.2.0` copy deleted |
+| X9, X10, X11a, X11b | release path, chain hygiene | no API |
+| Y16 | ADR 0028 (`paddock-about`, `paddock-deps`) | About and notices |
+| Y6 | new conformance check `ports-adapters` | `debrief-core` depends on no adapter crate (`debrief-store-duck`, Tauri, DuckDB); a Cargo-graph check with a seeded allow-list |
+| Y7 | `paddock-e2e` `stabilize(page)` (fonts ready, animations off, frozen clock, fixed DPR) | Debrief's screenshot specs call it first |
+| Y8 | Debrief's test architecture | `data-testid="<area>.<thing>"`, page objects in `app/e2e/pages/`, the flake list file |
+| A1's checks | ADR 0024 (C40 to C42) | Debrief's instances listed, then fixed |
+| Y14 R0 | the redesign's check: security S1 (restart arguments) and S2 (path grants), deadlocks, UI render cost [mem] | verification, no new API |
+| Y14 R3 | "split" from the 2026-10 redesign notes; its scope was not found in the sources read [U] | its owner confirms before starting (§17, Q18) |
+
+### 14.11 Rule 47 in Debrief's views (Y10)
+
+Material first (rule 47) in Debrief's own views, start by 2026-12-01 (plan §10.4): the audit's 72 `<select>` become
+`mat-select`, 63 checkboxes `mat-checkbox`, 19 radios `mat-radio-group`, 22 hand-rolled tabs `mat-tab-group`; all themed
+through `--pd-*` tokens. No new API. A Debrief-local ESLint rule `debrief/material-first` (warning, then error at Y10's
+end) flags native `select`, `input[type=checkbox|radio]` and `role="tab"` outside Material; sub-packages start with
+views that 2.7 and 4.5 do not rewrite. Tests: each touched view's spec on CDK component harnesses (rule 38); axe both
+themes; new screenshots with an independent review (ER-23).
+
+### 14.12 Room left for what moved out of 1.2
+
+| Moved function | Builds on, unchanged |
+|---|---|
+| Citations, report blocks, Pitwall drafting | `EvidenceRef` (§2.4), `AnyFinding` (§11), `Bounded` (§4.6) |
+| Thread/sequence view | `(source, ordinal)` order (§2.2), `ProcessInstance` (§2.5), lanes (§14.2) |
+| ADR 0068's checks (crash, hang, memory, .NET) | `CheckReport` on `Finding` (§11), `debrief.dumpquery.v1` and `HostFiles::lend_ranges` (§5.9, §4.2), `StampedTime` (§10.3), `OpenDocuments` (§14.8) |
+| ADR 0069's UMDH series | C1's reader (§14.7), `ProcessInstance`, `CheckKind::HeapGrowth` |
+| Y1 AI memory, Y2 semantic search, N4, N5, N0, N7 | the assistant contribution (§14.3); N3's pack (§14.9) |
+| Y13 formats, PML, batch queries | the `Importer` trait (§3), `Seekable` for PML |
+| Plugin analysis contributions | `debrief.analysis.v1` (§5.9) returning `AnyFinding` |
 
 ## 15. Package index: which section each package cites
 
+Every 1.2 package of the plan at `ac85e26c7`, except those §10.3 moves out.
+
 | Package | Section | | Package | Section |
 |---|---|---|---|---|
-| 0.4 | §1.1 | | SI-0, SI-1, SI-2 | §3.1 to §3.3, §3.9 |
-| 1.4 + B1 | §4.6 | | SI-3, SI-11 | §3.2, §3.3, §5.7 |
-| 2.2, P1, BP1 | §4.5 | | SI-4, SI-5 | §4.8, §3.4, §6.9 |
-| IP1 | §4.3, §4.1 (item 7) | | SI-6 | §5.4 (batching), §3.8 |
-| 2.6a | §4.2 (grants, lifecycle, failure, sniff) | | SI-7 | §4.1 (`HostFile`), §4.2 (`HostFiles`) |
-| 2.6b | §4.1, §4.2 (stream, host extensions) | | SI-8 | §5.3, §5.4, §5.7 |
-| 2.6c | §4.4 | | SI-9, PH4 | §5.4, §3.3 |
-| 2.6d, LV1, LV2 | §4.3 (frame v3), §4.4 | | SI-10, 3.4 | §3.4, §3.5, §4.2 |
-| PH1 | §4.7, §4.9 | | SI-12, MEM-3, MEM-4 | §3.3 (`ByPath`), §5.4 |
-| PH2a | §3.1, §5 | | SI-13, 3.6 | §3.7, §4.6 |
-| PH2b | §4.9, §5.8, §3.4 | | SI-14 | §3.9 |
-| PH3 | §4.9 (installed) | | SI-15, SI-16 | §3.9, §3.3 (`MemoryInput`) |
-| J1 | §9.3 | | SI-17, SI-18 | §14.2, §3.8 |
-| 2.5 (rest) | §4.6 (request types) | | F1, F1b, F2 | §6.2 |
-| 4.2 | §7.1, §4.6 | | F3 | §6.3 |
-| 3.5 | §3.3, §4.8 | | F4 | §6.4, §9 |
-| B3 to B8 | §4.6, §13.3 | | F5, F5b | §6.3 (`ReasonKey`), §3.2 (`class`) |
-| Z0 to Z13 | §10 | | F6 | §6.6 |
-| FD-U | §2.1 | | F7 | §6.5, §6.7 |
-| FD-B | §2.2, §7.2 | | F8 | §6.10 |
-| FD-P | §2.5 | | F9, F9b | §6.5 (UI), §14.2 |
-| FD-E1, FD-E2 | §2.3, §2.4 | | F10, F10b, F11 | §14.2, §6.9 |
-| FD-I, ADR 0068 WP-1 | §11 | | F12, FM | §6.11, §6.8 |
-| FD-K, WP-SL1 | §12 | | D-a, D-b | §7.3 |
-| Feature packages (§0) | §14 | | 1.1, 1.2, M2b | dialogs part |
+| 0.1, 0.2, 0.3 | §3.9, §14.1, §14.2 (the failing tests they write) | | SI-0, SI-1, SI-2 | §3.1 to §3.3, §3.9 |
+| 0.4 | §1.1 | | SI-3, SI-11 | §3.2, §3.3, §5.7 |
+| 1.1, 1.2, M2b | dialogs part | | SI-4, SI-5 | §4.8, §3.4, §6.9 |
+| 1.3 | §14.1 | | SI-6 | §5.4, §3.8 |
+| 1.4 + B1 (ADR 0065) | §4.6 | | SI-7 | §4.1, §4.2 |
+| 2.1, 2.7, 4.5, 3.7 | §14.1 | | SI-8 | §5.3, §5.4, §5.7 |
+| 2.2, P1, BP1 | §4.5 | | SI-9, PH4 | §5.4, §3.3 |
+| 2.3, B2, 3.2, 4.4 | §14.4 (UI), §4.2 and §4.5 (data) | | SI-10, 3.4 | §3.4, §3.5, §4.2 |
+| 2.4, 3.3, 4.1, M0, FL1, CH1 | §14.2 | | SI-12, MEM-3, MEM-4 | §3.3, §5.4 |
+| 2.5 (rest) | §4.6, §14.1 (lints) | | SI-13, 3.6 | §3.7, §4.6, §14.4 |
+| 2.6a | §4.2 | | SI-14 | §3.9 |
+| 2.6b | §4.1, §4.2 | | SI-15, SI-16 | §3.9, §3.3 |
+| 2.6c | §4.4 | | SI-17, SI-18 | §14.1, §3.8 |
+| 2.6d, LV1, LV2, LV3 | §4.3, §4.4 | | F1, F1b, F2 | §6.2 |
+| IP1 | §4.3, §4.1 | | F3 | §6.3 |
+| PH1 | §4.7, §4.9 | | F4 | §6.4, §9 |
+| PH2a | §3.1, §5 | | F5, F5b | §6.3, §3.2 |
+| PH2b | §4.9, §5.8, §3.4 | | F6 | §6.6 |
+| PH3 | §4.9 | | F7 | §6.5, §6.7 |
+| J1 | §9.3 | | F8 | §6.10 |
+| 4.2 | §7.1, §4.6, §14.4 | | F9, F9b | §6.5, §14.1 |
+| 3.5 | §3.3, §4.8 | | F10, F10b, F11 | §14.1, §6.9 |
+| B3 to B8, B7b (ADR 0065) | §4.6, §13.3 | | F12, FM, FR | §6.11, §6.8 |
+| Z0 to Z13, Z5b, Z8b, Z12a, Z12b | §10 | | D-a, D-b | §7.3, §14.5 |
+| FD-U | §2.1 | | M1, M2a, M2c, M3a, M3b, M4, M5, Y12 | §14.3 |
+| FD-B | §2.2, §7.2 | | ST-1, ST-2, ST-3, ST-5, ST-6, Q-1 to Q-4 | §14.5 |
+| FD-P | §2.5 | | SR1, SR3, SR4, SR5, IX-B1 to IX-S | §14.5 |
+| FD-E1, FD-E2 | §2.3, §2.4 | | P0, P2, P3, P4, P5, NR1, CPU-1, NB-1, D-0 | §14.5 |
+| WP-1 (ADR 0068), FD-I | §11 | | 4.3, 5.1, 5.2, B1 bench gates, X5 | §14.5 |
+| FD-F, FD-K, FD-M | §14.6, §12.2 | | Y3 rest, Y4, Y11, Y15 | §14.5 |
+| FD-G, MEM-5, MEM-6 ADR | §14.8 | | C1 to C5 | §14.7 |
+| WP-SL1 | §12.3 | | N1, N2, N3, N6, N8 | §14.9 |
+| Y9 (job service) | §9.5 | | X1 to X11, Y6, Y7, Y8, Y14 R0 and R3, Y16, A1 | §14.10 |
+| Y10 | §14.11 | | 5.4, M5, R, F (fix buffer), L-0 | no API (review, safety net, release, landing) |
+| W0 (ADR 0063's binary-wire gate) | §13.4, §17 Q1 and Q15 | | MEM-1, MEM-2 (done on `debrief/p0-idle`) | §8, §14.8 |
 
 ## 16. Settings introduced or touched
 
@@ -1612,10 +2001,21 @@ All under Settings ▸ Performance unless named; each validated in the engine; A
 | `performance.plugins.idle_stop_min` | 10 [J] | 1 to 120, Never | 2.6a, 4.4 |
 | `performance.plugins.stream_credit` | Auto (4) | 1 to 64 | 2.6b |
 | `performance.stall.<key>.blocked_ticks`, `.spin_cpu_s` | Auto (per key, LV1) | per key | 2.6c, LV1 |
+| `performance.index.read_threads`, `.write_threads`, `performance.catalogue.workers` | Auto (within cores − 1 beside parse threads; capped at 4 until measured) | 1 to cores | IX-S, SR1, SR3 |
+| `performance.index.tee_mb` | 240 | 0 (fan-out off) to the import memory | IX-S |
+| `performance.symbols_cache_mb` | from MEM-5's measurement | 64 to 4,096 | MEM-5 |
+| `performance.documents_mb` | from the MEM-6 ADR | as there | MEM-6, FD-G |
+| `performance.huge_import_threshold_gb` | from 5.2's measurement | 1 to 1,000 | 5.2 |
 | `folder.scan_entries` | 500,000 | 10,000 to 5,000,000 | F4 |
 | `folder.scan_threads` | Auto (`parse_threads` local, 4 remote) | 1 to cores | F4 |
+| `timeline.lanes_default` | 10 | 1 to 200, or All | 3.3 |
+| `timeline.cache_mb` | 16 | 4 to 256 | 4.1 |
 | `time.display` | UTC | UTC, Local, Logs' time zone | Z-packages |
 | `time.zone_probe_budget_ms` | ADR 0066 D3 | as there | Z8 |
+
+Limits that are registry rows without a Setting (`hard`) are listed with their sections: `store.event_ids` (§2.1),
+`evidence.resolve_batch` (§2.4), `query.source_folders` (§6.10), `timeline.lanes_max` (§14.2),
+`store.exact_positions_max` (§14.5), `search.budget_ms` (§14.5), `symbols.cache_bytes` (§14.8).
 
 ## 17. Open questions, corrections, recommendations
 
@@ -1623,7 +2023,7 @@ All under Settings ▸ Performance unless named; each validated in the engine; A
 |---|---|---|
 | Q1 | ADR 0063 is still Proposed; FD-U, 3.3 and 4.5 shape replies | **Decide 0063 before 3.3 and 4.5 start** (roadmap R8). FD-U does not wait: the declared bound (§2.1) holds under JSON and under MessagePack alike |
 | Q2 | Ids above 2^53 | **Declared bound** (§2.1), the cheapest of string, bigint or bound; a registry row `store.event_ids` (`hard`) and a test at `2^53 − 1` |
-| Q3 | ADR 0068 §12 drops `WholeReason::DumpWithoutMemoryList` (WP-8), which ADR 0064 lists | Keep it in the enum until WP-8 lands, then remove it in WP-8's change with ADR 0064's amendment; SI-1 should not design around its absence |
+| Q3 | ADR 0068 §12 drops `WholeReason::DumpWithoutMemoryList` (WP-8), which ADR 0064 lists | Keep it in the enum until WP-8 lands, then remove it in WP-8's change with ADR 0064's amendment. WP-8 moved out of 1.2 with ADR 0068's checks, so in 1.2 the reason stays |
 | Q4 | ADR 0068 §10 names `left_out: Vec<Omission>`; ADR 0065 has no `Omission` | **Use `Vec<Cut>`** (§11); a one-word amendment to ADR 0068 in WP-1's change |
 | Q5 | `NextStep` lives in family ADR 0052's `paddock-jobs` enum, not on main | Use it there; if ADR 0052's crate change slips past WP-1, define `NextStep` in `debrief-core::finding` registered in `docs/known-copies.toml` with a delete-by (rule 55), not silently |
 | Q6 | ADR 0031's `RunStateProbe::sample(pid: u32)` takes a bare pid (rule 53) | **Take `&ProcessId`** in 2.6c; the probe checks the start time before sampling, so a recycled pid reads `Exited`. A one-line amendment to ADR 0031 |
@@ -1634,19 +2034,30 @@ All under Settings ▸ Performance unless named; each validated in the engine; A
 | Q11 | `FileInfo.rel_tail` caps the path at 3 segments [J] | Accept; importers that read a folder name from the path (a machine folder) get it; the full path stays host-side |
 | Q12 | Plan D5 (`Limit`/`Page` home) | **`paddock-limits`** (§4.6), with ADR 0065's types, not `paddock-view` |
 | Q13 | `performance.plugins.idle_stop_min` default | 10 minutes [J]; 4.4 measures plugin start cost and may change it with a recorded result |
+| Q14 | The drawing research's package ids `F1` (flame fixes) and `C1` (chart bound) collide with the plan's F1 (the judge) and C1 (UMDH reader fixes) | **Rename them FL1 and CH1** in the plan's next edit; this file uses those names |
+| Q15 | `timeline_lane_buckets` answers raw bytes (drawing research) while ADR 0063 would make every reply binary | **One binary mechanism:** if 0063 is adopted, lane buckets are one of its tables and the `LB` layout is not built; if 0063 is rejected, `LB` v1 is the only raw reply, recorded as a short ADR 0018 amendment. Decide with Q1, before 3.3 |
+| Q16 | ADR 0020's executor takes `paddock_proc::MemoryCap` (`submit_child`) and offers `Class::Background`/`Idle`, while §4.5 has `MemoryPolicy` and rule 52 forbids starvable levels for waited work | One memory type: `submit_child` takes `MemoryPolicy` (Y9 amends ADR 0020 in its change); `class_for` (§9.5) is the only mapping from `WorkRole` to `Class` |
+| Q17 | Exact positions below 100M cost 905 MiB of `ord` at 100M against the 768 MB budget (plan §9.6 D7) | Keep `store.exact_positions_max` a `hard` row at 100M and let `ScrollModel` switch to time above it; bring the threshold back to the user with ST-5's numbers, as D7 says |
+| Q18 | ST-6, Y11's "sticky field promotion" and Y14's "R3 split" were not found in the sources read | Each owner writes a one-paragraph scope in the plan row before starting; none changes a foundation API here unless it adds a port row |
+| Q19 | Canvas vs DOM: ADR 0018 decision 8 defaults to DOM, the drawing research to canvas | The rule in §14.2 (canvas if M1a passes; DOM only if it passes where canvas failed), recorded as ADR 0018's note by M0 |
+| Q20 | F10b (ADR 0067's windowed rows) and 2.1 both define a window over rows | **One type, `PdRowWindow`, owned by 2.1**; F10b adopts it, which pulls 1.3 → 2.1 ahead of F10 (roadmap stop-gap table) |
 
 ## 18. Completeness
 
 **Complete** (signatures, entry points, names, Settings, test homes): §2 ids and references, §3 streaming import, §4
-the shared platform, §5 the `debrief.*` namespace (with Q10's field lists left to PH2a), §6 folder open, §16 Settings,
-§15 the package index.
+the shared platform, §5 the `debrief.*` namespace (with Q10's field lists left to PH2a), §6 folder open, §14.1 lists,
+§14.2 timeline with the measurement plan, §14.4 UI on foundation types, §14.6 analyses at scale (the API FD-F's ADR
+fills), §14.7 correctness, §16 Settings, §15 the package index.
 
-**Complete at the level of placement and contract, deferring to the accepted ADR for detail:** §7 store, §8 memory
-bounds, §9 jobs, §10 time model, §11 findings, §12 logs, §13 engine-to-UI contract.
+**Complete at the level of placement and contract, deferring to the accepted ADR or plan for detail:** §7 store, §8
+memory bounds, §9 jobs (with §9.5's executor), §10 time model, §11 findings, §12 logs, §13 engine-to-UI contract, §14.3
+the shell move (workbench.md and the move plan own the API), §14.5 store performance (internal; port changes given),
+§14.8 memory (the MEM-6 ADR fills the budget API), §14.9 names, §14.10 family obligations (each ADR owns its API),
+§14.11 rule 47.
 
-**Not designed, by the scope decision:** every package §0 lists as feature; §14 gives their extension points and the
-lane measurement plan.
+**Scope not found in the sources read, so not designed:** ST-6, Y11's sticky field promotion, Y14's R3 split (Q18).
 
 **Not verified:** nothing was compiled; signatures were checked against the source files named in the header, not
 built. `ViewFilter`, `ProfileLimits` and `DocumentOptions` field lists (Q10). The claim that ids grow with import order
-inside a store (§5.6) rests on the block allocator as read, not on a test.
+inside a store (§5.6) rests on the block allocator as read, not on a test. The drawing research's numbers are from
+Playwright's browsers, not the real webviews; M1a settles that.
