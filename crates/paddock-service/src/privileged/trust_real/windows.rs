@@ -404,6 +404,23 @@ mod windows_tests {
         );
     }
 
+    /// Gives a folder its inherited permissions back when the test ends. A test that locks a folder (inheritance removed, only
+    /// SYSTEM, Administrators and Users granted) leaves one its own user cannot delete, so the temporary folder around it
+    /// could not be removed ("Access is denied" on the runner). Declare it after the temporary folder, so it drops first;
+    /// the owner may always rewrite the permissions, and a failure here must not turn an unwinding test into an abort.
+    struct Unlock(std::path::PathBuf);
+
+    impl Drop for Unlock {
+        fn drop(&mut self) {
+            if let Ok(tool) = crate::privileged::system_tool("icacls") {
+                let _ = Command::new(tool)
+                    .arg(&self.0)
+                    .args(["/reset", "/T", "/C", "/Q"])
+                    .output();
+            }
+        }
+    }
+
     #[test]
     fn a_folder_a_user_made_under_a_user_writable_place_is_refused() {
         let dir = tempfile::tempdir().unwrap();
@@ -429,6 +446,7 @@ mod windows_tests {
         let dir = tempfile::tempdir().unwrap();
         let folder = dir.path().join("locked");
         std::fs::create_dir(&folder).unwrap();
+        let _unlock = Unlock(folder.clone());
         let path = text(&folder);
         icacls(&[
             &path,
@@ -462,6 +480,7 @@ mod windows_tests {
     fn create_dir_gives_the_protected_descriptor_at_creation_and_never_over_something() {
         let dir = tempfile::tempdir().unwrap();
         let made = text(&dir.path().join("made"));
+        let _unlock = Unlock(dir.path().join("made"));
         let mut port = RealTrust;
         port.create_dir(&made).unwrap();
         let Security::Windows(d) = port.node(&made).unwrap().unwrap().security else {
@@ -542,6 +561,7 @@ mod windows_tests {
         let folder = dir.path().join("folder");
         std::fs::create_dir(&folder).unwrap();
         std::fs::hard_link(&original, folder.join("link.txt")).unwrap();
+        let _unlock = Unlock(folder.clone());
         let before = RealTrust.node(&text(&original)).unwrap().unwrap();
         win::lock_dir_with(&text(&folder), false).unwrap();
         let after = RealTrust.node(&text(&original)).unwrap().unwrap();

@@ -369,6 +369,42 @@ fn mutating(label: &str) -> bool {
     matches!(label, "register" | "unregister" | "evict")
 }
 
+/// One line of the trace of a run: an OS call with the state it met, or a crash. A plain value (no text) so that taking and
+/// cloning a trace in the hot loop costs one allocation, not one per line; it is rendered only when a path is replayed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Line {
+    Call {
+        k: u32,
+        label: &'static str,
+        reg: Reg,
+        owner: Ver,
+        job: Job,
+        stale: bool,
+    },
+    CrashBefore,
+    CrashAfter,
+}
+
+impl std::fmt::Display for Line {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Line::Call {
+                k,
+                label,
+                reg,
+                owner,
+                job,
+                stale,
+            } => write!(
+                f,
+                "  #{k} {label}: reg {reg:?} owner {owner:?} job {job:?} stale {stale}"
+            ),
+            Line::CrashBefore => f.write_str("  -- crash before the effect"),
+            Line::CrashAfter => f.write_str("  -- crash after the effect"),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct Sim {
     w: World,
@@ -376,7 +412,7 @@ struct Sim {
     intr: Intr,
     tick: u32,
     ops: Vec<Op>,
-    trace: Vec<String>,
+    trace: Vec<Line>,
     cancel: Arc<AtomicBool>,
     mem: Arc<Memory>,
     registers: u32,
@@ -399,11 +435,11 @@ struct Capture {
 
 impl Capture {
     /// Takes the state at a crash `intr` of the run `s`; the line is what the trace of a real crash says.
-    fn take(&mut self, intr: Intr, s: &Sim, line: &str) {
+    fn take(&mut self, intr: Intr, s: &Sim, line: Line) {
         let mut at = s.clone();
         at.intr = intr;
         at.capture = None;
-        at.trace.push(line.into());
+        at.trace.push(line);
         let (rec, damaged) = self.rec.peek();
         self.snaps.push((intr, at, rec, damaged));
     }
@@ -462,10 +498,14 @@ impl SimBackend {
         s.tick += 1;
         let k = s.tick;
         s.ops.push(Op { k, label });
-        let line = format!(
-            "  #{k} {label}: reg {:?} owner {:?} job {:?} stale {}",
-            s.w.reg, s.w.owner, s.w.job, s.w.stale
-        );
+        let line = Line::Call {
+            k,
+            label,
+            reg: s.w.reg,
+            owner: s.w.owner,
+            job: s.w.job,
+            stale: s.w.stale,
+        };
         s.trace.push(line);
         if let Some(c) = s.capture.clone()
             && mutating(label)
@@ -473,14 +513,14 @@ impl SimBackend {
             c.lock().unwrap_or_else(|e| e.into_inner()).take(
                 Intr::CrashBefore(k),
                 &s,
-                "  -- crash before the effect",
+                Line::CrashBefore,
             );
         }
         match s.intr {
             Intr::Cancel(n) if n == k => s.cancel.store(true, Ordering::SeqCst),
             Intr::WritesFail(n) if n == k => s.mem.fail_writes(true),
             Intr::CrashBefore(n) if n == k => {
-                s.trace.push("  -- crash before the effect".into());
+                s.trace.push(Line::CrashBefore);
                 drop(s);
                 panic_any(Crash);
             }
@@ -497,11 +537,11 @@ impl SimBackend {
             c.lock().unwrap_or_else(|e| e.into_inner()).take(
                 Intr::CrashAfter(k),
                 &s,
-                "  -- crash after the effect",
+                Line::CrashAfter,
             );
         }
         if s.intr == Intr::CrashAfter(k) {
-            s.trace.push("  -- crash after the effect".into());
+            s.trace.push(Line::CrashAfter);
             drop(s);
             panic_any(Crash);
         }
@@ -707,7 +747,7 @@ struct Edge {
     after: World,
     crashed: bool,
     ops: Vec<Op>,
-    trace: Vec<String>,
+    trace: Vec<Line>,
     viols: Vec<Viol>,
 }
 
@@ -759,8 +799,9 @@ fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<S
         fault,
         intr,
         tick: 0,
-        ops: Vec::new(),
-        trace: Vec::new(),
+        // A run makes some ten calls; room for them at once instead of growing 4, 8, 16.
+        ops: Vec::with_capacity(16),
+        trace: Vec::with_capacity(24),
         cancel,
         mem,
         registers: 0,
@@ -1670,6 +1711,8 @@ struct Explored {
     finished: bool,
     /// The sum of the hashes of all states, so a change that explores other states shows even when their number is the same.
     fingerprint: u64,
+    /// Heap allocations the exploring thread made (see `alloc_count`).
+    allocs: u64,
 }
 
 struct Node {
@@ -1707,6 +1750,13 @@ fn take_crash(
 }
 
 fn explore_config(caps: Caps, resp: Resp) -> Explored {
+    let before = crate::alloc_count::allocations();
+    let mut ex = explore_inner(caps, resp);
+    ex.allocs = crate::alloc_count::allocations() - before;
+    ex
+}
+
+fn explore_inner(caps: Caps, resp: Resp) -> Explored {
     let mut ex = Explored::default();
     let mut nodes: Vec<Node> = Vec::new();
     let mut seen: HashMap<StateKey, usize> = HashMap::new();
@@ -1751,6 +1801,9 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
             }
         };
     ex.finished = true;
+    // Counted by position in the alphabet: formatting a name per edge was an allocation or two of the hot loop.
+    let mut ev_n = [0u64; ALL_EVS.len()];
+    let mut fault_n = [0u64; FAULTS.len()];
     let mut popped = 0u64;
     while let Some(i) = queue.pop_front() {
         popped += 1;
@@ -1773,7 +1826,7 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
         if !deep() && nodes[i].since_rare >= RARE_STEPS {
             continue;
         }
-        for &ev in &ALL_EVS {
+        for (evi, &ev) in ALL_EVS.iter().enumerate() {
             if (is_rare(ev) && (w.rare_used || nodes[i].depth > RARE_FROM_DEPTH))
                 || (ev == Ev::FirstRun && w.first_run_done)
             {
@@ -1805,9 +1858,9 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
                 if e.crashed {
                     ex.crash_edges += 1;
                 }
-                *ex.by_event.entry(format!("{ev:?}")).or_default() += 1;
-                if fault != Fault::None {
-                    *ex.by_fault.entry(format!("{fault:?}")).or_default() += 1;
+                ev_n[evi] += 1;
+                if let Some(fi) = FAULTS.iter().position(|f| *f == fault) {
+                    fault_n[fi] += 1;
                 }
                 let kind = match intr {
                     Intr::None => None,
@@ -1819,9 +1872,8 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
                 if let Some(k) = kind {
                     *ex.by_intr.entry(k).or_default() += 1;
                 }
-                let t = token(ev, fault, intr);
                 if !e.viols.is_empty() {
-                    record(&mut ex, &nodes, i, Some(&t), e.viols);
+                    record(&mut ex, &nodes, i, Some(&token(ev, fault, intr)), e.viols);
                 }
                 if first && is_entry(ev) {
                     let has = |l: &str| e.ops.iter().any(|o| o.label == l);
@@ -1879,12 +1931,22 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
                     let depth = nodes[i].depth + 1;
                     nodes.push(Node {
                         w: after,
-                        parent: Some((i, t)),
+                        parent: Some((i, token(ev, fault, intr))),
                         depth,
                         since_rare,
                     });
                 }
             }
+        }
+    }
+    for (e, n) in ALL_EVS.iter().zip(ev_n) {
+        if n > 0 {
+            ex.by_event.insert(format!("{e:?}"), n);
+        }
+    }
+    for (f, n) in FAULTS.iter().zip(fault_n) {
+        if n > 0 {
+            ex.by_fault.insert(format!("{f:?}"), n);
         }
     }
     ex.fingerprint = seen
@@ -2040,6 +2102,11 @@ fn faults_of(caps: Caps) -> Vec<Fault> {
         .collect()
 }
 
+/// Heap allocations one edge of the exploration may cost, measured by `alloc_count` on the exploring thread (about 60 to 70
+/// now; 94 to 136 when every OS call formatted a trace line and every snapshot cloned the trace). The Windows heap costs some
+/// 200 ns an allocation and release, and the five configurations are 0.6 to 2.4 million edges each.
+const ALLOCS_PER_EDGE_BUDGET: f64 = 85.0;
+
 /// One test per default-run configuration: each explores its own state space to a fixed point on its own thread of the test
 /// runner, so none is near the 60 s limit of the ci profile (the five together in one test were 58 s).
 macro_rules! model_test {
@@ -2134,15 +2201,24 @@ fn check_model(configs: &[(Caps, Resp)], floor: Option<Floor>) {
     let mut out = String::new();
     for (c, r, ex) in &results {
         out += &format!(
-            "{c:?}/{r:?}: {} states ({} core), {} edges ({} crashes), {} not expanded (depth bound), state fingerprint {:016x}{}\n",
+            "{c:?}/{r:?}: {} states ({} core), {} edges ({} crashes), {} not expanded (depth bound), state fingerprint {:016x}{}, {:.1} allocations per edge\n",
             ex.states,
             ex.core,
             ex.edges,
             ex.crash_edges,
             ex.depth_cut,
             ex.fingerprint,
-            if ex.finished { "" } else { "  NOT FINISHED" }
+            if ex.finished { "" } else { "  NOT FINISHED" },
+            ex.allocs as f64 / ex.edges.max(1) as f64
         );
+        if floor.is_some() {
+            let per_edge = ex.allocs as f64 / ex.edges.max(1) as f64;
+            assert!(
+                per_edge <= ALLOCS_PER_EDGE_BUDGET,
+                "{c:?}/{r:?}: {per_edge:.1} allocations per edge (budget {ALLOCS_PER_EDGE_BUDGET}): the hot loop of the exploration \
+                 must not format text or clone strings per edge (Windows's heap made 130 per edge a timeout)\n{out}"
+            );
+        }
         assert!(
             ex.finished,
             "{c:?}/{r:?}: the state ceiling was reached, so the key misses a bucket\n{out}"
