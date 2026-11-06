@@ -153,6 +153,10 @@ struct World {
     location_ok: bool,
     /// The record cannot be written (a newer format, a read-only folder).
     ro: bool,
+    /// The version whose process the running job is (an old build's job can outlive its registration).
+    job_ver: Ver,
+    /// Unattended registers of this version across starts that no answer has settled yet (saturates; reset by a settle or a version change).
+    ghost: u8,
     /// The record file is there but cannot be used (damaged, unreadable): the app adopts a service that answers.
     rec_damaged: bool,
     /// One of the rare events happened on this path (see [`is_rare`]).
@@ -222,6 +226,13 @@ const ALL_EVS: [Ev; 25] = [
 /// Whether the long run is asked for (`MODEL_DEEP=1`): every event may repeat and faulted replaces are crashed too. The
 /// default run keeps the whole alphabet but lets a path take at most one rare event, so it finishes in seconds; both end at a
 /// fixed point and print their size.
+fn depth_cap() -> u32 {
+    std::env::var("MODEL_DEPTH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(u32::MAX)
+}
+
 fn deep() -> bool {
     static DEEP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *DEEP.get_or_init(|| std::env::var("MODEL_DEEP").is_ok())
@@ -287,9 +298,11 @@ enum Fault {
     SlowOs,
     /// Another copy holds the repair lock.
     LockHeld,
+    /// The old job outlives its removal for good: it stays running (and answering) through a register (review P1-4).
+    LingeringJob,
 }
 
-const FAULTS: [Fault; 10] = [
+const FAULTS: [Fault; 11] = [
     Fault::RegNeedsApproval,
     Fault::RegUnavailable,
     Fault::RegNotAsWritten,
@@ -300,6 +313,7 @@ const FAULTS: [Fault; 10] = [
     Fault::RemovalTimeout,
     Fault::SlowOs,
     Fault::LockHeld,
+    Fault::LingeringJob,
 ];
 
 fn is_reg_fault(f: Fault) -> bool {
@@ -363,6 +377,8 @@ struct Sim {
     cancel: Arc<AtomicBool>,
     mem: Arc<Memory>,
     registers: u32,
+    /// Register calls that were an attempt (not a state of the user or the OS: approval, unavailable, elevation, declined).
+    counted: u32,
     prompts: u32,
     reg_while_off: u32,
 }
@@ -401,6 +417,7 @@ fn advance(w: &mut World, secs: u32) {
     {
         if secs >= s {
             w.job = Job::Running;
+            w.job_ver = w.owner;
             w.start_in = None;
         } else {
             w.start_in = Some(s - secs);
@@ -526,10 +543,14 @@ impl Backend for SimBackend {
                 (Reg::Unavailable, _) | (_, Fault::RegUnavailable) => {
                     Err(RegisterError::Unavailable("unavailable here".into()))
                 }
-                (_, Fault::RegOther) => Err(RegisterError::Other("the tool failed".into())),
+                (_, Fault::RegOther) => {
+                    s.counted += 1;
+                    Err(RegisterError::Other("the tool failed".into()))
+                }
                 (_, Fault::RegNeedsElevation) => Err(RegisterError::NeedsElevation),
                 (_, Fault::RegDeclined) => Err(RegisterError::Declined),
                 (_, fault) => {
+                    s.counted += 1;
                     let w = &mut s.w;
                     w.reg = Reg::Registered;
                     w.owner = w.cur;
@@ -542,6 +563,12 @@ impl Backend for SimBackend {
                         w.start_in = None;
                     } else if w.job != Job::Running {
                         w.job = Job::NotRunning;
+                        w.start_in = w.resp.delay();
+                    } else if !caps_of(w.caps).pinned_identity && w.job_ver != w.cur {
+                        // Registering over a running old build (systemd, the Windows Run value): the unit is restarted so the
+                        // new version runs, and the old agent is replaced by the new one.
+                        w.job = Job::NotRunning;
+                        w.job_ver = w.cur;
                         w.start_in = w.resp.delay();
                     }
                     let look = Self::look(&s.w);
@@ -579,7 +606,9 @@ impl Backend for SimBackend {
         let k = self.enter("evict");
         {
             let mut s = lk(&self.s);
-            if s.fault == Fault::RemovalTimeout {
+            if s.fault == Fault::LingeringJob {
+                // The job stays as it is, running its old build.
+            } else if s.fault == Fault::RemovalTimeout {
                 if s.w.job != Job::Absent {
                     s.w.linger = 25;
                 }
@@ -595,6 +624,19 @@ impl Backend for SimBackend {
     }
     fn job_gone(&mut self) -> bool {
         lk(&self.s).w.job == Job::Absent
+    }
+
+    /// The process of the job the OS runs: the old build's job that outlived a removal has its own, older identity, so the
+    /// settle check can tell it from the job this registration started (ADR 0056 P1-4).
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        let sim = lk(&self.s);
+        let w = &sim.w;
+        if w.job != Job::Running {
+            return None;
+        }
+        let pid = 1000 + w.job_ver as u32;
+        let started = if w.job_ver == w.owner { u64::MAX } else { 1 };
+        Some(paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(started)))
     }
     fn pause(&mut self, how_long: Duration) {
         advance(
@@ -675,6 +717,7 @@ fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<S
         cancel,
         mem,
         registers: 0,
+        counted: 0,
         prompts: 0,
         reg_while_off: 0,
     }))
@@ -776,7 +819,13 @@ fn environment(w: &mut World, ev: Ev) {
                 w.rec.resume_pending = Some(1);
             }
         }
-        Ev::SettingsOn => w.wanted = Some(true),
+        Ev::SettingsOn => {
+            // Off and on again is a user asking for the service again: the count starts over.
+            if w.wanted == Some(false) {
+                w.ghost = 0;
+            }
+            w.wanted = Some(true);
+        }
         Ev::SettingsOff => w.wanted = Some(false),
         Ev::SettingsDamaged => w.wanted = None,
         Ev::DamageRecord => {
@@ -799,6 +848,7 @@ fn environment(w: &mut World, ev: Ev) {
             w.other_copy = true;
             w.program_gone = false;
             w.job = Job::Running;
+            w.job_ver = v;
             w.stale = false;
             w.start_in = None;
             w.rec.registered_version = Some(v.s().to_string());
@@ -844,10 +894,27 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
         };
     }
     match ev {
-        Ev::Update => w.cur = Ver::V2,
-        Ev::Downgrade => w.cur = Ver::V1,
-        Ev::FirstRun | Ev::Install => w.wanted = Some(true),
-        Ev::Uninstall => w.wanted = Some(false),
+        Ev::Update => {
+            w.cur = Ver::V2;
+            w.ghost = 0;
+        }
+        Ev::Downgrade => {
+            w.cur = Ver::V1;
+            w.ghost = 0;
+        }
+        Ev::FirstRun | Ev::Install => {
+            // The switch was off and is on again: that is a user asking for the service again, so the count starts over (the
+            // removal that followed the switch going off cleared the attempts in the record).
+            if w.wanted == Some(false) {
+                w.ghost = 0;
+            }
+            w.wanted = Some(true);
+        }
+        Ev::Uninstall => {
+            // The user's switch off and on again tries again (the log of a hold says so), so the count starts over.
+            w.wanted = Some(false);
+            w.ghost = 0;
+        }
         _ => {}
     }
     let entry = w.clone();
@@ -901,6 +968,17 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
         after.first_run_done = true;
     }
     normalize(&mut after);
+    // The registers of this version across starts that no answer has settled (a free finish and a light resume are not attempts).
+    if unattended(ev) && !after.rare_used && matches!(entry.resp, Resp::Never | Resp::RefusedAlways)
+    {
+        let registers = s.counted;
+        let free = free_finish(&entry) + u32::from(ev == Ev::Resume);
+        after.ghost =
+            (u32::from(entry.ghost) + registers.saturating_sub(free)).min(MAX_ATTEMPTS + 1) as u8;
+    }
+    if after.reg == Reg::Registered && after.job == Job::Running && after.job_ver == after.cur {
+        after.ghost = 0;
+    }
     let ops = s.ops.clone();
     let trace = s.trace.clone();
     edge_checks(
@@ -921,6 +999,20 @@ fn apply(w0: &World, ev: Ev, fault: Fault, intr: Intr) -> Edge {
         trace,
         viols,
     }
+}
+
+/// The register a crash after the removal leaves is free (its attempt was never counted), by design (ADR 0056 section 1), and
+/// so is the finish of a removal the user asked for.
+fn free_finish(entry: &World) -> u32 {
+    let nothing_to_remove =
+        entry.reg == Reg::Absent && matches!(entry.job, Job::Absent | Job::Unknown);
+    u32::from(match entry.rec.phase_of(entry.cur.s()) {
+        Some(Phase::Registering) => true,
+        // Paid for already: by the user's request that began it, or by the attempt counted when `Registering` was written.
+        Some(Phase::RemovingOld { paid: true, .. }) => true,
+        Some(Phase::RemovingOld { .. }) => nothing_to_remove,
+        _ => false,
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1005,7 +1097,7 @@ fn edge_checks(
     }
     // The unattended register budget: what is left of this version's attempts, one free finish, one light resume.
     if unat {
-        let finishing = u32::from(entry.rec.phase_of(cur) == Some(Phase::Registering));
+        let finishing = free_finish(entry);
         let budget = MAX_ATTEMPTS.saturating_sub(entry.rec.attempts_of(cur))
             + finishing
             + u32::from(ev == Ev::Resume);
@@ -1095,10 +1187,19 @@ fn edge_checks(
             ),
         );
     }
+    if u32::from(after.ghost) > MAX_ATTEMPTS {
+        bad(
+            "more unattended registers across starts than the cap allows",
+            format!("{} registers", after.ghost),
+        );
+    }
     // The record only says a version is registered when the OS holds that version's registration.
     if entry.rec.registered_version.as_deref() != Some(cur)
         && after.rec.registered_version.as_deref() == Some(cur)
-        && !(after.reg == Reg::Registered && after.owner == after.cur)
+        // Where the build is pinned (macOS) a running old job is the old registration; elsewhere the definition is what is registered.
+        && !(after.reg == Reg::Registered
+            && after.owner == after.cur
+            && !(caps_of(after.caps).pinned_identity && after.job == Job::Running && after.job_ver != after.cur))
         // An unusable record on a Mac: the version cannot be told, so the app adopts a service that answers (ADR 0056).
         && !(entry.rec_damaged && entry.caps == Caps::Mac)
     {
@@ -1223,7 +1324,11 @@ fn state_checks(w: &World) -> Vec<Viol> {
         && w.rec.state != State::Removing
         && matches!(w.reg, Reg::Absent | Reg::Registered)
         && !w.program_gone
-        && !hold
+        && !(hold && w.reg == Reg::Registered)
+        // Allowed outcome (ADR 0056): a register that keeps failing after the old registration was removed (macOS, R03, and any
+        // replace that had to remove first) leaves nothing. The hold says the service could not be registered, with the cause, and
+        // Repair tries again.
+        && !matches!(plan, Plan::Leave(Hold::RegisterFailed(_)))
     {
         let after = run_chain(&cooperative(w), &[Ev::Start, Ev::Wait, Ev::Start, Ev::Wait]);
         if after.reg == Reg::Absent {
@@ -1257,9 +1362,17 @@ fn bucket(s: Option<u32>) -> &'static str {
     }
 }
 
+/// The record as the state key sees it: the time of the register call is the wall clock, which differs on every run, so only
+/// whether there is one counts.
+fn normalized(rec: &Recorded) -> Recorded {
+    let mut r = rec.clone();
+    r.registered_at = r.registered_at.map(|_| 1);
+    r
+}
+
 fn key(w: &World) -> String {
     format!(
-        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{:?}",
+        "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{}|{:?}",
         w.reg,
         w.owner,
         w.other_copy,
@@ -1274,9 +1387,15 @@ fn key(w: &World) -> String {
         w.location_ok,
         w.ro,
         w.rec_damaged,
+        if w.job == Job::Running && w.job_ver != w.owner {
+            Some(w.job_ver)
+        } else {
+            None
+        },
+        w.ghost,
         w.mark_unreadable,
         w.rare_used,
-        w.rec
+        normalized(&w.rec)
     )
 }
 
@@ -1299,16 +1418,20 @@ fn seeds(caps: Caps, resp: Resp) -> Vec<(&'static str, World)> {
         location_ok: true,
         ro: false,
         rec_damaged: false,
+        job_ver: Ver::V1,
+        ghost: 0,
         rare_used: false,
         rec: Recorded::default(),
     };
     let mut healthy = base.clone();
     healthy.reg = Reg::Registered;
     healthy.job = Job::Running;
+    healthy.job_ver = Ver::V1;
     healthy.first_run_done = true;
     healthy.rec.registered_version = Some(Ver::V1.s().into());
     let mut old = healthy.clone();
     old.owner = Ver::V0;
+    old.job_ver = Ver::V0;
     old.job = Job::Refused;
     old.stale = true;
     old.rec.registered_version = Some(Ver::V0.s().into());
@@ -1397,6 +1520,8 @@ struct Explored {
     states: usize,
     /// States before any rare event: the closure of the core alphabet.
     core: usize,
+    /// States not expanded because of MODEL_DEPTH (0 when the run is a fixed point).
+    depth_cut: usize,
     edges: u64,
     crash_edges: u64,
     by_event: BTreeMap<String, u64>,
@@ -1488,6 +1613,11 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
         let w = nodes[i].w.clone();
         let sv = state_checks(&w);
         record(&mut ex, &nodes, i, None, sv);
+        // MODEL_DEPTH=n (long run only): states deeper than n steps from a seed are checked but not expanded.
+        if deep() && nodes[i].depth >= depth_cap() {
+            ex.depth_cut += 1;
+            continue;
+        }
         if !deep() && nodes[i].since_rare >= RARE_STEPS {
             continue;
         }
@@ -1535,7 +1665,7 @@ fn explore_config(caps: Caps, resp: Resp) -> Explored {
                         let applies = match f {
                             f if is_reg_fault(f) => has("register") && ev != Ev::Uninstall,
                             Fault::UnregFails => has("unregister"),
-                            Fault::RemovalTimeout => has("evict"),
+                            Fault::RemovalTimeout | Fault::LingeringJob => has("evict"),
                             Fault::SlowOs => has("register") || has("unregister"),
                             Fault::LockHeld => e.ops.iter().any(|o| mutating(o.label)),
                             _ => false,
@@ -1610,9 +1740,22 @@ const CONFIGS: [(Caps, Resp); 8] = [
     (Caps::Linux, Resp::Fast),
 ];
 
-/// The configurations of the default run (the first five) or the long one (all).
-fn configs() -> &'static [(Caps, Resp)] {
-    if deep() { &CONFIGS } else { &CONFIGS[..5] }
+/// The configurations of the default run (the first five) or the long one (all). A named one (`MODEL_CONFIG=Mac/Slow`) is
+/// looked for among all of them, so a configuration of the long run can be run alone with the default bounds.
+fn configs_for(deep: bool, only: Option<&str>) -> Vec<(Caps, Resp)> {
+    let all: &[(Caps, Resp)] = if deep || only.is_some() { &CONFIGS } else { &CONFIGS[..5] };
+    all.iter()
+        .copied()
+        .filter(|(c, r)| only.is_none_or(|o| o == format!("{c:?}/{r:?}")))
+        .collect()
+}
+
+#[test]
+fn a_named_configuration_of_the_long_run_runs_alone_with_the_default_bounds() {
+    assert_eq!(configs_for(false, Some("Mac/Slow")), vec![(Caps::Mac, Resp::Slow)]);
+    assert_eq!(configs_for(false, None).len(), 5, "the default run is the first five");
+    assert_eq!(configs_for(true, None).len(), CONFIGS.len());
+    assert!(configs_for(false, Some("Mac/Nonsense")).is_empty());
 }
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
@@ -1623,12 +1766,7 @@ const KNOWN_FAILING: &[(&str, &str)] = &[];
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {
     silence_crashes();
     let started = Instant::now();
-    let only = std::env::var("MODEL_CONFIG").ok();
-    let configs: Vec<(Caps, Resp)> = configs()
-        .iter()
-        .copied()
-        .filter(|(c, r)| only.as_deref().is_none_or(|o| o == format!("{c:?}/{r:?}")))
-        .collect();
+    let configs = configs_for(deep(), std::env::var("MODEL_CONFIG").ok().as_deref());
     let results: Vec<(Caps, Resp, Explored)> = std::thread::scope(|sc| {
         let handles: Vec<_> = configs
             .iter()
@@ -1649,11 +1787,12 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
     let mut out = String::new();
     for (c, r, ex) in &results {
         out += &format!(
-            "{c:?}/{r:?}: {} states ({} core), {} edges ({} crashes){}\n",
+            "{c:?}/{r:?}: {} states ({} core), {} edges ({} crashes), {} not expanded (depth bound){}\n",
             ex.states,
             ex.core,
             ex.edges,
             ex.crash_edges,
+            ex.depth_cut,
             if ex.finished { "" } else { "  NOT FINISHED" }
         );
         assert!(
@@ -1693,18 +1832,21 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
         out += &format!("- {k}: {n} edges or states\n    MODEL_REPLAY='{replay}'\n    {why}\n");
     }
     println!("{out}");
-    // The alphabet is not silently trimmed: every event, fault and interruption was taken, and the floors hold.
+    // The alphabet is not silently trimmed: every event, fault and interruption was taken, and the floors hold. A run of one
+    // named configuration takes only what that configuration can (the elevation faults are NoAuto's).
+    if std::env::var("MODEL_CONFIG").is_err() {
     for e in ALL_EVS {
-        assert!(
-            by_event.get(&format!("{e:?}")).copied().unwrap_or(0) > 0,
-            "event {e:?} was never taken\n{out}"
-        );
-    }
-    for f in FAULTS {
-        assert!(
-            by_fault.get(&format!("{f:?}")).copied().unwrap_or(0) > 0,
-            "fault {f:?} was never injected\n{out}"
-        );
+            assert!(
+                by_event.get(&format!("{e:?}")).copied().unwrap_or(0) > 0,
+                "event {e:?} was never taken\n{out}"
+            );
+        }
+        for f in FAULTS {
+            assert!(
+                by_fault.get(&format!("{f:?}")).copied().unwrap_or(0) > 0,
+                "fault {f:?} was never injected\n{out}"
+            );
+        }
     }
     for i in ["CrashBefore", "CrashAfter", "Cancel", "WritesFail"] {
         assert!(
@@ -1712,14 +1854,17 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
             "interruption {i} was never taken\n{out}"
         );
     }
-    assert!(
-        states >= STATES_FLOOR,
-        "only {states} states (floor {STATES_FLOOR})\n{out}"
-    );
-    assert!(
-        edges >= EDGES_FLOOR,
-        "only {edges} edges (floor {EDGES_FLOOR})\n{out}"
-    );
+    // The floors are for the whole default run; one named configuration is a part of it.
+    if std::env::var("MODEL_CONFIG").is_err() {
+        assert!(
+            states >= STATES_FLOOR,
+            "only {states} states (floor {STATES_FLOOR})\n{out}"
+        );
+        assert!(
+            edges >= EDGES_FLOOR,
+            "only {edges} edges (floor {EDGES_FLOOR})\n{out}"
+        );
+    }
     let known: Vec<&str> = KNOWN_FAILING.iter().map(|(k, _)| *k).collect();
     let new: Vec<&&str> = kinds.keys().filter(|k| !known.contains(k)).collect();
     let fixed: Vec<&&str> = known.iter().filter(|k| !kinds.contains_key(*k)).collect();

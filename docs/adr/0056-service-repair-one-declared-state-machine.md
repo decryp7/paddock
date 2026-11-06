@@ -153,10 +153,15 @@ The simulator lives in `paddock_service::testing` (rule 43; apps run a wiring co
 store is a port (`RecordStore`) with the file store and an in-memory store, so a run costs microseconds, not 12 ms per
 fsync and rename; one test uses the real file store and one kills a real child process holding the lock.
 
-**Exploration is to a fixed point, not to a depth.** States are `(record, simulated OS)`; they are finite because attempts
-are at most 3 and the clock is virtual with timings shrunk (as `link/model.rs` does with `Tuning`). The explorer takes
-every event of the alphabet from every reachable state, with crashes as graph edges (before and after each OS effect, and
-during recovery), and prints the state count.
+**Exploration is to a fixed point within stated bounds.** Per configuration the explorer visits every reachable `(record, simulated OS)`
+state until nothing new appears, but rare events (a fault, an interruption) are limited to a short run of steps on each path
+unless `MODEL_DEEP=1` lifts the limit; the default run covers 5 of the 8 configurations (the other 3 need `MODEL_DEEP=1`),
+`model_linux.rs` is bounded by its own alphabet, and the deep run does not finish in an hour on one host in a single process
+(split it with `MODEL_CONFIG=<Caps>/<Resp>`, one configuration per run). The integrator adds the deep run to the nightly workflow
+(`.gitea/workflows/nightly.yml`: one step per configuration, `MODEL_DEEP=1 MODEL_CONFIG=... cargo test --release -p paddock-service
+--test it the_crash_model`, each bounded). Until that runs, "no state in the default bounds violates an invariant" is the claim,
+not "no reachable state does". It states: the set of states is finite because attempts are at most 3 and the clock is virtual,
+with timings shrunk (as `link/model.rs` does with `Tuning`).
 
 Alphabet: Start, Install (asked and unattended), Uninstall, Resume, Repair, StopRequested, update, downgrade, a second copy
 (newer and older), login and reboot, Login Items toggled, damaged and newer record, record write failure, lock contention,
@@ -192,6 +197,42 @@ an agent on an ordinary update. The invariant is stated that way: the link never
 **N3. The Settings switch returns at once.** `Install` asked runs on a worker; `settings_changed` returns with the busy state
 (ER-17). On `Install` asked, the app's own agent is retired first (the existing `link/machine.rs` handover is kept: the link
 refreshes the service before the wait, not after), then the wait runs. The wait is cancelled by Quit and by a newer event.
+
+**A request on a healthy service.** A requested Install or Repair never replaces a registration that is current, answers and passes the
+identity check (the plan's `Healthy`): it leaves it alone, logs "{app}'s background service is already working." and returns
+success. Only an unhealthy, refused, missing or stale registration is replaced, so a request cannot lose a service that works
+(the model's `Install+RegOther` on a healthy service).
+
+**A version-change replace that keeps failing.** Where registering over the old registration replaces it in one step (systemd, the
+Windows `Run` value: no pinned build identity), the replace registers the new service first and does not remove the old one, so a
+register that fails leaves the old service working. Where the OS needs the old registration removed first (macOS, R03), a register
+that keeps failing after the removal leaves nothing registered. That is an allowed outcome, not a lost service: the hold says the
+background service could not be registered, with the cause, and Repair tries again; the model records it as allowed.
+
+**Attempts start over when the user asks again.** The cap is for unattended registers. A user's switch off and on again is a request for the
+service: the removal that follows the switch going off clears the attempts in the record, so the first run after it counts from
+zero. The model's count follows the same rule (it resets when the switch goes from off to on, as it already did on Uninstall).
+
+**The register time.** The record (format 3, `registeredAt`) keeps the time of the attempt's register call. At the next start the plan
+settles an accepted registration on a running job only when the job started at or after it (`job_process`); a job that started
+before is the old build's that outlived the removal and settles nothing. Format 3 is the first release's: a record of an earlier
+format (2) is read as it is with no register time, which falls back to today's reading; a damaged or newer file falls back to
+defaults as before.
+
+**Rule A: the attempt count only rises between proofs.** Every register call adds one to the version's attempts, the user's request
+included. Only a proof that the service answers, a version change, or the switch going off resets the count. The next register of
+an interrupted replace is paid once (`Phase::RemovingOld { ours, paid }`: paid by the request that began it, or by the attempt counted
+when `Registering` was written), so a paid finish may run past the cap by one register and is never counted twice. A removal with
+nothing registered afterwards (an approval, unavailable, declined) records "removal unfinished" with the count before that register.
+
+**Rule B: only a proof that names both the time and the copy says "this version registered it".** The job answers or runs, it
+started at or after `registeredAt`, and `points_here` is not `Some(false)`. One check (`Manager::proves_ours`) guards the plan's
+settle, a start's mark and a first run's remember. A job that outlived its registration names nobody.
+
+**Registering over a running old service.** On systemd and the Windows `Run` value, after the new registration succeeds the old service is
+replaced by the new one: the unit is restarted when its text changed, and the old agent is asked to stop before the new one is
+spawned. A register that fails first leaves the old service working. The "register keeps failing after the old registration was
+removed" outcome (a hold with the cause, and Repair) is allowed on every platform; the model records it as allowed.
 
 **R1.** `Looked(answers | refused | settled)` is an event for a look during a wait, and a failed `unregister` or `evict` is an
 event too. **R2.** Settling by `Running` needs the same pid and start time on two looks of a process that started after the

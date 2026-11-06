@@ -124,6 +124,15 @@ pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
 #[derive(Default)]
 pub struct SwitchWorker {
     busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SwitchWorker {
+    /// Asks the running change to stop at its next step (the registration, a lock wait or the wait for the service).
+    pub fn cancel(&self) {
+        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        cancel_service_work_for_switch();
+    }
 }
 
 /// Clears the busy flag when the worker ends, however it ends.
@@ -144,11 +153,14 @@ impl SwitchWorker {
     pub fn start(
         &self,
         report: std::sync::Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync>,
-        work: impl FnOnce() -> Result<(), String> + Send + 'static,
+        work: impl FnOnce(&std::sync::atomic::AtomicBool) -> Result<(), String> + Send + 'static,
     ) -> Result<(), String> {
         if self.busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Err("Start at login is still being changed. Try again in a moment.".into());
         }
+        self.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+        begin_service_work();
+        let cancel = self.cancel.clone();
         let clear = Clear(self.busy.clone());
         let spawned = std::thread::Builder::new().name("dyno-login-switch".into()).spawn(move || {
             let _clear = clear;
@@ -158,9 +170,16 @@ impl SwitchWorker {
                     done: 0,
                 }),
             });
-            match work() {
-                Ok(()) => report(paddock_jobs::JobState::Done),
-                Err(message) => report(paddock_jobs::JobState::Failed { message }),
+            let result = work(&cancel);
+            // A cancel that came during the work ends the job as cancelled, whatever the work made of it (the record says what
+            // was registered; the next start puts the rest right).
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                report(paddock_jobs::JobState::Cancelled { reason: paddock_jobs::CancelReason::User });
+            } else {
+                match result {
+                    Ok(()) => report(paddock_jobs::JobState::Done),
+                    Err(message) => report(paddock_jobs::JobState::Failed { message }),
+                }
             }
         });
         spawned.map(drop).map_err(|e| {
@@ -367,11 +386,11 @@ impl paddock_service::login::LoginService for LinuxService {
     /// Registers the unit without waiting for the agent to answer (the link waits for it and falls back to one of its own).
     fn install(&mut self) -> Result<(), String> {
         let mut m = (self.make)(dyno_agent::service::linux::install_timings())?;
-        dyno_agent::service::linux::install(&mut m)
+        dyno_agent::service::linux::install_without_waiting(&mut m)
     }
 
     fn uninstall(&mut self) -> Result<(), String> {
-        dyno_agent::service::linux::uninstall(&mut self.quiet()?)
+        dyno_agent::service::linux::uninstall_without_waiting(&mut self.quiet()?)
     }
 }
 
@@ -500,6 +519,7 @@ fn registration_words(e: &paddock_service::ServiceError, opened: bool) -> String
         ServiceError::SwitchedOff => {
             format!("Dyno is switched off in System Settings > General > Login Items{shown}: switch it on there")
         }
+        ServiceError::Busy => "Another change is still running; try again in a moment.".to_string(),
         other => other.to_string(),
     }
 }
@@ -507,15 +527,8 @@ fn registration_words(e: &paddock_service::ServiceError, opened: bool) -> String
 /// Whether a registration is made without opening System Settings: the first run (nobody asked), once Login Items has been
 /// opened for it before.
 #[cfg(any(target_os = "macos", test))]
-fn install_is_quiet(first_run: bool, marker_exists: bool) -> bool {
-    first_run && marker_exists
-}
-
-/// Whether the first run records that it opened Login Items: it did (not quiet) and there was something for the user to do.
-#[cfg(any(target_os = "macos", test))]
-fn marker_wanted(first_run: bool, quiet: bool, result: &Result<paddock_service::RepairOutcome, paddock_service::ServiceError>) -> bool {
-    use paddock_service::ServiceError;
-    first_run && !quiet && matches!(result, Err(ServiceError::NeedsApproval | ServiceError::SwitchedOff))
+fn install_is_quiet(first_run: bool) -> bool {
+    first_run
 }
 
 /// The waits of the Settings switch's registration: it returns at once (the link waits for the agent and falls back to one of
@@ -585,14 +598,12 @@ mod mac {
         }
     }
 
-    /// The login items have no cancel button; a repair runs to its bounds.
-    fn never() -> AtomicBool {
-        AtomicBool::new(false)
-    }
+    /// Set when the user quits or changes the switch: a repair, a registration or a wait stops at its next step.
+    pub static CANCEL: AtomicBool = AtomicBool::new(false);
 
-    /// The marker that Login Items has been opened for the first run once.
-    fn opened_marker() -> PathBuf {
-        dyno_agent::paths::Dirs::current().root().join("login-items-opened")
+    /// The process-wide cancel of the service's work.
+    fn never() -> &'static AtomicBool {
+        &CANCEL
     }
 
     /// Dyno 1.1.0 records the registered version with the shared service record; the 1.0.0 file is of no use any more.
@@ -666,31 +677,22 @@ mod mac {
 
     impl LoginService for SmService {
         /// Registers the agent without waiting for it to answer (`install_timings`): the link waits for it and falls back to an
-        /// agent of its own. This call itself can still take long (a lost lock is waited for up to 30 s, and each registration
-        /// cycle about 24 s), so the Settings switch must show it as busy.
+        /// agent of its own. A change that finds another one running answers Busy after the lock's own look (about 0.4 s); the
+        /// registration itself runs on the switch's worker, off the save.
         fn install(&mut self) -> Result<(), String> {
             let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
-            let quiet = install_is_quiet(self.first_run, opened_marker().exists());
+            let quiet = install_is_quiet(self.first_run);
             // A first run that lost the lock to another registration waits for it instead of leaving nothing registered.
-            let result = m.install_patient(&never(), quiet, 6, std::time::Duration::from_secs(5));
-            if marker_wanted(self.first_run, quiet, &result) {
-                let marker = opened_marker();
-                let written = marker
-                    .parent()
-                    .map_or(Ok(()), std::fs::create_dir_all)
-                    .and_then(|()| std::fs::write(&marker, "opened\n"));
-                if let Err(e) = written {
-                    crate::logging::warn(&format!("the Login Items marker could not be written: {e}"));
-                }
-            }
+            // The Settings switch never waits for another change (it answers Busy at once, after the lock's own short look); the
+            // first run waits for one, so a first run that lost the lock does not end with nothing registered.
+            let (tries, pause) = if self.first_run { (6, 5) } else { (0, 0) };
+            let result = m.install_patient(never(), quiet, tries, std::time::Duration::from_secs(pause));
             result.map(drop).map_err(|e| registration_words(&e, !quiet))
         }
 
         fn uninstall(&mut self) -> Result<(), String> {
-            // Another registration or repair may hold the lock: wait for it as the install does.
-            quiet_manager()?
-                .uninstall_patient(6, std::time::Duration::from_secs(5))
-                .map_err(|e| e.to_string())
+            // Another change that holds the lock is answered with Busy (the switch does not wait for it).
+            quiet_manager()?.uninstall().map_err(|e| registration_words(&e, false))
         }
     }
 
@@ -720,7 +722,7 @@ mod mac {
             forget_old_version_file(dyno_agent::paths::Dirs::current().root());
             let mut m = manager(agent_answers, Timings::default())?;
             // Another registration or repair (the first run, a second copy) may hold the lock: wait for it a while.
-            let started = m.on_start_patient(&never(), 6, std::time::Duration::from_secs(5));
+            let started = m.on_start_patient(never(), 6, std::time::Duration::from_secs(5));
             if let Started::Repaired(reason, outcome) = &started {
                 crate::logging::info(&format!("agent service: replaced the registration ({reason:?}): {outcome:?}"));
             }
@@ -744,7 +746,7 @@ mod mac {
         /// waits for in a labelled phase ("Waiting for the background service") instead of a silent wait of up to 120 s here.
         fn resume(&mut self) -> Result<bool, String> {
             let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
-            match m.resume(&never(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
+            match m.resume(never(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
                 Ok(held) => Ok(held),
                 Err(_) if m.pending() => {
                     crate::logging::info("agent service: registered again; the link waits for it to answer");
@@ -784,6 +786,62 @@ pub fn platform_service() -> Box<dyn AgentService> {
 #[cfg(windows)]
 pub fn platform_service() -> Box<dyn AgentService> {
     Box::new(CliService)
+}
+
+/// Whether the user quit or changed the switch since: the service's work does not start.
+pub fn service_work_cancelled() -> bool {
+    #[cfg(target_os = "macos")]
+    return mac::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
+    #[cfg(target_os = "linux")]
+    return dyno_agent::service::linux::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
+    #[allow(unreachable_code)]
+    false
+}
+
+/// The start repair's thread reports here when it ends, so Quit can wait for it (it never leaves a repair writing the record
+/// beside the stop marker).
+static REPAIR_DONE: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>> = std::sync::Mutex::new(None);
+
+/// Registers the end of the start repair: the returned sender is used by its thread when it finishes.
+pub fn track_repair() -> std::sync::mpsc::Sender<()> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    *REPAIR_DONE.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
+    tx
+}
+
+/// Waits up to `bound` for the start repair to end (after [`cancel_service_work`]); `true` when it ended or never ran.
+pub fn join_service_work(bound: std::time::Duration) -> bool {
+    let rx = REPAIR_DONE.lock().unwrap_or_else(|e| e.into_inner()).take();
+    rx.is_none_or(|rx| !matches!(rx.recv_timeout(bound), Err(std::sync::mpsc::RecvTimeoutError::Timeout)))
+}
+
+/// Set once the user quits: a switch change that starts later does not clear the cancel.
+static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn set_platform_cancel(on: bool) {
+    #[cfg(target_os = "macos")]
+    mac::CANCEL.store(on, std::sync::atomic::Ordering::SeqCst);
+    #[cfg(target_os = "linux")]
+    dyno_agent::service::linux::CANCEL.store(on, std::sync::atomic::Ordering::SeqCst);
+    let _ = on;
+}
+
+/// Asks the service's repair, registration and waits to stop at their next step (Quit and stop measuring).
+pub fn cancel_service_work() {
+    QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
+    set_platform_cancel(true);
+}
+
+/// The Settings switch's cancel: the same stop, but a later change starts clean.
+fn cancel_service_work_for_switch() {
+    set_platform_cancel(true);
+}
+
+/// A new switch change starts clean unless the app is quitting.
+fn begin_service_work() {
+    if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+        set_platform_cancel(false);
+    }
 }
 
 /// Whether the app is waiting for a registration it made (see [`AgentService::pending`]).
@@ -861,6 +919,53 @@ impl Autostart for NoAutostart {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn a_cancel_stops_the_switch_change_and_it_ends_as_a_cancelled_job() {
+        use paddock_jobs::{CancelReason, JobState};
+        use std::sync::{mpsc, Arc, Mutex};
+        let worker = Arc::new(SwitchWorker::default());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (reported, wake) = mpsc::channel::<()>();
+        let report: Arc<dyn Fn(JobState) + Send + Sync> = {
+            let seen = seen.clone();
+            Arc::new(move |s| {
+                seen.lock().unwrap().push(s);
+                reported.send(()).unwrap();
+            })
+        };
+        // The work waits for its cancel (as a registration waits for the service) and gives up when it comes.
+        worker
+            .start(report, |cancel| {
+                let began = std::time::Instant::now();
+                while !cancel.load(std::sync::atomic::Ordering::SeqCst) && began.elapsed() < std::time::Duration::from_secs(5) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Ok(())
+            })
+            .unwrap();
+        wake.recv().unwrap();
+        worker.cancel();
+        wake.recv().unwrap();
+        assert_eq!(seen.lock().unwrap()[1], JobState::Cancelled { reason: CancelReason::User });
+    }
+
+    #[test]
+    fn quit_waits_for_the_start_repair_up_to_its_bound() {
+        let done = track_repair();
+        let slow = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            done.send(()).ok();
+        });
+        let began = std::time::Instant::now();
+        assert!(join_service_work(std::time::Duration::from_secs(5)), "it ended within the bound");
+        assert!(began.elapsed() >= std::time::Duration::from_millis(250), "quit waited for it");
+        slow.join().unwrap();
+        // A repair that does not end within the bound is given up on, and nothing registered is nothing to wait for.
+        let _kept = track_repair();
+        assert!(!join_service_work(std::time::Duration::from_millis(50)));
+        assert!(join_service_work(std::time::Duration::from_millis(50)), "taken once: nothing left to wait for");
+    }
+
+    #[test]
     fn the_switch_returns_at_once_while_the_os_step_is_blocked_and_reports_as_a_job() {
         use paddock_jobs::JobState;
         use std::sync::{mpsc, Arc, Mutex};
@@ -878,12 +983,12 @@ mod tests {
         let began = std::time::Instant::now();
         // The OS step (a registration waiting for a lock) blocks until the test lets it go.
         worker
-            .start(report.clone(), move || blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
+            .start(report.clone(), move |_| blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
             .unwrap();
         assert!(began.elapsed() < std::time::Duration::from_secs(2), "the save did not wait for the OS step");
         wake.recv().unwrap();
         assert!(matches!(seen.lock().unwrap()[0], JobState::Running { .. }), "running is reported while blocked");
-        assert!(worker.start(report.clone(), || Ok(())).is_err(), "a second change waits for the first");
+        assert!(worker.start(report.clone(), |_| Ok(())).is_err(), "a second change waits for the first");
         release.send(()).unwrap();
         wake.recv().unwrap();
         assert_eq!(seen.lock().unwrap()[1], JobState::Done);
@@ -891,7 +996,7 @@ mod tests {
         while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::yield_now();
         }
-        worker.start(report, || Err("needs approval".into())).unwrap();
+        worker.start(report, |_| Err("needs approval".into())).unwrap();
         wake.recv().unwrap();
         wake.recv().unwrap();
         assert_eq!(seen.lock().unwrap()[3], JobState::Failed { message: "needs approval".into() });
@@ -909,22 +1014,9 @@ mod tests {
     }
 
     #[test]
-    fn the_first_run_is_quiet_only_once_login_items_has_been_opened_for_it() {
-        assert!(!install_is_quiet(false, true), "the Settings switch always opens it");
-        assert!(!install_is_quiet(true, false));
-        assert!(install_is_quiet(true, true));
-    }
-
-    #[test]
-    fn the_marker_is_written_only_by_a_first_run_that_opened_login_items_for_the_user() {
-        use paddock_service::{RepairOutcome, ServiceError};
-        let needs = Err(ServiceError::SwitchedOff);
-        assert!(marker_wanted(true, false, &needs));
-        assert!(marker_wanted(true, false, &Err(ServiceError::NeedsApproval)));
-        assert!(!marker_wanted(false, false, &needs), "the Settings switch does not mark");
-        assert!(!marker_wanted(true, true, &needs), "a quiet install opened nothing");
-        assert!(!marker_wanted(true, false, &Err(ServiceError::Busy)));
-        assert!(!marker_wanted(true, false, &Ok(RepairOutcome::Recovered)));
+    fn the_first_run_is_always_quiet_and_removes_nothing_and_the_settings_switch_never_is() {
+        assert!(install_is_quiet(true), "nobody asked: no System Settings, no removal of a healthy registration");
+        assert!(!install_is_quiet(false), "the Settings switch opens Login Items for what the user has to do");
     }
 
     #[test]
@@ -956,6 +1048,10 @@ mod tests {
         use paddock_service::ServiceError;
         assert!(registration_words(&ServiceError::NeedsApproval, true).ends_with("(opened for you)"));
         assert!(!registration_words(&ServiceError::SwitchedOff, false).contains("opened for you"));
+        assert_eq!(
+            registration_words(&ServiceError::Busy, false),
+            "Another change is still running; try again in a moment."
+        );
     }
 
     #[test]

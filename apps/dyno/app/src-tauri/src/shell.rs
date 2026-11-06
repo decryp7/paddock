@@ -527,7 +527,7 @@ impl<R: Runtime> ShellOf<R> {
                         logging::warn(&format!("could not emit the start-at-login job: {e}"));
                     }
                 });
-                self.login_switch.start(report, move || {
+                self.login_switch.start(report, move |_cancel| {
                     let mut service = login::platform_service();
                     let mut autostart = login::platform_autostart(&app);
                     let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());

@@ -132,6 +132,9 @@ pub struct Facts<'a> {
     pub location_ok: bool,
     /// The state file is there but cannot be used (damaged, unreadable, a newer app's): a service that answers is adopted.
     pub record_damaged: bool,
+    /// Whether the running job started at or after this attempt's register call (`None`: the OS cannot say, or no register time
+    /// is recorded). `Some(false)` is the old build's job that outlived the removal: it does not settle the new registration.
+    pub job_after_register: Option<bool>,
 }
 
 /// How many register calls are allowed per version before the service is held.
@@ -206,6 +209,13 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     if let Err(r) = request(i) {
         return Plan::Leave(r.into());
     }
+    // From a disk image or a translocated copy nothing is registered or removed, a half-finished removal included.
+    if !f.location_ok {
+        return Plan::Leave(Hold::Unavailable(
+            "the app runs from a place it cannot register the background service from; move it to the Applications folder and open it there"
+                .to_string(),
+        ));
+    }
     let remove = || {
         if !i.present() {
             Plan::Leave(Hold::NotInstalled)
@@ -219,12 +229,6 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     // say (`wanted` unknown) finishes it.
     if matches!(f.state, State::Removing) && f.wanted != Some(true) {
         return remove();
-    }
-    if !f.location_ok {
-        return Plan::Leave(Hold::Unavailable(
-            "the app runs from a place it cannot register the background service from; move it to the Applications folder and open it there"
-                .to_string(),
-        ));
     }
     if f.wanted == Some(false) {
         return remove();
@@ -256,7 +260,7 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     // Accepted by the OS (or, for a removal that began on this version's own settled registration, still ours).
     let accepted = matches!(
         phase,
-        Some(Phase::Registering | Phase::Awaiting | Phase::RemovingOld { ours: true })
+        Some(Phase::Registering | Phase::Awaiting | Phase::RemovingOld { ours: true, .. })
     ) && i.definition_current != Some(false); // another build's registration is not the one this version made
     let fix = |r: Reason| {
         if f.wanted.is_none() {
@@ -293,8 +297,16 @@ pub fn plan(f: &Facts<'_>) -> Plan {
             ..
         } = f.state
         {
-            // A new removal cycle is a new register call: not past the cap. `Registering` is the free finish.
-            if capped && matches!(f.state, State::Attempting { phase: Phase::RemovingOld { .. }, .. }) && f.caps.automatic {
+            // The registration is gone and nothing else holds the job: registering it again finishes the replace and is not a new
+            // attempt (`allowed_registers`), so a crash at the cap never loses the service. With a job still held, the next removal
+            // cycle would be a new register call: past the cap that is a hold.
+            // A removal whose next register is already paid (by the request that began it, or by an attempt counted) is finished past the
+            // cap: one register, never counted twice.
+            if capped
+                && matches!(f.state, State::Attempting { phase: Phase::RemovingOld { paid: false, .. }, .. })
+                && !matches!(i.job, Job::Absent | Job::Unknown)
+                && f.caps.automatic
+            {
                 return Plan::Leave(held());
             }
             return if f.caps.automatic {
@@ -332,7 +344,8 @@ pub fn plan(f: &Facts<'_>) -> Plan {
         }
     }
     // The registration of this version was accepted and the service is up: settled, whatever the attempts were.
-    if accepted && (f.answers || i.job == Job::Running) {
+    // The proof that the registration is this version's names the time (the job started after the register) and the copy.
+    if accepted && (f.answers || i.job == Job::Running) && f.job_after_register != Some(false) && i.points_here != Some(false) {
         return Plan::MarkCurrent;
     }
     if i.program_exists == Some(false) {
@@ -346,8 +359,10 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     // Another copy's registration is left to that copy only when its program is known to exist; a newer version that is
     // part-way through registering counts as the newer owner.
     let newer = |v: &str| compare_versions(v, f.current_version) == Some(Ordering::Greater);
+    // The owner is named by a registration the OS holds: a job that outlived its registration names nobody (rule B).
     if let Some(recorded) = f.recorded_version
         && newer(recorded)
+        && i.registration != Registration::Absent
         && i.points_here == Some(false)
         && i.program_exists == Some(true)
     {
@@ -520,6 +535,7 @@ mod tests {
             first_run_done: false,
             location_ok: true,
             record_damaged: false,
+            job_after_register: None,
         }
     }
 
@@ -936,6 +952,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
+            job_after_register: None,
             }
         }
         // (a) not registered, `launchctl print` timed out, no record: not installed.
@@ -1013,6 +1030,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
+            job_after_register: None,
             })
         };
         let awaiting = |n| attempting("1.0.4", n, Phase::Awaiting);
@@ -1040,7 +1058,7 @@ mod tests {
             Plan::Await(Reason::VersionChanged)
         );
         assert_eq!(
-            with(&reg(Job::Running), false, phase(Phase::RemovingOld { ours: false }), false),
+            with(&reg(Job::Running), false, phase(Phase::RemovingOld { ours: false, paid: false }), false),
             Plan::Replace(Reason::VersionChanged)
         );
         // Another version's attempts do not count.
@@ -1065,11 +1083,26 @@ mod tests {
         );
         for ours in [true, false] {
             assert_eq!(
-                with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours }), false),
-                Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS))
+                with(&Inspection::absent(), false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours, paid: false }), false),
+                Plan::Replace(Reason::Interrupted),
+                "the registration is gone and nothing holds a job: registering again is the free finish, never a lost service"
+            );
+            let lingering = Inspection {
+                job: Job::Running,
+                ..Inspection::absent()
+            };
+            assert_eq!(
+                with(&lingering, false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours, paid: false }), false),
+                Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS)),
+                "a job that is still held needs another removal cycle, which is a new register call past the cap"
             );
             assert_eq!(
-                with(&Inspection::absent(), false, attempting("1.0.4", 1, Phase::RemovingOld { ours }), false),
+                with(&lingering, false, attempting("1.0.4", MAX_ATTEMPTS, Phase::RemovingOld { ours, paid: true }), false),
+                Plan::Replace(Reason::Interrupted),
+                "a paid finish runs past the cap by its one register (ADR 0056 rule A)"
+            );
+            assert_eq!(
+                with(&Inspection::absent(), false, attempting("1.0.4", 1, Phase::RemovingOld { ours, paid: false }), false),
                 Plan::Replace(Reason::Interrupted)
             );
         }
@@ -1083,6 +1116,34 @@ mod tests {
             with(&Inspection::absent(), false, failed(MAX_ATTEMPTS), false),
             Plan::Leave(Hold::RegisterFailed(MAX_ATTEMPTS))
         );
+    }
+
+    #[test]
+    fn the_paid_finish_of_a_crashed_registration_is_free_while_a_job_is_held() {
+        // `Registering` at the cap: the register call was counted when it was written (or never made), so registering again is
+        // the finish, whatever job lingers; only a removal that is not paid for needs another attempt.
+        let lingering = Inspection {
+            job: Job::Running,
+            ..Inspection::absent()
+        };
+        let at_cap = State::Attempting {
+            version: "1.0.4".into(),
+            attempts: MAX_ATTEMPTS,
+            phase: Phase::Registering,
+        };
+        let plan_for = |state: &State| {
+            plan(&Facts {
+                state,
+                ..facts(&lingering, MAC, Some("1.0.0"))
+            })
+        };
+        assert_eq!(plan_for(&at_cap), Plan::Replace(Reason::Interrupted));
+        let unpaid = State::Attempting {
+            version: "1.0.4".into(),
+            attempts: MAX_ATTEMPTS,
+            phase: Phase::RemovingOld { ours: false, paid: false },
+        };
+        assert_eq!(plan_for(&unpaid), Plan::Leave(Hold::Unanswered(MAX_ATTEMPTS)));
     }
 
     #[test]
@@ -1113,6 +1174,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
+            job_after_register: None,
             })
         };
         assert_eq!(with(UAC), Plan::MarkCurrent, "a current definition needs no replacement");
@@ -1136,6 +1198,7 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
+            job_after_register: None,
             })
         };
         assert_eq!(stale_with(UAC), Plan::Offer(Reason::VersionChanged));
@@ -1159,6 +1222,29 @@ mod tests {
             Plan::Replace(Reason::VersionChanged),
             "nothing is up: replaced once, as with no record"
         );
+    }
+
+    #[test]
+    fn a_half_finished_removal_is_not_finished_from_a_place_that_cannot_register() {
+        let reg = registered(Job::Running);
+        let removing = State::Removing;
+        let from_a_disk_image = Facts {
+            state: &removing,
+            location_ok: false,
+            ..facts(&reg, MAC, Some("1.0.4"))
+        };
+        // The switch is unknown (a damaged settings file), so the removal that was begun is finished from a good place.
+        let from_applications = Facts {
+            location_ok: true,
+            wanted: None,
+            ..from_a_disk_image
+        };
+        let from_a_disk_image = Facts {
+            wanted: None,
+            ..from_a_disk_image
+        };
+        assert!(matches!(plan(&from_a_disk_image), Plan::Leave(Hold::Unavailable(_))));
+        assert_eq!(plan(&from_applications), Plan::Remove);
     }
 
     #[test]

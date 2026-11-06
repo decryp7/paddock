@@ -12,7 +12,7 @@ use crate::error::ServiceError;
 use crate::manager::Started;
 use crate::plan::{ResumePath, installed, request, resume_path, supervises};
 use crate::record::Phase;
-use crate::port::RegisterError;
+use crate::plan::Reason;
 use crate::repair::RepairOutcome;
 use crate::stop::StopMechanism;
 use std::sync::atomic::AtomicBool;
@@ -120,26 +120,35 @@ impl Manager {
             }
             ResumePath::Repair => {}
             ResumePath::Light => {
-                // Registering again is an OS call: the record must be writable first (no OS call without a durable write).
-                if let Err(e) = self.record.set_state(recorded.state.clone()) {
-                    say(&format!("the service state cannot be written, so nothing is registered: {e}"));
-                    return Err(e);
+                // Registering again is an OS call: it goes through the lock and the executor like every other, with nothing to
+                // remove (register only, one cycle, no wait for the service: the job is looked for below).
+                let mut lock = self.locked();
+                if lock.is_none() {
+                    return Err(ServiceError::Busy);
                 }
-                // A register that reads back wrong may only be the OS lagging: look for the job before replacing anything
-                // (a removal and a second registration would announce the item again).
-                let registered = match self.backend.register() {
-                    Ok(_) => true,
-                    Err(RegisterError::NotAsWritten(_)) => {
-                        say(
-                            "registering the enabled item read back unexpectedly; looking for the job first",
-                        );
+                let saved = self.timings;
+                self.timings = saved.without_start_wait();
+                let ran = self.run_replace_locked(&mut lock, Reason::Stopped, false, cancel, true);
+                self.timings = saved;
+                drop(lock);
+                let registered = match ran {
+                    Ran::Busy => return Err(ServiceError::Busy),
+                    Ran::Unrecorded(why) => {
+                        say(&format!("the service state cannot be written, so nothing is registered: {why}"));
+                        return Err(ServiceError::Failed(why));
+                    }
+                    // A register that reads back wrong may only be the OS lagging: look for the job before replacing anything
+                    // (a removal and a second registration would announce the item again).
+                    Ran::Outcome(RepairOutcome::Failed(why)) => {
+                        say(&format!(
+                            "registering the enabled item failed ({why}); looking for the job, then the full repair"
+                        ));
                         true
                     }
-                    Err(e) => {
-                        say(&format!(
-                            "registering the enabled item failed ({e}); running the full repair"
-                        ));
-                        false
+                    Ran::Outcome(o) if o.registered() => true,
+                    Ran::Outcome(_) => {
+                        say("the enabled item cannot be registered without the user; the service stays as it is");
+                        return Ok(false);
                     }
                 };
                 if registered {
@@ -258,12 +267,14 @@ impl Manager {
                 recorded.phase_of(&self.version),
                 Some(Phase::Registering | Phase::Awaiting)
             );
-        // A job that lingers with no registration is not a registration: it is registered (and the job replaced).
-        let present = inspection.registration != crate::backend::Registration::Absent;
+        // A job that lingers with no registration is left to the start's plan too: a first run removes nothing.
+        let present = inspection.registration != crate::backend::Registration::Absent
+            || !matches!(inspection.job, Job::Absent | Job::Unknown);
         if present {
             // Something is registered: a first run removes nothing. Up (and this version's): remembered; otherwise the
             // start's plan decides what the registration needs.
-            let up = (self.answers)() || inspection.job == Job::Running;
+            let answers = (self.answers)();
+            let up = self.proves_ours(&inspection, answers);
             if up && here {
                 self.remember();
             }
@@ -274,16 +285,17 @@ impl Manager {
                 "registering the service needs the user's permission here; use Repair".to_string(),
             ));
         }
-        let Some(_lock) = self.locked() else {
+        let mut lock = self.locked();
+        if lock.is_none() {
             return Err(ServiceError::Busy);
-        };
+        }
         if recorded.attempts_of(&self.version) >= crate::plan::MAX_ATTEMPTS {
             return Err(ServiceError::Failed(format!(
                 "The service was registered {} times and did not start; it is not registered again by itself.",
                 recorded.attempts_of(&self.version)
             )));
         }
-        match self.run_replace_locked(reason, false, cancel) {
+        match self.run_replace_locked(&mut lock, reason, false, cancel, false) {
             Ran::Busy => Err(ServiceError::Busy),
             Ran::Unrecorded(why) => Err(ServiceError::Failed(why)),
             Ran::Outcome(outcome) => outcome_result(outcome),

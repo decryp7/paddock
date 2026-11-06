@@ -25,8 +25,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// The state file's format (1: version and attempt counter; 2: the declared [`State`]).
-pub const FORMAT: u32 = 2;
+/// The state file's format (1: version and attempt counter; 2: the declared [`State`]; 3: adds `registeredAt`).
+pub const FORMAT: u32 = 3;
 
 /// How far a replace has got; written before the step it names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,6 +37,11 @@ pub enum Phase {
     RemovingOld {
         /// What is being removed was registered by this version.
         ours: bool,
+        /// The next register of this replace is already paid for: by the user's request that began it (Repair, Install), or by an
+        /// attempt counted when `Registering` was written. A crash anywhere in the finish keeps it paid, so it is finished past the
+        /// cap with that one register and never counted twice (ADR 0056 rule A).
+        #[serde(default)]
+        paid: bool,
     },
     /// `register` is about to be (or was) called. Registered afterwards means it may have landed: wait, never remove;
     /// absent means it did not: register again without counting another attempt.
@@ -93,6 +98,10 @@ pub struct Recorded {
     /// What is in progress.
     #[serde(default)]
     pub state: State,
+    /// When the register call of the attempt in progress was made (microseconds since the Unix epoch, the unit of a process start
+    /// time): a job that started before it is the old build's, not the one this registration started. Cleared with the attempt.
+    #[serde(default)]
+    pub registered_at: Option<u64>,
 }
 
 impl Recorded {
@@ -198,7 +207,8 @@ impl RecordFile {
         Self {
             store: Store::File {
                 file: VersionedFile::new(data_dir.join(format!("service-{label}.json")), FORMAT)
-                    .with_migration(1, migrate_1),
+                    .with_migration(1, migrate_1)
+                    .with_migration(2, Ok),
                 lock: data_dir.join(format!("service-{label}.lock")),
                 dir: data_dir.to_path_buf(),
                 label: label.to_string(),
@@ -280,6 +290,19 @@ impl RecordFile {
         }
     }
 
+    /// Whether a write cannot succeed (a memory store that refuses writes, a file written by a newer app, which is left alone).
+    /// Reads only, so a query can ask it.
+    pub fn unwritable(&self) -> bool {
+        match &self.store {
+            Store::Memory(m) => m.fail_writes.load(Ordering::SeqCst) || m.writes_left.load(Ordering::SeqCst) == 0,
+            Store::File { file, .. } => std::fs::read(file.path())
+                .ok()
+                .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
+                .and_then(|v| v.get("version").and_then(serde_json::Value::as_u64))
+                .is_some_and(|v| v > u64::from(FORMAT)),
+        }
+    }
+
     /// Writes the whole record.
     ///
     /// # Errors
@@ -314,6 +337,25 @@ impl RecordFile {
         r.registered_version = Some(version.to_string());
         r.registered_program = program.map(str::to_string);
         r.state = State::Idle;
+        r.registered_at = None;
+        self.store(&r)
+    }
+
+    /// Remembers that `version` registered `program` without a proof that its service answers (a current definition on
+    /// Linux or Windows): the version only, so this version's attempts stay counted (ADR 0056 section 1).
+    ///
+    /// # Errors
+    /// [`ServiceError::Failed`] when it could not be saved.
+    pub fn mark(&self, version: &str, program: Option<&str>) -> Result<(), ServiceError> {
+        let mut r = self.load();
+        let attempts = r.attempts_of(version);
+        r.registered_version = Some(version.to_string());
+        r.registered_program = program.map(str::to_string);
+        r.state = if attempts > 0 {
+            State::Attempting { version: version.to_string(), attempts, phase: Phase::Awaiting }
+        } else {
+            State::Idle
+        };
         self.store(&r)
     }
 
@@ -356,12 +398,23 @@ impl RecordFile {
         self.store(&r)
     }
 
+    /// Records (or clears) when the register call of the attempt in progress was made, keeping the rest.
+    ///
+    /// # Errors
+    /// [`ServiceError::Failed`] when it could not be saved.
+    pub fn set_registered_at(&self, at: Option<u64>) -> Result<(), ServiceError> {
+        let mut r = self.load();
+        r.registered_at = at;
+        self.store(&r)
+    }
+
     /// Forgets the registration (after an uninstall): nothing is registered, nothing is in progress.
     pub fn forget(&self) -> Result<(), ServiceError> {
         let mut r = self.load();
         r.registered_version = None;
         r.registered_program = None;
         r.state = State::Idle;
+        r.registered_at = None;
         self.store(&r)
     }
 
@@ -420,7 +473,7 @@ mod tests {
         assert_eq!(back.registered_version.as_deref(), Some("1.0.4"));
         assert_eq!(back.registered_program.as_deref(), Some("/p"));
         let text = std::fs::read_to_string(d.path().join("service-net.a.b.json")).unwrap();
-        assert!(text.contains("\"registeredVersion\"") && text.contains("\"version\": 2"), "{text}");
+        assert!(text.contains("\"registeredVersion\"") && text.contains("\"version\": 3"), "{text}");
         r.forget().unwrap();
         assert_eq!(r.load(), Recorded::default());
     }
@@ -461,8 +514,8 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let r = RecordFile::new(d.path(), "net.a.b");
         for phase in [
-            Phase::RemovingOld { ours: false },
-            Phase::RemovingOld { ours: true },
+            Phase::RemovingOld { ours: false, paid: false },
+            Phase::RemovingOld { ours: true, paid: true },
             Phase::Registering,
             Phase::Awaiting,
             Phase::RegisterFailed(FailKind::Other),

@@ -847,3 +847,38 @@ fn the_event_source_stays_while_the_service_is_marked_for_deletion_and_still_run
         sys.commands()
     );
 }
+
+// ---- ADR 0056 N-settle: the process the job runs, by identity (rule 53) ----
+
+#[test]
+fn launchd_names_the_process_of_the_job_by_identity() {
+    let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
+    let sys = FakeSystem::new();
+    let mut b = launchd_file(&sys);
+    sys.put_file(PLIST, &b.definition());
+    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())));
+    assert_eq!(b.job_process(), Some(me));
+    sys.answer("/bin/launchctl print gui", launchd_print("waiting", 1, ""));
+    assert_eq!(b.job_process(), None, "no pid line: no process");
+}
+
+#[test]
+fn systemd_names_the_main_process_of_the_unit_by_identity() {
+    let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
+    let sys = FakeSystem::new();
+    let mut b = system_unit(&sys);
+    sys.answer("systemctl show", Output::ok(&format!("MainPID={}\n", me.pid())));
+    assert_eq!(b.job_process(), Some(me));
+    sys.answer("systemctl show", Output::ok("MainPID=0\n"));
+    assert_eq!(b.job_process(), None);
+}
+
+#[test]
+fn the_bundled_agent_names_the_process_of_the_job_by_identity() {
+    let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
+    let sys = FakeSystem::new();
+    let app = FakeAppService::new(&sys);
+    let mut b = LaunchdBundled::new(spec(Kind::UserAgent), 501, Box::new(app), Box::new(sys.clone()));
+    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())));
+    assert_eq!(b.job_process(), Some(me));
+}

@@ -246,6 +246,7 @@ impl Backend for Systemd {
             return self.read_back();
         }
         let text = self.definition();
+        let replaced = self.sys.read(&self.unit_path).ok();
         if let Err(e) = self.sys.write(&self.unit_path, &text) {
             return Err(if e.kind() == std::io::ErrorKind::PermissionDenied {
                 RegisterError::NeedsElevation
@@ -259,6 +260,11 @@ impl Backend for Systemd {
         let unit = self.spec.unit_file_name();
         self.checked(&["daemon-reload"])?;
         self.checked(&["enable", "--now", &unit])?;
+        // A unit that was there with another text keeps running its old program after `enable --now`: restart it, so the
+        // new version runs (registering over a running service is the one step that replaces it).
+        if replaced.is_some_and(|old| old != text) {
+            self.checked(&["restart", &unit])?;
+        }
         self.read_back()
     }
 
@@ -311,6 +317,12 @@ impl Backend for Systemd {
             Ok(o) => Err(format!("systemctl stop: {}", explain_systemctl(&o.stderr))),
             Err(e) => Err(format!("systemctl stop {e}")),
         }
+    }
+
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        let unit = self.spec.unit_file_name();
+        let out = self.ctl(&["show", "-p", "MainPID", &unit]).ok().filter(|o| o.success())?;
+        crate::parse::parse_main_pid(&out.stdout).and_then(paddock_proc::ProcessId::of)
     }
 
     fn job_gone(&mut self) -> bool {

@@ -1383,6 +1383,7 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
     let elevator = FakeElevator::new(&sys);
     // The elevated install re-registers the service for this copy: the SCM reads it back as this program afterwards.
     let installed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reset = installed.clone();
     let here = format!("BINARY_PATH_NAME : \"{}\" --service\r\n", exe.display());
     let flag = installed.clone();
     sys.on("sc qc", move |_, _| {
@@ -1414,6 +1415,9 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
         changes(&sys),
         [format!("elevated {} install", exe.display())]
     );
+    // The service works now, so a request leaves it alone; the OS shows another copy's registration again for what follows.
+    assert_eq!(m.repair(&no_cancel()).unwrap(), RepairOutcome::Recovered);
+    reset.store(false, std::sync::atomic::Ordering::SeqCst);
     // Declined, failed.
     elevator.results([Err(RegisterError::Declined)]);
     assert!(matches!(

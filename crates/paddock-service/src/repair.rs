@@ -6,6 +6,7 @@
 
 use crate::backend::{Backend, Job};
 use crate::port::RegisterError;
+use paddock_proc::{ProcessId, StartTime};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -208,6 +209,8 @@ pub enum OsResult {
         job: Job,
         /// Real time since the wait began.
         elapsed: Duration,
+        /// The process that answers, when the backend can name it (rule 53); `None` when it cannot.
+        process: Option<ProcessId>,
         /// The caller asked to cancel.
         cancelled: bool,
     },
@@ -248,6 +251,10 @@ pub struct Stepper {
     register_lost: bool,
     last_job: Option<Job>,
     polled: Duration,
+    /// When the last register began (the executor's clock); a process that started before it is an old build's.
+    registered_at: Option<StartTime>,
+    /// The answering process of the previous look; a new one settles only when two looks name it.
+    seen: Option<ProcessId>,
 }
 
 impl Stepper {
@@ -262,7 +269,31 @@ impl Stepper {
             register_lost: false,
             last_job: None,
             polled: Duration::ZERO,
+            registered_at: None,
+            seen: None,
         }
+    }
+
+    /// The executor tells when it began a register, so a later look can tell a new process from a lingering one.
+    pub fn registered_at(&mut self, at: StartTime) {
+        self.registered_at = Some(at);
+        self.seen = None;
+    }
+
+    /// Whether the answer comes from the process this register started (rule 53): one that started before the register is
+    /// an old build's job still running, and a new one must be named by two looks in a row (a crash loop shows `Running` once).
+    /// A backend that cannot name the process leaves the answer alone (the executor logs that the check could not run).
+    fn new_process_answers(&mut self, process: Option<ProcessId>) -> bool {
+        let (Some(p), Some(at)) = (process, self.registered_at) else {
+            return true;
+        };
+        if p.started() < at {
+            self.seen = None;
+            return false;
+        }
+        let same = self.seen == Some(p);
+        self.seen = Some(p);
+        same
     }
 
     /// The first action: the removal of the old registration.
@@ -417,9 +448,10 @@ impl Stepper {
                     job,
                     elapsed,
                     cancelled,
+                    process,
                 },
             ) => {
-                if answers {
+                if answers && self.new_process_answers(process) {
                     return self.done(vec![Step::Answers], RepairOutcome::Recovered);
                 }
                 self.last_job = Some(job);
@@ -466,8 +498,15 @@ pub fn replace(
         abort: &abort,
         allowed: t.max_cycles + 1,
         register_only: false,
+        now: &wall_clock,
     };
-    replace_bounded(b, answers, &bounds, t, say)
+    replace_bounded(b, answers, &bounds, t, &mut || {}, say)
+}
+
+/// The wall clock as a process start time (microseconds since the Unix epoch).
+pub fn wall_clock() -> StartTime {
+    let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    StartTime::from_micros(u64::try_from(t.as_micros()).unwrap_or(u64::MAX))
 }
 
 /// How far a replace may go.
@@ -482,6 +521,8 @@ pub struct Bounds<'a> {
     pub allowed: u32,
     /// Nothing is registered and no job is held: register without removing anything first.
     pub register_only: bool,
+    /// The clock for `registered_at`, in the same units as a process start time.
+    pub now: &'a dyn Fn() -> StartTime,
 }
 
 /// [`replace`] within `bounds`: the executor of a [`Stepper`], which performs each action and feeds back what the OS answered.
@@ -490,6 +531,7 @@ pub fn replace_bounded(
     answers: &mut dyn FnMut() -> bool,
     bounds: &Bounds<'_>,
     t: &Timings,
+    before_wait: &mut dyn FnMut(),
     say: &mut dyn FnMut(Step),
 ) -> RepairOutcome {
     let cancel = bounds.cancel;
@@ -497,7 +539,9 @@ pub fn replace_bounded(
         return RepairOutcome::Cancelled;
     }
     let mut stepper = Stepper::new(t, bounds.allowed);
+    let at = (bounds.now)();
     let mut next = if let Some(result) = b.replace_in_one_step() {
+        stepper.registered_at(at);
         match result {
             Ok(_) => stepper.registered_in_one_step(),
             Err(e) => {
@@ -516,6 +560,8 @@ pub fn replace_bounded(
         for step in next.say.drain(..) {
             if step == Step::WaitingForStart {
                 waiting_since = Some(std::time::Instant::now());
+                // The wait is long and changes nothing: the caller lets go of what it holds for it.
+                before_wait();
             }
             say(step);
         }
@@ -549,10 +595,13 @@ pub fn replace_bounded(
                 b.pause(how_long);
                 OsResult::Paused
             }
-            Action::Register => match b.register() {
+            Action::Register => {
+                stepper.registered_at((bounds.now)());
+                match b.register() {
                 Ok(_) => OsResult::RegisterOk,
                 Err(e) => OsResult::RegisterErr(e),
-            },
+                }
+            }
             Action::Settle { ask } => {
                 b.pause(t.settle);
                 let job = b.inspect().job;
@@ -565,8 +614,11 @@ pub fn replace_bounded(
             Action::Look => {
                 let answered = answers();
                 let job = if answered { Job::Running } else { b.inspect().job };
+                let process = if answered { b.job_process() } else { None };
+                log::info!(answers = answered, pid:? = process.map(|p| p.pid()); "service repair: look at the service (the pid is absent when the backend cannot name it)");
                 OsResult::Looked {
                     answers: answered,
+                    process,
                     job,
                     elapsed: waiting_since.map_or(Duration::ZERO, |s| s.elapsed()),
                     cancelled: cancel.load(Ordering::Relaxed),
@@ -599,7 +651,7 @@ mod tests {
             answers,
             job,
             elapsed: Duration::from_secs(secs),
-            cancelled: false,
+            cancelled: false, process: None,
         }
     }
 
@@ -739,7 +791,7 @@ mod tests {
             answers: false,
             job: Job::NotRunning,
             elapsed: Duration::ZERO,
-            cancelled: true,
+            cancelled: true, process: None,
         });
         assert_eq!(cancelled.action, Action::Done(RepairOutcome::Registered));
         // A refusal seen during the wait is another cycle, not a longer wait.
@@ -751,7 +803,7 @@ mod tests {
             answers: false,
             job: Job::Refused,
             elapsed: Duration::ZERO,
-            cancelled: true,
+            cancelled: true, process: None,
         });
         assert_eq!(over.action, Action::Done(RepairOutcome::Cancelled));
     }
@@ -782,6 +834,8 @@ mod tests {
         paused: Duration,
         job_after_failed_register: Option<Job>,
         failed_last: bool,
+    /// The process the job runs, as `job_process` names it.
+    process: Option<ProcessId>,
     }
 
     impl Backend for Script {
@@ -839,6 +893,10 @@ mod tests {
                 Ok(())
             }
         }
+        fn job_process(&mut self) -> Option<ProcessId> {
+            self.process
+        }
+
         fn job_gone(&mut self) -> bool {
             if self.lingering > 0 {
                 self.lingering -= 1;
@@ -1110,5 +1168,83 @@ mod tests {
             assert!(!s.to_string().is_empty());
         }
         assert!(Timings::default().worst_case() < Duration::from_secs(300));
+    }
+
+    // ---- which process answers (rule 53): an old build's job that lingers never settles a new version ----
+    const REGISTERED: u64 = 100;
+    fn proc(pid: u32, started: u64) -> ProcessId {
+        ProcessId::new(pid, StartTime::from_micros(started))
+    }
+    fn answered_by(process: Option<ProcessId>) -> OsResult {
+        OsResult::Looked { answers: true, job: Job::Running, elapsed: Duration::ZERO, cancelled: false, process }
+    }
+    fn waiting_after_register() -> Stepper {
+        let mut s = Stepper::new(&Timings::default(), 4);        s.start_register_only();
+        s.registered_at(StartTime::from_micros(REGISTERED));
+        s.next(OsResult::RegisterOk);
+        s.next(settled(Job::NotRunning, false));
+        s
+    }
+
+    #[test]
+    fn an_old_job_that_stays_running_does_not_settle_the_new_version() {
+        let mut s = waiting_after_register();
+        for _ in 0..3 {
+            let n = s.next(answered_by(Some(proc(7, REGISTERED - 50))));
+            assert!(!matches!(n.action, Action::Done(_)), "{n:?}");
+        }
+    }
+
+    #[test]
+    fn a_crash_loop_that_reads_running_once_does_not_settle() {
+        let mut s = waiting_after_register();
+        for pid in 20..24 {
+            let n = s.next(answered_by(Some(proc(pid, REGISTERED + u64::from(pid)))));
+            assert!(!matches!(n.action, Action::Done(RepairOutcome::Recovered)), "pid {pid}: {n:?}");
+        }
+    }
+
+    #[test]
+    fn one_new_process_seen_on_two_looks_settles() {
+        let mut s = waiting_after_register();
+        let new = proc(30, REGISTERED + 5);
+        assert_eq!(s.next(answered_by(Some(new))).action, Action::Pause(Timings::default().start_poll));
+        let n = s.next(answered_by(Some(new)));
+        assert_eq!(n.action, Action::Done(RepairOutcome::Recovered));
+    }
+
+    #[test]
+    fn a_process_that_started_at_the_register_moment_is_new() {
+        let mut s = waiting_after_register();
+        let p = proc(31, REGISTERED);
+        s.next(answered_by(Some(p)));
+        assert_eq!(s.next(answered_by(Some(p))).action, Action::Done(RepairOutcome::Recovered));
+    }
+
+    #[test]
+    fn a_backend_that_cannot_name_the_process_settles_on_the_answer_as_before() {
+        let mut s = waiting_after_register();
+        let n = s.next(answered_by(None));
+        assert_eq!(n.action, Action::Done(RepairOutcome::Recovered));
+    }
+
+    #[test]
+    fn the_executor_ends_registered_when_only_the_old_job_answers() {
+        let old = proc(7, REGISTERED - 50);
+        let mut s = Script { process: Some(old), ..Script::default() };
+        let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
+        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
+        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut |_| {});
+        assert_eq!(out, RepairOutcome::Registered);
+    }
+
+    #[test]
+    fn the_executor_settles_on_a_process_that_started_after_the_register() {
+        let new = proc(8, REGISTERED + 5);
+        let mut s = Script { process: Some(new), ..Script::default() };
+        let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
+        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
+        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut |_| {});
+        assert_eq!(out, RepairOutcome::Recovered);
     }
 }
