@@ -2,7 +2,7 @@
 
 `dyno` talks to the running Dyno agent over the same local protocol as the app (ADR 0014): it reads `agent.json` in the data folder
 (`DYNO_DATA_DIR`, else `%LOCALAPPDATA%\Dyno`, `~/Library/Application Support/Dyno` or `~/.local/share/dyno`), connects with the
-per-launch token and asks the same requests. It never links the platform adapters, so it is small, and it is read-only: it cannot change anything on your machine ([ADR 0021](adr/0021-monitoring-only.md)). Build it with `cargo build -p dyno-cli` (the binary is named `dyno`).
+per-launch token and asks the same requests. It never links the platform adapters, so it is small. The awake and wake commands ask the agent to act, and the agent validates each request ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). Build it with `cargo build -p dyno-cli` (the binary is named `dyno`).
 
 ## Installing and putting it on your PATH
 

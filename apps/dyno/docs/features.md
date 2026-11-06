@@ -1,7 +1,6 @@
 # Features
 
-What Dyno does, and honestly how far each feature is. Dyno 1.0.0 only watches: it never changes your machine, and the
-features that did are dropped ([ADR 0021](adr/0021-monitoring-only.md), listed in the [roadmap](roadmap.md#dropped)).
+What Dyno does, and honestly how far each feature is. Taming, cleanup and tuning are dropped ([ADR 0021](adr/0021-monitoring-only.md), listed in the [roadmap](roadmap.md#dropped)).
 **Built** means the code exists and is tested; **Engine only** means the agent and core implement it and the protocol
 exposes it but the UI screen is still a placeholder; **Planned** means it is not in the code (see [roadmap.md](roadmap.md)
 for the work package). Screenshots are in `docs/screenshots`; each is shown here as a light and dark pair that follows your colour scheme.
@@ -18,7 +17,7 @@ for the work package). Screenshots are in `docs/screenshots`; each is shown here
 - [Disk map](#disk-map)
 - [Alerts and reports](#alerts-and-reports)
 - [Tray, window and settings](#tray-window-and-settings)
-- [Read-only by design](#read-only-by-design)
+- [What Dyno writes](#what-dyno-writes)
 - [Extensibility](#extensibility)
 - [Later](#later)
 - [Platforms](#platforms)
@@ -350,12 +349,10 @@ retention, launch at login, alert settings; the theme, accent and density are th
 Dyno's own Copy menu, no browser keys.
 
 
-## Read-only by design
+## What Dyno writes
 
-**Built.** Dyno does not end, suspend, cap, delete, move or tune anything ([ADR 0021](adr/0021-monitoring-only.md)). Dyno 1.0
-has no privileged helper: the agent runs with your own rights, and a figure the OS withholds says *Unavailable* with the reason
-(user guide, [Running with your own rights](user-guide.md#running-with-your-own-rights)). Elevation (a
-read-only helper and starting as administrator at login) is planned for 1.1 (ADR 0022). Tests act only on processes and folders they create.
+**Built.** Dyno keeps its own data. Taming, cleanup and tuning are dropped ([ADR 0021](adr/0021-monitoring-only.md)); keep awake, Wake-on-LAN and idle or timed sleep run as you set them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). The agent runs with your own rights, and a figure the OS withholds says *Unavailable* with the reason
+(user guide, [Running with your own rights](user-guide.md#running-with-your-own-rights)). An optional administrator helper, turned on in Settings, reads what your account cannot (ADR 0027). Tests act only on processes and folders they create.
 
 ## Extensibility
 

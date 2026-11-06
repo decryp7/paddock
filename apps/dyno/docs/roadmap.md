@@ -1,7 +1,6 @@
 # Dyno roadmap
 
-What is built is in [features.md](features.md); this page is everything that is not. **Dyno 1.0.0 is a monitor**
-([ADR 0021](adr/0021-monitoring-only.md)): it watches and never changes the machine. Work packages (WP) are written so an
+What is built is in [features.md](features.md); this page is everything that is not. **Dyno is a monitor** ([ADR 0021](adr/0021-monitoring-only.md)), with power actions on request ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). Work packages (WP) are written so an
 agent or contributor can pick one up: scope, acceptance criteria, dependencies and the files it touches. Shared integration
 points (`lib.rs`, `protocol.rs`, `ports.rs`, the workspace `Cargo.toml`, `api.types.ts`) are changed by the integrating
 agent only (AGENTS.md "Working in parallel"). Every package ships tests, and every robustness behaviour has a test that

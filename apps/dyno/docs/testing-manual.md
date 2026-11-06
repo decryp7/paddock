@@ -1,7 +1,7 @@
 # Manual tests
 
 What automated tests cannot cover: a real desktop, a real OS service manager, real hardware. Run these before a release on
-each OS you ship, with the release build. Dyno only watches, so nothing here changes the machine; use dummy
+each OS you ship, with the release build. Use dummy
 programs (`yes > /dev/null`, `ping -t`, `sleep 1000`) as targets.
 
 Record: date, OS and version, Dyno version, load average at the time, result per row.

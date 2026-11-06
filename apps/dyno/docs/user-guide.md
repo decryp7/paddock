@@ -1,7 +1,6 @@
 # User guide
 
-Dyno measures your PC and explains why it is slow. It only watches: it never changes your machine, ends a program,
-deletes a file or alters a setting ([ADR 0021](adr/0021-monitoring-only.md)). This guide covers what works today; screens
+Dyno measures your PC and explains why it is slow. When you set it up, it also keeps the computer awake, wakes other computers or sleeps after idle or at a set time ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This guide covers what works today; screens
 marked *placeholder* are described in [features.md](features.md) and [roadmap.md](roadmap.md).
 
 ## Glossary
@@ -11,7 +10,7 @@ marked *placeholder* are described in [features.md](features.md) and [roadmap.md
 | Agent | `dyno-agent`, the background program that measures and keeps your history, also when the window is closed |
 | App | The Dyno window and tray icon |
 | Application (group) | All processes of one program (Chrome and its 40 helpers) shown as one |
-| Read-only | What Dyno is: it measures, explains and notifies; it writes only its own data (history, settings, alarm notes) |
+| Own data | What Dyno writes: history, settings, alarm notes |
 
 ## Install
 

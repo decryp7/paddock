@@ -19,7 +19,7 @@
   </style>
 <text x="48" y="64" class="title">Dyno</text>
 <text x="48" y="94" class="sub">Watches one PC: a per-user agent keeps the history, a window, tray and command line show it</text>
-<text x="48" y="118" class="desc">Live and history, why slow, alarms, a disk map and benchmarks · acts only when asked · Windows, macOS and Linux</text>
+<text x="48" y="118" class="desc">Live and history, why slow, alarms, a disk map and benchmarks · keep awake and Wake-on-LAN · Windows, macOS and Linux</text>
 <rect x="48" y="160" width="304" height="512" rx="10" class="g"/>
 <text x="64" y="188" class="gl">Dyno app and command line</text>
 <rect x="472" y="160" width="416" height="632" rx="10" class="g"/>

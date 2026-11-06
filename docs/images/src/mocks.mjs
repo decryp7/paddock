@@ -20,7 +20,7 @@ function box(x, y, w, h, label) {
 }
 
 
-// ---- Dyno (read-only monitor): no action buttons anywhere, only readings, reasons and alarms ----
+// ---- Dyno (monitor): readings, reasons and alarms ----
 /** A sparkline through values 0..1 in the box (x, y, w, h), with a soft fill under it. */
 function spark(x, y, w, h, v) {
   const P = v.map((q, i) => [x + (i * w) / (v.length - 1), y + h - q * h]);
@@ -41,7 +41,7 @@ function alarmRow(x, y, w, title, detail, state, on, cw = 108) {
 }
 function dynoHero() {
   return sidebar(['Dashboard', 'Processes', 'Why slow', 'Alarms', 'Issues', 'Counters', 'Benchmarks', 'Reports'], 0) +
-    t(232, 48, 'Dashboard', 'mh') + t(232, 70, 'Watching this PC · read-only', 'mm') + r(820, 34, 108, 26, 'mact', 13) + `<circle class="maccf" cx="838" cy="47" r="4"/>` + t(850, 52, 'Monitoring', 'mta') +
+    t(232, 48, 'Dashboard', 'mh') + t(232, 70, 'Watching this PC', 'mm') + r(820, 34, 108, 26, 'mact', 13) + `<circle class="maccf" cx="838" cy="47" r="4"/>` + t(850, 52, 'Monitoring', 'mta') +
     tile(232, 88, 207, 'CPU', '76', '%', CPU) + tile(449, 88, 207, 'Memory', '52', '%', MEM) + tile(672, 88, 123, 'Disk', '236', 'MB/s', DSK) + tile(805, 88, 123, 'Network', '1.2', 'MB/s', NET) +
     r(232, 222, 424, 330, 'mc', 10) + t(252, 254, 'Likeliest cause', 'mm') + t(252, 284, 'A build is using most of the CPU', 'mt2') +
     t(252, 312, 'cargo runs 6 compilers in parallel; the rest waits.', 'mm') +

@@ -7,8 +7,7 @@ planned (not built). The text companion is [architecture.md](architecture.md).
 ## Overview
 
 Dyno is a per-user **agent** that measures the machine and keeps its history, an **app** (Tauri shell plus Angular UI)
-that shows it, a pure Rust **core** that holds every decision, and OS **adapters** behind the core's ports. Dyno 1.0 has no privileged helper: everything runs with the user's own rights. Dyno only watches: it changes nothing on the machine
-([ADR 0021](adr/0021-monitoring-only.md)).
+that shows it, a pure Rust **core** that holds every decision, and OS **adapters** behind the core's ports. Everything runs with the user's own rights; an optional administrator helper adds readings ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)).
 
 ![Dyno at a glance](../diagrams/dyno-overview.svg)
 
@@ -68,8 +67,7 @@ unit, a per-user `Run` entry on Windows), the agent process and the data folder.
 
 ![Use cases: run and set up](../diagrams/svg/uml-use-cases-setup.svg)
 
-What the owner runs or sets up. Benchmarks start only on a click; Explain this in Pitwall is planned for after 1.0 (dashed). Dyno
-only watches (ADR 0021): none of these changes the machine. The disk map is in scope for 1.0.
+What the owner runs or sets up. Benchmarks start only on a click; Explain this in Pitwall is still planned (dashed). Keep awake and timed sleep run as the owner set them up (ADR 0032). The disk map is in scope for 1.0.
 
 ## Domain model
 

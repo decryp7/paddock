@@ -13,7 +13,7 @@ function column(d, x, w, y0, H, list) {
 // ---------- C4 level 1 ----------
 {
   const d = P({ title: 'Dyno — system context', kind: 'C4 · Level 1 — System context', w: 1344,
-    desc: 'Dyno measures and explains one PC for its owner. It acts on the machine only when the owner asks, such as keep awake or a timed sleep. Sister apps and the release host are reached only on a click or an opt-in.' });
+    desc: 'Dyno measures and explains one PC for its owner. It also keeps the computer awake, wakes other PCs and sleeps on a schedule when the owner sets that up. Sister apps and the release host are reached only on a click or an opt-in.' });
   const W = 288, y0 = 144;
   const left = [
     ['owner', 'process', 0, { name: 'PC owner', tech: 'Person', desc: 'Watches the machine, asks why it is slow, gets alarms, runs benchmarks on a click.', person: true }],
@@ -23,7 +23,7 @@ function column(d, x, w, y0, H, list) {
   const right = [
     ['hosts', 'external', 0, { name: 'Release host', tech: 'Gitea releases, HTTPS', desc: 'Signed installers and latest.json for Dyno\'s own opt-in updates.' }],
     ['debrief', 'external', 0, { name: 'Debrief', tech: 'Sister app', desc: 'Open in Debrief: a time window exported for log analysis.', planned: true }],
-    ['pitwall', 'external', 0, { name: 'Pitwall', tech: 'Local LLM server', desc: 'Explain this: a redacted summary, only on click.', planned: true }],
+    ['pitwall', 'external', 0, { name: 'Pitwall', tech: 'Local LLM server', desc: 'Reads Dyno over MCP once AI access is on in Settings. Explain this is planned.' }],
   ];
   const H = Math.max(need(d, W, left), need(d, W, right));
   column(d, 48, W, y0, H, left);
@@ -31,7 +31,7 @@ function column(d, x, w, y0, H, list) {
   d.node('sys', 528, y0, W, H, 'accent', { name: 'Dyno', tech: 'Tauri app + per-user agent + Rust core',
     desc: 'A per-user agent that samples, keeps history and raises alarms; a Tauri app (Angular UI) and the dyno command that show it; a pure Rust core that decides. It runs with the user\'s rights; an optional helper reads what needs an administrator.' });
   const [, oy, , oh] = d.rect.os;
-  const hd = { name: 'dyno-helper', tech: 'Optional OS service', desc: 'Turned on in Settings. Reads what needs administrator rights, such as every account\'s processes; changes no setting.' };
+  const hd = { name: 'dyno-helper', tech: 'Optional OS service', desc: 'Turned on in Settings. Reads what needs administrator rights, such as every account\'s processes.' };
   const hh = d.fit(240, hd);
   d.node('helper', 552, oy + oh - 24 - hh, 240, hh, 'accent', hd);
   hub(d, 'sys', 'L', 'owner', 'R', { rev: true, label: 'Views, asks' });
@@ -40,7 +40,7 @@ function column(d, x, w, y0, H, list) {
   hub(d, 'sys', 'L', 'data', 'R', { label: 'Reads, writes' });
   hub(d, 'sys', 'R', 'hosts', 'L', { label: 'Checks', dash: true });
   hub(d, 'sys', 'R', 'debrief', 'L', { label: 'Exports', dash: true });
-  hub(d, 'sys', 'R', 'pitwall', 'L', { label: 'Asks', dash: true });
+  hub(d, 'sys', 'R', 'pitwall', 'L', { rev: true, label: 'Reads over MCP', dash: true });
   d.legend([{ kind: 'process', label: 'Person · OS · data' }, { kind: 'accent', label: 'Dyno' }, { kind: 'external', label: 'External system' }, { kind: 'tag', label: 'Planned', role: 'external' }, { kind: 'line', label: 'Uses' }]);
   save('c4-1-context', d, y0 + H);
 }
@@ -66,7 +66,7 @@ function column(d, x, w, y0, H, list) {
   d.node('os', lx, r(g2, 1), LW, NH, 'process', { name: 'Operating system', tech: 'Windows · macOS · Linux', desc: 'Counters, /proc, Mach, OS logs, launchd, systemd.' });
   d.node('plugins', rx, r(g2, 0), aw, NH, 'plugin', { name: 'Plugins', tech: 'Rust, out of process', desc: 'Vendor sensors. Depend on dyno-plugin-api only; guarded by dyno-plugin-host.' });
   d.node('bench', rx, r(g2, 1), aw, NH, 'process', { name: 'dyno-bench', tech: 'Rust binary, child process', desc: 'CPU, memory and disk benchmarks, one at a time, killed on timeout.' });
-  d.node('helper', rx, r(g2, 2), aw, NH, 'accent', { name: 'dyno-helper', tech: 'Rust binary, OS service', desc: 'Optional, as administrator. Read-only answers with an audit log.' });
+  d.node('helper', rx, r(g2, 2), aw, NH, 'accent', { name: 'dyno-helper', tech: 'Rust binary, OS service', desc: 'Optional, as administrator. Answers what needs those rights, with an audit log.' });
   d.node('cli', bx, g2 + h2 + 56, bw, 96, 'accent', { name: 'dyno', tech: 'Rust binary, command line', desc: 'status, why-slow, top, alarms, snapshot, counters. Reads only (ADR 0014, 0021).' });
   link(d, 'person', 'R', 'ui', 'L', { label: 'Uses' });
   link(d, 'ui', 'R', 'shell', 'L', { label: 'Commands' });

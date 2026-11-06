@@ -1,7 +1,7 @@
 # Dyno architecture
 
 Dyno is built from a pure Rust core, thin OS adapters, a per-user agent that measures and keeps history, a Tauri app that
-shows it. There is no privileged helper in 1.0: everything runs with the user's own rights. Dyno only watches ([ADR 0021](adr/0021-monitoring-only.md)). This page describes how the pieces fit and what is true today; the diagrams
+shows it. Everything runs with the user's own rights; an optional administrator helper adds readings the user cannot get ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions (keep awake, Wake-on-LAN, idle and timed sleep) run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This page describes how the pieces fit and what is true today; the diagrams
 are in [design.md](design.md) and the reasoning is in the [ADRs](adr/README.md). Anything marked *planned* is not in the
 code.
 
@@ -170,7 +170,7 @@ working in memory.
   again. Open only what the user chose.
 - **Never trust another process.** Frames are bounded; the handshake needs the per-launch token (constant-time compare)
   and, where the OS tells, the peer pid. The discovery file is owner-only.
-- **Least privilege.** Nothing Dyno runs is elevated unless the user turns on the helper (ADR 0027); Dyno changes nothing on the machine and installs no service or helper by default. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
+- **Least privilege.** Nothing Dyno runs is elevated unless the user turns on the helper (ADR 0027); Dyno installs no service or helper by default. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
   origin; `scripts/check-capabilities.mjs` enforces it in CI.
 - **Contain failures.** Per-request and per-tick panics are caught, locks recover from poisoning, plugins are guarded and
   quarantined, a failing sensor is an unavailable reading, the app restarts a dead agent and an agent without an app keeps

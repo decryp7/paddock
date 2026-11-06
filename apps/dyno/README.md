@@ -4,21 +4,20 @@
 
 # Dyno
 
-**Watches your PC, read-only.** A background agent samples the machine and keeps its history while the window is
+**Watches your PC.** A background agent samples the machine and keeps its history while the window is
 closed; the app shows what is happening, says in plain words why it is slow, raises alarms, maps the disk and runs
-benchmarks on click. It never changes your machine ([ADR 0021](docs/adr/0021-monitoring-only.md)). On **Windows, macOS
+benchmarks on click. When you set it up, it keeps the computer awake, wakes other computers or sleeps after idle or at a set time ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). On **Windows, macOS
 and Linux**.
 
 A dynamometer measures an engine under load and shows where the power goes: Dyno does that for your computer.
 
 </div>
 
-![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=8ebe09a4)
+![Dyno: See why your PC is slow](docs/images/dyno-hero.svg?v=a1d1902f)
 
 
 > **Status: 1.1.0.** Dyno is a monitor: live and history, processes and why it is slow,
-> alarms, issues, a disk map, counters, extras, benchmarks and the command line, read-only apart from the opt-in keep awake, Wake-on-LAN and administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values). Taming, cleanup, tuning and
-> every other way of changing the machine are dropped, not postponed
+> alarms, issues, a disk map, counters, extras, benchmarks and the command line, plus opt-in keep awake, Wake-on-LAN, idle and timed sleep and the administrator helper (an optional, off-by-default AI access page also lets a local MCP client read these values). Taming, cleanup and tuning are dropped, not postponed
 > ([ADR 0021](docs/adr/0021-monitoring-only.md)). [docs/features.md](docs/features.md) says exactly what is real and
 > [docs/roadmap.md](docs/roadmap.md) lists what is left.
 
@@ -29,7 +28,7 @@ A dynamometer measures an engine under load and shows where the power goes: Dyno
 
 ## At a glance
 
-![Dyno at a glance: a window and tray in a Tauri shell and the dyno command line talk over one local IPC to a per-user agent that samples, answers requests, hosts sensor plugins, runs benchmarks in a child process on a click and keeps SQLite history, alarms, issues and a flight recorder; platform adapters for Windows, macOS and Linux sit around it; a pure Rust core holds every decision; nothing changes the machine](diagrams/dyno-overview.svg)
+![Dyno at a glance: a window and tray in a Tauri shell and the dyno command line talk over one local IPC to a per-user agent that samples, answers requests, hosts sensor plugins, runs benchmarks in a child process on a click and keeps SQLite history, alarms, issues and a flight recorder; platform adapters for Windows, macOS and Linux sit around it; a pure Rust core holds every decision](diagrams/dyno-overview.svg)
 
 A per-user **agent** measures and keeps the history whether or not the window is open; an unprivileged **app** (window
 and tray) shows it and sends requests over one local IPC; a pure Rust **core** holds every rule (grouping, diagnosis,
@@ -41,9 +40,7 @@ alarms, health, forecasts); thin **adapters** per OS read the counters. Everythi
 Task managers show numbers; cleaners and "boosters" change things behind your back. Dyno does the first well and never
 does the second:
 
-- **Read-only.** Dyno measures and explains. It ends nothing, deletes nothing and changes no setting
-  ([ADR 0021](docs/adr/0021-monitoring-only.md)). Its own data (history, settings, alarm acknowledgements and notes) is all
-  it writes.
+- **Measures and explains.** Dyno keeps its own data (history, settings, alarm acknowledgements and notes). Power actions run as you set them up ([ADR 0032](docs/adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)).
 - **Explains, not just counts.** Processes are grouped into applications, the diagnosis names the likeliest cause with its
   evidence, anomalies are called out, and history keeps short spikes visible.
 - **Light.** Adaptive sampling, one SQLite writer, no web server. On the 14-core M4 Mac mini the agent used about 2 to
@@ -53,9 +50,9 @@ does the second:
 
 ## Key features
 
-![Dyno features](docs/images/dyno-features.svg?v=883b556d)
+![Dyno features](docs/images/dyno-features.svg?v=c21897e1)
 
-![How Dyno works](docs/images/dyno-how-it-works.svg?v=d9cb3fb8)
+![How Dyno works](docs/images/dyno-how-it-works.svg?v=853b448e)
 
 Every feature, with its state, is in [docs/features.md](docs/features.md). Built today:
 

@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=e862b089" alt="Paddock: eight apps and a tool. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps; the planned tool Scrutineer signs every app's installers" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=7532e4df" alt="Paddock: eight apps and a tool. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps; the planned tool Scrutineer signs every app's installers" width="100%">
 </picture>
 
 Eight desktop apps and one tool for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -16,7 +16,7 @@ Sighter: docked panes with the layout planner, the activity bar, the Explorer, t
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=d92fe0d8) and [dark](images/paddock-ecosystem-dark.png?v=55edf0ea), integrations
+hero [light](images/paddock-ecosystem-light.png?v=9985d2ed) and [dark](images/paddock-ecosystem-dark.png?v=a2ccc68d), integrations
 [light](images/paddock-integrations-light.png?v=a9a7c6fa) and [dark](images/paddock-integrations-dark.png?v=38cb6fd5), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
@@ -88,7 +88,7 @@ Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 **For.** People who want to know what a machine is doing, now and over time.
 - A background agent keeps history while the window is closed.
 - Live and history views grouped by application, alarms, system facts, a disk map and benchmarks.
-- Strictly read-only: no tuning, no actions and no advice. Dyno needs its small read-only helper, installed with it, to read what only an administrator may see.
+- No tuning or cleanup; power actions (keep awake, Wake-on-LAN, idle and timed sleep) run as the owner sets them up. An optional administrator helper, turned on in Settings, reads what only an administrator may see.
 - Extensible with validated declarative packs, no code.
 - An opt-in MCP server (Settings > AI access) on the unreleased 1.1 line, not in 1.0.0; Pitwall 1.1 will call it; reading
   tools come in 1.2.
@@ -190,7 +190,7 @@ planned for Pitwall 1.1: Pitwall calls the MCP servers of Pacenotes, Debrief, Si
   Pitwall, release checks you configure in Spotter, updates of the apps themselves (signed, from `latest.json`).
 - Pitwall listens on loopback only and requires a key per app; keys live in the OS credential store.
 - Apps treat input as hostile: parsers never panic, limits are enforced, UIs never render untrusted text as HTML.
-- Dyno never changes the system. Its required privileged helper answers allow-listed read-only queries only, so it can see every process and the privileged counters.
+- Dyno's optional administrator helper answers an allow-listed set of questions, so it can see every process and the privileged counters.
 
 ## Pitwall is optional
 
