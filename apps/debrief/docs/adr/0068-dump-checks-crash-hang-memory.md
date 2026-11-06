@@ -5,8 +5,8 @@
   folds in the P2s of the re-review of `a8bc78a53` (approved, no P1): DAC signatures, capture privacy, package order,
   the helper's place and evidence, sizes, one reason shared with ADR 0069, file grants and memory caps. Design only: no
   product code, no builds or test runs for this ADR.
-- Scope: Debrief 1.2, after the streaming and folder-open foundation (ADR 0064 and ADR 0067) lands; the whole scope,
-  native checks and .NET.
+- Scope: WP-1 (the shared CheckReport contract) in Debrief 1.2 as foundation; crash and hang checks (native) in 1.4;
+  memory check in 1.7; .NET managed state in 1.9 (user decision 2026-11-07; designs and decisions unchanged).
 - Date: 2026-11-07
 - Related: ADR 0023 (dumps and UMDH: the reader plugin, `debrief-dump`, problem-first findings), ADR 0036 (symbols by PDB
   identity), ADR 0017 (out-of-process plugins, sandbox, lent files), ADR 0019 (problem-first findings, "Explain with AI"),
