@@ -54,6 +54,18 @@ pub fn child_main_then(
     make: impl FnOnce(&Bootstrap) -> Arc<dyn Handler>,
     connected: impl FnOnce(&Bootstrap, &Peer),
 ) -> io::Result<()> {
+    child_main_hooked(label, protocol, make, connected, || {})
+}
+
+/// [`child_main_then`] that also runs `stdin_closed` on the lifeline's thread when the host closed stdin or died, just before the
+/// process exits (a child that keeps a log writes its exit line there: `exit` runs no destructors).
+pub fn child_main_hooked(
+    label: &str,
+    protocol: ProtocolVersion,
+    make: impl FnOnce(&Bootstrap) -> Arc<dyn Handler>,
+    connected: impl FnOnce(&Bootstrap, &Peer),
+    stdin_closed: impl FnOnce() + Send + 'static,
+) -> io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let elevated = bootstrap_file(&args);
     let bootstrap = match &elevated {
@@ -64,7 +76,7 @@ pub fn child_main_then(
     connected(&bootstrap, &peer);
     if elevated.is_none() {
         // Started after the lockdown, like every thread of a child (see `connect_and_lock_down`).
-        lifeline();
+        lifeline_then(stdin_closed);
     }
     peer.wait_closed(None);
     Ok(())
@@ -72,9 +84,15 @@ pub fn child_main_then(
 
 /// The lifeline: when the host closes stdin (or dies), exit at once.
 pub fn lifeline() {
-    std::thread::spawn(|| {
+    lifeline_then(|| {});
+}
+
+/// [`lifeline`] that runs `on_closed` before the exit.
+pub fn lifeline_then(on_closed: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(move || {
         let mut sink = [0u8; 256];
         while matches!(io::stdin().read(&mut sink), Ok(n) if n > 0) {}
+        on_closed();
         // `exit` runs no destructors: remove the endpoints of children this process was still starting.
         crate::endpoint::remove_live();
         std::process::exit(0);
