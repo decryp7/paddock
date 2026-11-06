@@ -112,6 +112,14 @@ fn install_registers_enables_and_starts_the_unit_and_a_second_install_replaces_i
 }
 
 #[test]
+fn install_without_waiting_registers_and_enables_the_unit() {
+    let rig = Rig::new();
+    install_without_waiting(&mut rig.manager("1.1.0", install_timings()), &AtomicBool::new(false)).unwrap();
+    assert!(rig.unit_text().is_some());
+    assert!(rig.ctl.enabled());
+}
+
+#[test]
 fn install_without_a_user_manager_says_how_to_reach_it_and_writes_nothing_that_is_enabled() {
     let rig = Rig::new();
     rig.ctl.logout();

@@ -96,6 +96,23 @@ mod tests {
     }
 
     #[test]
+    fn the_flag_is_the_operations_own() {
+        let token = OpCancel::default();
+        token.cancel();
+        assert!(token.flag().load(Ordering::SeqCst), "the manager checks the flag the operation's cancel sets");
+        assert!(!OpCancel::default().flag().load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn ended_operations_are_forgotten() {
+        let ops = ServiceOps::default();
+        let ended: Vec<_> = (0..3).map(|_| ops.begin().unwrap()).collect();
+        drop(ended);
+        let _live = ops.begin().unwrap();
+        assert_eq!(ops.running().len(), 1, "a finished operation stays in the list");
+    }
+
+    #[test]
     fn quit_cancels_the_running_operations_and_refuses_new_ones() {
         let ops = ServiceOps::default();
         let running = ops.begin().unwrap();
