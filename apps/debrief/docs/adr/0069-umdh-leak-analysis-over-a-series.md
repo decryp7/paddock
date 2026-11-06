@@ -1,6 +1,6 @@
 # 69. UMDH leak analysis over a series: trends per call site, symbols by identity, findings that say what they could not check
 
-- Status: Proposed
+- Status: Proposed. Revision 2 (2026-11-07) answers the independent review of `cee49f7a1` (P1-4 to P1-6 and the P2s).
 - Date: 2026-11-07
 - Related: ADR 0023 (dumps and UMDH: reader plugin, engine crate, problem-first views), ADR 0036 (symbols by PDB identity;
   its section 2 "UMDH is not symbolised from folders" is amended by D4 here), ADR 0059 (Pitwall as the AI engine),
@@ -51,11 +51,13 @@ Why that is weak for finding a leak [J, with the cited sources]:
    UMDH's own guide says one log "is not sufficient" and to compare logs "recorded at different times"
    ([Using UMDH](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/using-umdh-to-find-a-user-mode-memory-leak) [D]).
    Debrief's Growth and Tree tabs only ever compare two logs; the series exists only as the strict "every step" test.
-2. **The strict test misses real leaks and the table rewards noise.** One flat or slightly lower step (a burst freed,
-   a quiet interval) removes a leaking stack from "steady growth"; a one-off load step ranks as high as a leak.
-3. **Identity is too fine.** The key is the whole stack. The same leaking call site reached from ten callers is ten
-   rows of 10 % each, below `LEAK_SHARE`, so the finding may not fire at all. Grouping by culprit function exists in
-   the table but not in the findings or the series test.
+2. **The series test is strict and the size test cannot tell shapes apart.** One flat or slightly lower step (a burst
+   freed, a quiet interval) removes a leaking stack from `SteadyGrowth` (`umdh.rs:383`, strict `>`); `LeakGrowth` (by size
+   between first and last) may still fire, but it fires the same way for a one-off load step, so the two cases look alike.
+3. **Identity is too fine.** The key is the whole stack. A growing stack is reported only when it grew ≥ 1 MiB or ≥ 10 %
+   of the growth (`umdh.rs:340`, skipped when `d < LEAK_BYTES && share < LEAK_SHARE`), and only the top 5. The same
+   leaking call site reached from a dozen callers, each under 1 MiB and under 10 %, gives no finding at all. Grouping by
+   culprit function exists in the table but not in the findings or the series test.
 4. **Without names most stacks say nothing.** A snapshot taken without `_NT_SYMBOL_PATH` holds raw addresses; UMDH
    "resolves symbols when you analyze the log" ([Interpreting a UMDH log](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/interpreting-a-umdh-log) [D]).
    Debrief names none of them, and does not say how much of the growth is unnamed.
@@ -78,11 +80,15 @@ Known UMDH quirks that the design must handle [D]:
 - On another machine, the symbol path "must point to the symbols for the version of Windows that was loaded on the
   logging computer … Do not point the symbol path on the analysis computer to a symbol server", or the names are
   wrong ([Analyze UMDH logs](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/analyze-umdh-logs)).
-- Output varies by version and mode: `-d` decimal, `-v` verbose, `-l` file and line, `-g` unreferenced blocks
-  ([Analyze a running process](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/analyze-a-running-process));
+- Output varies by version and mode: `-d` decimal, `-v` verbose, `-l` file and line when analysing logs
+  ([Analyze UMDH logs](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/analyze-umdh-logs)), and `-g`
+  unreferenced blocks when capturing ([Analyze a running process](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/analyze-a-running-process));
   the documented example of a log entry is aggregated per back trace, `00005320 bytes in 0x14 allocations
-  (@ 0x00000428) by: BackTrace00B53`, with frames that are not indented in the page's rendering [D]. The reader
-  handles neither (see "Failing tests first").
+  (@ 0x00000428) by: BackTrace00B53` (0x14 allocations of 0x428 bytes each), with frames that are not indented in the
+  page's rendering [D]. The reader handles neither (see "Failing tests first").
+- `BackTrace` ids are indices into the process's stack trace database: stable within one process lifetime (the
+  walkthrough looks up a diff's `BackTrace00B53` in the second snapshot [D]), but after a restart the same id may be a
+  different stack. Matching by frames (ADR 0023 §6) stays; the id is a check within one process instance only.
 - Stack depth is bounded by the stack database [U: the depth limit is not in the pages read]; truncated stacks must
   not split one call site into several.
 - 32-bit processes on 64-bit Windows need the matching UMDH; addresses are 8 hex digits there [U].
@@ -94,9 +100,15 @@ Known UMDH quirks that the design must handle [D]:
 The engine builds one `UmdhSeries` from 2 to `max_series` (default 64, a Setting) snapshots of one process, oldest
 first, or from one UMDH diff log (a series of two with UMDH's own numbers). Every view (table, tree, findings, export,
 explanation) reads the series, so "compare with" disappears as a separate mode: choosing two logs is a series of two.
-The engine checks that the logs belong together (same module set and bases, else "the process restarted between
-snapshot 3 and 4": the series is split and both parts are offered) and refuses a mix of snapshots and diff logs with
-that sentence.
+The engine checks that the logs belong to **one process instance**, the `ProcessInstance` of the roadmap
+proposal's foundation (pid, process start time and main image identity where known; rule 53 and ADR 0068 §1 use the
+same triple). A UMDH snapshot records neither pid nor start time [D: the documented log shape has none], so the
+instance comes from, in order: the collector's manifest when Debrief or `debrief-agent` took the snapshot; the main
+executable's base address and size in each log's module list (a restart under ASLR almost always moves it [J]); else
+*unconfirmed*. DLLs loading or unloading between snapshots never split the series: only the main executable's entry is
+compared. A changed main-executable base splits the series ("the process restarted between snapshot 3 and 4") and both
+parts are offered; an unconfirmed instance gives at most `Low` confidence and a Not checked item. A mix of snapshots and
+diff logs is refused with that sentence.
 
 ### D2. Identity in three levels, grouping by call site by default
 
@@ -126,8 +138,23 @@ For each identity the series gives bytes and count per snapshot. The engine comp
   plateau* (cache warming: the last `plateau_steps` 2 steps change less than `plateau_tolerance` 2 % of the total),
   *one step* (one step ≥ 0.8 of the growth), *fluctuating*, *shrinking*, *new*, *gone*.
 
-With two logs only *grew* or *shrank* exist, and every finding says that two logs cannot tell a leak from a cache.
-Ranking is by projected growth (slope × series length) for steady growth, else by net growth. All thresholds named
+**Minimum snapshots and precedence** (aligned with ADR 0068 revision 2 `a8bc78a53` §4: two dumps give `Grew` at most,
+three or more `Growing`):
+
+| Snapshots | Classes that may be given | Confidence at most |
+|---|---|---|
+| 2 | *grew*, *shrank*, *no growth*; the check's verdict is never a leak (D7) | `Low` |
+| 3 | all classes except *growth then plateau* (needs `plateau_steps` 2 flat steps after growth, so at least 4) | `Low` |
+| 4 to 5 | all | `Medium` |
+| 6 or more | all | `High` |
+
+Precedence, first that matches: *new* / *gone* (absent at one end), *shrinking* (slope < 0), *one step* (one step
+≥ 0.8 of the growth, whatever the others do), *growth then plateau*, *steady growth*, *fluctuating*. So a load step is
+never a leak, and a plateau after growth is never a leak.
+
+Ranking is by projected growth (slope × series length) for steady growth, else by net growth. Call sites enter the
+Theil–Sen pass by the larger of their rank by least-squares growth and their rank by **number of rising steps**, so a
+slow steady leak is not crowded out by a few large one-off steps. All thresholds named
 here are Settings in Settings ▸ Dumps ▸ UMDH with these defaults; the constants of `umdh.rs:283-288` become their
 defaults.
 
@@ -136,10 +163,15 @@ defaults.
 The ladder, first that works per module:
 
 1. The names UMDH wrote (a frame with `module!function`) are kept, marked *as UMDH wrote them*.
-2. A raw address in a listed module gets an identity from: a **dump of the same process** open in the project or the
-   bundle (same path, base and size in its module list, which carries the CodeView GUID and age), or the **PE file
-   itself** when it is in the bundle or a symbol folder (`debrief-symbols/src/pe.rs` reads the debug directory), size
-   and timestamp checked against the module list.
+2. A raw address in a listed module gets an identity only from **the same process instance** (D1): a dump of that
+   instance open in the project or the bundle (same pid and start time; its module list carries the CodeView GUID and
+   age for the module at that path, base and size), or the collector's manifest of that instance when it records the
+   module identities. UMDH's own module list has base, size and path only (`umdh_reader.rs:226-234`), with no time stamp
+   or GUID, so ADR 0036 §1's check cannot be made from the log alone. A PE file of the same path found in the bundle
+   or a symbol folder is used **only** when its size equals the listed size and the instance is confirmed, and its
+   names are marked **inferred identity** (the same path and size can still be another build) with a Not checked item.
+   Without the same instance, raw frames stay `module+offset` with the item "no identity for these modules: not the
+   same process instance as any dump in the project".
 3. With an identity, the PDB is found as ADR 0036 does (symbol folders; servers only when the user turned them on).
 4. Otherwise the frame stays `module+offset`; the module's status says why (`NoIdentity`, `Missing`, …, ADR 0036 §3).
 
@@ -159,18 +191,22 @@ whose times are all equal or missing keeps the order the user chose and says so.
 ### D6. Sizes per call site
 
 The reader keeps, per back trace, a sparse log2 size histogram (at most 48 buckets) and the three most frequent exact
-sizes with their counts (a bounded top-k). The engine merges them per identity, so a finding can say "94 % of the
+sizes with their counts (a bounded top-k). An aggregated entry (`… bytes in 0x14 allocations (@ 0x428) …`) gives its
+per-allocation size directly (`@ 0x428`), counted 0x14 times. The engine merges them per identity, so a finding can say "94 % of the
 growth is 1,064-byte blocks", the hint DebugDiag gives [D]. A diff log has no sizes; the finding says so.
 
 ### D7. A check report in ADR 0068's shape
 
 ADR 0068 (Proposed 2026-11-07, `docs/debrief-dump-analysis-adr`, its section 1 and the `CheckReport` type of its
 section 2) defines the report every dump check returns. The UMDH series returns the same parts, as a fourth check kind
-(`CheckKind::Leak`, a name for ADR 0068's author to confirm) so the UI, the report block and Pitwall read one shape:
+(**`CheckKind::HeapGrowth`**, the name ADR 0068 revision 2 asks for: a check is named for what it looks at, and a
+leak is a verdict it may or may not reach) so the UI, the report block and Pitwall read one shape:
 
-1. **Verdict** from a closed set: `Leak { call_sites }` (steady growth), `CacheWarming`, `OneStep`, `NoGrowth`,
-   `NotNtHeap` (D8), `ManagedHeap` (D8), and `CannotTell` when the data for a verdict is missing (ADR 0068's rule: no
-   weak verdict from a probe that cannot see; ER-33).
+1. **Verdict** from a closed set: `Leak { call_sites }` (steady growth, three or more snapshots only), `CacheWarming`,
+   `GrewOnce` (one step then flat: ADR 0068's name, its revision 2 §4), `Grew { delta }` (two snapshots, never more than that), `NoGrowth`, `NotNtHeap` (D8), `ManagedHeap` (D8),
+   and `CannotTell` when the data for a verdict is missing (ADR 0068's rule: no weak verdict from a probe that cannot
+   see; ER-33). **Two logs give only `Grew` with Not checked `NeedsMore { of: Snapshots, have: 2, need: 3 }`, `NoGrowth`,
+   `NotNtHeap` or `CannotTell`**, the one closed reason ADR 0068 shares with this ADR (`NeedsMore { of: Dumps | Snapshots, have, need }`, announced for ADR 0068's next revision; its revision 2 `a8bc78a53` still says `NeedsMoreDumps`). Confidence follows D3's table.
 2. **Confidence** `High`, `Medium` or `Low` with the reasons that set it (class, number of snapshots, time provenance,
    share of growth named, truncated stacks), computed by rules, never an unexplained score.
 3. **Evidence**: typed links: the series, a call site, a snapshot, a size signature (D6), a Private Bytes series, a log
@@ -178,7 +214,8 @@ section 2) defines the report every dump check returns. The UMDH series returns 
 4. **Not checked** from a closed set with a next step (family ADR 0052): `NoStackDatabase` (enable `+ust`, restart),
    `Unnamed(share)` (add the PE or a dump of the same process, D4), `WeakTimes` (set the times), `Restart(at)`,
    `DiffFromAnotherMachine` (D4), `DatabaseMayBeFull` (raise the stack trace database size), `NoPrivateBytes` (record a
-   `.blg` or the process monitor), `NeedsMoreSnapshots` (two logs cannot tell a leak from a cache).
+   `.blg` or the process monitor), `NeedsMore { of: Snapshots, have, need }` (two logs cannot tell a leak from a cache),
+   `InstanceUnconfirmed` (D1), `InferredIdentity(modules)` (D4).
 5. **Around**: log events around each snapshot's time.
 6. **Left out**: ADR 0065's omissions (stacks over `max_stacks`, frames over the cap, call sites beyond
    `trend_candidates`).
@@ -248,7 +285,8 @@ by default (they may name the customer's code); module counts and hashes instead
   the series (the tree by call site or by stack).
 - ADR 0036 §2 changes as D4 says; rule 55 gets one frame classifier for profiles and UMDH.
 - The `-g` (unreferenced blocks) output is not read in this ADR [U: its exact shape is not documented in the pages
-  read]; it is the strongest leak evidence UMDH gives and is a follow-up once a real sample shape is known.
+  read]; it is the strongest leak evidence UMDH gives and is a follow-up. A real sample may only come from a test
+  program run in a local VM (ER-14; never a user's log), and the fixtures are then invented in that shape.
 
 ## Failing tests first (ER-11; invented files only, ER-14)
 
@@ -257,17 +295,35 @@ spec of call sites with a growth shape: steady, plateau, one step, noise, shrink
 module list), never from real logs.
 
 1. `aggregated_entries_count_allocations`: a snapshot line `00005320 bytes in 0x14 allocations (@ 0x00000428) by:
-   BackTrace00B53` must read as count 0x14 and 0x5320 bytes; today the reader counts it as **one** allocation of
-   0x5320 bytes (`umdh_reader.rs:284-291`) [S].
-2. `unindented_frames_are_kept`: frames that follow an entry line without indentation are the stack; today they are
-   dropped (`umdh_reader.rs:300`) and the stack is keyed `#<id>`, which never matches across snapshots [S].
-3. `one_flat_step_is_still_a_leak`: 6 snapshots, one call site +5 MiB per step except one flat step: today's
-   `SteadyGrowth` misses it (`umdh.rs:383`, strict `>`); the series must classify it *steady growth*.
-4. `a_warming_cache_is_not_a_leak`: +10, +10, +0.1, +0.1, +0.1 MiB: *growth then plateau*, not a critical finding.
-5. `ten_callers_one_call_site`: one culprit reached from ten callers, 10 % each: today no `LeakGrowth` fires
-   (`LEAK_SHARE` 0.10, top 5); grouped by call site it must be one finding with 100 %.
+   BackTrace00B53` must read as count 0x14, 0x5320 bytes and a per-allocation size of 0x428 (largest 0x428, the size
+   histogram holding 0x14 × 0x428); today the reader counts it as **one** allocation of 0x5320 bytes
+   (`umdh_reader.rs:284-291`) [S].
+2. `unindented_frames_are_kept`: frames that follow an entry line without indentation are the stack. Today they are
+   dropped (`umdh_reader.rs:300`), so the stack has no frames: no culprit, no names, no grouping by module or function,
+   and the key falls back to `#<id>` (`umdh.rs:39-41`). Within one process instance that id is stable, so the
+   assertions are about frames, culprit and grouping, not about matching [S].
+2b. `same_id_after_a_restart_is_not_merged`: two snapshots of different instances (D1) where `BackTrace00A1` is a
+   different stack in each: they must not be merged under one key, whatever their frames' presence.
+3. `one_flat_step_is_classified_steady`: 6 snapshots, one call site +5 MiB per step except one flat step. Today
+   `LeakGrowth` (critical) still fires, but `SteadyGrowth` does not (`umdh.rs:383`, strict `>`), so the series' shape
+   is lost; the series must classify it *steady growth* with a rate.
+4. `a_warming_cache_is_not_a_leak`: +10, +10, +0.1, +0.1, +0.1 MiB: *growth then plateau*, verdict `CacheWarming`, not
+   `Leak`.
+5. `many_callers_one_call_site`: one culprit reached from 12 callers, each +0.5 MiB (under `LEAK_BYTES`) and about
+   8 % of the growth (under `LEAK_SHARE`): today no `LeakGrowth` fires (`umdh.rs:340`); grouped by call site it must be
+   one call site with 100 % of the growth.
+5b. `static_crt_frames_in_the_user_module`: the documented stack (`ntdll!RtlDebugAllocateHeap`, …,
+   `MyApp!_heap_alloc_base`, `MyApp!_nh_malloc`, `MyApp!operator new`, `MyApp!DisplayMyGraphics`, `MyApp!main`, from the
+   [Using UMDH](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/using-umdh-to-find-a-user-mode-memory-leak)
+   page, names invented in that shape): the culprit is `DisplayMyGraphics` (or `operator new` with the function as its
+   caller), never `_heap_alloc_base`; the statically linked CRT allocators are recognised inside the user's module.
+5c. `two_logs_never_give_a_leak`: any two snapshots give `Grew` with `NeedsMore { of: Snapshots, have: 2, need: 3 }`,
+   `NoGrowth`, `NotNtHeap` or `CannotTell` (proptest over random pairs).
 6. `weak_times_give_no_rate`: modification times only: no per-hour rate, a could-not-check line.
-7. `restart_splits_the_series`: module bases change between snapshots 3 and 4: two series, and the reason.
+7. `restart_splits_the_series`: the main executable's base changes between snapshots 3 and 4: two series, and the
+   reason. `dll_load_does_not_split`: a DLL appears or moves between snapshots, the executable's base stays: one series.
+8a. `inferred_identity_is_marked`: a PE of the same path and size in a symbol folder, instance confirmed: names marked
+   *inferred identity*; instance unconfirmed: no names and `InstanceUnconfirmed`.
 8. `raw_frames_named_by_identity`: raw addresses plus a synthetic minidump of the same process (from
    `debrief_plugin_dumps::synth`) with matching modules: frames named from a synthetic PDB; without the dump:
    `module+offset` and `Unnamed` with the share.
@@ -286,30 +342,32 @@ bounds are lowered with the numbers.
 
 | # | Package | Days | Depends |
 |---|---|---|---|
-| U0 | `umdh_series` generator and the failing tests 1–8 (marked) | 1.5 | - |
-| U1 | Reader: aggregated entries, unindented frames, size histogram and top sizes, process name when present; on SI-11's line loop | 2 | U0; SI-11 for the loop |
-| U2 | Frame interning, `UmdhSeries`, restart split, cache by ids and Settings; the measurement above | 2.5 | U0 |
-| U3 | Identity levels and the shared frame classifier with `debrief-profile` (rule 55, both callers in one change) | 2 | U2 |
-| U4 | Trends: slopes, classes, ranking, Settings page section | 2.5 | U2 |
+| U0 | `umdh_series` generator and the failing tests 1–8a (marked) | 2 | - |
+| U1 | Reader: aggregated entries (with their `@` size), unindented frames, size histogram and top sizes, process name when present. Lands **with SI-11** on its line loop, or before it with the tests carried into SI-11's change (the reader is the one SI-11 replaces) | 2 | U0; SI-11 |
+| U2 | Frame interning, `UmdhSeries`, instance check and restart split (D1, on the shared `ProcessInstance`), cache by ids and Settings; the measurement above | 3 | U0; `ProcessInstance` (roadmap FD-P) |
+| U3 | Identity levels and the shared frame classifier with `debrief-profile`: both callers in one commit, or a `docs/known-copies.toml` entry until they are (rule 55) | 2 | U2 |
+| U4 | Trends: slopes, classes with D3's minimums and precedence, ranking, Settings page section | 3 | U2 |
 | U5 | Times with provenance (file name through ADR 0066's reader, manifest, weak mtime) | 1 | U2; ADR 0066 Z1 |
 | U6 | The check report in ADR 0068's shape: verdicts, confidence rules, Not checked list | 2 | U4, ADR 0068's types |
-| U7 | Symbols ladder (dump of the same process, PE in bundle, ADR 0036 lookup) | 2 | U2 |
+| U7 | Symbols ladder (dump of the same instance, manifest identities, inferred PE, ADR 0036 lookup) | 2 | U2 |
 | U8 | Context: Private Bytes comparison, .NET hint, Moment and dump links | 2 | U6 |
 | U9 | UI: series header with times and provenance, call-site table with class chips and sparklines, sizes, stack panel, settings; mock backend | 3.5 | U4, U6 |
 | U10 | Report block, CSV export, citations | 1.5 | U6; report blocks and citations items |
 | U11 | Pitwall explanation over facts with the engine's check | 1 | U6; ADR 0059 |
 | U12 | ER-27 log lines, docs (features, ADR 0036 amendment note), user guide | 1 | all |
-| | **Total** | **25** [J] | |
+| | **Total** | **27** [J] | |
 
-The first useful cut is U0–U4 + U6 + U9 (about 16 days): series, call sites, classes and honest findings.
+The first useful cut is U0–U4 + U6 + U9 (about 18 days): series, call sites, classes and honest findings.
 
 ## Decisions for the user
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D-a | Release | **1.3**, after a large folder opens cleanly (the user's 2026-11-07 priority). In 1.2 only U0 and the two reader fixes (tests 1 and 2, about 1.5 days), since they are wrong results today and touch no shared code |
+| D-a | Release | **1.3**, after a large folder opens cleanly (the user's 2026-11-07 priority). In 1.2 only U0 and the two reader fixes (tests 1, 2 and 2b, about 2 days), landing with SI-11 or with their tests carried into it, since they are wrong results today and touch no shared code |
 | D-b | Default grouping | Call site (culprit + 2 callers); Function and Stack one click away |
-| D-c | Symbols from a dump or PE of the same process (D4) | Yes; still never by name alone |
+| D-c | Symbols only from the same process instance: a dump or manifest of it, or a PE of the same path and size marked *inferred identity* (D4) | Yes; still never by name alone |
 | D-d | Thresholds as Settings with today's constants as defaults | Yes |
 | D-e | Private Bytes comparison when a `.blg` or monitor capture of the same pid exists | Yes; it answers "is it even the NT heap" first |
-| D-f | `-g` unreferenced-block output | Later, once a real sample shape is known (invented from its documented form) |
+| D-f | `-g` unreferenced-block output | Later; a real sample only from a test program in a local VM, fixtures invented in its shape |
+| D-g | Minimum snapshots and caps (D3, D10): no leak verdict from two logs; `Low` at 3, `Medium` at 4–5, `High` from 6; at most 64 snapshots, 200,000 stacks per log, 1,000,000 interned frames | Yes |
+| D-h | The process instance check (D1) on the shared `ProcessInstance` of the roadmap's foundation | Yes |

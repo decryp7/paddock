@@ -10,7 +10,9 @@ later, and the foundation they rest on, is the companion note
   raw agent-days, ±50 %.
 - Ratings: **useful** (an investigator gets an answer they would act on), **basic** (correct, but they still have to do
   the real work by hand or in another tool), **not useful** (as built, it rarely changes what they do).
-- "In plan": the 1.2 plan (`docs/plans/debrief-1-2.md`, section 9 on `docs/debrief-1-2-plan-refresh` `abac43c0c`) or the
+- Revision 2 (2026-11-07) answers the independent review of `cee49f7a1`.
+- "In plan": the 1.2 plan (`docs/plans/debrief-1-2.md`; its section 9 is **not** on the base `852b35ac0`, only on
+  `docs/debrief-1-2-plan-refresh` `abac43c0c`) or the
   items the user approved since (citations, report blocks, thread/sequence view, Pitwall report drafting, .NET dump
   stacks, `+h:mm` and spaced-date time shapes at Checkpoint A, the dump analysis ADR).
 - Dumps: the user's "the open dump file function is too basic" is the subject of ADR 0068 (dump checks, Proposed, on
@@ -26,7 +28,7 @@ The design is [ADR 0069](../adr/0069-umdh-leak-analysis-over-a-series.md) (Propo
 
 | Layer | Code | What it does | Limits |
 |---|---|---|---|
-| Sniff and read | `crates/debrief-plugin-dumps/src/umdh_reader.rs:26,70,200` | Recognises a snapshot (`<size> bytes + <overhead> at <address> by BackTrace<id>` per allocation) and a UMDH diff (`± delta (new - old) n allocs BackTrace<id>`, count line, stack, `Total increase`), hex or `-d` decimal (decided by the total line), UTF-8 or UTF-16 with a BOM. Sums per back trace: bytes, count, largest. Frames `module!function+off`, `module+off` or raw addresses placed in the listed modules | Whole file in memory (`read_exact(0, len)`, ≤ `max_read_bytes` 1 GiB); 200,000 stacks; 64 frames per stack; lines ≤ 4,096; text ≤ 1,024 chars (`crates/debrief-dump/src/limits.rs:35-46`) |
+| Sniff and read | `crates/debrief-plugin-dumps/src/umdh_reader.rs:26,70,200` | Recognises a snapshot (`<size> bytes + <overhead> at <address> by BackTrace<id>` per allocation) and a UMDH diff (`± delta (new - old) n allocs BackTrace<id>`, count line, stack, `Total increase`), hex or `-d` decimal (decided by the total line), UTF-8 or UTF-16 with a BOM. Sums per back trace: bytes, count, largest. Frames `module!function+off`, `module+off` or raw addresses placed in the listed modules | Whole file in memory (`read_exact(0, len)`, ≤ `max_read_bytes` 1 GiB); 200,000 stacks; 64 frames per stack; text ≤ 1,024 chars (`crates/debrief-dump/src/limits.rs:35-46`); lines ≤ 4,096 (`MAX_LINE`, `umdh_reader.rs:23`) |
 | Time and process | `umdh_reader.rs:330-333` | Time = the file's modification time; process never filled in | - |
 | Symbols | `crates/debrief-plugin-dumps/src/import.rs:39`; ADR 0036 §2 | None: "the names UMDH wrote" | - |
 | Growth | `crates/debrief-dump/src/umdh.rs:94` | Two logs, stacks matched by full frame list (`module!function` per frame joined into one string), sorted by byte growth | One `(base, target)` pair cached (`crates/debrief-dump/src/store.rs:205`) |
@@ -47,7 +49,9 @@ Rating: **basic, close to not useful** for its main job [J]. In short (details a
    allocated-inside/freed-outside classes, [WPA heap glossary](https://learn.microsoft.com/en-us/previous-versions/windows/desktop/xperf/wpa-heap-glossary);
    DebugDiag's top allocators with sizes, [Debug Diag 1.1 walkthrough](https://learn.microsoft.com/en-us/archive/blogs/tess/debugging-native-memory-leaks-with-debug-diag-1-1);
    UMDH's own guide, [Using UMDH](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/using-umdh-to-find-a-user-mode-memory-leak)) [D].
-2. The series test is strict (`umdh.rs:383`): one flat step drops a real leak; a one-off step ranks like a leak.
+2. The series test is strict (`umdh.rs:383`): one flat step removes a real leak from "steady growth". The size test
+   (`LeakGrowth`, first against last) still fires, but it fires the same way for a one-off load step, so a leak and a
+   step look alike.
 3. Identity by the whole stack splits one call site reached from many callers into rows below the 10 % threshold.
 4. No names for raw addresses, and no statement of how much growth is unnamed.
 5. Times are file modification times, shown nowhere; ordering and any rate rest on them.
@@ -61,14 +65,17 @@ against a real file]:
 - The documented aggregated entry `00005320 bytes in 0x14 allocations (@ 0x00000428) by: BackTrace00B53`
   ([Using UMDH](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/using-umdh-to-find-a-user-mode-memory-leak))
   is read as **one** allocation of 0x5320 bytes (`umdh_reader.rs:284-291`), so count and largest are wrong.
-- Frames that are not indented are dropped (`umdh_reader.rs:300`); the stack is then keyed `#<id>`, which never
-  matches across snapshots, so its growth looks like new plus gone.
+- Frames that are not indented are dropped (`umdh_reader.rs:300`), so the stack has no frames: no culprit, no names,
+  no grouping by module or function. Its key falls back to `#<id>` (`umdh.rs:39-41`); a `BackTrace` id is stable within
+  one process lifetime, so matching still works there, but after a restart the same id can be a different stack and
+  would be merged silently.
 
 UMDH quirks the design handles [D]: `gflags /i <image> +ust` and a restart before snapshots; the stack database cap
 (32 MB x86, 64 MB x64 by default); `OANOCACHE=1` for BSTR caching; "Do not point the symbol path on the analysis
 computer to a symbol server" for diffs made elsewhere
 ([Analyze UMDH logs](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/analyze-umdh-logs));
-`-d`, `-v`, `-l`, `-g` variants ([Analyze a running process](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/analyze-a-running-process)).
+`-d`, `-v`, `-l` when analysing logs ([Analyze UMDH logs](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/analyze-umdh-logs)),
+`-g` when capturing ([Analyze a running process](https://learn.microsoft.com/en-us/windows-hardware/drivers/debugger/analyze-a-running-process)).
 Not found in the pages read [U]: the stack depth limit and the exact shape of `-g` output.
 
 ### What it should be (ADR 0069)
@@ -79,7 +86,8 @@ Not found in the pages read [U]: the stack depth limit and the exact shape of `-
   `crates/debrief-profile/src/frames.rs:138`, `crates/debrief-dump/src/modules.rs:106`; rule 55).
 - **Trend per call site**: robust slope (Theil–Sen on the top 2,000), classes *steady growth*, *growth then plateau*,
   *one step*, *fluctuating*, *shrinking*, *new*, *gone*; per hour only when times are better than *weak*.
-- **Symbols by identity** from a dump of the same process or the PE file in the bundle, then ADR 0036's lookup; never
+- **Symbols by identity** only from the same process instance (a dump or manifest of it; a PE of the same path and size
+  marked *inferred identity*), then ADR 0036's lookup, since UMDH's module list has no time stamp or GUID; never
   by name; the unnamed share is a finding.
 - **Times with provenance** (user, file name through ADR 0066's reader, collector manifest, weak mtime).
 - **Sizes per call site** (log2 histogram and top exact sizes).
@@ -91,8 +99,8 @@ Not found in the pages read [U]: the stack depth limit and the exact shape of `-
 - Settings for every threshold (today's constants as defaults); a job with phases and Cancel; bounded memory with
   interned frames; a Parallelism and cost section; ER-27 log lines without frame names.
 
-Size: **25 days** for all of it, **16** for the first useful cut (series, call sites, classes, honest findings, UI).
-Recommended: the two reader fixes and the test generator in 1.2 (about 1.5 days, app only); the rest in 1.3 (see the
+Size: **27 days** for all of it, **18** for the first useful cut (series, call sites, classes, honest findings, UI).
+Recommended: the two reader fixes and the test generator in 1.2 (about 2 days, app only, landing with SI-11); the rest in 1.3 (see the
 roadmap note).
 
 ## Part 2: every other function
@@ -105,13 +113,24 @@ are constants in code unless said otherwise.
 - **Fixed thresholds**: every log analysis gets `AnomalyConfig::default()` and `CompareConfig::default()`
   (`crates/debrief-core/src/workspace/insights.rs:122,133`; `crates/debrief-store-duck/src/analysis.rs:883,904`); only
   profiling findings take thresholds per request (`crates/debrief-profile/src/api.rs:794`).
-- **Analyses cover a sample at scale**: `MAX_ANALYSED = 2_000_000` events (`insights.rs:21`) and Moment
+- **Some analyses cover a sample at scale**: on the DuckDB store (the default, ADR 0010) anomalies (`anomalies_sql`,
+  `crates/debrief-store-duck/src/analysis.rs:849-879`) and field statistics (`:1131-1160`) cover every row, but
+  patterns, exception groups, compare (`analysis.rs:902-903`), spans and the query language stop at
+  `MAX_ANALYSED = 2_000_000` (`analysis.rs:31`; the in-memory workspace has the same cap, `insights.rs:21`) and Moment
   `MOMENT_EVENTS = 250_000`, each with a `Coverage` note. Against the 1 billion event target that is 0.2 %.
 - **Evidence is thin**: first-seen samples (patterns, exceptions), no ids (Silence, Compare, Field statistics), one id
   in health findings.
+- **The query language refuses** a query that matches more than 2,000,000 events (`crates/debrief-store-duck/src/qlang.rs:66-77`);
+  known issues (`known_issues::evidence`) and playbook queries go through it, so at the 1B target they fail rather than
+  answer.
+- **Event ids are `u32` on most DTOs**: QL results (`crates/debrief-core/src/ql/mod.rs:59`), anomaly and outlier
+  `sample_ids` (`analysis/anomaly.rs:85`, `analysis/outliers.rs:72`), Moment's `record_id`, the store's anomaly ids
+  (`crates/debrief-store-duck/src/anomalies.rs:122`); `sample_id()` saturates to `u32::MAX` "until 6c widens them"
+  (`anomaly.rs:89`; promised by ADR 0014, never done). Store ids are never-reused `u64` blocks
+  (`crates/debrief-batch/src/ids.rs:9`), so a 1B-event store with re-imports is within a few times of saturation.
 - **Three event-reference types**: AI citations `Record { id: u32 }` (`crates/debrief-ai/src/assistant/citations.rs:11`),
   report `Events { ids: Vec<u32> }` (`crates/debrief-core/src/report/mod.rs:108`), note anchors `event_id: u64` plus time,
-  source and excerpt (`crates/debrief-notes/src/anchor.rs`); the store's ids are `u64` (`crates/debrief-core/src/events.rs:66`),
+  source and excerpt (`crates/debrief-notes/src/anchor.rs`); the store's `EventId` is `u64` (`crates/debrief-batch/src/ids.rs:9`),
   and `EventsRequest` drops ids that no longer exist without saying so (`crates/debrief-core/src/ports/dto.rs:87`).
   This is the foundation gap behind citations (roadmap note, layer E).
 - **Two windows only** for comparison; `patterns::compare` (`crates/debrief-core/src/patterns.rs:662`) is called only from
@@ -179,7 +198,7 @@ are constants in code unless said otherwise.
 | B21 | Settings | Application, data, AI, plugins, diagnostics (`app/src/app/settings/settings-model.ts`) | **useful** | An Analysis section with the thresholds (A1, A3, UMDH) | 1 | 1.3 | M2c |
 | B22 | CLI | `import query analyze watch report` (`crates/debrief-cli/src/args.rs`) | **basic**: default profile only | `--profile` (A25); `export`, `sql` | 1 + 2 | 1.2 / 1.3 | no |
 | B23 | Agent | cron, interval and trigger schedules, bundle, monitor, perfmon; no network (`crates/debrief-agent/src/`) | **useful** | Write the snapshot manifest UMDH times can rest on (ADR 0069 D5); optional UMDH action | 1 | 1.3 | no |
-| B24 | Collector, monitor, perfmon | Bundle collector with its **own 7 secret detectors** (`crates/debrief-collect/src/redact.rs:13-16`) against the app's 13 (`crates/debrief-core/src/redact/detectors.rs:32`) | **useful**; inconsistent masking | One redaction mechanism (rule 55) | 1 | 1.2 (tiny) | no |
+| B24 | Collector, monitor, perfmon | The bundle collector applies 7 of the core's 13 secret detectors with its own `[REDACTED]` mask (`crates/debrief-collect/src/redact.rs:10-16`, the same `debrief_core::redact` mechanism) | **useful**; a bundle and a redacted share mask different things | Choose the collector's detector set from the same Setting as the share, or say in the bundle which were applied | 1 | 1.2 (tiny) | no |
 | B25 | Plugins | Signed packages, permissions, health, quarantine; importers listed in the survey | **useful** | As planned (PH1 to PH4, 4.4) | in plan | 1.2 | yes |
 | B26 | Profiles and pipelines | TOML pipeline, 16 step kinds, markers, 20 versions (`profile.rs`, `pipeline.rs:703-1045`) | **useful** | As is | - | - | - |
 | B27 | Home and dashboards | Tiles, level history, health check (`home.rs`, `tiles.rs`) | **useful** | Dashboard as one report block [U] | 1 | later | no |
@@ -191,13 +210,13 @@ the roadmap note (none of these is allowed to compete with the streaming and fol
 
 | Rank | Enhancement | Rows | Size | Release | In plan |
 |---|---|---|---|---|---|
-| 1 | UMDH reader fixes (aggregated entries, unindented frames) and the series test generator | Part 1 | 1.5 | 1.2 | no (new) |
+| 1 | UMDH reader fixes (aggregated entries, unindented frames) and the series test generator, landing with SI-11 | Part 1 | 2 | 1.2 | no (new) |
 | 2 | `+h:mm` and spaced-date time shapes | B2, A15 | 1.5 | 1.2 | **yes** (approved, Checkpoint A) |
 | 3 | Known issues and playbook queries scoped to the window | A16, A18 | 1 | 1.2 | no |
 | 4 | One shared Finding type (verdict, confidence, evidence, could not check) for health, dumps, UMDH, profiles | A7, A24, Part 1 | 2 | 1.2 | dump ADR (shape) |
 | 5 | One evidence reference for notes, reports and AI citations, with "moved/gone" | B15, B16, A26 | 3 (+2 ADR) | 1.2 | citations (approved; this is its foundation) |
 | 6 | Typed report blocks for analysis results, engine-rendered, citable | B16, A17, B10 | 5 | 1.2 | **yes** (report blocks) |
-| 7 | CLI `--profile`; collector uses the app's redaction | A25, B24 | 2 | 1.2 | no |
+| 7 | CLI `--profile`; collector's detector set from the share's Setting | A25, B24 | 2 | 1.2 | no |
 | 8 | Analysis thresholds as Settings (anomalies, compare, UMDH, profiling) | A1, A3, A22, B21 | 2 | 1.3 | no |
 | 9 | UMDH series, first cut (ADR 0069 U0–U4, U6, U9) | Part 1 | 16 | 1.3 | no |
 | 10 | Compare: pattern compare wired in, significance, evidence per row | A3, A9 | 3 | 1.3 | no |
@@ -210,11 +229,11 @@ outliers' Benjamini–Hochberg (A5, 0.5, tiny).
 
 | Group | Raw days [J] |
 |---|---|
-| UMDH, all of ADR 0069 | 25 |
+| UMDH, all of ADR 0069 | 27 |
 | Analyses A1–A27, enhancements not already in the plan | about 49 |
 | Everything else B1–B27, not already in the plan | about 33 |
-| **Total of new usefulness work** | **about 107** |
-| Of which proposed for 1.2 (ranks 1, 3, 4, 5, 7, BH, B6, B10; ranks 2 and 6 are already approved) | about 13.5 |
+| **Total of new usefulness work** | **about 109** |
+| Of which proposed for 1.2 (ranks 1, 3, 4, 5, 7, BH, B6, B10; ranks 2 and 6 are already approved) | about 14 |
 
 Items already in the plan (ADR 0064 to 0067, N packages, the timeline and lists, the approved items) are not counted
 here; the roadmap note prices the approved items that have no size yet.

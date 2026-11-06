@@ -2,7 +2,11 @@
 
 A proposal, not a plan change: `docs/plans/debrief-1-2.md` is not edited. It builds on the usefulness audit
 [2026-11-07-analysis-usefulness.md](2026-11-07-analysis-usefulness.md) (rows A1–A27, B1–B27 cited below) and on the plan
-refresh, section 9 of `docs/plans/debrief-1-2.md` on `docs/debrief-1-2-plan-refresh` `abac43c0c` ("§9" below).
+refresh, section 9 of `docs/plans/debrief-1-2.md` on `docs/debrief-1-2-plan-refresh` `abac43c0c` ("§9" below). The
+audit's base `origin/debrief/1.2-int` `852b35ac0` has no section 9; its plan file ends at section 8.
+
+Revision 2 (2026-11-07) answers the independent review of `cee49f7a1`: layer F's state, the `u32` ids, layer B's
+existing columns, `ProcessInstance`, R1's conditions and the chain arithmetic, the stop-gap table, the totals.
 
 - Marks as in the audit: **[S]** source at `origin/debrief/1.2-int` `852b35ac0`, **[P]** a size from the plan or an ADR,
   **[J]** judgement, **[calc]** worked out here, **[U]** not verified. Raw agent-days, ±50 %. Nothing was built or run.
@@ -32,15 +36,19 @@ must meet.
 
 ### B. Store and formats
 
-- **State.** DuckDB 2 with Parquet segments and Tantivy; event ids are `u64` blocks per segment, never reused
-  (`crates/debrief-store-duck/src/writer.rs:755`, `segments.rs:3`); ADR 0062 builds index and catalogue during the
-  import; ST-1 to ST-6 and Q-1 to Q-4 are planned (§9.2 layer 2).
-- **Gaps.** The thread/sequence view needs a total order inside a source (record ordinal as tie-break for equal
-  timestamps) and typed thread, process and activity columns; exact positions are decided only below 100M (§9.6 D7).
-  Without an ordinal in the store, a sequence view at 1B events is built on an approximation and redone later [J].
-  Field values are not in the full-text index (`fts.rs`) [S].
-- **Target.** ST and IX as planned, **plus** a declared `seq` (source id, record ordinal) column written by the sink:
-  no ADR covers it today (gap; fold into ADR 0062 as an amendment, about 1 day of design, 1.5 of build) [J].
+- **State.** DuckDB 2 with Parquet segments and Tantivy; event ids are `u64` blocks per segment
+  (`crates/debrief-store-duck/src/segments.rs:3`), never reused (asserted by the writer's test at `writer.rs:755`);
+  every event already has `source` and `line` columns: the inspector's context reads by `(source, line)`
+  (`crates/debrief-store-duck/src/context.rs:136`) and evidence ids are ordered by `ts, source, line, id`
+  (`anomalies.rs:343`). ADR 0062 builds index and catalogue during the import; ST-1 to ST-6 and Q-1 to Q-4 are planned
+  (§9.2 layer 2).
+- **Gaps.** The thread/sequence view needs a total order inside a source and typed thread, process and activity
+  columns. `(source, line)` gives it for text sources; what is missing is (a) a declared ordinal for sources without
+  lines (an EVTX record id, a CSV row, an OTLP record index, a video frame) and (b) a guarantee that `(source, ordinal)`
+  is unique and survives reload and re-time. Exact positions (`ord`) are decided only below 100M (§9.6 D7). Field
+  values are not in the full-text index (`fts.rs`) [S].
+- **Target.** ST and IX as planned, **plus** a small ADR 0062 amendment: `line` is the ordinal of text sources, each
+  non-text importer declares its ordinal, uniqueness is checked at the sink (about 0.5 day of design, 1 of build) [J].
 - **Budgets.** 1 billion events (ST-5, SI-15); post-import store CPU 20 CPU-s per GB against 57 measured (§9.6 D1).
 
 ### C. Plugin host
@@ -61,19 +69,32 @@ must meet.
 - **Target.** ADR 0067.
 - **Budgets.** ADR 0067's (scan time, 14,000 files, the FM gate); ADR 0065's UI at about 15,000 rows.
 
-### E. Evidence references (citations) — no ADR yet
+### E. Evidence references, `u64` ids and process instances — no ADR yet
 
-- **State** [S]. Three types point at an event: AI `Citation::Record { id: u32, verified }`
+- **`u64` ids on every DTO and wire** [S]. The store's `EventId` is `u64` (`crates/debrief-batch/src/ids.rs:9`), but most
+  DTOs carry `u32`: QL results (`crates/debrief-core/src/ql/mod.rs:59`), anomaly and outlier `sample_ids`
+  (`analysis/anomaly.rs:85`, `analysis/outliers.rs:72`), Moment's `record_id`, the store's anomaly ids
+  (`crates/debrief-store-duck/src/anomalies.rs:122`), report blocks and AI citations; `sample_id()` saturates to
+  `u32::MAX` "until 6c widens them" (`anomaly.rs:89`; ADR 0014 promised the widening, it was not done). Ids are never
+  reused, so a 1B store with re-imports gets within a few times of `u32::MAX` [calc: 4.29B]. A saturated id points at the
+  wrong event silently. **Target**: `EventId` (u64) on every DTO, the generated TypeScript and the wire, decided together
+  with ADR 0063 (the wire's integer encoding: JSON numbers lose precision above 2^53, so the TS side needs a string or a
+  bigint) and done **before** citations and report blocks. Size 3 [J].
+- **`ProcessInstance`** [J]. Dumps (ADR 0068 §1: pid, start time, main module identity; rule 53), UMDH series (ADR 0069
+  D1), the thread view (a thread id is only meaningful within one instance) and evidence references all need "the same
+  process". One type in `debrief-core`: pid, start time (with ADR 0066 provenance), main image identity where known, and
+  a confirmed/unconfirmed state with the reason. Size 1.5 (type, the dumps engine and UMDH on it) [J].
+- **State of event references** [S]. Three types point at an event: AI `Citation::Record { id: u32, verified }`
   (`crates/debrief-ai/src/assistant/citations.rs:11`), report `Block::Events { ids: Vec<u32> }`
   (`crates/debrief-core/src/report/mod.rs:108`), note anchors `Event { event_id: u64, time, source, excerpt }`
-  (`crates/debrief-notes/src/anchor.rs`). The store's ids are `u64`. `EventsRequest` leaves out ids that no longer exist
+  (`crates/debrief-notes/src/anchor.rs`). `EventsRequest` leaves out ids that no longer exist
   without saying so (`crates/debrief-core/src/ports/dto.rs:87`). Whether a reload or a re-time keeps event ids is not
   traced [U]; ADR 0051 keeps **source** ids stable, not event ids.
 - **Gaps.** The approved citations and report blocks, Pitwall drafting and every finding's evidence need one reference
   that survives reload, re-time (ADR 0066's Undo), a redacted copy and a project moved without its logs, and says
   "moved" or "gone" instead of vanishing. Building citations on the `u32` ids means undoing them later.
-- **Target (gap ADR, proposed).** One `EvidenceRef` in `debrief-core`: stable source id (ADR 0051), a locator (record
-  ordinal from layer B, byte offset and line for text, document key for a dump, UMDH call site or capture node), a
+- **Target (gap ADR, proposed).** One `EvidenceRef` in `debrief-core`: stable source id (ADR 0051), a locator (the
+  `(source, line)` or declared ordinal of layer B, byte offset for text, document key for a dump, UMDH call site or capture node), a
   content hash, the time with its provenance, and an id hint for the fast path. Resolution answers *found*, *moved*
   (resolved by locator and hash) or *gone* (with the kept excerpt), in ADR 0065's `Bounded` style. Notes, report blocks,
   AI citations and findings all use it (rule 55: one mechanism, three copies today).
@@ -82,12 +103,18 @@ must meet.
 
 ### F. Analyses at scale — no ADR yet
 
-- **State** [S]. Log analyses read at most `MAX_ANALYSED = 2_000_000` events (`crates/debrief-core/src/workspace/insights.rs:21`)
-  and Moment 250,000, each with a coverage note; ADR 0065's B4 (`Analyzed`) reports it; Q-2 makes results pageable.
-- **Gaps.** At the 1B target an analysis sees 0.2 % of the data. Patterns, exception groups, error counts per bucket and
-  field facets could be accumulated during the import (as ADR 0062 does for the catalogue) and finished per query; the
-  rest run as store-side SQL over all rows, as jobs with progress (ER-17 to ER-20). Without a decision, every usefulness
-  enhancement of the audit is built against a sample and revisited.
+- **State** [S]. On the DuckDB store (the default, ADR 0010) two analyses already cover every row: anomalies
+  (`anomalies_sql`, `crates/debrief-store-duck/src/analysis.rs:849-879`) and field statistics (`:1131-1160`). Patterns,
+  exception groups, compare (`analysis.rs:902-903`), spans and the query language stop at `MAX_ANALYSED = 2_000_000`
+  (`analysis.rs:31`), Moment at 250,000; each reports a coverage (ADR 0065's B4, `Analyzed`). The in-memory workspace
+  (`crates/debrief-core/src/workspace/insights.rs:21`) has the same cap. **The query language refuses** a query that
+  matches more than 2M events ("narrow it … first", `crates/debrief-store-duck/src/qlang.rs:66-77`), and known issues
+  (`known_issues::evidence`) and playbook queries run through it, so at 1B they fail instead of answering.
+- **Gaps.** At the 1B target the capped analyses see 0.2 % of the data, and known issues, playbooks and QL `stats` do
+  not run at all on broad queries. Patterns, exception groups and error counts per bucket could be accumulated during
+  the import (as ADR 0062 does for the catalogue) and finished per query; counts for known issues and playbook checks
+  can be plain store-side counts (no row stream); QL stages can run as SQL over all rows where they translate. Without a
+  decision, every usefulness enhancement of the audit is built against a sample and revisited.
 - **Target (gap ADR, proposed).** Which analysis is *import-time accumulated*, *store-side over all rows* or
   *sampled with a stated coverage*; a Parallelism and cost section per class; the Finding type of layer I as output.
 - **Size.** ADR 3 in 1.2 (design and measurements); the build is 1.3 [J].
@@ -114,12 +141,12 @@ must meet.
 ### I. Findings contract — ADR 0068's check report, made shared
 
 - **State** [S]. Findings exist in four shapes: health findings (`analysis/moment.rs:348`), dump and UMDH
-  `DumpFinding { kind, severity, title, detail, evidence }` (`crates/debrief-dump/src/api.rs:391-433`), profiling findings
+  `DumpFinding { kind, severity, title, detail, evidence }` (`crates/debrief-dump/src/api.rs`: `FindingKind` at 391, the struct at about 426-433), profiling findings
   (`crates/debrief-profile/src/ops/findings.rs`), heap findings; report `Block::Finding { severity: String, title, detail }`
   is untyped.
 - **Gaps.** Pitwall must explain computed facts only (rule 46), reports must cite them, the AI needs tools over them
   (audit A26). Four shapes mean four adapters each.
-- **Target.** The dump analysis ADR's finding (verdict, confidence, evidence as `EvidenceRef`s, could-not-check) as one
+- **Target.** ADR 0068's check report (verdict, confidence with reasons, evidence as `EvidenceRef`s, Not checked) as one
   `Finding` type in `debrief-core`, used by every analysis, the report's Finding block and Pitwall's fact bundle. No ADR
   makes it shared yet: a short amendment to ADR 0068, or a section of layer F's ADR.
 - **Size.** 2 (type, the four producers mapped, report block) [J].
@@ -167,7 +194,10 @@ must meet.
 | SI-3, plugin text importers "on today's loop" | Interim by design until SI-8/SI-9 | Keep; no new importer features on the old loop |
 | UI work on Debrief's own shell before M1–M4 and Y12 | The workbench move carries or rewrites it | Usefulness UI (UMDH series, thread view, report block editors) after M3b, or as components the move carries unchanged |
 | Analyses at `MAX_ANALYSED` 2M with a coverage note | A sample against a 1B target | Layer F decides; B4 reports it meanwhile |
+| The query language's refusal over 2M matches (`qlang.rs:66-77`), with known issues and playbooks on it | At 1B they fail, not degrade | Layer F: store-side counts for known issues and playbook checks, QL stages in SQL; meanwhile the refusal names the cap through ADR 0065 |
+| `u32` event ids on DTOs, `sample_id()` saturating | Wrong events past `u32::MAX`, silently | Layer E's `u64` ids with ADR 0063, before citations and report blocks |
 | Report blocks and citations on `u32` ids | Would be redone for layer E | Layer E first |
+| UMDH reader fixes on today's whole-file reader | SI-11 replaces that reader | Land them with SI-11, or carry their tests into SI-11's change (ADR 0069 U1) |
 | MEM-1/MEM-2 bounds on captures in the UI process | A bound, not a move; MEM-6 decides the move | Keep as the stop-gap it is; widen MEM-6 (layer G) |
 | W0 dropped while ADR 0063 stays Proposed | Two reply-shape passes over lists and timeline | Decide ADR 0063 before 3.3 and 4.5 |
 
@@ -181,36 +211,56 @@ to end (F12) at about T+30, with T the first day after the Dyno tag.
 
 What can start earlier or run in parallel [J unless marked]:
 
-1. **Write the waiting packages now, on branches.** §9.2 allows it ("may be written on a branch before"). 1.4 + B1,
-   IP1, 2.6c, PH1 and 2.2 have no app dependency beyond 0.5; written before T they land in the first days after it
-   instead of starting then. Gain on the path: about 3 to 5 days (IP1 4 and 1.4 3 are on or next to the path).
+1. **Write the waiting packages on branches before T, under conditions.** §9.2 allows it ("may be written on a branch
+   before"). But every candidate (1.4 + B1, IP1, 2.6c, PH1, 2.2, 1.3) depends on **0.5**, a 2-day design that is not
+   done; PH1 also needs 0.4, which lands only after the tag; wave 0 already uses all seven agents (§9.4); and the Dyno
+   pre-tag work changes `crates/` now. So: start only after 0.5 is reviewed, one branch per crate, merged (not rebased)
+   after the tag, on spare agents only. The gain is bounded by the working days between 0.5's review and T.
 2. **Split 0.5.** Its IP1 and 2.6b part first (about 1 day), so IP1 and 2.6b's design do not wait for the whole 2-day
    design. Gain: about 1 day.
-3. **3.4 + SI-10 against 2.6b's interface while 2.6d is built**, with 2.6d's judge behind its trait and a test double;
-   integrate when 2.6d lands. Gain: about 2 to 3 days of 3.4's 5. No stop-gap ships: the double lives in tests.
+3. **3.4's host side against the test plugin while PH4 migrates the first-party plugins.** §9.2 makes 3.4 + SI-10
+   depend on PH2b, **PH4**, SI-8 and 2.6d; 3.4's host-side streaming can be built and tested against
+   `debrief-plugin-test` on protocol 2 once PH2b is in, while PH4 + SI-9 move EVTX. Gain: about 2 days. No stop-gap ships.
 4. **App-only work of the chain now**: SI-0 to SI-3, SI-6, SI-11 and F1 to F6, FM (all "start now" in §9.4) get the free
    agents first, before any usefulness work.
 5. **2.1 before F10** (see the stop-gap table): 1.3 → 2.1 is about 7 days and waits for the tag; start 1.3 on a branch
    now so F10 and F10b build on it. Avoids a second windowed-rows implementation.
 6. **4.3's corpus in the first night windows**, so SI-15's acceptance and FM's gate have their data when they need it.
 
-Effect [J]: the event log opens at about **T+14 to T+16** instead of T+19, and F12 at about **T+26** instead of T+30, if
-the pre-T branches are written now and land cleanly. The tag date does not move from this alone (§9.3: capacity, not the
-path, sets the end).
+**Chain arithmetic** [calc from §9.2's rows and dependencies; J for overlaps]. §9.3's critical path runs through IP1,
+2.6b and 2.6d to 3.4 and leaves out PH4, on which §9.2 makes 3.4 depend. Counting it, the plan's own date is later:
+
+| Step | As planned from T | With 0.5 reviewed and 1.4, IP1, 2.6c, PH1 pre-written |
+|---|---|---|
+| 0.5 | T+2 | before T |
+| 1.4 → 2.6a | T+5 → T+9.5 | lands T+1 → T+5.5 |
+| IP1 → 2.6b → SI-8 | T+6 → T+9.5 → T+10.5 | lands T+1 → T+4.5 → T+5.5 |
+| 0.4 → PH1 → PH2a | T+1 → T+4.5 → T+7.5 | T+1 → about T+2 → T+5 |
+| PH2b (after 2.6a, 2.6b, PH1, PH2a, SI-8) | T+10.5 → T+14 | T+5.5 → about T+9 to T+10 |
+| PH4 + SI-9 | T+14 → T+18 | about T+10 → T+14 |
+| 2.6d (after 2.6b, 2.6c, IP1) | T+9.5 → T+13.5 | T+4.5 → T+8.5 |
+| 3.4 + SI-10: the event log opens | T+18 → **about T+23** | about T+14 → **T+16 to T+17**; with item 3, about T+15 to T+16 |
+
+So the 1.43 GiB event log opens at about T+16 to T+17 instead of the plan's stated T+19 (which is about T+23 once PH4 is
+counted), if the conditions of item 1 hold. F12 (the folder dialog end to end) moves less: its chain (F1 → F3 → F4 →
+F7, F10 on `pd-table`, F11 on SI-4) gains about 2 days from item 5, to about T+28 [J]. The tag date does not move from
+this alone (§9.3: capacity, not the path, sets the end).
 
 ### 2.2 Then: the foundation additions (1.2)
 
 | # | Package | Days | Depends | Shared code |
 |---|---|---|---|---|
 | FD-E1 | Evidence reference ADR (layer E) | 2 | ADR 0051, 0066 | design |
-| FD-E2 | `EvidenceRef`, resolver, notes/reports/AI moved | 3 | FD-E1; layer B's `seq` | no (app crates) |
-| FD-B | `seq` ordinal column (ADR 0062 amendment and build) | 2.5 | IX-B1 | no |
+| FD-U | `EventId` (u64) on every DTO, generated TypeScript and wire; `sample_id()` removed | 3 | ADR 0063 decided | no (app crates; the wire encoding with ADR 0063) |
+| FD-P | `ProcessInstance` type; dumps engine and UMDH on it | 1.5 | ADR 0068 §1 | no |
+| FD-E2 | `EvidenceRef`, resolver, notes/reports/AI moved | 3 | FD-E1, FD-U, FD-B | no (app crates) |
+| FD-B | Ordinal per source: `line` for text, a declared ordinal for the rest, uniqueness at the sink (ADR 0062 amendment) | 1.5 | IX-B1 | no |
 | FD-I | One `Finding` type (ADR 0068's shape) for all analyses and the report block | 2 | ADR 0068 | no |
 | FD-F | Analyses at scale ADR with measurements | 3 | Q-1, 4.3 | design |
 | FD-G | MEM-6 scope widened to dump and UMDH documents | 1 | MEM-6 | design |
 | FD-K | Analysis run log lines | 0.5 | FD-F | no |
 | FD-M | Planted-incident generator and recall check | 3 | 4.3 | the bench workflow line waits |
-| | **Total** | **17** | | |
+| | **Total** | **20.5** | | |
 
 ### 2.3 Then: usefulness in 1.2 (approved items and tiny ones)
 
@@ -222,24 +272,24 @@ Approved items without a size in the plan, priced here [J] (replace with their A
 | Citations | 3 | FD-E2 | on top of layer E |
 | Report blocks for analysis results | 5 | FD-I, FD-E2 | engine-rendered |
 | Pitwall report drafting | 4 | FD-I, report blocks, ADR 0059 | facts only (rule 46) |
-| Thread/sequence view | 7 | FD-B, 2.4/3.3 lanes | after M3b for its UI |
+| Thread/sequence view | 7 | FD-B, FD-P, 2.4/3.3 lanes | after M3b for its UI |
 | .NET dump stacks | 11 [P] | ADR 0068 | ADR 0068's WP-0 and WP-12 (its total 63, native checks 52 without them) |
 | Dump checks, native (ADR 0068 without .NET) | 52 [P] | ADR 0068 | not in the totals below; shown as a second line in 2.5 |
 
 Tiny usefulness items that do not compete with the chain (app only, small files, no shared code): UMDH reader fixes and
-test generator (1.5), known issues and playbooks scoped to the window (1), CLI `--profile` (1), collector on the app's
-redaction (1), outliers' Benjamini–Hochberg (0.5), watched-folder and range import in local and relative time (1, with
-ADR 0066's Z packages), SQL result as a report block (0.5). **6.5 days.**
+test generator (2, landing with SI-11), known issues and playbooks scoped to the window (1), CLI `--profile` (1), the
+collector's detector set from the share's Setting (1), outliers' Benjamini–Hochberg (0.5), watched-folder and range
+import in local and relative time (1, with ADR 0066's Z packages), SQL result as a report block (0.5). **7 days.**
 
 ### 2.4 1.3 and later
 
-- **1.3**: UMDH series (ADR 0069 rest, about 23.5), analysis thresholds as Settings (2), compare with pattern compare,
+- **1.3**: UMDH series (ADR 0069 rest, about 25), analysis thresholds as Settings (2), compare with pattern compare,
   significance and evidence (3), time in the query language (4), anomaly scores and per-operation baselines (4), AI
   tools over every analysis (3), Moment ranking and baselines (2), exception and pattern trends and spread samples (3.5),
   runs percentiles (1.5), memory growth on the shared trend classifier (1.5), traces by operation (2.5), playbook
   parameters (2), config diff by key and on the timeline (2), Explorer coverage (1.5), lens with time and instances (1),
   inspector chained correlation (2), folder survey in the scan (2), layer F's build (judged after its ADR), notes with
-  several anchors (2), agent manifest for UMDH times (1), profiling thresholds in Settings (1.5). About **66** [calc
+  several anchors (2), agent manifest for UMDH times (1), profiling thresholds in Settings (1.5). About **67.5** [calc
   from the audit rows], plus layer F's build once its ADR sizes it.
 - **Later**: clock drift (3), sequence operator in QL (4), alert hooks and history (3), plugin analysis contributions
   (3), chart overlays and small multiples (2), field statistics over time (1.5), dashboard as a report block (1), mixed
@@ -249,28 +299,30 @@ ADR 0066's Z packages), SQL result as a report block (0.5). **6.5 days.**
 
 | Added to 1.2 | Raw days | With 20 % |
 |---|---|---|
-| Foundation additions (2.2) | 17 | 20.4 |
+| Foundation additions (2.2) | 20.5 | 24.6 |
 | Approved items priced here (2.3, without ADR 0068's native checks) | 31.5 | 37.8 |
-| Tiny usefulness items | 6.5 | 7.8 |
-| **Total** | **55** | **66** [calc] |
+| Tiny usefulness items | 7 | 8.4 |
+| **Total** | **59** | **70.8** [calc] |
 | ADR 0068's native checks, if all in 1.2 | 52 | 62.4 |
 
-At §9.4's planning number of 5.5 agent-days a working day that is about **12 working days**: the end moves from about
-**2027-04-28** (§9.5) to about **2027-05-14** [calc; J for the sizes]. With all of ADR 0068's native checks in 1.2 as
-well, about 11 more working days: about **2027-05-31**. The chain
-speed-ups of 2.1 do not shorten the end (capacity sets it), but they bring the user's first step (a large folder opens
-cleanly) forward by about 3 to 4 days.
+At §9.4's planning number of 5.5 agent-days a working day that is about **13 working days**: the end moves from about
+**2027-04-28** (§9.5) to about **2027-05-17** [calc; J for the sizes]. With all of ADR 0068's native checks in 1.2 as
+well, about 11 more working days: about **2027-06-01**. The chain speed-ups of 2.1 do not shorten the end (capacity sets
+it), but they bring the user's first step (the large event log opens) to about T+16 to T+17, against the plan's stated
+T+19 and about T+23 once PH4 is counted.
 
 ## 3. Decisions for the user
 
 | # | Decision | Recommendation |
 |---|---|---|
-| R1 | Write the chain's waiting packages (1.4 + B1, IP1, 2.6c, PH1, 2.2, 1.3) on branches now, landing after the Dyno tag | **Yes**: the cheapest way to open a large folder sooner |
+| R1 | Write the chain's waiting packages (1.4 + B1, IP1, 2.6c, PH1, 2.2, 1.3) on branches before the Dyno tag | **Yes, conditionally**: only after 0.5 is reviewed, one branch per crate, merged (not rebased) after the tag, on spare agents only; the gain is bounded by the working days between 0.5's review and T (2.1's table) |
 | R2 | Layer E, one evidence reference for notes, reports, AI and findings, before citations and report blocks | **Yes, in 1.2** (5 days); otherwise citations are built twice |
-| R3 | Layer F, an ADR on analyses at 1B events, in 1.2; its build in 1.3 | **Yes** (3 days) |
+| R2b | `u64` event ids on every DTO and wire (FD-U), and when | **In 1.2, decided with ADR 0063 (the wire's integer encoding) and done before citations and report blocks** (3 days) |
+| R2c | One `ProcessInstance` (pid, start time, main image identity) for dumps, UMDH, the thread view and evidence references (FD-P) | **Yes, in 1.2** (1.5 days), with ADR 0068 |
+| R3 | Layer F, an ADR on analyses at 1B events, in 1.2; its build in 1.3. Scope includes the query language's 2M refusal and known issues and playbooks on store-side counts | **Yes** (3 days); if the refusal must go in 1.2, the store-side counts for known issues and playbooks first (about 1.5 days [J]) |
 | R4 | Make ADR 0068's check report the one shared `Finding` (layer I) | **Yes** (2 days) |
 | R5 | Planted-incident corpus (layer M) | **Yes, in 1.2** (3 days): the only way to measure usefulness |
-| R6 | ADR 0069 (UMDH series): reader fixes in 1.2, the rest in 1.3 | **Yes** |
+| R6 | ADR 0069 (UMDH series): reader fixes in 1.2 with SI-11, the rest in 1.3; minimum snapshots and caps as its D-g (no leak verdict from two logs; `Low` at 3, `Medium` at 4–5, `High` from 6; 64 snapshots, 200,000 stacks, 1,000,000 frames) | **Yes** |
 | R7 | If the date matters, defer first: part of ADR 0068 (its own D-list says which checks), then .NET dump stacks (11) and the thread/sequence view (7) to 1.3, then Pitwall drafting (4) | .NET plus the thread view save about 21.6 days with the buffer (about 3.9 working days), with Pitwall drafting about 26.4 (about 4.8) [calc]; keep layers E and I and the report blocks, which the rest needs |
 | R8 | Keep or drop W0 (§9.6 D2) | Keep, but only if ADR 0063 is decided before 3.3 and 4.5 build their replies; else drop and reject ADR 0063 for 1.2 |
 | R9 | Usefulness UI before or after the workbench move (M3b, Y12) | After, except the tiny items |
