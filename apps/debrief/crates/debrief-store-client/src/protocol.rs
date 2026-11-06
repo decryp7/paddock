@@ -206,6 +206,8 @@ pub struct StoreTuning {
     pub index_heap_mb: Option<u64>,
     /// The full-text index writer's threads.
     pub index_threads: Option<usize>,
+    /// Threads that read the segments and build documents for the full-text index.
+    pub index_read_threads: Option<usize>,
     /// Where DuckDB spills what does not fit in its memory limit (a folder per store below it); absent: the store
     /// folder's `tmp`.
     pub spill_dir: Option<PathBuf>,
@@ -274,6 +276,7 @@ impl StoreTuning {
             import_memory_limit_mb: mb(self.import_memory_limit_mb),
             index_heap_mb: mb(self.index_heap_mb),
             index_threads: threads(self.index_threads),
+            index_read_threads: threads(self.index_read_threads),
             spill_dir: self.spill_dir.filter(|d| d.is_absolute()),
             max_spill_mb: mb(self.max_spill_mb),
             allocator_flush_mb: mb(self.allocator_flush_mb),
@@ -532,6 +535,8 @@ mod tests {
             (Some(1), Some(MAX_TUNING_THREADS), Some(1), Some(MAX_TUNING_MB), None)
         );
         assert_eq!((wild.plugin_cpu_percent, wild.plugin_memory_overrides_mb["a"]), (Some(100), 1));
+        let reads = |n: u32| StoreTuning::from_args([format!(r#"{TUNING_ARG}{{"indexReadThreads":{n}}}"#)]).index_read_threads;
+        assert_eq!((reads(0), reads(3), reads(100_000)), (Some(1), Some(3), Some(MAX_TUNING_THREADS)));
         let arenas = |n: u32| StoreTuning::from_args([format!(r#"{TUNING_ARG}{{"allocatorArenas":{n}}}"#)]).allocator_arenas;
         assert_eq!(
             (arenas(0), arenas(2), arenas(100_000)),

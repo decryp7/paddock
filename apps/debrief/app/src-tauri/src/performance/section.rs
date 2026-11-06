@@ -109,6 +109,20 @@ pub fn schema() -> SettingsSection {
         )
         .field(
             SettingField::new(
+                "indexReadThreads",
+                "Search index read threads",
+                int(0, i64::from(MAX_INDEX_WRITER_THREADS), None),
+                d.index_read_threads,
+            )
+            .describe(
+                "How many cores read the stored events and prepare them for the word-search index, at a lowered priority. \
+                 0 is Auto: every core but the ones left free, at most 8. The events waiting for the index take a fixed \
+                 amount of memory whatever this is.",
+            )
+            .needs_restart(),
+        )
+        .field(
+            SettingField::new(
                 "indexHeapPerThreadMb",
                 "Search index memory per thread",
                 mb(i64::from(MIN_INDEX_HEAP_PER_THREAD_MB), i64::from(MAX_INDEX_HEAP_PER_THREAD_MB)),
@@ -365,6 +379,18 @@ mod tests {
         );
         let cpu = s.find("pluginCpuPercent").unwrap();
         assert!(cpu.description.contains("Windows") && cpu.description.contains("lowest priority"));
+    }
+
+    #[test]
+    fn the_index_read_threads_are_a_setting_with_auto_checked_in_rust() {
+        let s = schema();
+        let f = s.find("indexReadThreads").expect("the read threads are a field");
+        assert!(f.restart_required && f.description.contains("Auto"));
+        assert_eq!(s.defaults().to_json()["indexReadThreads"], 0, "Auto by default");
+        for (value, ok) in [(-1, false), (0, true), (8, true), (64, true), (65, false)] {
+            let r = debrief_core::settings::validate(&s, &json!({ "indexReadThreads": value }));
+            assert_eq!(r.is_ok(), ok, "{value} threads");
+        }
     }
 
     #[test]

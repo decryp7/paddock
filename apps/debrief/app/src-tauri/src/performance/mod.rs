@@ -52,6 +52,8 @@ pub struct PerformanceSettings {
     pub query_threads: u32,
     /// Full-text index writer threads; 0: automatic (the usable cores, as many as fit their heaps in the import memory).
     pub index_writer_threads: u32,
+    /// Threads that read the segments and build documents for the full-text index; 0: automatic (the usable cores, at most 8).
+    pub index_read_threads: u32,
     /// The heap of each full-text index writer thread.
     pub index_heap_per_thread_mb: u32,
     /// The plugins' CPU share, percent.
@@ -85,6 +87,7 @@ impl Default for PerformanceSettings {
             parse_threads: 0,
             query_threads: 4,
             index_writer_threads: 0,
+            index_read_threads: 0,
             index_heap_per_thread_mb: section::DEFAULT_INDEX_HEAP_PER_THREAD_MB,
             plugin_cpu_percent: 100,
             leave_cores_free: 1,

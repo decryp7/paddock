@@ -48,6 +48,19 @@ pub fn index_threads(s: &PerformanceSettings, cores: u32) -> u32 {
     (s.import_budget_mb / s.index_heap_per_thread_mb.max(1)).clamp(1, usable.min(MAX_AUTO_INDEX_THREADS))
 }
 
+/// Most search index read threads chosen automatically (`debrief_store_duck::fts::auto_read_threads`).
+pub const MAX_AUTO_INDEX_READ_THREADS: u32 = 8;
+
+/// Search index read threads: the setting within the usable cores, or (0) the usable cores up to
+/// [`MAX_AUTO_INDEX_READ_THREADS`]. At least one.
+pub fn index_read_threads(s: &PerformanceSettings, cores: u32) -> u32 {
+    let usable = usable_cores(s, cores);
+    if s.index_read_threads > 0 {
+        return s.index_read_threads.min(usable);
+    }
+    usable.min(MAX_AUTO_INDEX_READ_THREADS)
+}
+
 /// The search index writer's heap, MB: a heap per thread.
 pub fn index_heap_mb(s: &PerformanceSettings, cores: u32) -> u32 {
     index_threads(s, cores).saturating_mul(s.index_heap_per_thread_mb)
@@ -72,6 +85,7 @@ pub fn store_tuning(s: &PerformanceSettings, cores: u32) -> StoreTuning {
         import_memory_limit_mb: Some(u64::from(s.import_budget_mb.max(duck_memory_mb(s)))),
         index_heap_mb: Some(u64::from(index_heap_mb(s, cores))),
         index_threads: Some(index_threads(s, cores) as usize),
+        index_read_threads: Some(index_read_threads(s, cores) as usize),
         spill_dir: (!spill.is_empty()).then(|| PathBuf::from(spill)),
         max_spill_mb: (s.max_spill_mb > 0).then_some(u64::from(s.max_spill_mb)),
         allocator_flush_mb: Some(u64::from(s.allocator_flush_mb)),
@@ -169,6 +183,22 @@ mod tests {
         };
         assert_eq!((index_threads(&four, 14), index_heap_mb(&four, 14)), (4, 256));
         assert_eq!(index_threads(&four, 3), 2, "3 cores, one left free");
+    }
+
+    #[test]
+    fn the_index_read_threads_are_auto_within_the_usable_cores_or_the_setting() {
+        let d = PerformanceSettings::default();
+        assert_eq!(d.index_read_threads, 0, "Auto by default");
+        assert_eq!(index_read_threads(&d, 14), 8, "13 usable, capped at 8");
+        assert_eq!(index_read_threads(&d, 4), 3, "one core left free");
+        assert_eq!(index_read_threads(&d, 1), 1);
+        let set = PerformanceSettings {
+            index_read_threads: 6,
+            ..d.clone()
+        };
+        assert_eq!(index_read_threads(&set, 14), 6);
+        assert_eq!(index_read_threads(&set, 3), 2, "never more than the usable cores");
+        assert_eq!(store_tuning(&set, 14).index_read_threads, Some(6));
     }
 
     #[test]
