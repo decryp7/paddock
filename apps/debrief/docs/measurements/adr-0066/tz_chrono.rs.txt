@@ -1,0 +1,19 @@
+use chrono::*; use chrono_tz::Tz; use std::time::Instant; use std::hint::black_box;
+const N:i64=10_000_000;
+fn main(){
+ let a:Vec<String>=std::env::args().collect();
+ let zone=a.get(1).map(|s|s.as_str()).unwrap_or("Europe/Amsterdam");
+ let tz:Tz=zone.parse().unwrap();
+ println!("tzdb={}",chrono_tz::IANA_TZDB_VERSION);
+ for s in ["2026-03-29 02:30:00","2026-10-25 02:30:00","2026-06-01 12:00:00"]{
+  let n=NaiveDateTime::parse_from_str(s,"%Y-%m-%d %H:%M:%S").unwrap();
+  match tz.from_local_datetime(&n){LocalResult::None=>println!("{s} gap: LocalResult::None (no offsets given)"),
+   LocalResult::Single(d)=>println!("{s} single {}",d.timestamp()),
+   LocalResult::Ambiguous(x,y)=>println!("{s} fold {} {}",x.timestamp(),y.timestamp())}
+ }
+ let base=NaiveDate::from_ymd_opt(2026,1,1).unwrap().and_hms_opt(0,0,0).unwrap();
+ for run in 0..3{ let t=Instant::now(); let mut acc=0i64;
+  for i in 0..N{ let n=base+TimeDelta::milliseconds(i*3100);
+    acc^=tz.from_local_datetime(&n).earliest().map(|d|d.timestamp_millis()).unwrap_or(0);}
+  black_box(acc); let e=t.elapsed(); println!("run{run} chrono-tz per-event {:.1} ns",e.as_nanos() as f64/N as f64);}
+}

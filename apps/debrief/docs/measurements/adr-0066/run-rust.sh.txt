@@ -1,0 +1,18 @@
+#!/bin/bash
+set -u
+# As run on 2026-11-05 for Debrief ADR 0066, with the scratch folder written as $D. Layout: $D/tz-base, $D/tz-chrono,
+# $D/tz-jiff (each a crate: Cargo.toml from cargo-manifests.toml.txt, src/main.rs from tz_*.rs.txt), $D/sql/retime.py,
+# $D/venv with the duckdb 2.0.0 Python package.
+D=${D:?set D to the scratch folder}
+export CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=$D/target
+unset RUSTC_WRAPPER
+for c in tz-base tz-chrono tz-jiff; do
+  cargo build --release --manifest-path $D/$c/Cargo.toml 2>&1 | tail -1
+  ls -l $D/target/release/$c | awk -v c=$c '{print c, "stripped bytes", $5}'
+done
+$D/target/release/tz-chrono
+$D/target/release/tz-jiff
+grep -A1 -E 'name = "(chrono-tz|jiff|jiff-tzdb|phf|phf_shared|siphasher|jiff-static)"' $D/tz-chrono/Cargo.lock $D/tz-jiff/Cargo.lock | grep -E 'name|version' | cut -d: -f2-
+echo RUSTDONE
+$D/venv/bin/python $D/sql/retime.py 5000000 800
+echo SQLDONE

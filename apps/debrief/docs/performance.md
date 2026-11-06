@@ -85,6 +85,7 @@ the `perf script` importer; `e2e/scale-*.e2e.ts` check virtualisation (DOM row c
 - **Load:** 1-minute load 5 to 7 at the start; another agent's job in the other `plock` slot
 - **Build:** release, `strip = true`, default system allocator, no LTO (not Debrief's `dist` profile); `rustc` 1.99.1; DuckDB 2.0.0 through its Python package, 4 threads
 - **Corpus:** synthetic. For the libraries, 10,000,000 wall times 3.1 s apart from 2026-01-01, in `Europe/Amsterdam`, plus invented zones as POSIX strings. For re-timing, one Parquet file (zstd, row groups of 131,072) of 5,000,000 invented events, 800 sources, 3 years, 45.2 MB
+- **Generators and harnesses:** committed as text in [`docs/measurements/adr-0066/`](measurements/adr-0066/): `tz_base.rs.txt`, `tz_chrono.rs.txt`, `tz_jiff.rs.txt` (each a crate's `src/main.rs`; manifests in `cargo-manifests.toml.txt`), `retime.py.txt` (generates the Parquet file and runs every re-write), `run-rust.sh.txt` (the runner, scratch folder written as `$D`)
 - **Command:** `plock run adr-bounded-tz -- run-rust.sh`: `cargo build --release` of each crate, run each binary once; `retime.py 5000000 800`. Each `COPY (SELECT <expr> AS ts, ... FROM read_parquet(seg) ORDER BY id) TO out` ran 3 times
 - **Runs:** library timings 3 runs each; re-timing 3 runs each, median given
 
@@ -105,7 +106,19 @@ Each of those loops also adds to a date per event. A table built with `jiff` and
 
 Semantics, read from the same run: `jiff` gives `Gap { before, after }` and `Fold { before, after }`, and its `later` in a gap equals the offset-before reading of RFC 5545; `chrono-tz` gives `LocalResult::None` in a gap with no offsets. All the gap and fold rows in ADR 0066's test table matched.
 
-**Not measured:** the store's real rewrite path (`apply_offsets`), index rebuild, ordering, events with `raw` and field columns, more than one worker, memory (physical footprint, rule 26), and Debrief's own `dist` binaries. No budget applies; this informs a choice and is not a baseline.
+**Not measured:** the store's real rewrite path (`apply_offsets`), index rebuild, ordering, events with `raw` and field columns, more than one worker, the libraries' memory, and Debrief's own `dist` binaries. No budget applies; this informs a choice and is not a baseline.
+
+**Memory** (physical footprint, rule 26), from a second run of the re-write script, 2026-11-06 13:19, same machine and build, 1-minute load 14.2 at the start (5- and 15-minute 17.3 and 18.3), `plock` second slot; command `/usr/bin/time -l $D/venv/bin/python $D/sql/retime.py 5000000 800`; one run of the script, 3 runs per row:
+
+| Measure | Value |
+|---|---:|
+| Peak memory footprint, whole Python process (generation and every re-write, DuckDB 4 threads) | 1,092,699,696 B (1.02 GiB) |
+| Maximum resident set size | 2,575,351,808 B |
+| Wall time of the script | 12.17 s |
+
+The same run's timings, medians of 3: plain copy 0.46 s; one `WHEN` per source 1.63 s; one zone, 7 transitions 0.49 s; with fold cuts 0.58 s; the run-back scan 0.018 s. Every row was faster than on 2026-11-05, the zone row 2.7 times, so the two runs differ by machine load more than by expression. Only the order held: one branch per source was the slowest both times. Read the rates as a range, with the 5 November rates as the slower end.
+
+**What ADR 0066 concludes from this block, and how firmly.** Measured [M]: `jiff` adds less to a binary than `chrono-tz` and reports gaps with both offsets; a per-source `CASE` is the costly shape of a re-write and a set test per reading is cheaper; fold cuts add almost nothing. Judgement [J], not shown by this block: that the store's real re-write behaves like these single-file copies, and anything about 100M or 1B events. The ADR's table at those sizes is arithmetic on these rates and on the plan's index baseline [calc], and Z5's gate measures the real path before any segment decision.
 
 Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' builds. "Windows VM" is the shared
 24-core development VM used until 2026-10-22. Every run below was on a shared, loaded machine unless it says otherwise.

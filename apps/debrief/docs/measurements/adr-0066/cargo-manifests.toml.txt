@@ -1,0 +1,35 @@
+# tz-base/Cargo.toml
+[package]
+name="tz-base"
+version="0.0.0"
+edition="2021"
+[dependencies]
+chrono={version="=0.4.45",default-features=false,features=["clock","std"]}
+[profile.release]
+strip=true
+[workspace]
+
+# tz-chrono/Cargo.toml
+[package]
+name="tz-chrono"
+version="0.0.0"
+edition="2021"
+[dependencies]
+chrono={version="=0.4.45",default-features=false,features=["clock","std"]}
+chrono-tz="=0.10.4"
+[profile.release]
+strip=true
+[workspace]
+
+# tz-jiff/Cargo.toml
+[package]
+name="tz-jiff"
+version="0.0.0"
+edition="2021"
+[dependencies]
+chrono={version="=0.4.45",default-features=false,features=["clock","std"]}
+jiff={version="=0.2.39",default-features=false,features=["std","tzdb-bundle-always","tz-fat"]}
+[profile.release]
+strip=true
+[workspace]
+

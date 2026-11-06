@@ -1,0 +1,43 @@
+# Synthetic only: invented events; measures re-writing one Parquet segment with ts moved per source.
+import duckdb,time,os,sys,statistics,random
+D=os.path.dirname(os.path.abspath(__file__)); seg=D+"/seg.parquet"; out=D+"/out.parquet"
+N=int(sys.argv[1]) if len(sys.argv)>1 else 5_000_000
+SRC=int(sys.argv[2]) if len(sys.argv)>2 else 800
+con=duckdb.connect(); con.execute("SET threads=4")
+print("duckdb",duckdb.__version__,"rows",N,"sources",SRC)
+t=time.time()
+con.execute(f"""COPY (SELECT i AS id,
+  CAST(1735689600000 + i*(94608000000/{N}) + (i%977) AS BIGINT) AS ts, 0::UTINYINT AS ts_state, (i%6)::UTINYINT AS level,
+  (i%{SRC})::UINTEGER AS source, (i/{SRC})::UINTEGER AS line, (i*90)::UBIGINT AS byte_offset,
+  'invented event number '||i||' from worker '||(i%37)||' did something ordinary with item '||(i%10007) AS message
+  FROM range({N}) t(i) ORDER BY id) TO '{seg}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 131072)""")
+print("gen s",round(time.time()-t,2),"MB",round(os.path.getsize(seg)/1e6,1))
+cols="id,ts_state,level,source,line,byte_offset,message"
+def run(name,expr):
+    res=[]
+    for r in range(3):
+        t=time.time()
+        con.execute(f"COPY (SELECT {expr} AS ts,{cols} FROM read_parquet('{seg}') ORDER BY id) TO '{out}' (FORMAT parquet, COMPRESSION zstd, ROW_GROUP_SIZE 131072)")
+        res.append(time.time()-t)
+    print(f"{name}: median {statistics.median(res):.2f} s runs {[round(x,2) for x in res]} ({N/statistics.median(res)/1e6:.2f} M rows/s)")
+# identity copy
+run("identity",  "ts")
+srcs=list(range(SRC)); inlist=",".join(map(str,srcs))
+# today's shape: one WHEN per source, constant delta
+run("constant per source (today)", "CASE "+" ".join(f"WHEN source={s} THEN ts+{3600000+s%3}" for s in srcs)+" ELSE ts END")
+# One named zone: 7 transitions over 3 years, as wall-clock ranges, for a set of sources
+T=[1735689600000+i*(94608000000//7) for i in range(1,8)]
+ranges=" ".join(f"WHEN ts<{T[i]} THEN ts-{3600000 if i%2==0 else 7200000}" for i in range(7))+" ELSE ts-3600000"
+run("one zone, 7 transitions, source IN (all)", f"CASE WHEN source IN ({inlist}) THEN CASE {ranges} END ELSE ts END")
+# Same, plus fold cuts: 3 folds, a cut id per source in each fold (worst case: every source in every fold)
+folds=[]
+for k,fi in enumerate((1,3,5)):
+    lo,hi=T[fi],T[fi]+3600000
+    cuts=" ".join(f"WHEN source={s} THEN id<{(lo-1735689600000)*N//94608000000+s}" for s in srcs)
+    folds.append(f"WHEN ts>={lo} AND ts<{hi} THEN (CASE WHEN (CASE {cuts} ELSE TRUE END) THEN ts-7200000 ELSE ts-3600000 END)")
+run("one zone with fold cuts for every source", f"CASE {' '.join(folds)} {ranges} END")
+# Finding the cut: wall clock runs backwards in a fold range, per source, in id order
+t=time.time(); lo,hi=T[1],T[1]+3600000
+n=con.execute(f"""SELECT count(*) FROM (SELECT source,id,ts,lag(ts) OVER (PARTITION BY source ORDER BY id) p FROM read_parquet('{seg}') WHERE ts>={lo} AND ts<{hi}) WHERE p-ts>60000""").fetchone()[0]
+print(f"find cut scan one fold: {time.time()-t:.3f} s, {n} jumps")
+os.remove(out); os.remove(seg)

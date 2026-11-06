@@ -1,0 +1,80 @@
+use jiff::{civil::DateTime,tz::{TimeZone,AmbiguousOffset},Timestamp}; use std::time::Instant; use std::hint::black_box;
+const N:i64=10_000_000;
+/// wall-clock ms -> an interval table entry: [from,to) wall, offset ms, kind 0 normal,1 fold (second offset),2 gap
+#[derive(Clone,Debug)] struct Seg{from:i64,to:i64,off:i64,after:i64,kind:u8}
+fn table(tz:&TimeZone,from_utc:Timestamp,to_utc:Timestamp)->Vec<Seg>{
+ let mut out=vec![]; let mut off=tz.to_offset(from_utc).seconds() as i64*1000; let mut start=i64::MIN;
+ for tr in tz.following(from_utc).take(4096){ if tr.timestamp()>to_utc{break}
+  let t=tr.timestamp().as_millisecond(); let new=tr.offset().seconds() as i64*1000; if new==off{continue}
+  // wall at the transition under old and new offsets
+  let (wo,wn)=(t+off,t+new);
+  if new>off { out.push(Seg{from:start,to:wo,off,after:off,kind:0}); out.push(Seg{from:wo,to:wn,off,after:new,kind:2}); start=wn; }
+  else { out.push(Seg{from:start,to:wn,off,after:off,kind:0}); out.push(Seg{from:wn,to:wo,off,after:new,kind:1}); start=wo; }
+  off=new;
+ }
+ out.push(Seg{from:start,to:i64::MAX,off,after:off,kind:0}); out
+}
+fn jiff_tzdb_version()->Option<&'static str>{jiff::tz::TimeZoneDatabase::bundled().available().next().map(|_|"see lock")}
+fn main(){
+ let a:Vec<String>=std::env::args().collect();
+ println!("jiff tzdb: {:?}", jiff::tz::db().available().count());
+ let zone=a.get(1).map(|s|s.as_str()).unwrap_or("Europe/Amsterdam");
+ let tz=TimeZone::get(zone).unwrap();
+ for s in ["2026-03-29T02:30:00","2026-10-25T02:30:00","2026-06-01T12:00:00"]{
+  let dt:DateTime=s.parse().unwrap();
+  match tz.to_ambiguous_timestamp(dt).offset(){
+   AmbiguousOffset::Unambiguous{offset}=>println!("{s} single {offset}"),
+   AmbiguousOffset::Gap{before,after}=>println!("{s} gap before={before} after={after}; compatible={}",tz.to_ambiguous_timestamp(dt).compatible().unwrap()),
+   AmbiguousOffset::Fold{before,after}=>println!("{s} fold before={before} after={after}; compatible={}",tz.to_ambiguous_timestamp(dt).compatible().unwrap()),
+  }
+ }
+ // invented zones through POSIX TZ strings
+ for p in ["XST-2XDT,M3.5.0,M10.5.0/3","QQT+3:30QQS,M4.1.0/0,M9.2.0/0","LHX-10:30LHY-11,M10.1.0,M4.1.0"]{
+  let z=TimeZone::posix(p).unwrap();
+  let from:Timestamp="2026-01-01T00:00:00Z".parse().unwrap();
+  let trs:Vec<String>=z.following(from).take(2).map(|t|format!("{} -> {}",t.timestamp(),t.offset())).collect();
+  println!("invented {p}: {:?}",trs);
+ }
+
+ // Invented zone, the ADR's test table
+ let x=TimeZone::posix("XST-2XDT,M3.5.0,M10.5.0/3").unwrap();
+ for s in ["2026-03-29T01:59:59","2026-03-29T02:30:00","2026-03-29T03:00:00","2026-10-25T01:59:59","2026-10-25T02:30:00","2026-10-25T03:00:00"]{
+   let dt:DateTime=s.parse().unwrap(); let a=x.to_ambiguous_timestamp(dt);
+   println!("XST {s}: {:?} earlier={} later={}",a.offset(),a.earlier().unwrap(),a.later().unwrap());
+ }
+
+ for (zn,list) in [("LHX-10:30LHY-11,M10.1.0,M4.1.0",vec!["2026-10-04T02:15:00","2026-04-05T01:45:00"]),("QQT+3:30QQS,M4.1.0/0,M9.2.0/0",vec!["2026-04-05T00:30:00","2026-09-12T23:30:00"])]{
+   let x=TimeZone::posix(zn).unwrap();
+   for s in list{let dt:DateTime=s.parse().unwrap(); let a=x.to_ambiguous_timestamp(dt);
+   println!("{zn} {s}: {:?} earlier={} later={}",a.offset(),a.earlier().unwrap(),a.later().unwrap());}
+ }
+ let bdb=jiff::tz::TimeZoneDatabase::bundled();
+ println!("bundled db zones: {} tzdb {:?}",bdb.available().count(),jiff_tzdb_version());
+ let names:Vec<String>=bdb.available().map(|n|n.as_str().to_string()).collect();
+ let t=Instant::now();
+ let zones:Vec<TimeZone>=names.iter().filter_map(|n|bdb.get(n).ok()).collect();
+ println!("load all {} zones: {:?}",zones.len(),t.elapsed());
+ // candidates: which zones fit (instant,offset) evidence
+ let ev:Vec<(Timestamp,i32)>=vec![("2026-01-15T00:00:00Z".parse().unwrap(),7200),("2026-07-15T00:00:00Z".parse().unwrap(),10800)];
+ let t=Instant::now();
+ let fits:Vec<&String>=names.iter().zip(&zones).filter(|(_,z)|ev.iter().all(|(ts,o)|z.to_offset(*ts).seconds()==*o)).map(|(n,_)|n).collect();
+ println!("candidates for +2 winter +3 summer: {} in {:?}",fits.len(),t.elapsed());
+ let ev2:Vec<(Timestamp,i32)>=vec![("2026-01-15T00:00:00Z".parse().unwrap(),32400)];
+ let fits2:Vec<&String>=names.iter().zip(&zones).filter(|(_,z)|ev2.iter().all(|(ts,o)|z.to_offset(*ts).seconds()==*o)).map(|(n,_)|n).collect();
+ println!("candidates for +9 in one winter sample: {}",fits2.len());
+ let wall0:i64="2026-01-01T00:00:00Z".parse::<Timestamp>().unwrap().as_millisecond();
+ let base:DateTime="2026-01-01T00:00:00".parse().unwrap();
+ for run in 0..3{ let t=Instant::now(); let mut acc=0i64;
+  for i in 0..N{ let d=base.checked_add(jiff::SignedDuration::from_millis(i*3100)).unwrap();
+    acc^=tz.to_ambiguous_timestamp(d).compatible().unwrap().as_millisecond();}
+  black_box(acc); println!("run{run} jiff per-event {:.1} ns",t.elapsed().as_nanos() as f64/N as f64);}
+ let t=Instant::now();
+ let tb=table(&tz,"2000-01-01T00:00:00Z".parse().unwrap(),"2030-01-01T00:00:00Z".parse().unwrap());
+ println!("table of 30 years: {} segments in {:?}",tb.len(),t.elapsed());
+ for run in 0..3{ let t=Instant::now(); let mut acc=0i64; let mut idx=0usize;
+  for i in 0..N{ let w=wall0+i*3100;
+    if !(tb[idx].from<=w&&w<tb[idx].to){ idx=tb.partition_point(|s|s.to<=w); }
+    let s=&tb[idx]; acc^=w-s.off; }
+  black_box(acc); println!("run{run} table with cursor per-event {:.2} ns",t.elapsed().as_nanos() as f64/N as f64);}
+ println!("db size listing done");
+}
