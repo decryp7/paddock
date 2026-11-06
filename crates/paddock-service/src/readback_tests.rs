@@ -885,3 +885,21 @@ fn the_bundled_agent_names_the_process_of_the_job_by_identity() {
     sys.answer("/bin/launchctl print gui", launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())));
     assert_eq!(b.job_process(), Some(me));
 }
+
+#[test]
+fn a_bundled_agent_names_the_program_it_was_registered_with_and_whether_it_is_this_copy() {
+    let sys = FakeSystem::new();
+    let app = FakeAppService::new(&sys);
+    app.set_status(AppServiceStatus::Enabled);
+    let mut b = LaunchdBundled::new(spec(Kind::UserAgent), 501, Box::new(app.clone()), Box::new(sys.clone()));
+    sys.answer("/bin/launchctl print gui", launchd_print("running", 1, ""));
+    b.know_copy(Some("/Applications/A.app/Contents/MacOS/a"), Some("/Applications/A.app/Contents/MacOS/a"));
+    sys.put_program("/Applications/A.app/Contents/MacOS/a");
+    let look = b.inspect();
+    assert_eq!(look.program.as_deref(), Some("/Applications/A.app/Contents/MacOS/a"));
+    assert_eq!((look.program_exists, look.points_here), (Some(true), Some(true)));
+    b.know_copy(Some("/Applications/A.app/Contents/MacOS/a"), Some("/Users/u/B.app/Contents/MacOS/b"));
+    let other = b.inspect();
+    assert_eq!(other.program.as_deref(), Some("/Users/u/B.app/Contents/MacOS/b"));
+    assert_eq!((other.program_exists, other.points_here), (Some(false), Some(false)));
+}

@@ -1708,3 +1708,53 @@ fn manager_contract_details() {
         .sum();
     assert_eq!(paused, Timings::default().gone_wait);
 }
+
+#[test]
+fn a_systemd_unit_registered_over_another_text_is_restarted_and_over_the_same_text_is_not() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    sys.put_program("/usr/bin/pitwall-server");
+    let mut b = systemd(&sys, "/usr/bin/pitwall-server");
+    let text = b.definition();
+    let restarts = |sys: &FakeSystem| changes(sys).iter().filter(|c| c.contains("restart")).count();
+    // Another text was there: the running service still has the old program, so registering restarts it.
+    sys.put_file(&unit_path(), "[Service]\nExecStart=/old\n");
+    let _ = b.register();
+    assert_eq!(restarts(&sys), 1, "{:?}", changes(&sys));
+    assert_eq!(sys.file(&unit_path()).unwrap(), text);
+    // The same text: nothing changed, nothing to restart.
+    sys.clear_calls();
+    let _ = b.register();
+    assert_eq!(restarts(&sys), 0, "{:?}", changes(&sys));
+    // No unit before: nothing runs the old program either.
+    let sys2 = FakeSystem::new();
+    sys2.put_program("/usr/bin/pitwall-server");
+    let mut c = systemd(&sys2, "/usr/bin/pitwall-server");
+    let _ = c.register();
+    assert_eq!(restarts(&sys2), 0, "{:?}", changes(&sys2));
+}
+
+#[test]
+fn a_run_value_replaced_by_another_copy_stops_the_agent_the_old_value_started() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    let old = r"C:\Program Files\Dyno\old\dyno.exe";
+    let new = r"C:\Program Files\Dyno\new\dyno.exe";
+    sys.put_program(old);
+    sys.put_program(new);
+    sys.emulate_run_registry();
+    let mut first = WindowsRun::new(dyno(), Target::exe(old), Box::new(sys.clone()));
+    first.register().unwrap();
+    sys.clear_calls();
+    let mut second = WindowsRun::new(dyno(), Target::exe(new), Box::new(sys.clone()));
+    second.register().unwrap();
+    let stops: Vec<String> = sys
+        .calls()
+        .into_iter()
+        .filter_map(|c| match c {
+            Call::Run(s) if s.starts_with(old) => Some(s),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(stops, [format!("{old} stop")], "the old agent is asked to stop once the new value is written");
+}
