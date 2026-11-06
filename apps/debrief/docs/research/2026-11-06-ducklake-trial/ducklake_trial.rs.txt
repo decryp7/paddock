@@ -400,6 +400,10 @@ fn lake_mode() {
     if let Ok(m) = std::env::var("TRIAL_MEMORY_LIMIT") {
         conn.execute_batch(&format!("SET memory_limit = '{m}';")).unwrap();
     }
+    // `TRIAL_NO_ORDER=1`: `preserve_insertion_order = false` (DuckDB's advice for out-of-memory errors).
+    if std::env::var_os("TRIAL_NO_ORDER").is_some() {
+        conn.execute_batch("SET preserve_insertion_order = false;").unwrap();
+    }
     conn.execute_batch(&format!("LOAD '{}';", ext.join("ducklake.duckdb_extension").display())).unwrap();
     let meta = match catalog.as_str() {
         "sqlite" => {
