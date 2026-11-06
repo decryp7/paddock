@@ -1,10 +1,12 @@
 # 68. Dump checks: "Check crash", "Check hang", "Check memory", with .NET managed state
 
-- Status: Proposed (2026-11-07), revision 3. Revision 2 answered the independent review of `a92474647` (four P1s: range
+- Status: Accepted (2026-11-07, user decision: D1 to D13 as recommended), revision 3. Revision 2 answered the independent review of `a92474647` (four P1s: range
   reads after open, the unwind route, two-dump growth verdicts, the .NET adapter; the factual slips; the P2s); revision 3
   folds in the P2s of the re-review of `a8bc78a53` (approved, no P1): DAC signatures, capture privacy, package order,
   the helper's place and evidence, sizes, one reason shared with ADR 0069, file grants and memory caps. Design only: no
   product code, no builds or test runs for this ADR.
+- Scope: Debrief 1.2, after the streaming and folder-open foundation (ADR 0064 and ADR 0067) lands; the whole scope,
+  native checks and .NET.
 - Date: 2026-11-07
 - Related: ADR 0023 (dumps and UMDH: the reader plugin, `debrief-dump`, problem-first findings), ADR 0036 (symbols by PDB
   identity), ADR 0017 (out-of-process plugins, sandbox, lent files), ADR 0019 (problem-first findings, "Explain with AI"),
@@ -55,7 +57,7 @@ checked**.
 The ADR also lists every analysis a minidump can support ([Catalogue of analyses](#catalogue-of-analyses)) with what each
 needs, its value, its size and a recommendation, and what a minidump cannot give at all.
 
-Work packages total **99 days raw** (judgement-sized, [J]); open decisions D1 to D13 are at the end.
+Work packages total **99 days raw** (judgement-sized, [J]); decisions D1 to D13, decided by the user on 2026-11-07, are at the end.
 
 ## Context
 
@@ -745,9 +747,11 @@ schedules WP-18 with ADR 0052's own package; the engine work (WP-1 to WP-9) does
 enum is written in Debrief as a stand-in: it would be a second implementation of a shared mechanism (rule 55) that
 WP-18 would then have to remove.
 
-## Open decisions for the user
+## Decisions (decided by the user, 2026-11-07)
 
-| # | Question | Recommendation |
+The user accepted every recommendation below; the right-hand column is now the decision.
+
+| # | Question | Decision |
 | --- | --- | --- |
 | D1 | .NET adapter | **B: our ClrMD helper with a versioned JSON schema**, external and pinned; A (scraping `dotnet-dump`) rejected as a stop-gap |
 | D2 | .NET in its own plugin or inside the dumps reader | **Its own plugin** (`RunPrograms`); the reader keeps no programs and no network |
