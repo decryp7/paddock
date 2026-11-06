@@ -21,9 +21,6 @@ fn only_saving_the_inventory_waits_minutes_and_every_job_request_is_quick() {
                 query: IssuesQuery::default(),
             },
         },
-        Request::StartJob {
-            spec: JobSpec::RefreshBackup,
-        },
         Request::Jobs,
         Request::CancelJob { id: 1 },
         Request::JobResult { id: 1 },

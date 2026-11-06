@@ -4,7 +4,7 @@ import { ChangeDetectionStrategy, Component, ViewEncapsulation, input, output, v
 import { SuSparkline } from '@decryp7/paddock-ui';
 import { PdSkeleton, PdWidget, relativeAgo } from '@decryp7/paddock-ui/widgets';
 import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
-import type { AlarmRow, AppRow, BackupValue, CounterRow, IssueValue, Level, Page, PopoverValue, VolumeRow, WidgetActionId } from '../../../core/generated/widgets';
+import type { AlarmRow, AppRow, CounterRow, IssueValue, Level, Page, PopoverValue, VolumeRow, WidgetActionId } from '../../../core/generated/widgets';
 import { FullTextTip } from '../../../shared/full-text-tip';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../../shared/format';
 import { formatCounter } from '../../counters/counters-model';
@@ -21,7 +21,6 @@ const SK_VOLUMES: VolumeRow[] = [1, 2, 3].map((n) => ({ id: `${n}`, name: 'Macin
 const SK_COUNTERS: CounterRow[] = [1, 2, 3, 4].map((n) => ({ path: `${n}`, name: 'GPU memory in use', value: 1, unit: 'bytes', percent: null, tone: 'ok' }));
 const SK_APPS: AppRow[] = [1, 2, 3].map((n) => ({ name: `App ${n}`, cpuPercent: 10 }));
 const SK_ISSUE: IssueValue = { title: 'Disk write errors on disk4', app: '', kind: '', level: 'warning', at: 0, days: 7 };
-const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBackup: 0, summary: '', tools: 1 };
 
 /**
  * Dyno's template for each popup widget kind (`*pdWidget`), drawn inside `pd-widget-frame`. One set serves the popup and the
@@ -95,14 +94,6 @@ const SK_BACKUP: BackupValue = { name: 'Time Machine', state: 'healthy', lastBac
       </button>
     </ng-template>
 
-    <ng-template pdWidget="backupHealth" [pdWidgetOf]="witness" let-value>
-      @let b = backup(value) ?? skBackup;
-      <button type="button" class="dy-pw-plain" (click)="open('backups')">
-        <span class="dy-pw-flag" [attr.data-state]="b.state" pdSkeleton><pd-status-glyph [status]="b.state === 'healthy' ? 'success' : 'warning'" [size]="14" />{{ b.state === 'healthy' ? 'OK' : b.state === 'stale' ? 'Out of date' : 'No backup yet' }}</span>
-        <span class="dy-pw-strong" pdSkeleton>{{ backupLine(backup(value)) }}</span>
-        <span class="dy-pw-muted" pdSkeleton>{{ b.name }}</span>
-      </button>
-    </ng-template>
 
     <ng-template pdWidget="lastIssue" [pdWidgetOf]="witness" let-value>
       @let i = issue(value) ?? skIssue;
@@ -201,7 +192,6 @@ export class DynoPopoverWidgets {
   protected readonly skCounters = SK_COUNTERS;
   protected readonly skApps = SK_APPS;
   protected readonly skIssue = SK_ISSUE;
-  protected readonly skBackup = SK_BACKUP;
 
   protected readonly pct = formatPercent;
   protected readonly rateText = formatRate;
@@ -219,12 +209,7 @@ export class DynoPopoverWidgets {
     const [used, total] = [formatBytes(c.memoryUsed), formatBytes(c.memoryTotal)];
     const unit = total.split(' ')[1];
     return unit !== undefined && used.endsWith(` ${unit}`) ? `${used.slice(0, -unit.length - 1)} of ${total}` : `${used} of ${total}`;
-  }
-  protected backupLine(b: BackupValue | null): string {
-    if (b === null) return 'Last backup 2 h ago';
-    return b.lastBackup !== null ? `Last backup ${this.ago(b.lastBackup)}` : b.summary;
-  }
-  protected ago(ms: number): string {
+  }  protected ago(ms: number): string {
     return relativeAgo(this.now() ?? Date.now(), ms);
   }
   protected big(v: number): string {
@@ -250,7 +235,6 @@ export class DynoPopoverWidgets {
   protected readonly disks = (v: PopoverValue | null) => this.pick(v, 'diskSpace');
   protected readonly cpuMem = (v: PopoverValue | null) => this.pick(v, 'cpuMemory');
   protected readonly net = (v: PopoverValue | null) => this.pick(v, 'network');
-  protected readonly backup = (v: PopoverValue | null) => this.pick(v, 'backupHealth');
   protected readonly issue = (v: PopoverValue | null) => this.pick(v, 'lastIssue');
   protected readonly counters = (v: PopoverValue | null) => this.pick(v, 'pinnedCounters');
   protected readonly apps = (v: PopoverValue | null) => this.pick(v, 'topApps');

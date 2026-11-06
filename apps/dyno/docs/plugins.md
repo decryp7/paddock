@@ -78,5 +78,4 @@ dispatch `serve` uses, without a connection, so a test can send `PluginRequest`s
 
 ## Packs (tier 2, no code)
 
-Declarative TOML packs are planned for after 1.0 (roadmap WP-15). They will carry read-only data only (backup detectors,
-known helpers); there are no cleanup, tuning or rule packs ([ADR 0021](adr/0021-monitoring-only.md)).
+Declarative TOML packs are planned for after 1.0 (roadmap WP-15). They will carry read-only data only (known helpers); there are no cleanup, tuning or rule packs ([ADR 0021](adr/0021-monitoring-only.md)).

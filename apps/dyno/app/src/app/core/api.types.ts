@@ -854,8 +854,6 @@ export interface Settings {
   jobs?: JobSettings;
   /** Maintenance windows: when Dyno's own heavier background work may run. */
   maintenance: MaintenanceSettings;
-  /** Backup health checks. */
-  backup: BackupSettings;
   /** Power: keep awake (ADR 0032). */
   power: PowerSettings;
 }
@@ -2041,7 +2039,7 @@ export interface FinderLimitHit {
 // ------------------------------------------------------------------------------------------------------------- jobs
 
 /**
- * Long operations (find files, read the system logs, check the backups, hash a file, the sleep, boot, app-usage and software
+ * Long operations (find files, read the system logs, hash a file, the sleep, boot, app-usage and software
  * reads) run as jobs in the agent: starting one answers at once with its id, the shell's jobs store follows it through the
  * `paddock://jobs` events, Cancel is the shell's `job_cancel`, and `jobResult` hands over what a done job produced. Mirrors
  * `dyno_core::jobs`; the status itself is the shell's `SuJobSnapshot`.
@@ -2049,7 +2047,6 @@ export interface FinderLimitHit {
 export type JobSpec =
   | { findFiles: { query: FinderQuery } }
   | { rescanIssues: { query: IssuesQuery } }
-  | 'refreshBackup'
   | { fileHash: { source: HashSource } }
   | 'sleepBlockers'
   | 'bootAnalysis'
@@ -2067,7 +2064,7 @@ export type JobOutput =
   | { intel: IntelStatus }
   | { finder: FinderResult }
   | { issues: IssuesOverview }
-  | { backup: BackupReport }
+ 
   | { fileHash: FileHashInfo }
   | { sleep: SleepReport }
   | { boot: BootReport }
@@ -2138,48 +2135,6 @@ export interface MaintenanceStatus {
   openNow: boolean;
   closesAt: Timestamp | null;
   nextOpensAt: Timestamp | null;
-}
-
-// ------------------------------------------------------------------------------------------------------- backup
-// Mirrors `dyno_core::backup` (WP-14). Dyno reads each tool's own state with timeouts; it never runs or manages a backup.
-
-export type BackupTool = 'timeMachine' | 'windowsBackup' | 'fileHistory' | 'restic' | 'borg' | 'duplicati';
-
-export type BackupState = 'healthy' | 'stale' | 'noBackupYet' | 'notConfigured' | 'cannotCheck';
-
-export interface BackupStatus {
-  tool: BackupTool;
-  name: string;
-  state: BackupState;
-  /** When the last successful backup finished, when known. */
-  lastBackup: Timestamp | null;
-  summary: string;
-  nextStep: string | null;
-}
-
-export interface BackupReport {
-  statuses: BackupStatus[];
-  /** When it was checked; null while the first check is still running. */
-  checkedAt: Timestamp | null;
-  checking: boolean;
-  loginPathUsed: boolean;
-  /** Who read the Windows Backup versions. */
-  via: ReadVia;
-}
-
-/** Folders to look in before the PATH for one tool installed somewhere unusual. */
-export interface ToolOverride {
-  tool: BackupTool;
-  /** Absolute folders, searched first. */
-  dirs: string[];
-}
-
-export interface BackupSettings {
-  /** Check in the background and raise an alarm for a stale backup. */
-  alertWhenStale: boolean;
-  /** A backup older than this many hours is stale (1 to 2160). */
-  staleAfterHours: number;
-  overrides: ToolOverride[];
 }
 
 // ---------------------------------------------------------------------------------------------- IP lists, the map, the firewall
@@ -2516,7 +2471,7 @@ export interface PowerSettings {
 export type WakeRepeat = 'once' | 'daily' | { days: { mask: number } };
 
 /** The jobs a schedule may run: a fixed list, never a command. */
-export type DynoJob = 'backupCheck' | 'softwareInventory';
+export type DynoJob = 'softwareInventory';
 
 export interface WakeLastRun {
   at: Timestamp;

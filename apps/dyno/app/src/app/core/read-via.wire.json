@@ -1,16 +1,4 @@
 {
-  "backup": {
-    "checkedAt": null,
-    "checking": false,
-    "loginPathUsed": false,
-    "statuses": [],
-    "via": {
-      "unavailable": {
-        "next": null,
-        "reason": "No versions."
-      }
-    }
-  },
   "firewall": {
     "defaultIn": null,
     "defaultOut": null,

@@ -8,7 +8,6 @@
 //! The agent wire is postcard (`wire_roundtrip.rs`): a `via` field is always written, never skipped, so a type that carries one
 //! also round-trips through postcard here.
 
-use dyno_core::backup::BackupReport;
 use dyno_core::extras::sleep::SleepReport;
 use dyno_core::firewall::{FirewallSource, RuleSource};
 use dyno_core::inventory::{MemoryLayout, SystemInventory};
@@ -135,10 +134,6 @@ fn every_reply_type_that_carries_a_reading_has_a_via_that_defaults_to_local_and_
         blockers_via: h.clone(),
         ..SleepReport::default()
     };
-    let backup = BackupReport {
-        via: h.clone(),
-        ..BackupReport::default()
-    };
     let startup = dyno_core::startup::overview(vec![], Default::default(), dyno_core::os::Os::Windows).with_btm_via(h.clone());
     assert_eq!(startup.btm_via, h);
     let live_via = LiveVia {
@@ -152,7 +147,6 @@ fn every_reply_type_that_carries_a_reading_has_a_via_that_defaults_to_local_and_
     round(&inv);
     round(&net);
     round(&sleep);
-    round(&backup);
     round(&locker);
     round(&startup);
     round(&live_via);
@@ -169,7 +163,6 @@ fn sample() -> Value {
         "firewall": to_value(FirewallSource::new(RuleSource::Pf).with_via(ReadVia::Helper)).unwrap(),
         "network": to_value(NetworkSnapshot { traffic_via: ReadVia::Helper, owners_via: needs_helper(), ..NetworkSnapshot::default() }).unwrap(),
         "sleep": to_value(SleepReport { blockers_via: ReadVia::Helper, ..SleepReport::default() }).unwrap(),
-        "backup": to_value(BackupReport { via: ReadVia::unavailable("No versions."), ..BackupReport::default() }).unwrap(),
         "nextSteps": next_steps().iter().map(|n| to_value(n).unwrap()).collect::<Vec<_>>(),
         "inventory": to_value(
             SystemInventory::new("os".into(), None, Default::default(), MemoryLayout::TotalOnly { total: 1, reason: dyno_core::inventory::Unavailable { reason: "x".into() } }, vec![])

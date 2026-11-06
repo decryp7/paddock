@@ -10,7 +10,7 @@ use crate::audit::AuditLog;
 use dyno_core::btm::LoginItemsReader;
 use dyno_core::firewall::FirewallReader;
 use dyno_core::helper_counters::{answer, CounterReader, CounterValue};
-use dyno_core::helper_extras::{backup_answer, wake_answer, ExtrasReader};
+use dyno_core::helper_extras::{wake_answer, ExtrasReader};
 use dyno_core::helper_holders::{file_answer, socket_answer, HolderSource};
 use dyno_core::helper_memory::MemoryReader;
 use dyno_core::helper_policy::{Access, OthersPolicy, Visibility};
@@ -264,7 +264,6 @@ impl Dispatcher {
                 let detail = ctx.access == Access::Full;
                 let answer = match kind {
                     ExtrasKind::WakeRequests => self.extras.wake_requests().map(|i| wake_answer(i, detail)),
-                    ExtrasKind::BackupVersions => self.extras.backup_versions().map(|i| backup_answer(i, detail)),
                 };
                 log::info!(detail = detail, ok = answer.is_ok(); "Helper: extras answered");
                 answer.map(HelperReply::Extras).map_err(|e| remote(&e))
@@ -1238,9 +1237,6 @@ mod tests {
         fn wake_requests(&self) -> Result<Vec<dyno_core::helper_extras::WakeRequest>, PlatformError> {
             Ok(dyno_core::helper_extras::parse_requests("SYSTEM:\n[PROCESS] a.exe\n"))
         }
-        fn backup_versions(&self) -> Result<Vec<dyno_core::helper_extras::BackupVersion>, PlatformError> {
-            Err(PlatformError::Failed("wbadmin failed: no message".into()))
-        }
     }
 
     #[test]
@@ -1289,9 +1285,5 @@ mod tests {
             wake(Access::CountsOnly),
             HelperReply::Extras(ExtrasAnswer::WakeRequests { count: 1, items: None })
         ));
-        let e =
-            r.d.handle_for(&ctx(Access::Full, me), HelperRequest::Extras(ExtrasKind::BackupVersions))
-                .unwrap_err();
-        assert!(e.message.contains("wbadmin failed"));
     }
 }

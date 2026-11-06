@@ -1,18 +1,17 @@
-//! The OS readers behind the extras (WP-13) and the backup checks (WP-14). Every function runs read-only tools through a
+//! The OS readers behind the extras (WP-13). Every function runs read-only tools through a
 //! [`ToolRunner`] (so tests script the answers) with a timeout, and hands their output to the pure parsers in
 //! `dyno_core`. The OS is a parameter (`std::env::consts::OS` values), so every branch is tested on every host.
 //! A tool that is missing, slow or refused becomes an "unavailable: reason" in the report, never an error.
 
 use crate::runner::ToolRunner;
-use dyno_core::backup::{self, BackupState, BackupStatus, BackupTool};
 use dyno_core::extras::boot::{self, BootStep};
 use dyno_core::extras::gpu::{self, GpuReport};
 use dyno_core::extras::sleep::{self, SleepReport};
 use dyno_core::extras::software::{self, SoftwareInventory};
 use dyno_core::extras::usage::{self, EnergySample};
-use dyno_core::helper_extras::{parse_requests, parse_versions};
+use dyno_core::helper_extras::parse_requests;
 use dyno_core::ports::PlatformError;
-use dyno_core::time::{LocalZone, Timestamp};
+use dyno_core::time::Timestamp;
 use std::time::Duration;
 
 /// How long a quick tool may take.
@@ -304,192 +303,10 @@ pub fn software_list(r: &dyn ToolRunner, os: &str) -> SoftwareInventory {
     }
 }
 
-/// What the backup check needs from the agent: which tools exist and how to run them.
-pub trait BackupEnv {
-    /// Whether `tool`'s program exists (always true for tools read from the OS's own logs).
-    fn available(&self, tool: BackupTool) -> bool;
-    /// A runner for `tool` (resolves its program through the login-shell `PATH`, niced, with the timeout the caller gives).
-    fn runner(&self, tool: BackupTool) -> Box<dyn ToolRunner + '_>;
-}
-
-/// The backup tools that exist on this OS and are installed, in the order they are checked. Tools that are not installed
-/// are left out: "no backup tool found" is a normal state.
-pub fn backup_tools_present(env: &dyn BackupEnv, os: &str) -> Vec<BackupTool> {
-    BackupTool::ALL.into_iter().filter(|t| t.on_os(os) && env.available(*t)).collect()
-}
-
-/// Checks one backup tool (read-only tools with timeouts). One tool failing never affects the others.
-pub fn backup_status_of(
-    env: &dyn BackupEnv,
-    tool: BackupTool,
-    now: Timestamp,
-    zone: &dyn LocalZone,
-    stale_after_hours: u32,
-) -> BackupStatus {
-    let runner = env.runner(tool);
-    check_one(runner.as_ref(), tool, now, zone, stale_after_hours)
-}
-
-/// Checks every backup tool that exists on this OS and is installed.
-pub fn backup_statuses(env: &dyn BackupEnv, os: &str, now: Timestamp, zone: &dyn LocalZone, stale_after_hours: u32) -> Vec<BackupStatus> {
-    backup_tools_present(env, os)
-        .into_iter()
-        .map(|tool| backup_status_of(env, tool, now, zone, stale_after_hours))
-        .collect()
-}
-
-fn check_one(r: &dyn ToolRunner, tool: BackupTool, now: Timestamp, zone: &dyn LocalZone, stale: u32) -> BackupStatus {
-    match tool {
-        BackupTool::TimeMachine => {
-            let dest = run(r, "tmutil", &["destinationinfo"], QUICK);
-            let latest = run(r, "tmutil", &["latestbackup"], QUICK);
-            let d = dest.as_ref().map(String::as_str).map_err(|e| why("tmutil", e));
-            let l = latest.as_ref().map(String::as_str).map_err(|e| why("tmutil", e));
-            backup::time_machine_status(
-                d.as_deref().map_err(String::as_str),
-                l.as_deref().map_err(String::as_str),
-                now,
-                zone,
-                stale,
-            )
-        }
-        BackupTool::WindowsBackup => windows_backup(r, now, stale),
-        BackupTool::FileHistory => {
-            let args: Vec<String> = [
-                "qe",
-                "Microsoft-Windows-FileHistory-Core/WHC",
-                "/q:*[System[(EventID=201)]]",
-                "/c:5",
-                "/rd:true",
-                "/f:xml",
-            ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-            match r.run("wevtutil", &args, SLOW) {
-                Ok(t) => match backup::parse_event_log_latest(&t) {
-                    Some((at, _)) => backup::judged(tool, at, now, stale),
-                    None => backup::no_backup(tool, "File History has not recorded a finished backup."),
-                },
-                Err(e) => file_history_problem(tool, &e),
-            }
-        }
-        BackupTool::Restic => match run(
-            r,
-            "restic",
-            &["snapshots", "--latest", "1", "--json", "--no-lock"],
-            Duration::from_secs(60),
-        ) {
-            Ok(t) => match backup::parse_restic_latest(&t) {
-                Some(at) => backup::judged(tool, at, now, stale),
-                None => backup::no_backup(tool, "restic's repository has no snapshot yet."),
-            },
-            Err(e) => repo_problem(tool, &e, "RESTIC_REPOSITORY"),
-        },
-        BackupTool::Borg => match run(r, "borg", &["list", "--last", "1", "--json"], Duration::from_secs(60)) {
-            Ok(t) => match backup::parse_borg_latest(&t, zone) {
-                Some(at) => backup::judged(tool, at, now, stale),
-                None => backup::no_backup(tool, "Borg's repository has no archive yet."),
-            },
-            Err(e) => repo_problem(tool, &e, "BORG_REPO"),
-        },
-        BackupTool::Duplicati => BackupStatus {
-            next_step: Some("Open Duplicati's own page to see its last result.".into()),
-            ..backup::cannot_check(tool, "Duplicati is installed, but Dyno cannot read its results yet.")
-        },
-    }
-}
-
-/// A restic/Borg failure: usually the repository is not set in the environment Dyno sees.
-/// A File History log that could not be read. Windows creates the log the first time File History is turned on, so a log that
-/// does not exist means it never ran here: not set up, not a failure. Anything else stays "could not check", with a next step.
-fn file_history_problem(tool: BackupTool, e: &PlatformError) -> BackupStatus {
-    let m = why("wevtutil", e);
-    if m.to_lowercase().contains("channel could not be found") {
-        backup::not_configured(
-            tool,
-            "File History has never run on this computer.",
-            "Open Control Panel > File History to turn it on, or ignore this if you back up another way.",
-        )
-    } else {
-        BackupStatus {
-            next_step: Some(
-                "Choose Check now to try again. If it keeps failing, open File History in Control Panel to see its own state.".into(),
-            ),
-            ..backup::cannot_check(tool, &m)
-        }
-    }
-}
-
-fn repo_problem(tool: BackupTool, e: &PlatformError, var: &str) -> BackupStatus {
-    let m = why(tool.name(), e);
-    let lower = m.to_lowercase();
-    if lower.contains("repository") || lower.contains("repo") || lower.contains("passphrase") || lower.contains("password") {
-        backup::not_configured(
-            tool,
-            &format!("{} is installed but Dyno could not open its repository.", tool.name()),
-            &format!("Export {var} (and a password file or command) in your shell profile so Dyno can read it; Dyno never reads passwords themselves."),
-        )
-    } else {
-        backup::cannot_check(tool, &m)
-    }
-}
-
-/// What this Windows computer's own tools say about Windows Backup, with the caller's rights: the event log first (no
-/// administrator needed), then `wbadmin get versions` (administrator only). The versions are parsed by the one parser the
-/// helper uses too.
-///
-/// # Errors
-/// `wbadmin`'s refusal or failure when the event log had nothing.
-pub fn windows_backup_facts(r: &dyn ToolRunner) -> Result<backup::WindowsBackupFacts, PlatformError> {
-    let args: Vec<String> = [
-        "qe",
-        "Microsoft-Windows-Backup",
-        "/q:*[System[(EventID=4)]]",
-        "/c:5",
-        "/rd:true",
-        "/f:xml",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
-    if let Ok(t) = r.run("wevtutil", &args, SLOW) {
-        if let Some((at, _)) = backup::parse_event_log_latest(&t) {
-            return Ok(backup::WindowsBackupFacts {
-                count: None,
-                latest: Some(at),
-            });
-        }
-    }
-    let text = run(r, "wbadmin", &["get", "versions"], SLOW)?;
-    Ok(backup::WindowsBackupFacts::from_versions(&parse_versions(&text)))
-}
-
-/// The sentence for a refused `wbadmin get versions`.
-pub fn windows_backup_refused_text(e: &PlatformError) -> String {
-    format!(
-        "Windows only lets an administrator list Windows Backup versions ({}).",
-        why("wbadmin", e)
-    )
-}
-
-fn windows_backup(r: &dyn ToolRunner, now: Timestamp, stale: u32) -> BackupStatus {
-    match windows_backup_facts(r) {
-        Ok(f) => f.status(now, stale),
-        Err(e) => backup::cannot_check(BackupTool::WindowsBackup, &windows_backup_refused_text(&e)),
-    }
-}
-
-/// Whether a status needs attention (used to decide if the check should raise an alarm).
-pub fn needs_attention(s: &BackupStatus) -> bool {
-    matches!(s.state, BackupState::Stale | BackupState::NoBackupYet)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::issues::testing::Scripted;
-    use dyno_core::time::FixedZone;
 
     fn ok(s: &str) -> Result<String, PlatformError> {
         Ok(s.to_string())
@@ -613,94 +430,5 @@ mod tests {
             .contains("package manager"));
     }
 
-    struct Env {
-        present: Vec<BackupTool>,
-        answers: std::sync::Mutex<std::collections::HashMap<BackupTool, Vec<Result<String, PlatformError>>>>,
-    }
-
-    struct Per(Scripted);
-
-    impl ToolRunner for Per {
-        fn run_tool(&self, tool: &crate::runner::Tool, t: Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
-            self.0.run_tool(tool, t)
-        }
-    }
-
-    impl BackupEnv for Env {
-        fn available(&self, tool: BackupTool) -> bool {
-            self.present.contains(&tool)
-        }
-        fn runner(&self, tool: BackupTool) -> Box<dyn ToolRunner + '_> {
-            let a = self.answers.lock().unwrap().remove(&tool).unwrap_or_default();
-            Box::new(Per(Scripted::new(a)))
-        }
-    }
-
-    fn env(present: &[BackupTool], answers: Vec<(BackupTool, Vec<Result<String, PlatformError>>)>) -> Env {
-        Env {
-            present: present.to_vec(),
-            answers: std::sync::Mutex::new(answers.into_iter().collect()),
-        }
-    }
-
     // 2026-10-23T08:00:00Z
-    const NOW: Timestamp = Timestamp(1_792_742_400_000);
-
-    #[test]
-    fn no_backup_tool_found_is_a_normal_empty_answer() {
-        assert!(backup_statuses(&env(&[], vec![]), "macos", NOW, &FixedZone::UTC, 48).is_empty());
-        // A tool that exists on another OS is not even considered.
-        assert!(backup_statuses(&env(&[BackupTool::TimeMachine], vec![]), "linux", NOW, &FixedZone::UTC, 48).is_empty());
-    }
-
-    #[test]
-    fn file_history_that_never_ran_is_not_set_up_and_a_real_failure_gives_a_next_step() {
-        // Windows has no File History log until the feature has been turned on once: that is "not set up", not a failure.
-        let never = env(
-            &[BackupTool::FileHistory],
-            vec![(
-                BackupTool::FileHistory,
-                vec![fail("wevtutil failed: The specified channel could not be found.")],
-            )],
-        );
-        let s = backup_statuses(&never, "windows", NOW, &FixedZone::UTC, 48);
-        assert_eq!(s[0].state, BackupState::NotConfigured, "{s:#?}");
-        assert!(!s[0].summary.contains("wevtutil"), "plain words: {}", s[0].summary);
-        assert!(s[0].next_step.as_deref().is_some_and(|n| n.contains("File History")), "{s:#?}");
-        // Any other failure stays "could not check", and now says what to do next.
-        let broken = env(
-            &[BackupTool::FileHistory],
-            vec![(BackupTool::FileHistory, vec![fail("wevtutil failed: Access is denied.")])],
-        );
-        let s = backup_statuses(&broken, "windows", NOW, &FixedZone::UTC, 48);
-        assert_eq!(s[0].state, BackupState::CannotCheck);
-        assert!(s[0].next_step.as_deref().is_some_and(|n| n.contains("Check now")), "{s:#?}");
-    }
-
-    #[test]
-    fn each_tool_is_judged_on_its_own_and_one_failure_does_not_hide_the_rest() {
-        let e = env(
-            &[BackupTool::TimeMachine, BackupTool::Restic, BackupTool::Borg, BackupTool::Duplicati],
-            vec![
-                (
-                    BackupTool::TimeMachine,
-                    vec![ok("Name : TimeMachine\n"), ok("/Volumes/x/2026-10-23-150000.backup\n")],
-                ),
-                (BackupTool::Restic, vec![ok(r#"[{"time":"2026-10-01T00:00:00Z"}]"#)]),
-                (BackupTool::Borg, vec![fail("Repository /mnt/borg does not exist.")]),
-            ],
-        );
-        let s = backup_statuses(&e, "macos", NOW, &FixedZone(480), 48);
-        assert_eq!(s.len(), 4, "{s:#?}");
-        assert_eq!(
-            s.iter().find(|x| x.tool == BackupTool::Duplicati).unwrap().state,
-            BackupState::CannotCheck
-        );
-        let by = |t| s.iter().find(|x| x.tool == t).unwrap();
-        assert_eq!(by(BackupTool::TimeMachine).state, BackupState::Healthy);
-        assert_eq!(by(BackupTool::Restic).state, BackupState::Stale);
-        assert!(needs_attention(by(BackupTool::Restic)));
-        assert_eq!(by(BackupTool::Borg).state, BackupState::NotConfigured);
-        assert!(by(BackupTool::Borg).next_step.as_ref().unwrap().contains("BORG_REPO"));
-    }
 }

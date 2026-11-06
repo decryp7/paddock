@@ -67,7 +67,6 @@ import type {
   BenchExportFormat,
   BenchEstimateRequest,
   BenchRunEstimate,
-  BackupReport,
   ChangeTimeline,
   ChangesQuery,
   GpuReport,
@@ -292,7 +291,7 @@ export interface DynoBackend {
   /** The startup entries after hiding the OS's and signed ones, with the counts. */
   startupOverview(filter: StartupFilter): Promise<StartupOverview>;
 
-  // Extras (read-only views) and backup health.
+  // Extras (read-only views).
   /** Installs, updates, new start-up items and setting changes in a window. */
   changes(query: ChangesQuery): Promise<ChangeTimeline>;
   /** GPU use per process. */
@@ -303,11 +302,9 @@ export interface DynoBackend {
   pickFolder(): Promise<string | null>;
   /** Where the maintenance windows stand now. */
   maintenance(): Promise<MaintenanceStatus>;
-  /** The last backup check (the engine runs one when there is none yet). */
-  backup(): Promise<BackupReport>;
 
   // Long operations are jobs (ER-17 to ER-19): find large and duplicate files in a folder the person chose (deletes nothing),
-  // read the OS logs now, check the backup tools now, hash a program's file, and the sleep, boot, app-usage and software reads.
+  // read the OS logs now, hash a program's file, and the sleep, boot, app-usage and software reads.
   // The shell's jobs store follows them (`paddock://jobs`) and cancels them (`job_cancel`); `JobStarter` ties these together.
   // Nothing here waits for the work, so none of it needs a long timeout.
   /** Starts a job and resolves at once with its id. A second start of the same work answers the running job; another search or log read while one runs is refused with `busy`. */
@@ -332,7 +329,7 @@ export interface DynoBackend {
   popoverSnapshot(): Promise<PopoverSurfaceValues>;
   /** The values for the Settings preview, with the slow widgets asked of the agent now. It never marks the popover visible. */
   popoverPreview(): Promise<PopoverSurfaceValues>;
-  /** A widget's button: open a page, retry, start the backup check, restart the agent, open Settings. */
+  /** A widget's button: open a page, retry, restart the agent, open Settings. */
   runWidgetAction(action: WidgetActionId): Promise<void>;
   /** The popup's values, pushed while the popover is visible (`dyno://popover-values`). */
   onPopoverValues(listener: (v: PopoverSurfaceValues) => void): Unsubscribe;

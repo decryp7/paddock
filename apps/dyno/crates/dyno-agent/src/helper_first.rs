@@ -73,7 +73,7 @@ pub trait HelperCalls: Send + Sync {
     fn counters(&self, query: CounterQuery) -> Result<Vec<CounterAnswer>, CallError>;
     /// Memory modules from the DMI table (Linux).
     fn memory(&self) -> Result<MemoryLayout, CallError>;
-    /// Wake requests or Windows Backup versions.
+    /// Wake requests (Windows).
     fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, CallError>;
     /// Login items (macOS).
     fn login_items(&self) -> Result<LoginItemsReply, CallError>;

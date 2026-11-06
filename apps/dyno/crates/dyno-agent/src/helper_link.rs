@@ -369,7 +369,7 @@ impl<T: HelperTransport> HelperLink<T> {
         }
     }
 
-    /// Wake requests or Windows Backup versions.
+    /// Wake requests (Windows).
     pub fn extras(&self, kind: ExtrasKind) -> Result<ExtrasAnswer, PlatformError> {
         self.extras_in(kind, Wait::Default).map_err(|e| e.error)
     }

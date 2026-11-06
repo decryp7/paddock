@@ -73,7 +73,7 @@ impl JobCentre {
     }
 
     /// Starts `spec` in the background and answers its status at once. Work that is already running answers the running
-    /// job; a search, log read or backup check while another of its kind runs is refused (`Busy`), because the person has to
+    /// job; a search or log read while another of its kind runs is refused (`Busy`), because the person has to
     /// choose which to keep.
     pub fn start(&self, shared: &Arc<Shared>, spec: JobSpec) -> Result<WireSnapshot, AgentError> {
         let spec = validated(spec)?;
@@ -274,10 +274,6 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
             crate::issues::overview(shared, query)
                 .map(|o| JobOutput::Issues(Box::new(o)))
                 .map_err(|e| JobError::Failed(e.message))
-        }
-        JobSpec::RefreshBackup => {
-            let report = crate::extras::backup_check::refresh(shared, ctx)?;
-            Ok(JobOutput::Backup(Box::new(report)))
         }
         JobSpec::WolWake { id, test } => shared.wol.run(shared, ctx, id, test).map(|o| JobOutput::Wol(Box::new(o))),
         JobSpec::FileHash { source } => {

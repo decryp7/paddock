@@ -1,8 +1,7 @@
-//! The extras (WP-13) and backup health (WP-14) on the agent side: runs the read-only OS tools behind a [`ToolRunner`],
+//! The extras (WP-13) on the agent side: runs the read-only OS tools behind a [`ToolRunner`],
 //! keeps the few results worth caching, records the changes the "What changed" timeline needs, and answers the requests.
 //! Everything is observe-only: nothing here moves or removes a file ([`finder`] only lists).
 
-pub mod backup_check;
 pub mod finder;
 
 use crate::agent::{lock, now, Shared};
@@ -19,14 +18,13 @@ use dyno_core::protocol::{AgentError, BootRecord, ErrorCode, Reply, Request, Sav
 use dyno_core::read_via::ReadVia;
 use dyno_core::time::{Timestamp, DAY, HOUR, SECOND};
 use dyno_platform::runner::{SystemRunner as OsRunner, ToolRunner};
-use dyno_platform::toolpath::PathResolver;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// How long a software list is reused (reading it takes seconds to minutes).
 const SOFTWARE_TTL: Duration = Duration::from_secs(10 * 60);
-/// How often the background work runs (backup check, change recording).
+/// How often the background work runs (change recording).
 pub const BACKGROUND_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// The first background run waits this long after the agent starts.
 pub const FIRST_RUN_AFTER: Duration = Duration::from_secs(90);
@@ -58,9 +56,6 @@ fn internal(msg: impl std::fmt::Display) -> AgentError {
 /// See the module docs.
 pub struct ExtrasCentre {
     tools: Mutex<Arc<dyn ToolRunner>>,
-    resolver: Mutex<Arc<PathResolver>>,
-    /// Tests: runs every backup tool instead of resolving programs.
-    backup_tools: Mutex<Option<Arc<dyn ToolRunner>>>,
     os: Mutex<&'static str>,
     own_folder: bool,
     software: Arc<Mutex<Option<(Instant, SoftwareInventory)>>>,
@@ -68,14 +63,11 @@ pub struct ExtrasCentre {
     software_refreshing: Arc<std::sync::atomic::AtomicBool>,
     /// Its thread, so a test can wait for it to end.
     software_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
-    pub(crate) backup: Arc<Mutex<backup_check::Slot>>,
-    /// The readings the helper can give better (what keeps Windows awake, Windows Backup versions); none until the agent is
+    /// The readings the helper can give better (what keeps Windows awake); none until the agent is
     /// composed with a helper port ([`ExtrasCentre::use_helper`]), and then everything is read on this computer as before.
     pub(crate) helper: Mutex<Option<HelperExtras>>,
     /// The port the helper readings go through, to ask whether the helper changed since a report was made.
     helper_port: Mutex<Option<Arc<dyn HelperPort>>>,
-    /// Signalled when a backup check ends and when a job waiting for one is cancelled.
-    pub(crate) backup_done: Arc<std::sync::Condvar>,
     counter: AtomicU64,
 }
 
@@ -84,17 +76,13 @@ impl ExtrasCentre {
     pub fn new(own_folder: bool) -> ExtrasCentre {
         ExtrasCentre {
             tools: Mutex::new(Arc::new(OsRunner)),
-            resolver: Mutex::new(Arc::new(PathResolver::system())),
-            backup_tools: Mutex::new(None),
             os: Mutex::new(std::env::consts::OS),
             own_folder,
             software: Arc::new(Mutex::new(None)),
             software_refreshing: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             software_thread: Mutex::new(None),
-            backup: Arc::new(Mutex::new(backup_check::Slot::default())),
             helper: Mutex::new(None),
             helper_port: Mutex::new(None),
-            backup_done: Arc::new(std::sync::Condvar::new()),
             counter: AtomicU64::new(1),
         }
     }
@@ -107,15 +95,11 @@ impl ExtrasCentre {
         }
     }
 
-    /// Gives the extras the helper: what keeps Windows awake and the Windows Backup versions are then read helper first, and say
-    /// which path answered (`blockers_via`, `BackupReport.via`). Composition calls this once (`agent.rs`).
+    /// Gives the extras the helper: what keeps Windows awake is then read helper first, and say
+    /// which path answered (`blockers_via`). Composition calls this once (`agent.rs`).
     pub fn use_helper(&self, port: Arc<dyn HelperPort>) {
         *lock(&self.helper_port) = Some(port.clone());
-        *lock(&self.helper) = Some(HelperExtras::new(
-            port,
-            dyno_platform::extras::windows_wake_refused,
-            dyno_platform::extras::windows_backup_refused_text,
-        ));
+        *lock(&self.helper) = Some(HelperExtras::new(port, dyno_platform::extras::windows_wake_refused));
     }
 
     /// Where the helper stands now: moves whenever it is turned on, off, repaired or updated (0 without a helper port).
@@ -155,16 +139,6 @@ impl ExtrasCentre {
         *lock(&self.software) = None;
     }
 
-    /// Tests: replaces the runner every backup tool goes through.
-    pub fn use_backup_tools(&self, tools: Arc<dyn ToolRunner>) {
-        *lock(&self.backup_tools) = Some(tools);
-    }
-
-    /// The backup report as it stands, without starting a check (tests).
-    pub fn backup_report(&self) -> dyno_core::backup::BackupReport {
-        backup_check::peek(self)
-    }
-
     /// Tests: pretend to be another OS (`macos`, `windows`, `linux`).
     pub fn use_os(&self, os: &'static str) {
         *lock(&self.os) = os;
@@ -194,7 +168,6 @@ pub fn handle(shared: &Arc<Shared>, request: Request) -> Result<Reply, AgentErro
             let core = lock(&shared.core);
             Ok(Reply::Maintenance(core.settings.maintenance.status(now(), core.zone.as_ref())))
         }
-        Request::Backup => Ok(Reply::Backup(Box::new(backup_check::report(shared)))),
         other => Err(bad(format!("{other:?} is not an extras request."))),
     }
 }
@@ -479,7 +452,7 @@ fn wait(shared: &Shared, d: Duration) {
 }
 
 /// The background thread: records the boot, then every [`BACKGROUND_EVERY`] (inside the maintenance windows) checks the
-/// backups and compares the software lists. Does nothing on a data folder of its own (tests, `DYNO_DATA_DIR`).
+/// compares the software lists. Does nothing on a data folder of its own (tests, `DYNO_DATA_DIR`).
 pub fn run(shared: &Arc<Shared>) {
     if !shared.extras.own_folder {
         return;
@@ -493,9 +466,6 @@ pub fn run(shared: &Arc<Shared>) {
     wait(shared, FIRST_RUN_AFTER);
     while !shared.stopped() {
         if maintenance_open(shared) {
-            if lock(&shared.core).settings.backup.alert_when_stale {
-                backup_check::check_now(shared);
-            }
             record_changes(shared);
             wait(shared, BACKGROUND_EVERY);
         } else {

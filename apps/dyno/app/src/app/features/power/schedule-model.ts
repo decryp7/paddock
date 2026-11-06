@@ -2,7 +2,7 @@ import type { DynoJob, WakeInput, WakeRepeat, WakeRow, WakeRowState, WakeRouteSt
 import { formatDayTime } from '../../shared/format';
 
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
-export const JOB_LABELS: Record<DynoJob, string> = { backupCheck: 'Check the backups', softwareInventory: 'List the installed software' };
+export const JOB_LABELS: Record<DynoJob, string> = { softwareInventory: 'List the installed software' };
 
 /** "07:05" from minutes after midnight. */
 export function clock(minute: number): string {

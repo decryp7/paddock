@@ -7,15 +7,6 @@
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
       }
     },
-    {
-      "backup": {
-        "checkedAt": null,
-        "checking": false,
-        "loginPathUsed": false,
-        "statuses": [],
-        "via": "local"
-      }
-    },
     true
   ],
   "requests": [
@@ -41,11 +32,6 @@
             }
           }
         }
-      }
-    },
-    {
-      "startJob": {
-        "spec": "refreshBackup"
       }
     },
     {

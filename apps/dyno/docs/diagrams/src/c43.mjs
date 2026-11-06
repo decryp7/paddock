@@ -88,7 +88,7 @@ const Y = 144;
   m('settings', 2, 1, 'settings · tray · counters', 'modules', 'Versioned settings, tray icon model, formatting, the performance counter model.');
   m('proto', 3, 1, 'protocol', 'module', 'Request, Reply, Message, LiveUpdate, PROTOCOL_VERSION.');
   m('helper', 0, 2, 'startup', 'module', 'Startup entries, view only (ADR 0021).');
-  m('extras', 1, 2, 'extras · backup · toolpath', 'modules', 'Read-only views of the system, backup health and the login-shell PATH (ADR 0020).');
+  m('extras', 1, 2, 'extras', 'modules', 'Read-only views of the system (ADR 0020).');
   m('web', 2, 2, 'weblinks · netchange · network', 'modules', 'Redacted search text and hash links; Wi-Fi, VPN and IP changes (ADR 0019).');
   m('snap', 3, 2, 'snapshot · report · inventory', 'modules', 'Snapshots and diffs, the weekly report, hardware and software inventory.');
   d.node('ports', c(0), r(3), 4 * CW + 3 * G, NH, 'core', { name: 'ports', tech: 'traits, read-only', desc: 'SystemSensors · ProcessSource · FileLocks · StartupItems · FactsSource · UserActivity · CounterSource. Contract: no panics, Unavailable with a reason, bounded calls, a start-time check on every ProcessRef. None of them changes the machine.' });

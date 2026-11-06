@@ -102,7 +102,6 @@ fn popover_default(kind: PopoverKind) -> PopoverWidget {
         PopoverKind::DiskSpace => PopoverWidget::disk(VolumeChoice::All),
         PopoverKind::CpuMemory => PopoverWidget::CpuMemory,
         PopoverKind::Network => PopoverWidget::Network,
-        PopoverKind::BackupHealth => PopoverWidget::BackupHealth,
         PopoverKind::LastIssue => PopoverWidget::LastIssue,
         PopoverKind::PinnedCounters => PopoverWidget::PinnedCounters,
         PopoverKind::TopApps => PopoverWidget::TopApps,

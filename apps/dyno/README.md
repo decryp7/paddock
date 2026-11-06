@@ -72,8 +72,8 @@ Every feature, with its state, is in [docs/features.md](docs/features.md). Built
    ([ADR 0013](docs/adr/0013-alarms-lifecycle.md)); crashes and errors from the OS logs with a stability score
    ([ADR 0017](docs/adr/0017-issues-and-the-program-baseline.md)); a report for any of the last 52 weeks.
 6. **Health and startup items,** with reasons only: Dyno shows, it does not fix.
-7. **Disk map, counters, extras and backup health.** A disk map (in progress for 1.0: the engine is built and the screen is being built; a ring chart of a volume or folder where a click drills in, with a live scan you can cancel), a performance-counter browser, what changed,
-   sleep, boot, GPU, inventory, find files (view only) and backup checks
+7. **Disk map, counters, extras.** A disk map (in progress for 1.0: the engine is built and the screen is being built; a ring chart of a volume or folder where a click drills in, with a live scan you can cancel), a performance-counter browser, what changed,
+   sleep, boot, GPU, inventory, find files (view only)
    ([ADR 0020](docs/adr/0020-extras-backup-checks-and-taming-proof.md)).
 8. **Benchmarks on click,** network view, IP lookup, web and VirusTotal search (they only open your browser), the flight
    recorder and the problem report (a zip you look through and save yourself).

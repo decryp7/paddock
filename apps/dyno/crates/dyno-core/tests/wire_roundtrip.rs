@@ -107,7 +107,6 @@ fn tag_job_spec(v: &JobSpec) -> &'static str {
     match v {
         JobSpec::FindFiles { .. } => "FindFiles",
         JobSpec::RescanIssues { .. } => "RescanIssues",
-        JobSpec::RefreshBackup => "RefreshBackup",
         JobSpec::FileHash { .. } => "FileHash",
         JobSpec::SleepBlockers => "SleepBlockers",
         JobSpec::BootAnalysis => "BootAnalysis",
@@ -126,7 +125,6 @@ fn tag_job_output(v: &JobOutput) -> &'static str {
     match v {
         JobOutput::Finder(_) => "Finder",
         JobOutput::Issues(_) => "Issues",
-        JobOutput::Backup(_) => "Backup",
         JobOutput::FileHash(_) => "FileHash",
         JobOutput::Sleep(_) => "Sleep",
         JobOutput::Boot(_) => "Boot",
@@ -256,7 +254,6 @@ fn tag_request(v: &Request) -> &'static str {
         Request::GpuProcesses => "GpuProcesses",
         Request::SaveInventoryReport { .. } => "SaveInventoryReport",
         Request::Maintenance => "Maintenance",
-        Request::Backup => "Backup",
         Request::StartJob { .. } => "StartJob",
         Request::Jobs => "Jobs",
         Request::CancelJob { .. } => "CancelJob",
@@ -356,7 +353,6 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::Gpu(_) => "Gpu",
         Reply::InventorySaved(_) => "InventorySaved",
         Reply::Maintenance(_) => "Maintenance",
-        Reply::Backup(_) => "Backup",
         Reply::DiskVolumes(_) => "DiskVolumes",
         Reply::DiskScan(_) => "DiskScan",
         Reply::DiskScans(_) => "DiskScans",
@@ -427,7 +423,6 @@ fn job_spec_samples() -> Vec<JobSpec> {
         JobSpec::RescanIssues {
             query: IssuesQuery::default(),
         },
-        JobSpec::RefreshBackup,
         JobSpec::FileHash {
             source: HashSource::Process(process_ref()),
         },
@@ -450,7 +445,6 @@ fn job_output_samples() -> Vec<JobOutput> {
     vec![
         JobOutput::Finder(zero()),
         JobOutput::Issues(zero()),
-        JobOutput::Backup(zero()),
         JobOutput::FileHash(zero()),
         JobOutput::Sleep(zero()),
         JobOutput::Boot(zero()),
@@ -688,7 +682,6 @@ fn request_samples() -> Vec<Request> {
             format: extras::software::InventoryFormat::Markdown,
         },
         Request::Maintenance,
-        Request::Backup,
         Request::StartJob {
             spec: JobSpec::SoftwareInventory,
         },
@@ -879,7 +872,6 @@ fn reply_samples() -> Vec<Reply> {
             bytes: 1,
         }),
         Reply::Maintenance(extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), &dyno_core::time::FixedZone::UTC)),
-        Reply::Backup(zero()),
         Reply::DiskVolumes(vec![]),
         Reply::DiskScan(Box::new(disk_status())),
         Reply::DiskScans(vec![disk_status()]),
@@ -889,7 +881,7 @@ fn reply_samples() -> Vec<Reply> {
         Reply::Job(Box::new(wire_job())),
         Reply::Jobs(vec![wire_job()]),
         Reply::JobCancelled(true),
-        Reply::JobOutput(Box::new(JobOutput::Backup(zero()))),
+        Reply::JobOutput(Box::new(JobOutput::Sleep(zero()))),
         Reply::WidgetLayout(Box::new(widgets::layout_view(&Settings::default(), widgets::DynoSurface::Popover))),
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
         Reply::HelperStatus(Box::new(zero())),

@@ -166,67 +166,6 @@ describe('SettingsPage', () => {
     expect(el.querySelector('section[aria-label="Appearance"]')).toBeNull();
   });
 
-  it('has a Backup health section: switch, hours and folders for the tools found by name', async () => {
-    const { f, el, saveButton, store } = await make();
-    const section = el.querySelector('section[aria-label="Backup health"]')!;
-    expect(section).not.toBeNull();
-    expect(section.textContent).toContain('never runs or manages a backup');
-    expect(section.querySelectorAll('textarea')).toHaveLength(3);
-    expect(section.textContent).toContain('Where restic is installed');
-    toggle(el, 'Tell me when a backup is out of date').click();
-    await vi.waitFor(() => {
-      f.detectChanges();
-      expect(store.settings()!.backup.alertWhenStale).toBe(true);
-      expect(saveButton()).toBeDefined();
-    });
-  });
-
-  it('keeps what is typed in a folder box, validates it like the engine and saves it', async () => {
-    const { f, el, saveButton, store } = await make();
-    const box = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="restic folders"]')!;
-    box.value = 'tools/restic';
-    box.dispatchEvent(new Event('input'));
-    await settle(f);
-    expect(el.querySelector('section[aria-label="Backup health"] .problem')!.textContent).toContain('not a full path');
-    expect(saveButton()!.disabled).toBe(true);
-    box.value = '/opt/restic\n';
-    box.dispatchEvent(new Event('input'));
-    await settle(f);
-    expect(box.value).toBe('/opt/restic\n');
-    expect(el.querySelector('section[aria-label="Backup health"] .problem')).toBeNull();
-    const hours = el.querySelector<HTMLInputElement>('input[aria-label="Hours until a backup is out of date"]')!;
-    hours.value = '24';
-    hours.dispatchEvent(new Event('input'));
-    await settle(f);
-    saveButton()!.click();
-    await settle(f);
-    expect(store.settings()!.backup).toEqual({ alertWhenStale: true, staleAfterHours: 24, overrides: [{ tool: 'restic', dirs: ['/opt/restic'] }] });
-    expect(saveButton()).toBeUndefined();
-    expect(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="restic folders"]')!.value).toBe('/opt/restic');
-  });
-
-  it('shows the engine sentence when it refuses the backup settings, and discard restores the boxes', async () => {
-    const { f, el, mock, saveButton, discardButton } = await make();
-    const hours = el.querySelector<HTMLInputElement>('input[aria-label="Hours until a backup is out of date"]')!;
-    hours.value = '0';
-    hours.dispatchEvent(new Event('input'));
-    await settle(f);
-    expect(saveButton()!.disabled).toBe(true);
-    hours.value = '30';
-    hours.dispatchEvent(new Event('input'));
-    await settle(f);
-    vi.spyOn(mock, 'saveSettings').mockRejectedValueOnce({ code: 'badRequest', message: 'restic: not allowed.' });
-    saveButton()!.click();
-    await settle(f);
-    expect(el.querySelector('.save-error')!.textContent).toBe('restic: not allowed.');
-    const box = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Duplicati folders"]')!;
-    box.value = '/x';
-    box.dispatchEvent(new Event('input'));
-    await settle(f);
-    discardButton()!.click();
-    await settle(f);
-    expect(el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Duplicati folders"]')!.value).toBe('');
-  });
   it('shows the hardware and baselines section with the defaults when the settings hold none', async () => {
     const { el } = await make();
     const section = el.querySelector('section[aria-label="Hardware and baselines"]')!;

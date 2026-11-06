@@ -63,7 +63,6 @@ import type {
   BenchRunEstimate,
   AwakeSpec,
   EnergyReport,
-  BackupReport,
   PowerView,
   Neighbour,
   ThisPcWol,
@@ -685,7 +684,7 @@ export class TauriBackend implements DynoBackend {
     return this.command<void>('quit_and_stop_measuring');
   }
 
-  // ----------------------------------------------------------------------------------------------- extras, backup
+  // ---------------- extras
 
   changes(query: ChangesQuery): Promise<ChangeTimeline> {
     return this.request({ changes: { query } });
@@ -712,10 +711,6 @@ export class TauriBackend implements DynoBackend {
 
   maintenance(): Promise<MaintenanceStatus> {
     return this.request('maintenance');
-  }
-
-  backup(): Promise<BackupReport> {
-    return this.request('backup');
   }
 
   // ----------------------------------------------------------------------------------------------------- power

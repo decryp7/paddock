@@ -101,18 +101,13 @@ Right-click a process, a connection, an issue or a program and choose **Search t
 removed; edit it, then **Search** opens your browser. **Search file hash on VirusTotal…** shows the file's SHA-256 (computed on your
 computer) and opens VirusTotal's page for it; the file is never uploaded.
 
-## Extras and backup health
+## Extras
 
 **Extras** (one page, eight tabs) answers small questions without changing anything: *What changed* before things got slow, *Sleep*
 (why the computer will not sleep and what woke it), *Boot* (how long start-up took and what slowed it), *Apps* (network and energy
 per app), *GPU*, *Files* (large and duplicate files in a folder you choose), *Inventory* (installed software, with an export) and
 *Maintenance* (when Dyno's heavier background work may run). If your system does not tell Dyno something, the tab says what and
 why. In *Files*, Dyno lists duplicates and where they are; it removes nothing.
-
-**Backup health** shows whether your backups ran: Time Machine, Windows Backup, File History, restic and Borg. It never starts or
-changes a backup. A backup older than the limit you set (Settings, Backup health; 48 hours by default) raises an alarm. For restic
-and Borg export their repository variables in your shell profile, or give Dyno the tool's folder in Settings. "No backup tool found"
-is a normal answer.
 
 ## Benchmarks
 
@@ -251,7 +246,7 @@ wakes); it changes nothing else, and the card's Turn off removes it.
 
 What it adds: every account's processes in detail, per-program network traffic (Windows), disk health (SMART), the program that
 holds a socket or a file (Linux), temperatures, fans and CPU energy, memory slots (Linux), and on Windows what keeps the computer
-awake and the Windows Backup versions. Who sees what: the account that turned it on and administrators see everything; any other
+awake . Who sees what: the account that turned it on and administrators see everything; any other
 account sees its own and the system's programs, and the rest as one **Other users** total (or not at all), never another
 person's program folder. Every change request is recorded in the helper's audit log, which the card shows. The helper's log never
 holds file contents or command lines.

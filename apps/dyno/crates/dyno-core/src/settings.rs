@@ -131,8 +131,6 @@ pub struct Settings {
     pub jobs: crate::jobs::JobSettings,
     /// Maintenance windows: when Dyno's heavier background work may run (off: any time).
     pub maintenance: crate::extras::maintenance::MaintenanceSettings,
-    /// Backup health checks: how stale is too stale, and where to find the tools.
-    pub backup: crate::backup::BackupSettings,
     /// Power: keep awake (ADR 0032).
     pub power: crate::power::settings::PowerSettings,
 }
@@ -182,7 +180,6 @@ impl Default for Settings {
             disk: Default::default(),
             jobs: Default::default(),
             maintenance: Default::default(),
-            backup: Default::default(),
             power: Default::default(),
         }
     }
@@ -227,18 +224,15 @@ impl Settings {
         if self.maintenance.validate().is_err() {
             self.maintenance = Default::default();
         }
-        if self.backup.validate().is_err() {
-            self.backup = Default::default();
-        }
         self
     }
 
     /// What the user must fix before these settings are saved (the lenient [`Settings::normalised`] would silently reset
-    /// it): a maintenance window or a backup override that does not make sense.
+    /// it): a maintenance window that does not make sense.
     pub fn check_extras(&self) -> Result<(), String> {
         self.maintenance.validate()?;
         self.power.timed.validate()?;
-        self.backup.validate()
+        Ok(())
     }
 }
 
@@ -469,17 +463,17 @@ mod tests {
     fn extras_settings_are_optional_validated_and_reset_when_damaged() {
         let (s, w) = parse(r#"{"launchAtLogin":true}"#);
         assert!(w.is_none());
-        assert!(!s.maintenance.enabled && s.backup.alert_when_stale && s.backup.stale_after_hours == 48);
-        let (s, _) = parse(r#"{"maintenance":{"enabled":true,"windows":[]},"backup":{"staleAfterHours":0}}"#);
+        assert!(!s.maintenance.enabled);
+        // A saved file from before 1.1.0 may still carry the removed `backup` key: it is ignored.
+        let (s, w) = parse(r#"{"backup":{"staleAfterHours":0,"overrides":[{"tool":"restic","dirs":[]}]}}"#);
+        assert!(w.is_none() && s.maintenance == Default::default());
+        let (s, _) = parse(r#"{"maintenance":{"enabled":true,"windows":[]}}"#);
         assert_eq!(s.maintenance, Default::default());
-        assert_eq!(s.backup, Default::default());
         let mut s = Settings::default();
         assert!(s.check_extras().is_ok());
         s.maintenance.enabled = true;
         assert!(s.check_extras().unwrap_err().contains("Add a window"));
         s.maintenance.enabled = false;
-        s.backup.stale_after_hours = 5000;
-        assert!(s.check_extras().is_err());
     }
 
     #[test]

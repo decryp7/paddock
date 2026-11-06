@@ -38,7 +38,6 @@ pub mod sensors;
 pub mod smart_reader;
 pub mod smartctl_search;
 pub mod tool_install;
-pub mod toolpath;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_proc;

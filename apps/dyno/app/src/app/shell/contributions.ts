@@ -158,13 +158,6 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
       run: (ctx) => ctx.exportIssues(),
     }),
     defineCommand<DynoContext>({
-      id: 'dy.check-backup',
-      title: msg('dy.check-backup', 'Check now'),
-      category: msg('dy.category.backup', 'Backup health'),
-      enabled: (ctx) => ctx.canCheckBackup(),
-      run: (ctx) => ctx.checkBackup(),
-    }),
-    defineCommand<DynoContext>({
       id: 'dy.run-why-slow',
       title: msg('dy.run-why-slow', 'Run again'),
       category: msg('dy.category.why-slow', 'Why slow'),

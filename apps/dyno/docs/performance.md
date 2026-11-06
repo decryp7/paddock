@@ -187,7 +187,7 @@ linker was 39 %). It agrees with the 2026-10-29 block below: keep Apple's linker
 ### 2026-10-30, agent threads at the gentle level (rule 52, fix/dyno-qos-utility-2)
 
 - **Commit:** A/B: base 1af0b346e (only the disk walk lowered; every other agent thread at the default class) → change: the
-  agent's own threads (sampler, network, hardware, issues, extras, unusual, network change, inventory, boot, backup check,
+  agent's own threads (sampler, network, hardware, issues, extras, unusual, network change, inventory, boot,
   counters, volume list and probes, traffic and name lookups) and the finder's thread and workers at `lower_current_thread`
   (`QOS_CLASS_UTILITY` on macOS); `dyno-server`, its connections and the benchmark thread not lowered
 - **Machine:** Mac mini M4 Pro (Mac16,11), 14 cores, macOS 27.2; rustc 1.99.1

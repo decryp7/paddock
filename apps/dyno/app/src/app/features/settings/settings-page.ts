@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DEFAULT_POWER } from '../power/power-model';
-import type { WakeSettings, WolSettings, EnergySettings, KeepAwakeSettings, BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
+import type { WakeSettings, WolSettings, EnergySettings, KeepAwakeSettings, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -19,7 +19,6 @@ import { HelperCard } from './helper-card';
 import { OnlineData } from '../lists/online-data';
 import { IntelStore } from '../../state/intel.store';
 import { ToolCard } from './tool-card';
-import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
 import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
 import { ErrorStateMatcher } from '@angular/material/core';
@@ -43,7 +42,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
         }
         @if (dirty()) {
           <button type="button" matButton="outlined" (click)="revert()">Discard changes</button>
-          <button type="button" matButton="filled" [disabled]="store.saving() || !!backupProblem() || !!diskProblem()" (click)="save()">Save changes</button>
+          <button type="button" matButton="filled" [disabled]="store.saving() || !!diskProblem()" (click)="save()">Save changes</button>
         }
       </header>
 
@@ -262,29 +261,6 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
             </section>
 
-            <section class="card" aria-label="Backup health" id="backup">
-              <h2>Backup health</h2>
-              <p class="sub">Dyno reads the state of Time Machine, Windows Backup, File History, restic, Borg and Duplicati on the Backup health page. It never runs or manages a backup.</p>
-              <div class="row">
-                <div class="lbl"><strong>Tell me when a backup is out of date</strong><small>Checks every 6 hours, inside the maintenance windows, and raises an alarm.</small></div>
-                <mat-slide-toggle [checked]="backup().alertWhenStale" aria-label="Tell me when a backup is out of date" (change)="setBackup({ alertWhenStale: $event.checked })" />
-              </div>
-              <div class="row">
-                <div class="lbl"><strong>Out of date after</strong><small>A backup older than this counts as stale (1 hour to 90 days).</small></div>
-                <mat-form-field class="num-in"><input matInput type="number" min="1" max="2160" aria-label="Hours until a backup is out of date" [ngModel]="backup().staleAfterHours" (ngModelChange)="setBackup({ staleAfterHours: +$event })" /><span matTextSuffix>hours</span></mat-form-field>
-              </div>
-              @for (t of overridable; track t.tool) {
-                <div class="row top">
-                  <div class="lbl"><strong>Where {{ t.name }} is installed</strong><small>Only if Dyno cannot find it. Full folder paths, one per line; searched before the usual places.</small></div>
-                  <div class="ipt">
-                    <mat-form-field><textarea matInput rows="2" spellcheck="false" [attr.aria-label]="t.name + ' folders'" [ngModel]="overrideValue(t.tool)" (ngModelChange)="setOverride(t.tool, $event)"></textarea></mat-form-field>
-                    @if (overrideProblem(t.tool); as p) {
-                      <small class="problem" role="alert">{{ p }}</small>
-                    }
-                  </div>
-                </div>
-              }
-            </section>
 
             <section class="card" aria-label="Power" id="power">
               <h2>Power</h2>
@@ -531,7 +507,6 @@ export class SettingsPage implements OnInit {
       const s = this.store.settings();
       untracked(() => {
         this.draft.set(s ? structuredClone(s) : null);
-        this.rawOverrides.set({});
       });
     });
   }
@@ -566,11 +541,6 @@ export class SettingsPage implements OnInit {
   protected setUnusual(p: Partial<UnusualSettings>): void {
     this.draft.update((d) => (d ? { ...d, unusual: { ...(d.unusual ?? { enabled: true, learningDays: 7 }), ...p } } : d));
   }
-  protected readonly backup = computed<BackupSettings>(() => this.draft()?.backup ?? { alertWhenStale: true, staleAfterHours: 48, overrides: [] });
-  protected readonly overridable = BACKUP_TOOLS.filter((t) => OVERRIDABLE.includes(t.tool));
-  /** What the person typed in each folder box (kept as typed, so a new line is not swallowed while they type). */
-  private readonly rawOverrides = signal<Partial<Record<BackupTool, string>>>({});
-  protected readonly backupProblem = computed(() => validateBackup(this.backup()));
   protected readonly power = computed<KeepAwakeSettings>(() => this.draft()?.power?.keepAwake ?? DEFAULT_POWER.keepAwake);
   protected setPower(p: Partial<KeepAwakeSettings>): void {
     this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), keepAwake: { ...this.power(), ...p } } } : d));
@@ -596,23 +566,6 @@ export class SettingsPage implements OnInit {
   }
   protected mb(bytes: number): number {
     return Math.round(bytes / 1048576);
-  }
-  protected setBackup(p: Partial<BackupSettings>): void {
-    this.draft.update((d) => (d ? { ...d, backup: { ...this.backup(), ...p } } : d));
-  }
-  protected overrideValue(tool: BackupTool): string {
-    return this.rawOverrides()[tool] ?? overrideText(this.backup(), tool);
-  }
-  protected setOverride(tool: BackupTool, text: string): void {
-    this.rawOverrides.update((r) => ({ ...r, [tool]: text }));
-    this.draft.update((d) => (d ? { ...d, backup: withOverride(this.backup(), tool, text) } : d));
-  }
-  protected overrideProblem(tool: BackupTool): string | null {
-    for (const dir of this.backup().overrides.find((o) => o.tool === tool)?.dirs ?? []) {
-      const p = folderProblem(dir);
-      if (p) return p;
-    }
-    return null;
   }
   protected setAlerts(p: Partial<Settings['alerts']>): void {
     this.draft.update((d) => (d ? { ...d, alerts: { ...d.alerts, ...p } } : d));
@@ -655,7 +608,6 @@ export class SettingsPage implements OnInit {
   protected revert(): void {
     const s = this.store.settings();
     this.draft.set(s ? structuredClone(s) : null);
-    this.rawOverrides.set({});
   }
 
   protected every(ms: number): string {

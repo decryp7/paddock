@@ -81,7 +81,7 @@ pub enum HelperRequest {
     },
     /// The firewall's state, and its rules for the owner and administrators.
     Firewall,
-    /// Wake requests or backup versions (Windows).
+    /// Wake requests (Windows).
     Extras(ExtrasKind),
     /// The last audit entries (at most [`MAX_AUDIT_REPLY`]), newest first. Owner and administrators only.
     Audit(u32),
@@ -421,10 +421,6 @@ pub fn readings(host: HelperHost) -> &'static [Advertised] {
             },
             Advertised {
                 text: "What is keeping the computer awake",
-                kinds: &[RequestKind::Extras],
-            },
-            Advertised {
-                text: "Windows Backup versions (the backups of Backup and Restore)",
                 kinds: &[RequestKind::Extras],
             },
         ],

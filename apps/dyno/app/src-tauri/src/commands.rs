@@ -231,13 +231,6 @@ impl crate::actions::ActionPorts for LivePorts {
     fn refresh(&self) {
         self.shell.popover_changed();
     }
-    fn start_backup_check(&self) -> Result<(), CommandError> {
-        self.link
-            .call(Request::StartJob {
-                spec: dyno_core::jobs::JobSpec::RefreshBackup,
-            })
-            .map(|_| ())
-    }
     fn restart_agent(&self) {
         self.link.retry();
     }
@@ -649,7 +642,7 @@ mod tests {
     #[test]
     fn the_extras_requests_have_the_shape_the_ui_sends() {
         use serde_json::json;
-        for name in ["gpuProcesses", "maintenance", "backup", "jobs"] {
+        for name in ["gpuProcesses", "maintenance", "jobs"] {
             assert!(parse_request(json!(name)).is_ok(), "{name}");
         }
         assert!(matches!(

@@ -99,8 +99,6 @@ pub enum ToolKind {
 pub enum ExtrasKind {
     /// `powercfg /requests`.
     WakeRequests,
-    /// `wbadmin get versions`.
-    BackupVersions,
 }
 
 /// Why a decoded request is refused before it runs.

@@ -17,7 +17,7 @@
           "id": 1,
           "job": "softwareInventory",
           "minuteOfDay": 420,
-          "name": "Morning backup check",
+          "name": "Morning inventory",
           "repeat": "once",
           "stayAwakeMinutes": null,
           "wakeDevices": [
@@ -47,13 +47,13 @@
           "entry": {
             "enabled": true,
             "id": 1,
-            "job": "backupCheck",
+            "job": "softwareInventory",
             "lastRun": {
               "at": 1700000000000,
               "summary": "staying awake 30 min; started its job"
             },
             "minuteOfDay": 420,
-            "name": "Morning backup check",
+            "name": "Morning inventory",
             "nextAt": 1700050000000,
             "repeat": {
               "days": {
@@ -80,13 +80,13 @@
           "entry": {
             "enabled": true,
             "id": 1,
-            "job": "backupCheck",
+            "job": "softwareInventory",
             "lastRun": {
               "at": 1700000000000,
               "summary": "staying awake 30 min; started its job"
             },
             "minuteOfDay": 420,
-            "name": "Morning backup check",
+            "name": "Morning inventory",
             "nextAt": 1700050000000,
             "repeat": {
               "days": {
@@ -121,13 +121,13 @@
           "entry": {
             "enabled": true,
             "id": 1,
-            "job": "backupCheck",
+            "job": "softwareInventory",
             "lastRun": {
               "at": 1700000000000,
               "summary": "staying awake 30 min; started its job"
             },
             "minuteOfDay": 420,
-            "name": "Morning backup check",
+            "name": "Morning inventory",
             "nextAt": 1700050000000,
             "repeat": {
               "days": {
@@ -158,13 +158,13 @@
           "entry": {
             "enabled": true,
             "id": 1,
-            "job": "backupCheck",
+            "job": "softwareInventory",
             "lastRun": {
               "at": 1700000000000,
               "summary": "staying awake 30 min; started its job"
             },
             "minuteOfDay": 420,
-            "name": "Morning backup check",
+            "name": "Morning inventory",
             "nextAt": 1700050000000,
             "repeat": {
               "days": {
@@ -187,13 +187,13 @@
           "entry": {
             "enabled": true,
             "id": 1,
-            "job": "backupCheck",
+            "job": "softwareInventory",
             "lastRun": {
               "at": 1700000000000,
               "summary": "staying awake 30 min; started its job"
             },
             "minuteOfDay": 420,
-            "name": "Morning backup check",
+            "name": "Morning inventory",
             "nextAt": 1700050000000,
             "repeat": {
               "days": {
@@ -216,13 +216,13 @@
           "entry": {
             "enabled": true,
             "id": 1,
-            "job": "backupCheck",
+            "job": "softwareInventory",
             "lastRun": {
               "at": 1700000000000,
               "summary": "staying awake 30 min; started its job"
             },
             "minuteOfDay": 420,
-            "name": "Morning backup check",
+            "name": "Morning inventory",
             "nextAt": 1700050000000,
             "repeat": {
               "days": {

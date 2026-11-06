@@ -18,7 +18,6 @@ import { ReportsStore } from '../state/reports.store';
 import { SettingsStore } from '../state/settings.store';
 import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
-import { BackupStore } from '../state/backup.store';
 import { DiagnosisStore } from '../state/diagnosis.store';
 import { HistoryStore } from '../state/history.store';
 import { IssuesStore } from '../state/issues.store';
@@ -78,7 +77,6 @@ describe('Dyno contributions', () => {
     const history = vi.spyOn(TestBed.inject(HistoryStore), 'load');
     const rescan = vi.spyOn(TestBed.inject(IssuesStore), 'rescan');
     const exportIssues = vi.spyOn(TestBed.inject(IssuesStore), 'exportForDebrief');
-    const check = vi.spyOn(TestBed.inject(BackupStore), 'check');
     const run = vi.spyOn(TestBed.inject(DiagnosisStore), 'run');
     const exportReport = vi.spyOn(TestBed.inject(ReportsStore), 'export');
     await TestBed.inject(ShellContextHost).load();
@@ -86,7 +84,6 @@ describe('Dyno contributions', () => {
       ['dy.refresh-history', 'dy.dashboard', history],
       ['dy.rescan-issues', 'dy.issues', rescan],
       ['dy.export-issues', 'dy.issues', exportIssues],
-      ['dy.check-backup', 'dy.backup', check],
       ['dy.run-why-slow', 'dy.why-slow', run],
       ['dy.export-report', 'dy.reports', exportReport],
     ];
@@ -144,7 +141,7 @@ describe('Dyno contributions', () => {
   it('title every palette command in sentence case, under a category', () => {
     const own = TestBed.inject(ContributionRegistry).commands().filter((c) => c.id.startsWith('dy.'));
     expect(own.map((c) => c.id)).toEqual([
-      'dy.quit-stop', 'dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.export-issues', 'dy.check-backup', 'dy.run-why-slow', 'dy.export-report', 'dy.add-alarm-rule',
+      'dy.quit-stop', 'dy.capture', 'dy.refresh-history', 'dy.rescan-issues', 'dy.export-issues', 'dy.run-why-slow', 'dy.export-report', 'dy.add-alarm-rule',
     ]);
     for (const c of own) {
       expect(c.category).toBeDefined();

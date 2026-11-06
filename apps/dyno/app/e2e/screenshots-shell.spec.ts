@@ -5,7 +5,7 @@ import { dialogWindowUrl, test } from '@decryp7/paddock-e2e';
 // screenshots-dialogs.spec.ts (contract widths, both button orders). Only on request:
 // `SCREENSHOTS=1 SHELL_SHOTS_DIR=<dir> PW_PORT=<port> npx playwright test --project=screenshots e2e/screenshots-shell.spec.ts`.
 const OUT = process.env['SHELL_SHOTS_DIR'] ?? '';
-const PAGES = ['dashboard', 'processes', 'why-slow', 'throttling', 'issues', 'inventory', 'network', 'counters', 'benchmarks', 'alarms', 'reports', 'recorder', 'health', 'backup', 'extras', 'lifespan', 'diagnostics', 'cpu'];
+const PAGES = ['dashboard', 'processes', 'why-slow', 'throttling', 'issues', 'inventory', 'network', 'counters', 'benchmarks', 'alarms', 'reports', 'recorder', 'health', 'extras', 'lifespan', 'diagnostics', 'cpu'];
 test.describe('Dyno shell screenshots', () => {
   test.skip(!OUT, 'set SHELL_SHOTS_DIR');
   for (const scheme of ['light', 'dark'] as const) {

@@ -35,7 +35,7 @@ describe('MockWidgets layouts', () => {
     expect(() => w.edit({ popover: { resize: { id: 'cpu-memory', span: 1 } } })).toThrow(/not available/);
     expect(() => w.edit({ popover: { remove: { id: 'nope' } } })).toThrow(/no longer/);
     expect(() => w.edit({ popover: 'undo' })).toThrow(/nothing to undo/);
-    for (const k of ['network', 'backupHealth', 'lastIssue', 'pinnedCounters'] as const) w.edit({ popover: { add: { widget: k, span: null, at: null } } });
+    for (const k of ['network', 'lastIssue', 'pinnedCounters', 'topApps'] as const) w.edit({ popover: { add: { widget: k, span: null, at: null } } });
     w.edit({ popover: { add: { widget: { diskSpace: { volume: 'system' } }, span: null, at: null } } });
     expect(ids(w)).toContain('disk-space-2');
     expect(() => w.edit({ popover: { add: { widget: { diskSpace: { volume: 'all' } }, span: null, at: null } } })).toThrow(/At most 8 widgets fit in the popup/);

@@ -456,11 +456,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         r @ (Request::SearchSeed { .. } | Request::WebSearch { .. } | Request::VirusTotalUrl { .. } | Request::StartupOverview { .. }) => {
             crate::handlers_search::handle(shared, r)
         }
-        r @ (Request::Changes { .. }
-        | Request::GpuProcesses
-        | Request::SaveInventoryReport { .. }
-        | Request::Maintenance
-        | Request::Backup) => crate::extras::handle(shared, r),
+        r @ (Request::Changes { .. } | Request::GpuProcesses | Request::SaveInventoryReport { .. } | Request::Maintenance) => {
+            crate::extras::handle(shared, r)
+        }
         Request::WidgetLayout { surface } => Ok(Reply::WidgetLayout(Box::new(dyno_core::widgets::layout_view(
             &lock(&shared.core).settings,
             surface,

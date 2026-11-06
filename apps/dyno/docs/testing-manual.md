@@ -137,7 +137,7 @@ standard (non-administrator) account.
 | 34 | Inspect the data folder permissions | `agent.json` is readable by the owner only |
 | 35 | Search the logs for a file path or command line you used | None present |
 
-## Extras and backup health (WP-13, WP-14)
+## Extras (WP-13)
 
 | # | Steps | Expected |
 | --- | --- | --- |
@@ -145,9 +145,5 @@ standard (non-administrator) account.
 | 37 | Extras > Boot after a restart and after a second one | Two rows; the verdict appears from the fourth boot on. Linux: `systemd-analyze blame` entries; Windows: slow apps from the Diagnostics-Performance log |
 | 38 | Extras > Files, choose a folder with two identical large files | Both listed as one duplicate group; nothing can be removed from Dyno |
 | 40 | Extras > Inventory > Export report, open the file | Hardware and software lists; nothing else |
-| 41 | Extras > Maintenance: a window that is closed now, wait/inspect | "Next window opens ..."; no log read or backup check starts outside it; Rescan on Issues still works |
-| 42 | Backup health with Time Machine on (macOS) | Healthy with the last backup time; unplug the disk: no-backup/cannot-check sentence with a next step |
-| 43 | Backup health on Windows with File History or Windows Backup enabled | Verify the event IDs used (4 and 201) against your PC; report mismatches |
-| 44 | Install restic through Homebrew, export RESTIC_REPOSITORY and RESTIC_PASSWORD_FILE in the shell profile, restart the agent | Found through the login-shell PATH; healthy or stale |
-| 45 | Set the stale limit to 1 hour with a day-old backup | One alarm "... backup is out of date"; a new backup clears it at the next check |
+| 41 | Extras > Maintenance: a window that is closed now, wait/inspect | "Next window opens ..."; no log read starts outside it; Rescan on Issues still works |
 

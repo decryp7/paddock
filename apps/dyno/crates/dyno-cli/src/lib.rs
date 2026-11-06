@@ -398,13 +398,7 @@ fn wake_schedule(agent: &dyn Agent, cmd: &args::WakeScheduleCmd, json: bool) -> 
                 "weekends" => Repeat::Days { mask: 0b1100000 },
                 _ => Repeat::Daily,
             };
-            let job = job.as_deref().map(|j| {
-                if j == "backup" {
-                    DynoJob::BackupCheck
-                } else {
-                    DynoJob::SoftwareInventory
-                }
-            });
+            let job = job.as_deref().map(|_| DynoJob::SoftwareInventory);
             let entry = WakeInput {
                 id: None,
                 name: name.clone(),

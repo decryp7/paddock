@@ -2,7 +2,7 @@ import { MockWidgets } from '../core/mock/widgets';
 import { WIDGET_ICONS } from './widget-icons';
 
 /** The icon names the engine's catalogues use (`icon:` in dyno-core/src/widgets/{popover,dashboard,menu_bar}.rs). */
-const ENGINE_ICONS = ['alarm', 'disk', 'cpu', 'network', 'backup', 'issue', 'counters', 'apps', 'graph', 'number', 'bars', 'ring', 'heatmap', 'health', 'diagnosis', 'events', 'history', 'consumers', 'meter'];
+const ENGINE_ICONS = ['alarm', 'disk', 'cpu', 'network', 'issue', 'counters', 'apps', 'graph', 'number', 'bars', 'ring', 'heatmap', 'health', 'diagnosis', 'events', 'history', 'consumers', 'meter'];
 
 describe('widget icons', () => {
   it('draws every icon name the engine uses, as a 24 px outline in currentColor', () => {
