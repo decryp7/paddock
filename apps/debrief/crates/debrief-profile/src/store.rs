@@ -37,6 +37,12 @@ pub trait CaptureCatalog: Send + Sync {
     fn check_room(&self) -> Result<()>;
     /// Adds a capture imported outside the store (named like [`CaptureCatalog::open`] names its captures).
     fn adopt(&mut self, file_name: &str, capture: Capture, path: Option<&str>) -> Result<CaptureSummary>;
+    /// What it takes to read capture `id` again when the memory budget released its body: `None` when it is in memory.
+    /// Checks that the file is the one that was opened ([`ProfileError::Changed`]). Cheap; call it under a read lock, run
+    /// [`Reload::load`] with no lock held and give the result to [`install_reload`](Self::install_reload).
+    fn reload_plan(&self, id: u32) -> Result<Option<Reload>>;
+    /// Puts a capture read by [`Reload::load`] back as the body of the capture it was made for (a short call).
+    fn install_reload(&mut self, reload: &Reload, capture: Capture) -> Result<()>;
     /// Forgets a capture; false when it was not open.
     fn close(&mut self, id: u32) -> bool;
     /// Wall-clock spans of the captures, to line them up with logs.
@@ -132,6 +138,113 @@ impl Release for Resident {
     }
 }
 
+/// What identifies the file a capture was opened from, to see that a released capture is read again from the same file:
+/// its length, its modification time and a hash of its first 64 KiB.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FileStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    head: u64,
+}
+
+impl FileStamp {
+    fn of(path: &std::path::Path) -> std::io::Result<FileStamp> {
+        use std::hash::{Hash, Hasher};
+        let meta = std::fs::metadata(path)?;
+        let head = crate::import::read_head(path)?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        head.hash(&mut hasher);
+        Ok(FileStamp {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+            head: hasher.finish(),
+        })
+    }
+}
+
+/// Reading a released capture again from its file: planned under a read lock ([`CaptureCatalog::reload_plan`]), loaded
+/// with no lock held ([`Reload::load`]: an import can take minutes and the file is lent to the importer by ranges, never
+/// read into the app), installed under a short write lock ([`CaptureCatalog::install_reload`]).
+pub struct Reload {
+    id: u32,
+    name: String,
+    path: std::path::PathBuf,
+    importer: Arc<dyn CaptureImporter>,
+    limits: Limits,
+    stamp: FileStamp,
+}
+
+impl Reload {
+    /// The id of the capture this reads again.
+    pub fn id(&self) -> u32 {
+        self.id
+    }
+
+    /// Imports the file again through the importer that opened it, and checks that the file did not change meanwhile.
+    pub fn load(&self) -> Result<Capture> {
+        let file_name = crate::frames::basename(&self.path.to_string_lossy()).to_string();
+        let capture = self
+            .importer
+            .import_file(&file_name, &self.path, &self.limits)
+            .map_err(|e| self.unreadable(&e.to_string()))?;
+        self.check_unchanged()?;
+        Ok(capture)
+    }
+
+    fn check_unchanged(&self) -> Result<()> {
+        check_unchanged(&self.name, &self.path, &self.stamp)
+    }
+
+    fn unreadable(&self, why: &str) -> ProfileError {
+        unreadable(&self.name, why)
+    }
+}
+
+/// Fails with [`ProfileError::Changed`] unless the file at `path` is the one `stamp` was taken of.
+fn check_unchanged(name: &str, path: &std::path::Path, stamp: &FileStamp) -> Result<()> {
+    match FileStamp::of(path) {
+        Ok(now) if now == *stamp => Ok(()),
+        Ok(_) => Err(ProfileError::Changed { name: name.to_string() }),
+        Err(e) => Err(unreadable(name, &e.to_string())),
+    }
+}
+
+fn unreadable(name: &str, why: &str) -> ProfileError {
+    ProfileError::Budget {
+        message: format!(
+            "\"{name}\" was released from memory to make room for other captures and could not be read again ({why}); open it again"
+        ),
+    }
+}
+
+/// The most reloads one view makes: its own capture, and one more for each other capture the budget released to make room
+/// for it while the view held several (a diff of two captures needs both).
+const MAX_RELOADS: usize = 6;
+
+/// Runs a view on the store under a read lock, and when a capture it needs was released reads it again first, with no
+/// lock held: the plan under a read lock, the import with none, the result under a short write lock. A reload of
+/// minutes therefore never blocks the other views, opens or closes of the window.
+pub fn read_reloading<T>(store: &std::sync::RwLock<Box<dyn ProfileStore>>, view: impl Fn(&dyn ProfileStore) -> Result<T>) -> Result<T> {
+    let read = || store.read().unwrap_or_else(|p| p.into_inner());
+    for _ in 0..MAX_RELOADS {
+        let id = match view(read().as_ref()) {
+            Err(ProfileError::Released(id)) => id,
+            other => return other,
+        };
+        let plan = read().reload_plan(id)?;
+        if let Some(plan) = plan {
+            let started = std::time::Instant::now();
+            let capture = plan.load()?;
+            log::debug!("capture {id} imported again in {} ms", started.elapsed().as_millis());
+            store.write().unwrap_or_else(|p| p.into_inner()).install_reload(&plan, capture)?;
+        }
+    }
+    Err(ProfileError::Budget {
+        message: "the captures this view needs do not fit in memory together; close some captures or raise the memory for open documents"
+            .to_string(),
+    })
+}
+
 /// An open capture: what the lists need without the body (so a released capture still lists), and the body.
 struct Entry {
     summary: CaptureSummary,
@@ -139,6 +252,8 @@ struct Entry {
     heap: bool,
     name: String,
     path: Option<String>,
+    /// The file as it was when the capture was opened (none without a file, or when it could not be read).
+    stamp: Option<FileStamp>,
     resident: Arc<Resident>,
     /// Its place in the memory budget, when the store has one.
     ticket: Option<Ticket>,
@@ -184,6 +299,7 @@ impl Captures {
         let body = Body::of(capture);
         let path = path.map(str::to_string);
         let (summary, span, heap, name) = describe(id, &body, path.as_deref());
+        let stamp = path.as_deref().and_then(|p| FileStamp::of(std::path::Path::new(p)).ok());
         let resident = Arc::new(Resident {
             slot: Mutex::new(Some(body.clone())),
         });
@@ -211,6 +327,7 @@ impl Captures {
                 heap,
                 name,
                 path,
+                stamp,
                 resident,
                 ticket,
             },
@@ -222,39 +339,17 @@ impl Captures {
         self.entries.get(&id).map(|e| e.summary.clone())
     }
 
-    /// The body of capture `id`: in memory, or read again from its file when the budget released it.
+    /// The body of capture `id`, or [`ProfileError::Released`] when the budget released it: it is read again by the
+    /// caller, with no lock held (see [`CaptureCatalog::reload_plan`]).
     fn body(&self, id: u32) -> Result<(&Entry, Body)> {
         let e = self.entries.get(&id).ok_or(ProfileError::UnknownCapture(id))?;
         if let Some(t) = &e.ticket {
             t.touch();
         }
-        if let Some(b) = e.resident.get() {
-            return Ok((e, b));
+        match e.resident.get() {
+            Some(b) => Ok((e, b)),
+            None => Err(ProfileError::Released(id)),
         }
-        // Released to make room: read it again (no lock held meanwhile; two readers may both load, the last one wins).
-        let path = e.path.as_deref().ok_or(ProfileError::UnknownCapture(id))?;
-        let again = |why: String| ProfileError::Budget {
-            message: format!(
-                "\"{}\" was released from memory to make room for other captures and could not be read again ({why}); open it again",
-                e.name
-            ),
-        };
-        let file = std::path::Path::new(path);
-        let bytes = crate::import::read_bounded(file, &self.limits).map_err(|er| again(er.to_string()))?;
-        let file_name = crate::frames::basename(path).to_string();
-        let capture = import_with(&self.importer_refs(), &file_name, &bytes, &self.limits).map_err(|er| again(er.to_string()))?;
-        drop(bytes);
-        let body = Body::of(capture);
-        if let Some(t) = &e.ticket {
-            t.readmit(body.approx_bytes())
-                .map_err(|o| ProfileError::Budget { message: o.to_string() })?;
-        }
-        e.resident.set(body.clone());
-        log::info!(
-            "capture {id} read again from its file after it was released ({} MB)",
-            body.approx_bytes() >> 20
-        );
-        Ok((e, body))
     }
 
     fn profile(&self, id: u32) -> Result<Arc<Profile>> {
@@ -425,6 +520,48 @@ impl CaptureCatalog for Captures {
 
     fn list(&self) -> Vec<CaptureSummary> {
         self.entries.keys().filter_map(|&id| self.summary(id)).collect()
+    }
+
+    fn reload_plan(&self, id: u32) -> Result<Option<Reload>> {
+        let e = self.entries.get(&id).ok_or(ProfileError::UnknownCapture(id))?;
+        if e.resident.get().is_some() {
+            return Ok(None);
+        }
+        let (Some(path), Some(stamp)) = (e.path.as_deref(), e.stamp.clone()) else {
+            return Err(ProfileError::UnknownCapture(id));
+        };
+        let file = std::path::PathBuf::from(path);
+        let unreadable = |why: &str| unreadable(&e.name, why);
+        check_unchanged(&e.name, &file, &stamp)?;
+        let head = crate::import::read_head(&file).map_err(|er| unreadable(&er.to_string()))?;
+        let file_name = crate::frames::basename(path).to_string();
+        let importer = self
+            .pick_importer(&file_name, &head)
+            .ok_or_else(|| unreadable("no importer recognises the file any more"))?;
+        Ok(Some(Reload {
+            id,
+            name: e.name.clone(),
+            path: file,
+            importer,
+            limits: self.limits,
+            stamp,
+        }))
+    }
+
+    fn install_reload(&mut self, reload: &Reload, capture: Capture) -> Result<()> {
+        let e = self.entries.get(&reload.id).ok_or(ProfileError::UnknownCapture(reload.id))?;
+        let body = Body::of(capture);
+        if let Some(t) = &e.ticket {
+            t.readmit(body.approx_bytes())
+                .map_err(|o| ProfileError::Budget { message: o.to_string() })?;
+        }
+        e.resident.set(body.clone());
+        log::info!(
+            "capture {} read again from its file after it was released ({} MB)",
+            reload.id,
+            body.approx_bytes() >> 20
+        );
+        Ok(())
     }
 
     fn close(&mut self, id: u32) -> bool {
@@ -947,9 +1084,126 @@ mod tests {
         assert_eq!(s.list().len(), 3, "a released capture is still listed, with its summary");
         assert!(s.entries[&ids[0]].resident.get().is_none() && s.entries[&ids[1]].resident.get().is_some());
         // Asking for the released capture reads it from its file again and releases the next oldest.
-        let hot = s
-            .hotspots(&HotspotsRequest {
-                profile_id: ids[0],
+        let hotspots = |id: u32| {
+            move |s: &dyn ProfileStore| {
+                s.hotspots(&HotspotsRequest {
+                    profile_id: id,
+                    view: ProfileView::default(),
+                    group_by: GroupBy::Function,
+                    metric: None,
+                    sort: None,
+                    search: None,
+                    offset: 0,
+                    limit: 5,
+                })
+            }
+        };
+        assert!(
+            matches!(hotspots(ids[0])(&s), Err(ProfileError::Released(id)) if id == ids[0]),
+            "a view without a reload says the capture was released"
+        );
+        reload(&mut s, ids[0]);
+        assert!(!hotspots(ids[0])(&s).unwrap().rows.is_empty());
+        assert_eq!(s.list().len(), 3);
+        assert!(s.entries[&ids[0]].resident.get().is_some());
+        assert!(s.entries[&ids[1]].resident.get().is_none(), "b was the least recently used then");
+        assert!(s.entries[&third].resident.get().is_some());
+        assert_eq!(budget.used(), 2 * one);
+        // A released capture whose file is gone says which one and what to do.
+        std::fs::remove_file(&b).unwrap();
+        let e = s.reload_plan(ids[1]).err().unwrap();
+        let text = e.to_string();
+        assert!(text.contains("b.folded") && text.contains("open it again"), "{text}");
+        assert_eq!(e.code(), crate::error::ErrorCode::Limit);
+    }
+
+    /// What [`read_reloading`] does for a released capture, without a lock: plan, load, install.
+    fn reload(s: &mut Captures, id: u32) {
+        let plan = s.reload_plan(id).unwrap().expect("the capture was released");
+        let capture = plan.load().unwrap();
+        s.install_reload(&plan, capture).unwrap();
+    }
+
+    /// `Lines` that counts how the file reached it, and can stop in `import_file` (the reload under test) or change the
+    /// file there.
+    struct Spy {
+        inner: Lines,
+        /// Calls of `import` (the whole file as bytes) and of `import_file` (the path).
+        bytes: std::sync::atomic::AtomicUsize,
+        files: std::sync::atomic::AtomicUsize,
+        /// Armed: `import_file` says it is inside (on `entered`), then waits for `release`.
+        stop: Mutex<Option<(std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>)>>,
+        /// Armed: `import_file` runs this on the path before it returns (a change made while the file is read).
+        meanwhile: Mutex<Option<Box<dyn FnOnce(&std::path::Path) + Send>>>,
+    }
+
+    impl Spy {
+        fn new() -> Arc<Spy> {
+            Arc::new(Spy {
+                inner: Lines(90),
+                bytes: Default::default(),
+                files: Default::default(),
+                stop: Mutex::new(None),
+                meanwhile: Mutex::new(None),
+            })
+        }
+        fn counts(&self) -> (usize, usize) {
+            use std::sync::atomic::Ordering::SeqCst;
+            (self.bytes.load(SeqCst), self.files.load(SeqCst))
+        }
+    }
+
+    struct SpyHandle(Arc<Spy>);
+
+    impl CaptureImporter for SpyHandle {
+        fn id(&self) -> &str {
+            self.0.inner.id()
+        }
+        fn name(&self) -> &str {
+            self.0.inner.name()
+        }
+        fn sniff(&self, file_name: &str, head: &[u8]) -> u8 {
+            self.0.inner.sniff(file_name, head)
+        }
+        fn import(&self, file_name: &str, bytes: &[u8], limits: &Limits) -> Result<Capture> {
+            self.0.bytes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.0.inner.import(file_name, bytes, limits)
+        }
+        fn import_file(&self, file_name: &str, path: &std::path::Path, limits: &Limits) -> Result<Capture> {
+            self.0.files.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if let Some((entered, release)) = self.0.stop.lock().unwrap().take() {
+                entered.send(()).unwrap();
+                release.recv().unwrap();
+            }
+            let bytes = std::fs::read(path).unwrap();
+            let capture = self.0.inner.import(file_name, &bytes, limits);
+            if let Some(f) = self.0.meanwhile.lock().unwrap().take() {
+                f(path);
+            }
+            capture
+        }
+    }
+
+    /// Two captures where only one fits in the budget: the first is released when the second opens.
+    fn one_released(dir: &Dir, spy: &Arc<Spy>) -> (Captures, [String; 2]) {
+        let (a, b) = (dir.file("a.folded", 200), dir.file("b.folded", 200));
+        let one = {
+            let mut s = store();
+            open_file(&mut s, &a).unwrap();
+            s.profile(1).unwrap().approx_bytes()
+        };
+        let budget = debrief_budget::MemoryBudget::new(one * 3 / 2);
+        let mut s = Captures::new(vec![Arc::new(SpyHandle(spy.clone()))], Limits::default()).with_budget(budget);
+        open_file(&mut s, &a).unwrap();
+        open_file(&mut s, &b).unwrap();
+        assert!(s.entries[&1].resident.get().is_none(), "the first capture was released");
+        (s, [a, b])
+    }
+
+    fn hotspots_of(id: u32) -> impl Fn(&dyn ProfileStore) -> Result<HotspotsPage> {
+        move |s| {
+            s.hotspots(&HotspotsRequest {
+                profile_id: id,
                 view: ProfileView::default(),
                 group_by: GroupBy::Function,
                 metric: None,
@@ -958,18 +1212,98 @@ mod tests {
                 offset: 0,
                 limit: 5,
             })
-            .unwrap();
+        }
+    }
+
+    /// MEM-2: a released capture is read again through the importer's `import_file` (a plugin's process is lent the file by
+    /// ranges, the app reads none of it) and with no lock on the window's captures held meanwhile.
+    #[test]
+    fn a_released_capture_is_read_again_by_path_and_with_no_lock_held() {
+        let dir = Dir::new("reload-lock");
+        let spy = Spy::new();
+        let (s, _) = one_released(&dir, &spy);
+        let (entered_tx, entered) = std::sync::mpsc::channel();
+        let (release, release_rx) = std::sync::mpsc::channel();
+        *spy.stop.lock().unwrap() = Some((entered_tx, release_rx));
+        let before = spy.counts();
+        let lock: std::sync::RwLock<Box<dyn ProfileStore>> = std::sync::RwLock::new(Box::new(s));
+        let hot = std::thread::scope(|scope| {
+            let reader = scope.spawn(|| read_reloading(&lock, hotspots_of(1)));
+            // The reload is inside the importer now: the window's captures are free for everyone else.
+            entered.recv().unwrap();
+            assert!(lock.try_write().is_ok(), "no lock is held while the capture is imported again");
+            assert_eq!(lock.try_read().unwrap().list().len(), 2, "the other views carry on");
+            release.send(()).unwrap();
+            reader.join().unwrap()
+        })
+        .unwrap();
         assert!(!hot.rows.is_empty());
-        assert!(s.entries[&ids[0]].resident.get().is_some());
-        assert!(s.entries[&ids[1]].resident.get().is_none(), "b was the least recently used then");
-        assert!(s.entries[&third].resident.get().is_some());
-        assert_eq!(budget.used(), 2 * one);
-        // A released capture whose file is gone says which one and what to do.
-        std::fs::remove_file(&b).unwrap();
-        let e = s.profile(ids[1]).unwrap_err();
-        let text = e.to_string();
-        assert!(text.contains("b.folded") && text.contains("open it again"), "{text}");
-        assert_eq!(e.code(), crate::error::ErrorCode::Limit);
+        let after = spy.counts();
+        assert_eq!(after.1 - before.1, 1, "read again once, by its path");
+        assert_eq!(after.0, before.0, "the app did not hand the importer the whole file");
+    }
+
+    /// MEM-2: a released capture is not read again from a file that is not the one that was opened.
+    #[test]
+    fn a_released_capture_whose_file_changed_is_not_read_again() {
+        let dir = Dir::new("reload-changed");
+        // Longer.
+        let spy = Spy::new();
+        let (s, [a, _]) = one_released(&dir, &spy);
+        let mut longer = std::fs::read_to_string(&a).unwrap();
+        longer.push_str("main;extra 1\n");
+        std::fs::write(&a, longer).unwrap();
+        let e = s.reload_plan(1).err().unwrap();
+        assert!(matches!(e, ProfileError::Changed { .. }), "{e}");
+        assert!(e.to_string().ends_with("changed since it was opened; open it again"), "{e}");
+        assert_eq!(e.code(), crate::error::ErrorCode::Invalid);
+        let lock: std::sync::RwLock<Box<dyn ProfileStore>> = std::sync::RwLock::new(Box::new(s));
+        let failed = read_reloading(&lock, hotspots_of(1)).err().unwrap();
+        assert!(matches!(failed, ProfileError::Changed { .. }), "the view fails with it: {failed}");
+        assert_eq!(spy.counts().1, 0, "the changed file was not imported");
+        // The same length and the same modification time, other bytes: the head hash sees it.
+        let dir = Dir::new("reload-changed-head");
+        let spy = Spy::new();
+        let (s, [a, _]) = one_released(&dir, &spy);
+        let modified = std::fs::metadata(&a).unwrap().modified().unwrap();
+        let mut bytes = std::fs::read(&a).unwrap();
+        let at = bytes.len() / 2;
+        bytes[at] = if bytes[at] == b'x' { b'y' } else { b'x' };
+        let (head_len, total) = (bytes.len().min(crate::import::SNIFF_BYTES), bytes.len());
+        assert!(
+            at < head_len && total == std::fs::metadata(&a).unwrap().len() as usize,
+            "the change is inside the head"
+        );
+        std::fs::write(&a, bytes).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&a)
+            .unwrap()
+            .set_modified(modified)
+            .unwrap();
+        assert!(matches!(s.reload_plan(1).err(), Some(ProfileError::Changed { .. })));
+        // Untouched: planned.
+        let dir = Dir::new("reload-same");
+        let (s, _) = one_released(&dir, &Spy::new());
+        assert!(s.reload_plan(1).unwrap().is_some());
+        assert!(s.reload_plan(2).unwrap().is_none(), "a capture in memory needs no reload");
+    }
+
+    /// MEM-2: a file that changes while it is being read again is not installed.
+    #[test]
+    fn a_file_that_changes_while_it_is_read_again_is_not_installed() {
+        let dir = Dir::new("reload-meanwhile");
+        let spy = Spy::new();
+        let (s, _) = one_released(&dir, &spy);
+        *spy.meanwhile.lock().unwrap() = Some(Box::new(|p| {
+            let mut t = std::fs::read_to_string(p).unwrap();
+            t.push_str("main;late 1\n");
+            std::fs::write(p, t).unwrap();
+        }));
+        let lock: std::sync::RwLock<Box<dyn ProfileStore>> = std::sync::RwLock::new(Box::new(s));
+        let e = read_reloading(&lock, hotspots_of(1)).err().unwrap();
+        assert!(matches!(e, ProfileError::Changed { .. }), "{e}");
+        assert_eq!(lock.read().unwrap().list().len(), 2);
     }
 
     /// A capture that has no file cannot be released: when it and the others cannot fit, the open fails and the message
