@@ -166,3 +166,9 @@ opt-level = 3
 
 [profile.dev.package.crc32fast]
 opt-level = 3
+
+# The crash model (paddock-service tests/it/model.rs) explores five configurations of about 30 000 to 90 000 states each, and
+# unoptimised one took 42 to 52 s of the ci profile's 60 s limit. Only this package is optimised (debug assertions stay on);
+# nextest and llvm-cov build with the dev profile, so the override reaches the ci runs too.
+[profile.dev.package.paddock-service]
+opt-level = 3
