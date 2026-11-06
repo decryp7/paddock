@@ -27,7 +27,7 @@ code.
 
 `dyno_core` holds the model (`metrics`, `process`), `grouping` (ADR 0003), 
 `diagnosis`, `anomaly`, `forecast`, `health`, `history` (tiers and min/avg/max downsampling), `sampling` (adaptive intervals), `startup` (view), `alerts`,
-`report`, `issues` (OS problem events, the stability score), `unusual` (the baseline of programs), `extras` (parsers for the sleep, boot, energy, GPU, software, changes and file-finder views, and maintenance windows), `backup` (backup health judgement) and `toolpath` (the search list for the user's tools), `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
+`report`, `issues` (OS problem events, the stability score), `unusual` (the baseline of programs), `extras` (parsers for the sleep, boot, energy, GPU, software, changes and file-finder views, and maintenance windows), `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
 contract, `PROTOCOL_VERSION`). The ports are in `ports.rs`: `SystemSensors`, `ProcessSource`,
 `FileLocks`, `StartupItems`, `FactsSource`, `UserActivity`, with `PlatformError`. Their contract (no panics, unavailable
 readings with a reason, bounded calls, start-time check on every `ProcessRef`) is documented there and binding on every
@@ -63,7 +63,7 @@ block with a `// SAFETY:` comment.
 - **`issues`** and **`unusual`**: two background threads. The first reads the platform's `IssueSource`s every 15 minutes
   (panic-contained, "unavailable: reason" per source), stores new events and raises alarms; the second compares the process
   table with the baseline every 30 s ([ADR 0017](adr/0017-issues-and-the-program-baseline.md)).
-- **`extras`**: the extras (WP-13) and backup health checks (WP-14): runs read-only OS tools through a `ToolRunner` with the user's login-shell `PATH`, records what changed, answers the requests; a background thread records the boot and checks backups inside the maintenance windows ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)).
+- **`extras`**: the extras (WP-13): runs read-only OS tools through a `ToolRunner` with the user's login-shell `PATH`, records what changed, answers the requests; a background thread records the boot and compares the software lists inside the maintenance windows ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md); its backup checks were removed in 1.1.0).
 - **`store`** and **`rollup`**: the SQLite store (ADR 0008) and the `HistoryWriter` that records raw points and rolls
   closed buckets up through the minute, 15-minute and hour tiers.
 - **`service`**: install, uninstall, status and `ensure` of the per-user registration (ADR 0010); the unit text is pure.
@@ -117,7 +117,7 @@ first use of the plugins page (`Request::Plugins`) and the host guards them (tim
 | [0016](adr/0016-privileged-helper-install-and-ipc.md) | The helper: a system service installed on a click, one authorised user and program, audit log; not in 1.0 (planned for 1.1) |
 | [0021](adr/0021-monitoring-only.md) | Monitoring only: no taming, cleanup or tuning; no helper in 1.0 |
 | [0017](adr/0017-issues-and-the-program-baseline.md) | Issues from the OS logs behind a port; a baseline of programs that explains, never accuses |
-| [0020](adr/0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver |
+| [0020](adr/0020-extras-backup-checks-and-taming-proof.md) | Extras behind a ToolRunner (its backup checks were removed in 1.1.0; see the ADR) |
 | [0007](adr/0007-extensibility-three-tiers.md) | Core, TOML packs, out-of-process plugins |
 | [0008](adr/0008-storage-sqlite-and-retention.md) | SQLite, tiers, versioned schema |
 | [0009](adr/0009-native-feel.md) | Desktop feel in a webview |

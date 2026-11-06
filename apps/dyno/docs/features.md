@@ -13,7 +13,6 @@ for the work package). Screenshots are in `docs/screenshots`; each is shown here
 - [Processes](#processes)
 - [Why is it slow?](#why-is-it-slow)
 - [Extras](#extras)
-- [Backup health](#backup-health)
 - [Health and startup](#health-and-startup)
 - [Throttling, hardware life and what is normal](#throttling-hardware-life-and-what-is-normal)
 - [Disk map](#disk-map)
@@ -170,21 +169,8 @@ saying why, never an empty screen.
 - **Files**: large and duplicate files in a folder you choose. Duplicates are matched by SHA-256 after size and the first 64 KiB.
   View only: Dyno lists them and opens their location; it removes nothing.
 - **Inventory**: the installed software next to the hardware; **Export report** saves Markdown or JSON where you choose.
-- **Maintenance**: windows (days and times) when Dyno's heavier background work may run: reading the OS logs, backup checks and
+- **Maintenance**: windows (days and times) when Dyno's heavier background work may run: reading the OS logs and
   change recording. A click always runs.
-
-## Backup health
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="screenshots/backup-dark.png">
-  <img alt="Backup health" src="screenshots/backup-light.png">
-</picture>
-
-**Built** (WP-14), on the **Backup health** page and in Settings. Dyno checks that backups ran, never runs or manages one: Time Machine
-(`tmutil`), Windows Backup and File History (their event logs, `wbadmin`), restic and Borg (`snapshots` / `list`, with the repository
-variables your login shell exports, never passwords); Duplicati is detected but cannot be read yet. Tools are found through your login
-shell's `PATH` (so Homebrew installs work from a background service) and an optional folder per tool. A backup older than the limit
-(48 hours by default) is one plain alarm per tool, cleared when a new backup appears. No tool found is a normal state.
 
 ## Health and startup
 
@@ -297,7 +283,7 @@ file-system events; the Windows change journal once the helper exists).
   <img alt="The weekly report" src="screenshots/reports-light.png">
 </picture>
 
-**Built.** Alarms (low disk, overheating, crash loops, throttling, stale backups) notify and follow an ISA-18.2 style lifecycle
+**Built.** Alarms (low disk, overheating, crash loops, throttling) notify and follow an ISA-18.2 style lifecycle
 ([ADR 0013](adr/0013-alarms-lifecycle.md)); acknowledging, muting and notes are Dyno's own data and change nothing else. `WeeklyReport { weeksAgo }` builds the report for any of the last 52 weeks from stored data, in the engine:
 health score and its trend, CPU and memory, the busiest apps, free space and the disk-full forecast per disk, the week's alerts
 as issues, and what changed (installs, updates and startup entries seen). A week with nothing in it is a valid

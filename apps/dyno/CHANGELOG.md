@@ -21,7 +21,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - AI access connection: while AI access is on and a key exists, Dyno listens on this computer only (127.0.0.1, a port the system picks) and the page shows the port. A client connects with its key; a program that starts commands, such as Claude Desktop, runs the command "dyno mcp" with the key in its environment, as the page explains. Dyno must be running (it can stay in the tray); when it is quit, clients cannot connect. Turning AI access off or revoking the last key closes the listener at once. Readings are never older than 30 seconds, and are refused when Dyno's agent is not connected.
 - Keep awake: hold the computer awake for 30 minutes to 7 days, until a time of day, until you stop it, while a program runs, or while the computer is busy. It is on the Power page, in the tray menu and in the command "dyno awake". The hold ends if Dyno restarts, and the page says so.
 - Wake-on-LAN: save your other computers and wake them from the Power page or the tray menu, or test whether one wakes. A check of this computer tells you whether it can be woken over the network and what you need to change. The password for a computer is kept safely by your system, never in Dyno's own files.
-- Scheduled wake: wake the computer at a time you choose, keep it awake for a while, wake chosen computers and run one fixed task, such as checking the backups. It is off until you turn it on in Settings. A wake that was missed is shown as missed and never run late. Nothing can wake a computer that is shut down.
+- Scheduled wake: wake the computer at a time you choose, keep it awake for a while, wake chosen computers and run one fixed task, such as listing the installed software. It is off until you turn it on in Settings. A wake that was missed is shown as missed and never run late. Nothing can wake a computer that is shut down.
 - Every metric can be its own menu-bar or tray item, up to 32. macOS or Windows remembers where you put each one. The items have a new look: stacked label and value, a dash when a value is missing, and an alert when a value stays above its limit for 3 seconds. The default set is CPU, memory, network and temperature, and Settings has a menu-bar alert level.
 - Windows: a one-time notice on the first start, and when a new icon is added, tells you to drag Dyno's icons from the arrow to the taskbar, with a button that opens the taskbar settings.
 - The dashboard is a free-size grid of widgets. A Dyno 1.0 dashboard is upgraded on the first start.
@@ -35,7 +35,6 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 ### Fixed
 
 - Inventory: a memory module's maker and part number that does not fit beside the drawing now shows in full when you point at it, instead of being cut off with no way to read it.
-- Backup health: when File History has never been turned on, the page says "Not set up" and how to turn it on, instead of "Could not check" with a technical message. When a tool really cannot be read, the page now says to choose Check now to try again.
 - macOS: memory in use is read the way Activity Monitor reads it (app memory, wired and compressed). Dyno had counted memory that apps were using as free and showed 17 percent where Activity Monitor showed 54 percent. Memory alarms and the memory figure in reports now match what Activity Monitor says, so a memory alarm can fire on a Mac where it stayed quiet before.
 - Settings: dragging a widget in Menu bar items or Popup widgets now shows the whole row as it looks in the list, with its handle, title and controls in place and without the widget's symbol. Before, the picture under the pointer was drawn out of shape with a huge symbol.
 - Dashboard: while you edit the layout, the History legend checkboxes no longer show large pink squares.
@@ -43,7 +42,6 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - Tables grow and shrink with the window instead of keeping a fixed height. The Processes table fills the page; on every other page (Firewall, Alarms, Extras, Network, Benchmarks, Issues and the rest) the page scrolls once and each table is as tall as its rows, up to the height of the visible page, so a long table never needs more than the window and its last row can always be reached. The mouse wheel passes on to the page at the end of a table.
 - Lifespan on an Apple silicon Mac now reads the internal SSD. Dyno had thrown away the long drive names that macOS gives, so it said smartctl found no drives. A USB drive is now listed as one macOS cannot read health from, and the page no longer tells you to turn on administrator readings on a Mac, where the helper is not involved.
 - Reports: the Disks card no longer spills out of its card. Long mount paths are shortened in the middle (the full path is in the tooltip) and the sizes and the forecast stay in their own columns. Empty volumes, temporary folders, system helper volumes and tiny mounted disk images (under 256 MB) are no longer listed in the report, the highlights or the exports.
-- Backup health reads Windows Backup again once the administrator helper is turned on, instead of keeping the earlier "could not check" report and its missing helper note.
 - A dialog that Windows snaps to a screen half but cannot make narrower (the About window at 150 % display scale) now counts as sized by you, like any other snap.
 - Menu-bar and tray items show their metric and reading when you hover them, such as "CPU 34%", instead of "Dyno".
 - The connections map legend uses five clearly different shades that also work with colour-vision deficiency, and its tooltip names the step.
@@ -60,6 +58,10 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 - macOS: the menu-bar icons no longer flash on and off.
 - macOS: Dyno no longer removes and makes its menu-bar items again when its own check thinks they are not on screen. In one test run that re-make was followed by a crash of the app. The cause of items missing after a login is not found yet: the log now records whether the session has a menu bar, ControlCenter's start, and whether an earlier run ended in a crash, and Report a problem lists the names and times of the system's crash reports for Dyno.
 - Windows: after a restart the administrator helper starts with the computer, and when it cannot start, the log and the Windows Event Log say why.
+
+### Removed
+
+- Backup health: the Backup health page, its Settings section, the widget, the alarms, the `backup` command and the Time Machine, Windows Backup, File History, restic, Borg and Duplicati checks are removed. They may return as per-tool checks (File History once verified on x64 Windows). Saved settings, alarms, mutes and scheduled wakes that name them load without error and the backup parts are dropped. The agent protocol is now version 6.
 
 ### Changed
 

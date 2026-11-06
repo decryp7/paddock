@@ -37,7 +37,7 @@ Status words are honest: **built** (code and tests committed), **in progress** (
 | WP-12 | Performance counters browser | built: Counters page (objects, search, instances), chart any counter with the app's events marked, pinned counters and saved sets in settings, "Add to the dashboard" as a counter widget, `dyno counters`; Windows PDH (`PdhEnumObjectsW`, `PdhEnumObjectItemsW`, one persistent query; type-checked and linted from macOS, run by the Windows runner), macOS `vm_stat`/`netstat -inb`/`iostat -Id`/`sysctl`, Linux `/proc`; IOKit per-device statistics are not read |
 | WP-37 | Network: open ports and connections per process, Look up IP | built: listeners, connections, filters, grouping, new-listener/host activity entries, browser lookup (ADR 0015); reverse DNS on request, per-program traffic (macOS `nettop`; Linux `sock_diag` byte counters + `/proc/<pid>/fd`, no admin; Windows per-connection TCP statistics, which need administrator rights, so it says so), row context menu, process-details Network tab, alarms for new exposed listeners and new remote hosts |
 | WP-13 | Extras (what changed, sleep, boot, network and energy, inventory, GPU per process, file finder, maintenance windows) | built (feat/wp13-14-36): the Extras page with eight tabs over pure parsers with fixtures ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)). Verified by fixtures only: the Windows and Linux readers. Not built: per-app network and energy are not stored as app-minute columns (shown live, macOS only for energy), and Linux GPU per process needs NVIDIA's tool |
-| WP-14 | Backup health checks | built (feat/wp13-14-36): Time Machine, Windows Backup, File History, restic and Borg judged against a stale limit, alarm per tool, login-shell `PATH` resolver (G11). Duplicati is detected but not readable yet; the detectors are built in until WP-15's packs exist; Windows event IDs are fixture-verified only |
+| WP-14 | Backup health checks | removed in 1.1.0 | Backup health: removed in 1.1.0, may return as per-tool checks (Time Machine, Windows Backup, restic, Borg, Duplicati). File History checks: removed in 1.1.0, return once verified on x64 Windows. The setting, page, widget and alarm are gone; old saved ones are dropped on load. |
 | WP-15 | Declarative TOML packs | planned, Later (after 1.0) |
 | WP-16 | Optional local web API | planned, Later (after 1.0) |
 | WP-17 | Explain this via Pitwall | planned, Later (after 1.0) |
@@ -267,16 +267,11 @@ Each is small and independent; all are core logic plus an adapter plus a card or
 
 ## WP-14 Backup health checks
 
-- **Scope.** Check that backups ran and succeeded: Time Machine (`tmutil`), Windows Backup and File History, restic, Borg and
-  Duplicati (via their logs or CLIs, declared as tier-2 detector packs). Dyno never runs or manages backups.
-- **Acceptance.** Tools are run with timeouts and the user's login-shell `PATH` (G11); "no backup tool found" is a normal state;
-  a stale backup raises an alert with a plain sentence.
-- **Depends on.** G11, WP-15, WP-08.
-- **Touches.** `crates/dyno-core/src/backup.rs` (new), pack detectors, adapter command runners, UI card.
+Removed in 1.1.0 ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md) amended). Backup health: removed in 1.1.0, may return as per-tool checks. File History checks: removed in 1.1.0, return once verified on x64 Windows.
 
 ## WP-15 Declarative TOML packs (Later, after 1.0)
 
-- **Scope.** Tier 2 of ADR 0007, read-only data only: backup detectors and known helpers (no cleanup, tuning or rule packs,
+- **Scope.** Tier 2 of ADR 0007, read-only data only: detectors and known helpers (no cleanup, tuning or rule packs,
   [ADR 0021](adr/0021-monitoring-only.md)). A pack is parsed once at the edge (`deny_unknown_fields`, size and count limits),
   validated; invalid packs are skipped with a message naming the file and line; a format version gates loading. Packs ship in
   the app and may be dropped into the user's `packs/` folder.
@@ -431,7 +426,7 @@ or other shared OS services must poll rarely or use change notifications.
 ## WP-38 Customizable tray popup widgets
 
 - **Scope.** The person chooses which small widgets the tray popup shows, and their order, from a list such as active alarms,
-  disk space per volume, CPU and memory now, network now, backup health, last issue and pinned counters. In 1.0 (user, 2026-10-31: "In Dyno 1.0, delay the tag"); design in family ADR [0035](../../../docs/adr/0035-widget-layouts-are-shared.md).
+  disk space per volume, CPU and memory now, network now, last issue and pinned counters. In 1.0 (user, 2026-10-31: "In Dyno 1.0, delay the tag"); design in family ADR [0035](../../../docs/adr/0035-widget-layouts-are-shared.md).
 - **Settings.** The choice persists in settings as a versioned list, with sensible defaults (alarms, disk space, CPU and memory).
   Unknown or invalid entries are dropped one by one with a note; only a damaged layout gives the defaults (with a note, as WP-21
   does); a layout from a newer version is kept unchanged and not edited.
@@ -508,7 +503,6 @@ Not part of 1.0.0; anything new that only watches goes here. Anything that would
 | Network, listening ports | `network-*.png` | not captured |
 | Performance counters | `counters-*.png` | captured |
 | Performance counters, search | `counters-search-*.png` | not captured |
-| Backup health | `backup-*.png` | captured |
 | Per-core CPU tile (total and per-core toggle, P/E grouping) | `cpu-per-core-tile-*.png` | not captured (WP-19) |
 | CPU detail with per-core heatmap | `cpu-detail-*.png` | captured (WP-19) |
 | Widget gallery and dashboard edit mode | `widgets-edit-*.png` | captured (WP-21) |
