@@ -134,7 +134,10 @@ fn wire(sim: &Sim, sys: &FakeSystem) {
                 stderr: "Could not find service".into(),
             },
             Held::Running => Output::ok(&match w.pid {
-                Some(p) => RUNNING.replace("\tjob state = running", &format!("\tpid = {p}\n\tjob state = running")),
+                Some(p) => RUNNING.replace(
+                    "\tjob state = running",
+                    &format!("\tpid = {p}\n\tjob state = running"),
+                ),
                 None => RUNNING.to_string(),
             }),
             Held::Refused => Output::ok(SPAWN_FAILED),
@@ -1386,29 +1389,47 @@ fn an_uninstall_that_runs_during_the_wait_is_not_overwritten_by_the_next_cycle()
     let record = RecordFile::memory();
     let probe = record.reopen();
     let check = record.reopen();
-    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::NotRegistered,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().job_after_asks = None;
     let sys = FakeSystem::new();
     wire(&sim, &sys);
-    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
     let looks = Arc::new(AtomicBool::new(false));
     let (s, l) = (sim.clone(), looks.clone());
-    let mut m = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", move || {
-        // The first look of the wait (after the register): the user's uninstall runs now (it can take the lock the wait let go of) and the OS
-        // then refuses what it had accepted, which starts the next cycle.
-        // (`answers` is also asked while the plan is made, before anything is registered: not then.)
-        if s.lock().unwrap().calls.contains(&"register".to_string()) && !l.swap(true, Ordering::SeqCst) {
-            let guard = probe.lock().expect("the wait let the lock go");
-            let mut w = s.lock().unwrap();
-            w.calls.push("user uninstall".into());
-            w.status = AppServiceStatus::NotRegistered;
-            w.job = Held::Refused;
-            drop(w);
-            probe.set_state(State::Idle).unwrap();
-            drop(guard);
-        }
-        false
-    })
+    let mut m = Manager::new(
+        "Dyno",
+        Box::new(backend),
+        dir.path(),
+        LABEL,
+        "1.1.0",
+        move || {
+            // The first look of the wait (after the register): the user's uninstall runs now (it can take the lock the wait let go of) and the OS
+            // then refuses what it had accepted, which starts the next cycle.
+            // (`answers` is also asked while the plan is made, before anything is registered: not then.)
+            if s.lock().unwrap().calls.contains(&"register".to_string())
+                && !l.swap(true, Ordering::SeqCst)
+            {
+                let guard = probe.lock().expect("the wait let the lock go");
+                let mut w = s.lock().unwrap();
+                w.calls.push("user uninstall".into());
+                w.status = AppServiceStatus::NotRegistered;
+                w.job = Held::Refused;
+                drop(w);
+                probe.set_state(State::Idle).unwrap();
+                drop(guard);
+            }
+            false
+        },
+    )
     .with_record(record)
     .with_timings(Timings {
         start_wait: Duration::from_secs(6),
@@ -1416,10 +1437,21 @@ fn an_uninstall_that_runs_during_the_wait_is_not_overwritten_by_the_next_cycle()
     });
     let _ = m.install(&never());
     let c = calls(&sim);
-    let at = c.iter().position(|x| x == "user uninstall").expect("the uninstall ran");
-    assert_eq!(c[at + 1..], Vec::<String>::new(), "a second cycle changed the OS after the uninstall: {c:?}");
+    let at = c
+        .iter()
+        .position(|x| x == "user uninstall")
+        .expect("the uninstall ran");
+    assert_eq!(
+        c[at + 1..],
+        Vec::<String>::new(),
+        "a second cycle changed the OS after the uninstall: {c:?}"
+    );
     // The record is the uninstall's, not this replace's, and the lock is free again.
-    assert_eq!(check.load().state, State::Idle, "the stopped replace wrote over the uninstall's record");
+    assert_eq!(
+        check.load().state,
+        State::Idle,
+        "the stopped replace wrote over the uninstall's record"
+    );
     assert!(check.lock().is_some(), "the stopped replace kept the lock");
 }
 
@@ -1429,29 +1461,58 @@ fn a_second_cycle_does_not_start_while_another_request_holds_the_lock() {
     let dir = tempfile::tempdir().unwrap();
     let record = RecordFile::memory();
     let probe = record.reopen();
-    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::NotRegistered,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     sim.lock().unwrap().job_after_asks = None;
     let sys = FakeSystem::new();
     wire(&sim, &sys);
-    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
     let taken = Arc::new(Mutex::new(None));
     let (s, t) = (sim.clone(), taken.clone());
-    let mut m = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", move || {
-        // Another request takes the lock during the wait (the record still says this replace waits) and the OS refuses the job.
-        let mut w = s.lock().unwrap();
-        if w.calls.contains(&"register".to_string()) && t.lock().unwrap().is_none() {
-            *t.lock().unwrap() = probe.lock();
-            w.job = Held::Refused;
-        }
-        false
-    })
+    let mut m = Manager::new(
+        "Dyno",
+        Box::new(backend),
+        dir.path(),
+        LABEL,
+        "1.1.0",
+        move || {
+            // Another request takes the lock during the wait (the record still says this replace waits) and the OS refuses the job.
+            let mut w = s.lock().unwrap();
+            if w.calls.contains(&"register".to_string()) && t.lock().unwrap().is_none() {
+                *t.lock().unwrap() = probe.lock();
+                w.job = Held::Refused;
+            }
+            false
+        },
+    )
     .with_record(record.reopen())
-    .with_timings(Timings { start_wait: Duration::from_secs(6), ..Timings::default() });
+    .with_timings(Timings {
+        start_wait: Duration::from_secs(6),
+        ..Timings::default()
+    });
     let _ = m.install(&never());
     let c = calls(&sim);
-    assert_eq!(c, ["register"], "a second cycle ran without the lock: {c:?}");
-    assert!(taken.lock().unwrap().is_some(), "the other request got the lock during the wait");
-    assert!(matches!(record.load().state, State::Attempting { .. }), "the record is left as it was");
+    assert_eq!(
+        c,
+        ["register"],
+        "a second cycle ran without the lock: {c:?}"
+    );
+    assert!(
+        taken.lock().unwrap().is_some(),
+        "the other request got the lock during the wait"
+    );
+    assert!(
+        matches!(record.load().state, State::Attempting { .. }),
+        "the record is left as it was"
+    );
 }
 
 #[test]
@@ -1459,63 +1520,117 @@ fn a_second_cycle_after_a_wait_runs_under_the_lock_and_settles_the_record() {
     let dir = tempfile::tempdir().unwrap();
     let record = RecordFile::memory();
     let probe = record.reopen();
-    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Nothing);
+    let sim = world(
+        AppServiceStatus::NotRegistered,
+        DisabledMark::NotListed,
+        Held::Nothing,
+    );
     let sys = FakeSystem::new();
     wire(&sim, &sys);
-    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
     let free_at_cycle_two = Arc::new(Mutex::new(Vec::new()));
     let (s, f) = (sim.clone(), free_at_cycle_two.clone());
-    let mut m = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", move || {
-        let mut w = s.lock().unwrap();
-        let registers = w.calls.iter().filter(|c| *c == "register").count();
-        if registers == 1 && w.job != Held::Refused && w.calls.iter().all(|c| c != "unregister") {
-            // The first wait: the OS refuses what it accepted; the service comes up in the next cycle.
-            w.job = Held::Refused;
-            w.job_after_asks = Some(0);
-        }
-        if registers >= 2 {
-            // Asked in the second cycle's wait: the lock is let go again, and the service answers.
-            f.lock().unwrap().push(probe.lock().is_some());
-            return true;
-        }
-        false
-    })
+    let mut m = Manager::new(
+        "Dyno",
+        Box::new(backend),
+        dir.path(),
+        LABEL,
+        "1.1.0",
+        move || {
+            let mut w = s.lock().unwrap();
+            let registers = w.calls.iter().filter(|c| *c == "register").count();
+            if registers == 1 && w.job != Held::Refused && w.calls.iter().all(|c| c != "unregister")
+            {
+                // The first wait: the OS refuses what it accepted; the service comes up in the next cycle.
+                w.job = Held::Refused;
+                w.job_after_asks = Some(0);
+            }
+            if registers >= 2 {
+                // Asked in the second cycle's wait: the lock is let go again, and the service answers.
+                f.lock().unwrap().push(probe.lock().is_some());
+                return true;
+            }
+            false
+        },
+    )
     .with_record(record.reopen())
-    .with_timings(Timings { start_wait: Duration::from_secs(6), ..Timings::default() });
+    .with_timings(Timings {
+        start_wait: Duration::from_secs(6),
+        ..Timings::default()
+    });
     assert!(m.install(&never()).is_ok());
-    assert_eq!(count(&sim, "register"), 2, "the refused job was registered again");
-    assert!(free_at_cycle_two.lock().unwrap().iter().all(|free| *free), "the second wait held the lock");
-    assert_eq!(record.load().registered_version.as_deref(), Some("1.1.0"), "the replace settled the record");
+    assert_eq!(
+        count(&sim, "register"),
+        2,
+        "the refused job was registered again"
+    );
+    assert!(
+        free_at_cycle_two.lock().unwrap().iter().all(|free| *free),
+        "the second wait held the lock"
+    );
+    assert_eq!(
+        record.load().registered_version.as_deref(),
+        Some("1.1.0"),
+        "the replace settled the record"
+    );
 }
 
 #[test]
 fn a_running_job_named_by_two_looks_of_the_wait_settles_it_without_waiting_out_the_time() {
     use crate::manager::Started;
     let dir = tempfile::tempdir().unwrap();
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     sim.lock().unwrap().pid = Some(SERVICE_PID);
     let sys = FakeSystem::new();
     put_job_processes(&sys);
-    let mut m = awaiting_unanswered(dir.path(), &sim, &sys, || false)
-        .with_timings(Timings { start_wait: Duration::from_secs(60), ..Timings::default() });
+    let mut m = awaiting_unanswered(dir.path(), &sim, &sys, || false).with_timings(Timings {
+        start_wait: Duration::from_secs(60),
+        ..Timings::default()
+    });
     let started = m.on_start(&never());
     assert!(matches!(started, Started::Marked), "{started:?}");
-    assert!(sys.now() < Duration::from_secs(60), "it waited out the time instead of settling on the second look");
+    assert!(
+        sys.now() < Duration::from_secs(60),
+        "it waited out the time instead of settling on the second look"
+    );
     assert_eq!(m.recorded().registered_version.as_deref(), Some("1.1.0"));
 }
 
 // ---- rule R2: a job is the service's only when two looks name the same process
 
 /// A manager whose service never answers by itself, over a registration this version made at time 1 and waits for.
-fn awaiting_unanswered(dir: &Path, sim: &Sim, sys: &FakeSystem, answers: impl FnMut() -> bool + Send + 'static) -> Manager {
+fn awaiting_unanswered(
+    dir: &Path,
+    sim: &Sim,
+    sys: &FakeSystem,
+    answers: impl FnMut() -> bool + Send + 'static,
+) -> Manager {
     use crate::record::{Phase, State};
     let record = RecordFile::new(dir, LABEL);
     record
-        .set_state(State::Attempting { version: "1.1.0".into(), attempts: 1, phase: Phase::Awaiting })
+        .set_state(State::Attempting {
+            version: "1.1.0".into(),
+            attempts: 1,
+            phase: Phase::Awaiting,
+        })
         .unwrap();
     record.set_registered_at(Some(1)).unwrap();
     wire(sim, sys);
-    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
+    let backend = LaunchdBundled::new(
+        spec(),
+        501,
+        Box::new(SimApp(sim.clone())),
+        Box::new(sys.clone()),
+    );
     Manager::new("Dyno", Box::new(backend), dir, LABEL, "1.1.0", answers)
 }
 
@@ -1525,7 +1640,10 @@ const OTHER_PID: u32 = 4_000_002;
 
 fn put_job_processes(sys: &FakeSystem) {
     for (pid, started) in [(SERVICE_PID, 1_000), (OTHER_PID, 2_000)] {
-        sys.put_process(paddock_proc::ProcessId::new(pid, paddock_proc::StartTime::from_micros(started)));
+        sys.put_process(paddock_proc::ProcessId::new(
+            pid,
+            paddock_proc::StartTime::from_micros(started),
+        ));
     }
 }
 
@@ -1533,17 +1651,33 @@ fn put_job_processes(sys: &FakeSystem) {
 fn a_job_that_runs_proves_the_service_only_when_two_looks_name_the_same_process() {
     use crate::backend::{Inspection, Job};
     let dir = tempfile::tempdir().unwrap();
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     sim.lock().unwrap().pid = Some(SERVICE_PID);
     let sys = FakeSystem::new();
     put_job_processes(&sys);
     let mut m = awaiting_unanswered(dir.path(), &sim, &sys, || false);
-    let running = Inspection { job: Job::Running, ..Inspection::absent() };
-    assert!(!m.proves_ours(&running, false), "one look of a running job is a crash loop's first start as much as a service");
-    assert!(m.proves_ours(&running, false), "the second look names the same process");
+    let running = Inspection {
+        job: Job::Running,
+        ..Inspection::absent()
+    };
+    assert!(
+        !m.proves_ours(&running, false),
+        "one look of a running job is a crash loop's first start as much as a service"
+    );
+    assert!(
+        m.proves_ours(&running, false),
+        "the second look names the same process"
+    );
     // A different process on the next look starts the count again.
     sim.lock().unwrap().pid = Some(OTHER_PID);
-    assert!(!m.proves_ours(&running, false), "another process is a first look");
+    assert!(
+        !m.proves_ours(&running, false),
+        "another process is a first look"
+    );
     assert!(m.proves_ours(&running, false));
     // A service that answers needs no second look.
     sim.lock().unwrap().pid = Some(SERVICE_PID);
@@ -1554,7 +1688,11 @@ fn a_job_that_runs_proves_the_service_only_when_two_looks_name_the_same_process(
 fn a_job_seen_running_once_and_then_gone_neither_resets_the_attempts_nor_counts_as_healthy() {
     use crate::manager::Started;
     let dir = tempfile::tempdir().unwrap();
-    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let sim = world(
+        AppServiceStatus::Enabled,
+        DisabledMark::NotListed,
+        Held::Running,
+    );
     sim.lock().unwrap().pid = Some(SERVICE_PID);
     let sys = FakeSystem::new();
     put_job_processes(&sys);
@@ -1569,10 +1707,21 @@ fn a_job_seen_running_once_and_then_gone_neither_resets_the_attempts_nor_counts_
         false
     });
     let started = m.on_start(&AtomicBool::new(true));
-    assert!(!matches!(started, Started::Marked), "settled on one look: {started:?}");
+    assert!(
+        !matches!(started, Started::Marked),
+        "settled on one look: {started:?}"
+    );
     let record = RecordFile::new(dir.path(), LABEL);
-    assert_eq!(record.load().attempts_of("1.1.0"), 1, "the attempts were given back on one look");
-    assert_eq!(m.recorded().registered_version, None, "the version was remembered on one look");
+    assert_eq!(
+        record.load().attempts_of("1.1.0"),
+        1,
+        "the attempts were given back on one look"
+    );
+    assert_eq!(
+        m.recorded().registered_version,
+        None,
+        "the version was remembered on one look"
+    );
 }
 
 #[test]

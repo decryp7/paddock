@@ -171,7 +171,12 @@ impl Manager {
 
     /// [`Manager::decide`]; `fresh` is false for the read under the lock right after a decision: it is the same look, so it does
     /// not count as the second one of rule R2.
-    fn decide_with(&mut self, waited: bool, resuming: bool, fresh: bool) -> (Inspection, bool, Plan) {
+    fn decide_with(
+        &mut self,
+        waited: bool,
+        resuming: bool,
+        fresh: bool,
+    ) -> (Inspection, bool, Plan) {
         let answers = (self.answers)();
         let covered = (self.cover)();
         let (recorded, record_damaged) = self.record.peek();
@@ -183,7 +188,8 @@ impl Manager {
         );
         let inspection = self.backend.inspect();
         if fresh {
-            self.job_confirmed = answers || inspection.job != crate::backend::Job::Running || self.running_twice();
+            self.job_confirmed =
+                answers || inspection.job != crate::backend::Job::Running || self.running_twice();
         }
         let job_confirmed = self.job_confirmed;
         let p = plan(&Facts {
@@ -424,7 +430,9 @@ impl Manager {
             if ours {
                 wait_lock.set(WaitLock::Held);
             } else {
-                log::info!("the record or the lock changed during the wait (another request ran); this replace stops before it changes anything");
+                log::info!(
+                    "the record or the lock changed during the wait (another request ran); this replace stops before it changes anything"
+                );
                 *lock = None;
                 wait_lock.set(WaitLock::Lost);
             }
@@ -784,7 +792,9 @@ impl Manager {
             }
             let job = self.backend.inspect().job;
             match job {
-                crate::backend::Job::Running if ours && self.running_twice() => break (true, "the OS runs the job"),
+                crate::backend::Job::Running if ours && self.running_twice() => {
+                    break (true, "the OS runs the job");
+                }
                 crate::backend::Job::Refused => break (false, "the OS refuses the job"),
                 _ => {}
             }

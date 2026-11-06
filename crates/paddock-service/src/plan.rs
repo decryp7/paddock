@@ -356,7 +356,11 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     }
     // The registration of this version was accepted and the service is up: settled, whatever the attempts were.
     // The proof that the registration is this version's names the time (the job started after the register) and the copy.
-    if accepted && (f.answers || (i.job == Job::Running && f.job_confirmed)) && f.job_after_register != Some(false) && i.points_here != Some(false) {
+    if accepted
+        && (f.answers || (i.job == Job::Running && f.job_confirmed))
+        && f.job_after_register != Some(false)
+        && i.points_here != Some(false)
+    {
         return Plan::MarkCurrent;
     }
     if i.program_exists == Some(false) {
@@ -965,8 +969,8 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
-            job_after_register: None,
-            job_confirmed: true,
+                job_after_register: None,
+                job_confirmed: true,
             }
         }
         // (a) not registered, `launchctl print` timed out, no record: not installed.
@@ -1045,8 +1049,8 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
-            job_after_register: None,
-            job_confirmed: true,
+                job_after_register: None,
+                job_confirmed: true,
             })
         };
         let awaiting = |n| attempting("1.0.4", n, Phase::Awaiting);
@@ -1264,8 +1268,8 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
-            job_after_register: None,
-            job_confirmed: true,
+                job_after_register: None,
+                job_confirmed: true,
             })
         };
         assert_eq!(
@@ -1297,8 +1301,8 @@ mod tests {
                 first_run_done: false,
                 location_ok: true,
                 record_damaged: false,
-            job_after_register: None,
-            job_confirmed: true,
+                job_after_register: None,
+                job_confirmed: true,
             })
         };
         assert_eq!(stale_with(UAC), Plan::Offer(Reason::VersionChanged));

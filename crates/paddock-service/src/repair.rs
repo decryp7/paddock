@@ -571,7 +571,12 @@ pub fn replace_bounded(
         // A later cycle (the OS refused what it had accepted) changes the OS again: whatever was let go of for the wait is taken
         // back first, and the caller says whether the record still shows this replace (ADR 0056 section 3: the lock is taken again
         // to act). Before the steps are said, which write the record.
-        if let_go && matches!(next.action, Action::Unregister | Action::Evict | Action::Register) {
+        if let_go
+            && matches!(
+                next.action,
+                Action::Unregister | Action::Evict | Action::Register
+            )
+        {
             let_go = false;
             if !after_wait() {
                 return RepairOutcome::Cancelled;
@@ -1340,8 +1345,22 @@ mod tests {
             ..Script::default()
         };
         let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
-        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
-        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut || true, &mut |_| {});
+        let bounds = Bounds {
+            cancel: &cancel,
+            abort: &abort,
+            allowed: 4,
+            register_only: false,
+            now: &|| StartTime::from_micros(REGISTERED),
+        };
+        let out = replace_bounded(
+            &mut s,
+            &mut || true,
+            &bounds,
+            &Timings::default(),
+            &mut || {},
+            &mut || true,
+            &mut |_| {},
+        );
         assert_eq!(out, RepairOutcome::Registered);
     }
 
@@ -1353,17 +1372,42 @@ mod tests {
             ..Script::default()
         };
         let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
-        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
-        let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut || true, &mut |_| {});
+        let bounds = Bounds {
+            cancel: &cancel,
+            abort: &abort,
+            allowed: 4,
+            register_only: false,
+            now: &|| StartTime::from_micros(REGISTERED),
+        };
+        let out = replace_bounded(
+            &mut s,
+            &mut || true,
+            &bounds,
+            &Timings::default(),
+            &mut || {},
+            &mut || true,
+            &mut |_| {},
+        );
         assert_eq!(out, RepairOutcome::Recovered);
     }
 
     #[test]
-    fn what_a_wait_let_go_of_is_taken_again_once_before_the_cycle_that_follows_it_and_not_before_the_first() {
+    fn what_a_wait_let_go_of_is_taken_again_once_before_the_cycle_that_follows_it_and_not_before_the_first()
+     {
         let events = std::cell::RefCell::new(Vec::<String>::new());
-        let mut s = Script { quiet_for: 1, refused_for: 1, ..Script::default() };
+        let mut s = Script {
+            quiet_for: 1,
+            refused_for: 1,
+            ..Script::default()
+        };
         let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
-        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(1) };
+        let bounds = Bounds {
+            cancel: &cancel,
+            abort: &abort,
+            allowed: 4,
+            register_only: false,
+            now: &|| StartTime::from_micros(1),
+        };
         let mut asked = 0;
         let out = replace_bounded(
             &mut s,
@@ -1382,24 +1426,60 @@ mod tests {
         );
         assert_eq!(out, RepairOutcome::Recovered);
         let log = events.borrow();
-        let release = log.iter().position(|e| e == "release").expect("the wait let go");
+        let release = log
+            .iter()
+            .position(|e| e == "release")
+            .expect("the wait let go");
         assert_eq!(log.iter().filter(|e| *e == "retake").count(), 1, "{log:?}");
         let retake = log.iter().position(|e| e == "retake").unwrap();
-        assert!(release < retake, "taken again before it was let go: {log:?}");
+        assert!(
+            release < retake,
+            "taken again before it was let go: {log:?}"
+        );
         assert!(log[retake + 1].starts_with("say "), "{log:?}");
-        assert_eq!(s.calls.iter().filter(|c| **c == "register").count(), 2, "the refused job was registered again");
+        assert_eq!(
+            s.calls.iter().filter(|c| **c == "register").count(),
+            2,
+            "the refused job was registered again"
+        );
     }
 
     #[test]
     fn a_retake_that_says_no_ends_the_replace_before_any_os_call_of_the_next_cycle() {
-        let mut s = Script { quiet_for: 1, refused_for: 1, ..Script::default() };
+        let mut s = Script {
+            quiet_for: 1,
+            refused_for: 1,
+            ..Script::default()
+        };
         let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
-        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(1) };
+        let bounds = Bounds {
+            cancel: &cancel,
+            abort: &abort,
+            allowed: 4,
+            register_only: false,
+            now: &|| StartTime::from_micros(1),
+        };
         let mut said = Vec::new();
-        let out = replace_bounded(&mut s, &mut || false, &bounds, &Timings::default(), &mut || {}, &mut || false, &mut |st| said.push(st.to_string()));
+        let out = replace_bounded(
+            &mut s,
+            &mut || false,
+            &bounds,
+            &Timings::default(),
+            &mut || {},
+            &mut || false,
+            &mut |st| said.push(st.to_string()),
+        );
         assert_eq!(out, RepairOutcome::Cancelled);
-        assert_eq!(s.calls.iter().filter(|c| **c == "unregister").count(), 1, "the next cycle removed again: {:?}", s.calls);
-        assert!(said.iter().all(|x| !x.contains("retry 1")), "the next cycle was announced (it writes the record): {said:?}");
+        assert_eq!(
+            s.calls.iter().filter(|c| **c == "unregister").count(),
+            1,
+            "the next cycle removed again: {:?}",
+            s.calls
+        );
+        assert!(
+            said.iter().all(|x| !x.contains("retry 1")),
+            "the next cycle was announced (it writes the record): {said:?}"
+        );
     }
 
     #[test]
