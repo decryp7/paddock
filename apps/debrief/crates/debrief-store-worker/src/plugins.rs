@@ -52,7 +52,7 @@ pub fn install_plugins(plugins: Vec<Arc<dyn debrief_core::Plugin>>, disabled: &[
     for plugin in plugins {
         let id = plugin.id().to_string();
         if let Err(e) = registry.install_shared(plugin) {
-            log::error!("plugin {id} not installed in the store worker: {e:#}");
+            debrief_core::log_failure!(error, format!("plugin {id} not installed in the store worker"), e);
         }
     }
     registry.resolve();
@@ -163,7 +163,7 @@ impl PluginSource for WorkerPlugins {
             }
             match self.third_party_process(spec) {
                 Ok(p) => plugins.push(Arc::new(RemotePlugin::new(p))),
-                Err(e) => log::warn!("installed plugin {} does not take part in imports: {e}", spec.id),
+                Err(e) => debrief_core::log_failure!(warn, format!("installed plugin {} does not take part in imports", spec.id), e),
             }
         }
         install_plugins(plugins, choice.disabled)

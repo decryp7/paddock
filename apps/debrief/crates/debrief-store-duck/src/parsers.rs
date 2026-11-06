@@ -43,7 +43,7 @@ pub(crate) fn overrides(conn: &Connection) -> BTreeMap<String, String> {
     .and_then(|json| match serde_json::from_str(&json) {
         Ok(map) => Some(map),
         Err(e) => {
-            log::warn!("the store's parser choices cannot be read ({e}); every file is matched again");
+            debrief_core::log_failure!(warn, "the store's parser choices cannot be read; every file is matched again", e);
             None
         }
     })

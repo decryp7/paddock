@@ -34,7 +34,7 @@ pub(crate) fn record_import(conn: &Connection, report: &ImportReport) {
             .map_err(|e| e.to_string())
     });
     if let Err(e) = saved {
-        log::warn!("the last import could not be recorded: {e}");
+        debrief_core::log_failure!(warn, "the last import could not be recorded", e);
     }
 }
 
@@ -133,7 +133,7 @@ impl DuckStore {
         match read() {
             Ok(m) => m,
             Err(e) => {
-                log::warn!("segment footers could not be read: {e}");
+                debrief_core::log_failure!(warn, "segment footers could not be read", e);
                 HashMap::new()
             }
         }

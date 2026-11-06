@@ -156,7 +156,7 @@ fn dispatch<'s>(ctx: &'s Ctx<'s>, scope: Option<&rayon::Scope<'s>>, rx: std::syn
             match sink.reserve_sources(need) {
                 Ok(b) => Some(b.0),
                 Err(e) => {
-                    log::warn!("could not reserve source ids: {e:#}");
+                    crate::log_failure!(warn, "could not reserve source ids", e);
                     None
                 }
             }
@@ -253,7 +253,7 @@ pub fn import_stream(
         match &pool {
             Ok(pool) => pool.scope(|s| dispatch(&ctx, Some(s), rx)),
             Err(e) => {
-                log::warn!("parallel import unavailable ({e}); reading files one by one");
+                crate::log_failure!(warn, "parallel import unavailable; reading files one by one", e);
                 dispatch(&ctx, None, rx)
             }
         }

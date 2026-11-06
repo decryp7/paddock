@@ -171,7 +171,7 @@ impl LiveSession {
         if options.deleted_files == DeletedFiles::Drop {
             for id in &appended.deleted {
                 if let Err(e) = store.remove_source(SourceId(*id)) {
-                    log::warn!("the source {id} of a deleted file could not be removed: {e}");
+                    crate::log_failure!(warn, format!("the source {id} of a deleted file could not be removed"), e);
                 }
             }
         }
@@ -186,7 +186,7 @@ impl LiveSession {
                 report.alerts_raised = alerts.len();
                 report.alerts = alerts;
             }
-            Err(e) => log::warn!("live alerts could not be evaluated: {e}"),
+            Err(e) => crate::log_failure!(warn, "live alerts could not be evaluated", e),
         }
         report.elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
         report

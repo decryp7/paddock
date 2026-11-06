@@ -159,7 +159,7 @@ impl<S: Query + ?Sized> AnnotationView for PortView<'_, S> {
             ControlFlow::Continue(())
         });
         if let Err(e) = listed {
-            log::warn!("annotators: the instances could not be listed: {e:#}");
+            crate::log_failure!(warn, "annotators: the instances could not be listed", e);
         }
         out
     }

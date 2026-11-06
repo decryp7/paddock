@@ -61,7 +61,7 @@ pub fn parsers() -> &'static [Parser] {
             .filter_map(|f| match Parser::parse_unchecked(f.toml) {
                 Ok(p) => Some(p),
                 Err(e) => {
-                    log::error!("built-in parser does not parse: {e}");
+                    crate::log_failure!(error, "built-in parser does not parse", e);
                     None
                 }
             })

@@ -268,7 +268,9 @@ impl Health {
     /// Records a crash; quarantines the plugin after [`QUARANTINE_AFTER`] of them.
     pub fn fail(&self, plugin: &str, error: &str) {
         let quarantined = self.with(|l| Self::count(l, plugin, error));
-        log::error!(target: LOG_TARGET, Plugin = plugin, Contained = true; "Plugin {plugin} crashed (contained): {error}");
+        // The error can quote a record the plugin was reading: debug only.
+        log::error!(target: LOG_TARGET, Plugin = plugin, Contained = true; "Plugin {plugin} crashed (contained)");
+        log::debug!(target: LOG_TARGET, Plugin = plugin; "Plugin {plugin} crashed (contained): {error}");
         if quarantined {
             log::error!(target: LOG_TARGET, Plugin = plugin, Crashes = QUARANTINE_AFTER; "Plugin {plugin} quarantined after repeated crashes");
             self.notify();
@@ -350,7 +352,8 @@ impl Health {
             *l.hung.entry(plugin.to_string()).or_default() += 1;
             Self::count(l, plugin, error)
         });
-        log::error!(target: LOG_TARGET, Plugin = plugin, Hung = true; "Plugin {plugin} overran its time budget: {error}");
+        log::error!(target: LOG_TARGET, Plugin = plugin, Hung = true; "Plugin {plugin} overran its time budget");
+        log::debug!(target: LOG_TARGET, Plugin = plugin; "Plugin {plugin} overran its time budget: {error}");
         if quarantined {
             log::error!(target: LOG_TARGET, Plugin = plugin, Crashes = QUARANTINE_AFTER; "Plugin {plugin} quarantined after repeated failures");
             self.notify();

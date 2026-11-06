@@ -101,7 +101,7 @@ impl Inner {
         );
         if let Err(e) = conn.execute_batch(&sql) {
             let _ = conn.execute_batch("ROLLBACK");
-            log::warn!("the timeline's lane counts could not be materialised: {e}");
+            debrief_core::log_failure!(warn, "the timeline's lane counts could not be materialised", e);
             return Ok(None);
         }
         self.cache_put(conn, "lane-counts", key, &unit.to_string())?;

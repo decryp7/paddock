@@ -305,7 +305,8 @@ fn import_source<R: Read + Seek>(
     };
     // The reason is what the user sees; a failure to remove the partial source is logged.
     if let Err(e) = sink.abort_source(id) {
-        log::warn!(source = src.path.as_str(); "could not remove a partly imported source: {e:#}");
+        // The source by its id: its path is the user's.
+        crate::log_failure!(warn, "could not remove a partly imported source", e; Source = id.0);
     }
     Outcome::Unrecognized(UnrecognizedFile {
         path: src.path.clone(),

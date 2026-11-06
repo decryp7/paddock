@@ -123,7 +123,7 @@ impl Builtins {
         match load_manifests(exe) {
             Ok(manifests) => Builtins::from_manifests_with(exe, manifests, adjust),
             Err(e) => {
-                log::error!("Plugins unavailable: {e}");
+                debrief_core::log_failure!(error, "Plugins unavailable", e);
                 Builtins {
                     processes: Vec::new(),
                     problem: Some(e),

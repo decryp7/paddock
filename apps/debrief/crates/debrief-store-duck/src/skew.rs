@@ -205,12 +205,12 @@ impl DuckStore {
         }
         for l in &affected {
             if let Err(e) = delete_or_trash(&conn, &seg_dir.join(&l.file)) {
-                log::warn!("an old data file could not be removed: {e:#}");
+                debrief_core::log_failure!(warn, "an old data file could not be removed", e);
             }
         }
         if !shifts.is_empty() {
             if let Err(e) = pos::rebuild(&conn) {
-                log::warn!("time-order positions could not be rebuilt: {e}");
+                debrief_core::log_failure!(warn, "time-order positions could not be rebuilt", e);
             }
             inner.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             inner.bump_version(&conn)?;

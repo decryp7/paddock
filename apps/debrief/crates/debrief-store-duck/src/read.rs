@@ -1712,7 +1712,7 @@ impl sql::FieldSource for WithHits<'_> {
             }
             Ok(None) => None,
             Err(e) => {
-                log::warn!("word search falls back to substrings: {e:#}");
+                debrief_core::log_failure!(warn, "word search falls back to substrings", e);
                 None
             }
         }

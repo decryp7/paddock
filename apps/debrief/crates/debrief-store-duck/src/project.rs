@@ -105,7 +105,7 @@ impl DuckStore {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                 }
                 Err(e) => {
-                    log::warn!("checkpoint before the export failed: {e}");
+                    debrief_core::log_failure!(warn, "checkpoint before the export failed", e);
                     break;
                 }
             }

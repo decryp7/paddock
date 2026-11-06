@@ -248,7 +248,7 @@ impl Inner {
         if let Some(f) = &self.fts {
             for id in ids {
                 if let Err(e) = f.delete_source(*id) {
-                    log::warn!("could not remove source {id} from the full-text index: {e:#}");
+                    debrief_core::log_failure!(warn, format!("could not remove source {id} from the full-text index"), e);
                 }
             }
         }
@@ -443,16 +443,16 @@ impl Inner {
             });
             out.sources_changed.extend(done.iter().filter(|a| a.events > 0).map(|a| a.id));
             if let Err(e) = pos::append(conn, first_new, before) {
-                log::warn!("time-order positions could not be extended: {e}");
+                debrief_core::log_failure!(warn, "time-order positions could not be extended", e);
             }
             match compact::pending(conn) {
                 Ok(p) if !p.is_empty() => {
                     if let Err(e) = compact::compact(conn, &self.dir, &self.schema) {
-                        log::warn!("segment compaction failed: {e:#}");
+                        debrief_core::log_failure!(warn, "segment compaction failed", e);
                     }
                 }
                 Ok(_) => {}
-                Err(e) => log::warn!("segment compaction could not be planned: {e:#}"),
+                Err(e) => debrief_core::log_failure!(warn, "segment compaction could not be planned", e),
             }
             self.generation.fetch_add(1, Ordering::SeqCst);
             self.bump_version(conn)?;
@@ -556,7 +556,7 @@ impl DuckStore {
                         changed_ms: Some(wall_ms()),
                     };
                     if let Err(e) = save_tracked(&conn, s.id, &t) {
-                        log::warn!("the tail state of a source could not be saved: {e}");
+                        debrief_core::log_failure!(warn, "the tail state of a source could not be saved", e);
                     }
                 }
                 None => out.added.push(s.id),
@@ -691,7 +691,7 @@ impl Inner {
                     ..Tracked::default()
                 };
                 if let Err(e) = save_tracked(&conn, s.id, &t) {
-                    log::warn!("the tail state of a source could not be saved: {e}");
+                    debrief_core::log_failure!(warn, "the tail state of a source could not be saved", e);
                 }
             }
             report.events += full.events;

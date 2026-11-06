@@ -190,7 +190,7 @@ pub fn import_files_parallel(
     let base = match sink.reserve_sources(total) {
         Ok(b) => Some(b.0),
         Err(e) => {
-            log::warn!("could not reserve source ids: {e:#}");
+            crate::log_failure!(warn, "could not reserve source ids", e);
             None
         }
     };
@@ -223,7 +223,7 @@ pub fn import_files_parallel(
         Ok(pool) => pool.install(|| order.par_iter().map(|&i| (i, one(i))).collect()),
         // No threads to be had: read one file after another.
         Err(e) => {
-            log::warn!("parallel import unavailable ({e}); reading files one by one");
+            crate::log_failure!(warn, "parallel import unavailable; reading files one by one", e);
             order.iter().map(|&i| (i, one(i))).collect()
         }
     };

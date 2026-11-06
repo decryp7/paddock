@@ -319,7 +319,7 @@ impl Inner {
                     log::info!(EventId = "store.compact", Replaced = c.replaced as u64, Written = c.written as u64, Ms = ms(tc.elapsed()); "compacted {} segments into {}", c.replaced, c.written);
                 }
                 Ok(_) => {}
-                Err(e) => log::warn!(EventId = "store.compact.failed"; "segment compaction failed: {e:#}"),
+                Err(e) => debrief_core::log_failure!(warn, "segment compaction failed", e; EventId = "store.compact.failed"),
             }
         }
         times.compact_ms = ms(tc.elapsed());
@@ -329,14 +329,14 @@ impl Inner {
         match pos::rebuild(conn) {
             Ok(()) => log::debug!(EventId = "store.positions.rebuilt", Ms = ms(tp.elapsed()); "time-order positions rebuilt"),
             Err(e) => {
-                log::warn!(EventId = "store.positions.failed", Ms = ms(tp.elapsed()); "time-order positions could not be rebuilt: {e}")
+                debrief_core::log_failure!(warn, "time-order positions could not be rebuilt", e; EventId = "store.positions.failed", Ms = ms(tp.elapsed()))
             }
         }
         times.pos_ms = ms(tp.elapsed());
         stage("Saving the index");
         // Write the catalog into the database file now, so a reopen does not replay the WAL.
         if let Err(e) = conn.execute_batch("CHECKPOINT") {
-            log::warn!(EventId = "store.checkpoint.failed"; "checkpoint failed: {e}");
+            debrief_core::log_failure!(warn, "checkpoint failed", e; EventId = "store.checkpoint.failed");
         }
         self.generation.fetch_add(1, Ordering::SeqCst);
         if let Some(f) = &self.fts {
@@ -420,7 +420,7 @@ impl Inner {
         writer::refresh_view(&conn, &self.dir, &self.schema).map_err(|e| engine(format!("{e:#}")))?;
         if let Some(f) = &self.fts {
             if let Err(e) = f.clear() {
-                log::warn!("could not clear the full-text index: {e:#}");
+                debrief_core::log_failure!(warn, "could not clear the full-text index", e);
             }
         }
         let unrecognized = std::mem::take(&mut write_lock(&self.state).unrecognized);
@@ -434,7 +434,7 @@ impl Inner {
         if let Ok(conn) = self.conn() {
             for t in ASIDE_TABLES {
                 if let Err(e) = conn.execute_batch(&format!("DROP TABLE IF EXISTS aside_{t}")) {
-                    log::warn!("could not drop aside_{t}: {e}");
+                    debrief_core::log_failure!(warn, format!("could not drop aside_{t}"), e);
                 }
             }
             for f in aside.files {
@@ -487,7 +487,7 @@ impl Inner {
         writer::refresh_view(&conn, &self.dir, &self.schema).map_err(|e| engine(format!("{e:#}")))?;
         if let Some(f) = &self.fts {
             if let Err(e) = f.clear() {
-                log::warn!("could not clear the full-text index: {e:#}");
+                debrief_core::log_failure!(warn, "could not clear the full-text index", e);
             }
         }
         for f in files {
@@ -726,7 +726,7 @@ fn record_fingerprints(conn: &Connection, fingerprints: &[(u32, debrief_core::in
             "INSERT OR REPLACE INTO source_fingerprints VALUES (?, ?, ?)",
             params![id, fp.size, fp.hash],
         ) {
-            log::warn!("could not keep the fingerprint of source {id}: {e}");
+            debrief_core::log_failure!(warn, format!("could not keep the fingerprint of source {id}"), e);
             return;
         }
     }
@@ -777,7 +777,7 @@ fn open_db(dir: &Path, opts: &StoreOptions) -> StoreResult<Connection> {
     let conn = Connection::open_with_flags(dir.join(DB_FILE), config).map_err(engine)?;
     // Segment footers are parsed once, not per query (a setting of the Parquet reader, so set after opening).
     if let Err(e) = conn.execute_batch("SET GLOBAL parquet_metadata_cache = true") {
-        log::warn!("Parquet metadata cache unavailable: {e}");
+        debrief_core::log_failure!(warn, "Parquet metadata cache unavailable", e);
     }
     Ok(conn)
 }
@@ -912,7 +912,7 @@ impl DuckStore {
             match registry.compile_parsers(&parsers.base().profile, &setup) {
                 Ok(p) => p,
                 Err(e) => {
-                    log::warn!("the parser choices of this store cannot be applied: {e:#}");
+                    debrief_core::log_failure!(warn, "the parser choices of this store cannot be applied", e);
                     parsers
                 }
             }
@@ -926,7 +926,7 @@ impl DuckStore {
         let (fts, fts_error) = match started {
             Ok(f) => (Some(f), None),
             Err(e) => {
-                log::warn!("the full-text index is unavailable: {e:#}");
+                debrief_core::log_failure!(warn, "the full-text index is unavailable", e);
                 (None, Some(format!("the full-text index is unavailable: {e:#}")))
             }
         };
@@ -934,7 +934,7 @@ impl DuckStore {
             .try_clone()
             .map_err(anyhow::Error::from)
             .and_then(|c| catalogue::CatalogueService::start(c, write_lock.clone()))
-            .map_err(|e| log::warn!("the catalogue is unavailable: {e:#}"))
+            .map_err(|e| debrief_core::log_failure!(warn, "the catalogue is unavailable", e))
             .ok();
         DuckStore {
             inner: Arc::new(Inner {
@@ -1063,7 +1063,7 @@ impl DuckStore {
         // Not fatal: a stale data version only means cached analyses are recomputed late.
         let bumped = self.inner.conn().and_then(|c| self.inner.bump_version(&c));
         if let Err(e) = bumped {
-            log::warn!("the data version could not be bumped: {e}");
+            debrief_core::log_failure!(warn, "the data version could not be bumped", e);
         }
     }
 }
@@ -1145,7 +1145,7 @@ impl Ingest for DuckStore {
                 if let Some(f) = &self.inner.fts {
                     for id in &gone {
                         if let Err(e) = f.delete_source(*id) {
-                            log::warn!("could not remove source {id} from the full-text index: {e:#}");
+                            debrief_core::log_failure!(warn, format!("could not remove source {id} from the full-text index"), e);
                         }
                     }
                 }
@@ -1184,7 +1184,7 @@ impl Ingest for DuckStore {
         }
         if let Some(f) = &self.inner.fts {
             if let Err(e) = f.delete_source(id.0) {
-                log::warn!("could not remove source {id} from the full-text index: {e:#}");
+                debrief_core::log_failure!(warn, format!("could not remove source {id} from the full-text index"), e);
             }
         }
         self.inner.maintain(&conn, None);

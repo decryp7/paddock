@@ -586,7 +586,7 @@ impl Inner {
             "INSERT OR REPLACE INTO analysis_cache VALUES (?, ?, ?, ?, ?)",
             params![version, kind, fnv1a(key), key, value],
         ) {
-            log::warn!("caching {kind} failed: {e}");
+            debrief_core::log_failure!(warn, format!("caching {kind} failed"), e);
         }
         Ok(())
     }

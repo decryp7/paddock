@@ -213,7 +213,7 @@ impl Stopper {
             }
         });
         if let Err(e) = spawned {
-            log::warn!("the SQL console's time limit is unavailable: {e}");
+            debrief_core::log_failure!(warn, "the SQL console's time limit is unavailable", e);
         }
         Ok(Stopper {
             timed_out,

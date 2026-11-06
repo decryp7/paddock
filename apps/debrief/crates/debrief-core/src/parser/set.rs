@@ -129,7 +129,7 @@ impl ParserSet {
             let parser = match Parser::parse_unchecked(&p.toml) {
                 Ok(parser) => parser,
                 Err(e) => {
-                    log::warn!("a parser of the library does not parse and is left out: {e}");
+                    crate::log_failure!(warn, "a parser of the library does not parse and is left out", e);
                     continue;
                 }
             };
@@ -147,7 +147,9 @@ impl ParserSet {
                     matcher,
                     compiled: Arc::new(compiled),
                 }),
-                Err(e) => log::warn!(parser = parser.id.as_str(); "a parser of the library does not compile and is left out: {e:#}"),
+                Err(e) => {
+                    crate::log_failure!(warn, "a parser of the library does not compile and is left out", e; parser = parser.id.as_str())
+                }
             }
         }
         Ok(ParserSet {

@@ -311,7 +311,7 @@ fn read_index(dir: &Path) -> Index {
             Index::default()
         }
         Err(e) => {
-            log::warn!("the parser library index cannot be read ({e}): every parser is enabled");
+            crate::log_failure!(warn, "the parser library index cannot be read: every parser is enabled", e);
             Index::default()
         }
     }

@@ -349,7 +349,7 @@ impl Drop for LiveTail {
         if let Err(e) = std::thread::Builder::new().name("debrief-live-reaper".into()).spawn(reap) {
             // No thread to spare: the worker ends on its own (it sees the token); the watchers end with
             // their last reference.
-            log::warn!("cannot start the live tail reaper: {e}");
+            crate::log_failure!(warn, "cannot start the live tail reaper", e);
         }
     }
 }
