@@ -1,11 +1,12 @@
 # 69. UMDH leak analysis over a series: trends per call site, symbols by identity, findings that say what they could not check
 
-- Status: Proposed. Revision 2 (2026-11-07) answers the independent review of `cee49f7a1` (P1-4 to P1-6 and the P2s).
+- Status: Proposed. Revision 2 (2026-11-07) answers the independent review of `cee49f7a1` (P1-4 to P1-6 and the P2s);
+  revision 3 the re-review's P2s (ADR 0068 Accepted, confidence and growth rules aligned, restart signals).
 - Date: 2026-11-07
 - Related: ADR 0023 (dumps and UMDH: reader plugin, engine crate, problem-first views), ADR 0036 (symbols by PDB identity;
   its section 2 "UMDH is not symbolised from folders" is amended by D4 here), ADR 0059 (Pitwall as the AI engine),
   ADR 0064 (one streaming import trait; its SI-11 moves the UMDH reader to a line loop), ADR 0065 (bounded replies),
-  ADR 0066 (how Debrief reads times: provenance), ADR 0068 (dump checks, Proposed, on `docs/debrief-dump-analysis-adr`:
+  ADR 0066 (how Debrief reads times: provenance), ADR 0068 (dump checks, **Accepted** 2026-11-07, `1ba8e4ecd` on `docs/debrief-dump-analysis-adr`:
   D7 here returns its `CheckReport` shape; where they differ, ADR 0068 wins); family
   rules 42 (share first), 46 (no LLM for large jobs), 48 (benchmarks recorded), 51 (threads or cheaper), 55 (one
   implementation per mechanism); ER-14, ER-17 to ER-20, ER-27
@@ -102,12 +103,21 @@ first, or from one UMDH diff log (a series of two with UMDH's own numbers). Ever
 explanation) reads the series, so "compare with" disappears as a separate mode: choosing two logs is a series of two.
 The engine checks that the logs belong to **one process instance**, the `ProcessInstance` of the roadmap
 proposal's foundation (pid, process start time and main image identity where known; rule 53 and ADR 0068 §1 use the
-same triple). A UMDH snapshot records neither pid nor start time [D: the documented log shape has none], so the
-instance comes from, in order: the collector's manifest when Debrief or `debrief-agent` took the snapshot; the main
-executable's base address and size in each log's module list (a restart under ASLR almost always moves it [J]); else
-*unconfirmed*. DLLs loading or unloading between snapshots never split the series: only the main executable's entry is
-compared. A changed main-executable base splits the series ("the process restarted between snapshot 3 and 4") and both
-parts are offered; an unconfirmed instance gives at most `Low` confidence and a Not checked item. A mix of snapshots and
+same triple). A UMDH snapshot records neither pid nor start time [U: none appears in the documented examples read], so
+the instance comes from, in order: the collector's manifest when Debrief or `debrief-agent` took the snapshot (pid and
+start time, which decide alone); else three independent signals between consecutive snapshots:
+
+- the main executable's base address and size in each log's module list (a restart under ASLR usually moves it, but
+  Windows may map a cached relocated image at the same base again within one boot [J], so an unchanged base proves
+  nothing on its own);
+- a drop of the heap total by more than `restart_drop` (default 50 %, a Setting) [J];
+- the set of `BackTrace` ids collapsing to low ids (a new stack trace database numbers from the start: most of the
+  later snapshot's ids lower than the earlier snapshot's median id) [J].
+
+DLLs loading or unloading never count: only the main executable's entry is compared. When the signals agree on a
+restart the series is split ("the process restarted between snapshot 3 and 4") and both parts are offered; when they
+agree on no restart it is one instance, *unconfirmed* without a manifest; **when they disagree** the series is kept
+whole with `InstanceUnconfirmed` and confidence at most `Low`, and the item names the signals that disagreed. A mix of snapshots and
 diff logs is refused with that sentence.
 
 ### D2. Identity in three levels, grouping by call site by default
@@ -143,10 +153,15 @@ three or more `Growing`):
 
 | Snapshots | Classes that may be given | Confidence at most |
 |---|---|---|
-| 2 | *grew*, *shrank*, *no growth*; the check's verdict is never a leak (D7) | `Low` |
+| 2 | *grew*, *shrank*, *no growth*; the check's verdict is never a leak (D7) | `Medium` (as ADR 0068 §4 for two dumps: the growth itself is measured, only its meaning is open) |
 | 3 | all classes except *growth then plateau* (needs `plateau_steps` 2 flat steps after growth, so at least 4) | `Low` |
 | 4 to 5 | all | `Medium` |
-| 6 or more | all | `High` |
+| 6 or more | all | `High` only when the call site grew in **every** step (ADR 0068's `Growing` rule); with flat or lower steps (`rising_share` ≥ 0.7 but < 1) at most `Medium` |
+
+Why *steady growth* allows flat steps while ADR 0068's `Growing` needs every step: a UMDH series has many snapshots
+of one call site's live bytes, which a quiet interval or a freed burst lowers for one step without the leak stopping
+(test 3); a dump series is at most 16 dumps of coarse memory categories. The two agree where it matters: only growth in
+every step reaches `High`, and two snapshots or two dumps never give more than `Grew` at `Medium`.
 
 Precedence, first that matches: *new* / *gone* (absent at one end), *shrinking* (slope < 0), *one step* (one step
 ≥ 0.8 of the growth, whatever the others do), *growth then plateau*, *steady growth*, *fluctuating*. So a load step is
@@ -197,7 +212,7 @@ growth is 1,064-byte blocks", the hint DebugDiag gives [D]. A diff log has no si
 
 ### D7. A check report in ADR 0068's shape
 
-ADR 0068 (Proposed 2026-11-07, `docs/debrief-dump-analysis-adr`, its section 1 and the `CheckReport` type of its
+ADR 0068 (Accepted 2026-11-07, `1ba8e4ecd` on `docs/debrief-dump-analysis-adr`, its section 1 and the `CheckReport` type of its
 section 2) defines the report every dump check returns. The UMDH series returns the same parts, as a fourth check kind
 (**`CheckKind::HeapGrowth`**, the name ADR 0068 revision 2 asks for: a check is named for what it looks at, and a
 leak is a verdict it may or may not reach) so the UI, the report block and Pitwall read one shape:
@@ -369,5 +384,5 @@ The first useful cut is U0–U4 + U6 + U9 (about 18 days): series, call sites, c
 | D-d | Thresholds as Settings with today's constants as defaults | Yes |
 | D-e | Private Bytes comparison when a `.blg` or monitor capture of the same pid exists | Yes; it answers "is it even the NT heap" first |
 | D-f | `-g` unreferenced-block output | Later; a real sample only from a test program in a local VM, fixtures invented in its shape |
-| D-g | Minimum snapshots and caps (D3, D10): no leak verdict from two logs; `Low` at 3, `Medium` at 4–5, `High` from 6; at most 64 snapshots, 200,000 stacks per log, 1,000,000 interned frames | Yes |
+| D-g | Minimum snapshots and caps (D3, D10): no leak verdict from two logs (`Grew` at most `Medium`, as ADR 0068); `Low` at 3, `Medium` at 4–5, `High` from 6 only when every step grew; at most 64 snapshots, 200,000 stacks per log, 1,000,000 interned frames | Yes |
 | D-h | The process instance check (D1) on the shared `ProcessInstance` of the roadmap's foundation | Yes |

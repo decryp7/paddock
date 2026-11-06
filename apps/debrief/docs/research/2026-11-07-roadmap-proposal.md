@@ -78,12 +78,14 @@ must meet.
   `u32::MAX` "until 6c widens them" (`anomaly.rs:89`; ADR 0014 promised the widening, it was not done). Ids are never
   reused, so a 1B store with re-imports gets within a few times of `u32::MAX` [calc: 4.29B]. A saturated id points at the
   wrong event silently. **Target**: `EventId` (u64) on every DTO, the generated TypeScript and the wire, decided together
-  with ADR 0063 (the wire's integer encoding: JSON numbers lose precision above 2^53, so the TS side needs a string or a
-  bigint) and done **before** citations and report blocks. Size 3 [J].
+  with ADR 0063 (the wire's integer encoding: JSON numbers lose precision above 2^53, so the TS side needs a string, a
+  bigint, or a **declared bound**: ids below 2^53, checked at the sink with a typed error, so they stay plain numbers;
+  2^53 is about 9 × 10^15, far above any store [calc]) and done **before** citations and report blocks. Size 3 [J].
 - **`ProcessInstance`** [J]. Dumps (ADR 0068 §1: pid, start time, main module identity; rule 53), UMDH series (ADR 0069
   D1), the thread view (a thread id is only meaningful within one instance) and evidence references all need "the same
   process". One type in `debrief-core`: pid, start time (with ADR 0066 provenance), main image identity where known, and
-  a confirmed/unconfirmed state with the reason. Size 1.5 (type, the dumps engine and UMDH on it) [J].
+  a confirmed/unconfirmed state with the reason. Size 0.5 after netting: the type and UMDH on it; the dumps' same-process
+  check is ADR 0068 WP-6 [J].
 - **State of event references** [S]. Three types point at an event: AI `Citation::Record { id: u32, verified }`
   (`crates/debrief-ai/src/assistant/citations.rs:11`), report `Block::Events { ids: Vec<u32> }`
   (`crates/debrief-core/src/report/mod.rs:108`), note anchors `Event { event_id: u64, time, source, excerpt }`
@@ -149,7 +151,7 @@ must meet.
 - **Target.** ADR 0068's check report (verdict, confidence with reasons, evidence as `EvidenceRef`s, Not checked) as one
   `Finding` type in `debrief-core`, used by every analysis, the report's Finding block and Pitwall's fact bundle. No ADR
   makes it shared yet: a short amendment to ADR 0068, or a section of layer F's ADR.
-- **Size.** 2 (type, the four producers mapped, report block) [J].
+- **Size.** 1 after netting (the other producers mapped, the report block typed); the contract is ADR 0068 WP-1 [J].
 
 ### J. Time model and provenance
 
@@ -239,10 +241,10 @@ What can start earlier or run in parallel [J unless marked]:
 | PH2b (after 2.6a, 2.6b, PH1, PH2a, SI-8) | T+10.5 → T+14 | T+5.5 → about T+9 to T+10 |
 | PH4 + SI-9 | T+14 → T+18 | about T+10 → T+14 |
 | 2.6d (after 2.6b, 2.6c, IP1) | T+9.5 → T+13.5 | T+4.5 → T+8.5 |
-| 3.4 + SI-10: the event log opens | T+18 → **about T+23** | about T+14 → **T+16 to T+17**; with item 3, about T+15 to T+16 |
+| 3.4 + SI-10: the event log opens | T+18 → **about T+23** | T+14 → **about T+19**; with item 3 (3.4's host side built from PH2b, about T+10), about **T+17** |
 
-So the 1.43 GiB event log opens at about T+16 to T+17 instead of the plan's stated T+19 (which is about T+23 once PH4 is
-counted), if the conditions of item 1 hold. F12 (the folder dialog end to end) moves less: its chain (F1 → F3 → F4 →
+So the 1.43 GiB event log opens at about T+19, or about T+17 with item 3, against the plan's stated T+19, which is
+about T+23 once PH4 is counted; this holds only if the conditions of item 1 hold. F12 (the folder dialog end to end) moves less: its chain (F1 → F3 → F4 →
 F7, F10 on `pd-table`, F11 on SI-4) gains about 2 days from item 5, to about T+28 [J]. The tag date does not move from
 this alone (§9.3: capacity, not the path, sets the end).
 
@@ -252,15 +254,15 @@ this alone (§9.3: capacity, not the path, sets the end).
 |---|---|---|---|---|
 | FD-E1 | Evidence reference ADR (layer E) | 2 | ADR 0051, 0066 | design |
 | FD-U | `EventId` (u64) on every DTO, generated TypeScript and wire; `sample_id()` removed | 3 | ADR 0063 decided | no (app crates; the wire encoding with ADR 0063) |
-| FD-P | `ProcessInstance` type; dumps engine and UMDH on it | 1.5 | ADR 0068 §1 | no |
+| FD-P | `ProcessInstance` type in `debrief-core` and UMDH on it (netted: the dumps' same-process check is ADR 0068 WP-6, which builds on this type) | 0.5 | ADR 0068 §1 | no |
 | FD-E2 | `EvidenceRef`, resolver, notes/reports/AI moved | 3 | FD-E1, FD-U, FD-B | no (app crates) |
 | FD-B | Ordinal per source: `line` for text, a declared ordinal for the rest, uniqueness at the sink (ADR 0062 amendment) | 1.5 | IX-B1 | no |
-| FD-I | One `Finding` type (ADR 0068's shape) for all analyses and the report block | 2 | ADR 0068 | no |
+| FD-I | ADR 0068's `CheckReport` made the shared finding: health, profiling and heap findings mapped, the report's Finding block typed (netted: the contract itself is ADR 0068 WP-1) | 1 | ADR 0068 WP-1 | no |
 | FD-F | Analyses at scale ADR with measurements | 3 | Q-1, 4.3 | design |
 | FD-G | MEM-6 scope widened to dump and UMDH documents | 1 | MEM-6 | design |
 | FD-K | Analysis run log lines | 0.5 | FD-F | no |
 | FD-M | Planted-incident generator and recall check | 3 | 4.3 | the bench workflow line waits |
-| | **Total** | **20.5** | | |
+| | **Total** | **18.5** (after netting 2 against ADR 0068) | | |
 
 ### 2.3 Then: usefulness in 1.2 (approved items and tiny ones)
 
@@ -273,8 +275,8 @@ Approved items without a size in the plan, priced here [J] (replace with their A
 | Report blocks for analysis results | 5 | FD-I, FD-E2 | engine-rendered |
 | Pitwall report drafting | 4 | FD-I, report blocks, ADR 0059 | facts only (rule 46) |
 | Thread/sequence view | 7 | FD-B, FD-P, 2.4/3.3 lanes | after M3b for its UI |
-| .NET dump stacks | 11 [P] | ADR 0068 | ADR 0068's WP-0 and WP-12 (its total 63, native checks 52 without them) |
-| Dump checks, native (ADR 0068 without .NET) | 52 [P] | ADR 0068 | not in the totals below; shown as a second line in 2.5 |
+| ADR 0068, dump checks, native (all WPs but WP-0 and WP-12) | 81 [P] | - | Accepted 2026-11-07 (`1ba8e4ecd`) with its whole scope in 1.2 |
+| ADR 0068, .NET managed state (WP-0 3 + WP-12 15) | 18 [P] | WP-0, WP-1, WP-RR | the approved ".NET dump stacks" |
 
 Tiny usefulness items that do not compete with the chain (app only, small files, no shared code): UMDH reader fixes and
 test generator (2, landing with SI-11), known issues and playbooks scoped to the window (1), CLI `--profile` (1), the
@@ -299,17 +301,19 @@ import in local and relative time (1, with ADR 0066's Z packages), SQL result as
 
 | Added to 1.2 | Raw days | With 20 % |
 |---|---|---|
-| Foundation additions (2.2) | 20.5 | 24.6 |
-| Approved items priced here (2.3, without ADR 0068's native checks) | 31.5 | 37.8 |
+| Foundation additions (2.2), netted | 18.5 | 22.2 |
+| Approved items without a size elsewhere (time shapes, citations, report blocks, Pitwall drafting, thread view) | 20.5 | 24.6 |
+| ADR 0068, Accepted, whole scope (81 native + 18 .NET) | 99 | 118.8 |
 | Tiny usefulness items | 7 | 8.4 |
-| **Total** | **59** | **70.8** [calc] |
-| ADR 0068's native checks, if all in 1.2 | 52 | 62.4 |
+| **Total** | **145** | **174** [calc] |
 
-At §9.4's planning number of 5.5 agent-days a working day that is about **13 working days**: the end moves from about
-**2027-04-28** (§9.5) to about **2027-05-17** [calc; J for the sizes]. With all of ADR 0068's native checks in 1.2 as
-well, about 11 more working days: about **2027-06-01**. The chain speed-ups of 2.1 do not shorten the end (capacity sets
-it), but they bring the user's first step (the large event log opens) to about T+16 to T+17, against the plan's stated
-T+19 and about T+23 once PH4 is counted.
+Netted: 2 days, FD-P against ADR 0068 WP-6 (same-process check) and FD-I against WP-1 (the `CheckReport` contract); 1
+each. Without netting it is 147 raw, 176.4 with the buffer.
+
+At §9.4's planning number of 5.5 agent-days a working day, 174 / 5.5 is about **32 working days**: the end moves from
+about **2027-04-28** (§9.5) to about **2027-06-11** [calc; J for the sizes; no holidays counted]. The chain speed-ups of
+2.1 do not shorten the end (capacity sets it), but they bring the user's first step (the large event log opens) to about
+T+19, or T+17 with item 3, against about T+23 for the plan's own rows once PH4 is counted.
 
 ## 3. Decisions for the user
 
@@ -317,12 +321,12 @@ T+19 and about T+23 once PH4 is counted.
 |---|---|---|
 | R1 | Write the chain's waiting packages (1.4 + B1, IP1, 2.6c, PH1, 2.2, 1.3) on branches before the Dyno tag | **Yes, conditionally**: only after 0.5 is reviewed, one branch per crate, merged (not rebased) after the tag, on spare agents only; the gain is bounded by the working days between 0.5's review and T (2.1's table) |
 | R2 | Layer E, one evidence reference for notes, reports, AI and findings, before citations and report blocks | **Yes, in 1.2** (5 days); otherwise citations are built twice |
-| R2b | `u64` event ids on every DTO and wire (FD-U), and when | **In 1.2, decided with ADR 0063 (the wire's integer encoding) and done before citations and report blocks** (3 days) |
-| R2c | One `ProcessInstance` (pid, start time, main image identity) for dumps, UMDH, the thread view and evidence references (FD-P) | **Yes, in 1.2** (1.5 days), with ADR 0068 |
+| R2b | `u64` event ids on every DTO and wire (FD-U), and when | **In 1.2, decided with ADR 0063 and done before citations and report blocks** (3 days); for the TypeScript side, a declared bound (ids < 2^53, checked at the sink) is the cheapest of string, bigint or bound |
+| R2c | One `ProcessInstance` (pid, start time, main image identity) for dumps, UMDH, the thread view and evidence references (FD-P) | **Yes, in 1.2** (0.5 after netting with ADR 0068 WP-6; was 1.5 days), with ADR 0068 |
 | R3 | Layer F, an ADR on analyses at 1B events, in 1.2; its build in 1.3. Scope includes the query language's 2M refusal and known issues and playbooks on store-side counts | **Yes** (3 days); if the refusal must go in 1.2, the store-side counts for known issues and playbooks first (about 1.5 days [J]) |
 | R4 | Make ADR 0068's check report the one shared `Finding` (layer I) | **Yes** (2 days) |
 | R5 | Planted-incident corpus (layer M) | **Yes, in 1.2** (3 days): the only way to measure usefulness |
-| R6 | ADR 0069 (UMDH series): reader fixes in 1.2 with SI-11, the rest in 1.3; minimum snapshots and caps as its D-g (no leak verdict from two logs; `Low` at 3, `Medium` at 4–5, `High` from 6; 64 snapshots, 200,000 stacks, 1,000,000 frames) | **Yes** |
-| R7 | If the date matters, defer first: part of ADR 0068 (its own D-list says which checks), then .NET dump stacks (11) and the thread/sequence view (7) to 1.3, then Pitwall drafting (4) | .NET plus the thread view save about 21.6 days with the buffer (about 3.9 working days), with Pitwall drafting about 26.4 (about 4.8) [calc]; keep layers E and I and the report blocks, which the rest needs |
+| R6 | ADR 0069 (UMDH series): reader fixes in 1.2 with SI-11, the rest in 1.3; minimum snapshots and caps as its D-g (no leak verdict from two logs (`Grew` at most `Medium`, as ADR 0068); `Low` at 3, `Medium` at 4–5, `High` from 6 only when every step grew; 64 snapshots, 200,000 stacks, 1,000,000 frames) | **Yes** |
+| R7 | If the date matters, what to defer to 1.3 (ADR 0068 was accepted with its whole scope in 1.2, so deferring any of it reverses that decision) | From ADR 0068's own list, the separable packages: **.NET managed state, WP-0 + WP-12, 18**; capture presets and flags, WP-11, 3; the unexpected-modules pack, WP-16, 2. Then outside it: the thread/sequence view, 7, and Pitwall drafting, 4. All five: 34 raw, 40.8 with the buffer, about 7.4 working days, so the end about **2027-06-01** [calc]. .NET alone: 21.6 with the buffer, about 4 working days (about 2027-06-07). Not deferrable without rework: WP-1, WP-2, WP-RR, WP-8 and WP-3 (the base of every check), WP-17 (it removes a second minidump reader, rule 55), WP-9 (events around the dump, the link to the logs). Keep layers E and I and the report blocks, which the rest needs |
 | R8 | Keep or drop W0 (§9.6 D2) | Keep, but only if ADR 0063 is decided before 3.3 and 4.5 build their replies; else drop and reject ADR 0063 for 1.2 |
 | R9 | Usefulness UI before or after the workbench move (M3b, Y12) | After, except the tiny items |
