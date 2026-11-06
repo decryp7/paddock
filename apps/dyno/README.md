@@ -111,12 +111,10 @@ Dyno 1.0.0 is released on the repository's releases page, and 1.1.0 is in progre
 Run the NSIS installer (`Dyno_<version>_x64-setup.exe`). It installs once for every user of the PC, in Program Files, after one User Account Control prompt. At logon a per-user **Run** value named `Dyno` starts the app in the tray, and the app starts the agent (not a service: a service lives in session 0 and cannot see your idle time, foreground window
 or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)).
 
-<!-- TODO(coordinator): a researcher is checking whether 1.0.0's updater reads the dyno-latest feed; confirm or fix this claim. -->
-Coming from 1.0.0, update by hand once, because 1.0.0 does not look at these releases and was installed per user:
+Coming from 1.0.0, update by hand once. 1.0.0 was installed per user; it may offer 1.1.0 but cannot install it (after the User Account Control prompt the setup stops with "Uninstall the older Dyno first (Settings > Apps), then run this installer again." and 1.0.0 starts again):
 
-1. Run the 1.1.0 setup. After the User Account Control prompt it stops and says "Uninstall the older Dyno first (Settings > Apps), then run this installer again."
-2. Uninstall Dyno 1.0.0 in Settings > Apps and leave **Delete the application data** unchecked. Your history stays: the data folder is per user.
-3. Run the 1.1.0 setup again and answer the User Account Control prompt.
+1. Uninstall Dyno 1.0.0 in Settings > Apps and leave **Delete the application data** unchecked. Your history stays: the data folder is per user.
+2. Run the 1.1.0 setup and answer the User Account Control prompt.
 
 After the install Dyno runs with your own rights; only the optional administrator helper runs elevated. Without it, figures Windows shows only to administrators are marked *Unavailable* with the reason.
 

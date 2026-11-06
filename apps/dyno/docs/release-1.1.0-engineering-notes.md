@@ -5,7 +5,7 @@ The full engineering detail of the 1.1.0 changelog (wire types, ADR and work-pac
 
 Dyno 1.1.0 adds the optional administrator helper, saved views, the benchmark tool, the network lists, world map and firewall view,
 power features, the per-metric menu-bar items, a free-size dashboard grid and dialogs that fit their content, and fixes the nine
-problems reported on 1.0.0. Update by hand once from the releases page: 1.0.0 does not look at these releases (see the note below).
+problems reported on 1.0.0. Update by hand once: 1.0.0 reads the same feed and may offer 1.1.0, but cannot install it (the per-machine setup's per-user guard stops it, exit code 40, and 1.0.0 starts again), so uninstall 1.0.0 first (Settings > Apps), then run the 1.1.0 setup. The history stays because the data folder is per user.
 The app and the agent speak protocol 4: update both together (they ship in one installer).
 
 ### Added

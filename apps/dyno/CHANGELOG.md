@@ -2,7 +2,7 @@
 
 ## [1.1.0] - 2026-11-04
 
-Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, network lists with a world map and a firewall view, power features, one menu-bar item per metric, a free-size dashboard and dialogs that fit their content. It also fixes the problems reported on 1.0.0. Update by hand once from the releases page: 1.0.0 does not look at these releases.
+Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, network lists with a world map and a firewall view, power features, one menu-bar item per metric, a free-size dashboard and dialogs that fit their content. It also fixes the problems reported on 1.0.0. Update by hand once: 1.0.0 may offer 1.1.0 but cannot install it, so uninstall 1.0.0 first (Settings > Apps), then run the 1.1.0 setup from the releases page. Your history stays.
 
 ### Added
 
