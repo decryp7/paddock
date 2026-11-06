@@ -734,6 +734,64 @@ does the time go? Every block below gives the date, build, machine, load, corpus
 
 Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
 
+### 2026-11-07, index feed bounded by bytes and re-measured with the physical footprint (SR1 and SR3 re-recorded, branch `debrief/import-search`)
+
+- **Why:** the SR1 block below measured the feed only as peak RSS (up to 2.4 GB against 1.0 to 1.4 GB) and never the footprint
+  (rule 26); the feed also held up to about 14 row groups of 65,536 built documents outside any budget. This block replaces the
+  memory claims of the SR1 and SR3 blocks (rule 48); their times stay as recorded.
+- **Commits:** base = `f9eda8eee` (SR1 feed: row groups of up to 65,536 rows, `READ_CHUNK` 2, queue depth 2, a 2-way parallel read)
+  -> change = `ff7f0ed57` (slices of at most 8,192 rows sized by the footer's uncompressed text bytes; `FEED_MEMORY` 64 MiB of
+  estimated document bytes acquired by the reader and released by the adding thread; every slice its own pool task, window of two
+  per read thread; read threads a Setting, 0 is Auto, at most 8). The base binary carries the same harness (footprint sampler) as
+  the change; nothing else differs in the harness.
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; benchmark night window (no other agent builds); a DuckLake trial ran
+  beside it. 1-minute load at the start of the 11 runs below was 4.4 to 8.7 and at the end 3.3 to 9.5: **no run went above 12**.
+- **Corpus and build:** `large10` (7.2 GB, invented, `gen_large.py`), imported once by the change (56,152,132 events, 2,806 MB of
+  segments, 45.6 s = 1.23M events/s, peak footprint 1,325 MB) into a kept store; every row below indexes that same store again.
+  Release builds of `import_ready` (base and change), 4 writer threads of 64 MB, `DEBRIEF_READY_REINDEX=1`.
+- **Command:** `DEBRIEF_READY_STORE=<kept store> DEBRIEF_READY_REINDEX=1 DEBRIEF_READY_INDEX=4,256 [DEBRIEF_READY_READ_THREADS=<n>]
+  import_ready --nocapture`, each run through the lane lock (`scratch/debrief-search/final.sh`, raw output in `f-*.txt` and
+  `runs.txt` beside it). "Peak footprint" is the harness process (`paddock_proc::process_memory`: `ri_phys_footprint`), sampled
+  every 20 ms.
+- **Numbers** (index ready for 56.15M docs):
+
+  | Build | Read threads | Run | Index ready | Docs/s | Peak footprint | Index segments |
+  |---|---|---|---|---|---|---|
+  | base | 2 (effective) | 1 | 108.7 s | 517k | 1,363 MB | 26 |
+  | base | 2 | 2 | 84.1 s | 668k | 1,491 MB | 20 |
+  | base | 2 | 3 | 83.6 s | 671k | 1,443 MB | 18 |
+  | change | Auto (8) | 1 | 125.5 s | 447k | 1,004 MB | 30 |
+  | change | Auto (8) | 2 | 77.2 s | 727k | 1,158 MB | 16 |
+  | change | Auto (8) | 3 | 96.6 s | 581k | 1,057 MB | 26 |
+  | change | 1 | 1 | 98.5 s | 570k | 873 MB | 26 |
+  | change | 2 | 1 | 88.9 s | 632k | 1,068 MB | 17 |
+  | change | 4 | 1 | 82.1 s | 684k | 1,044 MB | 16 |
+
+  Medians: base 84.1 s and 1,443 MB; change at Auto 96.6 s and 1,057 MB. One run per read-thread row, so differences under about
+  30% are noise (rule 51 sweep: 1 thread 98.5 s, 2 threads 88.9 s, 4 threads 82.1 s, Auto 8 threads 77 to 126 s: more read
+  threads do not make the index faster; the in-order writer is the limit again, as the earlier finding said).
+- **Verdict, memory:** **met.** The change's footprint is 25% lower than the base (median 1,057 MB against 1,443 MB; every
+  change run below every base run); the feed's own bound is `FEED_MEMORY` (64 MiB of estimated document bytes), proved with
+  10 KB events by `the_feed_holds_long_events_within_its_byte_budget` (4 MB budget, peak built bytes within it; the same files
+  with a 1 GB budget build more than 8 MB at once, so the probe sees a breach). The earlier RSS rise did not show in the
+  footprint. The footprint figures include the 4 writer heaps of 64 MB, the index files' pages and DuckDB's catalogue.
+- **Verdict, speed:** **no change shown.** Median 96.6 s against 84.1 s (1.15x slower), inside the run-to-run spread of the
+  base itself (83.6 to 108.7 s); the SR1 budget (index ready at least 2x faster than 2 writer threads) stays not shown.
+- **Common-word search p50 after the index is ready** (the harness runs 20 searches per word right after the index; merges
+  still run then), "timeout" (3,684,614 hits): base 263.7, 626.0, 568.2 ms; change (Auto) 587.2, 614.7, 549.2 ms; medians 568 ms
+  against 587 ms. "declined" (2,339,944 hits): base 252.3, 615.3, 544.4; change 576.2, 605.7, 543.2. "contoso orders"
+  (1,404,576 hits): base 278.6, 645.9, 580.4; change 609.4, 637.5, 568.8. The cause of the first base run's 264 ms is not
+  known (not investigated); the spread within one build (264 to 626 ms) is larger than the difference between builds, so
+  **no worsening is shown, and none ruled out below about 10%**. The rare-word search ("cap_...", 1 hit) is 9 to 10 ms in
+  every run.
+- **SR3 (catalogue), re-recorded:** `DEBRIEF_READY_RECATALOGUE=1` on the same store with the change (one worker, as shipped):
+  162.1 s, peak footprint 351 MB (load 7.2 at the start, 3.3 at the end); the SR3 block's 160.5 s with one worker and RSS 361 MB
+  agree. The `catalogue_workers` option is removed until the D-0 bound is decided (the test
+  `building_the_catalogue_keeps_its_unsaved_rows_bounded` measures 12 to 16 MB with one worker against its 16 MB bound, a margin
+  of 0 to 4 MB, and 20 to 24 MB with two or four).
+- **Not done:** merges held off during the bulk load; lifting the Auto cap of 4 writer threads; the store worker's own logger
+  (the step summary lines are written with `log::` and no logger is installed in the worker process).
+
 ### 2026-11-05, catalogue workers (plan SR3, branch `debrief/import-search`)
 
 - **Commit:** base = `debrief/p0-idle` merged into the branch (one catalogue thread, rows read one by one through
