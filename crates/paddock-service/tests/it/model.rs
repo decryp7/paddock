@@ -1832,18 +1832,21 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
         out += &format!("- {k}: {n} edges or states\n    MODEL_REPLAY='{replay}'\n    {why}\n");
     }
     println!("{out}");
-    // The alphabet is not silently trimmed: every event, fault and interruption was taken, and the floors hold.
+    // The alphabet is not silently trimmed: every event, fault and interruption was taken, and the floors hold. A run of one
+    // named configuration takes only what that configuration can (the elevation faults are NoAuto's).
+    if std::env::var("MODEL_CONFIG").is_err() {
     for e in ALL_EVS {
-        assert!(
-            by_event.get(&format!("{e:?}")).copied().unwrap_or(0) > 0,
-            "event {e:?} was never taken\n{out}"
-        );
-    }
-    for f in FAULTS {
-        assert!(
-            by_fault.get(&format!("{f:?}")).copied().unwrap_or(0) > 0,
-            "fault {f:?} was never injected\n{out}"
-        );
+            assert!(
+                by_event.get(&format!("{e:?}")).copied().unwrap_or(0) > 0,
+                "event {e:?} was never taken\n{out}"
+            );
+        }
+        for f in FAULTS {
+            assert!(
+                by_fault.get(&format!("{f:?}")).copied().unwrap_or(0) > 0,
+                "fault {f:?} was never injected\n{out}"
+            );
+        }
     }
     for i in ["CrashBefore", "CrashAfter", "Cancel", "WritesFail"] {
         assert!(
@@ -1851,14 +1854,17 @@ fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state(
             "interruption {i} was never taken\n{out}"
         );
     }
-    assert!(
-        states >= STATES_FLOOR,
-        "only {states} states (floor {STATES_FLOOR})\n{out}"
-    );
-    assert!(
-        edges >= EDGES_FLOOR,
-        "only {edges} edges (floor {EDGES_FLOOR})\n{out}"
-    );
+    // The floors are for the whole default run; one named configuration is a part of it.
+    if std::env::var("MODEL_CONFIG").is_err() {
+        assert!(
+            states >= STATES_FLOOR,
+            "only {states} states (floor {STATES_FLOOR})\n{out}"
+        );
+        assert!(
+            edges >= EDGES_FLOOR,
+            "only {edges} edges (floor {EDGES_FLOOR})\n{out}"
+        );
+    }
     let known: Vec<&str> = KNOWN_FAILING.iter().map(|(k, _)| *k).collect();
     let new: Vec<&&str> = kinds.keys().filter(|k| !known.contains(k)).collect();
     let fixed: Vec<&&str> = known.iter().filter(|k| !kinds.contains_key(*k)).collect();

@@ -239,7 +239,10 @@ impl Manager {
     /// or after this attempt's register call, and the registration points at this copy.
     pub(crate) fn proves_ours(&mut self, i: &Inspection, answers: bool) -> bool {
         let at = self.record.peek().0.registered_at;
-        (answers || i.job == crate::backend::Job::Running) && self.job_after_register(at) != Some(false) && i.points_here != Some(false)
+        (answers || i.job == crate::backend::Job::Running) && self.job_after_register(at) != Some(false)
+            && i.points_here != Some(false)
+            // On a mechanism that can tell, the registration is this version's definition.
+            && i.definition_current != Some(false)
     }
 
     /// Settles with a proof (clears the attempts); without one (a current definition that does not answer) remembers the version
