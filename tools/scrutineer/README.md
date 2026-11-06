@@ -4,6 +4,8 @@
 
 # Scrutineer
 
+**Dropped on 2026-11-05: the apps stay unsigned. This page is kept as a record.**
+
 **A tool for code-signing certificates: generate, sign, verify and install them in one place.**
 
 In motorsport, scrutineering is the technical inspection that certifies a car before it may race. Scrutineer does that
