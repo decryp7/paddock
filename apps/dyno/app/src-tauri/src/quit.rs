@@ -731,7 +731,10 @@ mod tests {
     fn a_resume_that_failed_keeps_the_marker_and_one_that_was_done_clears_it() {
         let dir = temp("keep");
         write_marker(&dir, 5).unwrap();
-        let mut failing = Svc { fail: true, ..Svc::default() };
+        let mut failing = Svc {
+            fail: true,
+            ..Svc::default()
+        };
         resume_at_start(&dir, &|| STOPPED_SERVICE, Ok(()), &mut failing);
         assert_eq!(peek_marker(&dir), Some(5), "tried again at the next start");
         let mut svc = Svc::default();

@@ -122,7 +122,10 @@ mod tests {
     fn the_flag_is_the_operations_own() {
         let token = OpCancel::default();
         token.cancel();
-        assert!(token.flag().load(Ordering::SeqCst), "the manager checks the flag the operation's cancel sets");
+        assert!(
+            token.flag().load(Ordering::SeqCst),
+            "the manager checks the flag the operation's cancel sets"
+        );
         assert!(!OpCancel::default().flag().load(Ordering::SeqCst));
     }
 
@@ -145,7 +148,6 @@ mod tests {
         assert!(running.is_cancelled());
         assert!(ops.begin().is_none(), "nothing starts after Quit");
     }
-
 
     #[test]
     fn a_tracked_operation_is_joined_by_quit_and_none_starts_after_it() {
@@ -171,7 +173,11 @@ mod tests {
         assert!(ended.load(Ordering::SeqCst), "quit's join returned before the operation ended");
         assert_eq!(op.join().unwrap(), Some(true), "the running operation saw Quit's cancel");
         let mut ran = false;
-        assert_eq!(ops.run_tracked(|_| ran = true), None, "nothing starts after Quit, so nothing registers again");
+        assert_eq!(
+            ops.run_tracked(|_| ran = true),
+            None,
+            "nothing starts after Quit, so nothing registers again"
+        );
         assert!(!ran);
     }
 
@@ -186,7 +192,10 @@ mod tests {
         let _running = ops.track_repair();
         let finished = ops.track_repair();
         finished.send(()).unwrap();
-        assert!(!ops.join_repair(std::time::Duration::from_millis(50)), "the first of two is still running");
+        assert!(
+            !ops.join_repair(std::time::Duration::from_millis(50)),
+            "the first of two is still running"
+        );
     }
 
     /// The names of the process-wide items in `text`: any `static` item or `thread_local!` (a flag, an atomic, a `OnceLock`, a counter
@@ -195,7 +204,10 @@ mod tests {
         let mut found = Vec::new();
         for (n, line) in text.lines().enumerate() {
             let code = line.split("//").next().unwrap_or("").trim();
-            let code = code.strip_prefix("pub(crate) ").or_else(|| code.strip_prefix("pub ")).unwrap_or(code);
+            let code = code
+                .strip_prefix("pub(crate) ")
+                .or_else(|| code.strip_prefix("pub "))
+                .unwrap_or(code);
             let code = code.strip_prefix("static mut ").or_else(|| code.strip_prefix("static "));
             if let Some(rest) = code {
                 let name = rest.split([':', ' ']).next().unwrap_or("").to_string();
@@ -214,13 +226,21 @@ mod tests {
     #[test]
     fn the_scan_for_process_wide_flags_sees_every_shape_of_one() {
         let seen = |text: &str| process_wide_items(text, &[]).len();
-        assert_eq!(seen("pub static FIRST_RUN_ATTEMPT: FirstRunAttempt = FirstRunAttempt::new();"), 1, "the wrapped flag");
+        assert_eq!(
+            seen("pub static FIRST_RUN_ATTEMPT: FirstRunAttempt = FirstRunAttempt::new();"),
+            1,
+            "the wrapped flag"
+        );
         assert_eq!(seen("static CANCEL: AtomicBool = AtomicBool::new(false);"), 1);
         assert_eq!(seen("static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();"), 1);
         assert_eq!(seen("pub(crate) static COUNT: AtomicUsize ="), 1, "a declaration split over lines");
         assert_eq!(seen("static mut N: u32 = 0;"), 1);
         assert_eq!(seen("thread_local! { static T: Cell<bool> = Cell::new(false); }"), 1);
-        assert_eq!(seen("fn f(x: &'static str) -> &'static str { x } // static A: AtomicBool"), 0, "'static and comments are not items");
+        assert_eq!(
+            seen("fn f(x: &'static str) -> &'static str { x } // static A: AtomicBool"),
+            0,
+            "'static and comments are not items"
+        );
         assert_eq!(seen("const A: AtomicBool = AtomicBool::new(false);"), 0);
         assert_eq!(process_wide_items("static OK: u8 = 0;", &["OK"]), []);
     }

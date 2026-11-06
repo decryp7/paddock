@@ -87,7 +87,8 @@ pub fn spec() -> ServiceSpec {
 #[cfg(windows)]
 const DESCRIPTION: &str = "Answers Dyno's questions that need administrator rights, such as reading system details, and installs the disk-health tool when you ask.";
 #[cfg(not(windows))]
-const DESCRIPTION: &str = "Answers Dyno's questions that need administrator rights, such as reading system details, and sets Dyno's own scheduled wakes.";
+const DESCRIPTION: &str =
+    "Answers Dyno's questions that need administrator rights, such as reading system details, and sets Dyno's own scheduled wakes.";
 
 /// The folders Windows names for the helper's places: Program Files, ProgramData and the Windows folder, as the OS reports
 /// them (`SHGetKnownFolderPath`, `GetSystemDirectoryW`), never from the environment: the elevated install may inherit a

@@ -3,10 +3,10 @@
 //! the exit codes of the verbs.
 
 use super::*;
-use std::sync::atomic::AtomicBool;
 use paddock_env::MapVars;
 use paddock_service::fake_systemd::{Active, FakeSystemd};
 use paddock_service::testing::FakeSystem;
+use std::sync::atomic::AtomicBool;
 
 const HOME: &str = "/home/ana";
 const EXE: &str = "/opt/dyno/dyno-agent";
@@ -141,13 +141,19 @@ fn install_over_a_unit_the_user_disabled_says_what_to_run_instead_of_switching_i
 fn ensure_registers_a_stale_unit_again_and_leaves_a_current_one_a_missing_one_and_a_disabled_one_alone() {
     // Not installed stays not installed.
     let rig = Rig::new();
-    assert_eq!(ensure(&mut rig.manager("1.1.0", install_timings()), false, &AtomicBool::new(false)), Ok(false));
+    assert_eq!(
+        ensure(&mut rig.manager("1.1.0", install_timings()), false, &AtomicBool::new(false)),
+        Ok(false)
+    );
     assert!(rig.unit_text().is_none());
 
     // Installed and current: nothing to do.
     let rig = Rig::new().installed();
     let mark = rig.sys.commands().len();
-    assert_eq!(ensure(&mut rig.manager("1.1.0", install_timings()), false, &AtomicBool::new(false)), Ok(false));
+    assert_eq!(
+        ensure(&mut rig.manager("1.1.0", install_timings()), false, &AtomicBool::new(false)),
+        Ok(false)
+    );
     assert!(rig.sys.commands().len() > mark);
     assert!(rig.sys.commands()[mark..]
         .iter()
@@ -155,13 +161,19 @@ fn ensure_registers_a_stale_unit_again_and_leaves_a_current_one_a_missing_one_an
 
     // Another executable: registered again for this one.
     rig.sys.put_file(&rig.unit, "[Service]\nExecStart=/old/dyno-agent run\n");
-    assert_eq!(ensure(&mut rig.manager("1.1.0", install_timings()), false, &AtomicBool::new(false)), Ok(true));
+    assert_eq!(
+        ensure(&mut rig.manager("1.1.0", install_timings()), false, &AtomicBool::new(false)),
+        Ok(true)
+    );
     assert!(rig.unit_text().unwrap().contains("ExecStart=\"/opt/dyno/dyno-agent\" \"run\""));
 
     // What the user disabled stays disabled.
     rig.ctl.user_disables();
     rig.sys.put_file(&rig.unit, "[Service]\nExecStart=/old/dyno-agent run\n");
-    assert_eq!(ensure(&mut rig.manager("1.1.0", install_timings()), false, &AtomicBool::new(false)), Ok(false));
+    assert_eq!(
+        ensure(&mut rig.manager("1.1.0", install_timings()), false, &AtomicBool::new(false)),
+        Ok(false)
+    );
     assert!(rig.unit_text().unwrap().contains("/old/dyno-agent"));
 }
 
@@ -170,10 +182,16 @@ fn ensure_after_an_update_writes_the_new_text_of_the_unit_once() {
     let rig = Rig::new().installed();
     rig.sys
         .put_file(&rig.unit, "[Service]\nExecStart=/opt/dyno/dyno-agent run\nRestart=always\n");
-    assert_eq!(ensure(&mut rig.manager("1.2.0", install_timings()), false, &AtomicBool::new(false)), Ok(true));
+    assert_eq!(
+        ensure(&mut rig.manager("1.2.0", install_timings()), false, &AtomicBool::new(false)),
+        Ok(true)
+    );
     assert!(rig.unit_text().unwrap().contains("MemoryHigh=256M"));
     let mark = rig.sys.commands().len();
-    assert_eq!(ensure(&mut rig.manager("1.2.0", install_timings()), false, &AtomicBool::new(false)), Ok(false));
+    assert_eq!(
+        ensure(&mut rig.manager("1.2.0", install_timings()), false, &AtomicBool::new(false)),
+        Ok(false)
+    );
     assert!(rig.sys.commands()[mark..].iter().all(|c| !c.starts_with("systemctl --user enable")));
 }
 

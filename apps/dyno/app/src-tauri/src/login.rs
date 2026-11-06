@@ -469,15 +469,17 @@ impl LinuxService {
     pub fn real(cancel: crate::service_ops::OpCancel) -> LinuxService {
         LinuxService::with(
             Box::new(|timings| {
-            let manager = dyno_agent::service::linux::real_manager(&agent_program()?, env!("CARGO_PKG_VERSION"), timings)?;
-            // The app's own decisions are inputs to the plan, as on macOS (ADR 0056): the user's switch, the first run, the place
-            // the app runs from.
-            Ok(manager.with_app_state(
-                || wanted_setting(&dyno_agent::paths::Dirs::current().settings()),
-                first_run_done,
-                || current_location().is_ok(),
-            ))
-        }), cancel)
+                let manager = dyno_agent::service::linux::real_manager(&agent_program()?, env!("CARGO_PKG_VERSION"), timings)?;
+                // The app's own decisions are inputs to the plan, as on macOS (ADR 0056): the user's switch, the first run, the place
+                // the app runs from.
+                Ok(manager.with_app_state(
+                    || wanted_setting(&dyno_agent::paths::Dirs::current().settings()),
+                    first_run_done,
+                    || current_location().is_ok(),
+                ))
+            }),
+            cancel,
+        )
     }
 
     /// A service whose manager comes from `make` (tests).
@@ -702,12 +704,12 @@ mod mac {
     impl SmService {
         /// The service for what the user asks (Settings switch, repair at start, resume, stop).
         pub fn asked(cancel: crate::service_ops::OpCancel) -> SmService {
-        SmService { first_run: false, cancel }
+            SmService { first_run: false, cancel }
         }
 
         /// The service for the first run (no one asked): Login Items is opened at most once.
         pub fn first_run(cancel: crate::service_ops::OpCancel) -> SmService {
-        SmService { first_run: true, cancel }
+            SmService { first_run: true, cancel }
         }
     }
 
@@ -851,7 +853,9 @@ mod mac {
         /// waits for in a labelled phase ("Waiting for the background service") instead of a silent wait of up to 120 s here.
         fn resume(&mut self) -> Result<bool, String> {
             let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
-            match m.resume(self.cancel.flag(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
+            match m.resume(self.cancel.flag(), &mut |step| {
+                crate::logging::info(&format!("agent service: {step}"))
+            }) {
                 Ok(held) => Ok(held),
                 Err(_) if m.pending() => {
                     crate::logging::info("agent service: registered again; the link waits for it to answer");
@@ -988,7 +992,9 @@ mod tests {
         want: impl Fn(&paddock_jobs::JobState) -> bool,
     ) -> paddock_jobs::JobSnapshot {
         loop {
-            let s = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("the job did not reach the state");
+            let s = rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .expect("the job did not reach the state");
             if want(&s.state) {
                 return s;
             }
@@ -1033,9 +1039,14 @@ mod tests {
         }
         let (done, seen) = std::sync::mpsc::channel();
         worker
-            .start(&ops, register_switch(&registry), move |cancel| done.send(cancel.is_cancelled()).map_err(|e| e.to_string()))
+            .start(&ops, register_switch(&registry), move |cancel| {
+                done.send(cancel.is_cancelled()).map_err(|e| e.to_string())
+            })
             .unwrap();
-        assert!(!seen.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), "the next change starts cancelled");
+        assert!(
+            !seen.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
+            "the next change starts cancelled"
+        );
     }
 
     #[test]
@@ -1048,11 +1059,19 @@ mod tests {
         wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         ops.quit();
         let end = next_state(&rx, JobState::is_terminal);
-        assert_eq!(end.state, JobState::Cancelled { reason: CancelReason::User });
+        assert_eq!(
+            end.state,
+            JobState::Cancelled {
+                reason: CancelReason::User
+            }
+        );
         while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::yield_now();
         }
-        assert!(worker.start(&ops, register_switch(&registry), |_| Ok(())).is_err(), "nothing starts after Quit");
+        assert!(
+            worker.start(&ops, register_switch(&registry), |_| Ok(())).is_err(),
+            "nothing starts after Quit"
+        );
     }
 
     #[test]
@@ -1068,7 +1087,12 @@ mod tests {
         // What the Jobs view's Cancel button does (`job_cancel`).
         assert!(registry.cancel(running.id));
         let end = next_state(&rx, JobState::is_terminal);
-        assert_eq!(end.state, JobState::Cancelled { reason: CancelReason::User });
+        assert_eq!(
+            end.state,
+            JobState::Cancelled {
+                reason: CancelReason::User
+            }
+        );
         assert_eq!(end.id, running.id);
         while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::yield_now();
@@ -1085,7 +1109,12 @@ mod tests {
         wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         worker.cancel();
         let end = next_state(&rx, JobState::is_terminal);
-        assert_eq!(end.state, JobState::Cancelled { reason: CancelReason::User });
+        assert_eq!(
+            end.state,
+            JobState::Cancelled {
+                reason: CancelReason::User
+            }
+        );
     }
 
     #[test]
@@ -1103,7 +1132,10 @@ mod tests {
         // A repair that does not end within the bound is given up on, and nothing registered is nothing to wait for.
         let _kept = ops.track_repair();
         assert!(!ops.join_repair(std::time::Duration::from_millis(50)));
-        assert!(ops.join_repair(std::time::Duration::from_millis(50)), "taken once: nothing left to wait for");
+        assert!(
+            ops.join_repair(std::time::Duration::from_millis(50)),
+            "taken once: nothing left to wait for"
+        );
     }
 
     #[test]
@@ -1115,21 +1147,39 @@ mod tests {
         let began = std::time::Instant::now();
         // The OS step (a registration waiting for a lock) blocks until the test lets it go.
         worker
-            .start(&ops, register_switch(&registry), move |_| blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
+            .start(&ops, register_switch(&registry), move |_| {
+                blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())
+            })
             .unwrap();
-        assert!(began.elapsed() < std::time::Duration::from_secs(2), "the save did not wait for the OS step");
+        assert!(
+            began.elapsed() < std::time::Duration::from_secs(2),
+            "the save did not wait for the OS step"
+        );
         next_state(&rx, |s| matches!(s, JobState::Running { .. }));
-        worker.start(&ops, register_switch(&registry), |_| Ok(())).expect("a second change waits for the first");
-        assert_eq!(registry.snapshots().len(), 1, "a waiting change registers its job when it runs, not before");
+        worker
+            .start(&ops, register_switch(&registry), |_| Ok(()))
+            .expect("a second change waits for the first");
+        assert_eq!(
+            registry.snapshots().len(),
+            1,
+            "a waiting change registers its job when it runs, not before"
+        );
         release.send(()).unwrap();
         assert_eq!(next_state(&rx, JobState::is_terminal).state, JobState::Done);
         // Free again; a failure carries its message.
         while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::yield_now();
         }
-        worker.start(&ops, register_switch(&registry), |_| Err("needs approval".into())).unwrap();
+        worker
+            .start(&ops, register_switch(&registry), |_| Err("needs approval".into()))
+            .unwrap();
         let failed = next_state(&rx, |s| matches!(s, JobState::Failed { .. }));
-        assert_eq!(failed.state, JobState::Failed { message: "needs approval".into() });
+        assert_eq!(
+            failed.state,
+            JobState::Failed {
+                message: "needs approval".into()
+            }
+        );
     }
 
     #[test]
@@ -1145,8 +1195,14 @@ mod tests {
 
     #[test]
     fn the_first_run_is_always_quiet_and_removes_nothing_and_the_settings_switch_never_is() {
-        assert!(install_is_quiet(true), "nobody asked: no System Settings, no removal of a healthy registration");
-        assert!(!install_is_quiet(false), "the Settings switch opens Login Items for what the user has to do");
+        assert!(
+            install_is_quiet(true),
+            "nobody asked: no System Settings, no removal of a healthy registration"
+        );
+        assert!(
+            !install_is_quiet(false),
+            "the Settings switch opens Login Items for what the user has to do"
+        );
     }
 
     #[test]
@@ -1204,10 +1260,10 @@ mod tests {
         use crate::service_ops::{OpCancel, ServiceOps};
         use dyno_agent::service::linux;
         use paddock_env::MapVars;
-        use paddock_service::Timings;
         use paddock_service::fake_systemd::{Active, FakeSystemd};
         use paddock_service::login::LoginService;
         use paddock_service::testing::FakeSystem;
+        use paddock_service::Timings;
 
         const EXE: &str = "/opt/dyno/dyno-agent";
 
@@ -1225,7 +1281,12 @@ mod tests {
                 let sys = FakeSystem::new();
                 sys.put_program(EXE);
                 let ctl = FakeSystemd::new(&sys, "dyno-agent.service", &unit);
-                Rig { sys, ctl, unit, data: tempfile::tempdir().unwrap() }
+                Rig {
+                    sys,
+                    ctl,
+                    unit,
+                    data: tempfile::tempdir().unwrap(),
+                }
             }
 
             fn service(&self) -> LinuxService {
@@ -1234,28 +1295,31 @@ mod tests {
 
             fn service_with(&self, cancel: OpCancel) -> LinuxService {
                 let (sys, data) = (self.sys.clone(), self.data.path().to_path_buf());
-                LinuxService::with(Box::new(move |timings: Timings| {
-                    let sys = sys.clone();
-                    let factory: linux::SystemFactory = Box::new(move || Box::new(sys.clone()));
-                    linux::manager(
-                        std::path::Path::new(EXE),
-                        &MapVars::new().with("HOME", "/home/ana"),
-                        &data,
-                        "1.1.0",
-                        &factory,
-                        timings,
-                    )
-                }), cancel)
+                LinuxService::with(
+                    Box::new(move |timings: Timings| {
+                        let sys = sys.clone();
+                        let factory: linux::SystemFactory = Box::new(move || Box::new(sys.clone()));
+                        linux::manager(
+                            std::path::Path::new(EXE),
+                            &MapVars::new().with("HOME", "/home/ana"),
+                            &data,
+                            "1.1.0",
+                            &factory,
+                            timings,
+                        )
+                    }),
+                    cancel,
+                )
             }
         }
 
         #[test]
         fn a_change_after_a_cancelled_one_succeeds() {
-                let (rig, ops) = (Rig::new(), ServiceOps::default());
-                ops.begin().unwrap().cancel();
-                rig.service_with(ops.begin().unwrap()).install().unwrap();
-                assert!(rig.sys.file(&rig.unit).is_some());
-            }
+            let (rig, ops) = (Rig::new(), ServiceOps::default());
+            ops.begin().unwrap().cancel();
+            rig.service_with(ops.begin().unwrap()).install().unwrap();
+            assert!(rig.sys.file(&rig.unit).is_some());
+        }
 
         #[test]
         fn the_settings_switch_registers_and_removes_the_unit() {
@@ -1281,13 +1345,23 @@ mod tests {
             rig.ctl.user_stops();
             let record = RecordFile::new(rig.data.path(), dyno_agent::service::LABEL);
             let awaiting = |attempts| Recorded {
-                state: State::Attempting { version: "1.1.0".into(), attempts, phase: Phase::Awaiting },
+                state: State::Attempting {
+                    version: "1.1.0".into(),
+                    attempts,
+                    phase: Phase::Awaiting,
+                },
                 ..Recorded::default()
             };
             record.store(&awaiting(1)).unwrap();
-            assert!(s.pending(), "registered and not up yet: the link neither starts nor retires an agent");
+            assert!(
+                s.pending(),
+                "registered and not up yet: the link neither starts nor retires an agent"
+            );
             record.store(&awaiting(paddock_service::plan::MAX_ATTEMPTS)).unwrap();
-            assert!(!s.pending(), "the attempts are used up: nothing is coming, so the app starts its own agent");
+            assert!(
+                !s.pending(),
+                "the attempts are used up: nothing is coming, so the app starts its own agent"
+            );
         }
 
         #[test]
@@ -1316,7 +1390,9 @@ mod tests {
             let how = s.stop_mechanism().expect("the running unit");
             assert_eq!(
                 how,
-                paddock_service::stop::StopMechanism::SystemdUser { unit: "dyno-agent.service".into() }
+                paddock_service::stop::StopMechanism::SystemdUser {
+                    unit: "dyno-agent.service".into()
+                }
             );
             let mut sys = rig.sys.clone();
             paddock_service::stop::stop(&mut sys, &how, paddock_service::stop::StopTimings::default()).unwrap();
@@ -1692,7 +1768,10 @@ mod tests {
             if let Some(gate) = gate {
                 gate.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
             }
-            let mut s = FakeService { calls: log.clone(), fail: false };
+            let mut s = FakeService {
+                calls: log.clone(),
+                fail: false,
+            };
             let mut a = FakeAutostart { calls: log, fail: false };
             apply_launch_at_login(on, Ok(()), &mut s, &mut a)
         }
@@ -1710,7 +1789,9 @@ mod tests {
         let (registry, _rx) = jobs_rig();
         let calls = Calls::default();
         let (release, gate) = std::sync::mpsc::channel::<()>();
-        worker.start(&ops, register_switch(&registry), switch_change(true, &calls, Some(gate))).unwrap();
+        worker
+            .start(&ops, register_switch(&registry), switch_change(true, &calls, Some(gate)))
+            .unwrap();
         worker
             .start(&ops, register_switch(&registry), switch_change(false, &calls, None))
             .expect("a change while one runs waits its turn; it is not dropped");
@@ -1729,9 +1810,15 @@ mod tests {
         let (registry, _rx) = jobs_rig();
         let calls = Calls::default();
         let (release, gate) = std::sync::mpsc::channel::<()>();
-        worker.start(&ops, register_switch(&registry), switch_change(true, &calls, Some(gate))).unwrap();
-        worker.start(&ops, register_switch(&registry), switch_change(false, &calls, None)).unwrap();
-        worker.start(&ops, register_switch(&registry), switch_change(true, &calls, None)).unwrap();
+        worker
+            .start(&ops, register_switch(&registry), switch_change(true, &calls, Some(gate)))
+            .unwrap();
+        worker
+            .start(&ops, register_switch(&registry), switch_change(false, &calls, None))
+            .unwrap();
+        worker
+            .start(&ops, register_switch(&registry), switch_change(true, &calls, None))
+            .unwrap();
         release.send(()).unwrap();
         idle(&worker);
         let log = calls.0.lock().unwrap().clone();
@@ -1750,7 +1837,11 @@ mod tests {
         assert_eq!(*value.lock().unwrap(), Some(true), "a failed change is not remembered as applied");
         *value.lock().unwrap() = Some(false);
         assert!(!settle_applied(&value, false, Some(true), true, true));
-        assert_eq!(*value.lock().unwrap(), Some(true), "a cancelled change is not remembered as applied");
+        assert_eq!(
+            *value.lock().unwrap(),
+            Some(true),
+            "a cancelled change is not remembered as applied"
+        );
         // A newer change has set its own value meanwhile: this one leaves it alone.
         *value.lock().unwrap() = Some(true);
         settle_applied(&value, false, Some(true), false, false);
@@ -1789,11 +1880,24 @@ mod tests {
     fn a_cancel_after_the_agent_install_registers_no_app_item_but_a_removal_still_runs() {
         let calls = Calls::default();
         let cancel = crate::service_ops::OpCancel::default();
-        let mut service = CancelsAfterInstall { inner: FakeService { calls: calls.0.clone(), fail: false }, cancel: cancel.clone() };
-        let mut plain = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let mut service = CancelsAfterInstall {
+            inner: FakeService {
+                calls: calls.0.clone(),
+                fail: false,
+            },
+            cancel: cancel.clone(),
+        };
+        let mut plain = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
         let mut guarded = UnlessCancelled::new(&mut plain, &cancel);
         apply_launch_at_login(true, Ok(()), &mut service, &mut guarded).unwrap();
-        assert_eq!(*calls.0.lock().unwrap(), ["service install"], "the cancelled change still registered the app");
+        assert_eq!(
+            *calls.0.lock().unwrap(),
+            ["service install"],
+            "the cancelled change still registered the app"
+        );
         // Off is never held back by a cancel: the item must not stay behind.
         guarded.set(false).unwrap();
         assert_eq!(calls.0.lock().unwrap().last().map(String::as_str), Some("autostart false"));
@@ -1802,9 +1906,16 @@ mod tests {
     #[test]
     fn at_start_with_the_switch_off_the_apps_own_login_item_is_removed_and_with_it_on_it_is_written() {
         let calls = Calls::default();
-        let mut a = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let mut a = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
         assert_eq!(ensure_app_entry(false, &mut a), Ok(false));
-        assert_eq!(*calls.0.lock().unwrap(), ["autostart false"], "a stale item stays behind a switch that is off");
+        assert_eq!(
+            *calls.0.lock().unwrap(),
+            ["autostart false"],
+            "a stale item stays behind a switch that is off"
+        );
         assert_eq!(ensure_app_entry(true, &mut a), Ok(true));
         assert_eq!(calls.0.lock().unwrap().last().map(String::as_str), Some("autostart true"));
     }
@@ -1822,18 +1933,46 @@ mod tests {
         let calls = Calls::default();
         let cancel = crate::service_ops::OpCancel::default();
         let value = Mutex::new(Some(true));
-        let mut service = CancelsAfterInstall { inner: FakeService { calls: calls.0.clone(), fail: false }, cancel: cancel.clone() };
-        let mut plain = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let mut service = CancelsAfterInstall {
+            inner: FakeService {
+                calls: calls.0.clone(),
+                fail: false,
+            },
+            cancel: cancel.clone(),
+        };
+        let mut plain = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
         let r = apply_switch_change(true, Ok(()), &mut service, &mut plain, &cancel, &value, Some(false));
         assert_eq!(r, Ok(()));
-        assert_eq!(*calls.0.lock().unwrap(), ["service install"], "the cancelled change registered the app");
+        assert_eq!(
+            *calls.0.lock().unwrap(),
+            ["service install"],
+            "the cancelled change registered the app"
+        );
         assert_eq!(*value.lock().unwrap(), Some(false), "a cancelled change was remembered as on");
         // Not cancelled: both registrations, remembered.
         let calls = Calls::default();
         let value = Mutex::new(Some(true));
-        let mut service = FakeService { calls: calls.0.clone(), fail: false };
-        let mut plain = FakeAutostart { calls: calls.0.clone(), fail: false };
-        apply_switch_change(true, Ok(()), &mut service, &mut plain, &crate::service_ops::OpCancel::default(), &value, Some(false)).unwrap();
+        let mut service = FakeService {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        let mut plain = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
+        apply_switch_change(
+            true,
+            Ok(()),
+            &mut service,
+            &mut plain,
+            &crate::service_ops::OpCancel::default(),
+            &value,
+            Some(false),
+        )
+        .unwrap();
         assert_eq!(*calls.0.lock().unwrap(), ["service install", "autostart true"]);
         assert_eq!(*value.lock().unwrap(), Some(true));
     }
@@ -1851,34 +1990,62 @@ mod tests {
     #[test]
     fn only_a_switch_that_is_off_removes_the_app_item() {
         let calls = Calls::default();
-        let mut a = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let mut a = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: false,
+        };
         remove_stale_app_item(true, &mut a).unwrap();
-        assert!(calls.0.lock().unwrap().is_empty(), "an item behind a switch that is on is left alone");
+        assert!(
+            calls.0.lock().unwrap().is_empty(),
+            "an item behind a switch that is on is left alone"
+        );
         remove_stale_app_item(false, &mut a).unwrap();
         assert_eq!(*calls.0.lock().unwrap(), ["autostart false"]);
-        let mut failing = FakeAutostart { calls: calls.0.clone(), fail: true };
-        assert!(remove_stale_app_item(false, &mut failing).is_err(), "a failed removal is said, not hidden");
+        let mut failing = FakeAutostart {
+            calls: calls.0.clone(),
+            fail: true,
+        };
+        assert!(
+            remove_stale_app_item(false, &mut failing).is_err(),
+            "a failed removal is said, not hidden"
+        );
     }
 
     #[test]
     fn a_worker_that_panics_is_free_for_the_next_change() {
         let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
         let (registry, _rx) = jobs_rig();
-        worker.start(&ops, register_switch(&registry), |_| -> Result<(), String> { panic!("a test panic") }).unwrap();
+        worker
+            .start(&ops, register_switch(&registry), |_| -> Result<(), String> {
+                panic!("a test panic")
+            })
+            .unwrap();
         idle(&worker);
         let (done, seen) = std::sync::mpsc::channel();
-        worker.start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string())).unwrap();
-        seen.recv_timeout(std::time::Duration::from_secs(5)).expect("the next change did not run");
+        worker
+            .start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string()))
+            .unwrap();
+        seen.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the next change did not run");
     }
 
     #[test]
     fn a_change_that_panics_before_its_job_exists_is_dropped_and_the_next_one_runs() {
         let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
         let (registry, _rx) = jobs_rig();
-        worker.start(&ops, || -> paddock_jobs::JobContext { panic!("a test panic while registering") }, |_| Ok(())).unwrap();
+        worker
+            .start(
+                &ops,
+                || -> paddock_jobs::JobContext { panic!("a test panic while registering") },
+                |_| Ok(()),
+            )
+            .unwrap();
         let (done, seen) = std::sync::mpsc::channel();
-        worker.start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string())).unwrap();
-        seen.recv_timeout(std::time::Duration::from_secs(5)).expect("the change after the panic did not run");
+        worker
+            .start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string()))
+            .unwrap();
+        seen.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the change after the panic did not run");
         idle(&worker);
     }
 }

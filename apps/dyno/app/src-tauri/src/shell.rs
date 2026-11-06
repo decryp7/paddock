@@ -521,25 +521,27 @@ impl<R: Runtime> ShellOf<R> {
                 let jobs = self.app.state::<paddock_jobs::tauri::Jobs>().registry().clone();
                 let register = move || jobs.register("start-at-login", "Start Dyno at login", None);
                 let on_done = value.clone();
-                let started = self.login_switch.start(&self.app.state::<crate::service_ops::ServiceOps>(), register, move |cancel| {
-                    let mut service = login::platform_service(cancel.clone());
-                    let mut plain = login::platform_autostart(&app);
-                    let result = login::apply_switch_change(
-                        wanted,
-                        login::current_location(),
-                        service.as_mut(),
-                        plain.as_mut(),
-                        cancel,
-                        &on_done,
-                        previous,
-                    );
-                    // The link is the one the app manages (the save command holds only a reference to it).
-                    if let Some(link) = app.try_state::<Arc<crate::link::AgentLink>>() {
-                        link.set_service_installed(service.installed());
-                        link.refresh_service();
-                    }
-                    result
-                });
+                let started = self
+                    .login_switch
+                    .start(&self.app.state::<crate::service_ops::ServiceOps>(), register, move |cancel| {
+                        let mut service = login::platform_service(cancel.clone());
+                        let mut plain = login::platform_autostart(&app);
+                        let result = login::apply_switch_change(
+                            wanted,
+                            login::current_location(),
+                            service.as_mut(),
+                            plain.as_mut(),
+                            cancel,
+                            &on_done,
+                            previous,
+                        );
+                        // The link is the one the app manages (the save command holds only a reference to it).
+                        if let Some(link) = app.try_state::<Arc<crate::link::AgentLink>>() {
+                            link.set_service_installed(service.installed());
+                            link.refresh_service();
+                        }
+                        result
+                    });
                 login::undo_if_refused(started, &value, wanted, previous)
             }
         }
