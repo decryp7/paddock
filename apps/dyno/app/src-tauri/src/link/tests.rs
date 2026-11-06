@@ -883,6 +883,11 @@ fn turning_launch_at_login_off_brings_back_an_agent_of_the_apps_own() {
     manager.stop();
 }
 
+/// The pid the stub launcher reports: this test process, which the test holds, so it can never be another program's (ER-14, rule 53).
+fn held_pid() -> u32 {
+    std::process::id()
+}
+
 /// A launcher that does what the test says, counting what the link asks of it: after a launch the process is in
 /// `after_launch` (running and silent, or exited with a code), until `finish` ends it.
 struct StubLauncher {
@@ -990,6 +995,16 @@ fn collect_until(rx: &Receiver<AgentStatus>, state: AgentState) -> Vec<AgentStat
 }
 
 #[test]
+fn the_stub_launchers_pid_is_a_process_this_test_holds() {
+    // A made-up pid such as 4242 can belong to a real program on the machine running the tests.
+    assert_eq!(held_pid(), std::process::id());
+    assert!(
+        paddock_proc::ProcessId::of(held_pid()).is_some(),
+        "the held pid names a live process"
+    );
+}
+
+#[test]
 fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_nothing_more() {
     let r = stub_rig(Child::Exited {
         code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
@@ -1019,7 +1034,7 @@ fn a_stale_discovery_file_beside_a_slow_lock_holder_is_not_ready_and_launches_no
 
 #[test]
 fn an_agent_that_never_answers_is_reported_with_retry_and_retry_ends_that_process_and_launches_again() {
-    let r = stub_rig(Child::Running { pid: 4242 });
+    let r = stub_rig(Child::Running { pid: held_pid() });
     let handle = r.link.spawn().unwrap();
     let s = wait_state(&r.link, "a stall for an agent that never wrote its discovery file", |s| {
         s.stall.is_some()
@@ -1182,7 +1197,7 @@ fn taking_the_agent_back_waits_for_the_former_agent_to_release_the_data_folder_b
 fn quit_reports_the_agent_it_stopped_even_though_asking_it_to_exit_ended_its_process() {
     // The stub's `finish` ends the process at once, as asking the agent to exit does: the outcome was decided at the
     // moment of the quit, from the child that was held then, and is not read again afterwards.
-    let r = stub_rig(Child::Running { pid: 4242 });
+    let r = stub_rig(Child::Running { pid: held_pid() });
     let handle = r.link.spawn().unwrap();
     wait_state(&r.link, "the agent is launched", |s| s.child.is_some());
     assert!(
@@ -1251,7 +1266,7 @@ impl Sink for BlockedSink {
 fn a_quit_is_taken_at_once_while_the_shell_is_blocked_on_a_notification() {
     let tmp = tempfile::tempdir().unwrap();
     let gate = Arc::new((Mutex::new(false), Condvar::new()));
-    let launcher = StubLauncher::new(Child::Running { pid: 4242 });
+    let launcher = StubLauncher::new(Child::Running { pid: held_pid() });
     let link = AgentLink::paced(
         Dirs::at(tmp.path().join("data")),
         env!("CARGO_PKG_VERSION"),

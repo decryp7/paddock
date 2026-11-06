@@ -136,7 +136,8 @@ export class WidgetBoard {
     return w.kind === 'topProcesses' ? `Top apps by ${sentenceCase(name)}` : name;
   };
   /** The kinds whose widgets have a metric to choose: those that accept more than one. */
-  protected readonly hasOptions = (kind: string): boolean => (this.choices.choices()?.dashboard ?? []).some((k) => k.kind === kind && k.metrics.length > 1);
+  protected readonly hasOptions = (kind: string): boolean => !PANEL_KINDS.includes(kind as DashboardKind) &&
+    (this.choices.choices()?.dashboard ?? []).some((k) => k.kind === kind && k.metrics.length > 1);
 
   constructor() {
     const host = inject<ElementRef<HTMLElement>>(ElementRef);
