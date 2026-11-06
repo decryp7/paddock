@@ -21,7 +21,7 @@ pub(crate) enum Turn {
 /// The retry delay of a blocked turn.
 pub(crate) const BLOCKED_RETRY: Duration = Duration::from_millis(500);
 
-/// A safety net against a missed wake-up, not a poll: an idle loop wakes this rarely (well under 1 a second).
+/// A safety net against a missed wake-up, not a poll: an idle loop wakes once a minute (60 s), without news it runs no statement.
 pub(crate) const IDLE_BACKSTOP: Duration = Duration::from_secs(60);
 
 /// Whether a loop has news since its last look. A loop without news runs no statement: the data of the store changes

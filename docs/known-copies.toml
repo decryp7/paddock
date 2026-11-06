@@ -658,6 +658,20 @@ status = "built"
   delete_by = "spotter-v1.1.0"
   note = "paddock-jobs' schedule tests say the maths was ported from this file; Spotter 1.0 still uses its own."
 
+[[mechanism]]
+id = "job-idempotency-key"
+title = "Idempotency key on queued jobs: an equal key serves the request instead of adding a job (ADR 0024 rule 3, plan J1)"
+canonical = "paddock-jobs"
+paths = ["crates/paddock-jobs/src/queue.rs"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/jobs/queue.rs", "apps/debrief/app/src-tauri/src/jobs/service.rs"]
+  symbols = ["item:submit_or_existing", "item:submit_keyed_work"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief's own job queue holds the key (JobSpec::keyed, and keyed_while_queued for work that must run again after a trigger that arrives while it runs). Plan J1 puts the key in paddock-jobs, adopted by Debrief with M2a (jobs move to paddock-jobs); the canonical must keep both modes."
+
 # =====================================================================================================================
 # UI (@decryp7/paddock-ui)
 # =====================================================================================================================
