@@ -562,6 +562,29 @@ mod tests {
         assert!(stats.comparisons <= stats.candidates * stats.candidates, "{stats:?}");
     }
 
+    /// The gate by counting, not timing (the 2026-11-06 idle measurement: comparing every pair of 23,224 groups was 114 s of
+    /// a 124 s rebuild): 23,000 groups in families of three look-alike spellings, ten of them in the events. Only those are
+    /// candidates, and the comparisons follow the candidates, not the groups.
+    #[test]
+    fn twenty_three_thousand_groups_cost_the_comparisons_of_their_ten_candidates() {
+        let mut cands = Vec::new();
+        for family in 0..7_667u32 {
+            for variant in ["a", "b", "c"] {
+                cands.push(cand(&format!("fam{family:05}zq{variant}.exe"), 5));
+            }
+        }
+        let mut groups = group(&cands, &Vocabulary::builtin());
+        assert!(groups.len() >= 23_000, "{} groups", groups.len());
+        let mut cooc = Cooccurrence::default();
+        let known: Vec<String> = groups.iter().take(10).map(|g| g.canonical().to_string()).collect();
+        for pair in known.chunks(2) {
+            cooc.add_event(pair);
+        }
+        let stats = merge_cooccurring_stats(&mut groups, &cooc, 0.6);
+        assert!(stats.candidates >= 10 && stats.candidates <= 2 * 10, "{stats:?}");
+        assert!(stats.comparisons <= stats.candidates * stats.candidates, "{stats:?}");
+    }
+
     #[test]
     fn a_name_without_events_never_joins_and_a_zero_strength_does_not_join_everything() {
         let c = [cand("gfxbuilder.exe", 5), cand("gfx-bilder.exe", 4)];
