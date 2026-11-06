@@ -378,25 +378,23 @@ impl Manager {
         // The wait for the service can take 120 s: the lock is let go for it, so a user's event (a removal, a repair) never waits.
         // A later cycle takes it back before it changes anything, and only when the record still shows this wait.
         let held = std::cell::RefCell::new(lock.take());
-        let released = std::cell::Cell::new(false);
-        let lost = std::cell::Cell::new(false);
+        let wait_lock = std::cell::Cell::new(WaitLock::Held);
         let removed = std::cell::Cell::new(false);
         let mut release = || {
             *held.borrow_mut() = None;
-            released.set(true);
+            wait_lock.set(WaitLock::LetGo);
         };
         let mut retake = || {
             let mut lock = held.borrow_mut();
-            if lock.is_some() {
-                return true;
-            }
             *lock = record.lock();
             let ours = lock.is_some()
                 && matches!(record.load().state, State::Attempting { version: ref v, phase: Phase::Awaiting, .. } if *v == version);
-            if !ours {
+            if ours {
+                wait_lock.set(WaitLock::Held);
+            } else {
                 log::info!("the record or the lock changed during the wait (another request ran); this replace stops before it changes anything");
                 *lock = None;
-                lost.set(true);
+                wait_lock.set(WaitLock::Lost);
             }
             ours
         };
@@ -450,11 +448,15 @@ impl Manager {
         log::info!(outcome:? = outcome; "service repair finished");
         // After a wait without the lock, what the record says now may be somebody else's: only a record that still shows this
         // wait is settled here.
-        let still_ours = !lost.get()
-            && (held.borrow().is_some() || !released.get() || {
+        let still_ours = match wait_lock.get() {
+            WaitLock::Held => true,
+            WaitLock::Lost => false,
+            // The replace ended inside a wait: only a record that still shows it is settled.
+            WaitLock::LetGo => {
                 *held.borrow_mut() = self.record.lock();
                 matches!(self.record.load().state, State::Attempting { version: ref v, phase: Phase::Awaiting, .. } if *v == self.version)
-            });
+            }
+        };
         *lock = held.into_inner();
         let settled = if !still_ours {
             log::info!("the record changed during the wait (another request ran); this replace leaves it as it is");
@@ -748,6 +750,17 @@ impl Manager {
         log::info!(up = up, why = why, waited_ms = u64::try_from(polled.max(began.elapsed()).as_millis()).unwrap_or(u64::MAX); "waited for a registration this version made");
         up
     }
+}
+
+/// Who holds the repair lock while a replace waits for the service.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WaitLock {
+    /// The replace holds it (never let go, or taken again for a later cycle).
+    Held,
+    /// Let go for a wait and not taken again.
+    LetGo,
+    /// Taken again and not given back to the replace: the record or the lock was somebody else's.
+    Lost,
 }
 
 /// How many register calls a replace may make: a request runs its cycles, an unattended one gets what is left of the attempts

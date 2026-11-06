@@ -838,6 +838,8 @@ mod tests {
     struct Script {
         calls: Vec<&'static str>,
         refused_for: u32,
+        /// The first this many checks find the job running before the refusal begins (the OS refuses it during the wait).
+        quiet_for: u32,
         lingers: u32,
         lingering: u32,
         register: Vec<Result<(), RegisterError>>,
@@ -866,6 +868,9 @@ mod tests {
             self.calls.push("inspect");
             let job = if self.failed_last && self.job_after_failed_register.is_some() {
                 self.job_after_failed_register.unwrap_or(Job::Absent)
+            } else if self.quiet_for > 0 {
+                self.quiet_for -= 1;
+                Job::Running
             } else if self.refused_for > 0 {
                 self.refused_for -= 1;
                 Job::Refused
@@ -1259,5 +1264,49 @@ mod tests {
         let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(REGISTERED) };
         let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut || true, &mut |_| {});
         assert_eq!(out, RepairOutcome::Recovered);
+    }
+
+    #[test]
+    fn what_a_wait_let_go_of_is_taken_again_once_before_the_cycle_that_follows_it_and_not_before_the_first() {
+        let events = std::cell::RefCell::new(Vec::<String>::new());
+        let mut s = Script { quiet_for: 1, refused_for: 1, ..Script::default() };
+        let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
+        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(1) };
+        let mut asked = 0;
+        let out = replace_bounded(
+            &mut s,
+            &mut || {
+                asked += 1;
+                asked > 1
+            },
+            &bounds,
+            &Timings::default(),
+            &mut || events.borrow_mut().push("release".into()),
+            &mut || {
+                events.borrow_mut().push("retake".into());
+                true
+            },
+            &mut |st| events.borrow_mut().push(format!("say {st}")),
+        );
+        assert_eq!(out, RepairOutcome::Recovered);
+        let log = events.borrow();
+        let release = log.iter().position(|e| e == "release").expect("the wait let go");
+        assert_eq!(log.iter().filter(|e| *e == "retake").count(), 1, "{log:?}");
+        let retake = log.iter().position(|e| e == "retake").unwrap();
+        assert!(release < retake, "taken again before it was let go: {log:?}");
+        assert!(log[retake + 1].starts_with("say "), "{log:?}");
+        assert_eq!(s.calls.iter().filter(|c| **c == "register").count(), 2, "the refused job was registered again");
+    }
+
+    #[test]
+    fn a_retake_that_says_no_ends_the_replace_before_any_os_call_of_the_next_cycle() {
+        let mut s = Script { quiet_for: 1, refused_for: 1, ..Script::default() };
+        let (cancel, abort) = (AtomicBool::new(false), AtomicBool::new(false));
+        let bounds = Bounds { cancel: &cancel, abort: &abort, allowed: 4, register_only: false, now: &|| StartTime::from_micros(1) };
+        let mut said = Vec::new();
+        let out = replace_bounded(&mut s, &mut || false, &bounds, &Timings::default(), &mut || {}, &mut || false, &mut |st| said.push(st.to_string()));
+        assert_eq!(out, RepairOutcome::Cancelled);
+        assert_eq!(s.calls.iter().filter(|c| **c == "unregister").count(), 1, "the next cycle removed again: {:?}", s.calls);
+        assert!(said.iter().all(|x| !x.contains("retry 1")), "the next cycle was announced (it writes the record): {said:?}");
     }
 }
