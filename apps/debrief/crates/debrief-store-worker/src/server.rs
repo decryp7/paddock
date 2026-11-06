@@ -109,6 +109,7 @@ fn log_request(name: &'static str, took: Duration) {
 /// the open took, and what the store holds.
 fn log_opened(dir: &std::path::Path, store: &DuckStore, kind: &'static str, took: Duration) {
     let counts = store.open_counts();
+    // log-allow: the store is named by a fingerprint of its folder, never by the folder
     log::info!(
         EventId = "store.open",
         Store = paddock_log::fingerprint(&dir.to_string_lossy()).as_str(),
@@ -297,6 +298,7 @@ impl Worker {
                     // Dropping the last handle stops the store's background loops and waits for them.
                     let began = Instant::now();
                     drop(closing);
+                    // log-allow: the store is named by a fingerprint of its folder, never by the folder
                     log::info!(
                         EventId = "store.close",
                         Store = paddock_log::fingerprint(&dir.to_string_lossy()).as_str(),
