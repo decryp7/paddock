@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-diag`: `window::log_window_by` names the process of a file
+
+- `log_window_by(dir, prefix, budget, process_of)` is `log_window` where the caller says which process a file belongs to (`log_window` uses the text before the first dot). An app whose earlier versions wrote `<id>_<x>.log` maps them to its own process so they do not take a share of the window each (Debrief). Additive.
+
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.

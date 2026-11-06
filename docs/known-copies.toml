@@ -912,9 +912,28 @@ title = "A `log::Log` that keeps the records of a test process, to assert on wha
 canonical = "paddock-log"
 paths = ["crates/paddock-log/src/lib.rs"]
 status = "planned"
+note = "The shared home is a `test-support` feature of paddock-log (records with level, message and typed key/values, wait_for). Debrief's engine tests share one (debrief-core's testlog); the others below are hand-made and move there when paddock-log gets the feature, which is not planned in Debrief 1.2: the dates are the first release lines after it."
 
   [[mechanism.copy]]
-  paths = ["apps/debrief/crates/debrief-store-duck/src/testlog.rs"]
+  paths = ["apps/debrief/crates/debrief-core/src/testlog.rs"]
   owner = "debrief"
-  delete_by = "debrief-v1.2.0"
-  note = "Debrief's store worker logging (WP-SL1) asserts its lines through this capture. The shared home is a `test-support` feature of paddock-log (records with level, message and typed key/values, wait_for); the other hand-made capture loggers of the family move there too."
+  delete_by = "debrief-v1.3.0"
+  note = "Debrief's store worker logging (WP-SL1) asserts its lines through this capture (the store, the worker and the engine's tests use it). Not a Debrief 1.2 task: 1.2 does not wait for a paddock-log feature."
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/app/src-tauri/src/activity/logger.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.3.0"
+  note = "The capture sink of the app's activity logger tests."
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/crates/dyno-agent/tests/agent.rs", "apps/dyno/crates/dyno-agent/tests/saved_maps_privacy.rs"]
+  owner = "dyno"
+  delete_by = "dyno-v1.2.0"
+  note = "Capture loggers of the agent's integration tests."
+
+  [[mechanism.copy]]
+  paths = ["crates/paddock-commands/src/tauri/tests.rs", "crates/paddock-dialogs/src/tauri/tests.rs", "crates/paddock-health/src/tests.rs", "crates/paddock-startup/src/tauri/tests.rs"]
+  owner = "paddock"
+  delete_by = "v1.0.0"
+  note = "Capture loggers of the shared crates' tests (listed from a search for `impl log::Log` on 2026-11-07)."

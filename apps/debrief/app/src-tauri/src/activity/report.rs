@@ -1116,7 +1116,17 @@ pub(crate) mod tests {
         // The app's file is two and a half windows; the worker's is a whole window, ending with the line that matters.
         std::fs::write(&today, filler.repeat(LOG_WINDOW as usize * 5 / 2 / filler.len() + 100)).unwrap();
         std::fs::write(d.join("debrief.2000-01-02.log"), "older app day\n").unwrap();
-        std::fs::write(d.join("debrief_legacy.log"), "legacy app file\n").unwrap();
+        // An earlier version's file, a whole window: if it were a process of its own it would take a third of the window.
+        std::fs::write(d.join("debrief_legacy.log"), filler.repeat(LOG_WINDOW as usize / filler.len())).unwrap();
+        // Today's file is the newest, the older day's older, the earlier versions' file the oldest.
+        for (name, secs) in [("debrief_legacy.log", 1_000), ("debrief.2000-01-02.log", 2_000)] {
+            std::fs::File::options()
+                .write(true)
+                .open(d.join(name))
+                .unwrap()
+                .set_modified(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .unwrap();
+        }
         let store = format!("debrief-store.{day}.log");
         let failed = "{\"@t\":\"2026-11-06T08:00:00Z\",\"@l\":\"Warning\",\"@m\":\"full-text indexing failed\",\"EventId\":\"store.fts.failed\",\"Process\":\"store\"}\n";
         std::fs::write(
@@ -1153,7 +1163,13 @@ pub(crate) mod tests {
             "the app's part: {} of {half}",
             app_file.data.len()
         );
-        // The legacy file is the app's: no share of its own (the app's part is what was left to it).
+        // The legacy file is the app's: the app's files together (today's, the older day, the legacy one) have the other half.
+        let app_total: usize = files
+            .iter()
+            .filter(|f| f.kind == FileKind::Log && !is_store_worker_log(f.name.trim_start_matches("logs/")))
+            .map(|f| f.data.len())
+            .sum();
+        assert!(app_total <= half, "the app's files together: {app_total} of {half}");
         let all: usize = files.iter().filter(|f| f.kind == FileKind::Log).map(|f| f.data.len()).sum();
         assert!(all <= LOG_WINDOW as usize, "{all}");
         let activity = files.iter().find(|f| f.name == "logs/activity.log").unwrap();
