@@ -1247,4 +1247,46 @@ mod tests {
         let out = replace_bounded(&mut s, &mut || true, &bounds, &Timings::default(), &mut || {}, &mut |_| {});
         assert_eq!(out, RepairOutcome::Recovered);
     }
+
+    #[test]
+    fn after_a_register_read_back_wrong_a_silent_or_absent_job_starts_the_next_cycle_and_a_live_one_is_waited_for() {
+        let after = |job, answers| {
+            let mut s = Stepper::new(&Timings::default(), 4);
+            s.start();
+            through_removal(&mut s);
+            s.next(OsResult::Gone { timed_out: false });
+            s.next(OsResult::RegisterErr(RegisterError::NotAsWritten(Inspection::absent())));
+            s.next(settled(job, answers)).action
+        };
+        assert_eq!(after(Job::Absent, true), Action::Unregister, "no job at all, whatever answers");
+        assert_eq!(after(Job::NotRunning, false), Action::Unregister, "a job that is silent");
+        assert_eq!(after(Job::Running, true), Action::Look);
+        assert_eq!(after(Job::NotRunning, true), Action::Look, "something answers");
+    }
+
+    #[test]
+    fn a_cancel_ends_the_wait_at_once_and_the_time_running_out_ends_it_without_one() {
+        let t = Timings::default();
+        let waiting = || {
+            let mut s = Stepper::new(&t, 4);
+            s.start();
+            through_removal(&mut s);
+            s.next(OsResult::Gone { timed_out: false });
+            s.next(OsResult::RegisterOk);
+            s.next(settled(Job::NotRunning, false));
+            s
+        };
+        let look = |secs, cancelled| OsResult::Looked {
+            answers: false,
+            job: Job::NotRunning,
+            elapsed: Duration::from_secs(secs),
+            cancelled,
+            process: None,
+        };
+        let cancelled = waiting().next(look(0, true));
+        assert_eq!(cancelled.action, Action::Done(RepairOutcome::Registered), "cancelled early");
+        let ran_out = waiting().next(look(t.start_wait.as_secs() + 1, false));
+        assert_eq!(ran_out.action, Action::Done(RepairOutcome::Registered), "time ran out");
+        assert!(matches!(waiting().next(look(0, false)).action, Action::Pause(_)), "neither: keep waiting");
+    }
 }

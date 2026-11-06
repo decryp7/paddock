@@ -354,6 +354,16 @@ fn an_update_rewrites_the_unit_once_and_a_unit_in_the_new_text_is_only_marked() 
             .count(),
         1
     );
+    let cmds: Vec<String> = rig.sys.commands()[mark..].to_vec();
+    assert!(
+        !cmds.iter().any(|c| c.contains(" disable") || c.contains(" stop")),
+        "the working service is registered over, never removed first: {cmds:?}"
+    );
+    assert_eq!(
+        cmds.iter().filter(|c| c.contains(" restart")).count(),
+        1,
+        "the unit it replaced is restarted so the new text runs: {cmds:?}"
+    );
     assert!(
         rig.sys
             .file(&rig.unit_path)
@@ -611,4 +621,20 @@ fn every_sequence_of_the_linux_alphabet_keeps_the_invariants() {
         "{runs} runs; first of each kind:\n{}",
         failures.values().cloned().collect::<Vec<_>>().join("\n")
     );
+}
+
+#[test]
+fn a_unit_that_points_at_another_copy_is_removed_first_not_registered_over_while_it_runs() {
+    // Register-first is for an update only: a registration that points elsewhere is taken out before the new one is made.
+    let rig = Rig::new().installed();
+    rig.sys.put_program("/opt/old/model-agent");
+    rig.sys.put_file(
+        &rig.unit_path,
+        "[Service]\nExecStart=\"/opt/old/model-agent\" \"run\"\nRestart=always\n",
+    );
+    let mark = rig.mark();
+    let started = rig.manager(V1).on_start(&never());
+    assert!(matches!(started, Started::Repaired(..)), "{started:?}");
+    let cmds: Vec<String> = rig.sys.commands()[mark..].to_vec();
+    assert!(cmds.iter().any(|c| c.contains(" disable") || c.contains(" stop")), "{cmds:?}");
 }

@@ -1085,6 +1085,12 @@ fn a_held_service_is_not_supervised_and_a_completed_resume_clears_its_marker() {
     assert_eq!(last, Started::Left(Hold::Unanswered(crate::plan::MAX_ATTEMPTS)));
     assert!(!m.pending(), "no way forward: the link must not wait");
     assert!(!m.supervises(), "nothing will start it, so the app must not wait for it");
+    // The same record with the OS now running the job: a held service that is up is supervised, whoever answers.
+    sim.lock().unwrap().job = Held::Running;
+    let backend = LaunchdBundled::new(spec(), 501, Box::new(SimApp(sim.clone())), Box::new(sys.clone()));
+    let mut silent = Manager::new("Dyno", Box::new(backend), dir.path(), LABEL, "1.1.0", || false);
+    assert!(silent.supervises(), "the OS runs the job, so it is up even if the service itself has not answered");
+    sim.lock().unwrap().job = Held::Nothing;
     // The marker of a stop on request: a resume that is done clears it, in the record.
     let dir = tempfile::tempdir().unwrap();
     recorded(dir.path(), "1.1.0");
@@ -1222,4 +1228,29 @@ fn a_request_on_a_working_service_leaves_it_alone_and_one_on_a_refused_service_r
     let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
     assert!(m.repair(&never()).is_ok());
     assert!(calls(&sim).contains(&"register".to_string()));
+}
+
+#[test]
+fn a_first_run_leaves_a_lingering_job_alone_and_remembers_what_this_version_was_waiting_for() {
+    // A job with no registration (a removal that was interrupted): nothing is registered over it, nothing is removed.
+    let dir = tempfile::tempdir().unwrap();
+    recorded(dir.path(), "1.1.0");
+    let sim = world(AppServiceStatus::NotRegistered, DisabledMark::NotListed, Held::Running);
+    let sys = FakeSystem::new();
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert!(m.install_unattended(&never()).is_ok());
+    assert!(calls(&sim).is_empty(), "{:?}", calls(&sim));
+    // This version registered it and waits (the record names no registered version yet): once it is up it is remembered.
+    let dir = tempfile::tempdir().unwrap();
+    let file = RecordFile::new(dir.path(), LABEL);
+    file.set_state(crate::record::State::Attempting {
+        version: "1.1.0".into(),
+        attempts: 1,
+        phase: crate::record::Phase::Awaiting,
+    })
+    .unwrap();
+    let sim = world(AppServiceStatus::Enabled, DisabledMark::NotListed, Held::Running);
+    let mut m = manager(&sim, &sys, dir.path(), "1.1.0");
+    assert!(matches!(m.install_unattended(&never()), Ok(RepairOutcome::Recovered)));
+    assert_eq!(m.recorded().registered_version.as_deref(), Some("1.1.0"));
 }
