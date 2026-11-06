@@ -602,6 +602,80 @@ fn a_timed_action_warns_then_asks_once_and_a_once_entry_is_done() {
 }
 
 #[test]
+fn snoozing_a_timed_countdown_delays_the_action_and_a_once_entry_still_runs() {
+    let h = Harness::start();
+    h.wait_sampled();
+    let c = h.client();
+    let Reply::Settings(mut s) = ask(&c, Request::Settings).unwrap() else {
+        panic!()
+    };
+    let minute = dyno_core::time::local_minute(dyno_agent::agent::now(), &dyno_core::time::FixedZone(0));
+    s.power.timed.enabled = true;
+    s.power.timed.entries = vec![TimedAction {
+        id: 7,
+        action: IdleAction::Hibernate,
+        at_minute: minute,
+        repeat: Repeat::Once,
+        last_day: None,
+        done: false,
+    }];
+    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    h.fake.with(|s| s.idle_secs = Some(1));
+    assert!(matches!(h.tick(1_000), IdleView::Countdown { cause: Cause::Timed, .. }));
+    let v = power(ask(&c, Request::PowerIdleSnooze { minutes: 30 }).unwrap());
+    assert!(!matches!(v.idle, IdleView::Countdown { .. }), "snooze hides the countdown");
+    h.tick(10 * 60_000);
+    assert!(h.actions.requests().is_empty(), "snoozed: nothing is asked");
+    // The snooze is over: the countdown shows again, and only after it does the action run.
+    let back = h.tick(21 * 60_000);
+    assert!(
+        matches!(
+            back,
+            IdleView::Countdown {
+                action: IdleAction::Hibernate,
+                cause: Cause::Timed,
+                ..
+            }
+        ),
+        "a snoozed timed action comes back after the snooze, got {back:?}"
+    );
+    assert!(h.actions.requests().is_empty());
+    assert!(matches!(h.tick(61_000), IdleView::Acting { .. }));
+    assert_eq!(h.actions.requests(), [IdleAction::Hibernate]);
+    let Reply::Settings(after) = ask(&c, Request::Settings).unwrap() else {
+        panic!()
+    };
+    assert!(after.power.timed.entries[0].done);
+}
+
+#[test]
+fn cancelling_a_snoozed_timed_action_ends_it_for_today() {
+    let h = Harness::start();
+    h.wait_sampled();
+    let c = h.client();
+    let Reply::Settings(mut s) = ask(&c, Request::Settings).unwrap() else {
+        panic!()
+    };
+    let minute = dyno_core::time::local_minute(dyno_agent::agent::now(), &dyno_core::time::FixedZone(0));
+    s.power.timed.enabled = true;
+    s.power.timed.entries = vec![TimedAction {
+        id: 7,
+        action: IdleAction::Hibernate,
+        at_minute: minute,
+        repeat: Repeat::Daily,
+        last_day: None,
+        done: false,
+    }];
+    ask(&c, Request::SaveSettings { settings: s }).unwrap();
+    h.fake.with(|s| s.idle_secs = Some(1));
+    assert!(matches!(h.tick(1_000), IdleView::Countdown { .. }));
+    ask(&c, Request::PowerIdleSnooze { minutes: 5 }).unwrap();
+    ask(&c, Request::PowerIdleCancel).unwrap();
+    assert!(!matches!(h.tick(10 * 60_000), IdleView::Countdown { .. }), "cancelled for today");
+    assert!(h.actions.requests().is_empty());
+}
+
+#[test]
 fn invalid_timed_settings_are_refused_with_what_to_fix() {
     let h = Harness::start();
     let c = h.client();
