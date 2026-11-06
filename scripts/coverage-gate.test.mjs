@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { measure } from './coverage-gate.mjs';
+import { crateOf, gate, measure } from './coverage-gate.mjs';
 
 const sources = {
   'a.rs': ['fn a() {}', '#[::tauri::command]', 'pub async fn cmd() {', '    body();', '}'].join('\n'),
@@ -16,4 +16,40 @@ test('only the tauri command attribute lines are left out of the count', () => {
 
 test('a file that cannot be read keeps all its lines', () => {
   assert.deepEqual(measure('SF:gone.rs\nDA:1,0\nDA:2,1\nend_of_record', read), { hit: 1, total: 2, skipped: 0 });
+});
+
+test('crateOf names the folder after crates/ or the first folder', () => {
+  assert.equal(crateOf('/work/paddock/crates/paddock-proc/src/lib.rs'), 'paddock-proc');
+  assert.equal(crateOf('paddock-ipc/src/a.rs'), 'paddock-ipc');
+  assert.equal(crateOf('lib.rs'), '(other)');
+});
+
+const lcov = [
+  'SF:x/crates/paddock-a/src/a.rs', 'DA:1,1', 'DA:2,0', 'DA:3,0', 'end_of_record',
+  'SF:x/crates/paddock-b/src/b.rs', 'DA:1,1', 'DA:2,1', 'end_of_record',
+].join('\n');
+
+test('a failing gate prints one ::error:: line and the table, worst crate first', () => {
+  const { code, lines } = gate(lcov, 99, () => null);
+  assert.equal(code, 1);
+  const errors = lines.filter((l) => l.startsWith('::error::'));
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /60\.00% is below the minimum 99%: 2 lines uncovered, 2 more must be covered/);
+  const rows = lines[1].split('\n');
+  assert.match(rows[0], /^crate\s+lines\s+covered\s+missing\s+%$/);
+  assert.match(rows[1], /^paddock-a\s+3\s+1\s+2\s+33\.33$/);
+  assert.match(rows[2], /^paddock-b\s+2\s+2\s+0\s+100\.00$/);
+});
+
+test('a passing gate prints the table too, without an error line', () => {
+  const { code, lines } = gate(lcov, 50, () => null);
+  assert.equal(code, 0);
+  assert.equal(lines.some((l) => l.includes('::error::')), false);
+  assert.match(lines[1], /paddock-a/);
+});
+
+test('an empty lcov fails instead of dividing by zero', () => {
+  const { code, lines } = gate('', 99, () => null);
+  assert.equal(code, 1);
+  assert.ok(lines.some((l) => l.startsWith('::error::')));
 });

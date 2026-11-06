@@ -998,4 +998,131 @@ mod tests {
         fn takes(_: &mut dyn Autostart) {}
         takes(&mut MainAppItem::new());
     }
+
+    fn not_started() -> crate::port::RunError {
+        crate::port::RunError::NotStarted("reg.exe is missing".into())
+    }
+
+    #[test]
+    fn the_first_run_marker_says_when_it_cannot_be_written() {
+        let sys = FakeSystem::new();
+        sys.fail_writes(Some(std::io::ErrorKind::PermissionDenied));
+        let m = FirstRunMarker::new(r"C:\Users\a\AppData\Roaming\Dyno\login-default-applied");
+        let e = m.record(&mut sys.clone(), "applied").unwrap_err();
+        assert!(
+            e.contains("first-run marker") && e.contains("could not be written"),
+            "{e}"
+        );
+        assert!(e.contains("login-default-applied"), "{e}");
+        assert!(
+            m.path()
+                .to_string_lossy()
+                .ends_with("login-default-applied")
+        );
+        assert!(!m.is_set(&mut sys.clone()));
+    }
+
+    #[test]
+    fn what_happened_to_the_machine_value_is_told_in_the_error() {
+        // No machine-wide value: said so.
+        let sys = FakeSystem::new();
+        sys.on(HKLM_Q, |_, _| Ok(crate::port::Output::code(1)));
+        let e = entry(&sys, true).set(true).unwrap_err();
+        assert!(e.contains("no machine-wide Run value"), "{e}");
+
+        // The query itself fails: the cause is in the message.
+        let sys = FakeSystem::new();
+        sys.on(HKLM_Q, |_, _| Err(not_started()));
+        let e = entry(&sys, true).set(true).unwrap_err();
+        assert!(
+            e.contains("could not be read") && e.contains("reg.exe is missing"),
+            "{e}"
+        );
+
+        // Our value is there but the delete is refused, or reg.exe cannot start.
+        let ours = format!("\n    Dyno    REG_SZ    \"{APP}\" --hidden\n");
+        let sys = FakeSystem::new();
+        sys.on(HKLM_Q, {
+            let ours = ours.clone();
+            move |_, _| Ok(crate::port::Output::ok(&ours))
+        });
+        sys.on("reg delete HKLM", |_, _| {
+            Ok(crate::port::Output {
+                code: Some(5),
+                stdout: String::new(),
+                stderr: "Access is denied.".into(),
+            })
+        });
+        let e = entry(&sys, true).set(true).unwrap_err();
+        assert!(e.contains("could not be removed: Access is denied."), "{e}");
+        let sys = FakeSystem::new();
+        sys.on(HKLM_Q, move |_, _| Ok(crate::port::Output::ok(&ours)));
+        sys.on("reg delete HKLM", |_, _| Err(not_started()));
+        let e = entry(&sys, true).set(true).unwrap_err();
+        assert!(e.contains("could not be removed: reg.exe"), "{e}");
+    }
+
+    #[test]
+    fn a_registry_tool_that_fails_is_reported_for_every_step() {
+        // Turning off: a refused delete and a tool that cannot start.
+        let sys = FakeSystem::new();
+        sys.answer("reg delete HKCU", crate::port::Output::code(5));
+        let e = entry(&sys, false).set(false).unwrap_err();
+        assert!(e.starts_with("reg delete:"), "{e}");
+        let sys = FakeSystem::new();
+        sys.on("reg delete HKCU", |_, _| Err(not_started()));
+        let e = entry(&sys, false).set(false).unwrap_err();
+        assert!(
+            e.starts_with("reg.exe") && e.contains("reg.exe is missing"),
+            "{e}"
+        );
+
+        // Turning on: a refused add and a tool that cannot start.
+        let sys = FakeSystem::new();
+        sys.answer("reg add HKCU", crate::port::Output::code(5));
+        let e = entry(&sys, false).set(true).unwrap_err();
+        assert!(e.starts_with("reg add:"), "{e}");
+        let sys = FakeSystem::new();
+        sys.on("reg add HKCU", |_, _| Err(not_started()));
+        let e = entry(&sys, false).set(true).unwrap_err();
+        assert!(e.starts_with("reg.exe"), "{e}");
+
+        // The read-back query cannot run after a good add.
+        let sys = FakeSystem::new();
+        sys.on(RUN_Q, |_, _| Err(not_started()));
+        let e = entry(&sys, false).set(true).unwrap_err();
+        assert!(e.starts_with("reg.exe"), "{e}");
+    }
+
+    #[test]
+    fn the_autostart_file_quotes_what_the_desktop_would_misread() {
+        let sys = FakeSystem::new();
+        let x = XdgAutostart::new(
+            Path::new("/home/a/.config"),
+            "dyno",
+            "Dyno",
+            r#"/opt/My "App"/dyno$1"#.into(),
+            &["--name=a\\b`c"],
+            Box::new(sys),
+        );
+        let text = x.definition();
+        assert!(
+            text.contains(r#"Exec="/opt/My \"App\"/dyno\$1" "--name=a\\b\`c""#),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn linux_reports_a_file_it_cannot_remove_and_one_that_does_not_read_back() {
+        let sys = FakeSystem::new();
+        sys.fail_removes(Some(std::io::ErrorKind::PermissionDenied));
+        let e = xdg(&sys).set(false).unwrap_err();
+        assert!(e.contains("could not be removed"), "{e}");
+        assert!(e.contains("dyno.desktop"), "{e}");
+
+        let sys = FakeSystem::new();
+        sys.fail_reads(Some(std::io::ErrorKind::PermissionDenied));
+        let e = xdg(&sys).set(true).unwrap_err();
+        assert!(e.contains("does not read back as written"), "{e}");
+    }
 }
