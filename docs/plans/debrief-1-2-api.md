@@ -1,6 +1,6 @@
 # Debrief 1.2 API design (package 0.5): the foundation
 
-- Status: **Proposed**, 2026-11-07, for an independent review before wave 1 starts (plan row 0.5). Revision 3 answers
+- Status: **Reviewed (0.5 gate passed, 2026-11-07)**; revision 5 folds the confirmation pass's P2s. Revision 3 answers
   the independent review of `b9695e5e5` (P1-1 to P1-7 and its P2s).
 - Scope, by the user's decision of 2026-11-07 (plan §10, "full foundation in 1.2, then one function per release"):
   every package of the plan that §10.3 does not move out has its API here. Revision 2 (same day) extends revision 1,
@@ -570,6 +570,12 @@ Unchanged from ADR 0064's section [A]: files on the parse pool (`performance.imp
 reader each; one spool per file in flight. Cheaper: sniff memo and batch (§5.4), first read grows from 64 KiB, one open
 per file, `Vec<Record>` gone.
 
+**The cost of the `CreditPool` (§4.2) in parallelism.** It caps open plugin streams at `limit / EVENT_FRAME_MAX`: at the
+default 128 MiB at most 10 plugin files parse at once, at 64 MiB at most 5, against `2 × threads` (16) otherwise
+[calc]. In-process files are not affected, so the cost falls on plugin-heavy bundles: an EVTX-heavy folder parses fewer
+files at once. 2.6b's benchmark measures it: the same EVTX-heavy invented folder at 64, 128 and 256 MiB, recording
+throughput and the store worker's peak footprint, and the default moves only with that result (rule 48).
+
 ### 3.9 Tests: where each lives
 
 | What | Where | Package |
@@ -1083,6 +1089,19 @@ exact: the host answers `listed_through` with each run, the next run sends it ba
 takes `listed_after: Option<u64>` (§5.8) to read only those segments. The number is the store's and lives as long as the
 store; a re-import starts a new store, and an annotation run never spans one.
 
+**Under rewrites and merges** (IX-B1, one test per case in `debrief-store-duck/tests/listing_seq.rs`):
+
+| Case | Sequence of the result | Effect on the next annotation run |
+|---|---|---|
+| A new segment (import, live-tail append, re-read after undo) | a new sequence, always | its rows are read once |
+| Compaction or `maintain` merging segments | the **lowest** sequence of its inputs | nothing already seen is lost: rows the run already read may be read again only if an input was newer than `since`, never missed |
+| Re-time rewrite (ADR 0066 §8, clock skew) | the lowest sequence of its inputs | the same rows are not presented as new; their times moved, which the annotator learns only on a full run |
+| A source removed | its segments go | nothing to read |
+
+Rule: a rewrite never gives old rows a new sequence, and new rows never share an old one, so "new since" never misses
+a row and repeats one only after a merge with newer input. An annotator's results are keyed by event id, so a repeat
+replaces rather than doubles them.
+
 ### 5.7 `debrief.profile.v1` and `debrief.document.v1`
 
 ```rust
@@ -1445,8 +1464,11 @@ Where each bound is enforced, so no package invents another (roadmap layer G).
 
 Footprint is physical memory per rule 26 (macOS footprint, Linux PSS, Windows private bytes, recorded by 2.2).
 
-**The store worker's import budget, 768 MB (D7's gate), by part.** The parts must add up; 4.3 measures each and replaces
-these numbers with recorded ones (rule 48):
+**The store worker's import budget, 768 MB (D7's gate), by part.** The 768 MB is the worker's **total peak physical
+footprint** during an import (rule 26), not an increment above idle: that is how ADR 0067 §2 measures it ("the store
+worker peaked at 805 and 1,268 MB … a fail against 768") and how the whole-file gate subtracts it from the store cap
+[A]. So the idle footprint is inside the 768. The parts must add up; 4.3 measures each and replaces these numbers with
+recorded ones (rule 48):
 
 | Part | Bound | MB |
 |---|---|---:|
@@ -1454,10 +1476,12 @@ these numbers with recorded ones (rule 48):
 | Plugin items in flight | `CreditPool` | 134 (128 MiB) |
 | ADR 0062's tee share (index and names queues) | `performance.index.tee_mb` | 240 [A] |
 | Subtotal of bounded import parts | | 525 [calc] |
-| Left for the batcher's batches, the Parquet writer's row groups, DuckDB and the worker's idle footprint | 768 − 525 | 243 [calc] |
+| Idle footprint allowance (ADR 0067 §2, until measured) | macOS 630, Linux 320, other 300 | [A] |
+| Left for all import parts on macOS / Linux | 768 − idle | 138 / 448 [calc] |
+| Needed by the bounded parts above, before batches, the Parquet writer and DuckDB | | 525 [calc] |
 
-That remainder is below the idle footprint allowance ADR 0067 uses on macOS (630 MB) and near the Linux one (320 MB)
-[A: ADR 0067 §2], so **the budget does not add up on macOS as the parts stand** (§17, Q27). The tee share is already
+So **the budget does not add up on any OS as the parts stand**: on macOS 138 MB remain for 525 MB of bounded parts, on
+Linux 448 [calc] (§17, Q27). The tee share is already
 released before `maintain` and is off in low-memory mode (plan 5.2) [A].
 
 ## 9. Jobs
@@ -2271,8 +2295,8 @@ Limits that are registry rows without a Setting (`hard`) are listed with their s
 | Q24 | Setting paths: ADR 0067 used `performance.plugin_memory_mb` and `performance.import_whole_file_mb` | Use §16's one scheme (`performance.plugins.memory_mb`, `performance.import.whole_file_mb`); FM and 2.6a use these |
 | Q25 | `TsState` lives in `debrief-batch`, which pulls Arrow; plugins must not | `debrief-batch`'s Arrow dependencies behind a default feature `arrow`; `debrief-plugin-ext` depends on it with `default-features = false` (one definition, rule 55); a `cargo tree` check in CI (beside PH2a's) fails when a plugin binary (`debrief-plugins`, `debrief-plugin-*`) links an `arrow-*` crate. Alternative: move ids and `TsState` to a dependency-free crate; not chosen, one more crate for two types |
 | Q26 | Plugin items in flight across an import add up to the store worker's whole budget (§8) | **A shared `CreditPool` by bytes** (§4.2), initial grants included, at most `limit / EVENT_FRAME_MAX` plugin streams, FIFO fairness; `performance.import.items_in_flight_mb` 128 MiB, raised only with 2.6b's and 4.3's recorded results |
-| Q27 | **User's decision.** The 768 MB import budget by part (§8) leaves 243 MB for batches, the writer, DuckDB and the idle footprint, below ADR 0067's macOS idle allowance (630 MB) | 4.3 measures every part first; then either a per-OS budget (macOS higher, as rule 26's footprint differs) or a smaller tee share on macOS. Bring back with 4.3's numbers, beside plan §9.6 D1 |
-| Q28 | Annotation "new since" needs a listing sequence the store does not have (§5.6) | Add it in the listing transaction (IX-B1, which owns `writer.rs`), with a test that a run after an import sees exactly the newly listed segments |
+| Q27 | **User's decision.** D7's 768 MB is the worker's total peak footprint (§8). With ADR 0067's idle allowances, 138 MB remain on macOS and 448 MB on Linux for import parts whose bounded share alone is 525 MB (read buffers 151, credit pool 134, tee 240), before batches, the writer and DuckDB | 4.3 measures the idle footprint and every part first (the allowances are not measurements). Then choose: a per-OS budget (macOS's footprint counts more than Linux's PSS), smaller parts (tee share, chunk size, credit pool, at a measured throughput cost), or both. Bring back with 4.3's numbers, beside plan §9.6 D1 |
+| Q28 | Annotation "new since" needs a listing sequence the store does not have (§5.6) | **Owner: IX-B1** (it owns `writer.rs`, `compact.rs`, `skew.rs`): the sequence in the listing transaction, with the rewrite rules and tests of §5.6 |
 
 **Where the ADR notes land.** Q21's amendment of ADR 0064 and Q23's note land in SI-1's first commit; Q22's note in
 ADR 0067 lands in F1's first commit; Q8 and Q24's notes in ADR 0067 with F7 and FM; Q6 in ADR 0031 with 2.6c; Q4 in
@@ -2294,5 +2318,5 @@ the shell move (workbench.md and the move plan own the API), §14.5 store perfor
 **Scope not found in the sources read, so not designed:** ST-6, Y11's sticky field promotion, Y14's R3 split (Q18).
 
 **Not verified:** nothing was compiled; signatures were checked against the source files named in the header, not
-built. The listing sequence of §5.6 is a new store field [J]; IX-B1 or PH2b adds it with its test. The drawing research's numbers are from
+built. The listing sequence of §5.6 is a new store field [J]; IX-B1 adds it with the tests of §5.6. The drawing research's numbers are from
 Playwright's browsers, not the real webviews; M1a settles that.
