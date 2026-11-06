@@ -164,11 +164,7 @@ impl Manager {
         let covered = (self.cover)();
         let (recorded, record_damaged) = self.record.peek();
         // The job that runs must be the one this attempt's register call started (not the old build's that outlived the removal).
-        let job_after_register = recorded.registered_at.and_then(|at| {
-            self.backend
-                .job_process()
-                .map(|p| p.started().as_micros() >= at)
-        });
+        let job_after_register = self.job_after_register(recorded.registered_at);
         self.backend.know_copy(self.program.as_deref(), recorded.registered_program.as_deref());
         let inspection = self.backend.inspect();
         let p = plan(&Facts {
@@ -193,6 +189,12 @@ impl Manager {
             job_after_register,
         });
         (inspection, answers, p)
+    }
+
+    /// Whether the running job started at or after the attempt's register call (`None`: no register time, or the OS cannot say).
+    fn job_after_register(&mut self, registered_at: Option<u64>) -> Option<bool> {
+        let at = registered_at?;
+        self.backend.job_process().map(|p| p.started().as_micros() >= at)
     }
 
     /// How the service is doing, for the UI and [`ServiceStatus::health`].
@@ -630,11 +632,16 @@ impl Manager {
         let began = Instant::now();
         let mut polled = Duration::ZERO;
         let (up, why) = loop {
-            if (self.answers)() {
+            // The old build's job that outlived the removal answers too: only a job started by this register settles it.
+            let ours = {
+                let at = self.record.peek().0.registered_at;
+                self.job_after_register(at) != Some(false)
+            };
+            if ours && (self.answers)() {
                 break (true, "the service answers");
             }
             match self.backend.inspect().job {
-                crate::backend::Job::Running => break (true, "the OS runs the job"),
+                crate::backend::Job::Running if ours => break (true, "the OS runs the job"),
                 crate::backend::Job::Refused => break (false, "the OS refuses the job"),
                 _ => {}
             }
