@@ -1,6 +1,6 @@
 # 64. One streaming import trait: no importer holds a whole file just to read it
 
-- Status: Proposed. Revision 2 answers the independent review of `0f6e482f5`. Revision 3 answers the confirmation review of `570be48a1`
+- Status: Accepted (2026-11-06, by the user; D7 with option (c)). Revision 2 answers the independent review of `0f6e482f5`. Revision 3 answers the confirmation review of `570be48a1`
 - Date: 2026-11-05
 - Related: ADR 0014 (database-first engine, `raw`), ADR 0017 (one IPC, host files), ADR 0023 (dumps), ADR 0027 (plugin SDK), ADR 0040 (encodings), ADR 0047 (time
   window), ADR 0051 (streaming discovery), ADR 0052 (stage pipelines), ADR 0062 (index and catalogue during the import), ADR
