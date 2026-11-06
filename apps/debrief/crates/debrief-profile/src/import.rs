@@ -73,6 +73,14 @@ pub fn read_bounded(path: &std::path::Path, limits: &Limits) -> Result<Vec<u8>> 
     std::fs::read(path).map_err(|e| io("read", e))
 }
 
+/// The first [`SNIFF_BYTES`] of the file at `path` (fewer when it is shorter).
+pub fn read_head(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(SNIFF_BYTES);
+    std::fs::File::open(path)?.take(SNIFF_BYTES as u64).read_to_end(&mut head)?;
+    Ok(head)
+}
+
 /// Sniff score from which a file counts as a capture when routing files
 /// (drag and drop) without importing them; weaker guesses stay logs.
 pub const SNIFF_THRESHOLD: u8 = 50;

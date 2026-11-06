@@ -172,6 +172,20 @@ async fn read<T: Send + 'static>(
     )
 }
 
+/// As [`read`], for a view of a capture: a capture the memory budget released is read again first, with no lock held
+/// (`debrief_profile::read_reloading`), so a reload of minutes never blocks the window's other captures.
+async fn read_view<T: Send + 'static>(
+    win: &CurrentWindow,
+    view: impl Fn(&dyn ProfileStore) -> debrief_profile::Result<T> + Send + 'static,
+) -> ProfResult<T> {
+    let store = win.profiling.store.clone();
+    crate::error::lift_dto(
+        tauri::async_runtime::spawn_blocking(move || debrief_profile::read_reloading(&store, view).map_err(ProfilingErrorDto::from))
+            .await
+            .map_err(join_error)?,
+    )
+}
+
 async fn write<T: Send + 'static>(
     win: &CurrentWindow,
     f: impl FnOnce(&mut dyn ProfileStore) -> debrief_profile::Result<T> + Send + 'static,
@@ -247,9 +261,7 @@ pub(crate) fn open_capture(store: &RwLock<Box<dyn ProfileStore>>, name: &str, ca
 }
 
 fn read_head_of(path: &Path) -> std::io::Result<Vec<u8>> {
-    let mut head = Vec::with_capacity(SNIFF_BYTES);
-    std::fs::File::open(path)?.take(SNIFF_BYTES as u64).read_to_end(&mut head)?;
-    Ok(head)
+    debrief_profile::import::read_head(path)
 }
 
 /// File name and first bytes of a path, for sniffing; `None` when it is not a readable file.
@@ -346,95 +358,95 @@ pub async fn profiling_spans(state: CurrentWindow) -> ProfResult<Vec<ProfileSpan
 
 #[tauri::command]
 pub async fn profiling_hotspots(state: CurrentWindow, request: HotspotsRequest) -> ProfResult<HotspotsPage> {
-    read(&state, move |s| s.hotspots(&request)).await
+    read_view(&state, move |s| s.hotspots(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_tree(state: CurrentWindow, request: TreeRequest) -> ProfResult<TreePage> {
-    read(&state, move |s| s.tree(&request)).await
+    read_view(&state, move |s| s.tree(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_hot_path(state: CurrentWindow, request: HotPathRequest) -> ProfResult<HotPath> {
-    read(&state, move |s| s.hot_path(&request)).await
+    read_view(&state, move |s| s.hot_path(&request)).await
 }
 
 /// The hottest top-down paths to a function ("show in tree", "zoom the flame graph to it").
 #[tauri::command]
 pub async fn profiling_frame_paths(state: CurrentWindow, request: FramePathsRequest) -> ProfResult<FramePaths> {
-    read(&state, move |s| s.frame_paths(&request)).await
+    read_view(&state, move |s| s.frame_paths(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_butterfly(state: CurrentWindow, request: ButterflyRequest) -> ProfResult<Butterfly> {
-    read(&state, move |s| s.butterfly(&request)).await
+    read_view(&state, move |s| s.butterfly(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_flame(state: CurrentWindow, request: FlameRequest) -> ProfResult<FlameGraph> {
-    read(&state, move |s| s.flame(&request)).await
+    read_view(&state, move |s| s.flame(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_diff_flame(state: CurrentWindow, request: DiffFlameRequest) -> ProfResult<FlameGraph> {
-    read(&state, move |s| s.diff_flame(&request)).await
+    read_view(&state, move |s| s.diff_flame(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_function_diff(state: CurrentWindow, request: FunctionDiffRequest) -> ProfResult<FunctionDiffPage> {
-    read(&state, move |s| s.function_diff(&request)).await
+    read_view(&state, move |s| s.function_diff(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_threads(state: CurrentWindow, request: ThreadTimelineRequest) -> ProfResult<ThreadTimeline> {
-    read(&state, move |s| s.thread_timeline(&request)).await
+    read_view(&state, move |s| s.thread_timeline(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_findings(state: CurrentWindow, request: FindingsRequest) -> ProfResult<Vec<ProfileFinding>> {
-    read(&state, move |s| s.findings(&request)).await
+    read_view(&state, move |s| s.findings(&request)).await
 }
 
 /// "Profile samples in this window" for the Moment view.
 #[tauri::command]
 pub async fn profiling_moment(state: CurrentWindow, request: ProfileMomentRequest) -> ProfResult<Vec<ProfileMoment>> {
-    read(&state, move |s| s.moment(&request)).await
+    read_view(&state, move |s| s.moment(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_types(state: CurrentWindow, request: HeapTypesRequest) -> ProfResult<HeapTypesPage> {
-    read(&state, move |s| s.heap_types(&request)).await
+    read_view(&state, move |s| s.heap_types(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_diff(state: CurrentWindow, request: HeapDiffRequest) -> ProfResult<HeapDiffPage> {
-    read(&state, move |s| s.heap_diff(&request)).await
+    read_view(&state, move |s| s.heap_diff(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_growth(state: CurrentWindow, request: HeapGrowthRequest) -> ProfResult<HeapGrowthPage> {
-    read(&state, move |s| s.heap_growth(&request)).await
+    read_view(&state, move |s| s.heap_growth(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_dominators(state: CurrentWindow, request: HeapDominatorsRequest) -> ProfResult<HeapObjectsPage> {
-    read(&state, move |s| s.heap_dominators(&request)).await
+    read_view(&state, move |s| s.heap_dominators(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_instances(state: CurrentWindow, request: HeapInstancesRequest) -> ProfResult<HeapObjectsPage> {
-    read(&state, move |s| s.heap_instances(&request)).await
+    read_view(&state, move |s| s.heap_instances(&request)).await
 }
 
 #[tauri::command]
 pub async fn profiling_heap_paths(state: CurrentWindow, request: HeapPathsRequest) -> ProfResult<HeapPaths> {
-    read(&state, move |s| s.heap_paths(&request)).await
+    read_view(&state, move |s| s.heap_paths(&request)).await
 }
 
 /// Automatic findings over a heap snapshot (growth against `baselineId`).
 #[tauri::command]
 pub async fn profiling_heap_findings(state: CurrentWindow, request: HeapFindingsRequest) -> ProfResult<Vec<HeapFinding>> {
-    read(&state, move |s| s.heap_findings(&request)).await
+    read_view(&state, move |s| s.heap_findings(&request)).await
 }
 
 #[cfg(test)]
