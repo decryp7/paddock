@@ -223,7 +223,6 @@ export function demoSettings(): Settings {
         { days: ['sat', 'sun'], startMinute: 23 * 60, endMinute: 5 * 60 },
       ],
     },
-    backup: { alertWhenStale: true, staleAfterHours: 48, overrides: [] },
     power: { keepAwake: { enabled: true, display: false, graceSecs: 120, cpuPct: 50, netBytesPerS: 512_000, diskBytesPerS: 5_242_880, trayItem: false }, energy: { enabled: true, wattsOn: null, wattsSleep: null, tariffPerKwh: null, currency: null, co2GPerKwh: null }, idle: { enabled: false, action: 'sleep', afterSecs: 1800, countdownSecs: 60, acOnly: true, exceptions: { audio: true, fullScreen: true, otherStayAwake: true, cpuPct: 50, diskBytesPerS: 5_242_880, netBytesPerS: 512_000, programs: [] } }, timed: { enabled: false, entries: [] }, wol: { enabled: true, discovery: true, directedBroadcast: true, testTimeoutSecs: 120 }, wake: { enabled: false } },
   };
 }

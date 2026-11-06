@@ -73,7 +73,6 @@ import type {
   BenchRunEstimate,
   AwakeSpec,
   EnergyReport,
-  BackupReport,
   PowerView,
   Neighbour,
   ThisPcWol,
@@ -121,7 +120,6 @@ import { MockCounters, demoCounterSettings } from './mock/counters';
 import { MockDiskMap } from './mock/disk-map';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
-import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
 import { mockToolOffer } from './mock/tool';
 import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
 import { type MockIdleVariant, MockPower, type MockPowerVariant, mockEnergy } from './mock/power';
@@ -182,8 +180,6 @@ export interface MockOptions {
   keepsMeasuring?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
-  /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
-  backup?: MockBackupVariant;
   /** The helper's state at the start (`?helper=ready`, `off`, `silent`, `foreign`, `outdated`, `missing`, `notIncluded`; default `off`). */
   helper?: MockHelperVariant;
   /** Which keep-awake state the mock starts in (`?power=unavailable|ended|waiting`; default off). */
@@ -234,7 +230,6 @@ export function mockOptionsFromUrl(search: string): MockOptions {
     fail: new Set(fail ? fail.split(',') : []),
     widgetStorage: true,
     widgets: mockWidgetOptionsFromUrl(search),
-    ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
     ...savedFromUrl(q.get('saved')),
     ...(q.get('gate') === 'scans' ? { holdScans: true } : {}),
     ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
@@ -339,11 +334,9 @@ export class MockBackend implements DynoBackend {
   readonly savedInventories: InventoryFormat[] = [];
   /** Folder choices the mock was asked to show, for tests. */
   pickedFolders = 0;
-  private readonly backupVariant: MockBackupVariant;
   private helperVariant: MockHelperVariant;
   private toolInstalled = false;
   private rowsMany = false;
-  private backupCheckedAt: number;
   private readonly keepAwake: MockPower;
   private readonly powerListeners = new Set<(v: PowerView) => void>();
   private readonly wolMock: MockWol;
@@ -400,9 +393,7 @@ export class MockBackend implements DynoBackend {
       if (typeof window !== 'undefined') (window as unknown as { __dynoReleaseScans?: () => void }).__dynoReleaseScans = () => this.disk.release();
     }
     this.start = this.now();
-    this.backupVariant = options.backup ?? 'mixed';
     this.helperVariant = options.helper ?? 'off';
-    this.backupCheckedAt = this.start - 40 * MIN;
     this.keepAwake = new MockPower(options.power ?? 'normal', this.now, options.idle);
     if (options.idle && options.idle !== 'disabled') {
       // The engine is the single source: a state that says the rule is running comes with the rule switched on and its action.
@@ -1372,7 +1363,7 @@ export class MockBackend implements DynoBackend {
     return this.reply('saveSettings', () => {
       if (settings.sampling.intervalMs < 250) throw err('badRequest', 'Sample at most 4 times a second (250 ms).');
       if (settings.webApi.port < 1024 || settings.webApi.port > 65535) throw err('badRequest', 'Choose a port between 1024 and 65535.');
-      const extras = mockMaintenanceProblem(settings.maintenance) ?? mockBackupProblem(settings.backup);
+      const extras = mockMaintenanceProblem(settings.maintenance);
       if (extras) throw err('badRequest', extras);
       this.settingsValue = copy(settings);
       return this.settingsValue;
@@ -1610,7 +1601,7 @@ export class MockBackend implements DynoBackend {
     return this.reply('quitAndStopAgent', () => undefined);
   }
 
-  // ----------------------------------------------------------------------------------------- extras, backup
+  // ----------------------------------------------------------------------------------------- extras
 
   changes(query: ChangesQuery): Promise<ChangeTimeline> {
     return this.reply('changes', () => mockChanges(query, this.now()));
@@ -1636,10 +1627,6 @@ export class MockBackend implements DynoBackend {
 
   maintenance(): Promise<MaintenanceStatus> {
     return this.reply('maintenance', () => mockMaintenanceStatus(this.settingsValue.maintenance, this.now()));
-  }
-
-  backup(): Promise<BackupReport> {
-    return this.reply('backup', () => mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt));
   }
 
   // ----------------------------------------------------------------------------------------------- jobs
@@ -1746,7 +1733,6 @@ export class MockBackend implements DynoBackend {
       const problem = this.problemWith(job.spec);
       if (problem) this.change(job, { state: 'failed', message: problem });
       else {
-        if (job.status.kind === 'refresh-backup') this.backupCheckedAt = this.now();
         if (job.status.kind === 'install-tool') this.toolInstalled = true;
         if (job.status.kind === 'helper') this.helperVariant = afterHelperAction((objectOf(job.spec)['helper'] as { action: HelperAction }).action);
         this.change(job, { state: 'done' });
@@ -1800,8 +1786,7 @@ export class MockBackend implements DynoBackend {
     if ('helper' in o) return { helper: mockHelperStatus(this.helperVariant, this.profile.os) };
     if ('updateList' in o || 'updateGeo' in o || 'rebuildIntel' in o) return { intel: this.intel.status() };
     if ('installTool' in o) return { tool: { tool: 'smartmontools', installed: '7.5' } };
-    if ('wolWake' in o) return { wol: jobBookOutcome(this.jobBook, o) };
-    return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
+    return { wol: jobBookOutcome(this.jobBook, o) };
   }
 
   // ---------------------------------------------------------------------------------------------- plumbing
@@ -1931,7 +1916,7 @@ interface MockJob {
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel' | 'helper' | 'install-tool' | 'wol-wake';
+type JobKindSlug = 'find-files' | 'rescan-issues' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel' | 'helper' | 'install-tool' | 'wol-wake';
 
 /** The part of a snapshot that changes with its state (the shell's flat state tag). */
 type JobStateFields = SuJobState;
@@ -1939,7 +1924,6 @@ type JobStateFields = SuJobState;
 const JOB_TITLES: Record<JobKindSlug, string> = {
   'find-files': 'Finding files',
   'rescan-issues': 'Reading system logs',
-  'refresh-backup': 'Checking backups',
   'file-hash': 'Hashing a file',
   'sleep-blockers': 'Reading sleep blockers',
   'boot-analysis': 'Analysing boots',
@@ -1956,7 +1940,6 @@ const JOB_TITLES: Record<JobKindSlug, string> = {
 const SPEC_KIND: Record<string, JobKindSlug> = {
   findFiles: 'find-files',
   rescanIssues: 'rescan-issues',
-  refreshBackup: 'refresh-backup',
   fileHash: 'file-hash',
   sleepBlockers: 'sleep-blockers',
   bootAnalysis: 'boot-analysis',
@@ -2019,8 +2002,6 @@ function mockPhase(kind: JobKindSlug, step: number, last: number): SuJobPhase {
       return { id: 'walk', label: 'Listing files', unit: 'items', done: step * 1_200, total: null };
     case 'rescan-issues':
       return { id: 'source-MacLog', label: 'Reading system log', unit: 'items', done: step * 640, total: null };
-    case 'refresh-backup':
-      return { id: 'tools', label: 'Checking backup tools', unit: 'items', done: Math.min(2, Math.floor(part * 3)), total: 3 };
     case 'wol-wake':
       return step < last / 2
         ? { id: 'sending', label: 'Sending the wake packets', unit: 'items', done: Math.min(6, step * 2), total: 6 }

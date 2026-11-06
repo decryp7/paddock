@@ -32,8 +32,7 @@ test.describe('screens', () => {
       ['Alarms', 'Alarms'],
       ['Flight recorder', 'Flight recorder'],
       ['Health', 'Health'],
-      ['Backup health', 'Backup health'],
-      ['Extras', 'Extras'],
+            ['Extras', 'Extras'],
       ['Lifespan', 'Lifespan'],
       ['Diagnostics', 'Diagnostics bundle'],
       ['Dashboard', 'Dashboard'],
@@ -98,9 +97,9 @@ test.describe('command palette', () => {
     await expect(input(page)).toBeHidden();
     await pressMod(page, 'Mod+Shift+P');
     // No waiting for the input: this is how fast people type.
-    await page.keyboard.type('check backup');
+    await page.keyboard.type('read the system logs');
     await page.keyboard.press('Enter');
-    await expect(page.getByRole('heading', { level: 1, name: 'Backup health' })).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1, name: 'Issues' })).toBeVisible();
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
@@ -762,41 +761,6 @@ test.describe('timeline', () => {
   test('network changes are a kind of event in the history legend', async ({ page }) => {
     await page.goto(url('/'));
     await expect(page.getByRole('region', { name: 'History' }).getByText('Network', { exact: false }).first()).toBeVisible();
-  });
-});
-
-test.describe('backup health', () => {
-  test('lists a healthy, a stale and an unreadable tool, and Check now waits for the check', async ({ page }) => {
-    await page.goto(url('/backup'));
-    await expect(page.getByRole('heading', { level: 1, name: 'Backup health' })).toBeVisible();
-    await expect(page.getByRole('heading', { level: 2, name: 'restic backup is out of date' })).toBeVisible();
-    const table = page.getByRole('grid', { name: 'Backup tools' });
-    await expect(table.getByRole('row', { name: /Time Machine/ })).toContainText('Healthy');
-    await expect(table.getByRole('row', { name: /restic/ })).toContainText('Out of date');
-    await expect(table.getByRole('row', { name: /BorgBackup/ })).toContainText('Could not check');
-    await table.getByRole('row', { name: /restic/ }).click();
-    const panel = page.getByRole('complementary', { name: 'Backup details' });
-    await expect(panel).toContainText('never starts a backup');
-    await page.keyboard.press('Escape');
-    await expect(panel).toHaveCount(0);
-    await page.getByRole('button', { name: 'Check now' }).click();
-    await expect(page.getByRole('button', { name: 'Check now' })).toBeVisible();
-    await expect(page.getByText('Checked just now')).toBeVisible();
-  });
-
-  test('finding no backup tool is a normal state', async ({ page }) => {
-    await page.goto(url('/backup', '&backup=none'));
-    await expect(page.getByText('No backup tool found')).toBeVisible();
-    await expect(page.locator('dy-backup-page')).toContainText('never runs or manages a backup');
-    await expect(page.getByRole('alert')).toHaveCount(0);
-  });
-
-  test('Settings has the Backup health section', async ({ page }) => {
-    await openSettings(page);
-    const section = page.getByRole('region', { name: 'Backup health' });
-    await expect(section.getByText('Out of date after')).toBeVisible();
-    await section.getByLabel('restic folders').fill('tools/restic');
-    await expect(section.getByRole('alert')).toContainText('not a full path');
   });
 });
 

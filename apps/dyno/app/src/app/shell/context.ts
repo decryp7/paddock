@@ -4,7 +4,6 @@ import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { ShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { BACKEND } from '../core/backend';
 import { Notifier } from '../shared/notifier';
-import { BackupStore } from '../state/backup.store';
 import { DiagnosisStore } from '../state/diagnosis.store';
 import { HistoryStore } from '../state/history.store';
 import { IssuesStore } from '../state/issues.store';
@@ -28,9 +27,6 @@ export interface DynoContext {
   /** Issues: saves the window for Debrief. */
   exportIssues(): Promise<void>;
   canExportIssues(): boolean;
-  /** Backup health: checks the backup tools now. */
-  checkBackup(): Promise<void>;
-  canCheckBackup(): boolean;
   /** Why slow: runs the check again. */
   runWhySlow(): Promise<void>;
   canRunWhySlow(): boolean;
@@ -53,7 +49,6 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
   const dialogs = inject(DialogService);
   const history = inject(HistoryStore);
   const issues = inject(IssuesStore);
-  const backup = inject(BackupStore);
   const diagnosis = inject(DiagnosisStore);
   const reports = inject(ReportsStore);
   const settings = inject(SettingsStore);
@@ -83,13 +78,6 @@ export const dynoContext: AppContextFactory<DynoContext> = () => {
       await issues.exportForDebrief();
     },
     canExportIssues: () => !issues.exporting(),
-    checkBackup: async () => {
-      await pages.goAndFocus('dy.backup');
-      // The page's button waits for the first report; so does the command.
-      if (!backup.report()) await backup.load();
-      await backup.check();
-    },
-    canCheckBackup: () => !backup.busy(),
     runWhySlow: async () => {
       await pages.goAndFocus('dy.why-slow');
       await diagnosis.run();

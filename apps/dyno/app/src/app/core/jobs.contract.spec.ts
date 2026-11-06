@@ -32,7 +32,6 @@ const expected: Record<string, SuJobSnapshot> = {
 const specs: JobSpec[] = [
   { findFiles: { query: { folder: '/Users/alex/Projects', mode: 'both', minBytes: 1_048_576 } } },
   { rescanIssues: { query: { days: 14 } } },
-  'refreshBackup',
   { fileHash: { source: { path: '/Applications/Slack.app/slack' } } },
   { fileHash: { source: { process: { pid: 3, started: 4 } } } },
   'sleepBlockers',
@@ -70,10 +69,9 @@ describe('the jobs wire contract with the engine', () => {
   });
 
   it('what a done job hands over is read by its tag', async () => {
-    const invoke = vi.fn().mockResolvedValueOnce(wire.outputs[0]).mockResolvedValueOnce(wire.outputs[1]);
+    const invoke = vi.fn().mockResolvedValueOnce(wire.outputs[0]);
     const backend = new TauriBackend(invoke as unknown as InvokeFn, vi.fn() as unknown as ListenFn);
     expect(await backend.jobResult(3)).toMatchObject({ fileHash: { bytes: 3 } });
-    expect(await backend.jobResult(3)).toMatchObject({ backup: { checking: false } });
-    expect(wire.outputs[2]).toBe(true);
+    expect(wire.outputs[1]).toBe(true);
   });
 });

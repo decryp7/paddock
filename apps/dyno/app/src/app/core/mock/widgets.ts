@@ -63,7 +63,6 @@ const POPOVER_KINDS = [
   info('diskSpace', 'Disk space', 'Free space per volume', 'disk', [2], 4, { every: { secs: 60 } }),
   info('cpuMemory', 'CPU and memory', 'Load and memory in use, with the last minute', 'cpu', [2]),
   info('network', 'Network', 'Download and upload now', 'network', [1, 2]),
-  info('backupHealth', 'Backup', 'When the last backup ran', 'backup', [1, 2], 1, 'onChange'),
   info('lastIssue', 'Last issue', 'The newest problem of the last 7 days', 'issue', [2], 1, 'onChange'),
   info('pinnedCounters', 'Pinned counters', 'Your pinned performance counters', 'counters', [2]),
   info('topApps', 'Top apps', 'The busiest apps right now', 'apps', [2]),
@@ -683,7 +682,7 @@ export class MockWidgets {
           const rows = Array.from({ length: POPOVER_LIST_MAX }, (_, i) => ({ id: i + 1, title: `Invented alarm ${i + 1}: a rather long title that has to be cut short on one line`, level: (['critical', 'warning', 'info'] as const)[i % 3]!, since: at - (i + 1) * 3 * 60_000, acknowledged: i % 4 === 0 }));
           return ready({ activeAlarms: { rows, more: 5 } }, stale);
         }
-        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }, { id: 2, title: 'Backup is out of date', level: 'info', since: at - 26 * 3_600_000, acknowledged: true }], more: 0 } }, stale);
+        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }], more: 0 } }, stale);
       case 'diskSpace': {
         if (state === 'empty') return empty("See Time Machine's space when it's connected", "The disk isn't connected now.", 'Choose another volume', 'chooseVolume');
         if (state === 'error') return error("Couldn't read volumes", "The volume list didn't answer.");
@@ -699,11 +698,6 @@ export class MockWidgets {
       case 'network':
         if (state === 'empty') return empty('See traffic when online', 'Offline now.', 'Open network', { openPage: 'network' });
         return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5, 2), txMinute: wave(3e5, 5e4, 3) } }, stale);
-      case 'backupHealth':
-        if (state === 'empty') return empty('Know when backups ran', 'No backup set up.', 'Set up checks', 'setUpBackupChecks');
-        if (state === 'error') return error("Couldn't check", 'tmutil failed.');
-        if (state === 'working') return { state: 'working', title: 'Checking backup', phase: '', progress: { count: { done: 2, unit: 'items' } }, last: null, cancel: null };
-        return ready({ backupHealth: { name: 'Time Machine', state: 'healthy', lastBackup: at - 2 * 3_600_000, summary: 'Time Machine finished a backup.', tools: 1 } }, stale);
       case 'lastIssue':
         if (state === 'empty') return empty('No issues in the last 7 days', 'Dyno reads the system logs for crashes and hangs.', 'Open issues', { openPage: 'issues' }, true);
         if (state === 'error') return error("Couldn't read issues", 'The issue index is unavailable.');

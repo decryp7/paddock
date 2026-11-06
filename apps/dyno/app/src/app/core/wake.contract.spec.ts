@@ -8,17 +8,17 @@ import wire from './wake.wire.json';
  */
 const schedule: WakeSchedule = {
   id: 1,
-  name: 'Morning backup check',
+  name: 'Morning inventory',
   minuteOfDay: 420,
   repeat: { days: { mask: 31 } },
   stayAwakeMinutes: 30,
   wakeDevices: [2],
-  job: 'backupCheck',
+  job: 'softwareInventory',
   enabled: true,
   nextAt: 1_700_050_000_000,
   lastRun: { at: 1_700_000_000_000, summary: 'staying awake 30 min; started its job' },
 };
-const input: WakeInput = { id: 1, name: 'Morning backup check', minuteOfDay: 420, repeat: 'once', stayAwakeMinutes: null, wakeDevices: [2], job: 'softwareInventory', enabled: false };
+const input: WakeInput = { id: 1, name: 'Morning inventory', minuteOfDay: 420, repeat: 'once', stayAwakeMinutes: null, wakeDevices: [2], job: 'softwareInventory', enabled: false };
 const repeats: WakeRepeat[] = ['once', 'daily', { days: { mask: 96 } }];
 const views: Record<string, WakesView> = {
   armedHelper: { rows: [{ entry: schedule, state: { armed: { route: 'helper' } } }], route: 'helperReady' },

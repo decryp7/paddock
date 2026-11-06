@@ -27,7 +27,7 @@ describe('Schedule model', () => {
   });
 
   it('says what happens after the wake', () => {
-    expect(thenText(sched({ stayAwakeMinutes: 30, wakeDevices: [2], job: 'backupCheck' }), () => 'NAS')).toBe('Stay awake 30 min; wake NAS; check the backups');
+    expect(thenText(sched({ stayAwakeMinutes: 30, wakeDevices: [2], job: 'softwareInventory' }), () => 'NAS')).toBe('Stay awake 30 min; wake NAS; list the installed software');
     expect(thenText(sched(), () => 'x')).toBe('');
   });
 

@@ -1,4 +1,4 @@
-import type { BackupReport, FirewallSource, Locker, NetworkSnapshot, NextStep, ReadVia, SleepReport, StartupOverview, SystemInventory, LiveVia } from './api.types';
+import type { FirewallSource, Locker, NetworkSnapshot, NextStep, ReadVia, SleepReport, StartupOverview, SystemInventory, LiveVia } from './api.types';
 import wire from './read-via.wire.json';
 
 /**
@@ -19,7 +19,6 @@ const nextSteps: NextStep[] = ['retry', { openSettings: 'helper' }, 'updateHelpe
 const firewall: FirewallSource = { source: 'pf', states: [], switches: [], defaultIn: null, defaultOut: null, ruleCount: 0, rules: [], truncated: 0, rulesHidden: false, note: null, via: 'helper' };
 const network: Pick<NetworkSnapshot, 'trafficVia' | 'ownersVia'> = { trafficVia: 'helper', ownersVia: needsHelper };
 const sleep: Pick<SleepReport, 'blockersVia'> = { blockersVia: 'helper' };
-const backup: Pick<BackupReport, 'via'> = { via: { unavailable: { reason: 'No versions.', next: null } } };
 const inventory: Pick<SystemInventory, 'memoryVia'> = { memoryVia: needsHelper };
 const startup: Pick<StartupOverview, 'btmVia'> = { btmVia: 'helper' };
 const locker: Pick<Locker, 'via'> = { via: 'helper' };
@@ -38,7 +37,6 @@ describe('the via wire contract with the engine', () => {
     expect(wire.firewall).toEqual(firewall);
     expect(wire.network).toMatchObject(network);
     expect(wire.sleep).toMatchObject(sleep);
-    expect(wire.backup).toMatchObject(backup);
     expect(wire.inventory).toMatchObject(inventory);
     expect(wire.startup).toMatchObject(startup);
     expect(wire.locker).toMatchObject(locker);

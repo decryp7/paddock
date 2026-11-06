@@ -5,7 +5,7 @@ import { FIXTURES } from './dialog-fixtures';
 const UI = '../../../ui/projects/paddock-ui/shell';
 const CONTRACT_FILES = ['src/app/generated/dialog-contracts.ts', ...['about', 'confirm'].map((p) => `${UI}/${p}/generated/dialog-contracts.ts`)];
 const INPUTS = Object.fromEntries(Object.entries(FIXTURES).map(([id, list]) => [id, list[0] ?? {}]));
-const PAGES = ['', 'processes', 'why-slow', 'throttling', 'issues', 'inventory', 'network', 'map', 'lists', 'firewall', 'counters', 'benchmarks', 'alarms', 'reports', 'recorder', 'health', 'backup', 'extras', 'lifespan', 'diagnostics', 'cpu'];
+const PAGES = ['', 'processes', 'why-slow', 'throttling', 'issues', 'inventory', 'network', 'map', 'lists', 'firewall', 'counters', 'benchmarks', 'alarms', 'reports', 'recorder', 'health', 'extras', 'lifespan', 'diagnostics', 'cpu'];
 
 const target = (p: string): AxeTarget => ({
   name: `page ${p || 'dashboard'}`,

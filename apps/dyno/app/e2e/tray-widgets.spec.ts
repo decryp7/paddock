@@ -226,7 +226,7 @@ test.describe('screenshots for the independent review', () => {
       await snap(p4, 'popup-menu');
       await page.setViewportSize({ width: 1100, height: 900 });
       const chooser = await openChooser(page);
-      for (const [name, count] of [['Network', 4], ['Backup', 5], ['Last issue', 6], ['Pinned counters', 7]] as const) {
+      for (const [name, count] of [['Network', 4], ['Last issue', 6], ['Pinned counters', 7]] as const) {
         await chooser.getByRole('button', { name: `Add ${name}` }).click();
         await expect(shown(chooser)).toHaveCount(count);
       }
@@ -246,7 +246,7 @@ test.describe('screenshots for the independent review', () => {
       await chooser.getByRole('button', { name: /^More actions for Network/ }).click();
       await dialog.screenshot({ path: join(SHOTS!, `chooser-menu-${theme}.png`) });
       await page.keyboard.press('Escape');
-      const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale,network:empty,backupHealth:working,lastIssue:error,pinnedCounters:ready', 1500);
+      const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale,network:empty,lastIssue:error,pinnedCounters:ready', 1500);
       await snap(p2, 'popup-states', p2.locator('pd-tray-popover'));
       // The ready designs of the other kinds: the first three are removed, Top apps added.
       for (const title of ['Active alarms', 'Disk space', 'CPU and memory']) {

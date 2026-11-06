@@ -164,7 +164,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
       await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('grid')).toBeVisible();
     },
   },
-  { name: 'backup', path: '/#/backup', ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Backup tools' })).toBeVisible()) },
   {
     name: 'extras-changes',
     path: '/#/extras?tab=changes',
@@ -293,20 +292,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
       await expect(page.getByRole('option').first()).toBeVisible();
     },
   },
-  {
-    name: 'jobs',
-    path: '/#/backup',
-    latency: 150,
-    query: '&jobsteps=6',
-    ready: async (page) => {
-      // The Jobs list is opened first: a click made while a job runs waits for it to end, so the check is started with an event.
-      await page.getByRole('button', { name: /^Jobs/ }).click();
-      await page.getByRole('button', { name: 'Check now' }).dispatchEvent('click');
-      await page.clock.runFor(1_700);
-      const jobs = page.getByRole('region', { name: 'Jobs' });
-      await expect(jobs.getByRole('button', { name: /Cancel/ })).toBeVisible();
-      await page.mouse.move(2, 2);
-    },
   },
   {
     name: 'tray',
