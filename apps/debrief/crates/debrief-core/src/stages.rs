@@ -99,6 +99,8 @@ pub struct ByteBudget {
 struct BudgetState {
     used: usize,
     peak: usize,
+    /// Threads waiting in [`ByteBudget::acquire`] now.
+    waiting: usize,
 }
 
 impl ByteBudget {
@@ -123,16 +125,31 @@ impl ByteBudget {
             if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
                 return false;
             }
+            s.waiting += 1;
             // Woken by every release; the timeout only lets a cancel through.
             s = self
                 .freed
                 .wait_timeout(s, std::time::Duration::from_millis(100))
                 .map(|r| r.0)
                 .unwrap_or_else(|p| p.into_inner().0);
+            s.waiting -= 1;
         }
         s.used += bytes;
         s.peak = s.peak.max(s.used);
         true
+    }
+
+    /// Takes `bytes` more at once, without waiting: an estimate that proved too low is corrected after the fact, and the
+    /// readers after it wait for the excess. Given back with [`release`](ByteBudget::release).
+    pub fn charge(&self, bytes: usize) {
+        let mut s = self.lock();
+        s.used += bytes;
+        s.peak = s.peak.max(s.used);
+    }
+
+    /// Threads waiting for bytes now (tests wait for it to know a reader is blocked).
+    pub fn waiting(&self) -> usize {
+        self.lock().waiting
     }
 
     /// Gives `bytes` back.
@@ -202,6 +219,11 @@ impl Stages<'_> {
                 }
                 drop(order_tx);
             });
+            // The input also ends silently when it gave up waiting for a cancel (a blocked `ByteBudget::acquire`): that is
+            // a stop, not an end of the input.
+            if !stopped && cancelled() {
+                stopped = true;
+            }
             let _ = committer.join();
         });
         !stopped
@@ -369,10 +391,12 @@ mod tests {
     fn a_budget_holds_the_reader_until_the_committer_gives_bytes_back() {
         let budget = ByteBudget::new(100);
         assert!(budget.acquire(60, None));
-        // 60 + 60 does not fit: the second waits for the release below.
+        // 60 + 60 does not fit: the second waits until the release below, which only happens once it is known to wait.
         std::thread::scope(|s| {
             let waiter = s.spawn(|| budget.acquire(60, None));
-            // Nothing to sleep on: the release below is what lets the waiter through, whenever it gets there.
+            while budget.waiting() == 0 {
+                std::thread::yield_now();
+            }
             budget.release(60);
             assert!(waiter.join().unwrap());
         });
@@ -381,6 +405,45 @@ mod tests {
         budget.release(60);
         assert!(budget.acquire(500, None));
         assert_eq!(budget.peak(), 500);
+        assert_eq!(budget.waiting(), 0);
+    }
+
+    #[test]
+    fn a_charge_makes_the_next_reader_wait_for_the_excess() {
+        let budget = ByteBudget::new(100);
+        assert!(budget.acquire(40, None));
+        budget.charge(50);
+        let cancel = AtomicBool::new(true);
+        assert!(!budget.acquire(20, Some(&cancel)), "40 + 50 + 20 does not fit");
+        budget.release(90);
+        assert!(budget.acquire(20, Some(&cancel)));
+    }
+
+    /// A cancel that reaches a reader blocked on the budget ends the input silently: that is a stop, not a finished run.
+    #[test]
+    fn windowed_cancel_while_the_input_waits_for_the_budget_is_a_stop() {
+        let p = pool(2);
+        let cancel = AtomicBool::new(false);
+        let stages = Stages {
+            pool: &p,
+            chunk: 1,
+            cancel: Some(&cancel),
+        };
+        let budget = ByteBudget::new(10);
+        let input = (0..3u8).map_while(|i| budget.acquire(10, Some(&cancel)).then_some(i));
+        let mut committed = 0;
+        let done = stages.run_windowed(
+            2,
+            input,
+            |i| *i,
+            |_, _, _| {
+                committed += 1;
+                // The committer is slow to give the bytes back: the cancel arrives while the reader waits for them.
+                cancel.store(true, Ordering::SeqCst);
+            },
+        );
+        assert!(!done, "cancelled while waiting for the budget");
+        assert_eq!(committed, 1);
     }
 
     #[test]

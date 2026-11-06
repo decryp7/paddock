@@ -21,6 +21,8 @@ pub const MIN_INDEX_HEAP_PER_THREAD_MB: u32 = 16;
 pub const MAX_INDEX_HEAP_PER_THREAD_MB: u32 = 1024;
 /// Most search index writer threads.
 pub const MAX_INDEX_WRITER_THREADS: u32 = 64;
+/// The most search index read threads a user may ask for (the store bounds them again).
+pub const MAX_INDEX_READ_THREADS: u32 = 64;
 /// The store worker's own use before DuckDB's limit (its code, the catalog, buffers), MB: the query budget minus
 /// this is DuckDB's limit when none is chosen (300 → 192).
 pub const WORKER_BASE_MB: u32 = 108;
@@ -111,7 +113,7 @@ pub fn schema() -> SettingsSection {
             SettingField::new(
                 "indexReadThreads",
                 "Search index read threads",
-                int(0, i64::from(MAX_INDEX_WRITER_THREADS), None),
+                int(0, i64::from(MAX_INDEX_READ_THREADS), None),
                 d.index_read_threads,
             )
             .describe(

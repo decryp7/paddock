@@ -5,6 +5,7 @@
 
 use super::section::WORKER_BASE_MB;
 use super::PerformanceSettings;
+use debrief_core::threads::MAX_AUTO_INDEX_READ_THREADS;
 use debrief_ipc::memory_watch::MemoryListener;
 use debrief_plugin_host::PluginLimits;
 use debrief_store_client::{MemoryMode, StoreTuning, WorkerLaunch};
@@ -48,17 +49,15 @@ pub fn index_threads(s: &PerformanceSettings, cores: u32) -> u32 {
     (s.import_budget_mb / s.index_heap_per_thread_mb.max(1)).clamp(1, usable.min(MAX_AUTO_INDEX_THREADS))
 }
 
-/// Most search index read threads chosen automatically (`debrief_store_duck::fts::auto_read_threads`).
-pub const MAX_AUTO_INDEX_READ_THREADS: u32 = 8;
-
 /// Search index read threads: the setting within the usable cores, or (0) the usable cores up to
-/// [`MAX_AUTO_INDEX_READ_THREADS`]. At least one.
+/// [`MAX_AUTO_INDEX_READ_THREADS`] (the store's own Auto rule, `debrief_store_duck`'s `auto_read_threads`, with this cap).
+/// At least one.
 pub fn index_read_threads(s: &PerformanceSettings, cores: u32) -> u32 {
     let usable = usable_cores(s, cores);
     if s.index_read_threads > 0 {
         return s.index_read_threads.min(usable);
     }
-    usable.min(MAX_AUTO_INDEX_READ_THREADS)
+    usable.min(MAX_AUTO_INDEX_READ_THREADS as u32)
 }
 
 /// The search index writer's heap, MB: a heap per thread.

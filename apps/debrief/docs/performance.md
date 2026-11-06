@@ -768,21 +768,28 @@ Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
   | change | 4 | 1 | 82.1 s | 684k | 1,044 MB | 16 |
 
   Medians: base 84.1 s and 1,443 MB; change at Auto 96.6 s and 1,057 MB. One run per read-thread row, so differences under about
-  30% are noise (rule 51 sweep: 1 thread 98.5 s, 2 threads 88.9 s, 4 threads 82.1 s, Auto 8 threads 77 to 126 s: more read
-  threads do not make the index faster; the in-order writer is the limit again, as the earlier finding said).
+  30% are noise.
+- **Read-threads sweep (rule 51): not shown.** 1 thread 98.5 s, 2 threads 88.9 s, 4 threads 82.1 s (one run each, a trend of
+  about 17% sooner from 1 to 4 that the noise could hide), Auto (8 threads) 77.2, 96.6 and 125.5 s, a slower median than 4.
+  These numbers do not say that more read threads help, and they do not justify the Auto cap of 8 either: the cap
+  (`MAX_AUTO_INDEX_READ_THREADS`) is a ceiling for the cores-minus-one rule, not a measured optimum. A better sweep needs
+  several runs per row.
 - **Verdict, memory:** **met.** The change's footprint is 25% lower than the base (median 1,057 MB against 1,443 MB; every
-  change run below every base run); the feed's own bound is `FEED_MEMORY` (64 MiB of estimated document bytes), proved with
-  10 KB events by `the_feed_holds_long_events_within_its_byte_budget` (4 MB budget, peak built bytes within it; the same files
-  with a 1 GB budget build more than 8 MB at once, so the probe sees a breach). The earlier RSS rise did not show in the
+  change run below every base run); the feed's own bound is `FEED_MEMORY` (64 MiB), an estimate: slices are admitted by the
+  footer's unencoded text size and a slice that proves larger is charged the excess after it is built. The tests
+  `the_feed_holds_long_events_within_its_byte_budget` (10 KB events, 4 MB budget) and `a_repeated_long_exception_counts_at_its_full_size`
+  (the same 4 KB exception on every row, which dictionary encoding stores in a byte or two) show the peak of built bytes within
+  the budget; with a 1 GB budget the first test's files build more than 8 MB at once, so the probe sees a breach. The earlier RSS rise did not show in the
   footprint. The footprint figures include the 4 writer heaps of 64 MB, the index files' pages and DuckDB's catalogue.
-- **Verdict, speed:** **no change shown.** Median 96.6 s against 84.1 s (1.15x slower), inside the run-to-run spread of the
-  base itself (83.6 to 108.7 s); the SR1 budget (index ready at least 2x faster than 2 writer threads) stays not shown.
+- **Verdict, speed:** **no change shown; a slowdown up to about 1.15x is not ruled out.** Median 96.6 s against 84.1 s, inside
+  the run-to-run spread of the base itself (83.6 to 108.7 s) with three runs each; the SR1 budget (index ready at least 2x
+  faster than 2 writer threads) stays not shown.
 - **Common-word search p50 after the index is ready** (the harness runs 20 searches per word right after the index; merges
   still run then), "timeout" (3,684,614 hits): base 263.7, 626.0, 568.2 ms; change (Auto) 587.2, 614.7, 549.2 ms; medians 568 ms
   against 587 ms. "declined" (2,339,944 hits): base 252.3, 615.3, 544.4; change 576.2, 605.7, 543.2. "contoso orders"
   (1,404,576 hits): base 278.6, 645.9, 580.4; change 609.4, 637.5, 568.8. The cause of the first base run's 264 ms is not
   known (not investigated); the spread within one build (264 to 626 ms) is larger than the difference between builds, so
-  **no worsening is shown, and none ruled out below about 10%**. The rare-word search ("cap_...", 1 hit) is 9 to 10 ms in
+  **no worsening is shown, and the numbers cannot rule out a worsening of much more than 10%**. The rare-word search ("cap_...", 1 hit) is 9 to 10 ms in
   every run.
 - **SR3 (catalogue), re-recorded:** `DEBRIEF_READY_RECATALOGUE=1` on the same store with the change (one worker, as shipped):
   162.1 s, peak footprint 351 MB (load 7.2 at the start, 3.3 at the end); the SR3 block's 160.5 s with one worker and RSS 361 MB
@@ -790,7 +797,11 @@ Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
   `building_the_catalogue_keeps_its_unsaved_rows_bounded` measures 12 to 16 MB with one worker against its 16 MB bound, a margin
   of 0 to 4 MB, and 20 to 24 MB with two or four).
 - **Not done:** merges held off during the bulk load; lifting the Auto cap of 4 writer threads; the store worker's own logger
-  (the step summary lines are written with `log::` and no logger is installed in the worker process).
+  (the step summary lines are written with `log::` and no logger is installed in the worker process, so they reach no
+  bundle until the branch `feat/debrief-store-worker-logging` lands; this block's log lines depend on it).
+- **Raw output:** `f-import.txt`, `f-base-1..3.txt`, `f-new-auto-1..3.txt`, `f-new-r1.txt`, `f-new-r2.txt`, `f-new-r4.txt`,
+  `f-cat.txt` and `runs.txt` in `/Volumes/d7sst7/dev-targets/scratch/debrief-search/` (machine-local); the scripts are
+  `final.sh` and `run.sh` there.
 
 ### 2026-11-05, catalogue workers (plan SR3, branch `debrief/import-search`)
 
@@ -804,6 +815,8 @@ Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
 - **Command:** `DEBRIEF_READY_STORE=<kept store> DEBRIEF_READY_RECATALOGUE=1 DEBRIEF_READY_CATALOGUE_WORKERS=<n>
   import_ready --nocapture` (release; the harness times `wait_for_catalogue`). One run per row.
 - **Numbers:**
+
+  (Peak RSS column superseded by the 2026-11-07 block, which records the footprint.)
 
   | Build | Workers | Load at start | Catalogue built | Peak RSS (harness) |
   |---|---|---|---|---|
@@ -873,6 +886,8 @@ Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
   shown.** The best clean pair is change at 4 threads (135.9 s) against base at 2 (227.4 s), 1.67x, with the change run at
   the lower load; it is a direction, not a pass. Base at 4 threads is no faster than base at 2, which agrees with the
   earlier finding that the single reader, not the writer, was the limit.
+- **Superseded by the 2026-11-07 block for memory:** the peak RSS figures and the sentence about the footprint not being
+  measured below are replaced by footprint figures there (the change's footprint is lower than the base's, not higher).
 - **Not measured:** word-search p50 against today's. The harness times searches right after the index is ready, while
   Tantivy's merges and the catalogue still run; those values ranged from 150 to 650 ms across rows with no relation to the
   build (for "timeout", 3.7M hits: base 361 and 204 ms, change 154, 653 and 412 ms), so no comparison is claimed. The

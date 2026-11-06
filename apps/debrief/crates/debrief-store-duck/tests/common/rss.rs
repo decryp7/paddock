@@ -16,6 +16,12 @@ pub fn footprint() -> u64 {
     paddock_proc::process_memory(std::process::id()).unwrap_or_else(current)
 }
 
+/// Whether the real-memory gauge works here. A harness that prints "footprint" asserts it first (ER-33: a gauge that
+/// silently falls back to the resident size would be reported under the wrong name).
+pub fn footprint_gauge_works() -> bool {
+    paddock_proc::process_memory(std::process::id()).is_some_and(|b| b > 0)
+}
+
 pub struct Sampler {
     measure: fn() -> u64,
     peak: Arc<AtomicU64>,

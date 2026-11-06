@@ -83,6 +83,12 @@ impl Hardware {
 /// Upper bound of the default solid-state IO threads.
 pub const MAX_SSD_THREADS: usize = 8;
 
+/// Most threads reading segment row groups and building documents for the full-text index when the setting is Auto: the one
+/// cap of the store's pool (`debrief-store-duck`) and of Settings ▸ Performance (`tuning::index_read_threads`). It is a
+/// ceiling for the cores-minus-one rule, not a measured optimum: the sweep in `apps/debrief/docs/performance.md`
+/// (2026-11-07) shows no gain from more read threads, so a lower cap would do as well.
+pub const MAX_AUTO_INDEX_READ_THREADS: usize = 8;
+
 /// Threads for `kind` on `hw`. `setting` is the user's Performance choice for CPU work (0 or none = automatic).
 pub fn threads_for(kind: WorkKind, hw: Hardware, setting: Option<usize>) -> usize {
     let cores = hw.cores.max(1);

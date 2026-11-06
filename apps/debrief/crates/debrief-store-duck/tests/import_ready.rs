@@ -70,6 +70,11 @@ fn import_until_search_is_ready() {
         reindex || recatalogue || !store_dir.join("data.duckdb").exists(),
         "DEBRIEF_READY_STORE must be a new folder"
     );
+    assert!(
+        common::rss::footprint_gauge_works(),
+        "the memory gauge (paddock-proc process_memory) reads nothing here: the \"peak footprint\" figures would be resident sizes"
+    );
+    eprintln!("ready: memory gauge: physical footprint (paddock-proc)");
     let sampler = Sampler::start_footprint();
     let started = Instant::now();
     if std::env::var_os("DEBRIEF_READY_LOG").is_some() {
