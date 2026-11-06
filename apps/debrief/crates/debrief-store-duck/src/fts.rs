@@ -846,6 +846,9 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
         }
         *woken = false;
     }
+    // Stopped (the store is closing): wait for the writer's merges and give it back before the thread ends, so no index
+    // file is created or deleted after the store has been dropped (its folder can then be removed or moved at once).
+    drop_writer(s);
 }
 
 #[cfg(test)]
@@ -916,6 +919,43 @@ mod tests {
             "an import's budget and the writer's heaps never add up"
         );
         drop(held);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Search-flake: the indexing thread left its loop on a stop request without giving the writer back, so the writer's
+    /// merge threads were still creating and deleting index files after `drop(store)` returned (a test removing the
+    /// index folder right after failed with "Directory not empty").
+    #[test]
+    fn a_stopped_indexer_has_given_the_writer_back_when_it_returns() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 16 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let s = FtsShared {
+            writer: Mutex::new(Some(fts.writer().unwrap())),
+            fts,
+            stop: AtomicBool::new(true),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(0),
+            failure: Mutex::new(None),
+            bulk_import: Arc::new(AtomicBool::new(false)),
+            fail_writes: AtomicBool::new(false),
+        };
+        run(&s, &dir, &conn, &Mutex::new(()), 1);
+        assert!(
+            crate::lock(&s.writer).is_none(),
+            "the indexing thread returned with the index writer (and its merge threads) still alive"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
