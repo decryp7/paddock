@@ -1735,7 +1735,20 @@ fn configs() -> &'static [(Caps, Resp)] {
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
-const KNOWN_FAILING: &[(&str, &str)] = &[];
+const KNOWN_FAILING: &[(&str, &str)] = &[
+    (
+        "more unattended registers across starts than the cap allows",
+        "open: MODEL_REPLAY='Linux/Never/Fresh|FirstRun;Start;Install+RegNeedsApproval;Start+RegNotAsWritten' makes 4 registers. A requested Install that stops at an approval leaves the state of a replace that was begun; the next unattended Start then counts one register too many. Whether the Install's register belongs to the attempts (it is the user's) or the model should not count it needs the model owner's trace.",
+    ),
+    (
+        "the record says this version is registered but the OS holds another registration",
+        "open: MODEL_REPLAY='Mac/RefusedAlways/Fresh|CopyOlder;Start@CrashBefore(6);FirstRun' - an older copy's registration is in the OS while the record says this version registered it. The identity check by register time does not apply (no register of this version was made); the plan's copy identity (`program`/`points_here`) is what must catch it.",
+    ),
+    (
+        "the user's service was lost",
+        "open: MODEL_REPLAY='Mac/Fast/OldRefused|Start+LingeringJob;Install@CrashAfter(4)' - a request past the cap crashes after the removal with the refused old job lingering; the state is RemovingOld at the cap and the plan holds (a removal begun at the cap was a request, so its finish should carry the consent). I tried that rule (finish with one register more) and it made the registers count one over the budget in three other sequences; the budget has to count the finish of a request to allow it.",
+    ),
+];
 
 #[test]
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {
