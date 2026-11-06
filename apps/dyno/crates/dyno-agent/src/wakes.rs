@@ -54,6 +54,9 @@ pub struct WakeCentre {
     local: Option<Arc<dyn WakeScheduler>>,
     helper: Arc<dyn HelperRoute>,
     failures: Mutex<HashMap<u32, String>>,
+    /// Held by every change of the saved schedules and every sync of the OS wakes, from the first read to the last write: a sync that
+    /// listed the OS wakes after a change had been saved, with the schedules it read before, cancelled the changed schedule's wake.
+    exclusive: Mutex<()>,
     wait: (Mutex<bool>, Condvar),
 }
 
@@ -64,8 +67,13 @@ impl WakeCentre {
             local,
             helper,
             failures: Mutex::new(HashMap::new()),
+            exclusive: Mutex::new(()),
             wait: (Mutex::new(false), Condvar::new()),
         }
+    }
+
+    fn exclusive(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.exclusive.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Cuts the thread's wait short.
@@ -165,6 +173,7 @@ impl WakeCentre {
         if !Self::enabled(shared) {
             return Err(bad("Scheduled wake is turned off in Settings."));
         }
+        let _one_at_a_time = self.exclusive();
         let saved = self.schedules(shared)?;
         let devices = shared.wol.device_ids(shared)?;
         let valid = validate(&input, &saved, &devices).map_err(bad)?;
@@ -179,6 +188,7 @@ impl WakeCentre {
 
     /// Cancels a schedule and its OS wake.
     pub fn cancel(&self, shared: &Shared, id: u32) -> Result<WakesView, AgentError> {
+        let _one_at_a_time = self.exclusive();
         lock(&shared.core)
             .store
             .delete_wake_schedule(id)
@@ -231,6 +241,7 @@ impl WakeCentre {
 
     /// Sets every OS wake from the saved schedules and cancels Dyno's wakes that no schedule owns (after a restart, a removal).
     pub fn sync_all(&self, shared: &Shared) {
+        let _one_at_a_time = self.exclusive();
         let Ok(all) = self.schedules(shared) else { return };
         let on = Self::enabled(shared);
         let zone = lock(&shared.core).zone.clone();
@@ -264,6 +275,7 @@ impl WakeCentre {
         if !Self::enabled(shared) {
             return;
         }
+        let _one_at_a_time = self.exclusive();
         let Ok(all) = self.schedules(shared) else { return };
         let zone = lock(&shared.core).zone.clone();
         let mut acted = false;
