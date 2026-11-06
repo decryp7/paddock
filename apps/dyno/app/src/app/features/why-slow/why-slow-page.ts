@@ -25,7 +25,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
       <header class="page-head">
         <div class="titles">
           <h1>Why is my computer slow?</h1>
-          <p>Dyno weighs CPU, memory, disk, heat and background work together. It only looks; Dyno changes nothing on your computer.</p>
+          <p>Dyno weighs CPU, memory, disk, heat and background work together. This page only reads.</p>
         </div>
         <button type="button" matButton="outlined" [disabled]="!shown()" (click)="copy()"><dy-icon name="copy" /> Copy as text</button>
         <button type="button" matButton="filled" [disabled]="store.running()" (click)="store.run()">

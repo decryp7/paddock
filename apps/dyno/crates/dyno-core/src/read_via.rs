@@ -41,7 +41,7 @@ pub fn sentence(text: &str) -> String {
 pub enum NextStep {
     /// Try again.
     Retry,
-    /// Open this Settings section (`"helper"` for Settings > Helper).
+    /// Open this Settings section (`"helper"` for Settings > Dyno > Administrator readings).
     OpenSettings(String),
     /// Update the helper.
     UpdateHelper,
@@ -69,7 +69,7 @@ pub enum ReadVia {
     NeedsHelper {
         /// Why, as a sentence.
         reason: String,
-        /// What to do: open Settings > Helper, or update the helper.
+        /// What to do: open Settings > Dyno > Administrator readings, or update the helper.
         next: NextStep,
     },
     /// Neither path can read it on this computer (a virtual machine without sensors, a missing tool, no helper on this system).

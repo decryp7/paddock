@@ -61,7 +61,7 @@ import { FullTextTip } from '../../shared/full-text-tip';
           }
         }
       } @else {
-        <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. It only looks: Dyno changes nothing on your computer.</p>
+        <p class="idle">Dyno looks at CPU, memory, disk, heat and background work together and names the likeliest cause, with the evidence. This card only reads.</p>
       }
     </div>
     @if (stats(); as st) {

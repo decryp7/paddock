@@ -93,7 +93,7 @@ pub fn load_config(files: &mut dyn ProtectedFiles, path: &Path) -> Result<Helper
         .map_err(|e| format!("The helper will not start: {} cannot be read: {e}", path.display()))?
         .ok_or_else(|| {
             format!(
-                "The helper will not start: {} is missing. Turn the helper on again in Settings > Helper.",
+                "The helper will not start: {} is missing. Turn the helper on again in Settings > Dyno > Administrator readings.",
                 path.display()
             )
         })?;

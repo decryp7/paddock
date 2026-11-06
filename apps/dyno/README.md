@@ -107,9 +107,9 @@ of a `dyno-v*` tag or the nightly run.
 
 ### Windows
 
-Run the NSIS installer (`Dyno_<version>_x64-setup.exe`; per-user, no administrator rights). Dyno registers its agent as
+Run the NSIS installer (`Dyno_<version>_x64-setup.exe`; it installs for all users and asks for administrator rights once). Dyno registers its agent as
 a per-user **Run** entry (not a service: a service lives in session 0 and cannot see your idle time, foreground window
-or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno never needs administrator rights to install or to run. Figures Windows shows only to administrators are marked *Unavailable* with the reason.
+or per-user settings, [ADR 0010](docs/adr/0010-platforms-and-services.md)). Dyno runs with your own rights once installed. Figures Windows shows only to administrators are marked *Unavailable* with the reason.
 
 ### macOS (13 or newer)
 

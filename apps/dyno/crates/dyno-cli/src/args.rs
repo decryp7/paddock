@@ -217,7 +217,7 @@ counters get PATH... [--json]         read counters now (PATH looks like \\Memor
 agent COMMAND...                      the background agent's own commands (--version, status, stop, once,\n  \
                                       service install|uninstall|status|ensure); on Windows the agent program\n  \
                                       has no console, so use this to see its output and exit code\n\n\
-Dyno only looks: no command changes anything on your computer, except `awake`, `wake` and `wake-schedule` (power, only when you ask), `agent stop` and `agent service`.\n\
+These commands act: `awake`, `wake` and `wake-schedule` (power, when you ask), `idle cancel` and `idle snooze` (the sleep and shut down rules), `agent stop` and `agent service install|uninstall|ensure`. The others only read.\n\
 exit codes: 0 done, 1 failed, 2 wrong usage, 3 versions differ, 4 Dyno is not running\n";
 
 /// Why a command line is not usable (the message says what to type instead).

@@ -68,7 +68,7 @@ function stateOf(w: DashboardWidget, v: DyValue, counter: boolean, s: DashboardS
     case 'events':
       if (!s.eventsLoaded) return s.eventsError ? failed(s.eventsError, 'retryEvents') : null;
       return s.eventsEmpty
-        ? { state: 'empty', title: 'Nothing has happened yet', detail: 'Alerts and notes from Dyno itself show up here. Dyno only looks: it changes nothing on your computer.', next: null, calm: false }
+        ? { state: 'empty', title: 'Nothing has happened yet', detail: 'Alerts and notes from Dyno itself show up here. This page only reads.', next: null, calm: false }
         : ready(v, s.at);
     case 'history':
     case 'diskTrend':

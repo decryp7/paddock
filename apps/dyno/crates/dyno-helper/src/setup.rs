@@ -97,7 +97,9 @@ fn recorded_for_install(explicit: Option<&str>, existing: Option<String>) -> Str
 fn install_recorded(owner: HelperUser, recorded: Option<&str>) -> Result<Report, String> {
     #[cfg(unix)]
     if !crate::sys::is_elevated() {
-        return Err("Installing the helper needs administrator rights; turn it on from Dyno (Settings > Helper).".into());
+        return Err(
+            "Installing the helper needs administrator rights; turn it on from Dyno (Settings > Dyno > Administrator readings).".into(),
+        );
     }
     audit_run("install", "");
     let source = std::env::current_exe()
@@ -224,7 +226,7 @@ impl std::fmt::Display for RefreshError {
         match self {
             RefreshError::Refused(why) => write!(
                 f,
-                "The helper was not refreshed: {why}. It is left as it is; Settings > Helper offers Update the helper, which repairs the folder."
+                "The helper was not refreshed: {why}. It is left as it is; Settings > Dyno > Administrator readings offers Update the helper, which repairs the folder."
             ),
             RefreshError::Failed(why) => f.write_str(why),
         }
@@ -265,7 +267,7 @@ pub fn refresh_with(
         }
         Err(e @ crate::config::ConfigError::Invalid(_)) => {
             return Err(RefreshError::Failed(format!(
-                "{e} The helper was left as it is; turn it off and on again in Settings > Helper."
+                "{e} The helper was left as it is; turn it off and on again in Settings > Dyno > Administrator readings."
             )));
         }
     };
@@ -308,7 +310,10 @@ fn audit_run(verb: &str, what: &str) {
 pub fn uninstall() -> Result<Report, String> {
     #[cfg(unix)]
     if !crate::sys::is_elevated() {
-        return Err("Removing the helper needs administrator rights; use Dyno's Settings > Helper, or run this with sudo.".into());
+        return Err(
+            "Removing the helper needs administrator rights; use Dyno's Settings > Dyno > Administrator readings, or run this with sudo."
+                .into(),
+        );
     }
     audit_run("uninstall", "");
     let report = uninstall_in_place(

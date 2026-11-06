@@ -36,7 +36,7 @@
     "externalBin": ["binaries/dyno-agent", "binaries/dyno", "binaries/dyno-bench", "binaries/dyno-bench-gpu", "binaries/dyno-helper"],
     "category": "Utility",
     "shortDescription": "Measures and explains your PC",
-    "longDescription": "Dyno measures your PC, explains why it is slow: a background agent keeps the history and the tray icon shows the load. It only looks and changes nothing on your computer."
+    "longDescription": "Dyno measures your PC, explains why it is slow: a background agent keeps the history and the tray icon shows the load. Its power actions, such as keep awake, sleep and Wake-on-LAN, run only when you set them up."
   },
   "mainBinaryName": "dyno-app",
   "plugins": {

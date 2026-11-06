@@ -28,7 +28,7 @@ const IMPACT_ORDER: Record<ImpactRating, number> = { notMeasured: 0, low: 1, med
       <header class="page-head">
         <div class="titles">
           <h1>Health</h1>
-          <p>A score with reasons, and what slows your sign-in. Dyno only looks.</p>
+          <p>A score with reasons, and what slows your sign-in. This page only looks.</p>
         </div>
       </header>
 

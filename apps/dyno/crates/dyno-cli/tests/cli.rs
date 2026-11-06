@@ -191,7 +191,7 @@ fn usage_help_and_version_work_without_an_agent() {
     };
     let (code, out, _) = dyno_in(&env, "--help");
     assert_eq!(code, 0);
-    assert!(out.contains("no command changes anything"));
+    assert!(out.contains("These commands act:") && out.contains("`idle cancel` and `idle snooze`"));
     assert!(dyno_in(&env, "--version").1.starts_with("dyno "));
     let (code, _, err) = dyno_in(&env, "frobnicate");
     assert_eq!(code, 2);
