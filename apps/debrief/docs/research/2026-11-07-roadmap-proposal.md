@@ -315,7 +315,13 @@ about **2027-04-28** (§9.5) to about **2027-06-11** [calc; J for the sizes; no 
 2.1 do not shorten the end (capacity sets it), but they bring the user's first step (the large event log opens) to about
 T+19, or T+17 with item 3, against about T+23 for the plan's own rows once PH4 is counted.
 
-## 3. Decisions for the user
+## 3. Decisions (decided by the user, 2026-11-07)
+
+Decided as recommended: R1 (with its conditions), R2, R2b (a declared bound under 2^53 recommended; the final choice
+with ADR 0063), R2c, R3, R4, R5, R6 (UMDH reader fixes in 1.2 with SI-11, the redesign later), R8, R9, and ADR 0069's
+D-b to D-h. **R7 was first decided as "keep everything in 1.2" (end about 2027-06-11) and then replaced the same day by
+the user's direction "solid foundation in 1.2 first, then slowly one function one by one"**: section 4, Release split.
+The table keeps the recommendations as they were put to the user.
 
 | # | Decision | Recommendation |
 |---|---|---|
@@ -330,3 +336,89 @@ T+19, or T+17 with item 3, against about T+23 for the plan's own rows once PH4 i
 | R7 | If the date matters, what to defer to 1.3 (ADR 0068 was accepted with its whole scope in 1.2, so deferring any of it reverses that decision) | From ADR 0068's own list, the separable packages: **.NET managed state, WP-0 + WP-12, 18**; capture presets and flags, WP-11, 3; the unexpected-modules pack, WP-16, 2. Then outside it: the thread/sequence view, 7, and Pitwall drafting, 4. All five: 34 raw, 40.8 with the buffer, about 7.4 working days, so the end about **2027-06-01** [calc]. .NET alone: 21.6 with the buffer, about 4 working days (about 2027-06-07). Not deferrable without rework: WP-1, WP-2, WP-RR, WP-8 and WP-3 (the base of every check), WP-17 (it removes a second minidump reader, rule 55), WP-9 (events around the dump, the link to the logs). Keep layers E and I and the report blocks, which the rest needs |
 | R8 | Keep or drop W0 (§9.6 D2) | Keep, but only if ADR 0063 is decided before 3.3 and 4.5 build their replies; else drop and reject ADR 0063 for 1.2 |
 | R9 | Usefulness UI before or after the workbench move (M3b, Y12) | After, except the tiny items |
+
+## 4. Release split (the user's direction, 2026-11-07)
+
+The user chose, on 2026-11-07: "solid foundation in 1.2 first, then slowly one function one by one". This section
+replaces R7 and section 2.5's end date. It changes **release placement only**; every design (ADRs 0064 to 0069, the
+layers of section 1) stays as accepted.
+
+### 4.1 Debrief 1.2: foundation, plus bug fixes and correctness
+
+Rules used: **foundation** is what later functions stand on (import, store, plugin host, folder open, memory, jobs,
+time, logs, the engine-to-UI contract, shell and lists, test corpus, family obligations a tag needs); **correctness** is
+a wrong result or a broken path today; **function** is a new capability for the investigator. Functions leave 1.2,
+unless a foundation acceptance test needs them (then they stay and are named).
+
+| Class | Packages (plan §9.2 and the scope plan's rows, plus this note's FD items) | Raw days |
+|---|---|---|
+| Foundation, plan | Layers 0 to 6 of §9.2: L-0, X10, X11a/b, X1, WP-SL1, 0.2 to 0.5, X7; 1.4 + B1, 2.2, P1, IP1, 2.6a to 2.6d, PH1 to PH4, J1, 1.2 rest, 1.3, M1 to M4, D-a; SI-0 to SI-18; MEM-3 to MEM-5, MEM-6 ADR; Z0 to Z13 (ADR 0066); F1 to F12, FM, FR (ADR 0067); B0 to B8 (ADR 0065); ST, Q-1 to Q-4, IX, SR, CPU-1, NB-1, P4, BP1, 4.3, 5.1, 5.2, D-b, the bench gates; 2.1, 2.3 to 2.5, 2.7, 3.2, 3.3, 3.6, 3.7, 4.1, 4.2, 4.4, 4.5, the drawing build, W0, LV1 to LV3; Y3 rest, Y4, Y6, Y7, Y8, Y11, Y12, Y14's R0 and R3 (6), Y16; X2 to X6, X8, X9; N3 (the packs mechanism the frame classifier and ADR 0068's unexpected-modules pack use), N8; 5.4, M5, F, R | 463.5 [calc: §9.5's 534 less the functions below] |
+| Foundation, new | FD-U 3, FD-P 0.5, FD-E1 2, FD-E2 3, FD-B 1.5, FD-I 1, FD-F 3, FD-G 1, FD-K 0.5, FD-M 3; **plus ADR 0068's WP-1 (4)**: FD-I rests on its `CheckReport` contract, so the contract stays in 1.2 while the dump checks leave | 22.5 |
+| Correctness | UMDH reader fixes and test generator (2, with SI-11); `+h:mm` and spaced-date shapes (1.5, Checkpoint A); known issues and playbooks scoped to the window (1; they count outside it today); CLI `--profile` (1; the CLI ignores the profile today); outliers' Benjamini–Hochberg (0.5; p-values over up to 6,000 tests); the cap-stop and offset fix and the AI coverage fix (already done, 0) | 6 |
+| **1.2 total** | | **492 raw, 590.4 with 20 %** [calc] |
+
+**Out of 1.2 (functions):** from the plan Y1 AI memory (10.5), Y2 semantic search with X55 (9.5), N4, N5, N0, N7
+(5.5), Y5 tray popup (5), Y9's small items (4), Y10 rule 47 in Debrief's views (18.5), Y13 formats, PML, batch queries
+(9), Y14's R5 UI items (8): **70.5**. From the approved items: citations, report blocks, the thread/sequence view,
+Pitwall drafting and all of ADR 0068 except WP-1; from the tiny list the collector's detector set, range import in
+local time, the SQL result block.
+
+- **Y10 needs a check** [U]: if a conformance gate or a waiver with a date (C-checks, `paddock.waivers.toml`) requires
+  rule 47 in Debrief's views before its next tag, Y10 (or the part the gate checks) comes back into 1.2.
+- Nothing a foundation acceptance test needs is stranded: SI-15 and F12 need the import, the dialog and the store;
+  the B packages need the lists; FD-M needs only the corpus; FD-E2's tests use notes, which exist.
+
+**End date** [calc]: 590.4 / 5.5 = 107.3 working days, plus Spotter 2.5 and quiet-window slips 4 (§9.5's
+allowances): about **114 working days from 2026-11-09, so about 2027-04-15**, against about 2027-04-28 for the plan as it
+stood and about 2027-06-11 for "keep everything". 1.2 is barely shorter than the plan because the plan was already
+mostly foundation; the gain is that the functions after it no longer wait for each other.
+
+### 4.2 After 1.2: one function per release
+
+Ordered by value for effort and dependencies. Each release: raw days × 1.2 spread over the agents one function can use
+(about 2.5 agent-days a day for a small function, 3.4 to 4.25 for the dump and UMDH work [J]), plus about 2 working days
+of release work (safety net, VM pass, tag) [J]. Dates are working days after 2027-04-15, no holidays, one release at a
+time (ER-1) [calc].
+
+| Release | Function | Raw days | Working days | Rough date |
+|---|---|---|---|---|
+| 1.3 | Citations and report blocks (with the SQL result block) | 8.5 | 6 | 2027-04-26 |
+| 1.4 | Dump checks, crash and hang: ADR 0068 native WP-2, WP-RR, WP-8, WP-3, WP-4, WP-5, WP-6, WP-9, WP-10, WP-11, WP-13, WP-17, WP-18, most of WP-14 and WP-15 | 67 | 21 | 2027-05-25 |
+| 1.5 | Thread/sequence view | 7 | 5.5 | 2027-06-02 |
+| 1.6 | Pitwall report drafting | 4 | 4 | 2027-06-08 |
+| 1.7 | Dump check, memory: WP-7, WP-16, the rest of WP-14 and WP-15 | 10 | 7 | 2027-06-17 |
+| 1.8 | UMDH series (ADR 0069 less the reader fixes) | 25 | 11 | 2027-07-02 |
+| 1.9 | .NET managed state in dumps (ADR 0068 WP-0, WP-12) | 18 | 10.5 | 2027-07-19 |
+| 1.10 | Analyses at 1B events, the R3 build [J: sized by its ADR] | 10 | 7 | 2027-07-28 |
+| 1.11 | Analysis thresholds as Settings, and compare with pattern compare, significance and evidence | 5 | 4.5 | 2027-08-04 |
+| 1.12 | Time in the query language | 4 | 4 | 2027-08-10 |
+| 1.13 | Anomaly scores and per-operation baselines | 4 | 4 | 2027-08-16 |
+| 1.14 | AI tools over every analysis | 3 | 3.5 | 2027-08-20 |
+| 1.15 | Semantic search (Y2) | 9.5 | 6.5 | 2027-08-31 |
+| 1.16 | AI memory (Y1) | 10.5 | 7 | 2027-09-09 |
+| 1.17 | Rule 47 in Debrief's views (Y10), unless a gate pulls it into 1.2 | 18.5 | 8.5 | 2027-09-22 |
+
+Then, one each in the same way: names (N4, N5, N0, N7, 5.5), formats, PML and batch queries (Y13, 9), the tray popup
+(Y5, 5), Y14's R5 UI items (8), Y9's small items (4), and the rest of the audit's 1.3 list (section 2.4: Moment,
+exception and pattern trends, runs, traces, playbook parameters, config diff, Explorer coverage, lenses, inspector,
+folder survey in the scan, notes with several anchors), then its "later" list.
+
+- **Why this order.** Citations and report blocks first: small, and every later function reports through them. Dump
+  crash and hang next: the user's own complaint and the largest gain, on 1.2's `CheckReport` and `ProcessInstance`.
+  The thread view and Pitwall drafting are small and lean on the first two. The memory check, UMDH and .NET follow the
+  dump chain's dependencies (WP-6 before WP-7; ADR 0069 uses ADR 0068's report and the memory check's link; WP-12 after
+  WP-0 and WP-RR). The analyses at scale come before the analysis enhancements that would otherwise be built twice.
+- **Capacity.** One function at a time uses 2 to 5 agents; the rest of the family's capacity is free for the other apps
+  (ER-1). Designs and failing tests for the next release may be written while the current one finishes.
+
+### 4.3 What this changes
+
+- **Release placement only.** R7's "keep everything in 1.2" is replaced. The approved items (citations, report blocks,
+  thread/sequence view, Pitwall drafting, .NET dump stacks) move to 1.3 to 1.9; their designs do not change.
+- **ADR 0068** (Accepted, `1ba8e4ecd`, scope "Debrief 1.2"): its scope line needs updating to "WP-1 in 1.2; crash and
+  hang in 1.4; memory in 1.7; .NET in 1.9". That edit belongs to ADR 0068's branch and author; it is not made here.
+- **ADR 0069**: its status line already says the reader fixes are in 1.2 and the rest in its own release (1.8 here).
+- **The 1.2 plan** (`docs/plans/debrief-1-2.md`, §9): its totals and the packages listed as out above change when the
+  coordinator adopts this split; this note does not edit the plan.
+- **Section 2.3 and 2.5 above** describe the "everything in 1.2" option the user first chose; they stay as the record of
+  that option.

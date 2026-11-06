@@ -1,7 +1,10 @@
 # 69. UMDH leak analysis over a series: trends per call site, symbols by identity, findings that say what they could not check
 
-- Status: Proposed. Revision 2 (2026-11-07) answers the independent review of `cee49f7a1` (P1-4 to P1-6 and the P2s);
-  revision 3 the re-review's P2s (ADR 0068 Accepted, confidence and growth rules aligned, restart signals).
+- Status: **Accepted** (2026-11-07, user decision: D-a to D-h as recommended). Scope: the reader fixes and the test
+  generator (U0 and U1's two fixes, tests 1, 2 and 2b) in Debrief 1.2 with SI-11, as correctness work; the rest after
+  1.2, in its own release (1.8 in the roadmap proposal's release split, which the user chose the same day: 1.2 is
+  foundation only, then one function per release). Revision 2 answered the independent review of `cee49f7a1`;
+  revision 3 the re-review's P2s.
 - Date: 2026-11-07
 - Related: ADR 0023 (dumps and UMDH: reader plugin, engine crate, problem-first views), ADR 0036 (symbols by PDB identity;
   its section 2 "UMDH is not symbolised from folders" is amended by D4 here), ADR 0059 (Pitwall as the AI engine),
@@ -148,7 +151,7 @@ For each identity the series gives bytes and count per snapshot. The engine comp
   plateau* (cache warming: the last `plateau_steps` 2 steps change less than `plateau_tolerance` 2 % of the total),
   *one step* (one step ≥ 0.8 of the growth), *fluctuating*, *shrinking*, *new*, *gone*.
 
-**Minimum snapshots and precedence** (aligned with ADR 0068 revision 2 `a8bc78a53` §4: two dumps give `Grew` at most,
+**Minimum snapshots and precedence** (aligned with ADR 0068 `1ba8e4ecd`, Accepted, §4: two dumps give `Grew` at most,
 three or more `Growing`):
 
 | Snapshots | Classes that may be given | Confidence at most |
@@ -218,10 +221,10 @@ section 2) defines the report every dump check returns. The UMDH series returns 
 leak is a verdict it may or may not reach) so the UI, the report block and Pitwall read one shape:
 
 1. **Verdict** from a closed set: `Leak { call_sites }` (steady growth, three or more snapshots only), `CacheWarming`,
-   `GrewOnce` (one step then flat: the one name for this verdict, ADR 0068 revision 3 §4 and D13), `Grew { delta }` (two snapshots, never more than that), `NoGrowth`, `NotNtHeap` (D8), `ManagedHeap` (D8),
+   `GrewOnce` (one step then flat: the one name for this verdict, ADR 0068 `1ba8e4ecd` §4 and D13), `Grew { delta }` (two snapshots, never more than that), `NoGrowth`, `NotNtHeap` (D8), `ManagedHeap` (D8),
    and `CannotTell` when the data for a verdict is missing (ADR 0068's rule: no weak verdict from a probe that cannot
    see; ER-33). **Two logs give only `Grew` with Not checked `NeedsMore { of: Snapshots, have: 2, need: 3 }`, `NoGrowth`,
-   `NotNtHeap` or `CannotTell`**, the one closed reason ADR 0068 shares with this ADR (`NeedsMore { of: Dumps | Snapshots, have, need }`, ADR 0068 revision 3 `4b91eb4a4` §1 and its D13). Confidence follows D3's table.
+   `NotNtHeap` or `CannotTell`**, the one closed reason ADR 0068 shares with this ADR (`NeedsMore { of: Dumps | Snapshots, have, need }`, ADR 0068 `1ba8e4ecd` §1 and its D13). Confidence follows D3's table.
 2. **Confidence** `High`, `Medium` or `Low` with the reasons that set it (class, number of snapshots, time provenance,
    share of growth named, truncated stacks), computed by rules, never an unexplained score.
 3. **Evidence**: typed links: the series, a call site, a snapshot, a size signature (D6), a Private Bytes series, a log
@@ -374,11 +377,11 @@ bounds are lowered with the numbers.
 
 The first useful cut is U0–U4 + U6 + U9 (about 18 days): series, call sites, classes and honest findings.
 
-## Decisions for the user
+## Decisions (decided by the user, 2026-11-07: all as recommended; release placement per the release split)
 
 | # | Decision | Recommendation |
 |---|---|---|
-| D-a | Release | **1.3**, after a large folder opens cleanly (the user's 2026-11-07 priority). In 1.2 only U0 and the two reader fixes (tests 1, 2 and 2b, about 2 days), landing with SI-11 or with their tests carried into it, since they are wrong results today and touch no shared code |
+| D-a | Release | **Decided**: reader fixes and test generator (tests 1, 2, 2b, about 2 days) in 1.2 with SI-11, as correctness work; the redesign after 1.2 in its own release (1.8 in the release split) |
 | D-b | Default grouping | Call site (culprit + 2 callers); Function and Stack one click away |
 | D-c | Symbols only from the same process instance: a dump or manifest of it, or a PE of the same path and size marked *inferred identity* (D4) | Yes; still never by name alone |
 | D-d | Thresholds as Settings with today's constants as defaults | Yes |
