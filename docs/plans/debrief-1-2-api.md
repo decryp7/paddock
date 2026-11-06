@@ -1,6 +1,7 @@
 # Debrief 1.2 API design (package 0.5): the foundation
 
-- Status: **Reviewed (0.5 gate passed, 2026-11-07)**; revision 5 folds the confirmation pass's P2s. Revision 3 answers
+- Status: **Reviewed (0.5 gate passed, 2026-11-07)**; revision 5 folds the confirmation pass's P2s. The user decided Q1,
+  Q2, Q15, Q17 and Q27 on 2026-11-07, all as recommended (§17). Revision 3 answers
   the independent review of `b9695e5e5` (P1-1 to P1-7 and its P2s).
 - Scope, by the user's decision of 2026-11-07 (plan §10, "full foundation in 1.2, then one function per release"):
   every package of the plan that §10.3 does not move out has its API here. Revision 2 (same day) extends revision 1,
@@ -178,7 +179,7 @@ and store APIs (§6, §7) carry them, and because a `u32` id built into citation
 
 ### 2.1 `EventId`, `SourceId`: the declared bound (FD-U)
 
-**Decision recommended [J], pending ADR 0063:** ids stay `u64` in Rust and plain `number` in TypeScript, under a declared
+**Decided by the user, 2026-11-07 (Q2):** ids stay `u64` in Rust and plain `number` in TypeScript, under a declared
 bound checked where they are made. ADR 0063 does not change this: under MessagePack, integers above 2^53 lose precision
 exactly as with `JSON.parse` today [S: ADR 0063 "Numbers"].
 
@@ -1481,7 +1482,8 @@ recorded ones (rule 48):
 | Needed by the bounded parts above, before batches, the Parquet writer and DuckDB | | 525 [calc] |
 
 So **the budget does not add up on any OS as the parts stand**: on macOS 138 MB remain for 525 MB of bounded parts, on
-Linux 448 [calc] (§17, Q27). The tee share is already
+Linux 448 [calc] (§17, Q27, decided by the user 2026-11-07: package 4.3 measures the idle footprint and every
+part first, then per-OS budgets, smaller parts, or both). The tee share is already
 released before `maintain` and is off in low-memory mode (plan 5.2) [A].
 
 ## 9. Jobs
@@ -1744,7 +1746,7 @@ diff.
 
 Nothing in this file depends on ADR 0063's outcome: `Bounded` travels in the MessagePack head under it [A: ADR 0065
 §7], ids stay below 2^53 either way (§2.1). The roadmap's advice stands: decide 0063 before 3.3 and 4.5 build their reply
-shapes (§17, Q1).
+shapes (§17, Q1, decided by the user 2026-11-07: W0 gate early in wave 1).
 
 ## 14. The rest of 1.2: lists, timeline, shell, UI on foundation types, performance, analyses, correctness
 
@@ -1884,7 +1886,7 @@ pub struct MarkersRequest { pub query: QueryKey, pub kinds: Vec<MarkerKindId>, p
 pub fn markers(req: &MarkersRequest) -> Bounded<MarkerBuckets>;
 ```
 
-Commands: `timeline_lanes` (JSON), `timeline_lane_buckets` (raw `ipc::Response`, the one raw endpoint; §17, Q15),
+Commands: `timeline_lanes` (JSON), `timeline_lane_buckets` (raw `ipc::Response`, the one raw endpoint unless the W0 outcome says otherwise; §17, Q15, decided 2026-11-07),
 `timeline_markers` (JSON). A newer `generation` supersedes an older request through `query_cancel.rs`. One `MAX_LANES`
 for both engines (`timeline.lanes_max`). Tests: `debrief-store-duck/tests/lanes.rs` (60 lanes give 10 plus a catalogue
 of 50; paged), a differential test against the in-memory engine on `/samples`, the encoder's golden file
@@ -2044,7 +2046,7 @@ pub enum SortValue { Text(Box<str>), Int(i64), Float(f64), Null }
   implementation. **ST-5:** the 1 billion event bench (`debrief-bench.yml`, a quiet window), including a sort by a
   non-time column. **ST-6:** its content was not found in the sources read [U]; its owner names it before it starts.
 - **Exact positions below a threshold:** `store.exact_positions_max`, 100M by the user's decision of 2026-11-05 [mem],
-  pending ST-5's numbers (plan §9.6 D7): a registry row, `hard` until then.
+  kept at 100M as a `hard` registry row (decided by the user, 2026-11-07, Q17), revisited with ST-5's numbers (plan §9.6 D7).
 - **Q-2 pageable analysis results:** `AnalysisRunId` (§14.6) plus `Page`; results kept per run until superseded (Q-3's
   cache), `Bounded<T>` per page. **Q-3:** traces and requests cached by `(QueryKey, generation)`; Moment does not wait
   for anomalies. **Q-4:** a `rows_read` counter on the store under `cfg(feature = "test-stats")` and a test per view that
@@ -2269,8 +2271,8 @@ Limits that are registry rows without a Setting (`hard`) are listed with their s
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q1 | **User's decision.** ADR 0063 is still Proposed; FD-U, 3.3 and 4.5 shape replies | **Decide 0063 before 3.3 and 4.5 start** (roadmap R8). FD-U does not wait: the declared bound (§2.1) holds under JSON and under MessagePack alike |
-| Q2 | **User's decision.** Ids above 2^53 | **Declared bound** (§2.1), the cheapest of string, bigint or bound; a registry row `store.event_ids` (`hard`) and a test at `2^53 − 1` |
+| Q1 | **Decided by the user, 2026-11-07, as recommended.** ADR 0063 is still Proposed; FD-U, 3.3 and 4.5 shape replies | **Measure first: ADR 0063's W0 gate early in wave 1, and decide 0063 before 3.3 and 4.5 build their reply shapes** (roadmap R8). FD-U does not wait: the declared bound (§2.1) holds under JSON and under MessagePack alike |
+| Q2 | **Decided by the user, 2026-11-07, as recommended.** Ids above 2^53 | **Declared bound** (§2.1), the cheapest of string, bigint or bound; a registry row `store.event_ids` (`hard`) and a test at `2^53 − 1` |
 | Q3 | ADR 0068 §12 drops `WholeReason::DumpWithoutMemoryList` (WP-8), which ADR 0064 lists | Keep it in the enum until WP-8 lands, then remove it in WP-8's change with ADR 0064's amendment. WP-8 moved out of 1.2 with ADR 0068's checks, so in 1.2 the reason stays |
 | Q4 | ADR 0068 §10 names `left_out: Vec<Omission>`; ADR 0065 has no `Omission` | **Use `Vec<Cut>`** (§11); a one-word amendment to ADR 0068 in WP-1's change |
 | Q5 | `NextStep` lives in family ADR 0052's `paddock-jobs` enum, not on main | Use it there; if ADR 0052's crate change slips past WP-1, define `NextStep` in `debrief-core::finding` registered in `docs/known-copies.toml` with a delete-by (rule 55), not silently |
@@ -2283,9 +2285,9 @@ Limits that are registry rows without a Setting (`hard`) are listed with their s
 | Q12 | Plan D5 (`Limit`/`Page` home) | **`paddock-limits`** (§4.6), with ADR 0065's types, not `paddock-view` |
 | Q13 | `performance.plugins.idle_stop_min` default | 10 minutes [J]; 4.4 measures plugin start cost and may change it with a recorded result |
 | Q14 | The drawing research's package ids `F1` (flame fixes) and `C1` (chart bound) collide with the plan's F1 (the judge) and C1 (UMDH reader fixes) | **Rename them FL1 and CH1** in the plan's next edit; this file uses those names |
-| Q15 | **User's decision.** `timeline_lane_buckets` answers raw bytes (drawing research) while ADR 0063 would make every reply binary | **One binary mechanism:** if 0063 is adopted, lane buckets are one of its tables and the `LB` layout is not built; if 0063 is rejected, `LB` v1 is the only raw reply, recorded as a short ADR 0018 amendment. Decide with Q1, before 3.3 |
+| Q15 | **Decided by the user, 2026-11-07, as recommended.** `timeline_lane_buckets` answers raw bytes (drawing research) while ADR 0063 would make every reply binary | **Lane buckets follow the W0 outcome (Q1). One binary mechanism:** if 0063 is adopted, lane buckets are one of its tables and the `LB` layout is not built; if 0063 is rejected, `LB` v1 is the only raw reply, recorded as a short ADR 0018 amendment. Decide with Q1, before 3.3 |
 | Q16 | (Revised.) ADR 0020's executor takes `paddock_proc::MemoryCap` in `submit_child`, while §4.5 has `MemoryPolicy` | One memory type: `submit_child` takes `MemoryPolicy` (Y9 amends ADR 0020 in its change). On classes there is no conflict: under ADR 0020's 2026-10-30 amendment `Background` is the gentle level on every OS and only `Idle` is starvable, so `class_for` maps Bulk to `Background` (§9.5) |
-| Q17 | **User's decision.** Exact positions below 100M cost 905 MiB of `ord` at 100M against the 768 MB budget (plan §9.6 D7) | Keep `store.exact_positions_max` a `hard` row at 100M and let `ScrollModel` switch to time above it; bring the threshold back to the user with ST-5's numbers, as D7 says |
+| Q17 | **Decided by the user, 2026-11-07, as recommended.** Exact positions below 100M cost 905 MiB of `ord` at 100M against the 768 MB budget (plan §9.6 D7) | Keep `store.exact_positions_max` a `hard` row at 100M and let `ScrollModel` switch to time above it; bring the threshold back to the user with ST-5's numbers, as D7 says |
 | Q18 | ST-6, Y11's "sticky field promotion" and Y14's "R3 split" were not found in the sources read | Each owner writes a one-paragraph scope in the plan row before starting; none changes a foundation API here unless it adds a port row |
 | Q19 | Canvas vs DOM: ADR 0018 decision 8 defaults to DOM, the drawing research to canvas | The rule in §14.2 (canvas if M1a passes; DOM only if it passes where canvas failed), recorded as ADR 0018's note by M0 |
 | Q20 | F10b (ADR 0067's windowed rows) and 2.1 both define a window over rows | **One type, `PdRowWindow`, owned by 2.1**; F10b adopts it, which pulls 1.3 → 2.1 ahead of F10 (roadmap stop-gap table) |
@@ -2295,7 +2297,7 @@ Limits that are registry rows without a Setting (`hard`) are listed with their s
 | Q24 | Setting paths: ADR 0067 used `performance.plugin_memory_mb` and `performance.import_whole_file_mb` | Use §16's one scheme (`performance.plugins.memory_mb`, `performance.import.whole_file_mb`); FM and 2.6a use these |
 | Q25 | `TsState` lives in `debrief-batch`, which pulls Arrow; plugins must not | `debrief-batch`'s Arrow dependencies behind a default feature `arrow`; `debrief-plugin-ext` depends on it with `default-features = false` (one definition, rule 55); a `cargo tree` check in CI (beside PH2a's) fails when a plugin binary (`debrief-plugins`, `debrief-plugin-*`) links an `arrow-*` crate. Alternative: move ids and `TsState` to a dependency-free crate; not chosen, one more crate for two types |
 | Q26 | Plugin items in flight across an import add up to the store worker's whole budget (§8) | **A shared `CreditPool` by bytes** (§4.2), initial grants included, at most `limit / EVENT_FRAME_MAX` plugin streams, FIFO fairness; `performance.import.items_in_flight_mb` 128 MiB, raised only with 2.6b's and 4.3's recorded results |
-| Q27 | **User's decision.** D7's 768 MB is the worker's total peak footprint (§8). With ADR 0067's idle allowances, 138 MB remain on macOS and 448 MB on Linux for import parts whose bounded share alone is 525 MB (read buffers 151, credit pool 134, tee 240), before batches, the writer and DuckDB | 4.3 measures the idle footprint and every part first (the allowances are not measurements). Then choose: a per-OS budget (macOS's footprint counts more than Linux's PSS), smaller parts (tee share, chunk size, credit pool, at a measured throughput cost), or both. Bring back with 4.3's numbers, beside plan §9.6 D1 |
+| Q27 | **Decided by the user, 2026-11-07, as recommended.** D7's 768 MB is the worker's total peak footprint (§8). With ADR 0067's idle allowances, 138 MB remain on macOS and 448 MB on Linux for import parts whose bounded share alone is 525 MB (read buffers 151, credit pool 134, tee 240), before batches, the writer and DuckDB | 4.3 measures the idle footprint and every part first (the allowances are not measurements). Then choose: a per-OS budget (macOS's footprint counts more than Linux's PSS), smaller parts (tee share, chunk size, credit pool, at a measured throughput cost), or both. Bring back with 4.3's numbers, beside plan §9.6 D1 |
 | Q28 | Annotation "new since" needs a listing sequence the store does not have (§5.6) | **Owner: IX-B1** (it owns `writer.rs`, `compact.rs`, `skew.rs`): the sequence in the listing transaction, with the rewrite rules and tests of §5.6 |
 
 **Where the ADR notes land.** Q21's amendment of ADR 0064 and Q23's note land in SI-1's first commit; Q22's note in
