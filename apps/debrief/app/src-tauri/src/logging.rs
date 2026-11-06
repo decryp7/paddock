@@ -1,5 +1,5 @@
 //! Debrief's own log: `tracing` with a CLEF layer (Serilog's compact JSON, see [`crate::clef`]) writing to
-//! daily rolling files (`debrief.YYYY-MM-DD.log` via `tracing-appender`) and stdout.
+//! daily files (`debrief.YYYY-MM-DD.log` via `paddock_log::DailyFiles`) and stdout.
 //!
 //! Record flow:
 //! - `log` records (Debrief's own `log::info!(...)`, dependencies, and the webview's lines forwarded by the
@@ -18,15 +18,17 @@
 use crate::activity::ActivityLogger;
 use crate::diagnostics::{LogLevel, LogLimits, LOG_NAME};
 use chrono::{NaiveDate, Utc};
+use paddock_log::{DailyFiles, SystemClock};
 use serde_json::{Map, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+#[cfg(test)]
+use std::sync::Mutex;
+use std::sync::OnceLock;
 use tracing::field::{Field, Visit};
 use tracing::level_filters::LevelFilter;
 use tracing::span::{Attributes, Id, Record as SpanRecord};
 use tracing::{Event, Subscriber};
-use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{reload, Layer, Registry};
@@ -64,14 +66,25 @@ fn file_for(day: NaiveDate) -> String {
     format!("{LOG_NAME}.{}.log", day.format("%Y-%m-%d"))
 }
 
-/// Daily files in `dir`, keeping the current one plus `keep_files` old ones.
-pub fn rolling_files(dir: &Path, limits: &LogLimits) -> Result<RollingFileAppender, tracing_appender::rolling::InitError> {
-    RollingFileAppender::builder()
-        .rotation(Rotation::DAILY)
-        .filename_prefix(LOG_NAME)
-        .filename_suffix("log")
-        .max_log_files(limits.keep_files as usize + 1)
-        .build(dir)
+/// The store worker's own log, from the app's Diagnostics settings: the same folder as the app's files, the same level and
+/// limits, and the data folder for its crash marker. `None` without a log folder (the worker then keeps no file log). The
+/// level applies when the worker next starts.
+pub fn worker_log_args(log_dir: Option<&Path>, data_dir: Option<&Path>, limits: &LogLimits) -> Option<debrief_store_client::LogArgs> {
+    use debrief_store_client::LogLevelArg;
+    let dir = log_dir.filter(|d| d.is_absolute())?;
+    Some(debrief_store_client::LogArgs {
+        dir: dir.to_path_buf(),
+        data_dir: data_dir.filter(|d| d.is_absolute()).map(Path::to_path_buf),
+        level: match limits.level {
+            LogLevel::Error => LogLevelArg::Error,
+            LogLevel::Warn => LogLevelArg::Warn,
+            LogLevel::Info => LogLevelArg::Info,
+            LogLevel::Debug => LogLevelArg::Debug,
+            LogLevel::Trace => LogLevelArg::Trace,
+        },
+        max_file_mb: limits.max_file_mb,
+        keep_files: limits.keep_files,
+    })
 }
 
 /// Where formatted lines go.
@@ -79,80 +92,43 @@ pub trait LineSink: Send + Sync + 'static {
     fn write_line(&self, level: log::Level, line: &str);
 }
 
-/// Today's bytes so far, against the daily limit.
-struct Budget {
-    day: NaiveDate,
-    written: u64,
-    warned: bool,
-}
-
-/// The rolling files, with the daily size limit (errors always pass).
+/// The app's daily files (`debrief.<day>.log`), with the daily size limit (errors always pass) and `keep_files` old days
+/// kept. Written through [`paddock_log::DailyFiles`], which prunes only files named exactly `debrief.<day>.log`: the store
+/// worker's `debrief-store.<day>.log` in the same folder is not the app's to count or delete (the prefix-matching pruning of
+/// `tracing-appender` did both).
 pub struct FileSink {
-    files: Mutex<RollingFileAppender>,
-    budget: Mutex<Budget>,
-    max_bytes: u64,
+    files: DailyFiles,
 }
 
 impl FileSink {
-    pub fn new(dir: &Path, limits: &LogLimits) -> Result<FileSink, tracing_appender::rolling::InitError> {
-        let files = rolling_files(dir, limits)?;
-        let day = Utc::now().date_naive();
-        let written = std::fs::metadata(dir.join(file_for(day))).map(|m| m.len()).unwrap_or(0);
+    /// The files in `dir` (created now, so a folder that cannot be used is reported here, not at the first line).
+    pub fn new(dir: &Path, limits: &LogLimits) -> std::io::Result<FileSink> {
+        std::fs::create_dir_all(dir)?;
         Ok(FileSink {
-            files: Mutex::new(files),
-            budget: Mutex::new(Budget {
-                day,
-                written,
-                warned: false,
-            }),
-            max_bytes: u64::from(limits.max_file_mb) * 1024 * 1024,
+            files: DailyFiles::new(
+                dir,
+                LOG_NAME,
+                limits.keep_files,
+                u64::from(limits.max_file_mb) * 1024 * 1024,
+                std::sync::Arc::new(SystemClock),
+                paddock_log::Enrichment {
+                    application: "Debrief".into(),
+                    process: "app".into(),
+                    version: env!("CARGO_PKG_VERSION").into(),
+                    os: std::env::consts::OS,
+                    commit: String::new(),
+                    session_id: String::new(),
+                    process_id: std::process::id(),
+                },
+            ),
         })
-    }
-
-    /// Whether a line of `len` bytes at `level` may be written today, and the one-time notice to write
-    /// first when the limit was just reached.
-    fn admit(&self, level: log::Level, len: usize, today: NaiveDate) -> (bool, Option<String>) {
-        let mut b = crate::sync::lock(&self.budget);
-        if b.day != today {
-            *b = Budget {
-                day: today,
-                written: 0,
-                warned: false,
-            };
-        }
-        if b.written + len as u64 <= self.max_bytes || level == log::Level::Error {
-            b.written += len as u64;
-            return (true, None);
-        }
-        let notice = (!b.warned).then(|| {
-            b.warned = true;
-            crate::clef::format_event(
-                Utc::now(),
-                log::Level::Warn,
-                "debrief_app_lib::logging",
-                &format!(
-                    "The log reached its daily limit of {}; only errors are written until tomorrow",
-                    debrief_plugin_api::units::bytes(self.max_bytes)
-                ),
-                Map::new(),
-                &crate::clef::Enrichment::current(),
-            ) + "\n"
-        });
-        (false, notice)
     }
 }
 
 impl LineSink for FileSink {
     fn write_line(&self, level: log::Level, line: &str) {
-        let (ok, notice) = self.admit(level, line.len() + 1, Utc::now().date_naive());
-        let mut files = crate::sync::lock(&self.files);
         // A full disk or a locked file must not take the app down: the line is dropped.
-        if let Some(n) = notice {
-            let _ = files.write_all(n.as_bytes());
-        }
-        if ok {
-            let _ = files.write_all(format!("{line}\n").as_bytes());
-        }
+        paddock_log::LineSink::write_line(&self.files, level, line);
     }
 }
 
@@ -623,6 +599,38 @@ mod tests {
     }
 
     #[test]
+    fn the_worker_gets_the_apps_folder_level_and_limits() {
+        let dir = std::env::temp_dir().join("debrief-logs");
+        let data = std::env::temp_dir().join("debrief-data");
+        let limits = LogLimits {
+            level: LogLevel::Debug,
+            max_file_mb: 12,
+            keep_files: 3,
+            ..LogLimits::default()
+        };
+        let a = worker_log_args(Some(&dir), Some(&data), &limits).unwrap();
+        assert_eq!(
+            (a.dir, a.data_dir, a.level, a.max_file_mb, a.keep_files),
+            (dir.clone(), Some(data), debrief_store_client::LogLevelArg::Debug, 12, 3)
+        );
+        for (level, want) in [
+            (LogLevel::Error, debrief_store_client::LogLevelArg::Error),
+            (LogLevel::Warn, debrief_store_client::LogLevelArg::Warn),
+            (LogLevel::Info, debrief_store_client::LogLevelArg::Info),
+            (LogLevel::Trace, debrief_store_client::LogLevelArg::Trace),
+        ] {
+            let l = LogLimits {
+                level,
+                ..LogLimits::default()
+            };
+            assert_eq!(worker_log_args(Some(&dir), None, &l).unwrap().level, want);
+        }
+        assert!(worker_log_args(None, None, &limits).is_none(), "no log folder: no worker log");
+        assert!(worker_log_args(Some(Path::new("relative")), None, &limits).is_none());
+        assert_eq!(worker_log_args(Some(&dir), Some(Path::new("rel")), &limits).unwrap().data_dir, None);
+    }
+
+    #[test]
     fn daily_files_with_a_size_limit_errors_always_pass() {
         let dir = crate::test_support::TempDir::new("logging-files");
         let limits = LogLimits {
@@ -640,9 +648,6 @@ mod tests {
         assert_eq!(text.matches(&big).count(), 1);
         assert_eq!(text.matches("daily limit of 1 MB").count(), 1, "the notice is written once");
         assert!(text.ends_with("an error\n"));
-        // A new day starts a new budget.
-        let tomorrow = Utc::now().date_naive().succ_opt().unwrap();
-        assert_eq!(sink.admit(log::Level::Info, 10, tomorrow), (true, None));
         assert!(active_log_file(&dir.0)
             .file_name()
             .unwrap()

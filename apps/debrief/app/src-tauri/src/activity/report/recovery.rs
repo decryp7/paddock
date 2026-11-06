@@ -28,6 +28,23 @@ fn marker(data: &Path) -> Value {
     }
 }
 
+/// The store worker's crash marker (`crash-store.json`, left by its panic hook; see `debrief-store-worker`) as the report lists it:
+/// when, which process and thread and where in the code, never the panic message, which may name data. `None` without a marker.
+pub fn store_worker_marker(data: Option<&Path>) -> Option<Vec<u8>> {
+    let path = paddock_log::CrashMarker::path_for(data?, "store");
+    if std::fs::metadata(&path).ok()?.len() > MAX_MARKER * 4 {
+        return None;
+    }
+    let marker = paddock_log::CrashMarker::read(&path);
+    let value = match marker {
+        Some(m) => json!({ "process": m.process, "pid": m.pid, "time": m.time, "thread": m.thread, "location": m.location }),
+        None => json!({ "state": "unreadable" }),
+    };
+    let mut out = serde_json::to_vec_pretty(&value).ok()?;
+    out.push(b'\n');
+    Some(out)
+}
+
 /// The recovery information from Debrief's data folder (none without one). `previous_crash` is what this run
 /// decided at start, when known.
 pub fn session_recovery(data: Option<&Path>, previous_crash: Option<bool>) -> Value {
@@ -65,6 +82,40 @@ pub fn summary(v: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_store_workers_crash_marker_is_listed_without_its_message() {
+        let d = crate::activity::report::tests::temp("store-marker");
+        assert!(store_worker_marker(Some(&d)).is_none());
+        assert!(store_worker_marker(None).is_none());
+        let marker = paddock_log::CrashMarker {
+            version: 1,
+            process: "store".into(),
+            pid: 77,
+            time: "2026-11-06T08:00:00Z".into(),
+            thread: "debrief-store-call".into(),
+            message: "bad value secret-customer-id".into(),
+            location: "src/x.rs:1".into(),
+            log_file: None,
+        };
+        std::fs::write(d.join("crash-store.json"), serde_json::to_vec(&marker).unwrap()).unwrap();
+        let text = String::from_utf8(store_worker_marker(Some(&d)).unwrap()).unwrap();
+        assert!(
+            text.contains("src/x.rs:1") && text.contains("debrief-store-call") && text.contains("77"),
+            "{text}"
+        );
+        assert!(!text.contains("secret-customer-id"), "{text}");
+        std::fs::write(d.join("crash-store.json"), "garbage").unwrap();
+        assert!(String::from_utf8(store_worker_marker(Some(&d)).unwrap())
+            .unwrap()
+            .contains("unreadable"));
+        // A marker larger than any real one (16 KiB) is not read; one of exactly that size still is.
+        std::fs::write(d.join("crash-store.json"), " ".repeat(16 * 1024)).unwrap();
+        assert!(store_worker_marker(Some(&d)).is_some());
+        std::fs::write(d.join("crash-store.json"), " ".repeat(16 * 1024 + 1)).unwrap();
+        assert!(store_worker_marker(Some(&d)).is_none());
+        std::fs::remove_dir_all(d).unwrap();
+    }
 
     #[test]
     fn markers_and_sessions_are_reported_without_paths() {

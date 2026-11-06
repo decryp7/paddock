@@ -43,6 +43,7 @@ keyring = "4.2"
 debrief-collect = { path = "../../crates/debrief-collect" }
 # The shared report redactor (secrets, user names, home folders, e-mail and IP addresses) for problem reports.
 paddock-diag = { path = "../../../../crates/paddock-diag" }
+paddock-log = { path = "../../../../crates/paddock-log" }
 # Child-process logs (`debrief_ipc::child_log`) for problem reports.
 debrief-ipc = { path = "../../crates/debrief-ipc" }
 # The store worker's client (ADR 0014): every window's store over the worker; links no database.
@@ -63,7 +64,6 @@ tauri-plugin-window-state = "2"
 tauri-plugin-log = "2"
 tracing = { version = "0.1.44", default-features = false, features = ["std"] }
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["std", "registry"] }
-tracing-appender = "0.2.5"
 tracing-log = { version = "0.2", default-features = false, features = ["std"] }
 # >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version), 2.13.3 rejects non-canonical signatures: see `updater.rs`.
 # No "zip": Debrief publishes v2 updater artifacts (the installers themselves), and zip 4 has open advisories.

@@ -56,7 +56,7 @@ impl WorkerHost {
     /// resource folder `lib_dir` (installers), next to the worker, or from Debrief's own library path (development
     /// builds, `fetch-libduckdb.sh`). The worker starts the built-in plugins and the installed `third_party` ones
     /// for imports itself (ADR 0027), with `launch` (its cap and tuning from Settings ▸ Performance, ADR 0031) and
-    /// `memory_listener` hearing its memory watcher.
+    /// `memory_listener` hearing its memory watcher; `log` is where it writes its own log file (read when it starts).
     pub(crate) fn new(
         disabled_plugins: Vec<String>,
         safe_mode: bool,
@@ -64,6 +64,7 @@ impl WorkerHost {
         third_party: Vec<debrief_store_client::protocol::ThirdPartyPlugin>,
         launch: debrief_store_client::WorkerLaunch,
         memory_listener: Option<debrief_ipc::memory_watch::MemoryListener>,
+        log: Option<debrief_store_client::LogArgs>,
     ) -> StoreResult<WorkerHost> {
         let exe = worker_binary();
         let mut cfg = debrief_store_client::WorkerConfig::new(&exe);
@@ -76,6 +77,7 @@ impl WorkerHost {
         cfg.safe_mode = safe_mode;
         cfg.third_party = third_party;
         cfg.child_log = true;
+        cfg.log = log;
         Ok(WorkerHost {
             worker: debrief_store_client::StoreWorker::new(cfg)?,
         })

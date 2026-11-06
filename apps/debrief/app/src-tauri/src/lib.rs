@@ -662,6 +662,7 @@ fn setup(app: &mut tauri::App, launch: &instance::LaunchArgs, safe_mode: bool, s
         lib_dir,
         ctx.data.as_ref().map(|d| d.join("plugins")),
         ctx.safe_mode,
+        logging::worker_log_args(ctx.log.as_deref(), ctx.data.as_deref(), &diag.log),
     )?;
     step("app state");
     if let Some(problem) = shared.plugins.problem() {

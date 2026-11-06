@@ -21,7 +21,7 @@ pub(crate) mod sample;
 
 use super::breadcrumbs::Breadcrumb;
 use super::privacy::is_secret_key;
-use crate::snapshots::{tail_of, SnapshotStore};
+use crate::snapshots::SnapshotStore;
 use crate::{err, CmdResult};
 use chrono::{DateTime, Datelike, SecondsFormat, Timelike, Utc};
 use debrief_ipc::child_log::ProcessSummary;
@@ -33,8 +33,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
-/// Debrief log bytes in a report, over the current and the newest rotated file.
-pub const LOG_WINDOW: u64 = 2 * 1024 * 1024;
+/// Debrief log bytes in a report, over the logs of all its processes (ADR 0036 U1).
+pub const LOG_WINDOW: u64 = 4 * 1024 * 1024;
 /// Longest description kept (bytes, cut at a character boundary).
 pub const MAX_DESCRIPTION: usize = 10 * 1024;
 /// Breadcrumbs the steps to reproduce are made from.
@@ -162,7 +162,8 @@ pub fn without_secrets(v: &Value) -> Value {
 }
 
 /// Debrief's own log files, newest first: today's daily file, then older daily files (and earlier versions'
-/// `debrief.log`, `debrief_*.log`) by modification time.
+/// `debrief.log`, `debrief_*.log`) by modification time. The store worker's `debrief-store.<day>.log` is not among them:
+/// it is another process's log (see [`log_window`]).
 pub fn log_files(log_dir: &Path) -> Vec<PathBuf> {
     let name = crate::diagnostics::LOG_NAME;
     let active = crate::logging::active_log_file(log_dir);
@@ -172,7 +173,7 @@ pub fn log_files(log_dir: &Path) -> Vec<PathBuf> {
                 .flatten()
                 .filter(|e| {
                     let n = e.file_name().to_string_lossy().into_owned();
-                    n.starts_with(name) && n.ends_with(".log") && e.path() != active && e.path().is_file()
+                    n.starts_with(name) && n.ends_with(".log") && !is_store_worker_log(&n) && e.path() != active && e.path().is_file()
                 })
                 .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
                 .collect()
@@ -187,22 +188,22 @@ pub fn log_files(log_dir: &Path) -> Vec<PathBuf> {
     out
 }
 
-/// The newest [`LOG_WINDOW`] bytes of Debrief's logs: the current file's tail, then the newest rotated file
-/// with what is left. Returns (file name, bytes), newest first.
+/// The store worker's own daily log (`debrief-store.<day>.log`, written by `debrief-store-worker`).
+pub fn is_store_worker_log(file_name: &str) -> bool {
+    file_name.starts_with(STORE_WORKER_LOG) && file_name.ends_with(".log")
+}
+
+/// The file-name prefix of the store worker's log.
+const STORE_WORKER_LOG: &str = "debrief-store.";
+
+/// The newest [`LOG_WINDOW`] bytes of the logs of every Debrief process (the app's `debrief.<day>.log`, the store worker's
+/// `debrief-store.<day>.log`): each process gets an equal share, so a chatty app cannot push the worker's file out of the
+/// report. Returns (file name, bytes), each process's files newest first.
 fn log_window(log_dir: &Path) -> Vec<(String, Vec<u8>)> {
-    let mut left = LOG_WINDOW;
-    let mut out = Vec::new();
-    for path in log_files(log_dir).into_iter().take(2) {
-        if left == 0 {
-            break;
-        }
-        if let Some(tail) = tail_of(&path, left) {
-            left = left.saturating_sub(tail.len() as u64);
-            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-            out.push((name, tail));
-        }
-    }
-    out
+    paddock_diag::window::log_window(log_dir, crate::diagnostics::LOG_NAME, LOG_WINDOW)
+        .into_iter()
+        .map(|(name, bytes, _cut)| (name, bytes))
+        .collect()
 }
 
 /// Whether a CLEF line is an activity entry (`SourceContext = Debrief.Activity`).
@@ -382,6 +383,15 @@ fn report_files(inputs: &ReportInputs, description: &str) -> Vec<ReportFile> {
         summary: recovery::summary(&recovery),
         data: serde_json::to_vec_pretty(&recovery).unwrap_or_default(),
     });
+    // The store worker's panic marker, when it left one: where it panicked, never what the message said.
+    if let Some(marker) = recovery::store_worker_marker(inputs.data_dir.as_deref()) {
+        files.push(ReportFile {
+            name: "crash-store.json".into(),
+            kind: FileKind::Other,
+            summary: "The store worker's last panic (time, thread and place only)".into(),
+            data: marker,
+        });
+    }
     // Redacted first: the activity file below is cut from the redacted lines.
     let mut logs: Vec<(String, Vec<u8>)> = Vec::new();
     let mut log_counts: Vec<RedactionCounts> = Vec::new();
@@ -390,7 +400,9 @@ fn report_files(inputs: &ReportInputs, description: &str) -> Vec<ReportFile> {
         logs.push((name, data));
         log_counts.push(counts);
     }
-    let activity = activity_lines(&logs);
+    // The activity entries are the app's own; the worker's lines are not activity.
+    let app_logs: Vec<(String, Vec<u8>)> = logs.iter().filter(|(n, _)| !is_store_worker_log(n)).cloned().collect();
+    let activity = activity_lines(&app_logs);
     files.push(ReportFile {
         name: "logs/activity.log".into(),
         kind: FileKind::Activity,
@@ -401,7 +413,15 @@ fn report_files(inputs: &ReportInputs, description: &str) -> Vec<ReportFile> {
         files.push(ReportFile {
             name: format!("logs/{name}"),
             kind: FileKind::Log,
-            summary: format!("Debrief's own log (recent part){}", redaction::removed_note(&counts)),
+            summary: format!(
+                "{} (recent part){}",
+                if is_store_worker_log(&name) {
+                    "Store worker's log"
+                } else {
+                    "Debrief's own log"
+                },
+                redaction::removed_note(&counts)
+            ),
             data,
         });
     }
@@ -1044,7 +1064,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_log_window_is_bounded_to_the_newest_two_files() {
+    fn the_log_window_is_bounded_and_each_process_has_its_share() {
         let d = temp("window");
         let line = format!("{{\"@m\":\"{}\"}}\n", "x".repeat(1000));
         let big = line.repeat((LOG_WINDOW as usize / line.len()) + 100);
@@ -1062,19 +1082,29 @@ pub(crate) mod tests {
         let total: usize = w.iter().map(|(_, b)| b.len()).sum();
         assert!(total as u64 <= LOG_WINDOW, "{total}");
         assert_eq!(w[0].0, today_name);
-        // A small current file leaves room for the newest older one, never the oldest.
+        // A small current file leaves room for the older ones (the app's days first, newest first).
         std::fs::write(&today, "now\n").unwrap();
         let names: Vec<String> = log_window(&d).into_iter().map(|(n, _)| n).collect();
-        assert_eq!(names, [today_name.as_str(), "debrief.2000-01-02.log"]);
+        assert_eq!(names, [today_name.as_str(), "debrief.2000-01-02.log", "debrief_old.log"]);
         assert!(log_files(&d.join("missing")).is_empty());
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn the_log_window_is_four_mebibytes() {
+        assert_eq!(LOG_WINDOW, 4 * 1024 * 1024);
     }
 
     #[test]
     fn a_store_worker_log_line_reaches_the_bundle() {
         let d = temp("worker-log");
         let today = crate::logging::active_log_file(&d);
-        let day = today.file_name().unwrap().to_string_lossy().replace("debrief.", "").replace(".log", "");
+        let day = today
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .replace("debrief.", "")
+            .replace(".log", "");
         let line = format!("{{\"@m\":\"{}\"}}\n", "x".repeat(1000));
         std::fs::write(&today, line.repeat((LOG_WINDOW as usize * 5 / 2 / line.len()) + 100)).unwrap();
         std::fs::write(d.join("debrief.2000-01-02.log"), "older app day\n").unwrap();
@@ -1090,13 +1120,19 @@ pub(crate) mod tests {
         };
         let files = all_files(&inputs, "");
         let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
-        let worker = files.iter().find(|f| f.name == format!("logs/{store}")).unwrap_or_else(|| panic!("{names:?}"));
+        let worker = files
+            .iter()
+            .find(|f| f.name == format!("logs/{store}"))
+            .unwrap_or_else(|| panic!("{names:?}"));
         assert!(String::from_utf8_lossy(&worker.data).contains("store.fts.failed"));
         assert!(worker.summary.contains("Store worker"), "{}", worker.summary);
         let app = format!("logs/{}", today.file_name().unwrap().to_string_lossy());
         assert!(names.contains(&app.as_str()), "the app's newest file stays: {names:?}");
         let activity = files.iter().find(|f| f.name == "logs/activity.log").unwrap();
-        assert!(!String::from_utf8_lossy(&activity.data).contains("store.fts"), "the activity file reads the app's files only");
+        assert!(
+            !String::from_utf8_lossy(&activity.data).contains("store.fts"),
+            "the activity file reads the app's files only"
+        );
         std::fs::remove_dir_all(d).unwrap();
     }
 

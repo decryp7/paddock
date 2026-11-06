@@ -49,6 +49,7 @@ impl AppState {
         lib_dir: Option<PathBuf>,
         plugins_dir: Option<PathBuf>,
         safe_mode: bool,
+        worker_log: Option<debrief_store_client::LogArgs>,
     ) -> anyhow::Result<AppState> {
         let mut plugins = if safe_mode {
             Builtins::none()
@@ -66,6 +67,7 @@ impl AppState {
             installed.for_store_worker(),
             performance.worker_launch(),
             Some(performance.hub.listener()),
+            worker_log,
         )?;
         performance.attach_worker(stores.worker());
         let plugins = Arc::new(plugins);
