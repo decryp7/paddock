@@ -328,5 +328,26 @@ same process) was stopped by a cancel nobody had asked it for.
   running change only.
 - **Quit is the one app-wide signal.** `ServiceOps` is app state: `quit()` cancels every running operation's token and
   `begin()` then refuses new operations. It also holds the end-of-start-repair wait Quit joins.
-- **A check keeps it so:** a test scans `login.rs`, `quit.rs` and `dyno-agent`'s service module and fails on a `static`
-  atomic flag.
+- **A check keeps it so:** a test scans `login.rs`, `quit.rs` and `dyno-agent`'s service module and fails on any `static`
+  item or `thread_local!` there (a flag in a wrapper type or a `OnceLock` included; the earlier scan matched `static` and
+  `AtomicBool` on one line only and missed `FIRST_RUN_ATTEMPT`). Two items are named as the process's by nature
+  (`STOP_BEGUN`, Quit's once-per-process claim; `FIRST_RUN_MARKER_PATH`, the one folder of the first-run marker), and a
+  positive control shows the scan sees each shape. The first-run attempt now lives in `ServiceOps`.
+
+## Amendment: final review of Dyno 1.1.0 (revision 5)
+
+**Lock after a wait (amends section 3 and R1).** The replace let go of the lock at the first `WaitingForStart`, but a later look
+that saw `Job::Refused` started the next cycle (`Unregister`, `Evict`, `Register`) with no lock, so an uninstall that ran during
+the wait could be overwritten by a second cycle. Now `replace_bounded` takes a second hook, `after_wait`, and calls it before the
+`say` and the OS call of any cycle that follows a wait. The manager takes the lock again there and continues only when the record
+still shows this version's `Awaiting`; otherwise the replace ends as `Cancelled` before it changes anything, and the manager
+settles nothing (the record is somebody else's). A replace that ends inside the wait settles as before (lock taken, record
+checked). A test uninstalls during the wait and then lets the OS refuse the job.
+
+**One look is not R2 (amends R2).** R2 was enforced only in the repair's `Stepper`. The three other places that settle on
+`Job::Running` (`plan` for `MarkCurrent`, `await_start`, `proves_ours`) accepted one look, and `remember()` cleared the attempts.
+`Manager` now keeps the last `ProcessId` it saw for a running job (`running_twice`): a running job settles the service only when
+two looks name the same process (pid and start time, rule 53), or when the service itself answers. A backend that cannot name the
+process is left as before. The read under the lock right after a decision is the same look, not a second one, and `await_start`
+starts its own count so its first look is not confirmed by the decision's. `Facts` gains `job_confirmed`. A test sees a job once
+and then not at all: the attempts and the remembered version stay.

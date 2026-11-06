@@ -499,6 +499,11 @@ impl<R: Runtime> ShellOf<R> {
                         }
                     }
                 }
+                // The app's own login item does not outlive a switch that is off (an interrupted change, or an earlier build).
+                #[cfg(not(windows))]
+                if let Err(e) = login::remove_stale_app_item(wanted, login::platform_autostart(&self.app).as_mut()) {
+                    log::warn!(target: "dyno", Error = e.as_str(); "Start at login is off but the app's own login item could not be removed. Turn Start at login on and off in Settings.")
+                }
                 // Start at login is on by default: the first run registers it once. The start already tried it before the
                 // agent started; this is the same function, once per process, so a failed try is not repeated here.
                 login::run_first_run(&self.app, link, true);
@@ -506,28 +511,36 @@ impl<R: Runtime> ShellOf<R> {
             }
             Some(p) if p == wanted => Ok(()),
             Some(_) => {
-                // The save returns at once; one worker applies it and reports as a job (ER-17). What was just applied is
-                // recorded first (it decides what a quit does), then the agent is handed over to the service just registered,
-                // or taken back from the one just removed; a death in between is put right at the next start (`wanted`).
+                // The save returns at once; one worker applies it and reports as a job (ER-17). What was asked is recorded first
+                // (a second save sees it, and it decides what a quit does), then the agent is handed over to the service just
+                // registered, or taken back from the one just removed; a change that fails or is cancelled puts the old value back,
+                // and a death in between is put right at the next start (`wanted`).
                 let (app, value) = (self.app.clone(), self.launch_at_login.clone());
+                *lock(&value) = Some(wanted);
                 // The shell plugin manages the app's jobs; its Jobs view lists this one and its Cancel stops it.
                 let jobs = self.app.state::<paddock_jobs::tauri::Jobs>().registry().clone();
                 let register = move || jobs.register("start-at-login", "Start Dyno at login", None);
-                self.login_switch.start(&self.app.state::<crate::service_ops::ServiceOps>(), register, move |cancel| {
+                let on_done = value.clone();
+                let started = self.login_switch.start(&self.app.state::<crate::service_ops::ServiceOps>(), register, move |cancel| {
                     let mut service = login::platform_service(cancel.clone());
-                    let mut autostart = login::platform_autostart(&app);
-                    let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
+                    let mut plain = login::platform_autostart(&app);
+                    let result = login::apply_switch_change(
+                        wanted,
+                        login::current_location(),
+                        service.as_mut(),
+                        plain.as_mut(),
+                        cancel,
+                        &on_done,
+                        previous,
+                    );
                     // The link is the one the app manages (the save command holds only a reference to it).
                     if let Some(link) = app.try_state::<Arc<crate::link::AgentLink>>() {
                         link.set_service_installed(service.installed());
                         link.refresh_service();
                     }
-                    if result.is_ok() {
-                        *value.lock().unwrap_or_else(|e| e.into_inner()) = Some(wanted);
-                        logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
-                    }
                     result
-                })
+                });
+                login::undo_if_refused(started, &value, wanted, previous)
             }
         }
     }

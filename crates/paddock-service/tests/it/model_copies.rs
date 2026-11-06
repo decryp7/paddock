@@ -34,7 +34,9 @@ impl System for Launchd {
         let os = self.0.lock().unwrap();
         Ok(match args.first().copied() {
             Some("print") if os.registered_by.is_some() => {
-                Output::ok("x = {\n\tstate = running\n\tpid = 7\n}\n")
+                // A pid no machine hands out (Linux's limit is 2^22): on Linux a small pid such as 7 is a real kernel thread that started
+                // at boot, before any register, which the job-after-register check rightly refuses as an old job.
+                Output::ok("x = {\n\tstate = running\n\tpid = 4294967290\n}\n")
             }
             Some("print") => Output {
                 code: Some(113),

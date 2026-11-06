@@ -459,12 +459,19 @@ fn agent_setup<R: Runtime>(
         link.before_first_launch(Box::new(move || {
             // An agent stopped on request ("Quit and stop measuring") comes back now: the log says it was a request, and the service
             // starts again when nothing supervises it, so the link finds it and starts no second agent.
-            quit::resume_at_start(
-                first_link.dirs.root(),
-                &*login::service_probe(),
-                login::current_location(),
-                login::platform_service(service_ops::OpCancel::default()).as_mut(),
-            );
+            // An operation of its own: Quit cancels it and waits for it, and after Quit it does not run (it would register the
+            // service again behind "Quit and stop measuring").
+            let ran = tauri::Manager::state::<service_ops::ServiceOps>(&first_app).run_tracked(|cancel| {
+                quit::resume_at_start(
+                    first_link.dirs.root(),
+                    &*login::service_probe(),
+                    login::current_location(),
+                    login::platform_service(cancel).as_mut(),
+                );
+            });
+            if ran.is_none() {
+                logging::info("resume at start: the app is quitting, the stopped service stays stopped");
+            }
             login::run_first_run(&first_app, &first_link, false);
         }));
         // Asked before the link starts an agent of its own: none beside one the login service supervises.

@@ -135,6 +135,9 @@ pub struct Facts<'a> {
     /// Whether the running job started at or after this attempt's register call (`None`: the OS cannot say, or no register time
     /// is recorded). `Some(false)` is the old build's job that outlived the removal: it does not settle the new registration.
     pub job_after_register: Option<bool>,
+    /// Rule R2: a job that runs while the service is silent was named by the same process on two looks in a row (always true when
+    /// the service answers or no job runs).
+    pub job_confirmed: bool,
 }
 
 /// How many register calls are allowed per version before the service is held.
@@ -236,7 +239,7 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     // A record that cannot be used says nothing about the version: a service that is up is adopted, never replaced.
     // (Unless the OS says the definition is not this version's: then it is replaced as after an update.)
     if f.record_damaged
-        && (f.answers || i.job == Job::Running)
+        && (f.answers || (i.job == Job::Running && f.job_confirmed))
         && i.definition_current != Some(false)
     {
         return Plan::MarkCurrent;
@@ -345,7 +348,7 @@ pub fn plan(f: &Facts<'_>) -> Plan {
     }
     // The registration of this version was accepted and the service is up: settled, whatever the attempts were.
     // The proof that the registration is this version's names the time (the job started after the register) and the copy.
-    if accepted && (f.answers || i.job == Job::Running) && f.job_after_register != Some(false) && i.points_here != Some(false) {
+    if accepted && (f.answers || (i.job == Job::Running && f.job_confirmed)) && f.job_after_register != Some(false) && i.points_here != Some(false) {
         return Plan::MarkCurrent;
     }
     if i.program_exists == Some(false) {
@@ -536,6 +539,7 @@ mod tests {
             location_ok: true,
             record_damaged: false,
             job_after_register: None,
+            job_confirmed: true,
         }
     }
 
@@ -953,6 +957,7 @@ mod tests {
                 location_ok: true,
                 record_damaged: false,
             job_after_register: None,
+            job_confirmed: true,
             }
         }
         // (a) not registered, `launchctl print` timed out, no record: not installed.
@@ -1031,6 +1036,7 @@ mod tests {
                 location_ok: true,
                 record_damaged: false,
             job_after_register: None,
+            job_confirmed: true,
             })
         };
         let awaiting = |n| attempting("1.0.4", n, Phase::Awaiting);
@@ -1175,6 +1181,7 @@ mod tests {
                 location_ok: true,
                 record_damaged: false,
             job_after_register: None,
+            job_confirmed: true,
             })
         };
         assert_eq!(with(UAC), Plan::MarkCurrent, "a current definition needs no replacement");
@@ -1199,6 +1206,7 @@ mod tests {
                 location_ok: true,
                 record_damaged: false,
             job_after_register: None,
+            job_confirmed: true,
             })
         };
         assert_eq!(stale_with(UAC), Plan::Offer(Reason::VersionChanged));

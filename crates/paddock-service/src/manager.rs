@@ -60,6 +60,10 @@ pub struct Manager {
     app_state: bool,
     first_run_done: Box<dyn FnMut() -> bool + Send>,
     location_ok: Box<dyn FnMut() -> bool + Send>,
+    /// The process the last look at a running job named (rule R2: a job settles the service only when two looks name the same one).
+    seen_job: Option<paddock_proc::ProcessId>,
+    /// What the last fresh look concluded for rule R2.
+    job_confirmed: bool,
 }
 
 impl Manager {
@@ -88,6 +92,8 @@ impl Manager {
             app_state: false,
             first_run_done: Box::new(|| false),
             location_ok: Box::new(|| true),
+            seen_job: None,
+            job_confirmed: true,
         }
     }
 
@@ -160,6 +166,12 @@ impl Manager {
     }
 
     fn decide(&mut self, waited: bool, resuming: bool) -> (Inspection, bool, Plan) {
+        self.decide_with(waited, resuming, true)
+    }
+
+    /// [`Manager::decide`]; `fresh` is false for the read under the lock right after a decision: it is the same look, so it does
+    /// not count as the second one of rule R2.
+    fn decide_with(&mut self, waited: bool, resuming: bool, fresh: bool) -> (Inspection, bool, Plan) {
         let answers = (self.answers)();
         let covered = (self.cover)();
         let (recorded, record_damaged) = self.record.peek();
@@ -167,6 +179,10 @@ impl Manager {
         let job_after_register = self.job_after_register(recorded.registered_at);
         self.backend.know_copy(self.program.as_deref(), recorded.registered_program.as_deref());
         let inspection = self.backend.inspect();
+        if fresh {
+            self.job_confirmed = answers || inspection.job != crate::backend::Job::Running || self.running_twice();
+        }
+        let job_confirmed = self.job_confirmed;
         let p = plan(&Facts {
             inspection: &inspection,
             answers,
@@ -187,6 +203,7 @@ impl Manager {
             location_ok: (self.location_ok)(),
             record_damaged,
             job_after_register,
+            job_confirmed,
         });
         (inspection, answers, p)
     }
@@ -195,6 +212,18 @@ impl Manager {
     pub(crate) fn job_after_register(&mut self, registered_at: Option<u64>) -> Option<bool> {
         let at = registered_at?;
         self.backend.job_process().map(|p| p.started().as_micros() >= at)
+    }
+
+    /// Rule R2: a job that runs while the service does not answer settles nothing on one look. This look names the process; it
+    /// counts only when the last look named the same one (pid and start time, rule 53). A backend that cannot name the process
+    /// leaves the look alone, as the repair's own wait does.
+    pub(crate) fn running_twice(&mut self) -> bool {
+        let Some(process) = self.backend.job_process() else {
+            return true;
+        };
+        let same = self.seen_job == Some(process);
+        self.seen_job = Some(process);
+        same
     }
 
     /// How the service is doing, for the UI and [`ServiceStatus::health`].
@@ -239,7 +268,7 @@ impl Manager {
     /// or after this attempt's register call, and the registration points at this copy.
     pub(crate) fn proves_ours(&mut self, i: &Inspection, answers: bool) -> bool {
         let at = self.record.peek().0.registered_at;
-        (answers || i.job == crate::backend::Job::Running) && self.job_after_register(at) != Some(false)
+        (answers || (i.job == crate::backend::Job::Running && self.running_twice())) && self.job_after_register(at) != Some(false)
             && i.points_here != Some(false)
             // On a mechanism that can tell, the registration is this version's definition.
             && i.definition_current != Some(false)
@@ -347,11 +376,27 @@ impl Manager {
         now: &crate::repair::wall_clock,
         };
         // The wait for the service can take 120 s: the lock is let go for it, so a user's event (a removal, a repair) never waits.
-        let released = std::cell::Cell::new(false);
+        // A later cycle takes it back before it changes anything, and only when the record still shows this wait.
+        let held = std::cell::RefCell::new(lock.take());
+        let wait_lock = std::cell::Cell::new(WaitLock::Held);
         let removed = std::cell::Cell::new(false);
         let mut release = || {
-            *lock = None;
-            released.set(true);
+            *held.borrow_mut() = None;
+            wait_lock.set(WaitLock::LetGo);
+        };
+        let mut retake = || {
+            let mut lock = held.borrow_mut();
+            *lock = record.lock();
+            let ours = lock.is_some()
+                && matches!(record.load().state, State::Attempting { version: ref v, phase: Phase::Awaiting, .. } if *v == version);
+            if ours {
+                wait_lock.set(WaitLock::Held);
+            } else {
+                log::info!("the record or the lock changed during the wait (another request ran); this replace stops before it changes anything");
+                *lock = None;
+                wait_lock.set(WaitLock::Lost);
+            }
+            ours
         };
         let outcome = replace_bounded(
             self.backend.as_mut(),
@@ -359,6 +404,7 @@ impl Manager {
             &bounds,
             &self.timings,
             &mut release,
+            &mut retake,
             &mut |step| {
                 log::info!(step:% = step; "service repair");
                 tracker.step(&step);
@@ -402,10 +448,16 @@ impl Manager {
         log::info!(outcome:? = outcome; "service repair finished");
         // After a wait without the lock, what the record says now may be somebody else's: only a record that still shows this
         // wait is settled here.
-        let still_ours = !released.get() || {
-            *lock = self.record.lock();
-            matches!(self.record.load().state, State::Attempting { version: ref v, phase: Phase::Awaiting, .. } if *v == self.version)
+        let still_ours = match wait_lock.get() {
+            WaitLock::Held => true,
+            WaitLock::Lost => false,
+            // The replace ended inside a wait: only a record that still shows it is settled.
+            WaitLock::LetGo => {
+                *held.borrow_mut() = self.record.lock();
+                matches!(self.record.load().state, State::Attempting { version: ref v, phase: Phase::Awaiting, .. } if *v == self.version)
+            }
         };
+        *lock = held.into_inner();
         let settled = if !still_ours {
             log::info!("the record changed during the wait (another request ran); this replace leaves it as it is");
             Ok(())
@@ -492,7 +544,7 @@ impl Manager {
                     return Started::Busy;
                 };
                 lock = Some(l);
-                p = self.decide(waited, resuming).2;
+                p = self.decide_with(waited, resuming, false).2;
             }
             let recorded_now = self.record.load();
             log::info!(
@@ -669,6 +721,8 @@ impl Manager {
     pub(super) fn await_start(&mut self, cancel: &AtomicBool) -> bool {
         let began = Instant::now();
         let mut polled = Duration::ZERO;
+        // The decision's look is not this wait's first: a job that runs is named by two looks of the wait, a poll apart (rule R2).
+        self.seen_job = None;
         let (up, why) = loop {
             // The old build's job that outlived the removal answers too: only a job started by this register settles it.
             let ours = {
@@ -678,8 +732,9 @@ impl Manager {
             if ours && (self.answers)() {
                 break (true, "the service answers");
             }
-            match self.backend.inspect().job {
-                crate::backend::Job::Running if ours => break (true, "the OS runs the job"),
+            let job = self.backend.inspect().job;
+            match job {
+                crate::backend::Job::Running if ours && self.running_twice() => break (true, "the OS runs the job"),
                 crate::backend::Job::Refused => break (false, "the OS refuses the job"),
                 _ => {}
             }
@@ -695,6 +750,17 @@ impl Manager {
         log::info!(up = up, why = why, waited_ms = u64::try_from(polled.max(began.elapsed()).as_millis()).unwrap_or(u64::MAX); "waited for a registration this version made");
         up
     }
+}
+
+/// Who holds the repair lock while a replace waits for the service.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum WaitLock {
+    /// The replace holds it (never let go, or taken again for a later cycle).
+    Held,
+    /// Let go for a wait and not taken again.
+    LetGo,
+    /// Taken again and not given back to the replace: the record or the lock was somebody else's.
+    Lost,
 }
 
 /// How many register calls a replace may make: a request runs its cycles, an unattended one gets what is left of the attempts

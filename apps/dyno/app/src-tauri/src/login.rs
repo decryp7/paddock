@@ -118,13 +118,24 @@ pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
     settings.unwrap_or_default().launch_at_login
 }
 
+/// One change: the job it registers, the work it does and its own cancel.
+type Change = (
+    Box<dyn FnOnce() -> paddock_jobs::JobContext + Send>,
+    Box<dyn FnOnce(&crate::service_ops::OpCancel) -> Result<(), String> + Send>,
+    crate::service_ops::OpCancel,
+);
+
 /// Applying the Start-at-login switch takes seconds (a registration can wait for the lock another registration holds, and each
 /// cycle waits for the OS), so the save returns at once and one worker does it (ER-17); it reports as a job, which the shell's
-/// Jobs view and notices already show (`paddock://jobs`). A second change while one runs is refused with a message.
+/// Jobs view and notices already show (`paddock://jobs`). A change made while one runs is not dropped: it waits its turn, and a
+/// newer waiting change replaces an older one (only the final state of the switch matters).
 #[derive(Default)]
 pub struct SwitchWorker {
     busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    cancel: std::sync::Mutex<Option<crate::service_ops::OpCancel>>,
+    cancel: std::sync::Arc<std::sync::Mutex<Option<crate::service_ops::OpCancel>>>,
+    /// The change that waits for the running one. It is taken, and `busy` cleared when there is none, under this one lock, so a
+    /// change made at that moment is never left waiting.
+    queued: std::sync::Arc<std::sync::Mutex<Option<Change>>>,
 }
 
 impl SwitchWorker {
@@ -136,22 +147,36 @@ impl SwitchWorker {
     }
 }
 
-/// Clears the busy flag when the worker ends, however it ends.
-struct Clear(std::sync::Arc<std::sync::atomic::AtomicBool>);
-
-impl Drop for Clear {
-    fn drop(&mut self) {
-        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+/// One change as a job: registered, run and ended `Done`, `Failed` with the message the work returned, or `Cancelled`.
+fn run_change((register, work, cancel): Change) {
+    if cancel.is_cancelled() {
+        log::info!(target: "dyno", "a Start at login change was cancelled before it began (Quit)");
+        return;
     }
+    let job = register();
+    let flag = cancel.clone();
+    // Cancel in the Jobs view reaches the work the way a quit does: this operation's own token, which the service checks.
+    let _on_cancel = job.cancel_token().on_cancel(move || flag.cancel());
+    let _ = job.run(|ctx| {
+        ctx.phase(paddock_jobs::Phase::discovering("service", "Setting up the background service"));
+        ctx.check()?;
+        let result = work(&cancel);
+        // A cancel that came during the work ends the job as cancelled, whatever the work made of it (the
+        // record says what was registered; the next start puts the rest right).
+        if cancel.is_cancelled() {
+            return Err(paddock_jobs::JobError::Cancelled(paddock_jobs::CancelReason::User));
+        }
+        result.map_err(paddock_jobs::JobError::Failed)
+    });
 }
 
 impl SwitchWorker {
     /// Runs `work` on a worker thread and returns at once. The worker calls `register` for the change's job (the
-    /// Jobs view's Cancel stops `work` at its next step, as [`cancel`](Self::cancel) does) and the job ends `Done`,
-    /// `Failed` with the message `work` returned, or `Cancelled`.
+    /// Jobs view's Cancel stops `work` at its next step, as [`cancel`](Self::cancel) does). While a change runs, this one waits
+    /// behind it and the worker runs it next (it registers its job then).
     ///
     /// # Errors
-    /// A message when the previous change has not finished, or no worker could be started.
+    /// A message when the app is quitting or no worker could be started.
     pub fn start(
         &self,
         ops: &crate::service_ops::ServiceOps,
@@ -161,34 +186,113 @@ impl SwitchWorker {
         let Some(cancel) = ops.begin() else {
             return Err("Dyno is quitting. Start at login is not changed.".into());
         };
-        if self.busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            return Err("Start at login is still being changed. Try again in a moment.".into());
+        let change: Change = (Box::new(register), Box::new(work), cancel);
+        {
+            let mut queued = self.queued.lock().unwrap_or_else(|p| p.into_inner());
+            if self.busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                let replaced = queued.replace(change).is_some();
+                log::info!(target: "dyno", Replaced = replaced; "a Start at login change was made while another runs; it waits its turn");
+                return Ok(());
+            }
         }
-        *self.cancel.lock().unwrap_or_else(|p| p.into_inner()) = Some(cancel.clone());
-        let clear = Clear(self.busy.clone());
+        let (busy, queue, slot) = (self.busy.clone(), self.queued.clone(), self.cancel.clone());
         let spawned = std::thread::Builder::new().name("dyno-login-switch".into()).spawn(move || {
-            let _clear = clear;
-            let job = register();
-            let flag = cancel.clone();
-            // Cancel in the Jobs view reaches the work the way a quit does: this operation's own token, which the service checks.
-            let _on_cancel = job.cancel_token().on_cancel(move || flag.cancel());
-            let _ = job.run(|ctx| {
-                ctx.phase(paddock_jobs::Phase::discovering("service", "Setting up the background service"));
-                ctx.check()?;
-                let result = work(&cancel);
-                // A cancel that came during the work ends the job as cancelled, whatever the work made of it (the
-                // record says what was registered; the next start puts the rest right).
-                if cancel.is_cancelled() {
-                    return Err(paddock_jobs::JobError::Cancelled(paddock_jobs::CancelReason::User));
+            let mut next = Some(change);
+            while let Some(change) = next.take() {
+                *slot.lock().unwrap_or_else(|p| p.into_inner()) = Some(change.2.clone());
+                // A change that panics (even while registering its job) ends that change only: the worker goes on with the next one
+                // and is never left busy.
+                if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_change(change))).is_err() {
+                    log::warn!(target: "dyno", "a Start at login change panicked; it is dropped, the next one runs");
                 }
-                result.map_err(paddock_jobs::JobError::Failed)
-            });
+                let mut queued = queue.lock().unwrap_or_else(|p| p.into_inner());
+                next = queued.take();
+                if next.is_none() {
+                    busy.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
         });
         spawned.map(drop).map_err(|e| {
             self.busy.store(false, std::sync::atomic::Ordering::SeqCst);
             format!("Start at login could not be changed: {e}")
         })
     }
+}
+
+/// An autostart whose registration is not made once the change was cancelled: a cancel that came while the agent was being
+/// registered must not still add the app's own item (and be reported as on). Removing is never held back.
+pub struct UnlessCancelled<'a> {
+    inner: &'a mut dyn Autostart,
+    cancel: &'a crate::service_ops::OpCancel,
+}
+
+impl<'a> UnlessCancelled<'a> {
+    /// `inner`, guarded by `cancel`.
+    pub fn new(inner: &'a mut dyn Autostart, cancel: &'a crate::service_ops::OpCancel) -> Self {
+        Self { inner, cancel }
+    }
+}
+
+impl Autostart for UnlessCancelled<'_> {
+    fn set(&mut self, on: bool) -> Result<(), String> {
+        if on && self.cancel.is_cancelled() {
+            log::info!(target: "dyno", "start at login: cancelled, so the app's own item is not registered");
+            return Ok(());
+        }
+        self.inner.set(on)
+    }
+}
+
+/// What the app remembers as applied after a change that set `wanted` (it was remembered at once, before the worker started, so
+/// a second save sees it): kept when the change finished, put back to `before` when it failed or was cancelled, unless a newer
+/// change has set its own value meanwhile. Returns whether the change stands.
+pub fn settle_applied(value: &std::sync::Mutex<Option<bool>>, wanted: bool, before: Option<bool>, ok: bool, cancelled: bool) -> bool {
+    let stands = ok && !cancelled;
+    let mut value = value.lock().unwrap_or_else(|e| e.into_inner());
+    if !stands && *value == Some(wanted) {
+        *value = before;
+    }
+    stands
+}
+
+/// One Start-at-login change as the worker runs it: both registrations (the app's own only while the change is not cancelled), then
+/// the remembered value follows the outcome. The caller refreshes what depends on the service afterwards.
+pub fn apply_switch_change(
+    wanted: bool,
+    location: Result<(), String>,
+    service: &mut dyn AgentService,
+    plain: &mut dyn Autostart,
+    cancel: &crate::service_ops::OpCancel,
+    value: &std::sync::Mutex<Option<bool>>,
+    before: Option<bool>,
+) -> Result<(), String> {
+    let mut autostart = UnlessCancelled::new(plain, cancel);
+    let result = apply_launch_at_login(wanted, location, service, &mut autostart);
+    if settle_applied(value, wanted, before, result.is_ok(), cancel.is_cancelled()) {
+        crate::logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
+    }
+    result
+}
+
+/// A change the worker refused to take (the app is quitting, no thread) was never applied: the remembered value goes back.
+pub fn undo_if_refused(
+    started: Result<(), String>,
+    value: &std::sync::Mutex<Option<bool>>,
+    wanted: bool,
+    before: Option<bool>,
+) -> Result<(), String> {
+    if started.is_err() {
+        settle_applied(value, wanted, before, false, false);
+    }
+    started
+}
+
+/// With the switch off the app's own login item is removed (an interrupted change, or an earlier build, may have left it).
+pub fn remove_stale_app_item(start_at_login: bool, autostart: &mut dyn Autostart) -> Result<(), String> {
+    if start_at_login {
+        return Ok(());
+    }
+    autostart.set(false)
 }
 
 /// The user's switch as the service manager needs it (ADR 0056): the settings file's `launchAtLogin`; a missing file is a fresh
@@ -231,9 +335,6 @@ impl Default for FirstRunAttempt {
     }
 }
 
-/// This process's attempt.
-pub static FIRST_RUN_ATTEMPT: FirstRunAttempt = FirstRunAttempt::new();
-
 /// [`apply_first_run_at_start`], at most once per `attempt`: later calls do nothing and say [`FirstRun::Skipped`].
 pub fn apply_first_run_once(
     attempt: &FirstRunAttempt,
@@ -259,7 +360,8 @@ pub fn run_first_run<R: tauri::Runtime>(app: &tauri::AppHandle<R>, link: &crate:
         crate::logging::info("first run: no data folder, start at login not applied");
         return;
     };
-    let Some(cancel) = app.state::<crate::service_ops::ServiceOps>().begin() else {
+    let ops = app.state::<crate::service_ops::ServiceOps>();
+    let Some(cancel) = ops.begin() else {
         crate::logging::info("first run: the app is quitting, start at login is not applied");
         return;
     };
@@ -270,7 +372,7 @@ pub fn run_first_run<R: tauri::Runtime>(app: &tauri::AppHandle<R>, link: &crate:
     let mut sys = paddock_service::RealSystem::new();
     let began = std::time::Instant::now();
     match apply_first_run_once(
-        &FIRST_RUN_ATTEMPT,
+        ops.first_run_attempt(),
         &link.dirs.settings(),
         &marker,
         &mut sys,
@@ -504,9 +606,12 @@ pub fn repair_stale_agent_entry(
 
 /// Windows, at every start: when start at login is on, the app's own `Run` value is written again (idempotent), so a switch
 /// that says on while nothing is registered (an entry written to the wrong hive, deleted by a cleaner, or never written) heals
-/// itself. A switch that is off is never touched here. Returns whether it wrote.
+/// itself. With the switch off the app's own item is removed (on every platform, at the first sight of the settings), so one that
+/// outlived the switch does not start Dyno at login. Returns whether it wrote.
 pub fn ensure_app_entry(start_at_login: bool, autostart: &mut dyn Autostart) -> Result<bool, String> {
     if !start_at_login {
+        // The app's own item is not left behind a switch that is off (a change that was cut short, or an older build's).
+        remove_stale_app_item(false, autostart)?;
         return Ok(false);
     }
     autostart.set(true)?;
@@ -1014,8 +1119,8 @@ mod tests {
             .unwrap();
         assert!(began.elapsed() < std::time::Duration::from_secs(2), "the save did not wait for the OS step");
         next_state(&rx, |s| matches!(s, JobState::Running { .. }));
-        assert!(worker.start(&ops, register_switch(&registry), |_| Ok(())).is_err(), "a second change waits for the first");
-        assert_eq!(registry.snapshots().len(), 1, "a refused change registers no job");
+        worker.start(&ops, register_switch(&registry), |_| Ok(())).expect("a second change waits for the first");
+        assert_eq!(registry.snapshots().len(), 1, "a waiting change registers its job when it runs, not before");
         release.send(()).unwrap();
         assert_eq!(next_state(&rx, JobState::is_terminal).state, JobState::Done);
         // Free again; a failure carries its message.
@@ -1564,5 +1669,207 @@ mod tests {
     fn without_a_stale_entry_the_apps_entry_is_left_alone() {
         assert_eq!(upgrade(false, true), (Ok(false), vec!["repair".to_string()]));
         assert_eq!(upgrade(false, false), (Ok(false), vec!["repair".to_string()]));
+    }
+
+    // ---- the Settings switch while a change runs, a cancel in the middle of one, and a stale app item
+
+    fn switch_change(
+        on: bool,
+        calls: &Calls,
+        gate: Option<std::sync::mpsc::Receiver<()>>,
+    ) -> impl FnOnce(&crate::service_ops::OpCancel) -> Result<(), String> + Send + 'static {
+        let log = calls.0.clone();
+        move |_| {
+            if let Some(gate) = gate {
+                gate.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string())?;
+            }
+            let mut s = FakeService { calls: log.clone(), fail: false };
+            let mut a = FakeAutostart { calls: log, fail: false };
+            apply_launch_at_login(on, Ok(()), &mut s, &mut a)
+        }
+    }
+
+    fn idle(worker: &SwitchWorker) {
+        while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn a_change_made_while_another_runs_is_queued_and_on_then_off_ends_off_with_no_app_item() {
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
+        let (registry, _rx) = jobs_rig();
+        let calls = Calls::default();
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        worker.start(&ops, register_switch(&registry), switch_change(true, &calls, Some(gate))).unwrap();
+        worker
+            .start(&ops, register_switch(&registry), switch_change(false, &calls, None))
+            .expect("a change while one runs waits its turn; it is not dropped");
+        release.send(()).unwrap();
+        idle(&worker);
+        assert_eq!(
+            *calls.0.lock().unwrap(),
+            ["service install", "autostart true", "service uninstall", "autostart false"],
+            "the last change decides"
+        );
+    }
+
+    #[test]
+    fn of_several_changes_made_while_one_runs_only_the_last_runs() {
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
+        let (registry, _rx) = jobs_rig();
+        let calls = Calls::default();
+        let (release, gate) = std::sync::mpsc::channel::<()>();
+        worker.start(&ops, register_switch(&registry), switch_change(true, &calls, Some(gate))).unwrap();
+        worker.start(&ops, register_switch(&registry), switch_change(false, &calls, None)).unwrap();
+        worker.start(&ops, register_switch(&registry), switch_change(true, &calls, None)).unwrap();
+        release.send(()).unwrap();
+        idle(&worker);
+        let log = calls.0.lock().unwrap().clone();
+        assert!(!log.contains(&"service uninstall".to_string()), "a superseded change ran: {log:?}");
+        assert_eq!(log.last().map(String::as_str), Some("autostart true"));
+    }
+
+    #[test]
+    fn the_applied_value_follows_the_change_and_goes_back_when_it_did_not_finish() {
+        let value = Mutex::new(Some(true));
+        // Remembered at once, before the worker starts (a second save sees it).
+        *value.lock().unwrap() = Some(false);
+        assert!(settle_applied(&value, false, Some(true), true, false));
+        assert_eq!(*value.lock().unwrap(), Some(false), "applied");
+        assert!(!settle_applied(&value, false, Some(true), false, false));
+        assert_eq!(*value.lock().unwrap(), Some(true), "a failed change is not remembered as applied");
+        *value.lock().unwrap() = Some(false);
+        assert!(!settle_applied(&value, false, Some(true), true, true));
+        assert_eq!(*value.lock().unwrap(), Some(true), "a cancelled change is not remembered as applied");
+        // A newer change has set its own value meanwhile: this one leaves it alone.
+        *value.lock().unwrap() = Some(true);
+        settle_applied(&value, false, Some(true), false, false);
+        assert_eq!(*value.lock().unwrap(), Some(true));
+        *value.lock().unwrap() = Some(false);
+        settle_applied(&value, true, Some(false), false, false);
+        assert_eq!(*value.lock().unwrap(), Some(false), "not this change's value");
+    }
+
+    struct CancelsAfterInstall {
+        inner: FakeService,
+        cancel: crate::service_ops::OpCancel,
+    }
+
+    impl paddock_service::login::LoginService for CancelsAfterInstall {
+        fn install(&mut self) -> Result<(), String> {
+            let r = self.inner.install();
+            self.cancel.cancel();
+            r
+        }
+        fn uninstall(&mut self) -> Result<(), String> {
+            self.inner.uninstall()
+        }
+    }
+
+    impl AgentService for CancelsAfterInstall {
+        fn installed(&mut self) -> bool {
+            false
+        }
+        fn repair(&mut self, _: AnswerFn) -> Result<bool, String> {
+            Ok(false)
+        }
+    }
+
+    #[test]
+    fn a_cancel_after_the_agent_install_registers_no_app_item_but_a_removal_still_runs() {
+        let calls = Calls::default();
+        let cancel = crate::service_ops::OpCancel::default();
+        let mut service = CancelsAfterInstall { inner: FakeService { calls: calls.0.clone(), fail: false }, cancel: cancel.clone() };
+        let mut plain = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let mut guarded = UnlessCancelled::new(&mut plain, &cancel);
+        apply_launch_at_login(true, Ok(()), &mut service, &mut guarded).unwrap();
+        assert_eq!(*calls.0.lock().unwrap(), ["service install"], "the cancelled change still registered the app");
+        // Off is never held back by a cancel: the item must not stay behind.
+        guarded.set(false).unwrap();
+        assert_eq!(calls.0.lock().unwrap().last().map(String::as_str), Some("autostart false"));
+    }
+
+    #[test]
+    fn at_start_with_the_switch_off_the_apps_own_login_item_is_removed_and_with_it_on_it_is_written() {
+        let calls = Calls::default();
+        let mut a = FakeAutostart { calls: calls.0.clone(), fail: false };
+        assert_eq!(ensure_app_entry(false, &mut a), Ok(false));
+        assert_eq!(*calls.0.lock().unwrap(), ["autostart false"], "a stale item stays behind a switch that is off");
+        assert_eq!(ensure_app_entry(true, &mut a), Ok(true));
+        assert_eq!(calls.0.lock().unwrap().last().map(String::as_str), Some("autostart true"));
+    }
+
+    #[test]
+    fn the_first_run_attempt_belongs_to_the_service_operations_not_to_the_process() {
+        let (first, second) = (ServiceOps::default(), ServiceOps::default());
+        assert!(first.first_run_attempt().claim());
+        assert!(!first.first_run_attempt().claim(), "once per app");
+        assert!(second.first_run_attempt().claim(), "another app state starts clean");
+    }
+
+    #[test]
+    fn a_change_cancelled_after_the_agent_install_ends_with_no_app_item_and_the_old_value() {
+        let calls = Calls::default();
+        let cancel = crate::service_ops::OpCancel::default();
+        let value = Mutex::new(Some(true));
+        let mut service = CancelsAfterInstall { inner: FakeService { calls: calls.0.clone(), fail: false }, cancel: cancel.clone() };
+        let mut plain = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let r = apply_switch_change(true, Ok(()), &mut service, &mut plain, &cancel, &value, Some(false));
+        assert_eq!(r, Ok(()));
+        assert_eq!(*calls.0.lock().unwrap(), ["service install"], "the cancelled change registered the app");
+        assert_eq!(*value.lock().unwrap(), Some(false), "a cancelled change was remembered as on");
+        // Not cancelled: both registrations, remembered.
+        let calls = Calls::default();
+        let value = Mutex::new(Some(true));
+        let mut service = FakeService { calls: calls.0.clone(), fail: false };
+        let mut plain = FakeAutostart { calls: calls.0.clone(), fail: false };
+        apply_switch_change(true, Ok(()), &mut service, &mut plain, &crate::service_ops::OpCancel::default(), &value, Some(false)).unwrap();
+        assert_eq!(*calls.0.lock().unwrap(), ["service install", "autostart true"]);
+        assert_eq!(*value.lock().unwrap(), Some(true));
+    }
+
+    #[test]
+    fn a_change_the_worker_refused_puts_the_remembered_value_back_and_a_started_one_leaves_it() {
+        let value = Mutex::new(Some(true));
+        assert!(undo_if_refused(Err("quitting".into()), &value, true, Some(false)).is_err());
+        assert_eq!(*value.lock().unwrap(), Some(false));
+        *value.lock().unwrap() = Some(true);
+        assert!(undo_if_refused(Ok(()), &value, true, Some(false)).is_ok());
+        assert_eq!(*value.lock().unwrap(), Some(true));
+    }
+
+    #[test]
+    fn only_a_switch_that_is_off_removes_the_app_item() {
+        let calls = Calls::default();
+        let mut a = FakeAutostart { calls: calls.0.clone(), fail: false };
+        remove_stale_app_item(true, &mut a).unwrap();
+        assert!(calls.0.lock().unwrap().is_empty(), "an item behind a switch that is on is left alone");
+        remove_stale_app_item(false, &mut a).unwrap();
+        assert_eq!(*calls.0.lock().unwrap(), ["autostart false"]);
+        let mut failing = FakeAutostart { calls: calls.0.clone(), fail: true };
+        assert!(remove_stale_app_item(false, &mut failing).is_err(), "a failed removal is said, not hidden");
+    }
+
+    #[test]
+    fn a_worker_that_panics_is_free_for_the_next_change() {
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
+        let (registry, _rx) = jobs_rig();
+        worker.start(&ops, register_switch(&registry), |_| -> Result<(), String> { panic!("a test panic") }).unwrap();
+        idle(&worker);
+        let (done, seen) = std::sync::mpsc::channel();
+        worker.start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string())).unwrap();
+        seen.recv_timeout(std::time::Duration::from_secs(5)).expect("the next change did not run");
+    }
+
+    #[test]
+    fn a_change_that_panics_before_its_job_exists_is_dropped_and_the_next_one_runs() {
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
+        let (registry, _rx) = jobs_rig();
+        worker.start(&ops, || -> paddock_jobs::JobContext { panic!("a test panic while registering") }, |_| Ok(())).unwrap();
+        let (done, seen) = std::sync::mpsc::channel();
+        worker.start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string())).unwrap();
+        seen.recv_timeout(std::time::Duration::from_secs(5)).expect("the change after the panic did not run");
+        idle(&worker);
     }
 }
