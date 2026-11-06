@@ -182,6 +182,131 @@ impl MemoryMode {
     }
 }
 
+/// The level the worker writes its own log at (the user's Diagnostics setting, read when the worker starts).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum LogLevelArg {
+    Error,
+    Warn,
+    #[default]
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevelArg {
+    /// The word on the command line.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LogLevelArg::Error => "error",
+            LogLevelArg::Warn => "warn",
+            LogLevelArg::Info => "info",
+            LogLevelArg::Debug => "debug",
+            LogLevelArg::Trace => "trace",
+        }
+    }
+
+    /// The level a command-line word names.
+    pub fn parse(text: &str) -> Option<LogLevelArg> {
+        Some(match text {
+            "error" => LogLevelArg::Error,
+            "warn" => LogLevelArg::Warn,
+            "info" => LogLevelArg::Info,
+            "debug" => LogLevelArg::Debug,
+            "trace" => LogLevelArg::Trace,
+            _ => return None,
+        })
+    }
+}
+
+/// The largest daily log size, MB, a worker takes from its command line (Diagnostics allows 1..=100).
+pub const MAX_LOG_BUDGET_MB: u32 = 100;
+/// The most old daily log files a worker keeps (Diagnostics allows 1..=50).
+pub const MAX_LOG_KEEP: u32 = 50;
+
+/// Where and how the worker writes its own log (`debrief-store.<day>.log` in `dir`, next to the app's), from the app's
+/// Diagnostics settings, sent on its command line: its environment is cleared, so it cannot find the folder itself, and the
+/// app's value (portable mode, a test folder) is the single source. `None` in [`crate::WorkerConfig`]: no file log (the CLI
+/// and tests). The level applies from the worker's next start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogArgs {
+    /// The folder of the log files: the app's log folder.
+    pub dir: PathBuf,
+    /// The app's data folder, where the crash marker `crash-store.json` is left; absent: no marker.
+    pub data_dir: Option<PathBuf>,
+    pub level: LogLevelArg,
+    /// The daily size after which only errors are written, MB.
+    pub max_file_mb: u32,
+    /// Old daily files kept.
+    pub keep_files: u32,
+}
+
+const LOG_DIR_ARG: &str = "--log-dir=";
+const LOG_DATA_DIR_ARG: &str = "--log-data-dir=";
+const LOG_LEVEL_ARG: &str = "--log-level=";
+const LOG_BUDGET_ARG: &str = "--log-budget-mb=";
+const LOG_KEEP_ARG: &str = "--log-keep=";
+
+impl LogArgs {
+    /// The worker's arguments for this log.
+    pub fn args(&self) -> Vec<String> {
+        let mut args = vec![
+            format!("{LOG_DIR_ARG}{}", self.dir.display()),
+            format!("{LOG_LEVEL_ARG}{}", self.level.as_str()),
+            format!("{LOG_BUDGET_ARG}{}", self.max_file_mb),
+            format!("{LOG_KEEP_ARG}{}", self.keep_files),
+        ];
+        if let Some(d) = &self.data_dir {
+            args.push(format!("{LOG_DATA_DIR_ARG}{}", d.display()));
+        }
+        args
+    }
+
+    /// The log the worker's arguments name: `None` without an absolute `--log-dir=`; a bad level or number is ignored
+    /// (the default stays) with a message on standard error (the worker's child log), never a failed start.
+    pub fn from_args(args: impl IntoIterator<Item = String>) -> Option<LogArgs> {
+        let mut log = LogArgs {
+            dir: PathBuf::new(),
+            data_dir: None,
+            level: LogLevelArg::Info,
+            max_file_mb: 10,
+            keep_files: 5,
+        };
+        let mut named = false;
+        for a in args {
+            if let Some(v) = a.strip_prefix(LOG_DIR_ARG) {
+                let dir = PathBuf::from(v);
+                if dir.is_absolute() {
+                    log.dir = dir;
+                    named = true;
+                } else {
+                    eprintln!("debrief-store-worker: the log folder argument is not an absolute path and is ignored");
+                }
+            } else if let Some(v) = a.strip_prefix(LOG_DATA_DIR_ARG) {
+                let dir = PathBuf::from(v);
+                if dir.is_absolute() {
+                    log.data_dir = Some(dir);
+                }
+            } else if let Some(v) = a.strip_prefix(LOG_LEVEL_ARG) {
+                match LogLevelArg::parse(v) {
+                    Some(l) => log.level = l,
+                    None => eprintln!("debrief-store-worker: the log level argument is ignored (not a level)"),
+                }
+            } else if let Some(v) = a.strip_prefix(LOG_BUDGET_ARG) {
+                match v.parse::<u32>() {
+                    Ok(n) => log.max_file_mb = n.clamp(1, MAX_LOG_BUDGET_MB),
+                    Err(_) => eprintln!("debrief-store-worker: the log size argument is ignored (not a number)"),
+                }
+            } else if let Some(v) = a.strip_prefix(LOG_KEEP_ARG) {
+                match v.parse::<u32>() {
+                    Ok(n) => log.keep_files = n.clamp(1, MAX_LOG_KEEP),
+                    Err(_) => eprintln!("debrief-store-worker: the log files argument is ignored (not a number)"),
+                }
+            }
+        }
+        named.then_some(log)
+    }
+}
+
 /// The worker's command-line argument that carries its [`StoreTuning`] (`--tuning=<json>`).
 pub const TUNING_ARG: &str = "--tuning=";
 
@@ -494,6 +619,55 @@ mod tests {
         assert_eq!(MemoryMode::from_args(bootstrap), MemoryMode::Low);
         let old: WorkerStatus = serde_json::from_str(r#"{"pid":1,"rssBytes":2,"stores":0}"#).unwrap();
         assert_eq!(old.memory_mode, MemoryMode::Normal);
+    }
+
+    #[test]
+    fn the_log_goes_to_the_worker_as_arguments_and_bad_values_are_ignored() {
+        let dir = std::env::temp_dir().join("debrief-logs");
+        let log = LogArgs {
+            dir: dir.clone(),
+            data_dir: Some(std::env::temp_dir().join("debrief-data")),
+            level: LogLevelArg::Debug,
+            max_file_mb: 20,
+            keep_files: 7,
+        };
+        let mut args = vec!["debrief-store-worker".to_string(), "--low-memory".into()];
+        args.extend(log.args());
+        assert_eq!(LogArgs::from_args(args), Some(log));
+        for level in [
+            LogLevelArg::Error,
+            LogLevelArg::Warn,
+            LogLevelArg::Info,
+            LogLevelArg::Debug,
+            LogLevelArg::Trace,
+        ] {
+            assert_eq!(LogLevelArg::parse(level.as_str()), Some(level), "{level:?} reads back");
+        }
+        assert_eq!(LogLevelArg::parse("loud"), None);
+        assert_eq!(LogArgs::from_args(["x".to_string()]), None, "no folder: no file log");
+        assert_eq!(
+            LogArgs::from_args(["--log-dir=relative".to_string()]),
+            None,
+            "a relative folder is ignored"
+        );
+        let odd = LogArgs::from_args([
+            format!("--log-dir={}", dir.display()),
+            "--log-level=loud".to_string(),
+            "--log-budget-mb=many".to_string(),
+            "--log-keep=0".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(
+            (odd.level, odd.max_file_mb, odd.keep_files, odd.data_dir),
+            (LogLevelArg::Info, 10, 1, None)
+        );
+        let wild = LogArgs::from_args([
+            format!("--log-dir={}", dir.display()),
+            "--log-budget-mb=9999".to_string(),
+            "--log-keep=999".to_string(),
+        ])
+        .unwrap();
+        assert_eq!((wild.max_file_mb, wild.keep_files), (MAX_LOG_BUDGET_MB, MAX_LOG_KEEP));
     }
 
     #[test]

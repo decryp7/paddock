@@ -11,4 +11,4 @@ pub mod port_table;
 pub mod protocol;
 
 pub use client::{RemoteStore, StoreWorker, WorkerConfig, WorkerLaunch};
-pub use protocol::{MemoryMode, StoreTuning};
+pub use protocol::{LogArgs, LogLevelArg, MemoryMode, StoreTuning};

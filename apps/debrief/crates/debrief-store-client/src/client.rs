@@ -97,6 +97,9 @@ pub struct WorkerConfig {
     /// Extra environment for the worker (and the plugin processes it starts). Tests that kill a worker on purpose point
     /// `TMPDIR` at a folder they own, since a killed host cannot remove the private folders it made.
     pub env: Vec<(String, String)>,
+    /// Where the worker writes its own log (the app's Diagnostics settings); `None`: no file log (the CLI, tests). The
+    /// worker reads it when it starts, so a changed level reaches it at Debrief's next start.
+    pub log: Option<protocol::LogArgs>,
 }
 
 impl WorkerConfig {
@@ -115,6 +118,7 @@ impl WorkerConfig {
             tuning: protocol::StoreTuning::default(),
             memory_listener: None,
             env: Vec::new(),
+            log: None,
         }
     }
 }
@@ -326,11 +330,15 @@ impl StoreWorker {
             memory_mode: cfg.memory_mode,
             tuning: cfg.tuning.clone(),
         }));
+        // The worker's own log is fixed for the run of Debrief (not a Performance setting): its arguments are added at
+        // every start, whatever launch settings Settings hands over.
+        let log_args = cfg.log.as_ref().map(protocol::LogArgs::args).unwrap_or_default();
         let now = launch_now.clone();
         let sup = Supervisor::new(sup_cfg, move || {
             let mut spec = spec.clone();
             let current = lock(&now).clone();
             spec.spawn.args = current.args();
+            spec.spawn.args.extend(log_args.iter().cloned());
             spec.spawn.sandbox.memory_limit = current.memory_cap;
             // In the environment at spawn: DuckDB's jemalloc may read it before the worker's `main` runs.
             spec.spawn.env.extend(crate::allocator::worker_env(current.tuning.allocator_arenas));
