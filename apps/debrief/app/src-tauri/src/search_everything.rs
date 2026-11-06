@@ -156,10 +156,10 @@ pub async fn find_values<R: Runtime>(app: AppHandle<R>, state: CurrentWindow, re
             format!("search for at most {} characters", search_all::MAX_TEXT_CHARS),
         ));
     }
-    let store = state.engine.store()?;
+    let (id, store) = state.engine.tagged_store()?;
     let win = state.arc().clone();
     let (found, fresh) = crate::sync::blocking("find values", move || {
-        win.names.search(store.as_ref(), &request.text, request.limit)
+        win.names.search(id, store.as_ref(), &request.text, request.limit)
     })
     .await?;
     // The answer came from the last table at once; an out-of-date table is rebuilt by a job (at most one).

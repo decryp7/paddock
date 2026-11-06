@@ -57,6 +57,7 @@ pub trait SearchSource {
         Ok(crate::catalogue::CatalogueStatus {
             built: reply.built,
             pending: reply.pending,
+            failed: 0,
             generation: 0,
         })
     }

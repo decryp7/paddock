@@ -42,6 +42,7 @@ pub mod test_scratch;
 mod turns;
 mod writer;
 
+pub use catalogue::RowStats;
 pub use compact::Compaction;
 pub use fts::WriterBudget;
 pub use schema::FORMAT_VERSION;

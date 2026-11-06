@@ -191,6 +191,7 @@ pub trait Query: Send + Sync {
         Ok(crate::catalogue::CatalogueStatus {
             built: reply.built,
             pending: reply.pending,
+            failed: 0,
             generation: 0,
         })
     }

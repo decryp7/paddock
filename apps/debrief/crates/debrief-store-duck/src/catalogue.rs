@@ -204,6 +204,11 @@ struct Shared {
     unsaved: AtomicBool,
     /// How many rows they are ([`CHECKPOINT_AFTER_ROWS`]).
     unsaved_rows: AtomicU64,
+    /// The most unsaved rows there were at any moment, the rows ever committed and the largest single commit (the hook
+    /// of [`RowStats`]).
+    rows_high: AtomicU64,
+    rows_committed: AtomicU64,
+    rows_largest: AtomicU64,
     /// The store's lock of heavy DuckDB work (`Inner::heavy`).
     heavy: Arc<Mutex<()>>,
     /// Checkpoints run under / outside an [`crate::shutdown::Active`] guard (tests: the exit handler must count each).
@@ -216,6 +221,21 @@ struct Shared {
     gate: Gate,
     /// What status callers wait on.
     changes: Changes,
+}
+
+/// What the catalogue's builds did with their rows, kept by the service so a test can check the bound on the unsaved
+/// rows without sampling the store's memory from outside (a sample can miss the peak).
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowStats {
+    /// The most rows committed and not yet checkpointed at any moment.
+    pub high_water: u64,
+    /// Rows committed by all builds.
+    pub committed: u64,
+    /// The rows of the largest single commit.
+    pub largest_commit: u64,
+    /// The unsaved rows that make a build checkpoint.
+    pub checkpoint_after: u64,
 }
 
 /// The catalogue thread of a store; stopped and joined on drop.
@@ -238,6 +258,9 @@ impl CatalogueService {
             failed: Mutex::new(HashSet::new()),
             unsaved: AtomicBool::new(false),
             unsaved_rows: AtomicU64::new(0),
+            rows_high: AtomicU64::new(0),
+            rows_committed: AtomicU64::new(0),
+            rows_largest: AtomicU64::new(0),
             heavy,
             #[cfg(test)]
             checkpoints: (AtomicU64::new(0), AtomicU64::new(0)),
@@ -268,6 +291,22 @@ impl CatalogueService {
             shared,
             handle: Some(handle),
         })
+    }
+
+    /// The row counters of the builds so far.
+    pub(crate) fn row_stats(&self) -> RowStats {
+        RowStats {
+            high_water: self.shared.rows_high.load(Ordering::SeqCst),
+            committed: self.shared.rows_committed.load(Ordering::SeqCst),
+            largest_commit: self.shared.rows_largest.load(Ordering::SeqCst),
+            checkpoint_after: CHECKPOINT_AFTER_ROWS,
+        }
+    }
+
+    /// How many of the `todo` sources a build failed on (they are not tried again until the store is reopened).
+    pub(crate) fn failed_among(&self, todo: &[u32]) -> u64 {
+        let failed = lock(&self.shared.failed);
+        todo.iter().filter(|id| failed.contains(id)).count() as u64
     }
 
     /// Whether rows committed by the last builds still wait for their checkpoint.
@@ -350,6 +389,9 @@ fn step(_running: &crate::shutdown::Active, s: &Shared, conn: &Connection, write
     s.changes.bump();
     // A long run of builds does not keep its rows in memory until it ends.
     let unsaved = s.unsaved_rows.fetch_add(written.unwrap_or(0), Ordering::SeqCst) + written.unwrap_or(0);
+    s.rows_high.fetch_max(unsaved, Ordering::SeqCst);
+    s.rows_committed.fetch_add(written.unwrap_or(0), Ordering::SeqCst);
+    s.rows_largest.fetch_max(written.unwrap_or(0), Ordering::SeqCst);
     if unsaved >= CHECKPOINT_AFTER_ROWS && settle(conn, write_lock) {
         s.unsaved_rows.store(0, Ordering::SeqCst);
         s.unsaved.store(false, Ordering::SeqCst);
@@ -427,18 +469,27 @@ impl crate::Inner {
         // state: a change after it makes the next call return at once.
         let generation = self.catalogue.as_ref().map_or(0, |c| c.generation()) + self.generation.load(Ordering::SeqCst);
         let conn = self.conn()?;
-        let pending = pending(&conn).map_err(|e| engine(format!("{e:#}")))?.len() as u64;
+        let (pending, failed) = self.outstanding(&conn)?;
         Ok(CatalogueStatus {
             built: pending == 0 && !self.catalogue.as_ref().is_some_and(|c| c.saving()),
             pending,
+            failed,
             generation,
         })
+    }
+
+    /// The ready sources still to catalogue and the ones a build gave up on (those count as done: waiting for them
+    /// would never end).
+    fn outstanding(&self, conn: &Connection) -> StoreResult<(u64, u64)> {
+        let todo = pending(conn).map_err(|e| engine(format!("{e:#}")))?;
+        let failed = self.catalogue.as_ref().map_or(0, |c| c.failed_among(&todo));
+        Ok((todo.len() as u64 - failed, failed))
     }
 
     /// Names that look like `req.text`, from the catalogue.
     pub(crate) fn catalogue(&self, req: &CatalogueRequest) -> StoreResult<CatalogueReply> {
         let conn = self.conn()?;
-        let pending = pending(&conn).map_err(|e| engine(format!("{e:#}")))?.len() as u64;
+        let (pending, _failed) = self.outstanding(&conn)?;
         let text: String = req.text.trim().chars().take(debrief_core::find::MAX_TEXT_CHARS).collect();
         let keys = search_keys(&text);
         let squashed = squash(&text);
@@ -523,6 +574,12 @@ impl crate::Inner {
 
 impl crate::DuckStore {
     /// Waits until every ready source is catalogued (tests and benchmarks), at most `timeout`; true when it is.
+    /// The row counters of the catalogue builds so far (none without a catalogue service); a hook for tests.
+    #[doc(hidden)]
+    pub fn catalogue_row_stats(&self) -> Option<RowStats> {
+        self.inner.catalogue.as_ref().map(|c| c.row_stats())
+    }
+
     pub fn wait_for_catalogue(&self, timeout: Duration) -> StoreResult<bool> {
         let started = std::time::Instant::now();
         loop {

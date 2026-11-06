@@ -369,13 +369,23 @@ impl Jobs {
         controls: Controls,
         work: impl FnOnce(&JobCtx) -> JobEnd + Send + 'static,
     ) -> Result<JobId, Refusal> {
+        self.submit_keyed_work(spec, controls, work).map(|s| s.id)
+    }
+
+    /// As [`submit_work`](Self::submit_work), saying whether a job was added or an equal keyed one serves the request.
+    pub fn submit_keyed_work(
+        &self,
+        spec: JobSpec,
+        controls: Controls,
+        work: impl FnOnce(&JobCtx) -> JobEnd + Send + 'static,
+    ) -> Result<Submission, Refusal> {
         let now = self.now();
         let id = {
             let mut inner = self.lock();
             let Submission { id, created } = inner.queue.submit_or_existing(spec, now)?;
             if !created {
                 // The same keyed request is already queued or running: it serves this one; `work` is dropped unrun.
-                return Ok(id);
+                return Ok(Submission { id, created: false });
             }
             inner.controls.insert(
                 id,
@@ -394,7 +404,7 @@ impl Jobs {
         self.emit(&JobsEvent::Changed);
         self.pump();
         self.ensure_ticker();
-        Ok(id)
+        Ok(Submission { id, created: true })
     }
 
     /// Queues `f` and hands its value to the returned handle. Errors fail the job with their text
