@@ -61,6 +61,15 @@ fn the_worker_writes_its_own_log_and_the_lines_survive_a_kill() {
         "2026-10-14 10:00:00 INFO first record MARKER-7f3a\n2026-10-14 10:00:01 ERROR second record MARKER-7f3a\n",
     )
     .unwrap();
+    // A failure path with names in it: a file that cannot be read (where the OS lets a test make one) and one that is not text.
+    std::fs::write(source.join("secret-binary.log"), [0xff, 0xfe, 0x00, 0x9f, 0x00, 0xc3, 0x28]).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let unreadable = source.join("secret-unreadable.log");
+        std::fs::write(&unreadable, "2026-10-14 10:00:00 INFO MARKER-7f3a hidden\n").unwrap();
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
     let w = logged_worker(&logs, &data);
     let store = w.open_store(&store_dir, Profile::default_profile(), true, None).unwrap();
     store.open(std::slice::from_ref(&source)).unwrap().wait().unwrap();
@@ -70,15 +79,18 @@ fn the_worker_writes_its_own_log_and_the_lines_survive_a_kill() {
     let start = event(&lines, "store.worker.start").unwrap_or_else(|| panic!("no start line in {lines:?}"));
     assert_eq!(start["Process"], "store");
     assert_eq!(start["ProcessId"], pid);
-    assert!(start["ParentPid"].as_u64().unwrap() > 1);
+    // The worker's parent is this test (the host): its pid where the OS tells, 0 where the worker cannot ask (Windows).
+    let parent = start["ParentPid"].as_u64().unwrap();
+    assert_eq!(parent, if cfg!(unix) { u64::from(std::process::id()) } else { 0 });
     assert!(event(&lines, "store.worker.ready").unwrap()["Ms"].is_u64());
     let open = event(&lines, "store.open").unwrap();
     assert!(open["Ms"].is_u64() && open["Store"].as_str().unwrap().len() == 8, "{open}");
     assert_eq!(open["ProcessId"], pid);
     let import = event(&lines, "store.import").unwrap();
-    assert_eq!(
-        (import["Outcome"].as_str(), import["Events"].as_u64(), import["Sources"].as_u64()),
-        (Some("done"), Some(2), Some(1))
+    assert_eq!(import["Outcome"], "done");
+    assert!(
+        import["Events"].as_u64().unwrap() >= 2 && import["Sources"].as_u64().unwrap() >= 1,
+        "{import}"
     );
     assert!(import["ParseMs"].is_u64() && import["Ms"].is_u64());
 
@@ -89,7 +101,14 @@ fn the_worker_writes_its_own_log_and_the_lines_survive_a_kill() {
         .filter(|e| e.file_name().to_string_lossy().starts_with("debrief-store."))
         .map(|e| std::fs::read_to_string(e.path()).unwrap())
         .collect::<String>();
-    for secret in ["MARKER-7f3a", "secret-name", "secret-project", "first record"] {
+    for secret in [
+        "MARKER-7f3a",
+        "secret-name",
+        "secret-project",
+        "first record",
+        "secret-binary",
+        "secret-unreadable",
+    ] {
         assert!(!text.contains(secret), "{secret} reached the worker's log:\n{text}");
     }
 
@@ -146,7 +165,7 @@ fn the_start_line_names_the_memory_mode_and_the_tuning_without_a_path() {
 fn a_worker_that_cannot_connect_says_why_in_its_log_and_on_standard_error() {
     let root = TempDir::new("worker-exit");
     let (logs, data) = (root.0.join("logs"), root.0.join("data"));
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_debrief-store-worker"))
+    let out = debrief_core::process::quiet_command(env!("CARGO_BIN_EXE_debrief-store-worker"))
         .args(
             LogArgs {
                 dir: logs.clone(),

@@ -54,18 +54,23 @@ pub fn child_main_then(
     make: impl FnOnce(&Bootstrap) -> Arc<dyn Handler>,
     connected: impl FnOnce(&Bootstrap, &Peer),
 ) -> io::Result<()> {
-    child_main_hooked(label, protocol, make, connected, || {})
+    child_main_hooked(label, protocol, make, connected, || {}).map(drop)
 }
 
+/// How a child's connection ended when it was not the host closing it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Broke(pub String);
+
 /// [`child_main_then`] that also runs `stdin_closed` on the lifeline's thread when the host closed stdin or died, just before the
-/// process exits (a child that keeps a log writes its exit line there: `exit` runs no destructors).
+/// process exits (a child that keeps a log writes its exit line there: `exit` runs no destructors). `Ok(None)`: the host closed
+/// the connection; `Ok(Some(Broke))`: it broke (an I/O error, a protocol error) with the reason.
 pub fn child_main_hooked(
     label: &str,
     protocol: ProtocolVersion,
     make: impl FnOnce(&Bootstrap) -> Arc<dyn Handler>,
     connected: impl FnOnce(&Bootstrap, &Peer),
     stdin_closed: impl FnOnce() + Send + 'static,
-) -> io::Result<()> {
+) -> io::Result<Option<Broke>> {
     let args: Vec<String> = std::env::args().collect();
     let elevated = bootstrap_file(&args);
     let bootstrap = match &elevated {
@@ -79,7 +84,13 @@ pub fn child_main_hooked(
         lifeline_then(stdin_closed);
     }
     peer.wait_closed(None);
-    Ok(())
+    Ok(peer.closed().and_then(|why| broke(&why)))
+}
+
+/// Whether `why` is a break (not the host closing the connection): the reason text of a break says "broke".
+fn broke(why: &crate::IpcError) -> Option<Broke> {
+    let text = why.to_string();
+    text.contains("broke").then_some(Broke(text))
 }
 
 /// The lifeline: when the host closes stdin (or dies), exit at once.
@@ -186,6 +197,57 @@ fn lock_down(bootstrap: &Bootstrap, elevated: bool) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_break_of_the_connection_is_told_from_the_host_closing_it() {
+        use crate::IpcError;
+        let broken = broke(&IpcError::Died("the connection to Debrief broke (os error 32)".into()));
+        assert!(broken.is_some_and(|b| b.0.contains("os error")));
+        assert_eq!(broke(&IpcError::Died("Debrief closed the connection".into())), None);
+        assert_eq!(broke(&IpcError::Died("the connection to Debrief was closed".into())), None);
+    }
+
+    /// The lifeline runs its hook before the process exits: the test starts itself as the child (`exit` ends a process).
+    #[test]
+    #[allow(clippy::disallowed_methods)] // a test starts itself as the child; no console window to avoid
+    fn the_lifeline_runs_its_hook_when_stdin_closes_and_then_ends_the_process() {
+        const FILE: &str = "DEBRIEF_TEST_LIFELINE_FILE";
+        if let Some(file) = std::env::var_os(FILE) {
+            lifeline_then(move || std::fs::write(&file, "closed").unwrap());
+            // The lifeline ends this process; the wait is only a bound.
+            std::thread::sleep(std::time::Duration::from_secs(60));
+            std::process::exit(3);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("hook-ran");
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "child::tests::the_lifeline_runs_its_hook_when_stdin_closes_and_then_ends_the_process",
+                "--test-threads=1",
+            ])
+            .env(FILE, &marker)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        drop(child.stdin.take());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let status = loop {
+            if let Some(s) = child.try_wait().unwrap() {
+                break s;
+            }
+            if std::time::Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("the child did not end when its stdin closed");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        assert_eq!(status.code(), Some(0), "the lifeline exits with 0");
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "closed", "the hook ran before the exit");
+    }
 
     #[test]
     fn the_bootstrap_comes_from_stdin_or_a_named_file() {

@@ -1,6 +1,6 @@
 //! `store.activity`: every ten minutes while connected, what the worker spent and what its background loops did since the last
 //! line (ER-27). It answers "Debrief uses CPU while idle": a loop that wakes without work shows as idle turns and no step lines,
-//! next to the CPU milliseconds. Six lines an hour; reading the CPU time is one call.
+//! next to the worker's CPU milliseconds. Six lines an hour; reading the CPU time is one call.
 
 use debrief_store_duck::activity::{take, Counts, Loop};
 use std::time::Duration;
@@ -8,8 +8,8 @@ use std::time::Duration;
 /// How often the line is written.
 pub const EVERY: Duration = Duration::from_secs(10 * 60);
 
-/// The properties of one line: CPU milliseconds of the worker and its plugin processes since the last line, the resident
-/// megabytes, and for each loop the turns that worked, found nothing and found the write lock busy.
+/// The properties of one line: CPU milliseconds of the worker process alone since the last line, its resident megabytes (the
+/// same scope), and for each loop the turns that worked, found nothing, found the write lock busy and failed.
 pub fn values(cpu_ms: u64, resident_mb: u64, loops: &[(Loop, Counts)]) -> Vec<(String, u64)> {
     let mut out = vec![("CpuMs".to_string(), cpu_ms), ("ResidentMb".to_string(), resident_mb)];
     for (l, c) in loops {
@@ -18,29 +18,50 @@ pub fn values(cpu_ms: u64, resident_mb: u64, loops: &[(Loop, Counts)]) -> Vec<(S
         out.push((format!("{name}Worked"), c.worked));
         out.push((format!("{name}Idle"), c.idle));
         out.push((format!("{name}Blocked"), c.blocked));
+        out.push((format!("{name}Failed"), c.failed));
     }
     out
 }
 
-/// The CPU time of this process and the plugin processes it started, `None` where the OS does not say.
+/// The CPU time of this process alone: monotonic (a plugin process that ends does not take its share away, as it does from
+/// a tree's total), and the same scope as `ResidentMb`. `None` where the OS does not say.
 fn cpu_time() -> Option<Duration> {
-    paddock_proc::tree_cpu_time(paddock_proc::ProcessId::of(std::process::id())?)
+    paddock_proc::tree_cpu_time_of(&paddock_proc::OsSource::default(), &[std::process::id()])
 }
 
-/// Starts the thread that writes the line every `every` until the process ends.
-pub fn start(every: Duration) {
+/// The running activity thread; [`Activity::stop`] ends it (the worker keeps it for the life of the process).
+pub struct Activity {
+    stop: std::sync::mpsc::Sender<()>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl Activity {
+    /// Ends the thread and waits for it.
+    pub fn stop(self) {
+        drop(self.stop);
+        let _ = self.thread.join();
+    }
+}
+
+/// Starts the thread that writes the line every `every` until it is stopped. The first line counts from the thread's start.
+pub fn start(every: Duration) -> Option<Activity> {
+    let (stop, stopped) = std::sync::mpsc::channel::<()>();
     let spawned = std::thread::Builder::new().name("debrief-store-activity".into()).spawn(move || {
-        let mut last = Duration::ZERO;
-        loop {
-            std::thread::sleep(every);
+        let mut last = cpu_time().unwrap_or(Duration::ZERO);
+        // The wait ends early only when the sender is dropped.
+        while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
             let now = cpu_time();
             let cpu_ms = now.map_or(0, |n| u64::try_from(n.saturating_sub(last).as_millis()).unwrap_or(u64::MAX));
             last = now.unwrap_or(last);
             emit(&values(cpu_ms, debrief_ipc::process::current_rss_bytes() >> 20, &take()), every);
         }
     });
-    if let Err(e) = spawned {
-        log::warn!(EventId = "store.activity.not_started", Why = e.kind().to_string().as_str(); "The activity line cannot start");
+    match spawned {
+        Ok(thread) => Some(Activity { stop, thread }),
+        Err(e) => {
+            log::warn!(EventId = "store.activity.not_started", Why = e.kind().to_string().as_str(); "The activity line cannot start");
+            None
+        }
     }
 }
 
@@ -71,6 +92,7 @@ mod tests {
                     worked: 0,
                     idle: 1198,
                     blocked: 2,
+                    failed: 0,
                 },
             ),
             (
@@ -79,6 +101,7 @@ mod tests {
                     worked: 3,
                     idle: 4,
                     blocked: 5,
+                    failed: 0,
                 },
             ),
             (Loop::Tail, Counts::default()),
@@ -97,7 +120,7 @@ mod tests {
         );
         assert_eq!(get("TailWorked"), Some(0));
         assert_eq!(get("PositionsBlocked"), Some(0));
-        assert_eq!(v.len(), 2 + 4 * 3);
+        assert_eq!(v.len(), 2 + 4 * 4);
     }
 
     #[test]
@@ -114,6 +137,7 @@ mod tests {
                         worked: 1,
                         idle: 2,
                         blocked: 3,
+                        failed: 0,
                     },
                 )],
             ),
@@ -130,7 +154,7 @@ mod tests {
         );
         assert!(line.message.contains("10 minutes"), "{}", line.message);
         // The thread: a short period writes a line with the CPU of the period and the resident size.
-        start(Duration::from_millis(30));
+        let activity = start(Duration::from_millis(30)).expect("the thread starts");
         let own = testlog::wait_for("store.activity", Duration::from_secs(10), |r| {
             r.props.contains_key("ResidentMb") && r.props.contains_key("PositionsIdle") && r.props["ResidentMb"].as_u64() != Some(17)
         })
@@ -138,6 +162,8 @@ mod tests {
         let resident = own.props["ResidentMb"].as_u64().unwrap();
         assert!((1..1 << 20).contains(&resident), "megabytes, not bytes: {own:?}");
         assert!(own.props["CpuMs"].is_u64(), "{own:?}");
+        // Stopping ends the thread (no line from it after that).
+        activity.stop();
     }
 
     #[test]
@@ -145,8 +171,10 @@ mod tests {
         // Reading it twice around some work: it is real (not a constant) and does not go back.
         let first = cpu_time().expect("the OS reports the CPU time");
         assert!(first > Duration::ZERO);
+        let deadline = std::time::Instant::now() + Duration::from_secs(20);
         let mut x = 0u64;
         while cpu_time().unwrap() <= first {
+            assert!(std::time::Instant::now() < deadline, "the CPU time does not advance");
             x = std::hint::black_box(x.wrapping_add(1));
         }
         assert!(cpu_time().unwrap() > first);

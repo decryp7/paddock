@@ -154,7 +154,13 @@ pub fn note_previous_panic(log: &LogArgs) {
     }
 }
 
-/// Why the worker ended.
+/// Why the worker ended. The host stops a worker it is done with by closing its standard input and killing it after a short grace
+/// (`debrief_ipc::process::KILL_GRACE`), so under load the exit line can be missing: the parent's child log (`Stopped store-worker
+/// ...`, `Crashed ...`) is the authority on how the process ended, this line adds the reason the worker saw.
+///
+/// The panic hook of paddock-log writes the panic itself, message included, as a Fatal line (`<process> crashed on thread ...:
+/// <message>`); a message can quote data, and the report's redactor is the guard for it. The `store.worker.previous_panic` line
+/// and `crash-store.json` in the report carry the place only.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExitWhy {
     /// Debrief closed the connection.

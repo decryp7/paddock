@@ -418,7 +418,7 @@ fn with_progress<R: Send>(
                 sending = match debrief_ipc::wire::encode(&now) {
                     Ok(bytes) => items(bytes),
                     Err(e) => {
-                        log::warn!("cannot encode the progress: {e}");
+                        debrief_core::log_failure!(warn, "cannot encode the progress", e);
                         false
                     }
                 };
@@ -452,7 +452,7 @@ impl Watch {
             }
         });
         if let Err(e) = spawned {
-            log::warn!("cannot watch for cancels: {e}");
+            debrief_core::log_failure!(warn, "cannot watch for cancels", e);
         }
         Watch { done }
     }
@@ -528,12 +528,16 @@ pub fn run(plugins: Arc<dyn PluginSource>, mode: MemoryMode, tuning: StoreTuning
         move |_, _| {
             seen.store(true, Ordering::SeqCst);
             crate::logging::log_ready();
-            crate::activity::start(crate::activity::EVERY);
+            // Kept for the life of the process.
+            if let Some(a) = crate::activity::start(crate::activity::EVERY) {
+                std::mem::forget(a);
+            }
         },
         || crate::logging::log_exit(crate::logging::ExitWhy::StdinClosed, 0, None),
     );
     match &result {
-        Ok(()) => crate::logging::log_exit(crate::logging::ExitWhy::PeerClosed, 0, None),
+        Ok(None) => crate::logging::log_exit(crate::logging::ExitWhy::PeerClosed, 0, None),
+        Ok(Some(broke)) => crate::logging::log_exit(crate::logging::ExitWhy::Error, 1, Some(&std::io::Error::other(broke.0.clone()))),
         Err(e) => {
             let why = if connected.load(Ordering::SeqCst) {
                 crate::logging::ExitWhy::Error
@@ -543,7 +547,11 @@ pub fn run(plugins: Arc<dyn PluginSource>, mode: MemoryMode, tuning: StoreTuning
             crate::logging::log_exit(why, 1, Some(e));
         }
     }
-    result
+    match result {
+        Ok(None) => Ok(()),
+        Ok(Some(broke)) => Err(std::io::Error::other(broke.0)),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]
