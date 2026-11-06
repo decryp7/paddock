@@ -9,10 +9,10 @@
   Pitcrew ADR 0022 (a design for the service's `FileSecrets` with backup exclusion, not built), Debrief ADR 0059
   (Pitwall as the AI engine; the key "never in a file"), memory note "code signing dropped" (2026-11-05: the apps stay unsigned).
 - Number: 0057. The highest ADR file on `origin/main` is 0049; 0053 to 0056 are on open branches
-  (`git ls-tree --name-only <branch> docs/adr/` over all branches, 2026-11-06). The highest check named anywhere is C98
-  and the highest rule 71 (ADR 0054 on `origin/docs/adr-os-lifecycle-and-edges-amend1`, ADR 0055 on
-  `origin/docs/adr-family-logging`), so this ADR claims check **C99** and rule **72**. Renumber at landing if those
-  branches land first with more.
+  (`git ls-tree --name-only <branch> docs/adr/` over all branches, 2026-11-06). The highest check named anywhere is
+  C98, planned in ADR 0054 on `origin/docs/adr-os-lifecycle-and-edges` (`0054-os-integration-proved-on-the-real-os.md:868`).
+  The highest rule is 71, already on `main` (`docs/rules.md:284`), and no branch has a rule 72. So this ADR claims check
+  **C99** and rule **72**. Renumber at landing if other branches land first with more.
 
 ## Evidence
 
@@ -90,18 +90,25 @@ honest choices are to stop reading it, or to read it without UI and ask the user
 
 ### 1. The rule (proposed rule 72)
 
-> **No Paddock process uses the macOS Keychain.** A macOS build links no Keychain API, reads and writes no Keychain
-> item, and spawns no `security` Keychain subcommand; its secrets live in owner-only files. C99 checks it. *Why:*
-> ad-hoc and self-signed builds lose silent Keychain access on every update, reads and writes of an older build's item
-> both raise a dialog, and a blocked call waits with no time limit and no window (research 2026-11-05).
+> **No shipped Paddock process uses the macOS Keychain.** On macOS, no app, agent, helper, service or CLI that a
+> release ships calls a Keychain item or keychain-file API, or runs a `security` subcommand that touches a keychain;
+> its secrets live in owner-only files. Linking `Security.framework` for TLS trust (through `rustls-native-certs` and
+> `rustls-platform-verifier`) is allowed. C99 checks it. *Why:* ad-hoc and self-signed builds lose silent Keychain
+> access on every update, reads and writes of an older build's item both raise a dialog, and a blocked call waits with
+> no time limit and no window (research 2026-11-05).
 
-Option (b) in section 5 would keep a Keychain backend. It is not allowed by this rule: choosing it (D2 = b) is an
-amendment of this ADR that changes rule 72 and C99 together, as WP-9 states.
+Developer and CI scripts are outside the rule, because no release ships them. One of them uses a keychain on purpose:
+`apps/debrief/scripts/macos/dev-signing.sh:18-51` runs `security find-certificate`, `delete-identity`,
+`delete-certificate`, `import` and `add-trusted-cert` on a signing keychain of its own.
+
+Option (b) in section 5 would keep a Keychain backend, and the alternative in D3 would keep Debrief's key in the
+Keychain. Neither is allowed by this rule. Choosing either one is an amendment of this ADR that changes rule 72 and C99
+together, as WP-9 states.
 
 ### 2. One mechanism (rule 55)
 
-- **One door.** Only `paddock-secrets` may depend on `keyring`. Apps code against the `Secrets` port and never name
-  `keyring::Entry`.
+- **One door.** Only `paddock-secrets` may depend on `keyring` or its store crates. Apps code against the `Secrets`
+  port and never name `keyring::Entry`.
 - **One platform default.** `paddock_secrets::for_app(...)` returns `FileSecrets` in the app's data folder on macOS and
   the OS store on Windows and Linux. The `keyring` feature is enabled only under `cfg(not(target_os = "macos"))`, as
   Dyno's `dyno-platform` does on `fix/dyno-mcp-keys-file`, so the Keychain adapter is not compiled into a macOS build.
@@ -110,6 +117,9 @@ amendment of this ADR that changes rule 72 and C99 together, as WP-9 states.
   attribute. A test rewrites a secret and checks that the folder is still excluded. This is new work, because Pitcrew
   ADR 0022 only plans `tmutil addexclusion`. It reuses Dyno's `exclude_from_backup` attribute writer, which moves into
   shared code (rule 42) instead of being copied.
+- **Not in diagnostic bundles.** The bundle collector (`crates/paddock-diag/src/report.rs`, `collect` at `:119`) never
+  adds the secrets folder. A test builds a bundle with a secret in place and checks that neither the file nor its value
+  is in the bundle. Whether the collector copies the data folder today was not checked.
 - **Presence is not a read.** The port gets `contains(&Name) -> Result<bool, SecretsError>`. Screens that only show a
   tick ("token set") call it and never fetch the value. On `FileSecrets` it is a metadata check.
 
@@ -126,34 +136,54 @@ crate name, because `keyring` is only one way in. These all reach the same items
 - `SecItemCopyMatching` and the `SecKeychain*` functions of `objc2-security` (0.3.2, `src/generated/SecItem.rs:1526`),
   which is in the lockfiles of Dyno, Pitcrew, Pitwall, Spotter, both demos and `crates/`;
 - `keyring_core::Entry` and the `apple-native-keyring-store` crate;
-- a hand-written `extern "C"` block for `SecItemCopyMatching` with `#[link(name = "Security", kind = "framework")]`;
+- a hand-written `extern "C"` block for `SecItemCopyMatching` with `#[link(name = "Security", kind = "framework")]`,
+  in Paddock code or in a new dependency, including C or Objective-C built through `cc`;
 - a spawned `/usr/bin/security find-generic-password`.
 
-**Workspaces.** C99 reads `crates/`, `tools/paddock-dev` and the `cargo` folder of every `apps/*/paddock.ci.json`. A
-`Cargo.lock` that this list does not reach fails the check, so a new app cannot escape it. The lockfiles of code that
-is never shipped are excluded by name: `apps/debrief/fuzz`, `apps/debrief/docs/research/2026-10-28-duckdb-server-mode/harness`,
-`crates/*/fuzz` (`paddock-ipc`, `paddock-plugin-package`, `paddock-view`), `spikes/dialog-hidden` and the golden
-fixtures under `tools/paddock-dev/tests`. Apps with no `cargo` field and no lockfile (Pacenotes and Sighter today) are
-listed as "no Rust".
+**Workspaces.** C99 reads `crates/` and the `cargo` folder of every `apps/*/paddock.ci.json`, which makes 8 workspaces
+today (`crates/`, the five apps, both demos). A `Cargo.lock` that this list does not reach fails the check, so a new
+app cannot escape it. The lockfiles of code that is never shipped are excluded by name: `tools/paddock-dev` (a developer
+tool) and its golden fixtures under `tools/paddock-dev/tests`, `apps/debrief/fuzz`,
+`apps/debrief/docs/research/2026-10-28-duckdb-server-mode/harness`, `crates/*/fuzz` (`paddock-ipc`,
+`paddock-plugin-package`, `paddock-view`), `spikes/dialog-hidden`, and C99's own Clippy fixture. Apps with no `cargo`
+field and no lockfile (Pacenotes and Sighter today) are listed as "no Rust".
 
-1. **Manifest scan.** Every `Cargo.toml` table that names `keyring`, `keyring-core`, `apple-native-keyring-store`,
-   `security-framework`, `security-framework-sys` or `objc2-security` fails unless the table's `cfg` is one of
-   `not(target_os = "macos")`, `windows`, `target_os = "windows"`, `target_os = "linux"`. A table names a crate in its
-   body (a dependency, a renamed or inherited one, a feature entry such as `paddock-secrets/keyring` or
+1. **Manifest scan.** It reads every `Cargo.toml` of the 8 workspaces. A table names a crate in its body (a
+   dependency, a renamed or inherited one, a feature entry such as `paddock-secrets/keyring` or
    `paddock-secrets?/keyring`) or in its header line (`[dependencies.keyring]`,
-   `[target.'cfg(...)'.dependencies.keyring]`). There are two exceptions. `crates/paddock-secrets/Cargo.toml` defines
-   the `keyring` feature, and `crates/paddock-workspace-hack` is generated by `cargo hakari` and has no code (the graph
-   probe covers what it mirrors).
-2. **Source scan.** Files outside C99's own code fail when they name the Keychain:
-   - `.rs` files that name `SecItemCopyMatching`, `SecItemAdd`, `SecItemUpdate`, `SecItemDelete` or `SecKeychain`, which
-     catches a hand-written `extern "C"` block and a direct `objc2-security` call;
-   - `.rs`, `.ts`, `.mjs` and `.sh` files that name a `security` Keychain subcommand: `find-generic-password`,
-     `find-internet-password`, `add-generic-password`, `dump-keychain`, `unlock-keychain` or `export`. The bare word
-     `export` is matched only next to `security` (as in `security export` or `["security", "export"]`), because it is a
-     common word;
-   - Tauri capability files (`src-tauri/capabilities/*.json`) whose shell scope allows the `security` program. No
-     capability on `origin/main` grants a shell scope today.
-3. **Graph probe.** Per workspace and per macOS target (`aarch64-apple-darwin`, `x86_64-apple-darwin`), the check runs
+   `[target.'cfg(...)'.dependencies.keyring]`).
+   - **One door.** Outside `crates/paddock-secrets`, a table that names `keyring`, `keyring-core` or a keyring store
+     crate (`apple-native-keyring-store`, `windows-native-keyring-store`, `zbus-secret-service-keyring-store`) fails
+     under any `cfg`, Windows included. Other manifests may name only the `paddock-secrets/keyring` feature.
+   - **macOS.** A table that names the `paddock-secrets/keyring` feature, `security-framework`,
+     `security-framework-sys` or `objc2-security` fails unless its `cfg` is one of `not(target_os = "macos")`,
+     `windows`, `target_os = "windows"`, `target_os = "linux"`.
+   - **Exceptions.** `crates/paddock-secrets/Cargo.toml` defines the `keyring` feature. `crates/paddock-workspace-hack`
+     is generated by `cargo hakari` and has no code (the graph probe covers what it mirrors).
+2. **Source scan of Paddock code.** It reads what a release ships: every `.rs`, `.c`, `.m`, `.h`, `.cpp` and `.swift`
+   file of the 8 workspaces, the `.ts` files under `apps/*/app/src` and `ui/projects`, every
+   `src-tauri/capabilities/*.json`, and any file a `tauri.conf.json` lists under `bundle.resources`. A file fails when
+   it names any of these:
+   - the symbols `SecItemCopyMatching`, `SecItemAdd`, `SecItemUpdate`, `SecItemDelete`, `SecItemImport`,
+     `SecKeychain[A-Z]`, `SecCertificateAddToKeychain` or `SecPKCS12Import`, which catches a hand-written `extern "C"`
+     block and a direct `objc2-security` call;
+   - a `security` subcommand that touches a keychain: `find-generic-password`, `add-generic-password`,
+     `delete-generic-password`, the same three for `-internet-password`, `find-certificate`, `find-identity`,
+     `delete-certificate`, `delete-identity`, `add-trusted-cert`, `create-keychain`, `unlock-keychain`,
+     `dump-keychain`, `import` or `export`. The common words `import` and `export` match only next to `security` (as in
+     `security export` or `["security", "export"]`);
+   - in a capability file, a shell scope that allows the `security` program. No capability on `origin/main` grants a
+     shell scope today.
+3. **Source scan of dependencies.** After the fetch in point 4, the same symbol list is matched in the `.rs`, `.c`,
+   `.m`, `.h`, `.cpp` and `.swift` files of every crate in the macOS graphs (the source folders that `cargo metadata
+   --filter-platform <target>` names). Only `objc2-security`, `security-framework` and `security-framework-sys` may
+   match, because their Keychain API is fenced by the feature check and Clippy. A new dependency with its own Keychain
+   FFI therefore fails. The third independent review of this ADR (2026-11-06) ran this scan over 991 of the 1,117 crate
+   versions in the shipped lockfiles and found only those three. That count is the reviewer's and was not re-run for
+   this text. Results are cached per crate checksum from `Cargo.lock`, so a run reads only new versions. Prebuilt
+   binaries in a crate (`.a`, `.o`, `.dylib`, `.framework`) cannot be read this way. The scan lists every crate that
+   ships one as "binary, not scanned", and a new one fails until it is reviewed and added to an allow-list.
+4. **Graph probe.** Per workspace and per macOS target (`aarch64-apple-darwin`, `x86_64-apple-darwin`), the check runs
    `cargo fetch --locked --target <target>`, then one `cargo tree --locked --offline -e normal,build,features --target
    <target>` and reads every crate below from that one output:
    - `keyring`, `keyring-core` and `apple-native-keyring-store` must not appear.
@@ -162,7 +192,8 @@ listed as "no Rust".
      is banned above). `security-framework-sys` may appear only below `security-framework`,
      `rustls-platform-verifier` and `paddock-workspace-hack`.
    - `objc2-security` may appear only below `objc2-service-management`, which enables only its `Authorization`
-     feature. Its `SecItem`, `SecKeychain`, `SecKeychainItem` and `SecKeychainSearch` features must not be enabled.
+     feature. Its `SecItem`, `SecKeychain`, `SecKeychainItem`, `SecKeychainSearch`, `SecImportExport` and
+     `SecIdentitySearch` features must not be enabled.
    - A new direct user of any of these crates fails until this list is amended in review.
 
    Feature sets: app workspaces use `--all-features`, which covers every feature a release could turn on. In `crates/`,
@@ -171,66 +202,99 @@ listed as "no Rust".
    (from `cargo metadata --no-deps`) except `paddock-secrets/keyring`. No other crate in `crates/` enables that feature
    on `origin/main`.
 
-   When the fetch fails, the probe never passes: on a branch it reports `not measured`, and on the release path (a tag
-   or a `<app>-release.yml` run) it reports `check broken` and the release stops (ER-33).
+   When the fetch fails, the probe never passes. On a branch it reports `not measured`, which fails the pull-request
+   gate like any other finding. On the release path (a tag or a `<app>-release.yml` run) it reports `check broken` and
+   the release stops (ER-33).
 
-   Cost per run: one `cargo fetch` and one `cargo tree` per workspace and target. That is 9 workspaces (`crates/`,
-   `tools/paddock-dev`, the five apps and both demos) times 2 targets, so 18 of each when every workspace is affected,
-   and 2 of each for a one-app change. Neither command compiles anything, and `cargo fetch` downloads nothing when the
-   runner's cargo cache already holds the lockfile's crates. The time was not measured. WP-2 measures it on the CI
-   runner and records it in `docs/benchmarks.md` (rule 48) before C99 gates a pull request.
-4. **Clippy.** Clippy reads the `clippy.toml` of each workspace (it searches from the manifest folder upwards), never
+   Cost per run: one `cargo fetch` and one `cargo tree` per workspace and target, so 16 of each when all 8 workspaces
+   are affected and 2 of each for a one-app change, plus the dependency scan of crate versions not yet in the cache.
+   Neither cargo command compiles anything, and `cargo fetch` downloads nothing when the runner's cargo cache already
+   holds the lockfile's crates. The time was not measured. WP-2 measures it on the CI runner and records it in
+   `docs/benchmarks.md` (rule 48) before C99 gates a pull request.
+5. **Clippy.** Clippy reads the `clippy.toml` of each workspace (it searches from the manifest folder upwards), never
    `lint/clippy.toml`, which is the preset each workspace copies. There are 7 copies today (`crates/`,
    `apps/{debrief,dyno,pitcrew,pitwall,spotter}/`, `tools/paddock-dev/`), and C13
-   (`conformance/src/checks/C13-rust-lints.mjs`) compares only their `disallowed-methods` with the preset. WP-2 does
-   five things:
-   - It adds the entries to the preset and to all 7 copies (8 files).
-   - It gives `apps/shell-demo/src-tauri` and `apps/workbench-demo/src-tauri` a `clippy.toml` (neither has one, and
-     shell-demo uses `KeyringSecrets` in `src/mcp.rs`).
-   - It extends C13 to compare `disallowed-types` too.
-   - It adds `disallowed-types` for `keyring::Entry`, `keyring_core::Entry`,
-     `security_framework::os::macos::keychain::SecKeychain`, `security_framework::item::ItemSearchOptions`,
-     `security_framework::item::ItemAddOptions` and `security_framework::passwords_options::PasswordOptions`.
-   - It adds `disallowed-methods` for every function of `security_framework::passwords` (in 3.7.0:
-     `get_generic_password`, `generic_password`, `set_generic_password`, `set_generic_password_options`,
-     `delete_generic_password`, `delete_generic_password_options`, `get_internet_password`, `set_internet_password`,
-     `delete_internet_password`), for `find_generic_password` and `find_internet_password` in
-     `security_framework::os::macos::passwords`, for `add_item` and `update_item` in `security_framework::item`, and for
-     `objc2_security`'s `SecItemAdd`, `SecItemCopyMatching`, `SecItemUpdate`, `SecItemDelete` and its 52 `SecKeychain*`
-     functions (0.3.2), which the list names one by one.
+   (`conformance/src/checks/C13-rust-lints.mjs`) compares only their `disallowed-methods` with the preset.
+   - **The entries.**
+     - `disallowed-types`: `keyring::Entry`, `keyring_core::Entry`,
+       `security_framework::os::macos::keychain::SecKeychain`,
+       `security_framework::item::ItemSearchOptions`, `security_framework::item::ItemAddOptions`,
+       `security_framework::item::Location` (its `FileKeychain` variant, `item.rs:1051`),
+       `security_framework::passwords_options::PasswordOptions`, `security_framework::import_export::Pkcs12ImportOptions`,
+       `security_framework::os::macos::import_export::ImportOptions`, and `objc2_security`'s `SecKeychain`,
+       `SecKeychainItem` and `SecKeychainSearch`, because most of the real API is their inherent methods.
+     - `disallowed-methods` in `security-framework` 3.7.0: every function of `passwords` (`get_generic_password`,
+       `generic_password`, `set_generic_password`, `set_generic_password_options`, `delete_generic_password`,
+       `delete_generic_password_options`, `get_internet_password`, `set_internet_password`, `delete_internet_password`),
+       `find_generic_password` and `find_internet_password` in `os::macos::passwords`, `add_item` and `update_item` in
+       `item`, `SecCertificate::add_to_keychain` (`certificate.rs:70`), the `delete` methods of `SecCertificate`
+       (`certificate.rs:187`), `SecKey` (`key.rs:318`) and `SecIdentity` (`identity.rs:65`), and
+       `GenerateKeyOptions::set_location` (`key.rs:393`).
+     - `disallowed-methods` in `objc2-security` 0.3.2: `SecItemAdd`, `SecItemCopyMatching`, `SecItemUpdate`,
+       `SecItemDelete`, `SecItemImport`, `SecPKCS12Import`, `SecCertificateAddToKeychain`, and its 55 public
+       `SecKeychain*` functions (including `SecKeychainCreate`, `SecKeychainUnlock` and
+       `SecKeychainSetUserInteractionAllowed`, declared `extern "C-unwind"`), named one by one.
 
-   Clippy takes exact paths, not `::*`, so the list names each item, with `allow-invalid = true` for workspaces that do
-   not link the crate. `paddock-secrets` gets one `#[allow]` with a reason, in `src/os/native.rs` only (it is compiled
-   only off macOS).
+     Clippy takes exact paths, not `::*`, so the list names each item, with `allow-invalid = true` for workspaces that
+     do not link the crate. `paddock-secrets` gets one `#[allow]` with a reason, in `src/os/native.rs` only (it is
+     compiled only off macOS).
+   - **Where they land.** WP-2 adds the entries to the preset and to the copies of `crates/`, `apps/dyno/` and
+     `tools/paddock-dev/`, which name none of them today. It gives `apps/shell-demo/src-tauri` and
+     `apps/workbench-demo/src-tauri` a `clippy.toml` with the entries (neither has one; shell-demo uses
+     `KeyringSecrets`, not `keyring::Entry`). It extends C13 to compare `disallowed-types` too. The other four apps
+     still name `keyring::Entry` on `origin/main`, and Clippy runs with `-D warnings` on their Linux legs
+     (`.gitea/workflows/debrief.yml:143`, `.gitea/actions/app-gates/action.yml:119`), so the ban would turn their CI
+     red at once. Their copies therefore get the entries in each app's own WP, in the same change that removes the
+     uses. Until then each has one C13 waiver with `delete-by: WP-n`:
+
+     | App | Uses of `keyring::Entry` on `origin/main` | Waiver removed by |
+     | --- | --- | --- |
+     | Debrief | `app/src-tauri/src/ai/pitwall.rs:29-30` | WP-5 |
+     | Pitcrew | `app/src-tauri/src/credentials.rs:16-17`, `channels.rs:63`, `:73`, `:82` | WP-6 |
+     | Pitwall | `app/src-tauri/src/credentials.rs:44-45`, `crates/pitwall-cli/src/discover.rs:163` | WP-4 |
+     | Spotter | `app/src-tauri/src/credentials.rs:36-37` | WP-3 |
+   - **macOS half.** Most of the banned API exists only on Apple targets, so these entries bite only where Clippy runs
+     for macOS. `app-gates` runs Clippy on its macOS leg. Debrief runs Clippy only on Linux (`debrief.yml:123`, `runs-on: ubuntu-latest`, and `:143`),
+     and the demos run only on Linux. WP-5 adds a macOS Clippy step to Debrief's workflow. For the demos, C99 reports
+     "Clippy on macOS: not measured", and their macOS half rests on the scans and the graph probe.
 
 Positive controls (ER-33, rule 71), all of which must fail or be found, or C99 reports `check broken`:
 
 - Fixture manifests flagged by the scan: `features = ["keyring"]` under `[dependencies]`, a `[dependencies.keyring]`
-  header table, a direct `security-framework` entry, and `objc2-security` with the `SecItem` feature.
+  header table, `keyring` under `[target.'cfg(windows)'.dependencies]` in an app (the one-door case), a direct
+  `security-framework` entry, and `objc2-security` with the `SecItem` feature.
 - Fixture files fed straight to the source scanner (they are not in a workspace and never compiled): a `.rs` file
-  with an `extern "C"` `SecItemCopyMatching` block, a `.rs` file that spawns `security find-generic-password`, a `.ts`
-  file that runs `security dump-keychain`, and a capability file whose shell scope allows `security`.
-- Real entries the scan must find: `crates/paddock-secrets/Cargo.toml`'s optional `keyring` dependency (found, then
-  exempt), and from WP-1 on, `apps/dyno/crates/dyno-platform/Cargo.toml`'s `cfg(not(target_os = "macos"))` table
+  with an `extern "C"` `SecItemCopyMatching` block, a `.m` file that calls `SecItemCopyMatching`, a `.rs` file that
+  spawns `security find-generic-password`, a `.ts` file that runs `security dump-keychain`, and a capability file whose
+  shell scope allows `security`.
+- The Paddock source scan must read as many files as `git ls-files` lists for its globs, and more than zero.
+- The dependency scan must find `SecKeychainSetUserInteractionAllowed` in `security-framework`'s
+  `src/os/macos/keychain.rs` (found, then allowed), which proves it reads real fetched sources.
+- Real entries the manifest scan must find: `crates/paddock-secrets/Cargo.toml`'s optional `keyring` dependency (found,
+  then exempt), and from WP-1 on, `apps/dyno/crates/dyno-platform/Cargo.toml`'s `cfg(not(target_os = "macos"))` table
   (found, then allowed).
-- In the graph probe, `x86_64-pc-windows-msvc` must show `keyring` in at least one workspace, and `paddock-secrets`,
-  `security-framework` (below `rustls-native-certs`) and `objc2-security` (below `objc2-service-management`) must be
-  found for the macOS targets, which proves the probe reads the graph.
+- In the graph probe, every workspace whose manifests enable `paddock-secrets/keyring` for Windows must show `keyring`
+  in its `x86_64-pc-windows-msvc` graph. For the macOS targets, `paddock-secrets`, `security-framework` (below
+  `rustls-native-certs`) and `objc2-security` with its `Authorization` feature (below `objc2-service-management`) must
+  be found wherever their lockfile lists them. That proves the probe reads the graph and its features.
 - A fixture crate that calls `get_generic_password` and `objc2_security::SecItemCopyMatching` and names
   `keyring::Entry` must fail `cargo clippy -- -D warnings`. It runs once with the family's `clippy.toml` and once with
   a copy that has no `allow-invalid`, in which Clippy reports every path that does not resolve. That second run proves
-  each path is real, including `keyring::Entry`, which `keyring` 4.2 only re-exports (`pub use v1::*`). The
-  `security_framework` and `objc2_security` half runs on the macOS runner, because `security-framework` is empty off
-  Apple targets (`#![cfg(target_vendor = "apple")]`) and a call into `objc2-security` links the Security framework,
-  which exists only on Apple systems.
+  each path is real, including `keyring::Entry`, which `keyring` 4.2 only re-exports (`pub use cli::*` at
+  `src/lib.rs:38` under the `cli` feature, `pub use v1::*` at `:43`). The `security_framework` and `objc2_security`
+  half runs on the macOS runner, because `security-framework` is empty off Apple targets
+  (`#![cfg(target_vendor = "apple")]`) and a call into `objc2-security` links the Security framework, which exists only
+  on Apple systems.
 
 **Waivers.** The check starts with 11 waivers on `origin/main` today. Six cover the manifests that name `keyring`
 (listed in Evidence), and five cover the graph probe hits in the same workspaces, one per lockfile:
 `apps/debrief/Cargo.lock`, `apps/pitcrew/Cargo.lock`, `apps/pitwall/Cargo.lock` (one for both Pitwall manifests),
 `apps/spotter/Cargo.lock` and `apps/shell-demo/src-tauri/Cargo.lock`. No source file there names the Keychain API or a
-`security` subcommand, and no manifest but the exempt workspace hack names `security-framework`. The waiver list is the
-to-do list and empties with work packages WP-3 to WP-7, an app's two kinds of waiver together. Dyno's own test stays
-until C99 lands, then is deleted with the app's copy of the scan (rule 43).
+`security` subcommand, and no manifest but the exempt workspace hack names `security-framework`. The count assumes that
+Dyno reaches `main` with WP-1's fix. If `steward/dyno-1.1.0` lands first without it, Dyno adds 3 waivers (its two
+manifests and its lockfile). The waiver list is the to-do list and empties with work packages WP-3 to WP-7, an app's
+waivers of all kinds together. Dyno's own test stays until C99 lands, then is deleted with the app's copy of the scan
+(rule 43).
 
 ### 4. Per app (read in code on `origin/main`, Dyno on `origin/steward/dyno-1.1.0`)
 
@@ -243,7 +307,10 @@ until C99 lands, then is deleted with the app's copy of the scan (rule 43).
 | Pitcrew | Gitea tokens, registration tokens, webhook, ntfy and mail secrets (`credentials.rs`, `channels.rs`), to `FileSecrets` with backup exclusion; `has_secret` and `has_api_token` use `contains` | Re-enter each token once, from one "Re-enter after the update" notice the user opens. Never asked from a notification or the tray | 1.1 |
 | shell-demo | `mcp.rs` follows the shared default | Nothing (demo data) | After the Dyno tag |
 
-Released builds that wrote Keychain items: Debrief 1.1.1, Pitcrew 1.0.1, Pitwall 1.0.3 (research note, "Per app").
+Every released build of three apps links `keyring` on macOS: Debrief 1.0.0 to 1.1.1, Pitcrew 1.0.0 and 1.0.1, and
+Pitwall 1.0.0 to 1.0.3 (each tag's `apps/<app>/app/src-tauri/Cargo.toml`, read 2026-11-06). The research note's
+"Per app" section names only the latest of each. Which items the builds before Debrief 1.1.1 wrote, under which
+names, was not checked; the delete commands below use the names on `origin/main`.
 There is no compatibility shim beyond the one-time re-entry above (memory note "no backward compatibility before v1").
 Debrief's old Pitwall key keeps working after the update, because a Pitwall key stays valid until it is revoked
 (`pitwall-server/src/auth.rs:215`, "the old ones keep working until revoked"). Re-pairing an app that already exists
@@ -315,11 +382,13 @@ the accessibility tree.
 
 ## Consequences
 
-- No Paddock app on macOS can hang on a Keychain dialog, because the adapter is not compiled in. C99 keeps it so by
-  checking Paddock manifests for the Keychain crates (`keyring`, `keyring-core`, `apple-native-keyring-store`,
-  `security-framework`, `security-framework-sys`, `objc2-security`), source files for the `SecItem`/`SecKeychain`
-  calls and the `security` Keychain subcommands, the macOS dependency graph against an allow-list of today's users,
-  and the Keychain types and functions through Clippy.
+- No shipped Paddock process on macOS calls the Keychain, because the adapter is not compiled in. C99 keeps it so with
+  five layers: Paddock manifests (the Keychain crates and the one door), Paddock source (the `SecItem`/`SecKeychain`
+  symbols and the `security` keychain subcommands), the sources of every dependency in the macOS graphs (the same
+  symbols, three crates allowed), the macOS dependency graph and its features against an allow-list of today's users,
+  and Clippy over the Keychain types and functions. What it cannot see: a prebuilt binary inside a dependency (listed
+  as "binary, not scanned"), code a build script downloads at build time, and Clippy's macOS half for Debrief until
+  WP-5 and for the demos.
 - Secrets on macOS are as safe as `~/.netrc` (section 5): plain text owner-only files, readable by same-user code.
   Time Machine excludes them, while other clones, a synced or network home folder may still copy them or lose the file
   mode (Pitcrew ADR 0022 warns of this).
@@ -334,17 +403,18 @@ the accessibility tree.
 | WP | What | Days | Lands in |
 | --- | --- | --- | --- |
 | WP-1 | Dyno: finish and land `fix/dyno-mcp-keys-file` (review, installer build under rule 54) | 0.5 | Dyno 1.1.0 |
-| WP-2 | Shared: `for_app` default, `contains`; backup exclusion on the `FileSecrets` folder with the rewrite test, new for secrets, with Dyno's `exclude_from_backup` moved to shared code (0.75). C99: manifest scan with header lines and `objc2-security`; source scan over `.rs`, `.ts`, `.mjs`, `.sh` and capability files; graph probe with `cargo fetch`, the allow-lists, the feature check and the `crates/` feature set; the workspace list and its exclusions; positive controls and the 11 waivers (1.5 to 1.75). Clippy: entries in the preset and its 7 copies (75 paths with the `SecKeychain*` list), a `clippy.toml` for both demos, C13 extended to `disallowed-types`, the lint fixture with its run without `allow-invalid` on Linux and macOS (0.75 to 1). CI time of the probe measured and recorded (rule 48); rule 72 text; Dyno's test removed; the test fixtures that use the id `C99` (`conformance/test/core.test.mjs:90`, `waivers-unused.test.mjs:12`) get another id (0.5) | 3.5 to 4 | after the Dyno tag (no shared changes before it) |
-| WP-3 | Spotter: `FileSecrets` on macOS, `contains` for status, VM row | 0.5 to 1 | Spotter 1.0 |
-| WP-4 | Pitwall and CLI: remove `OsKeyStore` and `os_store`; the re-pair flag and the revoke rule (section 4) with tests; release note gives the delete command for the old item | 0.75 | Pitwall 1.1 |
-| WP-5 | Debrief: `FileSecrets`, re-pair with the re-pair flag, probe on `contains`; release note gives the delete command and, until Pitwall 1.1, says to revoke the old key; amend ADR 0059 | 0.75 | Debrief 1.2 |
-| WP-6 | Pitcrew: `FileSecrets` with exclusion, re-enter notice, release note gives the delete commands for the old items | 1 | Pitcrew 1.1 |
+| WP-2 | Shared: `for_app` default, `contains`; backup exclusion on the `FileSecrets` folder with the rewrite test, new for secrets, with Dyno's `exclude_from_backup` moved to shared code; the diagnostic bundle excludes the secrets folder, with its test (1). C99: manifest scan with header lines, the one door and `objc2-security`; Paddock source scan; dependency source scan with its cache and binary list; graph probe with `cargo fetch`, the allow-lists, the feature check and the `crates/` feature set; the workspace list and its exclusions; positive controls and the 11 waivers (2 to 2.25). Clippy: entries in the preset and the copies of `crates/`, Dyno and `tools/paddock-dev` (92 paths), a `clippy.toml` for both demos, C13 extended to `disallowed-types`, the 4 C13 waivers with `delete-by`, the lint fixture with its run without `allow-invalid` on Linux and macOS (1 to 1.25). CI time of the probe and the dependency scan measured and recorded (rule 48); rule 72 text; Dyno's test removed; the test fixtures that use the id `C99` (`conformance/test/core.test.mjs:90`, `waivers-unused.test.mjs:12`) get another id (0.5) | 4.5 to 5 | after the Dyno tag (no shared changes before it) |
+| WP-3 | Spotter: `FileSecrets` on macOS, `contains` for status, VM row; Clippy entries in Spotter's `clippy.toml`, its C13 and C99 waivers removed | 0.75 to 1.25 | Spotter 1.0 |
+| WP-4 | Pitwall and CLI: remove `OsKeyStore` and `os_store`; the re-pair flag and the revoke rule (section 4) with tests; Clippy entries in Pitwall's `clippy.toml`, its waivers removed; release note gives the delete command for the old item | 1 | Pitwall 1.1 |
+| WP-5 | Debrief: `FileSecrets`, re-pair with the re-pair flag, probe on `contains`; Clippy entries in Debrief's `clippy.toml` and a macOS Clippy step in `debrief.yml`, its waivers removed; release note gives the delete command and, until Pitwall 1.1, says to revoke the old key; amend ADR 0059 | 1.25 | Debrief 1.2 |
+| WP-6 | Pitcrew: `FileSecrets` with exclusion, re-enter notice; Clippy entries in Pitcrew's `clippy.toml`, its waivers removed; release note gives the delete commands for the old items | 1.25 | Pitcrew 1.1 |
 | WP-7 | shell-demo follows the default | 0.25 | after the Dyno tag |
 | WP-8 | VM release row (`scripts/vm-smoke`, ER-33 shaped) | 1 | before the next app tag after WP-2 |
-| WP-9 (if D2 = b) | An amendment of this ADR first: rule 72 then allows a Keychain backend with interaction off, typed `NeedsPermission` and `ask()` only from a user action, and C99 then allows the `keyring` feature on macOS for `paddock-secrets` only (rule and check change in one commit). Then no-UI reads plus the "Allow access" action, health row and VM row, per app with UI | 2 per app, plus 0.5 for the amendment | Spotter, Pitcrew |
+| WP-9 (if D2 = b, or D3 keeps the Keychain) | An amendment of this ADR first: rule 72 then allows a Keychain backend with interaction off, typed `NeedsPermission` and `ask()` only from a user action. C99 then allows the `keyring` feature on macOS for `paddock-secrets` only, and `paddock-secrets` as a direct user of `security-framework`, for `SecKeychainSetUserInteractionAllowed` (which `security-framework` wraps in `os/macos/keychain.rs:99` and `:248`). Rule and check change in one commit. Then no-UI reads plus the "Allow access" action, health row and VM row, per app with UI | 2 per app, plus 0.5 for the amendment | Spotter, Pitcrew, and Debrief if D3 keeps the Keychain |
 | WP-10 (if D5 = yes) | Test a free Apple Development certificate for a `teamid:` partition | 0.5 | anytime |
 
-Total 8.25 to 9.25 days for WP-1 to WP-8; option (b) adds about 4.5 days (Spotter, Pitcrew and the amendment). Spotter 1.0 is before
+Total 10.5 to 11.5 days for WP-1 to WP-8. Option (b) adds at most 4.5 days (Spotter, Pitcrew and the amendment). It
+replaces part of WP-3 and WP-6 (the move of real tokens to `FileSecrets`), so the net is lower; it was not estimated. Spotter 1.0 is before
 WP-2, so WP-3 does Spotter's change through Spotter's own `Secrets` port and adopts `for_app` with WP-2.
 
 ## Decisions for the user
@@ -353,8 +423,8 @@ WP-2, so WP-3 does Spotter's change through Spotter's own `Secrets` port and ado
   key meet a no-window dialog on the first update.
 - **D2.** Real tokens (Spotter, Pitcrew) on macOS: (a) owner-only file (recommended), or (b) Keychain with no-UI reads
   and an "Allow access" action (about 2 days per app). Choosing (b) amends rule 72 and C99 together (WP-9).
-- **D3.** Debrief: amend ADR 0059 to allow the file. Otherwise the key stays in the Keychain and the 15 s probe must
-  become no-UI.
+- **D3.** Debrief: amend ADR 0059 to allow the file (recommended). Otherwise the key stays in the Keychain, the 15 s
+  probe must become no-UI, and rule 72 and C99 are amended together first (WP-9).
 - **D4.** Accept this ADR's mechanism (one door, one platform default, C99) and rule 72's text.
 - **D5.** Spend half a day testing a free Apple Development certificate? It is the one free route that could give a
   `teamid:` partition. It needs the user's Apple ID on the test VM (or a certificate exported from it) and a check of
@@ -373,4 +443,6 @@ WP-2, so WP-3 does Spotter's change through Spotter's own `Secrets` port and ado
 - The Clippy paths are from the sources of `security-framework` 3.7.0 and `objc2-security` 0.3.2 (read 2026-11-06). A
   later version can rename them, which the lint fixture's run without `allow-invalid` catches.
 - The allow-lists of the graph probe are today's direct users in the lockfiles on `origin/main` (read 2026-11-06).
-- The CI time of `cargo fetch` and `cargo tree` per run is not measured yet (WP-2).
+- The CI time of `cargo fetch`, `cargo tree` and the dependency scan per run is not measured yet (WP-2).
+- The dependency scan's result (only three crates match, over 991 of 1,117 crate versions) is the third review's
+  measurement and was not re-run for this text.
