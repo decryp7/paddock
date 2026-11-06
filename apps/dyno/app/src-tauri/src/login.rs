@@ -145,14 +145,15 @@ impl Drop for Clear {
 }
 
 impl SwitchWorker {
-    /// Runs `work` on a worker thread and returns at once. `report` is told `Running`, then `Done` or `Failed` with the
-    /// message `work` returned.
+    /// Runs `work` on a worker thread and returns at once. The worker calls `register` for the change's job (the
+    /// Jobs view's Cancel stops `work` at its next step, as [`cancel`](Self::cancel) does) and the job ends `Done`,
+    /// `Failed` with the message `work` returned, or `Cancelled`.
     ///
     /// # Errors
     /// A message when the previous change has not finished, or no worker could be started.
     pub fn start(
         &self,
-        report: std::sync::Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync>,
+        register: impl FnOnce() -> paddock_jobs::JobContext + Send + 'static,
         work: impl FnOnce(&std::sync::atomic::AtomicBool) -> Result<(), String> + Send + 'static,
     ) -> Result<(), String> {
         if self.busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -164,23 +165,24 @@ impl SwitchWorker {
         let clear = Clear(self.busy.clone());
         let spawned = std::thread::Builder::new().name("dyno-login-switch".into()).spawn(move || {
             let _clear = clear;
-            report(paddock_jobs::JobState::Running {
-                phase: Some(paddock_jobs::PhaseProgress {
-                    phase: paddock_jobs::Phase::discovering("service", "Setting up the background service"),
-                    done: 0,
-                }),
+            let job = register();
+            let flag = cancel.clone();
+            // Cancel in the Jobs view reaches the work the way a quit does: the flag and the service's own stop.
+            let _on_cancel = job.cancel_token().on_cancel(move || {
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                cancel_service_work_for_switch();
             });
-            let result = work(&cancel);
-            // A cancel that came during the work ends the job as cancelled, whatever the work made of it (the record says what
-            // was registered; the next start puts the rest right).
-            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
-                report(paddock_jobs::JobState::Cancelled { reason: paddock_jobs::CancelReason::User });
-            } else {
-                match result {
-                    Ok(()) => report(paddock_jobs::JobState::Done),
-                    Err(message) => report(paddock_jobs::JobState::Failed { message }),
+            let _ = job.run(|ctx| {
+                ctx.phase(paddock_jobs::Phase::discovering("service", "Setting up the background service"));
+                ctx.check()?;
+                let result = work(&cancel);
+                // A cancel that came during the work ends the job as cancelled, whatever the work made of it (the
+                // record says what was registered; the next start puts the rest right).
+                if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Err(paddock_jobs::JobError::Cancelled(paddock_jobs::CancelReason::User));
                 }
-            }
+                result.map_err(paddock_jobs::JobError::Failed)
+            });
         });
         spawned.map(drop).map_err(|e| {
             self.busy.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -918,34 +920,87 @@ impl Autostart for NoAutostart {
 
 #[cfg(test)]
 mod tests {
+    /// The app's job registry with a sink that keeps every snapshot, as the Jobs view would see them.
+    fn jobs_rig() -> (Arc<paddock_jobs::JobRegistry>, std::sync::mpsc::Receiver<paddock_jobs::JobSnapshot>) {
+        struct Sink(Mutex<std::sync::mpsc::Sender<paddock_jobs::JobSnapshot>>);
+        impl paddock_jobs::EventSink for Sink {
+            fn emit(&self, snapshot: &paddock_jobs::JobSnapshot) {
+                let _ = self.0.lock().unwrap().send(snapshot.clone());
+            }
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let registry = paddock_jobs::JobRegistry::with_clock(Arc::new(Sink(Mutex::new(tx))), Arc::new(paddock_jobs::SystemClock), 0);
+        (Arc::new(registry), rx)
+    }
+
+    /// Waits for the first snapshot in `state`'s kind of state, as the window would.
+    fn next_state(
+        rx: &std::sync::mpsc::Receiver<paddock_jobs::JobSnapshot>,
+        want: impl Fn(&paddock_jobs::JobState) -> bool,
+    ) -> paddock_jobs::JobSnapshot {
+        loop {
+            let s = rx.recv_timeout(std::time::Duration::from_secs(5)).expect("the job did not reach the state");
+            if want(&s.state) {
+                return s;
+            }
+        }
+    }
+
+    fn register_switch(registry: &Arc<paddock_jobs::JobRegistry>) -> impl FnOnce() -> paddock_jobs::JobContext + Send + 'static {
+        let registry = registry.clone();
+        move || registry.register("start-at-login", "Start Dyno at login", None)
+    }
+
     #[test]
-    fn a_cancel_stops_the_switch_change_and_it_ends_as_a_cancelled_job() {
+    fn a_cancel_from_the_jobs_view_stops_the_switch_change_and_it_ends_as_a_cancelled_job() {
         use paddock_jobs::{CancelReason, JobState};
-        use std::sync::{mpsc, Arc, Mutex};
-        let worker = Arc::new(SwitchWorker::default());
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let (reported, wake) = mpsc::channel::<()>();
-        let report: Arc<dyn Fn(JobState) + Send + Sync> = {
-            let seen = seen.clone();
-            Arc::new(move |s| {
-                seen.lock().unwrap().push(s);
-                reported.send(()).unwrap();
-            })
-        };
+        let (registry, rx) = jobs_rig();
+        let worker = SwitchWorker::default();
+        let (began, wake) = std::sync::mpsc::channel::<()>();
         // The work waits for its cancel (as a registration waits for the service) and gives up when it comes.
         worker
-            .start(report, |cancel| {
-                let began = std::time::Instant::now();
-                while !cancel.load(std::sync::atomic::Ordering::SeqCst) && began.elapsed() < std::time::Duration::from_secs(5) {
+            .start(register_switch(&registry), move |cancel| {
+                began.send(()).unwrap();
+                let started = std::time::Instant::now();
+                while !cancel.load(std::sync::atomic::Ordering::SeqCst) && started.elapsed() < std::time::Duration::from_secs(5) {
                     std::thread::sleep(std::time::Duration::from_millis(10));
                 }
                 Ok(())
             })
             .unwrap();
-        wake.recv().unwrap();
+        wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        let running = next_state(&rx, |s| matches!(s, JobState::Running { .. }));
+        assert!(running.cancellable, "the Jobs view offers Cancel on the switch job");
+        // What the Jobs view's Cancel button does (`job_cancel`).
+        assert!(registry.cancel(running.id));
+        let end = next_state(&rx, JobState::is_terminal);
+        assert_eq!(end.state, JobState::Cancelled { reason: CancelReason::User });
+        assert_eq!(end.id, running.id);
+        while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn a_cancel_that_quit_asks_for_ends_the_switch_as_a_cancelled_job() {
+        use paddock_jobs::{CancelReason, JobState};
+        let (registry, rx) = jobs_rig();
+        let worker = SwitchWorker::default();
+        let (began, wake) = std::sync::mpsc::channel::<()>();
+        worker
+            .start(register_switch(&registry), move |cancel| {
+                began.send(()).unwrap();
+                let started = std::time::Instant::now();
+                while !cancel.load(std::sync::atomic::Ordering::SeqCst) && started.elapsed() < std::time::Duration::from_secs(5) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Ok(())
+            })
+            .unwrap();
+        wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         worker.cancel();
-        wake.recv().unwrap();
-        assert_eq!(seen.lock().unwrap()[1], JobState::Cancelled { reason: CancelReason::User });
+        let end = next_state(&rx, JobState::is_terminal);
+        assert_eq!(end.state, JobState::Cancelled { reason: CancelReason::User });
     }
 
     #[test]
@@ -968,38 +1023,27 @@ mod tests {
     #[test]
     fn the_switch_returns_at_once_while_the_os_step_is_blocked_and_reports_as_a_job() {
         use paddock_jobs::JobState;
-        use std::sync::{mpsc, Arc, Mutex};
+        let (registry, rx) = jobs_rig();
         let worker = SwitchWorker::default();
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let (release, blocked) = mpsc::channel::<()>();
-        let (reported, wake) = mpsc::channel::<()>();
-        let report: Arc<dyn Fn(JobState) + Send + Sync> = {
-            let seen = seen.clone();
-            Arc::new(move |s| {
-                seen.lock().unwrap().push(s);
-                reported.send(()).unwrap();
-            })
-        };
+        let (release, blocked) = std::sync::mpsc::channel::<()>();
         let began = std::time::Instant::now();
         // The OS step (a registration waiting for a lock) blocks until the test lets it go.
         worker
-            .start(report.clone(), move |_| blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
+            .start(register_switch(&registry), move |_| blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
             .unwrap();
         assert!(began.elapsed() < std::time::Duration::from_secs(2), "the save did not wait for the OS step");
-        wake.recv().unwrap();
-        assert!(matches!(seen.lock().unwrap()[0], JobState::Running { .. }), "running is reported while blocked");
-        assert!(worker.start(report.clone(), |_| Ok(())).is_err(), "a second change waits for the first");
+        next_state(&rx, |s| matches!(s, JobState::Running { .. }));
+        assert!(worker.start(register_switch(&registry), |_| Ok(())).is_err(), "a second change waits for the first");
+        assert_eq!(registry.snapshots().len(), 1, "a refused change registers no job");
         release.send(()).unwrap();
-        wake.recv().unwrap();
-        assert_eq!(seen.lock().unwrap()[1], JobState::Done);
+        assert_eq!(next_state(&rx, JobState::is_terminal).state, JobState::Done);
         // Free again; a failure carries its message.
         while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::yield_now();
         }
-        worker.start(report, |_| Err("needs approval".into())).unwrap();
-        wake.recv().unwrap();
-        wake.recv().unwrap();
-        assert_eq!(seen.lock().unwrap()[3], JobState::Failed { message: "needs approval".into() });
+        worker.start(register_switch(&registry), |_| Err("needs approval".into())).unwrap();
+        let failed = next_state(&rx, |s| matches!(s, JobState::Failed { .. }));
+        assert_eq!(failed.state, JobState::Failed { message: "needs approval".into() });
     }
 
     #[test]

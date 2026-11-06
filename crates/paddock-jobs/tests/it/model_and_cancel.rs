@@ -217,3 +217,11 @@ fn reporter_new_uses_the_system_clock() {
     );
     assert_eq!(r.snapshot().state, JobState::Queued);
 }
+
+#[test]
+fn ids_start_where_the_app_says() {
+    let reg = JobRegistry::new(std::sync::Arc::new(NullSink));
+    reg.start_ids_at(1000);
+    assert_eq!(reg.register("x", "X", None).id(), JobId(1000));
+    assert_eq!(reg.register("x", "X", None).id(), JobId(1001));
+}

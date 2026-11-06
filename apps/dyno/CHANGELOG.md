@@ -6,6 +6,7 @@ Dyno 1.1.0 adds optional administrator readings, saved views, a benchmark tool, 
 
 ### Added
 
+- Changing Start at login shows Cancel in the Jobs view while it works. Cancel stops the change at its next step and the job ends as cancelled; the next start puts any rest right.
 - Windows: Dyno installs once for every user of the PC, in Program Files, and updates from the app with one Windows permission prompt (a standard user types an administrator's name and password). "Install when the app quits" is not offered on Windows. If you decline the prompt or the installer stops, Dyno starts again and says so, with Install again. While another user's update installs, Dyno says "An update is being installed". After an update, the administrator helper is refreshed to the new version if it is on; if that cannot be done, Settings offers "Update the helper".
 - Windows: the status bar lists "the installer program" when the update helper in Dyno's folder is not the version of this Dyno (the installer could not replace it while it was in use); running the Dyno installer again clears it.
 - The log tells how the last run ended: a run that was killed or crashed is said at the next start (app, agent and helper), a watchdog pause and every external tool that failed are logged, update checks and downloads say what they found, and failures are warnings rather than plain lines.
