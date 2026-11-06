@@ -28,12 +28,24 @@ impl OpCancel {
     }
 }
 
+/// Tells the waiter that the operation ended, however it ended.
+struct Done(std::sync::mpsc::Sender<()>);
+
+impl Drop for Done {
+    fn drop(&mut self) {
+        self.0.send(()).ok();
+    }
+}
+
 /// The running service operations and whether the app is quitting. Held as app state.
 #[derive(Default)]
 pub struct ServiceOps {
     quitting: AtomicBool,
     running: Mutex<Vec<Weak<AtomicBool>>>,
-    repair_done: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// The ends of the operations Quit waits for (the start repair, the resume at start).
+    repair_done: Mutex<Vec<std::sync::mpsc::Receiver<()>>>,
+    /// Whether the first-run registration was tried in this app (an attempt is not repeated in the same run).
+    first_run: crate::login::FirstRunAttempt,
 }
 
 impl ServiceOps {
@@ -57,19 +69,40 @@ impl ServiceOps {
         Some(token)
     }
 
-    /// Registers the end of the start repair: the returned sender is used by its thread when it finishes, so Quit
-    /// can wait for it (it never leaves a repair writing the record beside the stop marker).
+    /// Registers the end of an operation Quit must wait for (the start repair, the resume at start): the returned sender is used by
+    /// its thread when it finishes, so Quit can wait for it (it never leaves one writing the record beside the stop marker). Every
+    /// registered operation is waited for, not only the last.
     pub fn track_repair(&self) -> std::sync::mpsc::Sender<()> {
         let (tx, rx) = std::sync::mpsc::channel();
-        *self.repair_done.lock().unwrap_or_else(|p| p.into_inner()) = Some(rx);
+        self.repair_done.lock().unwrap_or_else(|p| p.into_inner()).push(rx);
         tx
     }
 
-    /// Waits up to `bound` for the start repair to end (after [`quit`](Self::quit)); `true` when it ended or never
-    /// ran.
+    /// Waits up to `bound` in all for the tracked operations to end (after [`quit`](Self::quit)); `true` when they all ended or
+    /// none ran.
     pub fn join_repair(&self, bound: std::time::Duration) -> bool {
-        let rx = self.repair_done.lock().unwrap_or_else(|p| p.into_inner()).take();
-        rx.is_none_or(|rx| !matches!(rx.recv_timeout(bound), Err(std::sync::mpsc::RecvTimeoutError::Timeout)))
+        let all = std::mem::take(&mut *self.repair_done.lock().unwrap_or_else(|p| p.into_inner()));
+        let deadline = std::time::Instant::now() + bound;
+        all.into_iter().all(|rx| {
+            let left = deadline.saturating_duration_since(std::time::Instant::now());
+            !matches!(rx.recv_timeout(left), Err(std::sync::mpsc::RecvTimeoutError::Timeout))
+        })
+    }
+
+    /// Runs `work` as an operation of its own that Quit cancels and joins: `None` (and `work` does not run) once the app is
+    /// quitting, so a resume that comes after "Quit and stop measuring" cannot register the service again.
+    pub fn run_tracked<T>(&self, work: impl FnOnce(OpCancel) -> T) -> Option<T> {
+        // Tracked first: a Quit between the two still finds the operation to wait for.
+        let done = Done(self.track_repair());
+        let cancel = self.begin()?;
+        let out = work(cancel);
+        drop(done);
+        Some(out)
+    }
+
+    /// This app's first-run attempt.
+    pub fn first_run_attempt(&self) -> &crate::login::FirstRunAttempt {
+        &self.first_run
     }
 
     /// Quit: refuses new operations and asks the running ones to stop at their next step.
@@ -123,6 +156,85 @@ mod tests {
         assert!(ops.begin().is_none(), "nothing starts after Quit");
     }
 
+
+    #[test]
+    fn a_tracked_operation_is_joined_by_quit_and_none_starts_after_it() {
+        let ops = std::sync::Arc::new(ServiceOps::default());
+        let ended = std::sync::Arc::new(AtomicBool::new(false));
+        let (began, wake) = std::sync::mpsc::channel::<()>();
+        let (finish, wait) = std::sync::mpsc::channel::<()>();
+        let (worker, flag) = (ops.clone(), ended.clone());
+        let op = std::thread::spawn(move || {
+            worker.run_tracked(move |cancel| {
+                began.send(()).unwrap();
+                wait.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+                flag.store(true, Ordering::SeqCst);
+                cancel.is_cancelled()
+            })
+        });
+        wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        ops.quit();
+        let joiner = ops.clone();
+        let join = std::thread::spawn(move || joiner.join_repair(std::time::Duration::from_secs(5)));
+        finish.send(()).unwrap();
+        assert!(join.join().unwrap(), "quit's join gave up on a running operation");
+        assert!(ended.load(Ordering::SeqCst), "quit's join returned before the operation ended");
+        assert_eq!(op.join().unwrap(), Some(true), "the running operation saw Quit's cancel");
+        let mut ran = false;
+        assert_eq!(ops.run_tracked(|_| ran = true), None, "nothing starts after Quit, so nothing registers again");
+        assert!(!ran);
+    }
+
+    #[test]
+    fn quit_waits_for_every_tracked_operation_not_only_the_last() {
+        let ops = ServiceOps::default();
+        let first = ops.track_repair();
+        let second = ops.track_repair();
+        second.send(()).unwrap();
+        first.send(()).unwrap();
+        assert!(ops.join_repair(std::time::Duration::from_secs(5)));
+        let _running = ops.track_repair();
+        let finished = ops.track_repair();
+        finished.send(()).unwrap();
+        assert!(!ops.join_repair(std::time::Duration::from_millis(50)), "the first of two is still running");
+    }
+
+    /// The names of the process-wide items in `text`: any `static` item or `thread_local!` (a flag, an atomic, a `OnceLock`, a counter
+    /// or a cell), whatever type it is wrapped in. `allowed` names the ones that are the process's by nature.
+    fn process_wide_items(text: &str, allowed: &[&str]) -> Vec<(usize, String)> {
+        let mut found = Vec::new();
+        for (n, line) in text.lines().enumerate() {
+            let code = line.split("//").next().unwrap_or("").trim();
+            let code = code.strip_prefix("pub(crate) ").or_else(|| code.strip_prefix("pub ")).unwrap_or(code);
+            let code = code.strip_prefix("static mut ").or_else(|| code.strip_prefix("static "));
+            if let Some(rest) = code {
+                let name = rest.split([':', ' ']).next().unwrap_or("").to_string();
+                if !allowed.contains(&name.as_str()) {
+                    found.push((n + 1, name));
+                }
+            } else if line.trim_start().starts_with("thread_local!") {
+                found.push((n + 1, "thread_local".to_string()));
+            }
+        }
+        found
+    }
+
+    /// The probe has to see the shapes that made this bug: the earlier scan matched `static` and `AtomicBool` on one line only, so a
+    /// flag in a wrapper type (`FirstRunAttempt`), a `OnceLock` or a split declaration passed.
+    #[test]
+    fn the_scan_for_process_wide_flags_sees_every_shape_of_one() {
+        let seen = |text: &str| process_wide_items(text, &[]).len();
+        assert_eq!(seen("pub static FIRST_RUN_ATTEMPT: FirstRunAttempt = FirstRunAttempt::new();"), 1, "the wrapped flag");
+        assert_eq!(seen("static CANCEL: AtomicBool = AtomicBool::new(false);"), 1);
+        assert_eq!(seen("static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();"), 1);
+        assert_eq!(seen("pub(crate) static COUNT: AtomicUsize ="), 1, "a declaration split over lines");
+        assert_eq!(seen("static mut N: u32 = 0;"), 1);
+        assert_eq!(seen("thread_local! { static T: Cell<bool> = Cell::new(false); }"), 1);
+        assert_eq!(seen("fn f(x: &'static str) -> &'static str { x } // static A: AtomicBool"), 0, "'static and comments are not items");
+        assert_eq!(seen("const A: AtomicBool = AtomicBool::new(false);"), 0);
+        assert_eq!(process_wide_items("static OK: u8 = 0;", &["OK"]), []);
+    }
+
     /// ER-21: a process-wide cancel or quit flag made this class of bug (one test's or one operation's cancel
     /// reaching another); the sources that decide a service operation hold none.
     #[test]
@@ -141,18 +253,18 @@ mod tests {
                 }
             }
         }
-        let (stat, atomic) = (["sta", "tic "].concat(), ["Atomic", "Bool"].concat());
+        // `STOP_BEGUN` is Quit's once-per-process claim and `FIRST_RUN_MARKER_PATH` the one folder the first run's marker is in: neither
+        // is the cancel of an operation.
+        let allowed = ["STOP_BEGUN", "FIRST_RUN_MARKER_PATH"];
         for file in files {
             let text = std::fs::read_to_string(&file).unwrap();
-            for (n, line) in text.lines().enumerate() {
-                let code = line.split("//").next().unwrap_or("");
-                assert!(
-                    !(code.contains(&stat) && code.contains(&atomic)),
-                    "{}:{}: a process-wide flag; give the operation its own `OpCancel` (ADR 0056)",
-                    file.display(),
-                    n + 1
-                );
-            }
+            let tests_at = text.find("#[cfg(test)]").unwrap_or(text.len());
+            let found = process_wide_items(&text[..tests_at], &allowed);
+            assert!(
+                found.is_empty(),
+                "{}: {found:?} is process-wide state; give the operation its own `OpCancel` or put it in `ServiceOps` (ADR 0056)",
+                file.display()
+            );
         }
     }
 }
