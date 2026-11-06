@@ -160,4 +160,34 @@ mod tests {
         let ctx = ImportCtx::new(Path::new("a/b.log"), &ts);
         assert_eq!(ctx.file_name, "b.log");
     }
+
+    struct Plain;
+    impl TextImporter for Plain {
+        fn id(&self) -> &str {
+            "plain"
+        }
+        fn sniff(&self, _: &ImportCtx, _: &str) -> u8 {
+            0
+        }
+        fn import(&self, _: &ImportCtx, _: &str) -> Result<Imported> {
+            Ok(Imported::default())
+        }
+    }
+    impl BinaryImporter for Plain {
+        fn id(&self) -> &str {
+            "plain"
+        }
+        fn sniff(&self, _: &ImportCtx, _: &[u8]) -> u8 {
+            0
+        }
+        fn import(&self, _: &ImportCtx, _: &[u8]) -> Result<Imported> {
+            Ok(Imported::default())
+        }
+    }
+
+    #[test]
+    fn importers_declare_no_extensions_unless_they_say_so() {
+        assert!(TextImporter::extensions(&Plain).is_empty());
+        assert!(BinaryImporter::extensions(&Plain).is_empty());
+    }
 }

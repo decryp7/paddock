@@ -761,3 +761,31 @@ impl Plugin for RemotePlugin {
         }))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_next_step_names_the_setting_and_the_maximum() {
+        let max_mb = debrief_plugin_api::manifest::MAX_MEMORY_LIMIT >> 20;
+        let below = cap_next_step(64);
+        assert!(
+            below.contains("Settings \u{25b8} Performance \u{25b8} Plugin memory cap (now 64 MB, up to"),
+            "{below}"
+        );
+        assert!(below.contains(&format!("up to {max_mb} MB")), "{below}");
+        let at_max = cap_next_step(max_mb);
+        assert!(
+            at_max.contains(&format!("already at its maximum of {max_mb} MB")) && !at_max.contains("Settings"),
+            "{at_max}"
+        );
+    }
+
+    #[test]
+    fn an_extension_matches_whatever_the_case_and_never_a_bare_name() {
+        let ext = vec!["evtx".to_string()];
+        assert!(has_extension(&ext, "Security.EVTX") && has_extension(&ext, "a.b.evtx"));
+        assert!(!has_extension(&ext, "evtx") && !has_extension(&ext, "a.evt") && !has_extension(&[], "a.evtx"));
+    }
+}

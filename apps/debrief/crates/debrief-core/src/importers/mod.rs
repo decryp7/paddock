@@ -226,6 +226,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn built_in_importers_claim_no_file() {
+        struct B;
+        impl BinaryImporter for B {
+            fn id(&self) -> &str {
+                "b"
+            }
+            fn sniff(&self, _: &ImportCtx, _: &[u8]) -> u8 {
+                0
+            }
+            fn import(&self, _: &ImportCtx, _: &[u8]) -> Result<Imported> {
+                Ok(Imported::default())
+            }
+        }
+        assert!(!text::TextImporter.claims("a.log") && !video::VideoFramesImporter.claims("a.log") && !B.claims("a.evtx"));
+        assert!(text::TextImporter.unavailable().is_none() && B.unavailable().is_none());
+    }
+
+    #[test]
     fn decodes_utf16() {
         let s = "Windows Registry Editor Version 5.00\r\n";
         let mut bytes = vec![0xFF, 0xFE];

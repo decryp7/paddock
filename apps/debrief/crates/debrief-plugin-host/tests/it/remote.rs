@@ -503,3 +503,61 @@ fn a_quarantined_plugin_is_named_only_for_files_it_declares() {
     let reason = refused(&ws).into_iter().find(|(n, _)| n == "blob.bin").expect("refused").1;
     assert_eq!(reason, "binary file", "{reason}");
 }
+
+#[test]
+fn a_binary_importer_of_a_plugin_imports_and_is_named_by_its_extension_when_quarantined() {
+    let b = builtins();
+    let dir = tempfile::tempdir().unwrap();
+    let mut ws = workspace(&b);
+    let fbin = dir.path().join("a.fbin");
+    std::fs::write(&fbin, b"FAKEBIN\none\ntwo\n").unwrap();
+    ws.open(&[fbin]).unwrap();
+    assert_eq!(ws.records().len(), 2, "the plugin's binary importer read the file");
+    for i in 0..3 {
+        let _ = ws.open(&[file(dir.path(), &format!("crash{i}.log"), "crash")]);
+    }
+    let info = ws.summary().plugins.into_iter().find(|p| p.id == ID).unwrap();
+    assert_eq!(info.status, PluginStatus::Quarantined, "{info:?}");
+    // A binary file with the declared extension names the plugin; the same bytes under another name do not.
+    let bytes = [0u8, 159, 146, 150, 0, 1, 2, 3, 255, 254, 0, 0];
+    let (claimed, other) = (dir.path().join("b.fbin"), dir.path().join("b.xyz"));
+    std::fs::write(&claimed, bytes).unwrap();
+    std::fs::write(&other, bytes).unwrap();
+    let _ = ws.open(&[claimed, other]);
+    let reasons = refused(&ws);
+    let reason = |n: &str| {
+        reasons
+            .iter()
+            .find(|(f, _)| f == n)
+            .unwrap_or_else(|| panic!("{n} refused: {reasons:?}"))
+            .1
+            .clone()
+    };
+    assert!(reason("b.fbin").contains("disabled after repeated crashes"), "{}", reason("b.fbin"));
+    assert_eq!(reason("b.xyz"), "binary file");
+}
+
+#[test]
+fn a_crash_of_a_document_or_profile_importer_counts_against_the_plugin() {
+    use debrief_dump::{DumpImporter, ImportOptions};
+    use debrief_profile::CaptureImporter;
+    let b = builtins();
+    let r = registry(&b);
+    let docs = r.contributions::<dyn DumpImporter>(debrief_dump::IMPORTERS_POINT);
+    let doc = docs
+        .iter()
+        .find(|i| i.call(|i| i.id() == "fake.doc").unwrap_or(false))
+        .expect("fake document importer");
+    let profs = r.contributions::<dyn CaptureImporter>(debrief_profile::IMPORTERS_POINT);
+    let prof = profs
+        .iter()
+        .find(|i| i.call(|i| i.id() == "fake.prof").unwrap_or(false))
+        .expect("fake profile importer");
+    let ws = Workspace::with_registry(Profile::default_profile(), r).unwrap();
+    let failures = |ws: &Workspace| ws.summary().plugins.into_iter().find(|p| p.id == ID).unwrap().failures;
+    assert_eq!(failures(&ws), 0);
+    let _ = doc.call(|i| i.import("a.dmp", Arc::new(b"crash".to_vec()), &ImportOptions::default()));
+    assert_eq!(failures(&ws), 1, "a document reader that exits is a crash");
+    let _ = prof.call(|i| i.import("a.prof", b"crash", &debrief_profile::Limits::default()));
+    assert_eq!(failures(&ws), 2, "so is a profile reader that exits");
+}

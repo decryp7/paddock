@@ -110,6 +110,11 @@ mod tests {
     use debrief_plugin_api::time::TimestampParser;
     use std::sync::Arc;
 
+    #[test]
+    fn declares_its_extension() {
+        assert_eq!(BlgImporter::default().extensions(), ["blg"]);
+    }
+
     const CSV: &str = "\"(PDH-CSV 4.0) (UTC)(0)\",\"\\\\M\\Memory\\Pages/sec\"\n\"10/14/2026 09:00:00.000\",\"3.5\"\n";
 
     fn profile() -> TimestampParser {

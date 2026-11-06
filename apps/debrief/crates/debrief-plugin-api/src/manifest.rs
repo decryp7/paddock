@@ -282,12 +282,21 @@ mod tests {
         assert!(identity.check().unwrap_err().contains("identity fields"));
         identity.importers[0].identity_fields = vec!["F".into(); MAX_IDENTITY_FIELDS + 1];
         assert!(identity.check().is_err());
+        let mut ext = m.clone();
+        ext.importers[0].extensions = vec!["a".repeat(16); MAX_EXTENSIONS];
+        ext.check().unwrap();
+        ext.importers[0].extensions.push("log".into());
+        assert!(ext.check().unwrap_err().contains("extensions"), "too many");
+        for bad in ["", "log.gz", ".log", "a b", &"a".repeat(17)] {
+            ext.importers[0].extensions = vec![bad.into()];
+            assert!(ext.check().unwrap_err().contains("extensions"), "{bad:?}");
+        }
         // Older manifests without the field read as none.
         let mut json = serde_json::to_value(&m).unwrap();
         json["importers"][0].as_object_mut().unwrap().remove("identityFields");
-        assert!(serde_json::from_value::<Manifest>(json).unwrap().importers[0]
-            .identity_fields
-            .is_empty());
+        json["importers"][0].as_object_mut().unwrap().remove("extensions");
+        let old = serde_json::from_value::<Manifest>(json).unwrap();
+        assert!(old.importers[0].identity_fields.is_empty() && old.importers[0].extensions.is_empty());
         let mut twice = m.clone();
         twice.annotators.push("toy.spans".into());
         assert!(twice.check().unwrap_err().contains("twice"));

@@ -209,6 +209,11 @@ mod tests {
     use serde_json::json;
     use std::path::Path;
 
+    #[test]
+    fn declares_its_extension() {
+        assert_eq!(EvtxImporter.extensions(), ["evtx"]);
+    }
+
     const SAMPLE: &[u8] = include_bytes!("../tests/fixtures/security.evtx");
 
     fn ctx_run<T>(f: impl FnOnce(&ImportCtx) -> T) -> T {

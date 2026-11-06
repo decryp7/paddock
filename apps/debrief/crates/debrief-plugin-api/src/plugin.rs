@@ -261,3 +261,68 @@ impl Contributions {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::importer::{ImportCtx, Imported};
+
+    struct Reads;
+    impl TextImporter for Reads {
+        fn id(&self) -> &str {
+            "reads"
+        }
+        fn sniff(&self, _: &ImportCtx, _: &str) -> u8 {
+            0
+        }
+        fn import(&self, _: &ImportCtx, _: &str) -> Result<Imported> {
+            Ok(Imported::default())
+        }
+        fn extensions(&self) -> Vec<String> {
+            vec!["rd".into()]
+        }
+    }
+
+    struct ReadsBinary;
+    impl BinaryImporter for ReadsBinary {
+        fn id(&self) -> &str {
+            "reads-bin"
+        }
+        fn sniff(&self, _: &ImportCtx, _: &[u8]) -> u8 {
+            0
+        }
+        fn import(&self, _: &ImportCtx, _: &[u8]) -> Result<Imported> {
+            Ok(Imported::default())
+        }
+        fn extensions(&self) -> Vec<String> {
+            vec!["rdb".into(), "bin".into()]
+        }
+    }
+
+    struct P;
+    impl Plugin for P {
+        fn id(&self) -> &str {
+            "net.example.p"
+        }
+        fn name(&self) -> &str {
+            "P"
+        }
+        fn version(&self) -> &str {
+            "1.0.0"
+        }
+        fn register(&self, _: &mut Contributions) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_manifest_lists_the_extensions_each_importer_declares() {
+        let mut c = Contributions::default();
+        c.add_importer(Reads).add_binary_importer(ReadsBinary);
+        let m = c.manifest(&P);
+        let ext = |id: &str| m.importers.iter().find(|i| &*i.id == id).unwrap().extensions.clone();
+        assert_eq!(ext("reads"), ["rd"]);
+        assert_eq!(ext("reads-bin"), ["rdb", "bin"]);
+        m.check().unwrap();
+    }
+}

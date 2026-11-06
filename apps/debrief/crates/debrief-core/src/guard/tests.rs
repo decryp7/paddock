@@ -229,6 +229,38 @@ fn guarded_identity_fields_fall_back_to_none() {
     assert_eq!(health.get("j").failures, 1, "the crash is attributed to the plugin");
 }
 
+/// Claims `.dat` files, like a plugin importer that declares the extension.
+struct Claims;
+impl Importer for Claims {
+    fn id(&self) -> &'static str {
+        "claims"
+    }
+    fn sniff(&self, _: &ImportCtx, _: &str) -> u8 {
+        0
+    }
+    fn import(&self, _: &ImportCtx, _: &str) -> Result<Imported> {
+        Ok(Imported::default())
+    }
+    fn claims(&self, file_name: &str) -> bool {
+        file_name.ends_with(".dat")
+    }
+}
+
+#[test]
+fn a_guarded_importer_answers_claims_from_its_declaration_even_when_quarantined() {
+    let health = Arc::new(Health::default());
+    let g = GuardedImporter {
+        inner: Arc::new(Claims),
+        guard: Guard::new("c", health.clone()),
+    };
+    assert!(g.claims("x.dat") && !g.claims("x.log"));
+    for _ in 0..QUARANTINE_AFTER {
+        health.fail("c", "crashed");
+    }
+    assert!(g.unavailable().is_some(), "quarantined");
+    assert!(g.claims("x.dat") && !g.claims("x.log"), "still answers: the refusal needs it then");
+}
+
 struct Bin;
 impl BinaryImporter for Bin {
     fn id(&self) -> &'static str {

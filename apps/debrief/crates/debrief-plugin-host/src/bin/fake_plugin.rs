@@ -141,6 +141,9 @@ impl debrief_plugin_api::DocumentImporter for FakeDoc {
         {
             alloc_and_wait(mb);
         }
+        if text.starts_with("crash") {
+            std::process::exit(9);
+        }
         debrief_dump::wire::encode_result(&Err(debrief_dump::DumpError::invalid("the fake document reader refuses this file")))
     }
 }
@@ -170,9 +173,51 @@ impl debrief_plugin_api::ProfileImporter for FakeProf {
         {
             alloc_and_wait(mb);
         }
+        if text.starts_with("crash") {
+            std::process::exit(9);
+        }
         debrief_profile::wire::encode_result(&Err(debrief_profile::ProfileError::invalid(
             "the fake profile reader refuses this file",
         )))
+    }
+}
+
+/// The binary importer `fake.bin` (extension `fbin`): a file starting with `FAKEBIN` has one record per remaining line.
+struct FakeBin;
+
+impl debrief_plugin_api::BinaryImporter for FakeBin {
+    fn id(&self) -> &str {
+        "fake.bin"
+    }
+
+    fn extensions(&self) -> Vec<String> {
+        vec!["fbin".into()]
+    }
+
+    fn sniff(&self, _: &ImportCtx, head: &[u8]) -> u8 {
+        if head.starts_with(b"FAKEBIN") {
+            100
+        } else {
+            0
+        }
+    }
+
+    fn import(&self, _: &ImportCtx, bytes: &[u8]) -> Result<Imported> {
+        let text = String::from_utf8_lossy(bytes);
+        let records = text
+            .lines()
+            .skip(1)
+            .enumerate()
+            .map(|(i, l)| {
+                let mut r = Record::new(i as u32 + 2);
+                r.message = l.to_string();
+                r
+            })
+            .collect();
+        Ok(Imported {
+            records,
+            ..Default::default()
+        })
     }
 }
 
@@ -347,6 +392,7 @@ impl Plugin for FakePlugin {
         c.add_importer(Fake)
             .add_document_importer(FakeDoc)
             .add_profile_importer(FakeProf)
+            .add_binary_importer(FakeBin)
             .add_tool(Arc::new(FakeTool))
             .add_annotator(Notes)
             .set_settings(Arc::new(FakeSettings));
