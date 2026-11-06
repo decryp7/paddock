@@ -1344,6 +1344,14 @@ fn bucket(s: Option<u32>) -> &'static str {
     }
 }
 
+/// The record as the state key sees it: the time of the register call is the wall clock, which differs on every run, so only
+/// whether there is one counts.
+fn normalized(rec: &Recorded) -> Recorded {
+    let mut r = rec.clone();
+    r.registered_at = r.registered_at.map(|_| 1);
+    r
+}
+
 fn key(w: &World) -> String {
     format!(
         "{:?}|{:?}|{}|{}|{:?}|{}|{}|{}|{:?}|{:?}|{}|{}|{}|{}|{:?}|{}|{}|{}|{:?}",
@@ -1369,7 +1377,7 @@ fn key(w: &World) -> String {
         w.ghost,
         w.mark_unreadable,
         w.rare_used,
-        w.rec
+        &normalized(&w.rec)
     )
 }
 
