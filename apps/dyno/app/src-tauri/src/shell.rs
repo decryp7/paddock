@@ -501,11 +501,8 @@ impl<R: Runtime> ShellOf<R> {
                 }
                 // The app's own login item does not outlive a switch that is off (an interrupted change, or an earlier build).
                 #[cfg(not(windows))]
-                if !wanted {
-                    let mut autostart = login::platform_autostart(&self.app);
-                    if let Err(e) = login::ensure_app_entry(false, autostart.as_mut()) {
-                        log::warn!(target: "dyno", Error = e.as_str(); "Start at login is off but the app's own login item could not be removed. Turn Start at login on and off in Settings.")
-                    }
+                if let Err(e) = login::remove_stale_app_item(wanted, login::platform_autostart(&self.app).as_mut()) {
+                    log::warn!(target: "dyno", Error = e.as_str(); "Start at login is off but the app's own login item could not be removed. Turn Start at login on and off in Settings.")
                 }
                 // Start at login is on by default: the first run registers it once. The start already tried it before the
                 // agent started; this is the same function, once per process, so a failed try is not repeated here.
@@ -527,23 +524,23 @@ impl<R: Runtime> ShellOf<R> {
                 let started = self.login_switch.start(&self.app.state::<crate::service_ops::ServiceOps>(), register, move |cancel| {
                     let mut service = login::platform_service(cancel.clone());
                     let mut plain = login::platform_autostart(&app);
-                    let mut autostart = login::UnlessCancelled::new(plain.as_mut(), cancel);
-                    let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), &mut autostart);
+                    let result = login::apply_switch_change(
+                        wanted,
+                        login::current_location(),
+                        service.as_mut(),
+                        plain.as_mut(),
+                        cancel,
+                        &on_done,
+                        previous,
+                    );
                     // The link is the one the app manages (the save command holds only a reference to it).
                     if let Some(link) = app.try_state::<Arc<crate::link::AgentLink>>() {
                         link.set_service_installed(service.installed());
                         link.refresh_service();
                     }
-                    login::settle_applied(&on_done, wanted, previous, result.is_ok(), cancel.is_cancelled());
-                    if result.is_ok() && !cancel.is_cancelled() {
-                        logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
-                    }
                     result
                 });
-                if started.is_err() {
-                    login::settle_applied(&value, wanted, previous, false, false);
-                }
-                started
+                login::undo_if_refused(started, &value, wanted, previous)
             }
         }
     }

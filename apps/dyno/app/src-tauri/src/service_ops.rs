@@ -28,15 +28,6 @@ impl OpCancel {
     }
 }
 
-/// Tells the waiter that the operation ended, however it ended.
-struct Done(std::sync::mpsc::Sender<()>);
-
-impl Drop for Done {
-    fn drop(&mut self) {
-        self.0.send(()).ok();
-    }
-}
-
 /// The running service operations and whether the app is quitting. Held as app state.
 #[derive(Default)]
 pub struct ServiceOps {
@@ -92,12 +83,11 @@ impl ServiceOps {
     /// Runs `work` as an operation of its own that Quit cancels and joins: `None` (and `work` does not run) once the app is
     /// quitting, so a resume that comes after "Quit and stop measuring" cannot register the service again.
     pub fn run_tracked<T>(&self, work: impl FnOnce(OpCancel) -> T) -> Option<T> {
-        // Tracked first: a Quit between the two still finds the operation to wait for.
-        let done = Done(self.track_repair());
+        // Tracked first: a Quit between the two still finds the operation to wait for. The sender is dropped when the operation
+        // ends, however it ends (a panic included), which is the end the waiter sees.
+        let _done = self.track_repair();
         let cancel = self.begin()?;
-        let out = work(cancel);
-        drop(done);
-        Some(out)
+        Some(work(cancel))
     }
 
     /// This app's first-run attempt.

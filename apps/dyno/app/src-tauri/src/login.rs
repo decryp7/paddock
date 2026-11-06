@@ -254,12 +254,54 @@ impl Autostart for UnlessCancelled<'_> {
 
 /// What the app remembers as applied after a change that set `wanted` (it was remembered at once, before the worker started, so
 /// a second save sees it): kept when the change finished, put back to `before` when it failed or was cancelled, unless a newer
-/// change has set its own value meanwhile.
-pub fn settle_applied(value: &std::sync::Mutex<Option<bool>>, wanted: bool, before: Option<bool>, ok: bool, cancelled: bool) {
+/// change has set its own value meanwhile. Returns whether the change stands.
+pub fn settle_applied(value: &std::sync::Mutex<Option<bool>>, wanted: bool, before: Option<bool>, ok: bool, cancelled: bool) -> bool {
+    let stands = ok && !cancelled;
     let mut value = value.lock().unwrap_or_else(|e| e.into_inner());
-    if (!ok || cancelled) && *value == Some(wanted) {
+    if !stands && *value == Some(wanted) {
         *value = before;
     }
+    stands
+}
+
+/// One Start-at-login change as the worker runs it: both registrations (the app's own only while the change is not cancelled), then
+/// the remembered value follows the outcome. The caller refreshes what depends on the service afterwards.
+pub fn apply_switch_change(
+    wanted: bool,
+    location: Result<(), String>,
+    service: &mut dyn AgentService,
+    plain: &mut dyn Autostart,
+    cancel: &crate::service_ops::OpCancel,
+    value: &std::sync::Mutex<Option<bool>>,
+    before: Option<bool>,
+) -> Result<(), String> {
+    let mut autostart = UnlessCancelled::new(plain, cancel);
+    let result = apply_launch_at_login(wanted, location, service, &mut autostart);
+    if settle_applied(value, wanted, before, result.is_ok(), cancel.is_cancelled()) {
+        crate::logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
+    }
+    result
+}
+
+/// A change the worker refused to take (the app is quitting, no thread) was never applied: the remembered value goes back.
+pub fn undo_if_refused(
+    started: Result<(), String>,
+    value: &std::sync::Mutex<Option<bool>>,
+    wanted: bool,
+    before: Option<bool>,
+) -> Result<(), String> {
+    if started.is_err() {
+        settle_applied(value, wanted, before, false, false);
+    }
+    started
+}
+
+/// With the switch off the app's own login item is removed (an interrupted change, or an earlier build, may have left it).
+pub fn remove_stale_app_item(start_at_login: bool, autostart: &mut dyn Autostart) -> Result<(), String> {
+    if start_at_login {
+        return Ok(());
+    }
+    autostart.set(false)
 }
 
 /// The user's switch as the service manager needs it (ADR 0056): the settings file's `launchAtLogin`; a missing file is a fresh
@@ -578,7 +620,7 @@ pub fn repair_stale_agent_entry(
 pub fn ensure_app_entry(start_at_login: bool, autostart: &mut dyn Autostart) -> Result<bool, String> {
     if !start_at_login {
         // The app's own item is not left behind a switch that is off (a change that was cut short, or an older build's).
-        autostart.set(false)?;
+        remove_stale_app_item(false, autostart)?;
         return Ok(false);
     }
     autostart.set(true)?;
@@ -1702,12 +1744,12 @@ mod tests {
         let value = Mutex::new(Some(true));
         // Remembered at once, before the worker starts (a second save sees it).
         *value.lock().unwrap() = Some(false);
-        settle_applied(&value, false, Some(true), true, false);
+        assert!(settle_applied(&value, false, Some(true), true, false));
         assert_eq!(*value.lock().unwrap(), Some(false), "applied");
-        settle_applied(&value, false, Some(true), false, false);
+        assert!(!settle_applied(&value, false, Some(true), false, false));
         assert_eq!(*value.lock().unwrap(), Some(true), "a failed change is not remembered as applied");
         *value.lock().unwrap() = Some(false);
-        settle_applied(&value, false, Some(true), true, true);
+        assert!(!settle_applied(&value, false, Some(true), true, true));
         assert_eq!(*value.lock().unwrap(), Some(true), "a cancelled change is not remembered as applied");
         // A newer change has set its own value meanwhile: this one leaves it alone.
         *value.lock().unwrap() = Some(true);
@@ -1773,5 +1815,59 @@ mod tests {
         assert!(first.first_run_attempt().claim());
         assert!(!first.first_run_attempt().claim(), "once per app");
         assert!(second.first_run_attempt().claim(), "another app state starts clean");
+    }
+
+    #[test]
+    fn a_change_cancelled_after_the_agent_install_ends_with_no_app_item_and_the_old_value() {
+        let calls = Calls::default();
+        let cancel = crate::service_ops::OpCancel::default();
+        let value = Mutex::new(Some(true));
+        let mut service = CancelsAfterInstall { inner: FakeService { calls: calls.0.clone(), fail: false }, cancel: cancel.clone() };
+        let mut plain = FakeAutostart { calls: calls.0.clone(), fail: false };
+        let r = apply_switch_change(true, Ok(()), &mut service, &mut plain, &cancel, &value, Some(false));
+        assert_eq!(r, Ok(()));
+        assert_eq!(*calls.0.lock().unwrap(), ["service install"], "the cancelled change registered the app");
+        assert_eq!(*value.lock().unwrap(), Some(false), "a cancelled change was remembered as on");
+        // Not cancelled: both registrations, remembered.
+        let calls = Calls::default();
+        let value = Mutex::new(Some(true));
+        let mut service = FakeService { calls: calls.0.clone(), fail: false };
+        let mut plain = FakeAutostart { calls: calls.0.clone(), fail: false };
+        apply_switch_change(true, Ok(()), &mut service, &mut plain, &crate::service_ops::OpCancel::default(), &value, Some(false)).unwrap();
+        assert_eq!(*calls.0.lock().unwrap(), ["service install", "autostart true"]);
+        assert_eq!(*value.lock().unwrap(), Some(true));
+    }
+
+    #[test]
+    fn a_change_the_worker_refused_puts_the_remembered_value_back_and_a_started_one_leaves_it() {
+        let value = Mutex::new(Some(true));
+        assert!(undo_if_refused(Err("quitting".into()), &value, true, Some(false)).is_err());
+        assert_eq!(*value.lock().unwrap(), Some(false));
+        *value.lock().unwrap() = Some(true);
+        assert!(undo_if_refused(Ok(()), &value, true, Some(false)).is_ok());
+        assert_eq!(*value.lock().unwrap(), Some(true));
+    }
+
+    #[test]
+    fn only_a_switch_that_is_off_removes_the_app_item() {
+        let calls = Calls::default();
+        let mut a = FakeAutostart { calls: calls.0.clone(), fail: false };
+        remove_stale_app_item(true, &mut a).unwrap();
+        assert!(calls.0.lock().unwrap().is_empty(), "an item behind a switch that is on is left alone");
+        remove_stale_app_item(false, &mut a).unwrap();
+        assert_eq!(*calls.0.lock().unwrap(), ["autostart false"]);
+        let mut failing = FakeAutostart { calls: calls.0.clone(), fail: true };
+        assert!(remove_stale_app_item(false, &mut failing).is_err(), "a failed removal is said, not hidden");
+    }
+
+    #[test]
+    fn a_worker_that_panics_is_free_for_the_next_change() {
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
+        let (registry, _rx) = jobs_rig();
+        worker.start(&ops, register_switch(&registry), |_| -> Result<(), String> { panic!("a test panic") }).unwrap();
+        idle(&worker);
+        let (done, seen) = std::sync::mpsc::channel();
+        worker.start(&ops, register_switch(&registry), move |_| done.send(()).map_err(|e| e.to_string())).unwrap();
+        seen.recv_timeout(std::time::Duration::from_secs(5)).expect("the next change did not run");
     }
 }
