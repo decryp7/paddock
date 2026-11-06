@@ -25,6 +25,7 @@ pub mod popover;
 pub mod power_menu;
 pub mod quit;
 pub mod report;
+pub mod service_ops;
 pub mod shell;
 pub mod supervise;
 pub mod tray;
@@ -462,13 +463,14 @@ fn agent_setup<R: Runtime>(
                 first_link.dirs.root(),
                 &*login::service_probe(),
                 login::current_location(),
-                login::platform_service().as_mut(),
+                login::platform_service(service_ops::OpCancel::default()).as_mut(),
             );
             login::run_first_run(&first_app, &first_link, false);
         }));
         // Asked before the link starts an agent of its own: none beside one the login service supervises.
         link.set_service_probe(login::service_probe());
     }
+    app.manage(service_ops::ServiceOps::default());
     app.manage(events.clone());
     app.manage(link.clone());
     app.manage(commands::PickedFolders::default());
@@ -505,15 +507,18 @@ fn agent_setup<R: Runtime>(
     // Windows: no repair here (it rewrote the app's logon entry in 1.0.0); the stale entry of 1.0.0 is repaired once, with the
     // switch, when the settings first arrive (`shell::settings_changed`).
     #[cfg(not(windows))]
-    let repair_done = login::track_repair();
+    #[cfg(not(windows))]
+    let ops = app.clone();
+    #[cfg(not(windows))]
+    let repair_done = tauri::Manager::state::<service_ops::ServiceOps>(&ops).track_repair();
     #[cfg(not(windows))]
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        if login::service_work_cancelled() {
+        let Some(cancel) = tauri::Manager::state::<service_ops::ServiceOps>(&ops).begin() else {
             repair_done.send(()).ok();
             return;
-        }
-        match login::platform_service().repair(std::sync::Arc::new(move || repair.connected())) {
+        };
+        match login::platform_service(cancel).repair(std::sync::Arc::new(move || repair.connected())) {
             Ok(true) => logging::warn("registered the agent service again (a new version, or launchd refused the old registration)"),
             Ok(false) => {}
             Err(e) => logging::warn(&format!("the agent service could not be registered again: {e}")),

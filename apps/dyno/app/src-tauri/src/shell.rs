@@ -474,7 +474,7 @@ impl<R: Runtime> ShellOf<R> {
                 // Windows, once per start: the entry Dyno 1.0.0 left in place of the app's own is repaired with the switch.
                 #[cfg(windows)]
                 {
-                    let mut service = login::platform_service();
+                    let mut service = login::platform_service(crate::service_ops::OpCancel::default());
                     let mut autostart = login::platform_autostart(&self.app);
                     match login::ensure_app_entry(wanted, autostart.as_mut()) {
                         Ok(_) => {}
@@ -527,8 +527,8 @@ impl<R: Runtime> ShellOf<R> {
                         logging::warn(&format!("could not emit the start-at-login job: {e}"));
                     }
                 });
-                self.login_switch.start(report, move |_cancel| {
-                    let mut service = login::platform_service();
+                self.login_switch.start(&self.app.state::<crate::service_ops::ServiceOps>(), report, move |cancel| {
+                    let mut service = login::platform_service(cancel.clone());
                     let mut autostart = login::platform_autostart(&app);
                     let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
                     // The link is the one the app manages (the save command holds only a reference to it).

@@ -96,13 +96,6 @@ pub fn install_timings() -> Timings {
     Timings::default().without_start_wait()
 }
 
-/// Set by the app when the user quits: the registration or the wait stops at its next step.
-pub static CANCEL: AtomicBool = AtomicBool::new(false);
-
-fn never() -> &'static AtomicBool {
-    &CANCEL
-}
-
 /// What a failed request says to the user, with the Linux words for a switch that is the user's.
 pub fn words(e: &ServiceError) -> String {
     match e {
@@ -116,16 +109,16 @@ pub fn words(e: &ServiceError) -> String {
 }
 
 /// `dyno-agent service install` and Launch at login switched on: registers the unit, enables it and starts it.
-pub fn install(m: &mut Manager) -> Result<(), String> {
-    m.install_patient(never(), false, PATIENCE.0, PATIENCE.1)
+pub fn install(m: &mut Manager, cancel: &AtomicBool) -> Result<(), String> {
+    m.install_patient(cancel, false, PATIENCE.0, PATIENCE.1)
         .map(drop)
         .map_err(|e| words(&e))
 }
 
 /// The Settings switch on: the same registration, but another change that holds the lock is answered with Busy at once
 /// instead of waited for (the save does not wait; the verbs above keep their patience).
-pub fn install_without_waiting(m: &mut Manager) -> Result<(), String> {
-    m.install_patient(never(), false, 0, Duration::ZERO).map(drop).map_err(|e| words(&e))
+pub fn install_without_waiting(m: &mut Manager, cancel: &AtomicBool) -> Result<(), String> {
+    m.install_patient(cancel, false, 0, Duration::ZERO).map(drop).map_err(|e| words(&e))
 }
 
 /// The Settings switch off, without waiting for another change.
@@ -164,8 +157,8 @@ pub fn ensure_result(started: Started, waited: bool) -> Result<bool, String> {
 /// `dyno-agent service ensure` and the app's repair at start: registers the unit again when it is stale (another program, a
 /// definition from an older version, a program that is gone). Not installed stays not installed, and what the user switched
 /// off stays off.
-pub fn ensure(m: &mut Manager, waited: bool) -> Result<bool, String> {
-    let started = m.on_start_patient(never(), PATIENCE.0, PATIENCE.1);
+pub fn ensure(m: &mut Manager, waited: bool, cancel: &AtomicBool) -> Result<bool, String> {
+    let started = m.on_start_patient(cancel, PATIENCE.0, PATIENCE.1);
     if let Started::Repaired(reason, outcome) = &started {
         log::info!(reason:? = reason, outcome:? = outcome; "agent service: replaced the registration");
     }
@@ -203,7 +196,8 @@ impl Unit {
 
 impl Verbs for Unit {
     fn install(&mut self) -> Result<(), String> {
-        install(&mut self.0)
+        // A command-line verb: nothing cancels it, so it owns a flag that is never set.
+        install(&mut self.0, &AtomicBool::new(false))
     }
 
     fn uninstall(&mut self) -> Result<(), String> {
@@ -211,7 +205,7 @@ impl Verbs for Unit {
     }
 
     fn ensure(&mut self) -> Result<bool, String> {
-        ensure(&mut self.0, false)
+        ensure(&mut self.0, false, &AtomicBool::new(false))
     }
 
     fn status(&mut self) -> String {

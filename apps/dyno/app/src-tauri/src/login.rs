@@ -124,14 +124,15 @@ pub fn first_run_wanted(settings_file: &std::path::Path) -> bool {
 #[derive(Default)]
 pub struct SwitchWorker {
     busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    cancel: std::sync::Mutex<Option<crate::service_ops::OpCancel>>,
 }
 
 impl SwitchWorker {
     /// Asks the running change to stop at its next step (the registration, a lock wait or the wait for the service).
     pub fn cancel(&self) {
-        self.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
-        cancel_service_work_for_switch();
+        if let Some(cancel) = self.cancel.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+            cancel.cancel();
+        }
     }
 }
 
@@ -141,11 +142,6 @@ struct Clear(std::sync::Arc<std::sync::atomic::AtomicBool>);
 impl Drop for Clear {
     fn drop(&mut self) {
         self.0.store(false, std::sync::atomic::Ordering::SeqCst);
-        // A cancel belongs to the change it stopped: the next operation (another change, a Repair) starts clean.
-        // Quit's cancel stays, so nothing starts after it.
-        if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
-            set_platform_cancel(false);
-        }
     }
 }
 
@@ -157,15 +153,17 @@ impl SwitchWorker {
     /// A message when the previous change has not finished, or no worker could be started.
     pub fn start(
         &self,
+        ops: &crate::service_ops::ServiceOps,
         report: std::sync::Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync>,
-        work: impl FnOnce(&std::sync::atomic::AtomicBool) -> Result<(), String> + Send + 'static,
+        work: impl FnOnce(&crate::service_ops::OpCancel) -> Result<(), String> + Send + 'static,
     ) -> Result<(), String> {
+        let Some(cancel) = ops.begin() else {
+            return Err("Dyno is quitting. Start at login is not changed.".into());
+        };
         if self.busy.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Err("Start at login is still being changed. Try again in a moment.".into());
         }
-        self.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
-        begin_service_work();
-        let cancel = self.cancel.clone();
+        *self.cancel.lock().unwrap_or_else(|p| p.into_inner()) = Some(cancel.clone());
         let clear = Clear(self.busy.clone());
         let spawned = std::thread::Builder::new().name("dyno-login-switch".into()).spawn(move || {
             let _clear = clear;
@@ -178,7 +176,7 @@ impl SwitchWorker {
             let result = work(&cancel);
             // A cancel that came during the work ends the job as cancelled, whatever the work made of it (the record says what
             // was registered; the next start puts the rest right).
-            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+            if cancel.is_cancelled() {
                 report(paddock_jobs::JobState::Cancelled { reason: paddock_jobs::CancelReason::User });
             } else {
                 match result {
@@ -262,7 +260,11 @@ pub fn run_first_run<R: tauri::Runtime>(app: &tauri::AppHandle<R>, link: &crate:
         crate::logging::info("first run: no data folder, start at login not applied");
         return;
     };
-    let mut service = first_run_service();
+    let Some(cancel) = app.state::<crate::service_ops::ServiceOps>().begin() else {
+        crate::logging::info("first run: the app is quitting, start at login is not applied");
+        return;
+    };
+    let mut service = first_run_service(cancel);
     let mut autostart = platform_autostart(app);
     let marker = paddock_service::login::FirstRunMarker::new(data.join(FIRST_RUN_MARKER));
     FIRST_RUN_MARKER_PATH.set(data.join(FIRST_RUN_MARKER)).ok();
@@ -356,14 +358,16 @@ pub fn agent_override(debug_build: bool, value: Option<&std::ffi::OsStr>) -> Opt
 #[cfg(any(target_os = "linux", test))]
 pub struct LinuxService {
     make: dyno_agent::service::linux::ManagerFactory,
+    cancel: crate::service_ops::OpCancel,
 }
 
 #[cfg(any(target_os = "linux", test))]
 impl LinuxService {
     /// The service of this user: the real `systemctl`, Dyno's data folder and the agent program next to the app.
     #[cfg(target_os = "linux")]
-    pub fn real() -> LinuxService {
-        LinuxService::with(Box::new(|timings| {
+    pub fn real(cancel: crate::service_ops::OpCancel) -> LinuxService {
+        LinuxService::with(
+            Box::new(|timings| {
             let manager = dyno_agent::service::linux::real_manager(&agent_program()?, env!("CARGO_PKG_VERSION"), timings)?;
             // The app's own decisions are inputs to the plan, as on macOS (ADR 0056): the user's switch, the first run, the place
             // the app runs from.
@@ -372,12 +376,12 @@ impl LinuxService {
                 first_run_done,
                 || current_location().is_ok(),
             ))
-        }))
+        }), cancel)
     }
 
     /// A service whose manager comes from `make` (tests).
-    pub fn with(make: dyno_agent::service::linux::ManagerFactory) -> LinuxService {
-        LinuxService { make }
+    pub fn with(make: dyno_agent::service::linux::ManagerFactory, cancel: crate::service_ops::OpCancel) -> LinuxService {
+        LinuxService { make, cancel }
     }
 
     /// A manager that is only asked what it sees or told to stop or resume.
@@ -391,7 +395,7 @@ impl paddock_service::login::LoginService for LinuxService {
     /// Registers the unit without waiting for the agent to answer (the link waits for it and falls back to one of its own).
     fn install(&mut self) -> Result<(), String> {
         let mut m = (self.make)(dyno_agent::service::linux::install_timings())?;
-        dyno_agent::service::linux::install_without_waiting(&mut m)
+        dyno_agent::service::linux::install_without_waiting(&mut m, self.cancel.flag())
     }
 
     fn uninstall(&mut self) -> Result<(), String> {
@@ -415,7 +419,7 @@ impl AgentService for LinuxService {
     fn repair(&mut self, agent_answers: AnswerFn) -> Result<bool, String> {
         // The app's own agent keeps a refused unit from being replaced while the app measures; it never settles anything.
         let mut manager = self.quiet()?.with_cover(move || agent_answers());
-        dyno_agent::service::linux::ensure(&mut manager, true)
+        dyno_agent::service::linux::ensure(&mut manager, true, self.cancel.flag())
     }
 
     /// Whether a registration this app made is being waited for (the link neither starts nor retires an agent meanwhile).
@@ -431,7 +435,7 @@ impl AgentService for LinuxService {
     /// After a stop on request: the shared resume starts the unit again unless the user switched it off meanwhile.
     fn resume(&mut self) -> Result<bool, String> {
         self.quiet()?
-            .resume(&std::sync::atomic::AtomicBool::new(false), &mut |step| {
+            .resume(self.cancel.flag(), &mut |step| {
                 crate::logging::info(&format!("agent service: {step}"))
             })
             .map_err(|e| dyno_agent::service::linux::words(&e))
@@ -583,32 +587,24 @@ mod mac {
     use paddock_service::manager::Started;
     use paddock_service::repair::Timings;
     use paddock_service::{Manager, ServiceSpec};
-    use std::sync::atomic::AtomicBool;
 
     /// The bundled launch agent. `first_run` is the unasked registration at the first sight of the settings: it opens System
     /// Settings (Login Items) for an approval or a switch at most once, where the Settings switch always does.
     pub struct SmService {
         first_run: bool,
+        cancel: crate::service_ops::OpCancel,
     }
 
     impl SmService {
         /// The service for what the user asks (Settings switch, repair at start, resume, stop).
-        pub const fn asked() -> SmService {
-            SmService { first_run: false }
+        pub fn asked(cancel: crate::service_ops::OpCancel) -> SmService {
+        SmService { first_run: false, cancel }
         }
 
         /// The service for the first run (no one asked): Login Items is opened at most once.
-        pub const fn first_run() -> SmService {
-            SmService { first_run: true }
+        pub fn first_run(cancel: crate::service_ops::OpCancel) -> SmService {
+        SmService { first_run: true, cancel }
         }
-    }
-
-    /// Set when the user quits or changes the switch: a repair, a registration or a wait stops at its next step.
-    pub static CANCEL: AtomicBool = AtomicBool::new(false);
-
-    /// The process-wide cancel of the service's work.
-    fn never() -> &'static AtomicBool {
-        &CANCEL
     }
 
     /// Dyno 1.1.0 records the registered version with the shared service record; the 1.0.0 file is of no use any more.
@@ -691,7 +687,7 @@ mod mac {
             // The Settings switch never waits for another change (it answers Busy at once, after the lock's own short look); the
             // first run waits for one, so a first run that lost the lock does not end with nothing registered.
             let (tries, pause) = if self.first_run { (6, 5) } else { (0, 0) };
-            let result = m.install_patient(never(), quiet, tries, std::time::Duration::from_secs(pause));
+            let result = m.install_patient(self.cancel.flag(), quiet, tries, std::time::Duration::from_secs(pause));
             result.map(drop).map_err(|e| registration_words(&e, !quiet))
         }
 
@@ -727,7 +723,7 @@ mod mac {
             forget_old_version_file(dyno_agent::paths::Dirs::current().root());
             let mut m = manager(agent_answers, Timings::default())?;
             // Another registration or repair (the first run, a second copy) may hold the lock: wait for it a while.
-            let started = m.on_start_patient(never(), 6, std::time::Duration::from_secs(5));
+            let started = m.on_start_patient(self.cancel.flag(), 6, std::time::Duration::from_secs(5));
             if let Started::Repaired(reason, outcome) = &started {
                 crate::logging::info(&format!("agent service: replaced the registration ({reason:?}): {outcome:?}"));
             }
@@ -751,7 +747,7 @@ mod mac {
         /// waits for in a labelled phase ("Waiting for the background service") instead of a silent wait of up to 120 s here.
         fn resume(&mut self) -> Result<bool, String> {
             let mut m = manager(std::sync::Arc::new(|| false), install_timings())?;
-            match m.resume(never(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
+            match m.resume(self.cancel.flag(), &mut |step| crate::logging::info(&format!("agent service: {step}"))) {
                 Ok(held) => Ok(held),
                 Err(_) if m.pending() => {
                     crate::logging::info("agent service: registered again; the link waits for it to answer");
@@ -763,101 +759,45 @@ mod mac {
     }
 }
 
-/// The platform's agent service.
+/// The platform's agent service; `cancel` is the cancel of the operation that uses it.
 #[cfg(target_os = "macos")]
-pub fn platform_service() -> Box<dyn AgentService> {
-    Box::new(SmService::asked())
+pub fn platform_service(cancel: crate::service_ops::OpCancel) -> Box<dyn AgentService> {
+    Box::new(SmService::asked(cancel))
 }
 
 /// The agent service for the first run, which nobody asked for: System Settings is opened at most once.
 #[cfg(target_os = "macos")]
-pub fn first_run_service() -> Box<dyn AgentService> {
-    Box::new(SmService::first_run())
+pub fn first_run_service(cancel: crate::service_ops::OpCancel) -> Box<dyn AgentService> {
+    Box::new(SmService::first_run(cancel))
 }
 
 /// The agent service for the first run (the same as [`platform_service`] off macOS).
 #[cfg(not(target_os = "macos"))]
-pub fn first_run_service() -> Box<dyn AgentService> {
-    platform_service()
+pub fn first_run_service(cancel: crate::service_ops::OpCancel) -> Box<dyn AgentService> {
+    platform_service(cancel)
 }
 
 /// The platform's agent service.
 #[cfg(target_os = "linux")]
-pub fn platform_service() -> Box<dyn AgentService> {
-    Box::new(LinuxService::real())
+pub fn platform_service(cancel: crate::service_ops::OpCancel) -> Box<dyn AgentService> {
+    Box::new(LinuxService::real(cancel))
 }
 
-/// The platform's agent service.
+/// The platform's agent service (Windows has nothing to wait for or cancel).
 #[cfg(windows)]
-pub fn platform_service() -> Box<dyn AgentService> {
+pub fn platform_service(_cancel: crate::service_ops::OpCancel) -> Box<dyn AgentService> {
     Box::new(CliService)
-}
-
-/// Whether the user quit or changed the switch since: the service's work does not start.
-pub fn service_work_cancelled() -> bool {
-    #[cfg(target_os = "macos")]
-    return mac::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
-    #[cfg(target_os = "linux")]
-    return dyno_agent::service::linux::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
-    #[allow(unreachable_code)]
-    false
-}
-
-/// The start repair's thread reports here when it ends, so Quit can wait for it (it never leaves a repair writing the record
-/// beside the stop marker).
-static REPAIR_DONE: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>> = std::sync::Mutex::new(None);
-
-/// Registers the end of the start repair: the returned sender is used by its thread when it finishes.
-pub fn track_repair() -> std::sync::mpsc::Sender<()> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    *REPAIR_DONE.lock().unwrap_or_else(|e| e.into_inner()) = Some(rx);
-    tx
-}
-
-/// Waits up to `bound` for the start repair to end (after [`cancel_service_work`]); `true` when it ended or never ran.
-pub fn join_service_work(bound: std::time::Duration) -> bool {
-    let rx = REPAIR_DONE.lock().unwrap_or_else(|e| e.into_inner()).take();
-    rx.is_none_or(|rx| !matches!(rx.recv_timeout(bound), Err(std::sync::mpsc::RecvTimeoutError::Timeout)))
-}
-
-/// Set once the user quits: a switch change that starts later does not clear the cancel.
-static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-fn set_platform_cancel(on: bool) {
-    #[cfg(target_os = "macos")]
-    mac::CANCEL.store(on, std::sync::atomic::Ordering::SeqCst);
-    #[cfg(target_os = "linux")]
-    dyno_agent::service::linux::CANCEL.store(on, std::sync::atomic::Ordering::SeqCst);
-    let _ = on;
-}
-
-/// Asks the service's repair, registration and waits to stop at their next step (Quit and stop measuring).
-pub fn cancel_service_work() {
-    QUITTING.store(true, std::sync::atomic::Ordering::SeqCst);
-    set_platform_cancel(true);
-}
-
-/// The Settings switch's cancel: the same stop, but a later change starts clean.
-fn cancel_service_work_for_switch() {
-    set_platform_cancel(true);
-}
-
-/// A new switch change starts clean unless the app is quitting.
-fn begin_service_work() {
-    if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
-        set_platform_cancel(false);
-    }
 }
 
 /// Whether the app is waiting for a registration it made (see [`AgentService::pending`]).
 pub fn service_pending() -> bool {
-    platform_service().pending()
+    platform_service(crate::service_ops::OpCancel::default()).pending()
 }
 
 /// The probe the agent link asks before it starts an agent of its own (see [`crate::link::ServiceState`]).
 pub fn service_probe() -> crate::link::ServiceProbe {
     std::sync::Arc::new(|| {
-        let mut service = platform_service();
+        let mut service = platform_service(crate::service_ops::OpCancel::default());
         crate::link::ServiceState {
             installed: service.installed(),
             supervises: service.supervises(),
@@ -923,77 +863,50 @@ impl Autostart for NoAutostart {
 
 #[cfg(test)]
 mod tests {
-    /// The service's cancel flags are process-wide. A test that sets or reads them holds this lock and starts and
-    /// ends with them clear, so no other test meets a cancel it did not ask for (a leaked one failed the Linux
-    /// wiring tests whenever the cancel test ran first).
-    static CANCEL_FLAGS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    use crate::service_ops::ServiceOps;
 
-    struct CleanCancel(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
-
-    impl CleanCancel {
-        fn hold() -> Self {
-            let guard = CANCEL_FLAGS.lock().unwrap_or_else(|p| p.into_inner());
-            Self::clear();
-            Self(guard)
-        }
-
-        fn clear() {
-            super::QUITTING.store(false, std::sync::atomic::Ordering::SeqCst);
-            super::set_platform_cancel(false);
-        }
-    }
-
-    impl Drop for CleanCancel {
-        fn drop(&mut self) {
-            Self::clear();
-        }
-    }
-
-    fn platform_cancel_set() -> bool {
-        #[cfg(target_os = "macos")]
-        return mac::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
-        #[cfg(target_os = "linux")]
-        return dyno_agent::service::linux::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        false
-    }
-
-    /// Starts a switch change that waits for its cancel, cancels it as the Jobs view or Settings would, and waits
-    /// until the worker has ended.
-    fn cancel_a_switch_change() {
-        let worker = SwitchWorker::default();
-        let (began, wake) = std::sync::mpsc::channel::<()>();
+    /// Starts a switch change that waits for its cancel and returns once its work has begun.
+    fn start_a_waiting_change(
+        worker: &SwitchWorker,
+        ops: &ServiceOps,
+        report: Arc<dyn Fn(paddock_jobs::JobState) + Send + Sync>,
+        begun: std::sync::mpsc::Sender<()>,
+    ) {
+        // The work waits for its cancel (as a registration waits for the service) and gives up when it comes.
         worker
-            .start(std::sync::Arc::new(|_| {}), move |cancel| {
-                began.send(()).unwrap();
-                while !cancel.load(std::sync::atomic::Ordering::SeqCst) {
-                    std::thread::yield_now();
+            .start(ops, report, move |cancel| {
+                begun.send(()).unwrap();
+                let began = std::time::Instant::now();
+                while !cancel.is_cancelled() && began.elapsed() < std::time::Duration::from_secs(5) {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn a_cancelled_switch_change_leaves_no_cancel_for_the_next_one() {
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
+        let (begun, wake) = std::sync::mpsc::channel::<()>();
+        start_a_waiting_change(&worker, &ops, Arc::new(|_| {}), begun);
         wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         worker.cancel();
         while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::yield_now();
         }
+        let (done, seen) = std::sync::mpsc::channel();
+        worker.start(&ops, Arc::new(|_| {}), move |cancel| done.send(cancel.is_cancelled()).map_err(|e| e.to_string())).unwrap();
+        assert!(!seen.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), "the next change starts cancelled");
     }
 
     #[test]
-    fn a_cancelled_switch_change_leaves_no_cancel_for_the_next_operation() {
-        let _clean = CleanCancel::hold();
-        cancel_a_switch_change();
-        assert!(!platform_cancel_set(), "the service's cancel flag is still set");
-    }
-
-    #[test]
-    fn a_cancel_stops_the_switch_change_and_it_ends_as_a_cancelled_job() {
-        let _clean = CleanCancel::hold();
+    fn quit_stops_the_running_change_and_refuses_the_next() {
         use paddock_jobs::{CancelReason, JobState};
-        use std::sync::{mpsc, Arc, Mutex};
-        let worker = Arc::new(SwitchWorker::default());
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
         let seen = Arc::new(Mutex::new(Vec::new()));
-        let (reported, wake) = mpsc::channel::<()>();
+        let (reported, ended) = std::sync::mpsc::channel::<()>();
+        let (begun, wake) = std::sync::mpsc::channel::<()>();
         let report: Arc<dyn Fn(JobState) + Send + Sync> = {
             let seen = seen.clone();
             Arc::new(move |s| {
@@ -1001,16 +914,34 @@ mod tests {
                 reported.send(()).unwrap();
             })
         };
-        // The work waits for its cancel (as a registration waits for the service) and gives up when it comes.
-        worker
-            .start(report, |cancel| {
-                let began = std::time::Instant::now();
-                while !cancel.load(std::sync::atomic::Ordering::SeqCst) && began.elapsed() < std::time::Duration::from_secs(5) {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                Ok(())
+        start_a_waiting_change(&worker, &ops, report, begun);
+        wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        ops.quit();
+        ended.recv().unwrap();
+        ended.recv().unwrap();
+        assert_eq!(seen.lock().unwrap()[1], JobState::Cancelled { reason: CancelReason::User });
+        while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        assert!(worker.start(&ops, Arc::new(|_| {}), |_| Ok(())).is_err(), "nothing starts after Quit");
+    }
+
+    #[test]
+    fn a_cancel_stops_the_switch_change_and_it_ends_as_a_cancelled_job() {
+        use paddock_jobs::{CancelReason, JobState};
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let (reported, wake) = std::sync::mpsc::channel::<()>();
+        let (begun, started) = std::sync::mpsc::channel::<()>();
+        let report: Arc<dyn Fn(JobState) + Send + Sync> = {
+            let seen = seen.clone();
+            Arc::new(move |s| {
+                seen.lock().unwrap().push(s);
+                reported.send(()).unwrap();
             })
-            .unwrap();
+        };
+        start_a_waiting_change(&worker, &ops, report, begun);
+        started.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         wake.recv().unwrap();
         worker.cancel();
         wake.recv().unwrap();
@@ -1019,27 +950,27 @@ mod tests {
 
     #[test]
     fn quit_waits_for_the_start_repair_up_to_its_bound() {
-        let done = track_repair();
+        let ops = ServiceOps::default();
+        let done = ops.track_repair();
         let slow = std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(300));
             done.send(()).ok();
         });
         let began = std::time::Instant::now();
-        assert!(join_service_work(std::time::Duration::from_secs(5)), "it ended within the bound");
+        assert!(ops.join_repair(std::time::Duration::from_secs(5)), "it ended within the bound");
         assert!(began.elapsed() >= std::time::Duration::from_millis(250), "quit waited for it");
         slow.join().unwrap();
         // A repair that does not end within the bound is given up on, and nothing registered is nothing to wait for.
-        let _kept = track_repair();
-        assert!(!join_service_work(std::time::Duration::from_millis(50)));
-        assert!(join_service_work(std::time::Duration::from_millis(50)), "taken once: nothing left to wait for");
+        let _kept = ops.track_repair();
+        assert!(!ops.join_repair(std::time::Duration::from_millis(50)));
+        assert!(ops.join_repair(std::time::Duration::from_millis(50)), "taken once: nothing left to wait for");
     }
 
     #[test]
     fn the_switch_returns_at_once_while_the_os_step_is_blocked_and_reports_as_a_job() {
-        let _clean = CleanCancel::hold();
         use paddock_jobs::JobState;
         use std::sync::{mpsc, Arc, Mutex};
-        let worker = SwitchWorker::default();
+        let (ops, worker) = (ServiceOps::default(), SwitchWorker::default());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let (release, blocked) = mpsc::channel::<()>();
         let (reported, wake) = mpsc::channel::<()>();
@@ -1053,12 +984,12 @@ mod tests {
         let began = std::time::Instant::now();
         // The OS step (a registration waiting for a lock) blocks until the test lets it go.
         worker
-            .start(report.clone(), move |_| blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
+            .start(&ops, report.clone(), move |_| blocked.recv_timeout(std::time::Duration::from_secs(5)).map_err(|e| e.to_string()))
             .unwrap();
         assert!(began.elapsed() < std::time::Duration::from_secs(2), "the save did not wait for the OS step");
         wake.recv().unwrap();
         assert!(matches!(seen.lock().unwrap()[0], JobState::Running { .. }), "running is reported while blocked");
-        assert!(worker.start(report.clone(), |_| Ok(())).is_err(), "a second change waits for the first");
+        assert!(worker.start(&ops, report.clone(), |_| Ok(())).is_err(), "a second change waits for the first");
         release.send(()).unwrap();
         wake.recv().unwrap();
         assert_eq!(seen.lock().unwrap()[1], JobState::Done);
@@ -1066,7 +997,7 @@ mod tests {
         while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
             std::thread::yield_now();
         }
-        worker.start(report, |_| Err("needs approval".into())).unwrap();
+        worker.start(&ops, report, |_| Err("needs approval".into())).unwrap();
         wake.recv().unwrap();
         wake.recv().unwrap();
         assert_eq!(seen.lock().unwrap()[3], JobState::Failed { message: "needs approval".into() });
@@ -1141,6 +1072,7 @@ mod tests {
     /// it with Dyno's unit, its paths and its words.
     mod linux_wiring {
         use super::super::*;
+        use crate::service_ops::{OpCancel, ServiceOps};
         use dyno_agent::service::linux;
         use paddock_env::MapVars;
         use paddock_service::Timings;
@@ -1151,7 +1083,6 @@ mod tests {
         const EXE: &str = "/opt/dyno/dyno-agent";
 
         struct Rig {
-        _clean: super::CleanCancel,
             sys: FakeSystem,
             ctl: FakeSystemd,
             unit: PathBuf,
@@ -1165,10 +1096,14 @@ mod tests {
                 let sys = FakeSystem::new();
                 sys.put_program(EXE);
                 let ctl = FakeSystemd::new(&sys, "dyno-agent.service", &unit);
-                Rig { _clean: super::CleanCancel::hold(), sys, ctl, unit, data: tempfile::tempdir().unwrap() }
+                Rig { sys, ctl, unit, data: tempfile::tempdir().unwrap() }
             }
 
             fn service(&self) -> LinuxService {
+                self.service_with(OpCancel::default())
+            }
+
+            fn service_with(&self, cancel: OpCancel) -> LinuxService {
                 let (sys, data) = (self.sys.clone(), self.data.path().to_path_buf());
                 LinuxService::with(Box::new(move |timings: Timings| {
                     let sys = sys.clone();
@@ -1181,17 +1116,17 @@ mod tests {
                         &factory,
                         timings,
                     )
-                }))
+                }), cancel)
             }
         }
 
         #[test]
         fn a_change_after_a_cancelled_one_succeeds() {
-            let rig = Rig::new();
-            super::cancel_a_switch_change();
-            rig.service().install().unwrap();
-            assert!(rig.sys.file(&rig.unit).is_some());
-        }
+                let (rig, ops) = (Rig::new(), ServiceOps::default());
+                ops.begin().unwrap().cancel();
+                rig.service_with(ops.begin().unwrap()).install().unwrap();
+                assert!(rig.sys.file(&rig.unit).is_some());
+            }
 
         #[test]
         fn the_settings_switch_registers_and_removes_the_unit() {
