@@ -1740,9 +1740,22 @@ const CONFIGS: [(Caps, Resp); 8] = [
     (Caps::Linux, Resp::Fast),
 ];
 
-/// The configurations of the default run (the first five) or the long one (all).
-fn configs() -> &'static [(Caps, Resp)] {
-    if deep() { &CONFIGS } else { &CONFIGS[..5] }
+/// The configurations of the default run (the first five) or the long one (all). A named one (`MODEL_CONFIG=Mac/Slow`) is
+/// looked for among all of them, so a configuration of the long run can be run alone with the default bounds.
+fn configs_for(deep: bool, only: Option<&str>) -> Vec<(Caps, Resp)> {
+    let all: &[(Caps, Resp)] = if deep || only.is_some() { &CONFIGS } else { &CONFIGS[..5] };
+    all.iter()
+        .copied()
+        .filter(|(c, r)| only.is_none_or(|o| o == format!("{c:?}/{r:?}")))
+        .collect()
+}
+
+#[test]
+fn a_named_configuration_of_the_long_run_runs_alone_with_the_default_bounds() {
+    assert_eq!(configs_for(false, Some("Mac/Slow")), vec![(Caps::Mac, Resp::Slow)]);
+    assert_eq!(configs_for(false, None).len(), 5, "the default run is the first five");
+    assert_eq!(configs_for(true, None).len(), CONFIGS.len());
+    assert!(configs_for(false, Some("Mac/Nonsense")).is_empty());
 }
 
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
@@ -1753,12 +1766,7 @@ const KNOWN_FAILING: &[(&str, &str)] = &[];
 fn the_crash_model_reaches_a_fixed_point_and_the_invariants_hold_in_every_state() {
     silence_crashes();
     let started = Instant::now();
-    let only = std::env::var("MODEL_CONFIG").ok();
-    let configs: Vec<(Caps, Resp)> = configs()
-        .iter()
-        .copied()
-        .filter(|(c, r)| only.as_deref().is_none_or(|o| o == format!("{c:?}/{r:?}")))
-        .collect();
+    let configs = configs_for(deep(), std::env::var("MODEL_CONFIG").ok().as_deref());
     let results: Vec<(Caps, Resp, Explored)> = std::thread::scope(|sc| {
         let handles: Vec<_> = configs
             .iter()
