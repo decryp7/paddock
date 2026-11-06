@@ -674,13 +674,21 @@ impl FacetRequest {
     /// `None` when there is nothing to search for.
     pub fn needle(&self) -> Option<String> {
         let t = self.search.trim();
-        (!t.is_empty()).then(|| t.chars().take(MAX_FACET_SEARCH).collect::<String>().to_lowercase())
+        (!t.is_empty()).then(|| facet_fold(&t.chars().take(MAX_FACET_SEARCH).collect::<String>()))
     }
+}
+
+/// Lower case as the store's `lower()` does it: one character at a time, each by its first lower-case character. That
+/// is the simple mapping (`İ` becomes `i`; the full mapping of `str::to_lowercase` would make it `i` plus a combining
+/// dot, which the store never produces, and would pick the final sigma by context). Both sides must fold alike, or
+/// a value would match in the workspace and not in the store.
+pub fn facet_fold(s: &str) -> String {
+    s.chars().map(|c| c.to_lowercase().next().unwrap_or(c)).collect()
 }
 
 /// Whether a facet value matches a [`FacetRequest::needle`].
 pub fn facet_value_matches(needle: &str, value: &str) -> bool {
-    value.to_lowercase().contains(needle)
+    facet_fold(value).contains(needle)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -773,4 +781,46 @@ pub struct ExtractPreview {
     pub failed: usize,
     pub samples: Vec<ExtractSample>,
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod facet_search_tests {
+    use super::*;
+
+    fn needle(search: &str) -> Option<String> {
+        FacetRequest {
+            query: Default::default(),
+            field: "f".into(),
+            limit: 50,
+            search: search.into(),
+        }
+        .needle()
+    }
+
+    #[test]
+    fn the_needle_is_trimmed_cut_and_folded_and_empty_means_no_search() {
+        assert_eq!(needle(""), None);
+        assert_eq!(needle("  \t "), None);
+        assert_eq!(needle("  Web-02 "), Some("web-02".into()));
+        let long = needle(&"Ab".repeat(MAX_FACET_SEARCH)).unwrap();
+        assert_eq!(long.chars().count(), MAX_FACET_SEARCH);
+        assert!(long.starts_with("abab"));
+    }
+
+    #[test]
+    fn folding_is_one_character_at_a_time_like_the_stores_lower() {
+        assert_eq!(facet_fold("ABC-é-É"), "abc-é-é");
+        // `İ` has a two-character full lower case; the store's `lower()` gives `i`.
+        assert_eq!(facet_fold("İstanbul"), "istanbul");
+        // No final-sigma rule, no `ß` change.
+        assert_eq!(facet_fold("ΟΔΟΣ ß"), "οδοσ ß");
+    }
+
+    #[test]
+    fn a_value_matches_when_it_contains_the_needle_in_any_case() {
+        assert!(facet_value_matches("gateway", "İstanbul-Gateway") && facet_value_matches("gateway", "Istanbul-GATEWAY"));
+        assert!(facet_value_matches("stanbul-gate", "İstanbul-Gateway"));
+        assert!(!facet_value_matches("gateway", "Order-Service"));
+        assert!(facet_value_matches("", "anything"));
+    }
 }

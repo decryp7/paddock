@@ -243,3 +243,79 @@ fn analysis_tools_report_a_partial_coverage() {
 fn the_analyst_is_told_to_state_a_partial_coverage() {
     assert!(ANALYST_SYSTEM.contains("coverage") && ANALYST_SYSTEM.contains("analysed"));
 }
+
+/// A workspace store over the sample logs.
+fn sample_store() -> debrief_core::workspace::WorkspaceStore {
+    use debrief_core::{Profile, Workspace};
+    let text = std::fs::read_to_string(samples().join("profiles/orderservice.debriefprofile.toml")).unwrap();
+    let mut ws = Workspace::new(Profile::from_toml(&text).unwrap()).unwrap();
+    ws.open(&[samples()]).unwrap();
+    debrief_core::workspace::WorkspaceStore::new(ws)
+}
+
+/// A listed limit without fewer events analysed: the words must not claim fewer were analysed (P2-1).
+#[test]
+fn a_limit_without_fewer_analysed_events_is_worded_as_a_limit() {
+    use debrief_core::ports::Coverage;
+    let inner = sample_store();
+    let mut d = delegate::Delegating::new(&inner);
+    d.coverage = Some(Coverage {
+        matched: 5000,
+        analysed: 5000,
+        limits: vec!["patterns: 10,000 kept; 312 events in the overflow pattern".into()],
+    });
+    let mut tools = EngineTools::new(&d as &dyn debrief_core::ports::Store, ToolLimits::for_context(8192));
+    let o = tools.call("patterns", &json!({}));
+    assert!(!o.is_error, "{}", o.text);
+    assert_eq!(parsed(&o)["coverage"]["partial"], true);
+    assert!(o.summary.contains("limited: patterns: 10,000 kept"), "{}", o.summary);
+    assert!(!o.summary.contains("of 5000"), "all 5000 events were analysed: {}", o.summary);
+    // The prompt covers both cases.
+    assert!(ANALYST_SYSTEM.contains("a listed limit applied"));
+}
+
+/// Fewer analysed than matched: the summary names both numbers.
+#[test]
+fn fewer_analysed_events_are_worded_with_both_numbers() {
+    use debrief_core::ports::Coverage;
+    let inner = sample_store();
+    let mut d = delegate::Delegating::new(&inner);
+    d.coverage = Some(Coverage {
+        matched: 10_000_000,
+        analysed: 2_000_000,
+        limits: vec!["analysis: the oldest 2,000,000 events".into()],
+    });
+    let mut tools = EngineTools::new(&d as &dyn debrief_core::ports::Store, ToolLimits::for_context(8192));
+    let o = tools.call("overview", &json!({}));
+    assert!(o.summary.ends_with("(from 2000000 of 10000000 matching events)"), "{}", o.summary);
+}
+
+/// The coverage is the first key of the tool's JSON, so a cut of an oversized result drops the rest first (P2-2).
+#[test]
+fn the_coverage_survives_a_cut_of_a_large_result() {
+    use debrief_core::ports::Coverage;
+    let inner = sample_store();
+    let mut d = delegate::Delegating::new(&inner);
+    d.coverage = Some(Coverage {
+        matched: 10_000_000,
+        analysed: 2_000_000,
+        limits: vec!["analysis: the oldest 2,000,000 events".into()],
+    });
+    let small = ToolLimits {
+        max_chars: 90,
+        max_items: 1,
+        max_str: 40,
+    };
+    let mut tools = EngineTools::new(&d as &dyn debrief_core::ports::Store, small);
+    for (name, input) in [
+        ("patterns", json!({})),
+        ("exception_groups", json!({})),
+        ("overview", json!({})),
+        ("moment", json!({"from": ms(10, 30, 0), "to": ms(10, 50, 0)})),
+    ] {
+        let o = tools.call(name, &input);
+        assert!(o.text.contains("[truncated]"), "{name} is cut for this test: {}", o.text);
+        assert!(o.text.starts_with("{\"coverage\":{\"matched\":10000000"), "{name}: {}", o.text);
+        assert!(o.text.contains("\"partial\":true"), "{name}: {}", o.text);
+    }
+}

@@ -824,14 +824,10 @@ impl Inner {
             // One scan: the groups, with the totals over all groups alongside the top ones.
             // The search is a bound parameter and `contains` has no wildcards, so nothing in it needs escaping. It filters
             // the groups after the total is summed, so shares stay shares of all values; `distinct` counts the matches.
-            let mut stmt = conn
-                .prepare(&format!(
-                    "SELECT v, n, total, count(*) OVER () AS distinct_values FROM (SELECT v, n, CAST(sum(n) OVER () AS UBIGINT) AS total FROM (SELECT v, count(*) AS n FROM ({inner}) WHERE v IS NOT NULL GROUP BY v)) WHERE contains(lower(v), ?) ORDER BY n DESC, v LIMIT {limit}"
-                ))
-                .map_err(engine)?;
+            let mut stmt = conn.prepare(&facet_sql(&inner, limit, needle.is_some())).map_err(engine)?;
             let (mut total, mut distinct) = (0u64, 0u64);
             let rows = stmt
-                .query_map([needle.as_deref().unwrap_or("")], |r| {
+                .query_map(duckdb::params_from_iter(needle.as_deref()), |r| {
                     Ok((
                         FacetValue {
                             value: r.get(0)?,
@@ -847,6 +843,14 @@ impl Inner {
                 let (v, t, d) = row.map_err(engine)?;
                 (total, distinct) = (t, d);
                 values.push(v);
+            }
+            if values.is_empty() && needle.is_some() {
+                // No value matched, so no row carries the total: it stays the count over all values, as in the workspace.
+                total = conn
+                    .query_row(&format!("SELECT CAST(count(v) AS UBIGINT) FROM ({inner})"), [], |r| {
+                        r.get::<_, u64>(0)
+                    })
+                    .map_err(engine)?;
             }
             return Ok(Facet {
                 field: req.field.clone(),
@@ -1732,5 +1736,37 @@ struct Presence(HashMap<(String, usize), usize>);
 impl debrief_core::instance::FieldPresence for Presence {
     fn count_in(&self, field: &str, source: usize) -> usize {
         self.0.get(&(field.to_string(), source)).copied().unwrap_or(0)
+    }
+}
+
+/// The one-scan facet query over `inner` (rows of `v`): the groups with the total over all of them, then, only when
+/// `searching`, the filter on the one bound parameter (the lower-cased needle; `contains` has no wildcards, so nothing in
+/// it needs escaping). The filter runs after the total is summed, so shares stay shares of all values, and the
+/// window `count(*)` after it counts the matches.
+fn facet_sql(inner: &str, limit: usize, searching: bool) -> String {
+    let search = if searching { " WHERE contains(lower(v), ?)" } else { "" };
+    format!(
+        "SELECT v, n, total, count(*) OVER () AS distinct_values FROM (SELECT v, n, CAST(sum(n) OVER () AS UBIGINT) AS total FROM (SELECT v, count(*) AS n FROM ({inner}) WHERE v IS NOT NULL GROUP BY v)){search} ORDER BY n DESC, v LIMIT {limit}"
+    )
+}
+
+#[cfg(test)]
+mod facet_sql_tests {
+    use super::facet_sql;
+
+    #[test]
+    fn the_filter_and_its_parameter_exist_only_when_searching() {
+        let plain = facet_sql("SELECT 1 AS v", 50, false);
+        assert!(!plain.contains("contains") && !plain.contains('?'), "{plain}");
+        assert!(plain.ends_with("ORDER BY n DESC, v LIMIT 50"), "{plain}");
+        let searching = facet_sql("SELECT 1 AS v", 50, true);
+        assert_eq!(searching.matches('?').count(), 1, "{searching}");
+        // The filter is after the totals are summed and before the window count and the limit.
+        let (total, filter, limit) = (
+            searching.find("sum(n) OVER ()").unwrap(),
+            searching.find("WHERE contains(lower(v), ?)").unwrap(),
+            searching.find("LIMIT 50").unwrap(),
+        );
+        assert!(total < filter && filter < limit, "{searching}");
     }
 }

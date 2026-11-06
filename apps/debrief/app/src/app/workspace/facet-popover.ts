@@ -112,10 +112,13 @@ export class FacetPopover {
     const f = this.facet();
     if (this.error()) return $localize`:@@workspace.facet.unavailable:unavailable`;
     if (!f) return '…';
-    if (this.term()) return $localize`:@@workspace.facet.matches:${formatCount(f.distinct)}:count: match`;
     const loaded = f.values.length;
     const distinct = f.distinct >= 10000 ? '10,000+' : formatCount(f.distinct);
-    const parts = [$localize`:@@workspace.facet.summary:${distinct}:count: values in current results`];
+    const parts = [
+      this.term()
+        ? $localize`:@@workspace.facet.matches:${formatCount(f.distinct)}:count: match`
+        : $localize`:@@workspace.facet.summary:${distinct}:count: values in current results`,
+    ];
     if (loaded < f.distinct) parts.push($localize`:@@workspace.facet.topShown:top ${formatCount(loaded)}:count: shown`);
     return parts.join(' · ');
   });

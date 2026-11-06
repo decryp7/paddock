@@ -600,7 +600,7 @@ impl EngineTools<'_> {
                         let n = p.len();
                         let top: Vec<_> = p.into_iter().take(a.limit.unwrap_or(15).clamp(1, 30)).collect();
                         self.finish(
-                            json!({"total": n, "patterns": top, "coverage": coverage_json(&coverage)}),
+                            json!({"coverage": coverage_json(&coverage), "total": n, "patterns": top}),
                             with_coverage(format!("{n} patterns"), &coverage),
                             vec![a.ql].into_iter().filter(|q| !q.is_empty()).collect(),
                         )
@@ -614,7 +614,7 @@ impl EngineTools<'_> {
                     Ok(Analyzed { result: g, coverage }) => {
                         let n = g.len();
                         self.finish(
-                            json!({"total": n, "groups": g, "coverage": coverage_json(&coverage)}),
+                            json!({"coverage": coverage_json(&coverage), "total": n, "groups": g}),
                             with_coverage(format!("{n} exception groups"), &coverage),
                             vec![],
                         )
@@ -626,7 +626,7 @@ impl EngineTools<'_> {
                 Ok(Analyzed { result: f, coverage }) => {
                     let n = f.len();
                     self.finish(
-                        json!({"findings": f, "coverage": coverage_json(&coverage)}),
+                        json!({"coverage": coverage_json(&coverage), "findings": f}),
                         with_coverage(format!("{n} findings"), &coverage),
                         vec![],
                     )
@@ -642,10 +642,16 @@ impl EngineTools<'_> {
                 }) {
                     Ok(Analyzed { result: m, coverage }) => {
                         let total = m.total;
-                        let mut value = serde_json::to_value(&m).unwrap_or(Value::Null);
-                        if let Value::Object(o) = &mut value {
-                            o.insert("coverage".into(), coverage_json(&coverage));
-                        }
+                        // The coverage comes first: a cut of an oversized result drops the end first.
+                        let value = match serde_json::to_value(&m) {
+                            Ok(Value::Object(rest)) => {
+                                let mut o = serde_json::Map::new();
+                                o.insert("coverage".into(), coverage_json(&coverage));
+                                o.extend(rest);
+                                Value::Object(o)
+                            }
+                            _ => Value::Null,
+                        };
                         self.finish(value, with_coverage(format!("{total} events in the window"), &coverage), vec![])
                     }
                     Err(e) => ToolOutcome::err(format!("{e:#}")),
@@ -699,11 +705,14 @@ fn coverage_json(c: &Coverage) -> Value {
     json!({"matched": c.matched, "analysed": c.analysed, "partial": !c.complete(), "limits": c.limits})
 }
 
-/// The tool's one-line summary (shown to the user), with the coverage when the analysis was partial.
+/// The tool's one-line summary (shown to the user), with the coverage when the analysis was partial: fewer events
+/// analysed than matched, or (all analysed) a listed limit that bounded the result.
 fn with_coverage(summary: String, c: &Coverage) -> String {
     if c.complete() {
         summary
-    } else {
+    } else if c.analysed < c.matched {
         format!("{summary} (from {} of {} matching events)", c.analysed, c.matched)
+    } else {
+        format!("{summary} (limited: {})", c.limits.join("; "))
     }
 }

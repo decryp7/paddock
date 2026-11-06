@@ -285,7 +285,7 @@ for a sample that holds one the test compares the decoded values, not the bytes;
 - `json` (Pitcrew's protocol, Debrief's `debrief-ai` worker, the `json_roots`): the last tag's goldens are decoded to
   decide: breaking when one no longer decodes; an added field with a serde default, or a new variant, decodes and is
   additive. (A JSON root inside a postcard wire makes that wire's version bump too.)
-- Debrief's store-client wire (`WIRE_VERSION` 3) is positional by the row order of its operation table
+- Debrief's store-client wire (`WIRE_VERSION` 4) is positional by the row order of its operation table
   (`debrief-store-client/src/port_table.rs`, `wire_names`): WP-4 writes a manual emitter that lists the rows in order with
   their DTO types as `schema.json`; appended rows are additive, anything else breaking; the DTOs get JSON goldens.
 

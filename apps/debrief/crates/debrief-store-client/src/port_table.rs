@@ -21,7 +21,7 @@
 
 /// The worker protocol's version. Bump it when an operation is removed, reordered or its DTO changes shape; the
 /// app and its worker ship together, and the client refuses a worker that reports another version.
-pub const WIRE_VERSION: u32 = 3;
+pub const WIRE_VERSION: u32 = 4;
 
 /// The names the table's types resolve through (the callbacks expand in other modules and crates).
 pub mod ty {

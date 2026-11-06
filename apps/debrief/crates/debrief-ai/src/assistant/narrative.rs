@@ -14,8 +14,8 @@ use serde_json::{json, Value};
 pub const ANALYST_SYSTEM: &str =
     "You are the log analysis assistant inside Debrief. Use only facts from the tool results; never invent events, \
 times or causes. Cite evidence as event ids (for example: event 123) or as queries in backticks. If the logs do not contain the answer, \
-say \"not found in the logs\". When a tool result has a coverage object with partial true (analysed is lower than matched), say in your answer that \
-the counts come from the analysed events only (give both numbers and the limits it lists), not from all matching events. Be concise and concrete: what happened, where, when, the likely cause, and next steps.";
+say \"not found in the logs\". When a tool result has a coverage object with partial true (fewer events analysed than matched, or a listed limit applied), say in your answer that \
+the counts do not cover all matching events (give both numbers and the limits it lists). Be concise and concrete: what happened, where, when, the likely cause, and next steps.";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

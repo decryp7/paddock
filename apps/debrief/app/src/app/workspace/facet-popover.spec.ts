@@ -146,7 +146,10 @@ describe('FacetPopover', () => {
     expect(text(fixture)).toContain('MachineName-value-09042');
     await search(fixture, 'value-00');
     expect(all(fixture, '.value').length).toBeLessThan(25);
-    expect(el(fixture, '[data-testid=facet-summary]').textContent).toContain('1,000 match');
+    expect(el(fixture, '[data-testid=facet-summary]').textContent).toBe('1,000 match');
+    // More matches than the engine returns: the summary still says that only the top 1,000 are shown.
+    await search(fixture, 'value-0');
+    expect(el(fixture, '[data-testid=facet-summary]').textContent).toBe('10,000 match · top 1,000 shown');
   });
 
   it('shows an inline error with Retry, then the values', async () => {

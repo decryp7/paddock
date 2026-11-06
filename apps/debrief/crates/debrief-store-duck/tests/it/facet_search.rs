@@ -80,6 +80,8 @@ fn a_search_is_text_not_a_pattern() {
         let (w, d) = facet(&p, needle, 50);
         assert!(w.values.is_empty() && d.values.is_empty(), "{needle:?}");
         assert_eq!((w.distinct, d.distinct), (0, 0), "{needle:?}");
+        // With no match the total is still the count over all values (3,999 events), in both.
+        assert_eq!((w.total, d.total), (3999, 3999), "{needle:?}");
     }
     // A plain part of many values returns the matches in order, within the limit.
     let (w, d) = facet(&p, "svc-000", 5);
@@ -90,4 +92,68 @@ fn a_search_is_text_not_a_pattern() {
     // A search longer than the bound is cut, not refused.
     let (_, d) = facet(&p, &"x".repeat(5000), 5);
     assert!(d.values.is_empty());
+}
+
+/// Values with letters beyond ASCII: `İ` (whose full lower case is two characters), accents, `ß` and a Greek word.
+fn unicode_values() -> (TempDir, std::path::PathBuf) {
+    let dir = TempDir::new("facet-search-unicode");
+    let path = dir.0.join("apps-20261014.log");
+    let mut f = std::fs::File::create(&path).unwrap();
+    for (n, app) in [
+        "İstanbul-Gateway",
+        "Ünal-Service",
+        "ÉCOLE-Portal",
+        "Straße-Relay",
+        "ΣΊΣΥΦΟΣ-Queue",
+        "plain-ascii",
+    ]
+    .iter()
+    .enumerate()
+    {
+        writeln!(
+            f,
+            "2026-10-14 10:00:{n:02}.000 +00:00 [INF] Order {n} captured {{\"Application\": \"{app}\"}}"
+        )
+        .unwrap();
+    }
+    (dir, path)
+}
+
+#[test]
+fn a_search_beyond_ascii_matches_the_same_values_in_the_store_and_the_workspace() {
+    let (_dir, path) = unicode_values();
+    let p = pair_of(Profile::default_profile(), std::slice::from_ref(&path));
+    let names = |f: &Facet| f.values.iter().map(|v| v.value.clone()).collect::<Vec<_>>();
+    for needle in [
+        "İ",
+        "i",
+        "İstanbul",
+        "istanbul",
+        "İSTANBUL",
+        "ünal",
+        "ÜNAL",
+        "école",
+        "ÉCOLE",
+        "ß",
+        "straße",
+        "σ",
+        "ς",
+        "Σ",
+        "σίσυφος",
+        "ΣΊΣΥΦΟΣ",
+    ] {
+        let (w, d) = facet(&p, needle, 50);
+        assert_eq!(names(&w), names(&d), "{needle:?}: workspace and store agree");
+        assert_eq!((w.distinct, w.total), (d.distinct, d.total), "{needle:?}");
+    }
+    // The shapes a user types find their value, in either case.
+    for (needle, want) in [
+        ("İstanbul", "İstanbul-Gateway"),
+        ("istanbul", "İstanbul-Gateway"),
+        ("ÜNAL", "Ünal-Service"),
+        ("école", "ÉCOLE-Portal"),
+    ] {
+        let (_, d) = facet(&p, needle, 50);
+        assert_eq!(names(&d), [want], "{needle:?}");
+    }
 }
