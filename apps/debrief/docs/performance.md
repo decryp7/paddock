@@ -773,15 +773,16 @@ Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
   slice is built; `ff7f0ed57` above used the encoded size): Auto, three runs on the same store (`g-new-auto-1..3.txt`): index ready
   102.9, 73.0 and 76.5 s (median 76.5 s), peak footprint 1,003, 1,172 and 1,172 MB (median 1,172 MB), search "timeout" p50 703.5,
   597.4 and 660.2 ms. Run 1 ended at load 12.7 (a DuckLake trial beside it): **marked, load above 12**. The footprint median rose
-  from 1,057 to 1,172 MB (the cause is not investigated; three runs each, so it may be noise) and stays 19% below the base's median of 1,443 MB (every run below every base run).
+  from 1,057 to 1,172 MB (not explained; two of the three runs read exactly 1,172 MB) and stays 19% below the base's median of 1,443 MB (every run below every base run).
   The memory verdict stands on these figures; the speed and search figures are within the spread of the table above.
 - **Read-threads sweep (rule 51): not shown.** 1 thread 98.5 s, 2 threads 88.9 s, 4 threads 82.1 s (one run each, a trend of
   about 17% sooner from 1 to 4 that the noise could hide), Auto (8 threads) 77.2, 96.6 and 125.5 s, a slower median than 4.
   These numbers do not say that more read threads help, and they do not justify the Auto cap of 8 either: the cap
   (`MAX_AUTO_INDEX_READ_THREADS`) is a ceiling for the cores-minus-one rule, not a measured optimum. A better sweep needs
   several runs per row.
-- **Verdict, memory:** **met.** The change's footprint is 25% lower than the base (median 1,057 MB against 1,443 MB; every
-  change run below every base run); the feed's own bound is `FEED_MEMORY` (64 MiB), an estimate: slices are admitted by the
+- **Verdict, memory:** **met.** The change's footprint is 19% lower than the base (median 1,172 MB against 1,443 MB, from the
+  re-measurement at `d4d09d4c5` below; the first three runs at `ff7f0ed57` gave 1,057 MB; every change run below every base
+  run); the feed's own bound is `FEED_MEMORY` (64 MiB), an estimate: slices are admitted by the
   footer's unencoded text size and a slice that proves larger is charged the excess after it is built. The tests
   `the_feed_holds_long_events_within_its_byte_budget` (10 KB events, 4 MB budget) and `a_repeated_long_exception_counts_at_its_full_size`
   (the same 4 KB exception on every row, which dictionary encoding stores in a byte or two) show the peak of built bytes within
