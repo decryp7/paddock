@@ -141,6 +141,11 @@ struct Clear(std::sync::Arc<std::sync::atomic::AtomicBool>);
 impl Drop for Clear {
     fn drop(&mut self) {
         self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+        // A cancel belongs to the change it stopped: the next operation (another change, a Repair) starts clean.
+        // Quit's cancel stays, so nothing starts after it.
+        if !QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+            set_platform_cancel(false);
+        }
     }
 }
 
@@ -944,6 +949,43 @@ mod tests {
         }
     }
 
+    fn platform_cancel_set() -> bool {
+        #[cfg(target_os = "macos")]
+        return mac::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
+        #[cfg(target_os = "linux")]
+        return dyno_agent::service::linux::CANCEL.load(std::sync::atomic::Ordering::SeqCst);
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        false
+    }
+
+    /// Starts a switch change that waits for its cancel, cancels it as the Jobs view or Settings would, and waits
+    /// until the worker has ended.
+    fn cancel_a_switch_change() {
+        let worker = SwitchWorker::default();
+        let (began, wake) = std::sync::mpsc::channel::<()>();
+        worker
+            .start(std::sync::Arc::new(|_| {}), move |cancel| {
+                began.send(()).unwrap();
+                while !cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                    std::thread::yield_now();
+                }
+                Ok(())
+            })
+            .unwrap();
+        wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        worker.cancel();
+        while worker.busy.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn a_cancelled_switch_change_leaves_no_cancel_for_the_next_operation() {
+        let _clean = CleanCancel::hold();
+        cancel_a_switch_change();
+        assert!(!platform_cancel_set(), "the service's cancel flag is still set");
+    }
+
     #[test]
     fn a_cancel_stops_the_switch_change_and_it_ends_as_a_cancelled_job() {
         let _clean = CleanCancel::hold();
@@ -1141,6 +1183,14 @@ mod tests {
                     )
                 }))
             }
+        }
+
+        #[test]
+        fn a_change_after_a_cancelled_one_succeeds() {
+            let rig = Rig::new();
+            super::cancel_a_switch_change();
+            rig.service().install().unwrap();
+            assert!(rig.sys.file(&rig.unit).is_some());
         }
 
         #[test]
