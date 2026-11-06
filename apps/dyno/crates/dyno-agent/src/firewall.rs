@@ -178,13 +178,14 @@ impl FirewallCentre {
     pub fn for_this_os(clock: Arc<dyn paddock_jobs::time::Clock>) -> FirewallCentre {
         #[cfg(windows)]
         {
-            let _: std::sync::Arc<dyn paddock_jobs::time::Clock> = clock;
             FirewallCentre::new(
                 HelperHost::Windows,
                 vec![(
                     RuleSource::WindowsFirewall,
-                    Box::new(dyno_platform::windows_firewall::WindowsFirewallReader(
+                    Box::new(dyno_platform::windows_firewall::WindowsFirewallReader::new(
                         dyno_platform::windows::firewall_com::ComFirewall,
+                        Box::new(dyno_platform::windows::indirect::ShellIndirect),
+                        clock,
                     )),
                 )],
                 vec![],

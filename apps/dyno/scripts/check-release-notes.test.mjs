@@ -26,3 +26,15 @@ test('reads only the newest release', () => {
 test('a changelog with no release has nothing to check', () => {
   assert.deepEqual(problems('# Changelog\n'), []);
 });
+
+test('catches the SNAKE_CASE identifiers the VM harness catches (digits, one-letter parts, trailing digit groups)', () => {
+  for (const id of ['S3_BUCKET', 'I_O', 'SHA256_SUM', 'WAKE_2', 'IN_PROGRESS']) {
+    const md = `## [2.0.0] - 2026-01-01\n\n- Shows ${id} in a sentence.\n`;
+    assert.equal(problems(md).length, 1, id);
+  }
+});
+
+test('leaves ordinary capitals and units alone', () => {
+  const md = '## [2.0.0] - 2026-01-01\n\n- Reads CPU and RAM, shows GB/s, and a USB-C port. Version 2_0 is not an identifier.\n';
+  assert.deepEqual(problems(md), []);
+});
