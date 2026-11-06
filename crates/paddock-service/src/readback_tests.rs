@@ -854,6 +854,7 @@ fn the_event_source_stays_while_the_service_is_marked_for_deletion_and_still_run
 fn launchd_names_the_process_of_the_job_by_identity() {
     let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
     let sys = FakeSystem::new();
+    sys.put_process(me);
     let mut b = launchd_file(&sys);
     sys.put_file(PLIST, &b.definition());
     sys.answer("/bin/launchctl print gui", launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())));
@@ -866,6 +867,7 @@ fn launchd_names_the_process_of_the_job_by_identity() {
 fn systemd_names_the_main_process_of_the_unit_by_identity() {
     let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
     let sys = FakeSystem::new();
+    sys.put_process(me);
     let mut b = system_unit(&sys);
     sys.answer("systemctl show", Output::ok(&format!("MainPID={}\n", me.pid())));
     assert_eq!(b.job_process(), Some(me));
@@ -877,6 +879,7 @@ fn systemd_names_the_main_process_of_the_unit_by_identity() {
 fn the_bundled_agent_names_the_process_of_the_job_by_identity() {
     let me = paddock_proc::ProcessId::of(std::process::id()).expect("own process");
     let sys = FakeSystem::new();
+    sys.put_process(me);
     let app = FakeAppService::new(&sys);
     let mut b = LaunchdBundled::new(spec(Kind::UserAgent), 501, Box::new(app), Box::new(sys.clone()));
     sys.answer("/bin/launchctl print gui", launchd_print("running", 1, &format!("\tpid = {}\n", me.pid())));

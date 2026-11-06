@@ -81,6 +81,11 @@ pub trait System: Send {
     fn run(&mut self, program: &str, args: &[&str]) -> Result<Output, RunError>;
     /// Starts `program args…` detached (no console window), without waiting (a `Run` entry's agent after registering).
     fn spawn(&mut self, program: &Path, args: &[String]) -> Result<(), String>;
+    /// The process that holds `pid` now, by identity (pid and start time, rule 53); `None` when there is none. Tests answer from
+    /// a table, so what they see never depends on the processes of the machine they run on (ER-14).
+    fn process(&mut self, pid: u32) -> Option<paddock_proc::ProcessId> {
+        paddock_proc::ProcessId::of(pid)
+    }
     /// Reads a small text file (a plist, a unit).
     fn read(&mut self, path: &Path) -> std::io::Result<String>;
     /// Writes a file atomically, creating its folder.
