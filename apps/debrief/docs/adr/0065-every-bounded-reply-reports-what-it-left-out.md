@@ -1,6 +1,6 @@
 # 65. Every bounded reply reports what it left out
 
-- Status: Proposed, revision 2: answers the independent review of `1eaa14850` (two P1s, the P2s and P3s)
+- Status: Proposed, revision 3: answers the second independent review of `fd622064a` (no P1; its P2s and P3s). Revision 2 answered the first review of `1eaa14850`
 - Date: 2026-11-05, revised 2026-11-06
 - Related: family ADRs [0018](../../../../docs/adr/0018-bounded-loading-everywhere.md) (bounded loading, `Truncated`, `boundedBy`),
   [0019](../../../../docs/adr/0019-limits-explain-themselves.md) (limits explain themselves: `LimitId`, the registry, `limit_case!`, the completeness check), 0014 (monorepo, shared code); Debrief ADR 0016 (command table, generated
@@ -17,7 +17,7 @@
 | Where does it live? | **In `paddock-limits`, beside 0019's `LimitExceeded`** (option D, recommended): one crate for "a limit was hit", whether the work stopped or the reply was cut, with one `LimitId`, one registry type and one `limit_case!`. |
 | What about `Coverage`? | **It becomes a `Cut`.** `Analyzed<T>` is the first use of the mechanism and does half the job. Its `limits: Vec<String>` is why it is not enough: English text, no numbers, nothing checks it. |
 | Is the `boundedBy` lint built? | **No.** It exists only as words in ADR 0018 and plan package 2.5. Its rule alone would miss most instances here (see "Why not just the lint"). |
-| Old builds and old files? | **No migration code** (user, 2026-11-06). The one stored change (instance 12) bumps the store's `FORMAT_VERSION`; the existing check refuses a newer store in an older build ("saved by a newer Debrief … update Debrief") and an older store in a newer build ("saved by an older preview of Debrief … open its log files again"), `crates/debrief-store-duck/src/lib.rs:913-923` [S]. The store worker's `WIRE_VERSION` is internal to one build. |
+| Old builds and old files? | **No migration code** (user, 2026-11-06). The one stored change (instance 12) bumps the store's `FORMAT_VERSION` by one, on its own: every schema change takes the next number, so if ADR 0066's change lands first this one takes the number after it; the existing check refuses a newer store in an older build ("saved by a newer Debrief … update Debrief") and an older store in a newer build ("saved by an older preview of Debrief … open its log files again"), `crates/debrief-store-duck/src/lib.rs:913-923` [S]. The store worker's `WIRE_VERSION` is internal to one build. |
 | Does it fit ADR 0063? | **Yes, in either order.** Cuts travel in the MessagePack head, rows in a table. The checker must accept `#[wire_command]` as well as `#[tauri::command]`. |
 
 ## Context
@@ -59,6 +59,7 @@ In `paddock-limits` (section 6, option D), beside 0019's `LimitExceeded`, using 
 pub struct Bounded<T> { result: T, cuts: Vec<Cut> }
 
 #[serde(try_from = "CutWire", into = "CutWire")]
+#[ts(export)]
 pub struct Cut {
     limit: LimitId,          // paddock-limits' key: "traces.list", "analysis.events" (plan 1.4)
     of: FieldPath,           // which list in `result` was cut: "traces", "callers", "result.callees"; "" for the value itself
@@ -68,7 +69,12 @@ pub struct Cut {
     next: Next,              // what the person can do about it; derived from the registry row, section 3
 }
 
-pub enum Total { Exact { n: u64 }, AtLeast { n: u64 }, Unknown }
+pub enum Total {
+    Exact { #[ts(type = "number")] n: u64 },
+    AtLeast { #[ts(type = "number")] n: u64 },
+    /// Something may have been left out, and nobody knows how much. Only `Cut::maybe` makes it.
+    Unknown,
+}
 pub enum Selection {
     /// Items `from .. from + shown` in the source's own order (a page, or the first ones from 0).
     First { from: u64 },
@@ -80,13 +86,14 @@ pub enum Selection {
 }
 pub struct SortKey { field: FieldPath, order: Order }
 pub enum Order { Desc, Asc }
-/// A dotted path of field names in the reply's camelCase (`durationMs`, `callees.selfMs`): parsed once, at most 64
-/// bytes, `[a-z][a-zA-Z0-9]*` per part. Never shown to a person: the words come from the message (section 4).
+/// A dotted path of field names in the reply's camelCase (`durationMs`, `callees.selfMs`), where a part may carry one
+/// index into a list (`groups[3].ids`): parsed once, at most 64 bytes, `[a-z][a-zA-Z0-9]*` or that with `[<u32>]` per
+/// part. Never shown to a person: the words come from the message (section 4).
 pub struct FieldPath(Box<str>);
 pub enum Next { Page, ShowMore, RaiseSetting, Narrow, None }
 ```
 
-Serde is camelCase with `tag = "kind"`, like `OffsetSpec`. In TypeScript:
+Serde is camelCase with `tag = "kind"`, like `OffsetSpec`. Counts are `u64` in Rust and `number` in TypeScript (`#[ts(type = "number")]`; ts-rs would otherwise write `bigint`); no count comes near 2^53. In TypeScript:
 
 ```ts
 interface Bounded<T> { result: T; cuts: Cut[] }
@@ -95,15 +102,20 @@ type Total = { kind: 'exact'; n: number } | { kind: 'atLeast'; n: number } | { k
 
 Rules the constructors enforce, so the illegal states cannot be built:
 
-- A cut is made only if something was left out: `shown < n` for both `Exact` and `AtLeast`. `shown == total` yields no `Cut`, and an empty `cuts` means complete.
+- A cut is made only if something was left out: `shown < n` for both `Exact` and `AtLeast`. `shown == total` yields no `Cut`, and an empty `cuts` means complete. `Total::Unknown` means "something may have been left out" and comes only from `Cut::maybe(row, of, shown, selection)`, for a list whose producer knows it may have dropped items but not how many (instance 12).
 - `from + shown <= n` for `Exact`. `of` must be a path the bounded-check (section 5, part 2) finds as a collection field of the reply type, or empty when the value itself is the list.
-- `Bounded::first(iter, row, of)` takes `limit + 1` items and answers `AtLeast { n: limit + 1 }` when the extra one exists. **It never counts further just to print a number** (rule 51). `Bounded::page(items, offset, total, row, of)` is a page with `First { from: offset }` and `Next::Page`. `Bounded::ranked(vec, row, of, key)` has seen them all and answers `Exact` with `TopBy { from: 0 }`. `Bounded::counted(items, total, row, of)` is for a total the store already knows. `Bounded::last(..)`, `Bounded::sampled(..)` likewise. `Bounded::complete(value)` has no cut. Several cuts on one value: `.and(cut)`.
+- `Bounded::first(iter, row, of)` takes `limit + 1` items and answers `AtLeast { n: limit + 1 }` when the extra one exists. **It never counts further just to print a number** (rule 51). `Bounded::page(items, offset, total, row, of)` is a page with `First { from: offset }` and `Next::Page`. `Bounded::ranked(vec, row, of, key)` has seen them all and answers `Exact` with `TopBy { from: 0 }`. `Bounded::counted(items, total, row, of)` is for a total the store already knows. `Bounded::last(..)`, `Bounded::sampled(..)` likewise. `Bounded::complete(value)` has no cut. Several cuts on one value: `.and(cut)`, where the cut comes from the public `Cut::counted(row, of, shown, total, selection) -> Option<Cut>` (or `Cut::first`, `Cut::page`, `Cut::maybe`), which answers `None` when nothing was left out.
+- **Many lists, few cuts.** One cut per list, and a list inside a list is named by index (`groups[3].ids`). Above 32 cuts on one value, the constructors keep the first 32 and add one aggregate cut, `of` the outer list (`groups`), counting the further lists that were cut, so `cuts` is itself bounded.
 - **Limits set by the request still produce a cut.** `heapDiff` with `limit: 500` and `total_rows: 1,204` answers a `Cut` with `First { from: offset }` and `Next::Page`; a page is a cut with a known total and a way to the rest. "The caller asked for 500" is not a reason to stay silent, as the person never typed the 500 (instances 6 to 8). The row is `kind = cut`, `value = by-request` in the registry.
 - Fixed limits come from the registry (section 3), not from a loose number at the call site: the constructors take a registry row, not a number.
 
-**Each constructor has a test** that asserts every field it sets: `limit`, `of`, `from`, `shown`, `total`, `selection`, `next`. A proptest over any lengths checks that no constructor yields a cut with nothing left out, that `TryFrom<CutWire>` refuses every wire value a constructor could not have made (`shown >= n`, `from + shown > n`, a bad `FieldPath`), and that round trips are identical.
+**Each constructor has a test** that asserts every field it sets: `limit`, `of`, `from`, `shown`, `total`, `selection`, `next`. A proptest over any lengths checks that no constructor yields a cut with nothing left out, that `TryFrom<CutWire>` refuses every wire value a constructor could not have made, and that round trips are identical.
+
+**What each guard covers.** `TryFrom<CutWire>` checks what a value can show on its own: the arithmetic (`shown < n`, `from + shown <= n`, an `Unknown` with no `n`), the `FieldPath` syntax and the 32-cut bound. It cannot know the registry or the reply, so these are left to the bounded-check (section 5, part 2), at build time: that `limit` is a registry row of `kind = cut` or `both`; that `next` is what the row derives (section 3); that the `Selection` is one the row declares; that `of` names a collection field of the reply type. That `shown` equals the length of the list it names is checked by each command's `limit_case!` (part 4) at the edge, not for every value. In TypeScript, `boundedSlice` makes a cut in the UI itself and is outside the constructors-only guarantee: it is one function with its own spec, and ESLint (part 5) keeps every other `.slice(0, n)` out.
 
 **One `Bounded`, not one per list.** A reply with two lists (`Butterfly`, `traces`) has one `Bounded<Reply>` with two cuts, told apart by `of`. So the same type covers *a list was cut* and *the analysis saw only part of its input*: both are "shown M of N somethings", and the words come from the limit. `Coverage { matched, analysed }` becomes a cut with limit `analysis.events`, `of: ""`, `shown: analysed`, `total: Exact(matched)`, `selection: First { from: 0 }`, which matches what the engine does: "above 2 million matching events it analyses the oldest 2 million" (CHANGELOG line of `adaa192c0` on `fix/debrief-ai-coverage-facet-search`) [S].
+
+**Wrapped, not flattened.** A bounded reply is `Bounded<T>` on the wire, `{ result, cuts }`, for every command, including those whose `T` is a page struct. Flattening `cuts` into each `T` would need a field in every reply type and lose the one generated shape the UI checks against. So each migrated command's UI reads `.result`; that is the cost B6 carries (below), and `Analyzed` already has this shape.
 
 **Paging is a cut too, with `next: Page`.** A page has a known total and a way to reach the rest, so the note reads "500 of 1,204" with a "Show more" button, and the views listed below stop hiding it. `queryPage` (the events grid) answers its cut like any page; the grid shows it through its scrollbar instead of the note (section 5, part 5), so callers that do not read `cuts` need no change.
 
@@ -120,9 +132,19 @@ Rules the constructors enforce, so the illegal states cannot be built:
 | 0019, check 1 | `limit_case!` asserts `LimitExceeded` with id, value, Setting path and text | `limit_case!` also has a cut form: data at the limit gives no cut; one over gives a `Cut` with the exact `limit`, `of`, `shown`, `total`, `selection` | The same harness, one line per limit, as 0019 intends. |
 | 0019, check 2 | Constants used "in a comparison that returns an error, truncates or kills" and not in the registry warn | The same scan (`conformance/src/limits.mjs`, plan 1.4) also counts `.take(`, `.truncate(`, `.slice(0,` and a SQL `LIMIT` built from a constant as cutting | Most silent cuts here are `.truncate` and `.take`. |
 
-If this ADR is accepted, ADRs 0018 and 0019 each get a one-line amendment pointing here. 0018's typed arguments (`Limit`, `Page`, `Buckets`) stay as they are, as do its Settings and virtualization decisions. This ADR adds no Settings.
+**In the same change as acceptance** (package B0), so no plan or family ADR keeps building the old shape:
+
+- Plan package 2.5 (`docs/plans/debrief-1-2.md:131`): `Truncated` in `paddock-view` and the `boundedBy` conformance check are struck; it points here for `Cut` and the check, and keeps what "What remains of plan package 2.5" lists.
+- Plan package 4.2 (`:168`): "`Limit`/`Page` and `Truncated`" becomes "`Limit`/`Page`, replies in `Bounded` (ADR 0065)", and its per-method test becomes part 4 of the check.
+- Family ADR 0018: one line, "`Truncated` is `paddock_limits::Cut` (Debrief ADR 0065); the `boundedBy` check is Debrief's `xtask bounded-check` until a second app adopts it, then `./dev`".
+- Family ADR 0019: one line, "a cut result carries a `Cut` in `paddock-limits` (Debrief ADR 0065); the registry rows gain `kind` and their `Selection`s".
+
+These change family ADRs, so they are the user's decision (D5). 0018's typed arguments (`Limit`, `Page`, `Buckets`) stay as they are, as do its Settings and virtualization decisions. This ADR adds no Settings.
 
 ### 3. The registry
+
+B3 needs Debrief to build against the in-tree shared crates, which is plan package 0.4 ("Debrief consumes in-tree shared code": path dependencies to `crates/`), as well as 1.4.
+
 
 The registry **type**, `LimitId` and `limit_case!` come from plan package 1.4 (`crates/paddock-limits/`, `crates/paddock-testkit/src/limits.rs`). Debrief's **rows** live in `crates/debrief-core/src/limits.rs`, the file plan package 3.6 creates for ADR 0019's rows 1-50: one registry per app, as 0019 decision 7 says. This ADR adds the rows that can cut a reply (`kind = cut` or `both`) with their message keys. If B3 runs before 3.6, it creates the file with only the cut rows and 3.6 adds the stop rows; either order, one file.
 
@@ -185,7 +207,7 @@ Rule 42 says that what is generic or needed elsewhere is built in Paddock, and r
 
 **Nothing shared lands before the Dyno tag** (rule 1). The release-scope plan lists "`paddock-limits` core" under "now, on a branch; lands after T", and 2.5 under "wait for T" (`docs/plans/debrief-1-2-release-scope.md:221-222`, on `docs/debrief-1-2-release-scope`), with T about 2026-11-07. So B1 is written on 1.4's branch and lands with or after it; B3 and later wait for 1.4 on `main` or on `debrief/1.2-int`, provided that branch reaches `main` only afterwards. Each app's registry rows and messages are its own. `xtask bounded-check` starts in Debrief and moves to `./dev` when a second app adopts it (rule of three).
 
-**ADR 0067 needs one matching edit** if this is accepted (0067 is not edited here). Its line 194, the `folder.scan_entries` bullet, should read: a row (`kind = cut`, Setting) in Debrief's limit registry `debrief_core::limits` on plan 1.4's `paddock-limits` registry type; the listing is `paddock_limits::Bounded::first(.., row, of: "entries")`; above the limit the `Cut` says `of`, `shown`, `Total::AtLeast` and `First { from: 0 }`, and `next` comes from the row (`RaiseSetting` once the Setting's field exists, so the note offers "Raise it…" beside the dialog's own "open a subfolder", and `Narrow` until then); the words are the ICU message for `folder.scan_entries` × `First`.
+**ADR 0067 needs two matching edits** if this is accepted (0067 is not edited here). First, its line 194, the `folder.scan_entries` bullet, should read: a row (`kind = cut`, Setting) in Debrief's limit registry `debrief_core::limits` on plan 1.4's `paddock-limits` registry type; the listing is `paddock_limits::Bounded::first(.., row, of: "entries")`; above the limit the `Cut` says `of`, `shown`, `Total::AtLeast` and `First { from: 0 }`, and `next` comes from the row (`RaiseSetting` once the Setting's field exists, so the note offers "Raise it…" beside the dialog's own "open a subfolder", and `Narrow` until then); the words are the ICU message for `folder.scan_entries` × `First`. Second, `folder_scan_rows` (0067 r5 line 265, and its fit section, line 521) uses `Bounded::page(rows, offset, count, row, of: "rows")`, which gives `First { from: offset }` and `Next::Page`, not `Bounded::counted`; the row is a `by-request` cut row, and its `BOUNDED_SURFACES` entry is `scrollbar`, as 0067 already says. The reference to `paddock-bounded` in its line 521 becomes `paddock-limits`.
 
 ### 7. Fit with ADR 0063
 
@@ -212,7 +234,7 @@ Nothing here depends on 0063 landing, and neither blocks the other [J]:
 | 9 | Butterfly, `profiling/butterfly/butterfly-view.ts:103` | 50 callers and 50 callees | No | Two cuts from `ops/butterfly.rs:89-90`, `of: "callers"` and `"callees"` | Exact, as it ranks |
 | 10 | Traces, `analysis/moment.rs:296` | Top 200, reply says complete | No | `trace_summaries` returns a cut, both engines | Exact |
 | 11 | Requests, `analysis/trace.rs:263` | Top 500, reply says complete | No | Same | Exact |
-| 12 | Fields panel, `crates/debrief-store-duck/src/stats.rs:178` | Keys beyond 512 per segment dropped at write | No, and lost by then | New `segments.fields_dropped` count, with the store's `FORMAT_VERSION` bump (no migration: section "Answers"); `StoreFields` gets both cuts | `AtLeast` when any segment dropped |
+| 12 | Fields panel, `crates/debrief-store-duck/src/stats.rs:178` | Keys beyond 512 per segment dropped at write | No, and lost by then | New `segments.fields_dropped` count, with its own `FORMAT_VERSION` bump (no migration: section "Answers"); `StoreFields` gets both cuts | `Unknown` (`Cut::maybe`) when any segment dropped, since another segment may still list the key |
 | 13 | AI tools, `crates/debrief-ai/src/assistant/tools.rs:598`, `:613`, `:621`, `:636` | Drop coverage | Dropped | Fix branch first, then `cuts_json` in every tool (section 4) | As the source |
 | 14 | Survey, `survey/sample.rs:115` | First 10,000 source ids of a group | The group knows | Second cut beside `truncated`; `First { from: 0 }`. Could spread over the group instead: not measured. Largest group in the sample bundle is 1,211 files, so this is not hit there | Exact |
 
@@ -234,17 +256,18 @@ Rough days; one agent; red tests first in each.
 
 | # | Package | Owns | Days | Waits for |
 |---|---|---|---|---|
-| B1 | `Bounded`, `Cut`, `Total`, `Selection`, `SortKey`, `FieldPath`, `Next` in `paddock-limits`; constructors with a test each; `TryFrom<CutWire>`; ts-rs; proptests; `limit_case!`'s cut form | `crates/paddock-limits/src/bounded.rs`, `crates/paddock-testkit/src/limits.rs` (cut form) | 1.5 | 1.4's crate (same branch, or after it); lands after the Dyno tag |
+| B0 | At acceptance: plan 2.5 and 4.2 amended, one line each in family ADRs 0018 and 0019 (D5) | `docs/plans/debrief-1-2.md`, `docs/adr/0018-*`, `docs/adr/0019-*` | 0.5 | acceptance and D5 |
+| B1 | `Bounded`, `Cut`, `Total`, `Selection`, `SortKey`, `FieldPath` with indices, `Next` in `paddock-limits`; constructors and `Cut::*` with a test each; the 32-cut aggregate; `TryFrom<CutWire>`; ts-rs with `number` counts; proptests; `limit_case!`'s cut form | `crates/paddock-limits/src/bounded.rs`, `crates/paddock-testkit/src/limits.rs` (cut form) | 2 | 1.4's crate (same branch, or after it); lands after the Dyno tag |
 | B2 | `limit-note`, `formatCut`, the ICU messages and the required-keys check, gallery entry; Raise it through `LimitNotice` | `ui/projects/paddock-ui/limit-note` | 1.5 | B1; 2.3 for Raise it (until then the note shows the other actions) |
-| B3 | Debrief's cut rows, `limits.ts`, `boundedSlice`, one `limit_case!` per cut row, the row-to-`next` rule, Setting paths resolved against the schema | `crates/debrief-core/src/limits.rs` (with 3.6), `core/generated` | 1 | B1; 1.4 on `main` or `debrief/1.2-int` |
-| B4 | `Analyzed` and both coverage types onto `Bounded`, both engines, mocks, `AsyncResource`; `cuts_json` in every AI tool, replacing `coverage_json`, `with_coverage`, the prompt sentence and the two tests of the fix branch | `ports/dto.rs`, `store-duck/analysis.rs`, `analysis/*`, `home/*`, `crates/debrief-ai/src/assistant` | 3 | B2, B3, the AI fix branch |
-| B5 | Engine instances 3, 5, 9, 10, 11, 12, 14, the `FORMAT_VERSION` bump for 12 | `skew`, `analysis`, `profile/ops`, `store-duck/stats.rs`, `store-duck/schema.rs`, `survey` | 2 | B4 (not 4.2: `RaiseSetting` follows the rows, section 3) |
-| B6 | UI instances 1, 2, 4 to 9, and `BOUNDED_SURFACES` | `ai/chat`, `grid`, `dumps`, `profiling` | 1.5 | B4 |
+| B3 | Debrief's cut rows, `limits.ts`, `boundedSlice`, one `limit_case!` per cut row, the row-to-`next` rule, Setting paths resolved against the schema | `crates/debrief-core/src/limits.rs` (with 3.6), `core/generated` | 1 | B1; 1.4 and 0.4 on `main` or `debrief/1.2-int` |
+| B4 | `Analyzed` and both coverage types onto `Bounded`, both engines, mocks, `AsyncResource`; the five producers of `Coverage.limits` strings become cuts (`analysis/outliers.rs:291`, `:358`; `crates/debrief-store-duck/src/analysis.rs:410`, `:777`, `:932`); `cuts_json` in every AI tool, replacing `coverage_json`, `with_coverage`, the prompt sentence and the two tests of the fix branch | `ports/dto.rs`, `store-duck/analysis.rs`, `analysis/*`, `home/*`, `crates/debrief-ai/src/assistant` | 3 | B2, B3, the AI fix branch |
+| B5 | Engine instances 3, 5, 9, 10, 11, 12, 14, the `FORMAT_VERSION` bump for 12 | `skew`, `analysis`, `profile/ops`, `store-duck/stats.rs`, `store-duck/schema.rs`, `survey` | 2 | B4 (not 4.2: `RaiseSetting` follows the rows, section 3). Instance 3 (`skew/store.rs`) lands before ADR 0066's Z5 starts, which rewrites `skew` |
+| B6 | UI instances 1, 2, 4 to 9, and `BOUNDED_SURFACES`; every view of a migrated command reads `.result` (about 20 services and their specs and mocks [J]) | `ai/chat`, `grid`, `dumps`, `profiling`, `core/mock` | 2.5 | B4 |
 | B7 | `xtask bounded-check`: a `syn` walker over two macro tables and both command attributes, through generics and re-exports, with the `of` check; the ESLint rule; seeded exempt list; CI line (warnings) | `xtask`, `apps/debrief/bounded-exempt.toml`, `eslint/`, integrating agent for `.gitea` | 5 | B3 |
 | B7b | 1.4's `conformance/src/limits.mjs` extended to the cut sites of section 2, its waiver list seeded for Debrief | `conformance/src/limits.mjs` | 1 | 1.4, B3 |
 | B8 | The fields list above, the check's lists reasoned, warnings become errors | across Debrief | 3 | B5, B6, B7, B7b |
 
-**About 19.5 days raw.** It takes over part of 2.5 (`Truncated` and the `boundedBy` check, about 1.5 of its 2.5 days) and the marker half of 4.2 (about 1 of its 3), so the net addition is about 17 days [J]. B7 was 2.5 days in revision 1, which priced a scan by type name; walking generics and re-exports through two macro tables and two command attributes is the larger part of the work [J]. The "per-method test" of 4.2 is part 4 of the check. If the scope has to shrink, B1 to B6 fix every named instance in about 10.5 days, without the check; then the next limit can again be silent, which is what ER-21 asks to prevent, so that is not the recommendation.
+**About 21.5 days raw.** It takes over part of 2.5 (`Truncated` and the `boundedBy` check, about 1.5 of its 2.5 days) and the marker half of 4.2 (about 1 of its 3), so the net addition is about 19 days [J]. Revision 2 said 19.5: B0 (0.5), indexed paths and the aggregate in B1 (0.5) and the `.result` reads in B6 (1) were not counted. B7 was 2.5 days in revision 1, which priced a scan by type name; walking generics and re-exports through two macro tables and two command attributes is the larger part of the work [J]. The "per-method test" of 4.2 is part 4 of the check. If the scope has to shrink, B0 to B6 fix every named instance in about 13 days, without the check; then the next limit can again be silent, which is what ER-21 asks to prevent, so that is not the recommendation.
 
 ## Parallelism and cost
 
@@ -257,7 +280,7 @@ No long operation is added. **Cheaper is the design:** `first` reads one extra i
 ## Consequences
 
 - A person can always tell a list is partial, by how much, from where and in what order, and what to do about it.
-- About 25 ad-hoc fields and two coverage types go away. A `WIRE_VERSION` bump, one `FORMAT_VERSION` bump and a change to the mocks, once. A store from before the bump is refused with "open its log files again"; no migration.
+- About 25 ad-hoc fields and two coverage types go away. A `WIRE_VERSION` bump, one `FORMAT_VERSION` bump of its own and a change to the mocks, once. A store from before the bump is refused with "open its log files again"; no migration.
 - `paddock-limits` holds both halves of "a limit was hit", so 0019's registry, harness and scan are built once.
 - `Analyzed.result` keeps its name, so views change little; `coverage` readers change to `cuts`.
 - A reply that is whole costs an empty array.
@@ -275,6 +298,7 @@ No long operation is added. **Cheaper is the design:** `first` reads one extra i
 ## Decisions for the user
 
 - **D1. Home of the types.** D: in `paddock-limits` with plan 1.4, after the Dyno tag (recommended: one crate, key, registry and harness for every limit). B: inside Debrief with a registered copy (rule 55), moved later, only if 1.4 slips.
-- **D2. Scope for 1.2.** All packages, about 19.5 days raw or 17 net of 2.5 and 4.2 (recommended, since the check is the point). Or B1 to B6 only, about 10.5 days.
+- **D2. Scope for 1.2.** All packages, about 21.5 days raw or 19 net of 2.5 and 4.2 (recommended, since the check is the point). Or B0 to B6 only, about 13 days.
 - **D3. Show more on views that have none.** Dumps, UMDH and heap lists could get paged Show more (in B6, recommended: the dump, UMDH-growth and heap requests already take `offset`, `crates/debrief-profile/src/api.rs:951` onwards [S]), or only the note, with the rest reachable by filter.
 - **D4. Instance 14.** Keep the cut with a note (recommended, since 10,000 files in one log group has not been seen) or spread sampling across the group.
+- **D5. The family change.** At acceptance, family ADR 0018's `Truncated` becomes `paddock_limits::Cut` and its family-wide `boundedBy` check becomes Debrief's `xtask bounded-check` until a second app adopts it (then `./dev`); ADR 0019 gains the cut rows. Recommended: yes, with plan 2.5 and 4.2 amended in the same change (B0). The alternative is to keep 0018's words and build both, which is the copy rule 55 forbids.
