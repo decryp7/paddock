@@ -597,6 +597,32 @@ mod tests {
     }
 
     #[test]
+    fn the_apps_pruning_keeps_the_store_workers_days() {
+        let dir = crate::test_support::TempDir::new("logging-worker-days");
+        for d in 1..=10 {
+            std::fs::write(dir.0.join(format!("debrief-store.2020-01-{d:02}.log")), "{}\n").unwrap();
+        }
+        for d in 1..=5 {
+            std::fs::write(dir.0.join(format!("debrief.2020-01-{d:02}.log")), "{}\n").unwrap();
+        }
+        let limits = LogLimits {
+            keep_files: 2,
+            ..LogLimits::default()
+        };
+        let sink = FileSink::new(&dir.0, &limits).unwrap();
+        sink.write_line(log::Level::Info, "{}");
+        let count = |prefix: &str| {
+            std::fs::read_dir(&dir.0)
+                .unwrap()
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+                .count()
+        };
+        assert_eq!(count("debrief-store."), 10, "the worker's own days are not the app's to prune");
+        assert_eq!(count("debrief."), 3, "today and the newest two older days of the app");
+    }
+
+    #[test]
     fn daily_files_with_a_size_limit_errors_always_pass() {
         let dir = crate::test_support::TempDir::new("logging-files");
         let limits = LogLimits {

@@ -1071,6 +1071,36 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_store_worker_log_line_reaches_the_bundle() {
+        let d = temp("worker-log");
+        let today = crate::logging::active_log_file(&d);
+        let day = today.file_name().unwrap().to_string_lossy().replace("debrief.", "").replace(".log", "");
+        let line = format!("{{\"@m\":\"{}\"}}\n", "x".repeat(1000));
+        std::fs::write(&today, line.repeat((LOG_WINDOW as usize * 5 / 2 / line.len()) + 100)).unwrap();
+        std::fs::write(d.join("debrief.2000-01-02.log"), "older app day\n").unwrap();
+        let store = format!("debrief-store.{day}.log");
+        std::fs::write(
+            d.join(&store),
+            "{\"@t\":\"2026-11-06T08:00:00Z\",\"@l\":\"Warning\",\"@m\":\"full-text indexing failed\",\"EventId\":\"store.fts.failed\",\"Process\":\"store\"}\n",
+        )
+        .unwrap();
+        let inputs = ReportInputs {
+            log_dir: Some(d.clone()),
+            ..ReportInputs::empty()
+        };
+        let files = all_files(&inputs, "");
+        let names: Vec<&str> = files.iter().map(|f| f.name.as_str()).collect();
+        let worker = files.iter().find(|f| f.name == format!("logs/{store}")).unwrap_or_else(|| panic!("{names:?}"));
+        assert!(String::from_utf8_lossy(&worker.data).contains("store.fts.failed"));
+        assert!(worker.summary.contains("Store worker"), "{}", worker.summary);
+        let app = format!("logs/{}", today.file_name().unwrap().to_string_lossy());
+        assert!(names.contains(&app.as_str()), "the app's newest file stays: {names:?}");
+        let activity = files.iter().find(|f| f.name == "logs/activity.log").unwrap();
+        assert!(!String::from_utf8_lossy(&activity.data).contains("store.fts"), "the activity file reads the app's files only");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
     fn the_activity_project_opens_the_logs_filtered() {
         let d = temp("project");
         let logs = d.join("logs");
