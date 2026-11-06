@@ -49,7 +49,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
       <dy-async [loaded]="!!draft()" [error]="store.error()" what="settings" [rows]="4" (retry)="store.load()">
         @if (draft(); as d) {
           <div class="stack">
-            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads and changes nothing on your computer.</p>
+            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno watches this computer. Its power actions, such as keep awake, sleep and Wake-on-LAN, run only when you set them up.</p>
 
             <section class="card" aria-label="Start-up">
               <h2>Start-up</h2>

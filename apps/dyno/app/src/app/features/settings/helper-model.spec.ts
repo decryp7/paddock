@@ -27,7 +27,7 @@ describe('helperFace', () => {
   });
 
   it('says what the helper shows, that it only reads, names each running action and whether Cancel works at the prompt', () => {
-    expect(HELPER_READS_ONLY).toMatch(/only reads/);
+    expect(HELPER_READS_ONLY).toMatch(/reads system details.*only when you ask/);
     for (const a of ['turnOn', 'repair', 'update', 'turnOff'] as const) expect(helperActionSentence(a), a).not.toMatch(/not turned on/);
     expect(['turnOn', 'repair', 'update', 'turnOff'].map((a) => helperActionBadge(a as never))).toEqual(['Turning on', 'Repairing', 'Updating', 'Turning off']);
     expect(TURN_OFF_LABEL).toBe('Turn off administrator readings');

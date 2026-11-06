@@ -32,7 +32,7 @@ export function helperFace(state: HelperState): HelperFace {
 }
 
 /** The assurance under the list of readings. */
-export const HELPER_READS_ONLY = 'It only reads. It changes nothing on this computer except installing or removing itself.';
+export const HELPER_READS_ONLY = 'It reads system details that need administrator rights. It installs or removes only itself, and installs the disk-health tool only when you ask.';
 
 /** The word on the badge while an action runs ("Turning on"). */
 export function helperActionBadge(action: HelperAction): string {

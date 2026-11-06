@@ -70,7 +70,7 @@ pub fn spec() -> ServiceSpec {
     ServiceSpec::builder(LABEL, SERVICE_NAME, PROGRAM)
         .unit(PROGRAM)
         .display_name("Dyno helper")
-        .description("Answers Dyno's read-only questions that need administrator rights. It changes nothing on this computer.")
+        .description("Answers Dyno's questions that need administrator rights, such as reading system details. It installs the disk-health tool only when you ask.")
         .args(["serve"])
         .kind(Kind::SystemService)
         .restart(Restart::OnFailure)

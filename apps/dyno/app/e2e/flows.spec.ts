@@ -233,7 +233,7 @@ test.describe('settings', () => {
   test('Settings is the shell’s window: Dyno’s page saves, the appearance is the shell’s', async ({ page }) => {
     await openSettings(page);
     const dialog = page.getByRole('dialog');
-    await expect(dialog.getByText(/Dyno only reads/).first()).toBeVisible();
+    await expect(dialog.getByText(/Dyno watches this computer/).first()).toBeVisible();
     await expect(dialog.getByRole('radio', { name: 'Dark' })).toHaveCount(0);
     await dialog.getByRole('switch', { name: 'Start Dyno at login' }).click();
     await dialog.getByRole('button', { name: 'Save changes' }).click();

@@ -26,7 +26,7 @@ type View = 'issues' | 'unusual';
       <header class="page-head">
         <div class="titles">
           <h1>Issues</h1>
-          <p>Crashes and other problems your system logged, and programs that are new here. Dyno only reads; it changes nothing.</p>
+          <p>Crashes and other problems your system logged, and programs that are new here. This page only reads.</p>
         </div>
         @if (view() === 'issues') {
           <button type="button" matButton="text" [disabled]="issues.exporting() || !issues.overview()" (click)="issues.exportForDebrief()">

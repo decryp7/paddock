@@ -27,7 +27,7 @@ import { ExtrasStore } from '../../state/extras.store';
       <header class="page-head">
         <div class="titles">
           <h1>Extras</h1>
-          <p>More ways to look at this computer. Dyno only reads; it changes nothing.</p>
+          <p>More ways to look at this computer. This page only reads.</p>
         </div>
       </header>
 

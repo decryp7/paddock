@@ -23,7 +23,7 @@ import { CAUSE_LABEL, CAUSE_TONE, confidenceText, episodeSeconds, verdictTone } 
       <header class="page-head">
         <div class="titles">
           <h1>Throttling</h1>
-          <p>Whether the CPU is running slower than it should, and why. Dyno only reads; it changes nothing.</p>
+          <p>Whether the CPU is running slower than it should, and why. This page only reads.</p>
         </div>
       </header>
 
