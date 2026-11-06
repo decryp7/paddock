@@ -685,9 +685,9 @@ export type PopoverWidget = "activeAlarms" | { "diskSpace": {
 /**
  * Which volume.
  */
-volume: VolumeChoice, } } | "cpuMemory" | "network" | "backupHealth" | "lastIssue" | "pinnedCounters" | "topApps";
+volume: VolumeChoice, } } | "cpuMemory" | "network" | "lastIssue" | "pinnedCounters" | "topApps";
 
-export type PopoverKind = "activeAlarms" | "diskSpace" | "cpuMemory" | "network" | "backupHealth" | "lastIssue" | "pinnedCounters" | "topApps";
+export type PopoverKind = "activeAlarms" | "diskSpace" | "cpuMemory" | "network" | "lastIssue" | "pinnedCounters" | "topApps";
 
 export type Thresholds = { 
 /**
@@ -802,13 +802,13 @@ export type ValueTone = "ok" | "warn" | "bad";
 
 export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "count" | "milliseconds" | "seconds" | "number";
 
-export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "backups" | "counters" | "processes" | "power";
+export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "counters" | "processes" | "power";
 
 export type SettingsSection = "popupWidgets" | "general";
 
 export type Navigate = { "page": Page } | { "settings": SettingsSection };
 
-export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "setUpBackupChecks" | "startBackupCheck" | "restartAgent" | "customizeWidgets" | "openSettings";
+export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "restartAgent" | "customizeWidgets" | "openSettings";
 
 export type Level = "info" | "warning" | "critical";
 
@@ -900,30 +900,6 @@ name: string,
  */
 cpuPercent: number | null, };
 
-export type BackupVerdict = "healthy" | "stale" | "noBackupYet";
-
-export type BackupValue = { 
-/**
- * The tool's name ("Time Machine").
- */
-name: string, 
-/**
- * Its verdict.
- */
-state: BackupVerdict, 
-/**
- * When the last backup finished.
- */
-lastBackup: number | null, 
-/**
- * One plain sentence.
- */
-summary: string, 
-/**
- * How many tools are set up.
- */
-tools: number, };
-
 export type IssueValue = { 
 /**
  * One line.
@@ -1010,7 +986,7 @@ rxMinute: Array<number>,
 /**
  * Upload over the last minute, oldest first.
  */
-txMinute: Array<number>, } } | { "backupHealth": BackupValue } | { "lastIssue": IssueValue } | { "pinnedCounters": { 
+txMinute: Array<number>, } } | { "lastIssue": IssueValue } | { "pinnedCounters": { 
 /**
  * The first rows.
  */

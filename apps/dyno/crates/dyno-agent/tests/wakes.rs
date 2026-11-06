@@ -253,7 +253,7 @@ fn a_due_schedule_acts_stays_awake_wakes_the_computers_runs_its_job_and_arms_the
     .unwrap();
     let mut i = input("Morning");
     i.wake_devices = vec![1];
-    i.job = Some(DynoJob::BackupCheck);
+    i.job = Some(DynoJob::SoftwareInventory);
     let v = set(&c, i).unwrap();
     let due = v.rows[0].entry.next_at.unwrap();
     let shared = h.shared();

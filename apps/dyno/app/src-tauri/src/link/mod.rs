@@ -55,7 +55,7 @@ use std::time::Duration;
 /// Every request fails after this long.
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long the one remaining slow request may take: saving the inventory report (it reads the software list, which runs the
-/// package tools). Everything else that can run long (finding files, reading the system logs, checking the backups, hashing a
+/// package tools). Everything else that can run long (finding files, reading the system logs, hashing a
 /// file, the sleep, boot, app-usage and software reads) is a job: starting it answers at once and it reports progress and
 /// accepts Cancel, so no request waits for it.
 pub const EXTRAS_TIMEOUT: Duration = Duration::from_secs(120);

@@ -36,8 +36,6 @@ pub enum Repeat {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DynoJob {
-    /// Check the backup tools (as the Backup health page's Check now).
-    BackupCheck,
     /// List the installed software.
     SoftwareInventory,
 }

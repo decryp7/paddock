@@ -14,7 +14,6 @@ use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{ErrorCode, Message, Reply, Request};
 use dyno_core::time::Timestamp;
 use dyno_platform::fake::{process, Fake};
-use dyno_platform::runner::ToolRunner;
 use paddock_ipc::{BodyOptions, BodyPeer};
 use paddock_jobs::wire::{WireSnapshot, WireState};
 use std::sync::{Arc, Condvar, Mutex};
@@ -72,23 +71,6 @@ impl IssueSource for Slow {
     fn read(&self, _since: Timestamp, _until: Timestamp) -> Result<Vec<Issue>, PlatformError> {
         self.gate.pass();
         Ok(self.issues.clone())
-    }
-}
-
-struct SlowTool(Arc<Gate>);
-
-impl ToolRunner for SlowTool {
-    fn run_tool(&self, tool: &dyno_platform::runner::Tool, _timeout: Duration) -> Result<dyno_platform::runner::ToolOutput, PlatformError> {
-        let (_program, _args) = (tool.program.as_str(), &tool.args);
-        let answer: Result<String, PlatformError> = {
-            self.0.pass();
-            Err(PlatformError::Unsupported("scripted".into()))
-        };
-        answer.map(|stdout| dyno_platform::runner::ToolOutput {
-            ok: true,
-            stdout,
-            error: String::new(),
-        })
     }
 }
 
@@ -288,35 +270,6 @@ fn cancelling_a_log_read_keeps_what_was_there_and_the_next_read_works() {
         panic!("issues")
     };
     assert_eq!(o.total, 1);
-}
-
-#[test]
-fn cancelling_a_backup_check_between_tools_keeps_the_report_and_clears_checking() {
-    let gate = Arc::new(Gate::default());
-    let h = Harness::start(vec![]);
-    let s = h.shared();
-    s.extras.use_os("macos");
-    s.extras.use_backup_tools(Arc::new(SlowTool(gate.clone())));
-    let peer = h.client();
-    let job = start(&peer, JobSpec::RefreshBackup).unwrap();
-    gate.wait_for_callers(1);
-    let WireState::Running(Some(p)) = status(&peer, job.id).state else {
-        panic!("running")
-    };
-    assert_eq!(p.id, "tools");
-    assert_eq!(p.done, 0);
-    assert!(p.total.is_some_and(|t| t >= 2), "more than one tool is checked: {p:?}");
-    ask(&peer, Request::CancelJob { id: job.id }).unwrap();
-    gate.open();
-    let end = wait_final(&peer, job.id);
-    assert!(matches!(end.state, WireState::Cancelled(_)), "{:?}", end.state);
-    assert!(s.extras.backup_report().checked_at.is_none(), "the report was not replaced");
-    assert!(!s.extras.backup_report().checking, "checking came down");
-    // A later check runs to the end.
-    let JobOutput::Backup(r) = run_job(&peer, JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
-        panic!("backup")
-    };
-    assert!(r.checked_at.is_some() && !r.checking);
 }
 
 #[test]
@@ -562,37 +515,6 @@ fn a_running_read_stays_running_until_its_results_are_stored() {
 }
 
 #[test]
-fn a_backup_check_waits_for_the_one_that_is_running_and_cancel_wakes_the_wait() {
-    let gate = Arc::new(Gate::default());
-    let h = Harness::start(vec![]);
-    let s = h.shared();
-    s.extras.use_os("macos");
-    s.extras.use_backup_tools(Arc::new(SlowTool(gate.clone())));
-    let scheduled = {
-        let s = s.clone();
-        std::thread::spawn(move || dyno_agent::extras::backup_check::check_now(&s))
-    };
-    gate.wait_for_callers(1);
-    let peer = h.client();
-    let job = start(&peer, JobSpec::RefreshBackup).unwrap();
-    for _ in 0..400 {
-        if matches!(&status(&peer, job.id).state, WireState::Running(Some(p)) if p.id == "waiting") {
-            break;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    let WireState::Running(Some(p)) = status(&peer, job.id).state else {
-        panic!("running")
-    };
-    assert_eq!(p.id, "waiting");
-    ask(&peer, Request::CancelJob { id: job.id }).unwrap();
-    assert!(matches!(wait_final(&peer, job.id).state, WireState::Cancelled(_)));
-    gate.open();
-    scheduled.join().unwrap();
-    assert!(!s.extras.backup_report().checking);
-}
-
-#[test]
 fn every_status_of_a_job_is_pushed_to_a_connected_app_in_order_and_the_end_is_never_dropped() {
     let h = Harness::start(vec![]);
     let d = dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).unwrap();
@@ -684,28 +606,6 @@ fn a_rescan_cancelled_before_it_waits_for_the_running_read_returns_cancelled_ins
     assert!(matches!(out, Err(paddock_jobs::JobError::Cancelled(_))), "{out:?}");
     gate.open();
     assert!(scheduled.join().unwrap().unwrap());
-}
-
-#[test]
-fn a_backup_check_cancelled_before_it_waits_for_the_running_one_returns_cancelled_instead_of_blocking_on_itself() {
-    let gate = Arc::new(Gate::default());
-    let h = Harness::start(vec![]);
-    let s = h.shared();
-    s.extras.use_os("macos");
-    s.extras.use_backup_tools(Arc::new(SlowTool(gate.clone())));
-    let scheduled = {
-        let s = s.clone();
-        std::thread::spawn(move || dyno_agent::extras::backup_check::check_now(&s))
-    };
-    gate.wait_for_callers(1);
-    let s2 = s.clone();
-    let out = within("a cancelled backup check", move || {
-        dyno_agent::extras::backup_check::refresh(&s2, &cancelled_job())
-    });
-    assert!(matches!(out, Err(paddock_jobs::JobError::Cancelled(_))), "{out:?}");
-    gate.open();
-    scheduled.join().unwrap();
-    assert!(!s.extras.backup_report().checking, "checking came down");
 }
 
 #[test]

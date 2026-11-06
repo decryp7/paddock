@@ -2,22 +2,18 @@
 
 //! Local days end to end: the agent runs in a zone eight hours from UTC (the fake platform's zone port), and today's
 //! issue score, the history's crash days, quiet hours, "until tomorrow", maintenance windows, learned baselines and a
-//! backup's local time all follow that zone, never the UTC date. Each test fails when the agent reads UTC.
+//! the local time all follow that zone, never the UTC date. Each test fails when the agent reads UTC.
 
-use dyno_agent::cli::{ask, connect, run_job};
+use dyno_agent::cli::{ask, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::alarms::{ChangeKind, Shelf, ShelveFor};
-use dyno_core::backup::BackupTool;
 use dyno_core::extras::maintenance::{Weekday, Window};
 use dyno_core::history::{HistoryPoint, HistoryRange, Tier};
-use dyno_core::issues::{civil_from_days, IssuesQuery};
-use dyno_core::jobs::{JobOutput, JobSpec};
-use dyno_core::ports::PlatformError;
+use dyno_core::issues::IssuesQuery;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
-use dyno_core::time::{day_start, local_minute, next_day_start, to_local, FixedZone, Timestamp, DAY, HOUR, MINUTE, SECOND};
+use dyno_core::time::{day_start, local_minute, next_day_start, to_local, FixedZone, Timestamp, DAY, HOUR, MINUTE};
 use dyno_platform::fake::{process, quiet_sample, Fake};
-use dyno_platform::runner::ToolRunner;
 use paddock_ipc::BodyPeer;
 use std::sync::Arc;
 use std::time::Duration;
@@ -282,51 +278,6 @@ fn baselines_learn_and_judge_by_the_local_hour() {
         format!("Usual for {weekday} {part}")
     };
     assert!([words(t), words(after)].contains(&cpu.judgement.phrase), "{cpu:?}");
-}
-
-/// Answers `tmutil` with a destination and the given latest backup.
-struct TimeMachine(String);
-
-impl ToolRunner for TimeMachine {
-    fn run_tool(&self, tool: &dyno_platform::runner::Tool, _timeout: Duration) -> Result<dyno_platform::runner::ToolOutput, PlatformError> {
-        let (_program, args) = (tool.program.as_str(), &tool.args);
-        let answer: Result<String, PlatformError> = {
-            match args.first().map(String::as_str) {
-                Some("destinationinfo") => Ok("Name : Disk\n".into()),
-                Some("latestbackup") => Ok(self.0.clone()),
-                _ => Err(PlatformError::Unsupported("not scripted".into())),
-            }
-        };
-        answer.map(|stdout| dyno_platform::runner::ToolOutput {
-            ok: true,
-            stdout,
-            error: String::new(),
-        })
-    }
-}
-
-#[test]
-fn a_time_machine_folder_name_is_read_as_local_time() {
-    let h = Harness::start(None);
-    let s = h.shared();
-    s.extras.use_os("macos");
-    // The folder of a backup 30 hours ago, named in local time as Time Machine names it.
-    let at = Timestamp((now().millis() - 30 * HOUR) / SECOND * SECOND);
-    let local = to_local(at, &ZONE);
-    let (y, m, d) = civil_from_days(local.div_euclid(DAY));
-    let secs = local.rem_euclid(DAY) / SECOND;
-    let name = format!(
-        "/Volumes/.timemachine/X/{y:04}-{m:02}-{d:02}-{:02}{:02}{:02}.backup\n",
-        secs / 3_600,
-        secs / 60 % 60,
-        secs % 60
-    );
-    s.extras.use_backup_tools(Arc::new(TimeMachine(name)));
-    let JobOutput::Backup(r) = run_job(&h.client(), JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
-        panic!("backup")
-    };
-    let tm = r.statuses.iter().find(|x| x.tool == BackupTool::TimeMachine).expect("Time Machine");
-    assert_eq!(tm.last_backup, Some(at), "{tm:?}");
 }
 
 #[test]

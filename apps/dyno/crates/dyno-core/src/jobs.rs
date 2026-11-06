@@ -6,7 +6,6 @@
 //!
 //! Wire shape rules (postcard): externally tagged enums, no `flatten`, no internal tags.
 
-use crate::backup::BackupReport;
 use crate::extras::files::{FinderQuery, FinderResult};
 use crate::extras::{boot::BootReport, sleep::SleepReport, software::SoftwareInventory, usage::UsageReport};
 use crate::issues::{IssuesOverview, IssuesQuery};
@@ -59,8 +58,6 @@ pub enum JobSpec {
         /// The window the result is built for.
         query: IssuesQuery,
     },
-    /// Checks the backup tools now.
-    RefreshBackup,
     /// The SHA-256 of a program's file.
     FileHash {
         /// Which file.
@@ -108,7 +105,6 @@ impl JobSpec {
         match self {
             JobSpec::FindFiles { .. } => JobKind::FindFiles,
             JobSpec::RescanIssues { .. } => JobKind::RescanIssues,
-            JobSpec::RefreshBackup => JobKind::RefreshBackup,
             JobSpec::FileHash { .. } => JobKind::FileHash,
             JobSpec::SleepBlockers => JobKind::SleepBlockers,
             JobSpec::BootAnalysis => JobKind::BootAnalysis,
@@ -132,8 +128,6 @@ pub enum JobKind {
     FindFiles,
     /// Reading the OS logs.
     RescanIssues,
-    /// Checking the backup tools.
-    RefreshBackup,
     /// Hashing a file.
     FileHash,
     /// Reading what keeps the computer awake.
@@ -164,7 +158,6 @@ impl JobKind {
         match self {
             JobKind::FindFiles => "Finding files",
             JobKind::RescanIssues => "Reading system logs",
-            JobKind::RefreshBackup => "Checking backups",
             JobKind::FileHash => "Hashing a file",
             JobKind::SleepBlockers => "Reading sleep blockers",
             JobKind::BootAnalysis => "Analysing boots",
@@ -184,7 +177,6 @@ impl JobKind {
         match self {
             JobKind::FindFiles => "find-files",
             JobKind::RescanIssues => "rescan-issues",
-            JobKind::RefreshBackup => "refresh-backup",
             JobKind::FileHash => "file-hash",
             JobKind::SleepBlockers => "sleep-blockers",
             JobKind::BootAnalysis => "boot-analysis",
@@ -204,7 +196,6 @@ impl JobKind {
         [
             JobKind::FindFiles,
             JobKind::RescanIssues,
-            JobKind::RefreshBackup,
             JobKind::FileHash,
             JobKind::SleepBlockers,
             JobKind::BootAnalysis,
@@ -230,8 +221,6 @@ pub enum JobOutput {
     Finder(Box<FinderResult>),
     /// From [`JobSpec::RescanIssues`].
     Issues(Box<IssuesOverview>),
-    /// From [`JobSpec::RefreshBackup`].
-    Backup(Box<BackupReport>),
     /// From [`JobSpec::FileHash`].
     FileHash(FileHashInfo),
     /// From [`JobSpec::SleepBlockers`].
@@ -275,7 +264,6 @@ mod tests {
             serde_json::json!({"findFiles": {"query": {"folder": "/x", "mode": "both", "minBytes": 5}}})
         );
         assert_eq!(spec.kind(), JobKind::FindFiles);
-        assert_eq!(serde_json::to_value(JobSpec::RefreshBackup).unwrap(), "refreshBackup");
         let hash: JobSpec = serde_json::from_value(serde_json::json!({"fileHash": {"source": {"path": "/a"}}})).unwrap();
         assert_eq!(hash.kind(), JobKind::FileHash);
         let rescan: JobSpec = serde_json::from_value(serde_json::json!({"rescanIssues": {"query": {"days": 7}}})).unwrap();
@@ -314,7 +302,6 @@ mod tests {
     #[test]
     fn every_kind_has_a_unique_slug_that_finds_it_again() {
         let specs = [
-            JobSpec::RefreshBackup,
             JobSpec::SleepBlockers,
             JobSpec::BootAnalysis,
             JobSpec::AppUsage,
@@ -331,8 +318,6 @@ mod tests {
 
     #[test]
     fn an_output_survives_the_wire() {
-        let out = JobOutput::Backup(Box::default());
-        assert_eq!(round(&out), out);
         assert_eq!(round(&JobOutput::Sleep(Box::default())), JobOutput::Sleep(Box::default()));
         assert_eq!(
             serde_json::to_value(JobOutput::FileHash(FileHashInfo {

@@ -93,7 +93,7 @@ paddock_commands::command_table! {
     Query [MAIN] => commands::preview_widget_layout,
     /// The tray popup's values now, for the popup that has just opened (the live ones arrive as `dyno://popover-values`); the Settings window's preview reads it too.
     Query [MAIN | TRAY | DIALOG] => commands::popover_values,
-    /// A button of a widget: open a page, retry, start the backup check, restart the agent.
+    /// A button of a widget: open a page, retry, restart the agent.
     Mutation [MAIN | TRAY] => commands::run_widget_action,
     /// The popup's values as known now, without opening it: the Settings preview.
     Query [MAIN | DIALOG] => commands::popover_snapshot,

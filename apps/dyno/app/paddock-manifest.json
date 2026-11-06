@@ -10,10 +10,6 @@
       "title": "dy.capture"
     },
     {
-      "id": "dy.check-backup",
-      "title": "dy.check-backup"
-    },
-    {
       "id": "dy.export-issues",
       "title": "dy.export-issues"
     },
@@ -118,7 +114,6 @@
   ],
   "pages": [
     "dy.alarms",
-    "dy.backup",
     "dy.benchmarks",
     "dy.counters",
     "dy.dashboard",
@@ -324,13 +319,11 @@
     "dy.alert-rule.title": "Alert rule",
     "dy.capture": "Capture the last ten minutes",
     "dy.category.alarms": "Alarms",
-    "dy.category.backup": "Backup health",
     "dy.category.dashboard": "Dashboard",
     "dy.category.issues": "Issues",
     "dy.category.recorder": "Flight recorder",
     "dy.category.reports": "Reports",
     "dy.category.why-slow": "Why slow",
-    "dy.check-backup": "Check now",
     "dy.export-issues": "Export for Debrief…",
     "dy.export-report": "Export Markdown…",
     "dy.file-hash.title": "Search the file's hash on VirusTotal",
@@ -340,7 +333,6 @@
     "dy.lockers.title": "What is locking this file?",
     "dy.notification.alarm": "Alarm",
     "dy.page.alarms": "Alarms",
-    "dy.page.backup": "Backup health",
     "dy.page.benchmarks": "Benchmarks",
     "dy.page.counters": "Counters",
     "dy.page.dashboard": "Dashboard",

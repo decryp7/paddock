@@ -36,8 +36,6 @@ pub enum PopoverWidget {
     CpuMemory,
     /// Download and upload now, with the last minute.
     Network,
-    /// The backup check's last report.
-    BackupHealth,
     /// The newest problem of the last 7 days.
     LastIssue,
     /// The pinned performance counters.
@@ -59,8 +57,6 @@ pub enum PopoverKind {
     CpuMemory,
     /// [`PopoverWidget::Network`].
     Network,
-    /// [`PopoverWidget::BackupHealth`].
-    BackupHealth,
     /// [`PopoverWidget::LastIssue`].
     LastIssue,
     /// [`PopoverWidget::PinnedCounters`].
@@ -78,7 +74,6 @@ impl Widget for PopoverWidget {
             PopoverWidget::DiskSpace { .. } => PopoverKind::DiskSpace,
             PopoverWidget::CpuMemory => PopoverKind::CpuMemory,
             PopoverWidget::Network => PopoverKind::Network,
-            PopoverWidget::BackupHealth => PopoverKind::BackupHealth,
             PopoverWidget::LastIssue => PopoverKind::LastIssue,
             PopoverWidget::PinnedCounters => PopoverKind::PinnedCounters,
             PopoverWidget::TopApps => PopoverKind::TopApps,
@@ -143,15 +138,6 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::Live,
-    },
-    KindSpec {
-        kind: PopoverKind::BackupHealth,
-        title: "Backup",
-        summary: "When your last backup ran and whether it is healthy",
-        icon: "backup",
-        size: &[1, 2],
-        max_instances: 1,
-        refresh: Refresh::OnChange,
     },
     KindSpec {
         kind: PopoverKind::LastIssue,

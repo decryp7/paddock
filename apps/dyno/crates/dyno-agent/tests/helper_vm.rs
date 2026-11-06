@@ -119,7 +119,6 @@ fn the_helper_readers_on_this_machine() {
     show("memory", t.call(HelperRequest::MemoryModules));
     show("sockets", t.call(HelperRequest::SocketOwners));
     show("wakeRequests", t.call(HelperRequest::Extras(ExtrasKind::WakeRequests)));
-    show("backupVersions", t.call(HelperRequest::Extras(ExtrasKind::BackupVersions)));
     // A file this test holds open: the helper must name this process as a holder, by device and inode, without opening it.
     #[cfg(unix)]
     {

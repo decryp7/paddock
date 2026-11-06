@@ -1,11 +1,9 @@
-//! What keeps a Windows computer awake, and the Windows Backup versions: both need an administrator (`powercfg /requests`,
-//! `wbadmin get versions`), so the helper reads them (`Extras`); without it Dyno tries the same tools with the person's own rights
+//! What keeps a Windows computer awake needs an administrator (`powercfg /requests`), so the helper reads it (`Extras`); without it Dyno tries the same tools with the person's own rights
 //! and says why when Windows refuses. Both are built on the seam ([`crate::helper_first`]) and both parse the tool's text with
 //! one parser, in `dyno_core::helper_extras` (rule 55).
 
 use crate::helper_first::{Availability, HelperCalls, HelperFirst, HelperPort, HelperReading, ReadClass};
 use crate::helper_link::CallError;
-use dyno_core::backup::WindowsBackupFacts;
 use dyno_core::extras::sleep::{blockers_from_requests, SleepBlocker};
 use dyno_core::helper_extras::ExtrasAnswer;
 use dyno_core::helper_requests::ExtrasKind;
@@ -16,15 +14,9 @@ use std::time::Duration;
 
 /// Reads the blockers with this computer's own rights (the platform's `powercfg /requests` run).
 pub type LocalWakes = Box<dyn Fn() -> Result<Vec<SleepBlocker>, PlatformError> + Send + Sync>;
-/// Reads the Windows Backup facts with this computer's own rights (event log, then `wbadmin get versions`).
-pub type LocalBackup = Box<dyn Fn() -> Result<WindowsBackupFacts, PlatformError> + Send + Sync>;
 
 fn none_set() -> PlatformError {
     PlatformError::Unsupported("This computer's own reader was not given.".into())
-}
-
-fn other_answer(kind: &str) -> PlatformError {
-    PlatformError::Failed(format!("The helper answered {kind} with something else."))
 }
 
 /// The wake requests: the helper's, else this computer's.
@@ -65,56 +57,10 @@ impl HelperReading for WakeRequests {
                 if count == 1 { "" } else { "s" }
             ))
             .into()),
-            ExtrasAnswer::BackupVersions { .. } => Err(other_answer("the wake requests").into()),
         }
     }
 
     fn local(&mut self) -> Reading<Vec<SleepBlocker>> {
-        match (self.local)() {
-            Ok(v) => Reading::Available(v),
-            Err(e) => Reading::Unavailable((self.refused)(&e)),
-        }
-    }
-}
-
-/// The Windows Backup versions: the helper's, else this computer's.
-pub struct WindowsBackupVersions {
-    local: LocalBackup,
-    refused: fn(&PlatformError) -> String,
-}
-
-impl WindowsBackupVersions {
-    /// A reading whose local reader is `local`; `refused` words its refusal.
-    pub fn new(local: LocalBackup, refused: fn(&PlatformError) -> String) -> WindowsBackupVersions {
-        WindowsBackupVersions { local, refused }
-    }
-
-    /// Gives the reading the local reader of the next read.
-    pub fn set_local(&mut self, local: LocalBackup) {
-        self.local = local;
-    }
-}
-
-impl HelperReading for WindowsBackupVersions {
-    type Value = WindowsBackupFacts;
-
-    fn name(&self) -> &'static str {
-        "windows backup versions"
-    }
-
-    fn class(&self) -> ReadClass {
-        ReadClass::Bulk
-    }
-
-    fn via_helper(&self, calls: &dyn HelperCalls) -> Result<WindowsBackupFacts, CallError> {
-        match calls.extras(ExtrasKind::BackupVersions)? {
-            ExtrasAnswer::BackupVersions { items: Some(items), .. } => Ok(WindowsBackupFacts::from_versions(&items)),
-            ExtrasAnswer::BackupVersions { count, items: None } => Ok(WindowsBackupFacts::counted(count)),
-            ExtrasAnswer::WakeRequests { .. } => Err(other_answer("the backup versions").into()),
-        }
-    }
-
-    fn local(&mut self) -> Reading<WindowsBackupFacts> {
         match (self.local)() {
             Ok(v) => Reading::Available(v),
             Err(e) => Reading::Unavailable((self.refused)(&e)),
@@ -144,25 +90,15 @@ impl HelperPort for Handle {
 pub struct HelperExtras {
     /// What keeps the computer awake.
     pub wakes: HelperFirst<WakeRequests>,
-    /// The Windows Backup versions.
-    pub backup: HelperFirst<WindowsBackupVersions>,
 }
 
 impl HelperExtras {
     /// The readings over `port`, with the platform's wording of a refusal.
-    pub fn new(
-        port: Arc<dyn HelperPort>,
-        wake_refused: fn(&PlatformError) -> String,
-        backup_refused: fn(&PlatformError) -> String,
-    ) -> HelperExtras {
+    pub fn new(port: Arc<dyn HelperPort>, wake_refused: fn(&PlatformError) -> String) -> HelperExtras {
         HelperExtras {
             wakes: HelperFirst::new(
                 WakeRequests::new(Box::new(|| Err(none_set())), wake_refused),
                 Box::new(Handle(port.clone())),
-            ),
-            backup: HelperFirst::new(
-                WindowsBackupVersions::new(Box::new(|| Err(none_set())), backup_refused),
-                Box::new(Handle(port)),
             ),
         }
     }
@@ -174,7 +110,7 @@ mod tests {
     use crate::helper_first::testkit::{centre, port, Net};
     use crate::helper_link::TransportError;
     use dyno_core::extras::sleep::Prevents;
-    use dyno_core::helper_extras::{parse_requests, BackupVersion};
+    use dyno_core::helper_extras::parse_requests;
     use dyno_core::helper_wire::HelperReply;
     use dyno_core::read_via::ReadVia;
     use paddock_jobs::time::FakeClock;
@@ -192,11 +128,6 @@ mod tests {
     fn wakes(up: bool, answers: Vec<Result<HelperReply, TransportError>>, local: LocalWakes) -> HelperFirst<WakeRequests> {
         let c = centre(&Net::new(up, answers), &FakeClock::new());
         HelperFirst::new(WakeRequests::new(local, refused), port(&c))
-    }
-
-    fn backup(up: bool, answers: Vec<Result<HelperReply, TransportError>>, local: LocalBackup) -> HelperFirst<WindowsBackupVersions> {
-        let c = centre(&Net::new(up, answers), &FakeClock::new());
-        HelperFirst::new(WindowsBackupVersions::new(local, refused), port(&c))
     }
 
     #[test]
@@ -243,61 +174,6 @@ mod tests {
             reason.contains("2 requests") && reason.contains("administrator list this"),
             "{reason}"
         );
-    }
-
-    fn version(id: &str) -> BackupVersion {
-        BackupVersion {
-            time: "x".into(),
-            location: "D:".into(),
-            identifier: id.into(),
-            recovers: "Volume(s)".into(),
-        }
-    }
-
-    #[test]
-    fn backup_versions_come_from_the_helper_and_the_newest_is_the_date() {
-        let answer = ExtrasAnswer::BackupVersions {
-            count: 2,
-            items: Some(vec![version("10/22/2026-18:00"), version("10/23/2026-00:00")]),
-        };
-        let never = Box::new(|| Err(PlatformError::AccessDenied("no".into())));
-        let got = backup(true, vec![Ok(HelperReply::Extras(answer))], never).read();
-        let facts = *got.value.value().expect("facts");
-        assert_eq!(facts.count, Some(2));
-        assert_eq!(facts.latest, dyno_core::backup::version_time("10/23/2026-00:00"));
-        assert_eq!(got.via, ReadVia::Helper);
-    }
-
-    #[test]
-    fn counts_only_backup_versions_are_a_count_without_a_date() {
-        let answer = ExtrasAnswer::BackupVersions { count: 3, items: None };
-        let never = Box::new(|| Err(PlatformError::AccessDenied("no".into())));
-        let facts = *backup(true, vec![Ok(HelperReply::Extras(answer))], never)
-            .read()
-            .value
-            .value()
-            .unwrap();
-        assert_eq!((facts.count, facts.latest), (Some(3), None));
-    }
-
-    #[test]
-    fn backup_versions_refused_locally_without_the_helper_ask_for_it() {
-        let got = backup(
-            false,
-            vec![],
-            Box::new(|| Err(PlatformError::AccessDenied("Access is denied.".into()))),
-        )
-        .read();
-        assert!(got.value.value().is_none());
-        assert!(matches!(got.via, ReadVia::NeedsHelper { .. }), "{:?}", got.via);
-    }
-
-    #[test]
-    fn a_reply_of_the_other_kind_is_an_error_not_a_panic() {
-        let wrong = ExtrasAnswer::BackupVersions { count: 0, items: None };
-        let got = wakes(true, vec![Ok(HelperReply::Extras(wrong))], Box::new(denied)).read();
-        assert!(got.value.value().is_none());
-        assert!(got.via.reason().unwrap_or_default().contains("something else"));
     }
 
     /// A runner whose Windows tools all refuse, as a standard account sees them.

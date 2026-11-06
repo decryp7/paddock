@@ -329,7 +329,6 @@ impl WakeCentre {
         }
         if let Some(job) = s.job {
             let spec = match job {
-                DynoJob::BackupCheck => JobSpec::RefreshBackup,
                 DynoJob::SoftwareInventory => JobSpec::SoftwareInventory,
             };
             parts.push(match shared.jobs.start(shared, spec) {

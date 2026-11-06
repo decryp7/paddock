@@ -92,7 +92,7 @@ pub enum WakeScheduleCmd {
         stay: Option<u32>,
         /// Saved computers to wake, by name or hardware address.
         devices: Vec<String>,
-        /// `backup` or `software`.
+        /// `software`.
         job: Option<String>,
     },
     /// Cancel one, by name or id.
@@ -205,7 +205,7 @@ idle [status|cancel|snooze MIN]       the sleep/shut down rules: what they wait 
 awake [on|off|status] [--for 90m|2h] [--until 18:30] [--busy cpu,network,disk] [--while-pid N] [--display]\n  \
                                       keep the computer awake (on without --for or --until: until `awake off`)\n  \
 wake NAME|ADDRESS [--test] [--json]   wake a saved computer (Wake-on-LAN); --test waits for it to answer\n  \
-wake-schedule list|add NAME --at 07:30 [--repeat once|daily|weekdays|weekends] [--stay 30m] [--device NAME]... [--job backup|software]|cancel NAME|ID\n  \
+wake-schedule list|add NAME --at 07:30 [--repeat once|daily|weekdays|weekends] [--stay 30m] [--device NAME]... [--job software]|cancel NAME|ID\n  \
                                       scheduled wakes of this computer\n  \
 why-slow [--json]                     why it feels slow, in plain words\n  \
 top [--by cpu|memory] [-n N] [--json] the busiest apps\n  \
@@ -272,8 +272,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             },
             "--job" => {
                 job = match it.next().map(String::as_str) {
-                    Some(j @ ("backup" | "software")) => Some(j.to_string()),
-                    _ => return err("--job takes backup or software."),
+                    Some(j @ "software") => Some(j.to_string()),
+                    _ => return err("--job takes software."),
                 }
             }
             "--stay" => {
@@ -565,7 +565,7 @@ mod tests {
     fn wake_schedule_takes_list_add_and_cancel() {
         assert_eq!(p("wake-schedule").unwrap().command, Command::WakeSchedule(WakeScheduleCmd::List));
         assert_eq!(
-            p("wake-schedule add Morning run --at 07:30 --repeat weekdays --stay 30m --device NAS --job backup")
+            p("wake-schedule add Morning run --at 07:30 --repeat weekdays --stay 30m --device NAS --job software")
                 .unwrap()
                 .command,
             Command::WakeSchedule(WakeScheduleCmd::Add {
@@ -574,7 +574,7 @@ mod tests {
                 repeat: "weekdays".into(),
                 stay: Some(30),
                 devices: vec!["NAS".into()],
-                job: Some("backup".into()),
+                job: Some("software".into()),
             })
         );
         assert_eq!(

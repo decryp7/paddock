@@ -61,8 +61,11 @@ use serde::{Deserialize, Serialize};
 ///   JSON widget layouts, not positionally.)
 /// - helper wiring (unreleased, so no bump): the reply types of the readings the helper can give carry a `via: ReadVia` (`read_via`):
 ///   `FirewallSource`, `StartupOverview.btm_via`, `NetworkSnapshot.{traffic_via, owners_via}`, `Locker`, `SystemInventory.memory_via`,
-///   `SleepReport.blockers_via`, `BackupReport` and `LiveUpdate.via`.
-pub const PROTOCOL_VERSION: u32 = 5;
+///   `SleepReport.blockers_via`, `LiveUpdate.via`.
+///
+/// Version 6 (1.1.0) removed backup health: `Request::Backup`, `Reply::Backup`, `JobSpec::RefreshBackup`, `JobOutput::Backup`
+/// and `DynoJob::BackupCheck` are gone, which moves the variants after them.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
 /// client of another protocol is refused at the handshake with "update the older one" (the minor stays 0: new variants go at the
@@ -401,7 +404,7 @@ pub enum Request {
         /// What to hide.
         filter: crate::startup::StartupFilter,
     },
-    // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
+    // ---- extras and taming proof (WP-13, WP-14, WP-36) ----
     /// "What changed": installs, updates, new startup items and setting changes in a window. A query. Appended.
     Changes {
         /// The window.
@@ -419,12 +422,9 @@ pub enum Request {
     },
     /// The maintenance windows' state now. A query. Appended.
     Maintenance,
-    /// Backup health (Time Machine, Windows Backup, File History, restic, Borg, Duplicati): the last check, without
-    /// running one unless there is none. Appended.
-    Backup,
 
     // ---- long operations as jobs (ER-17, ER-18, ER-19): every request below answers at once ----
-    /// Starts a long read-only operation (find files, read the OS logs, check the backups, hash a file) in the
+    /// Starts a long read-only operation (find files, read the OS logs, hash a file) in the
     /// background and answers its status at once. A second start of a kind that is running answers the running job.
     StartJob {
         /// What to run.
@@ -540,7 +540,7 @@ pub enum Request {
         /// one the edit is refused (another window edited meanwhile) and the app reloads the view. `None`: applied as is.
         base_revision: Option<u64>,
     },
-    /// The popup's values for the widgets that are not live (alarms, disk space, backup, last issue, pinned counters),
+    /// The popup's values for the widgets that are not live (alarms, disk space, last issue, pinned counters),
     /// from state the agent already keeps. Placements that are not in the popup layout, or are live, are left out.
     /// Answers [`Reply::PopoverValues`].
     PopoverValues {
@@ -907,7 +907,7 @@ pub enum Reply {
     SearchSeed(crate::weblinks::SearchSeed),
     /// The filtered startup list. Appended.
     StartupOverview(Box<crate::startup::StartupOverview>),
-    // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
+    // ---- extras and taming proof (WP-13, WP-14, WP-36) ----
     /// What changed. Appended.
     Changes(Box<crate::extras::changes::ChangeTimeline>),
     /// GPU per process. Appended.
@@ -916,8 +916,6 @@ pub enum Reply {
     InventorySaved(SavedInventory),
     /// The maintenance windows' state. Appended.
     Maintenance(crate::extras::maintenance::MaintenanceStatus),
-    /// Backup health. Appended.
-    Backup(Box<crate::backup::BackupReport>),
     /// The volumes. Appended.
     DiskVolumes(Vec<crate::disk::volume::Volume>),
     /// One scan's status. Appended.
@@ -1044,7 +1042,6 @@ impl Reply {
             Reply::Gpu(x) => v(x),
             Reply::InventorySaved(x) => v(x),
             Reply::Maintenance(x) => v(x),
-            Reply::Backup(x) => v(x),
             Reply::DiskVolumes(x) => v(x),
             Reply::DiskScan(x) => v(x),
             Reply::DiskScans(x) => v(x),
@@ -1371,7 +1368,7 @@ mod tests {
                 repeat: Repeat::Days { mask: 0b101 },
                 stay_awake_minutes: Some(30),
                 wake_devices: vec![1],
-                job: Some(DynoJob::BackupCheck),
+                job: Some(DynoJob::SoftwareInventory),
                 enabled: true,
             };
             for r in [
@@ -1526,7 +1523,6 @@ mod tests {
             Reply::Maintenance(
                 crate::extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), &crate::time::FixedZone::UTC),
             ),
-            Reply::Backup(Box::default()),
             Reply::CounterObjects(Box::default()),
             Reply::CounterHits(vec![]),
             Reply::CounterValues(vec![]),
@@ -1598,7 +1594,6 @@ mod tests {
             Reply::DiskRings(Box::new(index.rings(index.root(), 2, 0.0, 10).unwrap())),
             Reply::Jobs(vec![]),
             Reply::JobCancelled(true),
-            Reply::JobOutput(Box::new(crate::jobs::JobOutput::Backup(Box::default()))),
         ];
         for r in replies {
             let m = Message::Reply(Box::new(Ok(r.clone())));
@@ -1724,7 +1719,6 @@ mod tests {
         for (name, r) in [
             ("gpuProcesses", Request::GpuProcesses),
             ("maintenance", Request::Maintenance),
-            ("backup", Request::Backup),
             ("jobs", Request::Jobs),
         ] {
             assert_eq!(serde_json::to_value(&r).unwrap(), name);
@@ -1839,7 +1833,7 @@ mod search_watch_tests {
                 },
             },
             Request::StartJob {
-                spec: crate::jobs::JobSpec::RefreshBackup,
+                spec: crate::jobs::JobSpec::SleepBlockers,
             },
             Request::Jobs,
             Request::CancelJob { id: 9 },

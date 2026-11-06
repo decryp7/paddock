@@ -271,13 +271,13 @@ pub struct Shared {
     pub issues: crate::issues::IssueCentre,
     /// The baseline of programs seen on this machine (observe-only).
     pub unusual: crate::unusual::UnusualCentre,
-    /// The extras and backup health checks (observe-only; removing finder results is a click).
+    /// The extras checks (observe-only; removing finder results is a click).
     pub extras: crate::extras::ExtrasCentre,
     /// Benchmark runs (only on the user's click).
     pub bench: crate::bench::BenchCentre,
     /// Network change events on the timeline (WP-35).
     pub netwatch: crate::netwatch::NetWatchCentre,
-    /// Long operations (find files, read the OS logs, check backups, hash a file) as jobs with progress and Cancel.
+    /// Long operations (find files, read the OS logs, hash a file) as jobs with progress and Cancel.
     pub jobs: crate::jobs::JobCentre,
     /// SHA-256 of program files for the VirusTotal search (WP-33); nothing is uploaded.
     pub hasher: crate::filehash::FileHasher,
@@ -631,7 +631,7 @@ impl Shared {
             wake: (Mutex::new(false), Condvar::new()),
             next_conn: AtomicU64::new(1),
         });
-        // What keeps Windows awake and the Windows Backup versions are read helper first.
+        // What keeps Windows awake is read helper first.
         if helper_first {
             shared
                 .extras
