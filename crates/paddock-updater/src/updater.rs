@@ -873,6 +873,9 @@ impl Updater {
                     detail: "the verified download is no longer there".into(),
                 });
             };
+            // The staged file sat on disk since the download: check it against the family key again, before the services
+            // are stopped, so a file changed in between is never installed (the installer's own check is not relied on).
+            self.reverify_staged(&file, &platform, &version)?;
             if let Some(hooks) = &self.hooks {
                 hooks
                     .before_install()
@@ -925,6 +928,42 @@ impl Updater {
                 let _ = self.apply(Event::InstallFailed(e), |_| {});
                 // Start the old version again so the user sees what happened.
                 ExitAction::Failed { relaunch }
+            }
+        }
+    }
+
+    /// Verifies the staged `file` against the release's signature and the family key again. On a mismatch the file is deleted
+    /// (the next check offers the update again and the download fetches a fresh copy) and the cause is logged.
+    fn reverify_staged(
+        &self,
+        file: &Path,
+        platform: &Platform,
+        version: &str,
+    ) -> Result<(), UpdateError> {
+        let began = std::time::Instant::now();
+        let outcome = match (&self.config.key, semver::Version::parse(version)) {
+            (None, _) => Err(UpdateError::SignatureInvalid {
+                detail: "this build has no update key to check the staged file with".into(),
+            }),
+            (_, Err(e)) => Err(UpdateError::SignatureInvalid {
+                detail: format!("the staged update's version cannot be read ({e})"),
+            }),
+            (Some(key), Ok(announced)) => {
+                signature::verify_file(key, file, &platform.signature, &announced, None)
+                    .map_err(VerifyError::into_update_error)
+            }
+        };
+        match outcome {
+            Ok(()) => {
+                log::info!(Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "update.install staged file verified again");
+                Ok(())
+            }
+            Err(e) => {
+                let why = e.to_string();
+                log::warn!(Why = why.chars().take(300).collect::<String>().as_str(), Version = version; "update.install staged file failed its signature check; deleted, the next check downloads it again");
+                remove(file);
+                self.lock().ready = None;
+                Err(e)
             }
         }
     }
