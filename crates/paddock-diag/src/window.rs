@@ -59,6 +59,19 @@ pub fn log_files(dir: &Path, prefix: &str) -> Vec<PathBuf> {
 /// for the others): each gets an equal share, and what a small one does not use goes to the larger ones, so a chatty process
 /// cannot push another's log out of the report. A file that cannot be read is skipped.
 pub fn log_window(dir: &Path, prefix: &str, budget: u64) -> Vec<(String, Vec<u8>, bool)> {
+    log_window_by(dir, prefix, budget, |name| {
+        name.split('.').next().unwrap_or("").to_string()
+    })
+}
+
+/// [`log_window`] where `process_of` names the process a file belongs to (by default the text before the first dot): an app
+/// whose earlier versions wrote other file names (`<id>_<x>.log`) maps them to its own process, so each does not take a share.
+pub fn log_window_by(
+    dir: &Path,
+    prefix: &str,
+    budget: u64,
+    process_of: impl Fn(&str) -> String,
+) -> Vec<(String, Vec<u8>, bool)> {
     // The files by process, in the order each process's newest file appears.
     let mut groups: Vec<(String, Vec<PathBuf>)> = Vec::new();
     for path in log_files(dir, prefix) {
@@ -66,7 +79,7 @@ pub fn log_window(dir: &Path, prefix: &str, budget: u64) -> Vec<(String, Vec<u8>
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let process = name.split('.').next().unwrap_or("").to_string();
+        let process = process_of(&name);
         match groups.iter_mut().find(|(p, _)| *p == process) {
             Some((_, files)) => {
                 if files.len() < MAX_LOG_FILES {
@@ -256,6 +269,43 @@ mod tests {
             "{sizes:?}"
         );
         assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn files_the_caller_maps_to_one_process_share_one_part_of_the_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = "a line of a log\n".repeat(300);
+        for name in [
+            "app.2026-11-01.log",
+            "app_old.log",
+            "app-agent.2026-11-01.log",
+        ] {
+            std::fs::write(dir.path().join(name), &line).unwrap();
+        }
+        let budget = 3 * line.len() as u64;
+        // By default `app_old.log` is a process of its own: three equal shares.
+        assert_eq!(log_window(dir.path(), "app", budget).len(), 3);
+        // Mapped to the app, the app's two files share one half of the window with the agent's.
+        let mapped = log_window_by(dir.path(), "app", line.len() as u64, |name| {
+            if name.starts_with("app_") {
+                "app".to_string()
+            } else {
+                name.split('.').next().unwrap_or("").to_string()
+            }
+        });
+        let of = |prefix: &str| {
+            mapped
+                .iter()
+                .filter(|g| g.0.starts_with(prefix))
+                .map(|g| g.1.len())
+                .sum::<usize>()
+        };
+        assert!(
+            of("app_") + of("app.") <= line.len() / 2 + 20,
+            "{:?}",
+            mapped.iter().map(|g| (&g.0, g.1.len())).collect::<Vec<_>>()
+        );
+        assert!(of("app-agent") > line.len() / 2 - 20);
     }
 
     #[test]

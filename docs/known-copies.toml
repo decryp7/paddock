@@ -901,3 +901,20 @@ status = "built"
   owner = "sighter"
   delete_by = "sighter-v1.0.0"
   note = "Byte-identical to the canonical."
+
+# =====================================================================================================================
+# Logging
+# =====================================================================================================================
+
+[[mechanism]]
+id = "log-record-capture-for-tests"
+title = "A `log::Log` that keeps the records of a test process, to assert on what the code logs (ER-27)"
+canonical = "paddock-log"
+paths = ["crates/paddock-log/src/lib.rs"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["apps/debrief/crates/debrief-store-duck/src/testlog.rs"]
+  owner = "debrief"
+  delete_by = "debrief-v1.2.0"
+  note = "Debrief's store worker logging (WP-SL1) asserts its lines through this capture. The shared home is a `test-support` feature of paddock-log (records with level, message and typed key/values, wait_for); the other hand-made capture loggers of the family move there too."

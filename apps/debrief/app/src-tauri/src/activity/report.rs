@@ -200,10 +200,17 @@ const STORE_WORKER_LOG: &str = "debrief-store.";
 /// `debrief-store.<day>.log`): each process gets an equal share, so a chatty app cannot push the worker's file out of the
 /// report. Returns (file name, bytes), each process's files newest first.
 fn log_window(log_dir: &Path) -> Vec<(String, Vec<u8>)> {
-    paddock_diag::window::log_window(log_dir, crate::diagnostics::LOG_NAME, LOG_WINDOW)
-        .into_iter()
-        .map(|(name, bytes, _cut)| (name, bytes))
-        .collect()
+    // Earlier versions wrote `debrief_<x>.log`: they are the app's, not processes of their own with a share each.
+    paddock_diag::window::log_window_by(log_dir, crate::diagnostics::LOG_NAME, LOG_WINDOW, |name| {
+        if name.starts_with("debrief_") {
+            crate::diagnostics::LOG_NAME.to_string()
+        } else {
+            name.split('.').next().unwrap_or("").to_string()
+        }
+    })
+    .into_iter()
+    .map(|(name, bytes, _cut)| (name, bytes))
+    .collect()
 }
 
 /// Whether a CLEF line is an activity entry (`SourceContext = Debrief.Activity`).
@@ -1105,13 +1112,16 @@ pub(crate) mod tests {
             .to_string_lossy()
             .replace("debrief.", "")
             .replace(".log", "");
-        let line = format!("{{\"@m\":\"{}\"}}\n", "x".repeat(1000));
-        std::fs::write(&today, line.repeat((LOG_WINDOW as usize * 5 / 2 / line.len()) + 100)).unwrap();
+        let filler = format!("{{\"@m\":\"{}\"}}\n", "x".repeat(1000));
+        // The app's file is two and a half windows; the worker's is a whole window, ending with the line that matters.
+        std::fs::write(&today, filler.repeat(LOG_WINDOW as usize * 5 / 2 / filler.len() + 100)).unwrap();
         std::fs::write(d.join("debrief.2000-01-02.log"), "older app day\n").unwrap();
+        std::fs::write(d.join("debrief_legacy.log"), "legacy app file\n").unwrap();
         let store = format!("debrief-store.{day}.log");
+        let failed = "{\"@t\":\"2026-11-06T08:00:00Z\",\"@l\":\"Warning\",\"@m\":\"full-text indexing failed\",\"EventId\":\"store.fts.failed\",\"Process\":\"store\"}\n";
         std::fs::write(
             d.join(&store),
-            "{\"@t\":\"2026-11-06T08:00:00Z\",\"@l\":\"Warning\",\"@m\":\"full-text indexing failed\",\"EventId\":\"store.fts.failed\",\"Process\":\"store\"}\n",
+            format!("{}{failed}", filler.repeat(LOG_WINDOW as usize / filler.len())),
         )
         .unwrap();
         let inputs = ReportInputs {
@@ -1126,8 +1136,26 @@ pub(crate) mod tests {
             .unwrap_or_else(|| panic!("{names:?}"));
         assert!(String::from_utf8_lossy(&worker.data).contains("store.fts.failed"));
         assert!(worker.summary.contains("Store worker"), "{}", worker.summary);
+        // Each process gets about half of the window: the chatty app cannot take it all, the worker cannot either.
+        let half = LOG_WINDOW as usize / 2;
+        assert!(
+            (half * 9 / 10..=half).contains(&worker.data.len()),
+            "the worker's part: {} of {half}",
+            worker.data.len()
+        );
         let app = format!("logs/{}", today.file_name().unwrap().to_string_lossy());
-        assert!(names.contains(&app.as_str()), "the app's newest file stays: {names:?}");
+        let app_file = files
+            .iter()
+            .find(|f| f.name == app)
+            .unwrap_or_else(|| panic!("the app's newest file stays: {names:?}"));
+        assert!(
+            (half * 9 / 10..=half).contains(&app_file.data.len()),
+            "the app's part: {} of {half}",
+            app_file.data.len()
+        );
+        // The legacy file is the app's: no share of its own (the app's part is what was left to it).
+        let all: usize = files.iter().filter(|f| f.kind == FileKind::Log).map(|f| f.data.len()).sum();
+        assert!(all <= LOG_WINDOW as usize, "{all}");
         let activity = files.iter().find(|f| f.name == "logs/activity.log").unwrap();
         assert!(
             !String::from_utf8_lossy(&activity.data).contains("store.fts"),

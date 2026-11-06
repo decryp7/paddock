@@ -38,6 +38,32 @@ fn usage_sums_the_categories_and_reports_a_cap() {
 }
 
 #[test]
+fn the_store_workers_logs_are_listed_with_the_apps_and_todays_is_kept() {
+    let d = TempDir::new("storage-worker-logs");
+    let today = format!("debrief-store.{}.log", chrono::Utc::now().date_naive().format("%Y-%m-%d"));
+    write(&d.0.join("logs").join("debrief.2026-10-17.log"), 10);
+    write(&d.0.join("logs").join("debrief-store.2026-10-17.log"), 20);
+    write(&d.0.join("logs").join(&today), 30);
+    write(&d.0.join("logs").join("other.log"), 40);
+    let cats = plan::categories(&log_folders(&d.0));
+    let logs = cats.iter().find(|c| c.id == CategoryId::Logs).unwrap();
+    let mut names: Vec<(String, bool)> = logs
+        .items
+        .iter()
+        .map(|i| (i.path.file_name().unwrap().to_string_lossy().into_owned(), i.protect.is_some()))
+        .collect();
+    names.sort();
+    assert_eq!(
+        names,
+        [
+            ("debrief-store.2026-10-17.log".to_string(), false),
+            (today, true),
+            ("debrief.2026-10-17.log".to_string(), false),
+        ]
+    );
+}
+
+#[test]
 fn clearing_several_categories_reports_each_with_progress_and_stops_when_cancelled() {
     let d = TempDir::new("storage-clear-all");
     write(&d.0.join("logs").join("debrief.2026-10-16.log"), 10);

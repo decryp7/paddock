@@ -309,23 +309,28 @@ fn ai_models(f: &Folders<'_>) -> Category {
     c
 }
 
+/// The store worker's own log files (`debrief-store.<day>.log`) are Debrief's logs too, and listed with the app's.
+const WORKER_LOG_PREFIX: &str = "debrief-store.";
+
 fn logs(f: &Folders<'_>) -> Category {
     let mut c = Category::new(CategoryId::Logs, f.log.clone(), f.log.clone());
     if let Some(dir) = &f.log {
         let prefix = format!("{}.", crate::diagnostics::LOG_NAME);
+        let worker_today = format!("{WORKER_LOG_PREFIX}{}.log", chrono::Utc::now().date_naive().format("%Y-%m-%d"));
         c.items = entries(dir)
             .into_iter()
             .filter(|p| {
                 let n = name_of(p);
-                !is_dir(p) && n.starts_with(&prefix) && n.ends_with(".log")
+                !is_dir(p) && (n.starts_with(&prefix) || n.starts_with(WORKER_LOG_PREFIX)) && n.ends_with(".log")
             })
             .map(|p| {
-                let current =
-                    f.active_log.as_ref().is_some_and(|a| a == &p) || name_of(&p) == format!("{}.log", crate::diagnostics::LOG_NAME);
+                let current = f.active_log.as_ref().is_some_and(|a| a == &p)
+                    || name_of(&p) == format!("{}.log", crate::diagnostics::LOG_NAME)
+                    || name_of(&p) == worker_today;
                 Item::path(p).protected(current.then(|| "Debrief is writing to it".to_string()))
             })
             .collect();
-        c.note = Some("Today's log is kept.".into());
+        c.note = Some("Today's logs are kept.".into());
     }
     c
 }

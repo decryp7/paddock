@@ -47,7 +47,9 @@ impl Configurable for DiagnosticsSection {
                     FieldKind::Enum { options: levels },
                     level_name(d.log.level),
                 )
-                .describe("How much Debrief writes to its own log. Debug and Trace help when reporting a problem."),
+                .describe(
+                    "How much Debrief writes to its own log. Debug and Trace help when reporting a problem. The level applies at once to Debrief; the store worker that imports and indexes reads it when it starts, so a change reaches it at the next start of Debrief.",
+                ),
             )
             .field(
                 SettingField::new("logMaxFileMb", "Log file size", int(1, 100, Some("MB")), d.log.max_file_mb)
@@ -271,5 +273,21 @@ impl ExternalValues for PluginsSection {
                 .map(|(id, _, _)| (id.clone(), json!(!disabled.contains(id))))
                 .collect(),
         )
+    }
+}
+
+#[cfg(test)]
+mod store_worker_log_tests {
+    use super::*;
+
+    #[test]
+    fn the_log_level_says_when_it_reaches_the_store_worker() {
+        let section = DiagnosticsSection { dir: None }.settings_section();
+        let field = section.fields.iter().find(|f| f.key == "logLevel").unwrap();
+        assert!(
+            field.description.contains("store worker") && field.description.contains("next start"),
+            "{}",
+            field.description
+        );
     }
 }
