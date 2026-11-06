@@ -38,7 +38,7 @@ const Y = 144;
   const NH = 112, CW = 216, G = 104, ox = 48, gx = ox + 176 + 104, c0 = gx + 24, c1 = c0 + CW + G, c2 = c1 + CW + G, ex = c2 + CW + 24 + 72;
   const r = (i) => Y + 40 + i * (NH + 32);
   const BG = { name: 'issues · unusual · netwatch', tech: 'three threads', desc: 'OS logs every 15 min; programs against the baseline every 30 s (ADR 0017); Wi-Fi, VPN and IP changes on a slow poll.' };
-  const VW = { name: 'counters · hardware · extras', tech: 'modules', desc: 'Counter browser, pinned counters every 15 s; throttling, disk and battery life, baselines (ADR 0018); read-only OS tools, boot records, backup checks (ADR 0020).' };
+  const VW = { name: 'counters · hardware · extras', tech: 'modules', desc: 'Counter browser, pinned counters every 15 s; throttling, disk and battery life, baselines (ADR 0018); read-only OS tools, boot records and Extras (ADR 0020).' };
   const bgH = Math.max(NH, d.fit(CW, BG)), vwH = Math.max(NH, d.fit(CW, VW)), vwY = r(2) + bgH + 32;
   const GH = vwY + vwH + 24 - Y;
   d.node('sm', ox, r(1), 176, NH, 'process', { name: 'Service manager', tech: 'launchd · systemd · Run', desc: 'Starts the agent at login.' });

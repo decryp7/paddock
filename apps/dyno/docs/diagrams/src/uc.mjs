@@ -34,7 +34,7 @@ function useCases(file, { title, desc, owner, rows, ext }) {
 }
 useCases('uml-use-cases-observe', {
   title: 'Use cases — see and understand', desc: 'What the PC owner learns about the machine. Nothing here changes it.', owner: 'PC owner',
-  rows: [['Watch live performance and history'], ['Browse and sort processes'], ['Ask "why is my PC slow?" or "is this normal?"'], ['Check health and read the reasons'], ['See what starts at login'], ['Receive alarms and anomalies'], ['Browse Issues and unusual processes'], ['Read the weekly report'], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Browse hardware and software inventory'], ['Use Extras; see backup and network changes']],
+  rows: [['Watch live performance and history'], ['Browse and sort processes'], ['Ask "why is my PC slow?" or "is this normal?"'], ['Check health and read the reasons'], ['See what starts at login'], ['Receive alarms and anomalies'], ['Browse Issues and unusual processes'], ['Read the weekly report'], ['Browse performance counters'], ['Check throttling, disk and battery life'], ['Browse hardware and software inventory'], ['Use Extras; see network changes']],
 });
 useCases('uml-use-cases-setup', {
   title: 'Use cases — run and set up', desc: 'What the PC owner runs or sets up. Benchmarks start only on a click; Explain this (Pitwall) is planned after 1.0. None of it changes the machine; Dyno writes only its own data.', owner: 'PC owner',

@@ -13,7 +13,7 @@ export default {
     panels: [
       { mock: 'explain', title: 'Why is my PC slow?', text: 'The likeliest cause in plain words, with the evidence behind it.' },
       { mock: 'normal', title: 'Is this normal?', text: 'Dyno learns what is usual for this PC and says when today is not.' },
-      { mock: 'alarms', title: 'Alarms that notify', text: 'Low disk, heat, crash loops and stale backups, until you acknowledge them.' },
+      { mock: 'alarms', title: 'Alarms that notify', text: 'Low disk, heat and crash loops, until you acknowledge them.' },
       { mock: 'bench', title: 'Benchmarks on a click', text: 'CPU, memory and disk, measured before and after a change you make.' },
     ],
   },
