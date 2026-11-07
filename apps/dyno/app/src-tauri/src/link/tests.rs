@@ -575,6 +575,9 @@ fn it_reconnects_after_the_agent_goes_away() {
 struct SlowLauncher {
     dirs: Dirs,
     gate: Arc<(Mutex<bool>, Condvar)>,
+    /// Open by default. Closed, a started agent is not yet recorded in `agents`: the window between `Running::start`
+    /// (which writes the discovery file the link connects through) and the push, made deterministic.
+    registration: Arc<(Mutex<bool>, Condvar)>,
     launches: AtomicUsize,
     ended: AtomicUsize,
     agents: Arc<Mutex<Vec<Running>>>,
@@ -586,6 +589,7 @@ impl SlowLauncher {
         Arc::new(SlowLauncher {
             dirs,
             gate: Arc::new((Mutex::new(false), Condvar::new())),
+            registration: Arc::new((Mutex::new(true), Condvar::new())),
             launches: AtomicUsize::new(0),
             ended: AtomicUsize::new(0),
             agents: Arc::new(Mutex::new(Vec::new())),
@@ -598,11 +602,21 @@ impl SlowLauncher {
         self.gate.1.notify_all();
     }
 
+    fn hold_registration(&self) {
+        *lock(&self.registration.0) = false;
+    }
+
+    fn release_registration(&self) {
+        *lock(&self.registration.0) = true;
+        self.registration.1.notify_all();
+    }
+
     fn running_agents(&self) -> usize {
         lock(&self.agents).iter().filter(|r| !r.stopped()).count()
     }
 
     fn stop_all(&self) {
+        self.release_registration();
         self.open();
         for t in std::mem::take(&mut *lock(&self.threads)) {
             let _ = t.join();
@@ -620,11 +634,14 @@ impl Launcher for SlowShared {
         let me = &self.0;
         me.launches.fetch_add(1, Ordering::SeqCst);
         let (gate, dirs, agents) = (me.gate.clone(), me.dirs.clone(), me.agents.clone());
+        let registration = me.registration.clone();
         let t = std::thread::spawn(move || {
             let open = lock(&gate.0);
             drop(gate.1.wait_while(open, |o| !*o).unwrap_or_else(|e| e.into_inner()));
             let fake = Fake::new();
             if let Ok(r) = Running::start(dirs, fake.platform(), Box::new(fake.clone()), Box::new(|_| Ok(()))) {
+                let held = lock(&registration.0);
+                drop(registration.1.wait_while(held, |open| !*open).unwrap_or_else(|e| e.into_inner()));
                 lock(&agents).push(r);
             }
         });
@@ -662,6 +679,9 @@ fn slow_rig() -> (Arc<AgentLink>, Arc<SlowLauncher>, Receiver<AgentStatus>, temp
 fn a_slow_agent_start_is_waited_for_and_never_doubled() {
     // No wall clock decides anything here: the link counts observations of the process and the discovery file.
     let (link, launcher, statuses, _tmp) = slow_rig();
+    // `Running::start` writes the discovery file the link connects through before the launcher records the agent, so the
+    // link can be running while `running_agents()` is still 0: hold that window open to show the count does not decide.
+    launcher.hold_registration();
     let handle = link.spawn().unwrap();
     // The wait is measured in observations, not in seconds (ER-12): the old link gave up after 50 looks and started a
     // second agent, so well over twice that many observations with the gate shut must still show exactly one launch.
@@ -675,7 +695,12 @@ fn a_slow_agent_start_is_waited_for_and_never_doubled() {
     launcher.open();
     running(&link, &statuses);
     assert_eq!(launcher.launches.load(Ordering::SeqCst), 1);
-    assert_eq!(launcher.running_agents(), 1, "exactly one agent runs");
+    // The link is connected while the launcher has not recorded the agent yet (held above): that is not a second agent.
+    launcher.release_registration();
+    assert!(
+        until(Duration::from_secs(10), || launcher.running_agents() == 1),
+        "exactly one agent runs"
+    );
     assert!(link.started_by_this_app());
     assert!(link.quit(), "the agent this app started is stopped on quit");
     handle.join().unwrap();
