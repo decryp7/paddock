@@ -13,6 +13,8 @@ import { fileURLToPath } from 'node:url';
 import { buildStep, expectedCommit } from './verdict.mjs';
 import { requiredSteps } from './manifest.mjs';
 import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } from './report.mjs';
+import { swapNotDriven, upgradeSwapStep } from './upgrade-swap-row.mjs';
+import { linuxSwapPrimitives } from './upgrade-swap-prims.mjs';
 import { loginJobsRow, linuxLoginJobsDriver } from './login-jobs-drivers.mjs';
 import { readingSteps } from './helper-readings.mjs';
 import { trayHostChecks } from './linux-tray-host.mjs';
@@ -36,7 +38,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep-vm') o.keep = true; else if (a === '--reboot-check') o.reboot = true; else if (a === '--tray-host') o.trayHost = true; else if (a === '--expect-commit') o.expectCommit = v(); else if (a === '--partial') o.partial = true;
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep-vm') o.keep = true; else if (a === '--reboot-check') o.reboot = true; else if (a === '--tray-host') o.trayHost = true; else if (a === '--old-installer') o.oldInstaller = v(); else if (a === '--expect-commit') o.expectCommit = v(); else if (a === '--partial') o.partial = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Linux suite');
@@ -304,6 +306,16 @@ async function main(argv) {
       g('sudo apt-get remove -y -qq dyno >/dev/null 2>&1; true', 300_000);
       const ls = g('ls /var/log/dyno-helper 2>&1');
       push(rowStep(ROW_TITLES.linuxLogDir, judgeLinuxHelperLogDir({ code: ls.code, out: ls.stdout, helperActive, logBefore }), 'the helper log folder survives the uninstall (helper on at the removal)'));
+    }
+    // Release row: the new .deb over a RUNNING older build (--old-installer <older .deb>; dpkg -i).
+    {
+      if (!o.oldInstaller) push(swapNotDriven('no older build was given (--old-installer <older .deb>: the 1.0.0 .deb or an older RC), so there is nothing to install over'));
+      else {
+        sh('bash', ['-c', `cat ${JSON.stringify(resolve(o.oldInstaller))} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/DynoOld.deb'`], 600_000);
+        const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-swap${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
+        g('sudo apt-get remove -y -qq dyno >/dev/null 2>&1; pkill -x dyno-app; pkill -x dyno-agent; true', 300_000);
+        push(await upgradeSwapStep(linuxSwapPrimitives({ exec: async (c) => ses(c), sleep, now: () => Date.now(), oldDeb: '/tmp/DynoOld.deb', newDeb: '/tmp/Dyno.deb', startApp })).catch((e) => swapNotDriven(String(e.message ?? e))));
+      }
     }
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();

@@ -14,7 +14,7 @@ const RULE71 = [row('mcp', /^Rule 71: Dyno MCP from outside/), row('quit-stop', 
 // Release rows collected for 1.1.0 (release-rows.mjs): a row nobody drives is a not-measured step with its reason, so the run is INCOMPLETE, never PASS.
 const hung = row('hung-page', /^Release row: a hung or paused visible page/);
 const ROWS_WIN = [row('win-reinstall', /^Release row: reinstall over a leftover/), hung, row('second-user', /^Release row: a second user/), row('kill-installer', /^Release row: killing the installer/), row('install-again', /^Release row: install again works/)];
-const ROWS_MAC = [row('mac-reopen', /^Release row: macOS Quit and stop measuring, then reopen/), row('mac-lifecycle-log', /^Release row: a standard user reads helper-lifecycle/), hung,
+const ROWS_MAC = [row('upgrade-swap', /^Release row: installing the new build over a running older one/), row('mac-reopen', /^Release row: macOS Quit and stop measuring, then reopen/), row('mac-lifecycle-log', /^Release row: a standard user reads helper-lifecycle/), hung,
   ...(KEYCHAIN_ROW_REQUIRED ? [row('keychain-update', /^Release row: an update keeps the app openable with a key the earlier build made/)] : [])];
 const ROWS_LINUX = [row('linux-log-dir', /^Release row: Linux uninstall leaves/), hung];
 
@@ -39,7 +39,7 @@ const MAC_HELPER = [
 ];
 const LINUX = [
   row('install', /^Install \(\.deb/), BUILD, row('cold-start', /^Cold start, one instance/), row('keep-awake', /^Keep awake: held by the OS/),
-  row('helper-on', /^Admin helper Turn on \(polkit\)/), ...readings('linux'), row('helper-off', /^Admin helper Turn off removes it/), row('login-jobs', /^Row 5a:/), row('quit', /^Quit \(File > Quit\)/),
+  row('helper-on', /^Admin helper Turn on \(polkit\)/), ...readings('linux'), row('helper-off', /^Admin helper Turn off removes it/), row('login-jobs', /^Row 5a:/), row('upgrade-swap', /^Release row: installing the new build over a running older one/), row('quit', /^Quit \(File > Quit\)/),
 ];
 const LINUX_REBOOT = [
   row('reboot-before', /^Restart check: before the reboot/), row('reboot-after', /^Restart check: Dyno after the reboot/),
@@ -58,7 +58,7 @@ const WIN_UI = [
   row('repeat-install', /^Windows: repeat install of the disk health tool/), row('disk-health', /^Windows: disk health install/), ...readings('windows'),
   row('scoping', /^Windows: D6 scoping/), row('served', /^Windows: the helper reports which readings it served/),
   row('login-jobs', /^Row 5a:/), row('repair', /^Windows: Repair through the card/), row('helper-off', /^Windows: admin helper Turn off/),
-  row('quit-exit', /^Windows: Quit Dyno \(File menu\)/), row('same-version-refused', /^Windows: an update from the same version is refused/), row('uninstall', /^Windows: uninstall removes/),
+  row('upgrade-swap', /^Release row: installing the new build over a running older one/), row('quit-exit', /^Windows: Quit Dyno \(File menu\)/), row('same-version-refused', /^Windows: an update from the same version is refused/), row('uninstall', /^Windows: uninstall removes/),
 ];
 const WIN_REBOOT = [
   row('helper-on', /^Windows: admin helper Turn on/), row('restart-before', /^Windows restart: helper, Launch at login and tray before the restart/),

@@ -211,3 +211,8 @@ PASS only with all seven runs present, not partial, passed, of the same CI run a
   icons as information only: a notification area that UI Automation cannot read stays NOT MEASURED.
 - **Row 5a** (`login-jobs-row.mjs`, `login-jobs-drivers.mjs`): Start at login is changed in Settings; the Jobs list must show the job, Cancel must end it as Cancelled,
   a second change must be accepted and the switch is put back. A change that ends before the list shows it is NOT MEASURED (a quiet guest answers at once).
+- **Install over a running older build** (`upgrade-swap-row.mjs`, `upgrade-swap-prims.mjs`): the older build runs with the helper on, the new one is installed over it
+  (macOS: `--installer-before <older .dmg>` with `--suite power`; Linux: `--old-installer <older .deb>`, `dpkg -i`), the app is opened, and within 60 s the running agent
+  and the helper must report the new version and no process that started before the install may be left (by pid, path and start time). Preconditions (the old version
+  differs from the new, the helper was on) are checked; no older build given or not installable is NOT MEASURED. Windows is not driven (1.0.0 cannot be updated in place by
+  1.1.0; no older RC setup driver yet). The version reads come from `dyno status` / the helper's `--version` and are unverified on a live guest.

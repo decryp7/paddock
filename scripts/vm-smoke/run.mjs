@@ -18,6 +18,8 @@ import { PowerChecks, runPowerSuite } from './power-checks.mjs';
 import { MacGui } from './mac-gui.mjs';
 import { MacIdleChecks } from './mac-idle.mjs';
 import { macDriver, readingSteps } from './helper-readings.mjs';
+import { swapNotDriven, upgradeSwapStep } from './upgrade-swap-row.mjs';
+import { macSwapPrimitives } from './upgrade-swap-prims.mjs';
 import { loginJobsRow, macLoginJobsDriver } from './login-jobs-drivers.mjs';
 import { macRebootCheck } from './mac-reboot.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
@@ -336,6 +338,14 @@ async function main(argv) {
           await prim.cleanup().catch(() => {});
           log(`${km.status.toUpperCase()}  ${km.title}: ${km.summary}`);
           suite.steps.push(km);
+        }
+        // Release row: the new build installed over a RUNNING older one (needs the older .dmg as --installer-before). Last: it replaces the installed app.
+        if (o.suite === 'power') {
+          const sw = o.installerBefore
+            ? await upgradeSwapStep(macSwapPrimitives({ guest, gui, check, share: SHARE, bundle: `/Applications/${config.bundle}` })).catch((e) => swapNotDriven(String(e.message ?? e)))
+            : swapNotDriven('no older build was given (--installer-before <older .dmg>: the 1.0.0 .dmg or an older RC), so there is nothing to install over');
+          log(`${sw.status.toUpperCase()}  ${sw.title}: ${sw.summary}`);
+          suite.steps.push(sw);
         }
         return suite;
       })()

@@ -9,6 +9,7 @@ import { Actor } from './win-act.mjs';
 import { APP_LOG_PS } from './win-tray-icons.mjs';
 import { judgeColdUninstall, coldUninstallAccepted, judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
+import { swapNotDriven } from './upgrade-swap-row.mjs';
 import { makeResult } from './verdict.mjs';
 import { judgeUninstall as judgeUninstallFacts, triState } from './win-judges.mjs';
 
@@ -154,7 +155,7 @@ export async function coldUninstallStep() {
   return coldUninstallAccepted(f) ? { ...res, status: 'pass', summary: 'the first uninstall after boot left nothing, or only the noted leftover and a reinstall works' } : res;
 }
 
-export const notDrivenWinRows = () => [notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
+export const notDrivenWinRows = () => [notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser), swapNotDriven('Windows: 1.0.0 cannot be updated in place by 1.1.0 (uninstall it first, keeping data), and no older 1.1.0 RC setup is driven here yet; the swap needs a driver that installs the older setup, turns the helper on (UAC over VNC), runs the new setup and reads both versions')];
 
 const NT = `Add-Type -Namespace N -Name P -MemberDefinition '[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h); [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr h);'; `;
 const renderers = `$ids = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -match '--type=renderer' -and $_.CommandLine -match 'dyno' } | ForEach-Object { $_.ProcessId }); `;
