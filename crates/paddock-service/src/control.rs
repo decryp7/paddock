@@ -10,12 +10,12 @@ use crate::manager::{Manager, Started};
 use crate::plan::Hold;
 use crate::repair::RepairOutcome;
 use crate::status::{Condition, ServiceStatus};
-use paddock_health::{Cause, Health};
+use paddock_health::{Cause, Clock, Health};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Why a service command was refused or failed. On the wire `{ code, message, retryable }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +110,8 @@ pub type Emit = Arc<dyn Fn(&ServiceUpdate) + Send + Sync>;
 pub struct ServiceControl {
     manager: Mutex<Manager>,
     tracker: Arc<crate::tracker::RepairTracker>,
+    /// The manager's clock: the tracker's times are its monotonic readings, so every read of the tracker uses it.
+    clock: Arc<dyn Clock>,
     last: Mutex<Option<ServiceStatus>>,
     health: Option<(Arc<Health>, String)>,
     emit: Emit,
@@ -163,6 +165,7 @@ impl ServiceControl {
     fn build(manager: Manager, emit: Emit, health: Option<(Arc<Health>, String)>) -> Arc<Self> {
         Arc::new(Self {
             tracker: manager.tracker(),
+            clock: manager.clock(),
             manager: Mutex::new(manager),
             last: Mutex::new(None),
             health,
@@ -205,7 +208,7 @@ impl ServiceControl {
             }
             Err(std::sync::TryLockError::WouldBlock) => {
                 let mut s = lock(&self.last).clone()?;
-                s.repair = self.tracker.current(Instant::now());
+                s.repair = self.tracker.current(self.clock.monotonic());
                 if s.repair
                     .as_ref()
                     .is_some_and(|r| r.state == crate::tracker::RepairState::Working)
@@ -340,7 +343,7 @@ impl ServiceControl {
                     code: ServiceErrorCode::Failed,
                     message: self
                         .tracker
-                        .current(Instant::now())
+                        .current(self.clock.monotonic())
                         .map(|n| n.message)
                         .unwrap_or_default(),
                     retryable: true,
@@ -421,6 +424,7 @@ mod tests {
     use crate::spec::ServiceSpec;
     use crate::testing::{Call, FakeAppService, FakeSystem};
     use paddock_health::{RepairAction, ServiceSpec as HealthSpec, ServiceState};
+    use std::time::Instant;
 
     type Seen = Arc<Mutex<Vec<ServiceUpdate>>>;
 
@@ -524,6 +528,36 @@ mod tests {
     }
 
     #[test]
+    fn the_control_reads_the_tracker_on_the_clock_of_its_manager() {
+        // The tracker holds readings of the manager's monotonic clock, so the control must read it on the same clock: on the
+        // machine's, a success stamped on a test's clock would never fade (and on a real one, compare two origins). While a
+        // repair holds the manager, the status is composed from the last look and the tracker's notice.
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let (emit, _) = emitter();
+        let clock = paddock_health::FakeClock::new();
+        let c = ServiceControl::new(
+            dyno(&sys, d.path(), true).with_clock(Arc::new(clock.clone())),
+            emit,
+        );
+        assert!(c.status().is_some());
+        c.tracker
+            .finish(&RepairOutcome::Recovered, clock.monotonic());
+        let held = lock(&c.manager);
+        assert!(
+            c.status().unwrap().repair.is_some(),
+            "a fresh success is shown"
+        );
+        clock.advance(crate::tracker::SUCCESS_SHOWN + Duration::from_secs(1));
+        assert_eq!(
+            c.status().unwrap().repair,
+            None,
+            "and fades on the manager's clock"
+        );
+        drop(held);
+    }
+
+    #[test]
     fn while_a_repair_holds_the_manager_status_answers_from_the_last_look_and_requests_are_busy() {
         let d = tempfile::tempdir().unwrap();
         let sys = FakeSystem::new();
@@ -531,7 +565,7 @@ mod tests {
         let c = ServiceControl::new(dyno(&sys, d.path(), true), emit);
         assert!(c.status().is_some());
         let held = lock(&c.manager);
-        assert!(c.tracker.start(Instant::now()));
+        assert!(c.tracker.start(paddock_health::SystemClock.monotonic()));
         let s = c.status().unwrap();
         assert_eq!(s.condition, Condition::Repairing);
         assert_eq!(
@@ -543,7 +577,10 @@ mod tests {
             ServiceErrorCode::Busy
         );
         drop(held);
-        c.tracker.finish(&RepairOutcome::Recovered, Instant::now());
+        c.tracker.finish(
+            &RepairOutcome::Recovered,
+            paddock_health::SystemClock.monotonic(),
+        );
         assert_eq!(
             c.open_login_items(),
             Ok(false),
@@ -816,7 +853,7 @@ mod tests {
         c.status().unwrap();
         // `on_start` holds the manager through the whole wait; the health registry's Repair and `run` must not queue behind it.
         let held = lock(&c.manager);
-        assert!(c.tracker.start(Instant::now()));
+        assert!(c.tracker.start(paddock_health::SystemClock.monotonic()));
         let (tx, rx) = channel();
         let c2 = c.clone();
         let t = std::thread::spawn(move || {
@@ -831,7 +868,10 @@ mod tests {
         assert!(matches!(run, Err(ServiceError::Busy)), "{run:?}");
         assert_eq!(cause.code.as_deref(), Some("service.busy"));
         assert!(cause.message.contains("already"), "{cause:?}");
-        c.tracker.finish(&RepairOutcome::Cancelled, Instant::now());
+        c.tracker.finish(
+            &RepairOutcome::Cancelled,
+            paddock_health::SystemClock.monotonic(),
+        );
     }
 
     #[test]

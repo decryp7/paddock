@@ -157,7 +157,8 @@ struct World {
     rec_damaged: bool,
     /// One of the rare events happened on this path (see [`is_rare`]).
     rare_used: bool,
-    rec: Recorded,
+    /// Shared, so that cloning a world (several times an edge) copies no strings; a change goes through `Arc::make_mut`.
+    rec: Arc<Recorded>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -237,8 +238,15 @@ fn deep() -> bool {
 /// `MODEL_REAL_CRASHES=1`: every crash is a real panic unwound through the manager, as before the edges of crashes were taken
 /// from a running run (the two give the same states and edges: the fingerprint of the states in the output says so).
 fn real_crashes() -> bool {
-    std::env::var_os("MODEL_REAL_CRASHES").is_some()
+    // Read once: it is asked on every edge, and an environment lookup is a system call on Windows (it also walks the whole
+    // environment block, which on a CI runner is large).
+    static REAL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *REAL.get_or_init(|| std::env::var_os("MODEL_REAL_CRASHES").is_some())
 }
+
+/// Panics that unwound through the manager (a crash edge taken by really panicking). Counted to show how many the
+/// exploration still pays for: an unwind costs tens of microseconds on macOS and far more on Windows.
+static REAL_PANICS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Events that matter in combination with the core alphabet but not with each other: a path takes at most one of them, so
 /// each is tried from every core state without multiplying the state space by every combination.
@@ -365,6 +373,14 @@ struct Op {
     label: &'static str,
 }
 
+/// The OS calls a trace holds, in order.
+fn ops_of(trace: &[Line]) -> impl Iterator<Item = Op> + '_ {
+    trace.iter().filter_map(|l| match l {
+        Line::Call { k, label, .. } => Some(Op { k: *k, label }),
+        _ => None,
+    })
+}
+
 fn mutating(label: &str) -> bool {
     matches!(label, "register" | "unregister" | "evict")
 }
@@ -411,7 +427,6 @@ struct Sim {
     fault: Fault,
     intr: Intr,
     tick: u32,
-    ops: Vec<Op>,
     trace: Vec<Line>,
     cancel: Arc<AtomicBool>,
     mem: Arc<Memory>,
@@ -497,7 +512,6 @@ impl SimBackend {
         let mut s = lk(&self.s);
         s.tick += 1;
         let k = s.tick;
-        s.ops.push(Op { k, label });
         let line = Line::Call {
             k,
             label,
@@ -532,7 +546,7 @@ impl SimBackend {
     fn leave(&self, k: u32) {
         let mut s = lk(&self.s);
         if let Some(c) = s.capture.clone()
-            && s.ops.iter().any(|o| o.k == k && mutating(o.label))
+            && ops_of(&s.trace).any(|o| o.k == k && mutating(o.label))
         {
             c.lock().unwrap_or_else(|e| e.into_inner()).take(
                 Intr::CrashAfter(k),
@@ -746,18 +760,33 @@ type Viol = (&'static str, String);
 struct Edge {
     after: World,
     crashed: bool,
-    ops: Vec<Op>,
     trace: Vec<Line>,
     viols: Vec<Viol>,
 }
 
 fn normalize(w: &mut World) {
-    if let State::Attempting { attempts, .. } = &mut w.rec.state {
-        *attempts = (*attempts).min(MAX_ATTEMPTS);
+    let over =
+        matches!(&w.rec.state, State::Attempting { attempts, .. } if *attempts > MAX_ATTEMPTS);
+    let pending = matches!(w.rec.resume_pending, Some(n) if n != 1);
+    if over || pending {
+        let r = Arc::make_mut(&mut w.rec);
+        if let State::Attempting { attempts, .. } = &mut r.state {
+            *attempts = (*attempts).min(MAX_ATTEMPTS);
+        }
+        if r.resume_pending.is_some() {
+            r.resume_pending = Some(1);
+        }
     }
-    if w.rec.resume_pending.is_some() {
-        w.rec.resume_pending = Some(1);
-    }
+}
+
+/// The clock every manager of the model reads: fixed, at a calendar time after the process start times the simulated jobs
+/// report, never moving. The real one is a system call per reading, five to seven an edge, and on a QEMU Windows runner each
+/// was 13 to 25 microseconds (CI run 7646's diagnostic), most of the 20 to 35 microseconds an edge cost there.
+fn model_clock() -> Arc<dyn paddock_health::Clock> {
+    static CLOCK: std::sync::OnceLock<Arc<dyn paddock_health::Clock>> = std::sync::OnceLock::new();
+    CLOCK
+        .get_or_init(|| Arc::new(paddock_health::FakeClock::at_wall_ms(1_700_000_000_000)))
+        .clone()
 }
 
 fn build(sim: &Arc<Mutex<Sim>>, rec: RecordFile, timings: Option<Timings>) -> Manager {
@@ -773,6 +802,7 @@ fn build(sim: &Arc<Mutex<Sim>>, rec: RecordFile, timings: Option<Timings>) -> Ma
         move || lk(&a).w.job == Job::Running,
     )
     .with_record(rec)
+    .with_clock(model_clock())
     .with_app_state(
         move || lk(&b).w.wanted,
         move || lk(&c).w.first_run_done,
@@ -800,7 +830,6 @@ fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<S
         intr,
         tick: 0,
         // A run makes some ten calls; room for them at once instead of growing 4, 8, 16.
-        ops: Vec::with_capacity(16),
         trace: Vec::with_capacity(24),
         cancel,
         mem,
@@ -905,7 +934,7 @@ fn environment(w: &mut World, ev: Ev) {
                 w.stale = false;
                 w.start_in = None;
                 w.linger = 0;
-                w.rec.resume_pending = Some(1);
+                Arc::make_mut(&mut w.rec).resume_pending = Some(1);
             }
         }
         Ev::SettingsOn => {
@@ -918,11 +947,11 @@ fn environment(w: &mut World, ev: Ev) {
         Ev::SettingsOff => w.wanted = Some(false),
         Ev::SettingsDamaged => w.wanted = None,
         Ev::DamageRecord => {
-            w.rec = Recorded::default();
+            w.rec = Arc::default();
             w.rec_damaged = true;
         }
         Ev::NewerRecord => {
-            w.rec = Recorded::default();
+            w.rec = Arc::default();
             w.rec_damaged = true;
             w.ro = true;
         }
@@ -940,8 +969,9 @@ fn environment(w: &mut World, ev: Ev) {
             w.job_ver = v;
             w.stale = false;
             w.start_in = None;
-            w.rec.registered_version = Some(v.s().to_string());
-            w.rec.state = State::Idle;
+            let r = Arc::make_mut(&mut w.rec);
+            r.registered_version = Some(v.s().to_string());
+            r.state = State::Idle;
         }
         Ev::ProgramGone => {
             if w.reg == Reg::Registered {
@@ -992,7 +1022,6 @@ fn run(
         let edge = Edge {
             after: w,
             crashed: false,
-            ops: Vec::new(),
             trace: Vec::new(),
             viols: Vec::new(),
         };
@@ -1022,11 +1051,11 @@ fn run(
         }
         _ => {}
     }
-    let entry = w.clone();
+    let entry = w;
     let rec = RecordFile::memory();
-    rec.store(&w.rec)
+    rec.store(&entry.rec)
         .expect("the memory store takes the first write");
-    let sim = new_sim(&w, fault, intr, &rec);
+    let sim = new_sim(&entry, fault, intr, &rec);
     let capture = with_crashes.then(|| {
         Arc::new(Mutex::new(Capture {
             rec: rec.reopen(),
@@ -1065,6 +1094,7 @@ fn run(
     let (crashed, out) = match result {
         Ok(o) => (false, Some(o)),
         Err(p) => {
+            REAL_PANICS.fetch_add(1, Ordering::Relaxed);
             if let Some(msg) = describe_panic(p.as_ref()) {
                 viols.push(("the code under test panicked", msg));
             }
@@ -1125,7 +1155,7 @@ fn conclude(
     mut viols: Vec<Viol>,
 ) -> Edge {
     let mut after = s.w.clone();
-    after.rec = recorded;
+    after.rec = Arc::new(recorded);
     after.rec_damaged = damaged;
     if matches!(ev, Ev::FirstRun | Ev::Install) && matches!(out, Some(Out::Install(Ok(_)))) {
         // Dyno writes its first-run marker after a registration that did not fail.
@@ -1143,13 +1173,11 @@ fn conclude(
     if after.reg == Reg::Registered && after.job == Job::Running && after.job_ver == after.cur {
         after.ghost = 0;
     }
-    let ops = s.ops.clone();
     let trace = s.trace.clone();
     edge_checks(entry, &after, ev, fault, intr, s, out, crashed, &mut viols);
     Edge {
         after,
         crashed,
-        ops,
         trace,
         viols,
     }
@@ -1181,7 +1209,7 @@ fn edge_checks(
     crashed: bool,
     v: &mut Vec<Viol>,
 ) {
-    let count = |l: &str| s.ops.iter().filter(|o| o.label == l).count() as u32;
+    let count = |l: &str| ops_of(&s.trace).filter(|o| o.label == l).count() as u32;
     let (registers, unregisters, evicts) = (count("register"), count("unregister"), count("evict"));
     let unat = unattended(ev);
     let cur = entry.cur.s();
@@ -1292,9 +1320,7 @@ fn edge_checks(
             None
         };
         if let Some(k) = from
-            && s.ops
-                .iter()
-                .any(|o| o.k > k && matches!(o.label, "register" | "unregister"))
+            && ops_of(&s.trace).any(|o| o.k > k && matches!(o.label, "register" | "unregister"))
         {
             bad(
                 "an OS call without a durable record of it",
@@ -1518,10 +1544,15 @@ fn bucket(s: Option<u32>) -> &'static str {
 
 /// The record as the state key sees it: the time of the register call is the wall clock, which differs on every run, so only
 /// whether there is one counts.
-fn normalized(rec: &Recorded) -> Recorded {
-    let mut r = rec.clone();
-    r.registered_at = r.registered_at.map(|_| 1);
-    r
+fn normalized(rec: &Arc<Recorded>) -> Arc<Recorded> {
+    match rec.registered_at {
+        None | Some(1) => rec.clone(),
+        Some(_) => {
+            let mut r = Recorded::clone(rec);
+            r.registered_at = Some(1);
+            Arc::new(r)
+        }
+    }
 }
 
 /// A state of the graph as the exploration tells states apart: every field that matters, compared and hashed as it is (no
@@ -1548,7 +1579,7 @@ struct StateKey {
     ghost: u8,
     mark_unreadable: bool,
     rare_used: bool,
-    rec: Recorded,
+    rec: Arc<Recorded>,
 }
 
 fn key(w: &World) -> StateKey {
@@ -1601,20 +1632,20 @@ fn seeds(caps: Caps, resp: Resp) -> Vec<(&'static str, World)> {
         job_ver: Ver::V1,
         ghost: 0,
         rare_used: false,
-        rec: Recorded::default(),
+        rec: Arc::default(),
     };
     let mut healthy = base.clone();
     healthy.reg = Reg::Registered;
     healthy.job = Job::Running;
     healthy.job_ver = Ver::V1;
     healthy.first_run_done = true;
-    healthy.rec.registered_version = Some(Ver::V1.s().into());
+    Arc::make_mut(&mut healthy.rec).registered_version = Some(Ver::V1.s().into());
     let mut old = healthy.clone();
     old.owner = Ver::V0;
     old.job_ver = Ver::V0;
     old.job = Job::Refused;
     old.stale = true;
-    old.rec.registered_version = Some(Ver::V0.s().into());
+    Arc::make_mut(&mut old.rec).registered_version = Some(Ver::V0.s().into());
     let mut unavailable = base.clone();
     unavailable.reg = Reg::Unavailable;
     vec![
@@ -1674,9 +1705,9 @@ fn parse_token(t: &str) -> (Ev, Fault, Intr) {
 }
 
 /// The interruptions worth trying for an entry point whose fault-free run made these calls.
-fn interruptions(ops: &[Op]) -> Vec<Intr> {
+fn interruptions(ops: impl Iterator<Item = Op>) -> Vec<Intr> {
     let mut v = vec![Intr::Cancel(0), Intr::WritesFail(0)];
-    let muts: Vec<&Op> = ops.iter().filter(|o| mutating(o.label)).collect();
+    let muts: Vec<Op> = ops.filter(|o| mutating(o.label)).collect();
     for o in &muts {
         v.extend([Intr::CrashBefore(o.k), Intr::CrashAfter(o.k)]);
     }
@@ -1876,14 +1907,14 @@ fn explore_inner(caps: Caps, resp: Resp) -> Explored {
                     record(&mut ex, &nodes, i, Some(&token(ev, fault, intr)), e.viols);
                 }
                 if first && is_entry(ev) {
-                    let has = |l: &str| e.ops.iter().any(|o| o.label == l);
+                    let has = |l: &str| ops_of(&e.trace).any(|o| o.label == l);
                     for f in FAULTS.iter().copied().filter(|_| !light) {
                         let applies = match f {
                             f if is_reg_fault(f) => has("register") && ev != Ev::Uninstall,
                             Fault::UnregFails => has("unregister"),
                             Fault::RemovalTimeout | Fault::LingeringJob => has("evict"),
                             Fault::SlowOs => has("register") || has("unregister"),
-                            Fault::LockHeld => e.ops.iter().any(|o| mutating(o.label)),
+                            Fault::LockHeld => ops_of(&e.trace).any(|o| mutating(o.label)),
                             _ => false,
                         };
                         let caps_ok = match f {
@@ -1896,7 +1927,7 @@ fn explore_inner(caps: Caps, resp: Resp) -> Explored {
                         }
                     }
                     if (!light || ev == Ev::Start) && !(ev == Ev::Repair && !deep()) {
-                        for it in interruptions(&e.ops) {
+                        for it in interruptions(ops_of(&e.trace)) {
                             tries.push((Fault::None, it));
                         }
                     }
@@ -1908,7 +1939,7 @@ fn explore_inner(caps: Caps, resp: Resp) -> Explored {
                     )
                 {
                     // A crash during a replace that already met a fault.
-                    for o in e.ops.iter().filter(|o| mutating(o.label)) {
+                    for o in ops_of(&e.trace).filter(|o| mutating(o.label)) {
                         tries.push((fault, Intr::CrashBefore(o.k)));
                         tries.push((fault, Intr::CrashAfter(o.k)));
                     }
@@ -1990,10 +2021,8 @@ fn configs_for(deep: bool, only: Option<&str>) -> Vec<(Caps, Resp)> {
 
 /// What two edges must agree on to be the same step.
 fn same_edge(a: &Edge, b: &Edge) -> bool {
-    let ops = |e: &Edge| e.ops.iter().map(|o| (o.k, o.label)).collect::<Vec<_>>();
     key(&a.after) == key(&b.after)
         && a.crashed == b.crashed
-        && ops(a) == ops(b)
         && a.trace == b.trace
         && a.viols == b.viols
 }
@@ -2102,10 +2131,10 @@ fn faults_of(caps: Caps) -> Vec<Fault> {
         .collect()
 }
 
-/// Heap allocations one edge of the exploration may cost, measured by `alloc_count` on the exploring thread (about 60 to 70
+/// Heap allocations one edge of the exploration may cost, measured by `alloc_count` on the exploring thread (about 49 to 57
 /// now; 94 to 136 when every OS call formatted a trace line and every snapshot cloned the trace). The Windows heap costs some
 /// 200 ns an allocation and release, and the five configurations are 0.6 to 2.4 million edges each.
-const ALLOCS_PER_EDGE_BUDGET: f64 = 85.0;
+const ALLOCS_PER_EDGE_BUDGET: f64 = 63.0;
 
 /// One test per default-run configuration: each explores its own state space to a fixed point on its own thread of the test
 /// runner, so none is near the 60 s limit of the ci profile (the five together in one test were 58 s).
@@ -2249,7 +2278,8 @@ fn check_model(configs: &[(Caps, Resp)], floor: Option<Floor>) {
         }
     }
     out += &format!(
-        "total: {states} states, {edges} edges ({crash_edges} crash edges) in {:?}\nedges by event {by_event:?}\nedges by fault {by_fault:?}\nedges by interruption {by_intr:?}\n",
+        "total: {states} states, {edges} edges ({crash_edges} crash edges, {} real panics) in {:?}\nedges by event {by_event:?}\nedges by fault {by_fault:?}\nedges by interruption {by_intr:?}\n",
+        REAL_PANICS.load(Ordering::Relaxed),
         started.elapsed()
     );
     for (k, (n, replay, why)) in &kinds {
@@ -2298,6 +2328,120 @@ fn check_model(configs: &[(Caps, Resp)], floor: Option<Floor>) {
         fixed.is_empty(),
         "known-failing entries that no longer fail (delete them): {fixed:?}\n{out}"
     );
+}
+
+/// Reports, in the job log, what the pieces of one edge cost on this machine, so a platform on which the exploration is far
+/// slower than elsewhere (the Windows runner: 20 to 35 times a Mac per edge, CI run 7642) can be told apart by measurement and
+/// not by guessing: the per-call cost of the system calls an edge makes (the clocks the manager reads several times, an
+/// environment lookup, a lock, a small allocation, an unwind) and the cost of whole edges. It asserts nothing about time
+/// (ER-12); it asserts only that it measured something, so a broken probe cannot read as a result (ER-33).
+#[test]
+fn the_cost_of_the_pieces_of_one_edge_is_reported() {
+    silence_crashes();
+    fn per_call(n: u32, mut f: impl FnMut()) -> f64 {
+        let t = Instant::now();
+        for _ in 0..n {
+            f();
+        }
+        t.elapsed().as_nanos() as f64 / f64::from(n)
+    }
+    let m = Mutex::new(0u32);
+    let sink = std::sync::atomic::AtomicU64::new(0);
+    let mut out = String::from("cost of the pieces of one edge (ns per call)\n");
+    let rows: Vec<(&str, f64)> = vec![
+        (
+            "Instant::now",
+            per_call(20_000, || {
+                sink.fetch_add(
+                    Instant::now().elapsed().as_nanos() as u64,
+                    Ordering::Relaxed,
+                );
+            }),
+        ),
+        (
+            "SystemTime::now",
+            per_call(20_000, || {
+                sink.fetch_add(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |d| d.subsec_nanos()) as u64,
+                    Ordering::Relaxed,
+                );
+            }),
+        ),
+        (
+            "env::var_os (absent name)",
+            per_call(20_000, || {
+                sink.fetch_add(
+                    u64::from(std::env::var_os("MODEL_COST_PROBE_ABSENT").is_some()),
+                    Ordering::Relaxed,
+                );
+            }),
+        ),
+        (
+            "Mutex lock and unlock",
+            per_call(20_000, || {
+                *lk_u32(&m) += 1;
+            }),
+        ),
+        (
+            "Box::new of 64 bytes",
+            per_call(20_000, || {
+                sink.fetch_add(u64::from(Box::new([1u8; 64])[3]), Ordering::Relaxed);
+            }),
+        ),
+        (
+            "catch_unwind without a panic",
+            per_call(20_000, || {
+                let _ = std::hint::black_box(catch_unwind(|| std::hint::black_box(1u32)));
+            }),
+        ),
+        (
+            "catch_unwind with a Crash panic",
+            per_call(300, || {
+                let _ = catch_unwind(|| panic_any(Crash));
+            }),
+        ),
+    ];
+    for (name, ns) in &rows {
+        out += &format!("  {name}: {ns:.0}\n");
+    }
+    // Whole edges: every entry point from the seeds of one configuration, repeated.
+    let (caps, resp) = (Caps::NoAuto, Resp::Fast);
+    let mut edges = 0u32;
+    let t = Instant::now();
+    for _ in 0..20 {
+        for (_, w) in seeds(caps, resp) {
+            for &ev in ALL_EVS.iter().filter(|e| is_entry(**e)) {
+                let e = apply(&w, ev, Fault::None, Intr::None);
+                edges += 1;
+                sink.fetch_add(u64::from(e.crashed), Ordering::Relaxed);
+            }
+        }
+    }
+    let whole = t.elapsed().as_nanos() as f64 / f64::from(edges);
+    let t = Instant::now();
+    for _ in 0..20 {
+        for (_, w) in seeds(caps, resp) {
+            for &ev in ALL_EVS.iter().filter(|e| is_entry(**e)) {
+                let (e, c) = apply_with_crashes(&w, ev, Fault::None);
+                sink.fetch_add(u64::from(e.crashed) + c.len() as u64, Ordering::Relaxed);
+            }
+        }
+    }
+    let with_crashes = t.elapsed().as_nanos() as f64 / f64::from(edges);
+    out += &format!(
+        "  whole edge, {edges} entry-point edges of {caps:?}/{resp:?}: {whole:.0}\n  the same with crash snapshots: {with_crashes:.0}\n"
+    );
+    println!("{out}");
+    assert!(
+        edges > 0 && whole > 0.0 && rows.iter().all(|(_, ns)| *ns > 0.0),
+        "the probe measured nothing\n{out}"
+    );
+}
+
+fn lk_u32(m: &Mutex<u32>) -> std::sync::MutexGuard<'_, u32> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Replays one path printed by a failure: `MODEL_REPLAY='Mac/Fast/Healthy|Start;Install+RegOther@CrashAfter(2)'` prints the
