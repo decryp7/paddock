@@ -58,11 +58,16 @@ fn a_time_range_is_pushed_into_the_segment_scan() {
             ..Filter::default()
         },
     );
-    // The scan's box in the plan: from "Read Parquet" to its closing line.
-    let scan = plan
-        .lines()
-        .skip_while(|l| !l.contains("Read Parquet"))
+    // The scan's box in the plan: from its label to its closing line (labels are matched ignoring case).
+    let lines: Vec<&str> = plan.lines().collect();
+    let start = lines
+        .iter()
+        .position(|l| l.to_ascii_lowercase().contains("read parquet") || l.to_ascii_lowercase().contains("read_parquet"))
+        .unwrap_or_else(|| panic!("the plan has no Parquet scan, so the probe cannot see the filter:\n{plan}"));
+    let scan = lines[start..]
+        .iter()
         .take_while(|l| !l.contains('╰'))
+        .copied()
         .collect::<Vec<_>>()
         .join("\n");
     assert!(scan.contains("ts >="), "the scan has no time filter at all:\n{plan}");

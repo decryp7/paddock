@@ -371,7 +371,7 @@ fn time_range_sql(from: Option<i64>, to: Option<i64>) -> Option<String> {
 /// The SQL of a conjunct of the `WHERE` (see [`expr_sql`]; NULL counts as false there). A time range stays plain
 /// comparisons: wrapped in `coalesce` DuckDB cannot use the segments' min/max statistics, and a 45 s window of a 56M-event
 /// store then reads every segment's `ts` column (384 MB instead of 8 MB; WP-1 in performance.md).
-fn conjunct_sql(e: &Expr, schema: &dyn FieldSource, group_by: &[String]) -> Option<String> {
+pub(crate) fn conjunct_sql(e: &Expr, schema: &dyn FieldSource, group_by: &[String]) -> Option<String> {
     match e {
         Expr::Time { from, to } => Some(time_range_sql(*from, *to).unwrap_or_else(|| "TRUE".into())),
         _ => expr_sql(e, schema, group_by),
@@ -604,6 +604,23 @@ mod tests {
 
     fn plain() -> EventSchema {
         EventSchema::plain()
+    }
+
+    #[test]
+    fn a_time_range_conjunct_is_plain_but_inside_not_it_keeps_the_coalesce() {
+        let range = Expr::Time {
+            from: Some(10),
+            to: Some(20),
+        };
+        let schema = plain();
+        assert_eq!(conjunct_sql(&range, &schema, &[]).unwrap(), "e.ts >= 10 AND e.ts <= 20");
+        assert_eq!(conjunct_sql(&Expr::Time { from: None, to: None }, &schema, &[]).unwrap(), "TRUE");
+        // An untimed event (NULL ts) is outside the range, so NOT range must keep it: the coalesce makes that so.
+        let negated = Expr::Not(Box::new(range));
+        assert_eq!(
+            expr_sql(&negated, &schema, &[]).unwrap(),
+            "(NOT coalesce(e.ts >= 10 AND e.ts <= 20, FALSE))"
+        );
     }
 
     #[test]

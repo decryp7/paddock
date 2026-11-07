@@ -1,15 +1,15 @@
 //! Events-grid page benchmark (WP-1 of the Debrief 1.2 foundation; budget: interactive < 0.5 s, ADR 0010 and 0014).
-//! Off unless `GRID_MODE` is set. Invented corpora only. Run with `--release --test bench_grid_page -- --nocapture`.
+//! Off unless `DEBRIEF_BENCH_GRID_MODE` is set. Invented corpora only. Run with `--release --test bench_grid_page -- --nocapture`.
 //!
-//! - `GRID_MODE=build`: `GRID_STORE` (new folder) imports `GRID_MAIN`, waits for the index and the catalogue, stops. The
+//! - `DEBRIEF_BENCH_GRID_MODE=build`: `DEBRIEF_BENCH_GRID_STORE` (new folder) imports `DEBRIEF_BENCH_GRID_MAIN`, waits for the index and the catalogue, stops. The
 //!   folder is the "first import done" snapshot; clone it per run (`cp -cR`).
-//! - `GRID_MODE=quiet`: opens `GRID_STORE`; with `GRID_EXTRA` imports that folder as the second import and waits for the
-//!   index and the catalogue; then `GRID_RUNS` (default 21) page queries one after another.
-//! - `GRID_MODE=during`: opens `GRID_STORE` and imports `GRID_EXTRA` while a thread runs the page query every 250 ms.
-//! - `GRID_MODE=explain`: opens the catalogue of `GRID_STORE` with a plain connection (the store's memory limit and
-//!   thread count) and prints `EXPLAIN ANALYZE` of the statements the page runs (`GRID_SQL` names one more).
+//! - `DEBRIEF_BENCH_GRID_MODE=quiet`: opens `DEBRIEF_BENCH_GRID_STORE`; with `DEBRIEF_BENCH_GRID_EXTRA` imports that folder as the second import and waits for the
+//!   index and the catalogue; then `DEBRIEF_BENCH_GRID_RUNS` (default 21) page queries one after another.
+//! - `DEBRIEF_BENCH_GRID_MODE=during`: opens `DEBRIEF_BENCH_GRID_STORE` and imports `DEBRIEF_BENCH_GRID_EXTRA` while a thread runs the page query every 250 ms.
+//! - `DEBRIEF_BENCH_GRID_MODE=explain`: opens the catalogue of `DEBRIEF_BENCH_GRID_STORE` with a plain connection (the store's memory limit and
+//!   thread count) and prints `EXPLAIN ANALYZE` of the statements the page runs (`DEBRIEF_BENCH_GRID_SQL` names one more).
 //!
-//! The query: `GRID_Q_FROM`/`GRID_Q_TO` (ms) and `GRID_Q_FIELD` = `GRID_Q_VALUE`. Every result line starts with `grid:`.
+//! The query: `DEBRIEF_BENCH_GRID_Q_FROM`/`DEBRIEF_BENCH_GRID_Q_TO` (ms) and `DEBRIEF_BENCH_GRID_Q_FIELD` = `DEBRIEF_BENCH_GRID_Q_VALUE`. Every result line starts with `grid:`.
 
 mod common;
 
@@ -31,12 +31,12 @@ fn env(k: &str) -> String {
 
 fn filter() -> Filter {
     Filter {
-        from: Some(env("GRID_Q_FROM").parse().unwrap()),
-        to: Some(env("GRID_Q_TO").parse().unwrap()),
+        from: Some(env("DEBRIEF_BENCH_GRID_Q_FROM").parse().unwrap()),
+        to: Some(env("DEBRIEF_BENCH_GRID_Q_TO").parse().unwrap()),
         filters: vec![FieldFilter {
-            field: env("GRID_Q_FIELD"),
+            field: env("DEBRIEF_BENCH_GRID_Q_FIELD"),
             op: "eq".into(),
-            value: Some(env("GRID_Q_VALUE")),
+            value: Some(env("DEBRIEF_BENCH_GRID_Q_VALUE")),
         }],
         ..Filter::default()
     }
@@ -79,7 +79,7 @@ impl log::Log for Stderr {
     }
 
     fn log(&self, r: &log::Record) {
-        if self.enabled(r.metadata()) && std::env::var("GRID_TRACE").is_ok() {
+        if self.enabled(r.metadata()) && std::env::var("DEBRIEF_BENCH_GRID_TRACE").is_ok() {
             println!("grid: log {}", r.args());
         }
     }
@@ -94,22 +94,29 @@ fn open(dir: &std::path::Path) -> DuckStore {
 
 #[test]
 fn grid_page() {
-    match std::env::var("GRID_MODE").as_deref() {
+    match std::env::var("DEBRIEF_BENCH_GRID_MODE").as_deref() {
         Ok("build") => build(),
         Ok("quiet") => quiet(),
         Ok("during") => during(),
         Ok("explain") => explain(),
-        _ => eprintln!("skipped: set GRID_MODE=build|quiet|during|explain"),
+        _ => eprintln!("skipped: set DEBRIEF_BENCH_GRID_MODE=build|quiet|during|explain"),
     }
 }
 
 fn build() {
     debrief_alloc::tune();
-    let dir = PathBuf::from(env("GRID_STORE"));
-    assert!(!dir.join(debrief_store_duck::DB_FILE).exists(), "GRID_STORE must be a new folder");
+    let dir = PathBuf::from(env("DEBRIEF_BENCH_GRID_STORE"));
+    assert!(
+        !dir.join(debrief_store_duck::DB_FILE).exists(),
+        "DEBRIEF_BENCH_GRID_STORE must be a new folder"
+    );
     let store = DuckStore::create(&dir, Profile::default_profile(), PluginRegistry::new()).unwrap();
     let t = Instant::now();
-    let r = store.open(&[PathBuf::from(env("GRID_MAIN"))]).unwrap().wait().unwrap();
+    let r = store
+        .open(&[PathBuf::from(env("DEBRIEF_BENCH_GRID_MAIN"))])
+        .unwrap()
+        .wait()
+        .unwrap();
     println!("grid: build import events={} s={:.1}", r.events, t.elapsed().as_secs_f64());
     store.wait_for_index(Duration::from_secs(7200)).unwrap();
     store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
@@ -118,14 +125,17 @@ fn build() {
 
 fn quiet() {
     debrief_alloc::tune();
-    let store = open(&PathBuf::from(env("GRID_STORE")));
-    if let Ok(extra) = std::env::var("GRID_EXTRA") {
+    let store = open(&PathBuf::from(env("DEBRIEF_BENCH_GRID_STORE")));
+    if let Ok(extra) = std::env::var("DEBRIEF_BENCH_GRID_EXTRA") {
         store.open(&[PathBuf::from(extra)]).unwrap().wait().unwrap();
         store.wait_for_index(Duration::from_secs(7200)).unwrap();
         store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
     }
     let f = filter();
-    let runs: usize = std::env::var("GRID_RUNS").ok().and_then(|v| v.parse().ok()).unwrap_or(21);
+    let runs: usize = std::env::var("DEBRIEF_BENCH_GRID_RUNS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(21);
     let (cold, rows) = page(&store, &f);
     println!("grid: first_query_ms={cold:.1} rows={rows}");
     let mut ms = Vec::new();
@@ -140,7 +150,7 @@ fn quiet() {
 
 fn during() {
     debrief_alloc::tune();
-    let store = Arc::new(open(&PathBuf::from(env("GRID_STORE"))));
+    let store = Arc::new(open(&PathBuf::from(env("DEBRIEF_BENCH_GRID_STORE"))));
     let f = filter();
     let stop = Arc::new(AtomicBool::new(false));
     let samples = Arc::new(Mutex::new((Vec::new(), 0usize)));
@@ -158,7 +168,11 @@ fn during() {
         })
     };
     let t = Instant::now();
-    let r = store.open(&[PathBuf::from(env("GRID_EXTRA"))]).unwrap().wait().unwrap();
+    let r = store
+        .open(&[PathBuf::from(env("DEBRIEF_BENCH_GRID_EXTRA"))])
+        .unwrap()
+        .wait()
+        .unwrap();
     stop.store(true, Ordering::Relaxed);
     probe.join().unwrap();
     println!("grid: during import events={} s={:.1}", r.events, t.elapsed().as_secs_f64());
@@ -168,29 +182,29 @@ fn during() {
 
 fn explain() {
     use duckdb::Connection;
-    let dir = PathBuf::from(env("GRID_STORE"));
+    let dir = PathBuf::from(env("DEBRIEF_BENCH_GRID_STORE"));
     // Opening the store points the `events` views at this folder's segments; then only the catalogue is used.
     drop(open(&dir));
-    let threads = std::env::var("GRID_THREADS").unwrap_or_else(|_| "4".into());
-    let limit = std::env::var("GRID_LIMIT").unwrap_or_else(|_| "192MB".into());
+    let threads = std::env::var("DEBRIEF_BENCH_GRID_THREADS").unwrap_or_else(|_| "4".into());
+    let limit = std::env::var("DEBRIEF_BENCH_GRID_LIMIT").unwrap_or_else(|_| "192MB".into());
     let mut cfg = duckdb::Config::default()
         .max_memory(&limit)
         .and_then(|c| c.threads(threads.parse().unwrap()))
         .unwrap();
-    // The store's other settings (open_db), each switchable: GRID_ASYNC (default 4, "none" leaves DuckDB's), GRID_FLUSH.
-    let asy = std::env::var("GRID_ASYNC").unwrap_or_else(|_| "4".into());
+    // The store's other settings (open_db), each switchable: DEBRIEF_BENCH_GRID_ASYNC (default 4, "none" leaves DuckDB's), DEBRIEF_BENCH_GRID_FLUSH.
+    let asy = std::env::var("DEBRIEF_BENCH_GRID_ASYNC").unwrap_or_else(|_| "4".into());
     if asy != "none" {
         cfg = cfg.with("async_threads", asy).unwrap();
     }
-    if let Ok(flush) = std::env::var("GRID_FLUSH") {
+    if let Ok(flush) = std::env::var("DEBRIEF_BENCH_GRID_FLUSH") {
         cfg = cfg.with("allocator_flush_threshold", flush).unwrap();
     }
     let conn = Connection::open_with_flags(dir.join(debrief_store_duck::DB_FILE), cfg).unwrap();
     conn.execute_batch("SET GLOBAL parquet_metadata_cache = true").unwrap();
-    if let Ok(set) = std::env::var("GRID_SET") {
+    if let Ok(set) = std::env::var("DEBRIEF_BENCH_GRID_SET") {
         conn.execute_batch(&set).unwrap();
     }
-    let text = std::fs::read_to_string(env("GRID_SQL")).unwrap();
+    let text = std::fs::read_to_string(env("DEBRIEF_BENCH_GRID_SQL")).unwrap();
     for stmt in text.split(";;") {
         let stmt = stmt.trim();
         if stmt.is_empty() {

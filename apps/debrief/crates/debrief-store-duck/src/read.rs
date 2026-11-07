@@ -183,7 +183,7 @@ pub(crate) fn for_each_batch(
 /// Phase timer of one page query (ER-27): at drop it logs the path taken and each phase's milliseconds at debug level, so a
 /// diagnostic bundle shows where a slow page spent its time.
 struct PageTrace {
-    path: &'static str,
+    route: &'static str,
     started: std::time::Instant,
     last: std::time::Instant,
     phases: Vec<(&'static str, f64)>,
@@ -193,7 +193,7 @@ impl PageTrace {
     fn new() -> PageTrace {
         let now = std::time::Instant::now();
         PageTrace {
-            path: "?",
+            route: "?",
             started: now,
             last: now,
             phases: Vec::new(),
@@ -212,8 +212,8 @@ impl Drop for PageTrace {
         if log::log_enabled!(log::Level::Debug) {
             let phases: Vec<String> = self.phases.iter().map(|(p, ms)| format!("{p}={ms:.1}ms")).collect();
             log::debug!(
-                "page path={} total={:.1}ms {}",
-                self.path,
+                "page route={} total={:.1}ms {}",
+                self.route,
                 self.started.elapsed().as_secs_f64() * 1000.0,
                 phases.join(" ")
             );
@@ -603,8 +603,9 @@ impl Inner {
         let display = |pos: usize, total: usize| if req.descending { total - 1 - pos } else { pos };
         // No criteria: the time-order positions give the page directly (no sort).
         if f.exact && f.structural.is_empty() && f.content.is_empty() && !self.is_importing() {
-            trace.path = "positions";
+            trace.route = "positions";
             let total = count(&conn, "SELECT count(*) FROM ord")?;
+            trace.mark("count");
             let mut offset = req.offset;
             let mut anchor_index = None;
             if let Some(a) = req.anchor {
@@ -635,7 +636,9 @@ impl Inner {
             if req.descending {
                 wanted.reverse();
             }
+            trace.mark("ids");
             let rows = self.rows_by_id(&conn, &ctx, &wanted, &cq)?;
+            trace.mark("rows");
             return Ok(PageReply {
                 total,
                 offset,
@@ -644,7 +647,7 @@ impl Inner {
             });
         }
         if f.exact {
-            trace.path = "sql";
+            trace.route = "sql";
             let w = f.all_sql();
             let total = count(&conn, &format!("SELECT count(*) FROM {FROM} WHERE {w}"))?;
             trace.mark("count");
@@ -692,7 +695,7 @@ impl Inner {
                 anchor_index,
             });
         }
-        trace.path = "scan";
+        trace.route = "scan";
         let ids = self.matching_ids(&conn, &ctx, &f, &cq)?;
         trace.mark("scan");
         let total = ids.len();
@@ -1333,7 +1336,7 @@ impl Inner {
             filter.extend(
                 cq.structural_exprs()
                     .iter()
-                    .filter_map(|e| sql::expr_sql(e, &ctx.fields, &cq.group_by)),
+                    .filter_map(|e| sql::conjunct_sql(e, &ctx.fields, &cq.group_by)),
             );
             let content = cq
                 .content_exprs()
