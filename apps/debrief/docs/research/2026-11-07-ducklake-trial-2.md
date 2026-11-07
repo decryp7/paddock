@@ -162,10 +162,12 @@ does not inherit the trial's environment. A 10M check import with `DEBRIEF_TRIAL
   - **Cause:** the catalogue reads each source with `FROM events WHERE source = ?`. In B0 that is `read_parquet` over all
     446 segments with `union_by_name`; in B2 it is `lake.events`, which skips files by their per-file `source`
     statistics.
-  - **Without DuckLake:** passing only the segments that `histogram` names for the source (a trial patch, 95 of 95 tests
-    pass) brought B0's catalogue to 249 s, about two thirds of B2's gain.
+  - **Without DuckLake:** the run `cat-56m-pruned-1` is B1 (page pruning) plus a per-source file list for the
+    catalogue, passing only the segments that `histogram` names for the source (a trial patch, 95 of 95 tests pass). Its
+    catalogue took 249 s, about two thirds of B2's gain. B3 was not split.
   - **Confidence:** single runs on a loaded machine, so this is partly confirmed, not settled.
-- **B2's import 1 was slower:** 40.9–45.4 s against B0's 30.3–41.7 s (registering the segments on every listing).
+- **B2's import 1 was slower in the series:** 40.9–45.4 s against B0's 30.3–41.7 s. The ranges overlap, and in the
+  targeted runs the two were equal (38.80 s against 38.69 s). The cause is not measured.
 - **DuckLake as the catalog buys nothing in the page query that B1 does not.** In the store's real page query, B2 mirror (91–100 ms at
   56M) equals B1 pruned (91–108 ms). At the SQL level, DuckLake's pruning over the same 446 files (53–57 ms) is slower
   than a plain ts min/max list (24–25 ms). Trial 1's 22 ms through DuckLake was against an unpruned `read_parquet` with
@@ -181,8 +183,10 @@ does not inherit the trial's environment. A 10M check import with `DEBRIEF_TRIAL
   1.6–1.8 s at 56M in every variant, over the 0.5 s interactive budget.
 - **Better time ordering gives little of what is left in the store.** At the SQL level: 24 ms (pruned) → 10–12 ms
   (sorted) or 9–15 ms (10-minute buckets). But the store's page with pruning takes 91–108 ms against 24 ms for its SQL
-  shape (and B2 91 ms against 53 ms). Ordering can therefore save at most about 12–15 ms of about 91 ms; the other
-  roughly 65 ms is store overhead in the page path that this trial did not attribute. The cost is at import: a sorted rewrite took 75–88 s and 10-minute bucketing 160–189 s for 54.4M events, while
+  shape (and B2 91 ms against 53 ms). If that overhead is fixed, ordering can save at most about 12–15 ms of about
+  91 ms; the other roughly 65 ms is store overhead in the page path that this trial did not attribute. The overhead may
+  not be fixed: it is about 67 ms for B1 and about 38 ms for B2, so it may scale with what the query reads, and ordering
+  in the page path was not measured. The cost is at import: a sorted rewrite took 75–88 s and 10-minute bucketing 160–189 s for 54.4M events, while
   the whole store import took 30–43 s. Late rows (the second import) became 58 small files in existing buckets, merged
   in 21–22 s. 1-hour buckets did not fit 768 MB in DuckDB's partitioned write.
 - **Row-group size:** tied with 32,768 at 56M (168–176 against 173–189 ms); keep the default 65,536. 16,384 is clearly
@@ -202,9 +206,9 @@ does not inherit the trial's environment. A 10M check import with `DEBRIEF_TRIAL
   not that.
 - **Rows without a timestamp** in the bucket layouts (excluded; a product needs an "untimed" bucket).
 - **The cause of B3's wrong answers after a move.**
-- **Cold-cache queries, Windows and Linux.**
+- **Windows and Linux.**
 - **Clean loads on every 56M run** (16 of 23 peaked above 12; see Results).
-- **Cold-cache page queries:** the page-query verdicts are "met warm; cold not measured".
+- **Cold-cache queries:** every query verdict is "met warm; cold not measured".
 - **The remaining store overhead of the page path** (about 65 ms of B1's 91 ms at 56M) is not attributed by phase.
 - **The catalogue cause, settled:** one targeted run per variant only.
 
@@ -218,13 +222,14 @@ does not inherit the trial's environment. A 10M check import with `DEBRIEF_TRIAL
    - **Page path (B1):** use the per-segment ts range from `histogram`, or a ts min/max column in `segments`. It is
      small, needs no format change and nearly halves the 56M page query after the WP-1 fix (168–176 → 91–108 ms).
    - **Catalogue:** read each source from its own segments (`histogram` names them). That took about two thirds of
-     DuckLake's end-to-end gain in one targeted run (catalogue 270 → 249 s, B2 239 s); confirm it with three runs on a
+     DuckLake's end-to-end gain in one targeted run of B1 with per-source lists (catalogue 270 → 249 s, B2 239 s); confirm it with three runs on a
      quiet machine as part of the work.
    - **Estimate:** 2–3 days with tests for the page path, plus 1 day for the catalogue.
 3. **Keep 65,536 rows per row group.**
 4. **Attribute the page path's remaining store overhead next** (about 65 ms of B1's 91 ms at 56M, outside the SQL
    shape). Improve time ordering only after that, and only if it still matters. Ordering's measured upper bound is 24 →
-   10–12 ms at the SQL level, at most about 12–15 ms of the store's 91 ms. The cost is a rewrite or bucketing step of 75–190 s
+   10–12 ms at the SQL level. That is at most about 12–15 ms of the store's 91 ms only if the store's overhead is fixed;
+   it may scale (B1 about 67 ms, B2 about 38 ms), and ordering was not measured in the page path. The cost is a rewrite or bucketing step of 75–190 s
    per 54M events, or a writer change. The cheaper option to test next is compaction that merges segments into
    time-ordered files in the background after the import, with the late-row merge cost measured here (21 s per 58
    files). Design it with the 768 MB budget in mind: DuckDB's partitioned write did not fit with 1-hour buckets.

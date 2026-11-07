@@ -459,3 +459,36 @@ cat-56m-base-1: background_split index_s=97.96 catalogue_s=270.11 ready_end_to_e
 cat-56m-pruned-1: background_split index_s=119.63 catalogue_s=249.05 ready_end_to_end s=301.39 
 cat-56m-mirror-1: background_split index_s=106.04 catalogue_s=238.95 ready_end_to_end s=292.90 
 gate with catalogue pruning (pruned): test result: ok. 95 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 38.22s
+
+## Moved-store answers (move_reopen: page, plain filter, search hits before and after the move)
+f-10m-base-1: move_reopen s=0.105 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=442
+f-10m-base-2: move_reopen s=0.104 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=760
+f-10m-base-3: move_reopen s=0.116 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=420
+f-10m-mirror-1: move_reopen s=0.134 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=571
+f-10m-mirror-2: move_reopen s=0.129 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=571
+f-10m-mirror-3: move_reopen s=0.133 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=560
+f-10m-native-1: move_reopen s=0.146 same_answers=false before=(Some(138), Some(47715), 306109) after=(Some(138), Some(55867), 306109) peak_fp_mb=805
+f-10m-native-2: move_reopen s=0.180 same_answers=false before=(Some(138), Some(47715), 306109) after=(Some(138), Some(55867), 306109) peak_fp_mb=791
+f-10m-native-3: move_reopen s=0.165 same_answers=false before=(Some(138), Some(47715), 306109) after=(Some(138), Some(55867), 306109) peak_fp_mb=721
+f-10m-pruned-1: move_reopen s=0.105 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=776
+f-10m-pruned-2: move_reopen s=0.115 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=418
+f-10m-pruned-3: move_reopen s=0.114 same_answers=true before=(Some(138), Some(47715), 306109) after=(Some(138), Some(47715), 306109) peak_fp_mb=490
+f-56m-base-2: move_reopen s=0.227 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=611
+f-56m-base-3: move_reopen s=0.223 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=426
+f-56m-base-4: move_reopen s=0.233 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=364
+f-56m-base-5: move_reopen s=0.222 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=339
+f-56m-mirror-1: move_reopen s=0.167 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=1125
+f-56m-mirror-2: move_reopen s=0.179 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=426
+f-56m-mirror-3: move_reopen s=0.203 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=364
+f-56m-mirror-4: move_reopen s=0.167 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=401
+f-56m-native-1: move_reopen s=0.290 same_answers=false before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(299370), 1699896) peak_fp_mb=701
+f-56m-native-2: move_reopen s=0.272 same_answers=false before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(297283), 1699896) peak_fp_mb=974
+f-56m-native-3: move_reopen s=0.250 same_answers=false before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(299294), 1699896) peak_fp_mb=495
+f-56m-pruned-1: move_reopen s=0.239 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=1359
+f-56m-pruned-2: move_reopen s=0.238 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=472
+f-56m-pruned-3: move_reopen s=0.282 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=353
+f-56m-pruned-4: move_reopen s=0.224 same_answers=true before=(Some(138), Some(267018), 1699896) after=(Some(138), Some(267018), 1699896) peak_fp_mb=374
+
+## Corpus size (du -sk, 2026-11-07)
+/Volumes/d7sst7/dev-targets/scratch/ducklake-trial/corpus56m/main 7147252 KiB = 7.32 GB
+/Volumes/d7sst7/dev-targets/scratch/ducklake-trial/corpus10m/main 1286524 KiB = 1.32 GB

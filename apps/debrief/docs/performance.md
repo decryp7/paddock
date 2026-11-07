@@ -99,7 +99,7 @@ to 15:57, plus three targeted catalogue runs from 16:21 to 16:37.
   - **Start gate:** every run started only at a 1-minute load of 12 or less with no macOS CI job in progress (`run2.sh`,
     checked before and again inside the lock).
   - **Peak loads:** the highest load during each run is in [runs.txt](research/2026-11-07-ducklake-trial-2/runs.txt).
-    10M and layout runs: 3.6 to 7.0, except `rg-10m-16384-3` at 12.53. 16 of the 23 counted 56M store runs peaked at 12.5
+    10M and layout runs: 3.6 to 7.2, except `rg-10m-16384-3` at 12.53. 16 of the 23 counted 56M store runs peaked at 13.5
     to 32 from other agents' jobs. They are counted and flagged, with a flag column in runs.txt; replacements at
     15:37–15:57 were no quieter (16.2 and 16.4), so the time box stopped them. The one clean run per variant: B0 170.9,
     B1 92.0, B2 98.6, B3 118.6 ms page p50. Import, searchable and during-import times are load-sensitive.
@@ -126,9 +126,9 @@ to 15:57, plus three targeted catalogue runs from 16:21 to 16:37.
   | Page query during import 2, p50 / max | 295–1,900 / 3,265–4,542 ms | 174–1,737 / 410–4,484 ms | 172–1,769 / 3,112–4,981 ms | 208–1,674 / 3,698–4,244 ms | < 0.5 s | all over at p50 in some runs; at max in every run but one B1 run (410 ms) |
   | Plain field filter, quiet p50 | 1,621–1,649 ms | 1,616–1,777 ms | 1,687–1,745 ms | 1,730–1,758 ms | < 0.5 s | all over |
   | Import 1 (54.4M) | 30.3–41.7 s | 35.6–43.3 s | 40.9–45.4 s | 34.8–42.9 s | ≥ 218k events/s | all met (1.2–1.8M/s) |
-  | Searchable end to end | 306–332 s | 317–329 s | 275–290 s | 274–287 s | none (exploratory) | B2 and B3 faster: the catalogue's per-source reads (targeted runs: catalogue B0 270 s, B2 239 s, B0 with per-source file lists 249 s; index 98–120 s) |
+  | Searchable end to end | 306–332 s | 317–329 s | 275–290 s | 274–287 s | none (exploratory) | B2 and B3 faster: the catalogue's per-source reads (targeted runs: catalogue B0 270 s, B2 239 s, B1 with per-source file lists 249 s; index 98–120 s; B3 not split) |
   | Import time per GB (7.32 GB) | 4.1–5.7 s/GB | 4.9–5.9 s/GB | 5.6–6.2 s/GB | 4.8–5.9 s/GB | D7: ≤ 6 s/GB | met, except B2 over in some runs |
-  | Catalogue memory | not separable | not separable | not separable | not separable | D7: catalogue ≤ 512 MB | not applicable here: the background peaks (1.6–1.9 GB at 56M) mix the catalogue with the index build in one process |
+  | Catalogue memory | not separable | not separable | not separable | not separable | D7: catalogue ≤ 512 MB | not applicable here: the background peaks (0.8–1.9 GB at 56M) mix the catalogue with the index build in one process |
   | Undo, searchable again | 5.22–5.55 s | 4.97–5.77 s | 5.71–8.20 s | 5.41–6.16 s | none (exploratory) | — |
   | Time shift (6.4M rows), searchable again | 33.5–41.3 s | 32.3–37.9 s | 35.2–42.8 s | 29.8–37.0 s | none (exploratory) | — |
   | Disk after shift | 4,902–4,976 MB | 4,894–5,034 MB | 4,874–4,966 MB | 5,567–5,696 MB | none (exploratory) | — |
@@ -200,7 +200,8 @@ Quoted by [research/2026-11-06-ducklake-trial.md](research/2026-11-06-ducklake-t
   `l10m-sqlite-1..3` (13.1 to 14.7: flagged, replaced by `l10m-sqlite-4..6` at 3.6 to 4.5). macOS CI: the probe used during
   these runs could not read the Gitea API (a Python certificate error it reported as "none"), so the check was blind at
   the time (ER-33). Reconstructed on 2026-11-07 from the job start and end times of every macOS job
-  ([ci-mac-jobs.txt](research/2026-11-07-ducklake-trial-2/ci-mac-jobs.txt), runs 7630 onwards, `overlap.py`): none of the
+  ([ci-mac-jobs.txt](research/2026-11-07-ducklake-trial-2/ci-mac-jobs.txt), runs 7630 onwards: the first run whose
+  jobs could still be in progress when trial 1 started, 7630, was the Dyno run named in the trial's brief; `overlap.py`): none of the
   77 runs overlapped a macOS CI job ([trial1-ci-overlap.txt](research/2026-11-07-ducklake-trial-2/trial1-ci-overlap.txt)). A first 56M pass used a query window that matched 37
   rows; it was discarded and rerun (one of its store runs peaked at load 70.9). The review runs (768 MB with 4 threads,
   4-thread raw and adopt queries, 03:31 to 03:36) ran at a highest 1-minute load of 1.9 to 3.8.

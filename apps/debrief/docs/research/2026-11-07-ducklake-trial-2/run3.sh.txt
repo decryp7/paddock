@@ -1,5 +1,5 @@
 #!/bin/bash
-# usage: run2.sh LABEL VARIANT SIZE [ENV=VAL]  one trial-2 store run (DEBRIEF_TRIAL_STORE=VARIANT) through plock; waits (at most 60 min)
+# usage: run3.sh LABEL VARIANT SIZE [ENV=VAL]  one trial-2 store run (DEBRIEF_TRIAL_STORE=VARIANT) through plock; waits (at most 60 min)
 # until the 1-minute load is at most 12 and no macOS CI job is in progress; logs load before/after, max load and CI.
 T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial
 P=/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock
