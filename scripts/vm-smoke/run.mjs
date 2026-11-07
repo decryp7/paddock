@@ -295,7 +295,7 @@ async function main(argv) {
             stopApp: async () => { await exec(`osascript -e 'quit app "Dyno"' ; pkill -x dyno-app; true`); await sleepMs(4000); },
             startApp: async () => { await exec(`open -a ${bundle}`); for (let i = 0; i < 30; i++) { if ((await exec(`${bundle}/Contents/MacOS/dyno-agent status >/dev/null 2>&1`)).code === 0) break; await sleepMs(4000); } await sleepMs(8000); },
             // The agent is supervised (launchd job net.decryptology.dyno.agent.ondemand restarts a killed one within seconds): take the job out first, or the "agent is gone" half cannot be seen.
-            killAgent: async () => { await exec('launchctl bootout gui/$(id -u)/net.decryptology.dyno.agent.ondemand 2>/dev/null; pkill -9 -x dyno-agent; true'); },
+            killAgent: async () => { await exec('for j in $(launchctl print gui/$(id -u) | grep -o "net.decryptology.dyno.agent[A-Za-z.]*" | sort -u); do launchctl bootout gui/$(id -u)/$j 2>/dev/null; done; pkill -9 -x dyno-agent; true'); },
             agentAlive: async () => (await exec('pgrep -x dyno-agent >/dev/null')).code === 0,
             quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; true`); await sleepMs(4000); },
             pidAlive: async (pid) => (await exec(`kill -0 ${pid} 2>/dev/null`)).code === 0,
