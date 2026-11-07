@@ -229,6 +229,23 @@ describe('PdAssistant', () => {
     expect(r.all('[data-testid=assistant-turn]')).toHaveLength(0);
   });
 
+  it('tells its host which conversation is open (a host keeps per-chat state beside the pane, such as "Don\'t save")', async () => {
+    const { r } = await open({ conversations: [FIXTURE_CONVERSATION] });
+    const seen: (string | null)[] = [];
+    const sub = (r.fixture.componentInstance as PdAssistant).activeChange.subscribe((id) => seen.push(id));
+    r.one('[data-testid=assistant-list-toggle]').click();
+    await settle(r.fixture);
+    r.one('[data-testid=assistant-open]').click();
+    await vi.waitFor(() => expect(seen.at(-1)).toBe(FIXTURE_CONVERSATION.id));
+    r.one('[data-testid=assistant-new]').click();
+    await vi.waitFor(() => expect(seen.at(-1)).toBeNull());
+    const box = await type(r, 'hello');
+    await press(r, box, { key: 'Enter' });
+    await vi.waitFor(() => expect(typeof seen.at(-1)).toBe('string'));
+    expect(seen.at(-1)).not.toBe(FIXTURE_CONVERSATION.id);
+    sub.unsubscribe();
+  });
+
   it('shows the shared needs-AI state and keeps the composer from sending until Pitwall is ready', async () => {
     const pitwall = new MemoryPitwallBackend({ state: { kind: 'notRunning' }, app: 'Demo' });
     const { r, backend } = await open({ pitwall });
