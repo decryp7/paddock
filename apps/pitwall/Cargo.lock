@@ -3811,6 +3811,7 @@ dependencies = [
 name = "pitwall-app"
 version = "1.1.0"
 dependencies = [
+ "chrono",
  "getrandom 0.3.4",
  "keyring",
  "log",
@@ -3820,6 +3821,7 @@ dependencies = [
  "paddock-assistant",
  "paddock-build",
  "paddock-commands",
+ "paddock-diag",
  "paddock-dialogs",
  "paddock-env",
  "paddock-health",

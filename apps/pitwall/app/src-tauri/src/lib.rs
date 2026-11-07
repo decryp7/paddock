@@ -22,6 +22,7 @@ pub mod live;
 pub mod popup;
 pub mod quit;
 pub mod repair_schedule;
+pub mod report;
 pub mod server_client;
 pub mod service_install;
 pub mod service_manager;
@@ -235,7 +236,8 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
         .updater(move |app| updater(app, test_dir, update_client))
         .windows(move |app| windows(app, installed));
     if installed {
-        builder
+        // Report a problem only for the installed app: a test place never resolves the real folders (ER-14).
+        builder.diagnostics(diagnostics_setup)
     } else {
         builder.in_memory().native_menu(false)
     }
@@ -414,10 +416,35 @@ fn pitwall_setup<R: Runtime>(app: &AppHandle<R>, installed: bool) {
     }
 }
 
+/// The app's log, kept for Report a problem (its pending repeats are written before a report, and its Logging section sets
+/// the level).
+static LOG: std::sync::OnceLock<paddock_log::LogHandle> = std::sync::OnceLock::new();
+
+/// Report a problem's setup: paddock-diag's built-in sections (system facts, the shell's settings, the crash markers, and the
+/// dated logs of the app, the server and the command line, read from disk so they are there with the server down), then
+/// Pitwall's own sections ([`report`]) and the log handle.
+fn diagnostics_setup<R: Runtime>(app: &AppHandle<R>) -> Result<paddock_diag::tauri::Setup, Box<dyn std::error::Error + Send + Sync>> {
+    let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
+    let dirs = paddock_env::AppDirs::for_app(&id)?;
+    let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
+    let data = app_state::data_dir().ok_or("Pitwall's data folder cannot be found")?;
+    let mut setup = paddock_diag::tauri::Setup::new(info, dirs).settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE);
+    for section in report::sections(app, data) {
+        setup = setup.section(section);
+    }
+    if let Some(handle) = LOG.get() {
+        setup = setup.log(handle.clone());
+    }
+    Ok(setup)
+}
+
 /// Starts the app.
 pub fn run() {
     // First: the shared crates' log lines (the start's error among them) reach Pitwall's daily log file (paddock-log).
     let _log = paddock_shell::logging::install(&AppIdentity::new(APP_ID, APP_NAME, VERSION));
+    if let Some(handle) = &_log {
+        let _ = LOG.set(handle.clone());
+    }
     let cwd = std::env::current_dir().ok();
     let launch = paddock_window::launch::parse_args(std::env::args().skip(1), cwd.as_deref(), &[]);
     let builder = tauri::Builder::default();

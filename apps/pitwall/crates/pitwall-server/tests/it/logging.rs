@@ -1,7 +1,8 @@
 //! The server's own log (ER-27, plan B4a): its lines go to a dated paddock-log file in the log folder, and a playground chat
 //! leaves its `pitwall_chat` lines there (start, end, the cause of a failure), with names, counts and times and no content.
 
-use crate::common::harness;
+use crate::common;
+use common::harness;
 use serde_json::json;
 use std::time::Duration;
 
@@ -15,7 +16,7 @@ fn chat_body(marker: &str) -> Vec<u8> {
     .unwrap()
 }
 
-async fn chat(h: &crate::common::Harness, body: Vec<u8>) -> String {
+async fn chat(h: &common::Harness, body: Vec<u8>) -> String {
     let auth = format!("Bearer {}", h.admin);
     let r = h
         .client

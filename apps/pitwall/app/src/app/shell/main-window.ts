@@ -5,6 +5,7 @@ import { providePaddockMaterial } from '@decryp7/paddock-ui/material';
 import { PdCommandPalette, providePagesPalette } from '@decryp7/paddock-ui/workbench/palette';
 import { PdShellFrame, provideShellPages } from '@decryp7/paddock-ui/shell/pages';
 import { provideContributions, provideShellContext, provideShellVersionCheck } from '@decryp7/paddock-ui/shell';
+import { provideWebviewLog } from '@decryp7/paddock-ui/shell/diagnostics';
 import { provideShellAbout } from '@decryp7/paddock-ui/shell/about';
 import { tauriDialogIo } from '@decryp7/paddock-ui/shell/dialogs';
 import { provideSubmenus, tauriNativeMenuPort } from '@decryp7/paddock-ui/shell/menu';
@@ -23,7 +24,7 @@ import { ServiceConsentPrompt } from '../features/service/service-consent';
 import { ServiceStore } from '../features/service/service.store';
 import { provideIcons } from '../shared/icons';
 import { providePitwallAppearance } from './appearance';
-import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS } from './contributions';
+import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIAGNOSTICS_CONTRIBUTIONS } from './contributions';
 import { aboutBackend, notifyBackends, settingsBackend, updatesBackend } from './engines';
 import { PitwallIcon } from './icon';
 import { tauriBridge, tauriIpc } from './ipc';
@@ -112,6 +113,9 @@ export function bootMainWindow(): Promise<unknown> {
       // The desktop build asks the shell plugin for its version once (ADR 0012 §3): a different one is a plain error.
       ...(ipc ? [provideShellVersionCheck(ipc.invoke)] : []),
       provideContributions(ABOUT_CONTRIBUTIONS),
+      provideContributions(DIAGNOSTICS_CONTRIBUTIONS),
+      // The page's own errors reach the log (the command is part of every window's contract); the browser build has no log.
+      ...(ipc ? [provideWebviewLog({ ipc: () => ({ invoke: (command, args) => ipc.invoke(command, args) }) })] : []),
       provideShellAbout({ about: aboutBackend, updates: updatesBackend, main: true, ready: windowReady }),
       provideContributions(SETTINGS_CONTRIBUTIONS),
       provideShellSettings({ backend: settingsBackend, appearance: { gate: windowReady } }),

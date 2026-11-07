@@ -42,7 +42,11 @@ paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 paddock-mcp = { path = "../../../../crates/paddock-mcp" }
 # The pasted MCP keys (ADR 0023 Decision 7): an owner-only file on macOS, the OS store elsewhere (the target section below).
 paddock-secrets = { path = "../../../../crates/paddock-secrets" }
+# Report a problem (plan B4): Pitwall's sections beside paddock-diag's, the app's folders and the log handle its Logging
+# section drives.
+paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
 paddock-env = { path = "../../../../crates/paddock-env" }
+paddock-log = { path = "../../../../crates/paddock-log" }
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -102,10 +106,10 @@ workspace = true
 # A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
 socket2 = { version = "0.6", features = ["all"] }
 tempfile.workspace = true
+# The time of a report the tests make (paddock-diag takes a chrono time).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # A held loopback port for "nothing answers there" (C39).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
-# The chat host's tests: a real MCP listener with fake tools.
-paddock-log = { path = "../../../../crates/paddock-log" }
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
 tauri = { version = "2.12.4", features = ["test"] }
 # The shell plugin on Tauri's mock runtime: the start test (ADR 0029, C50) opens no window and touches no user folder.

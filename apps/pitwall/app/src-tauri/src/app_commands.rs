@@ -20,7 +20,7 @@ fn internal(m: impl Into<String>) -> CommandError {
     CommandError::new(ErrorCode::Internal, m)
 }
 
-async fn compose_state(client: &SharedClient) -> ServiceInstall {
+pub(crate) async fn compose_state(client: &SharedClient) -> ServiceInstall {
     let os = {
         let client = client.clone();
         // The shared manager asks launchd and the server: blocking calls, off the runtime's threads.
@@ -715,18 +715,19 @@ mod tests {
         jobs::start(&jobs, spec("repair-service", "t", "p"), sink, move |ctx| {
             repair_job(
                 ctx,
-                move |_: &AtomicBool| {
+                Box::new(move |_: &AtomicBool| {
                     // Held until the job has polled the step once, so the poll comes first.
                     go_rx.recv().unwrap();
                     *shared.lock().unwrap() = Some("Removing the old registration".to_string());
                     at_step.send(()).unwrap();
                     finish_rx.recv().unwrap();
                     Ok(RepairOutcome::Recovered)
-                },
+                }),
                 Arc::new(move || {
                     let _ = polled_tx.send(());
                     read.lock().unwrap().clone()
                 }),
+                // The end state is the test's own (ER-14), as in `start_repair`.
                 || async { Ok(serde_json::json!({ "installed": true })) },
             )
         });
@@ -737,7 +738,9 @@ mod tests {
         // next poll of the step does not come by itself: advance the clock by one poll interval instead of waiting for it.
         tokio::time::advance(STEP_POLL).await;
         events
-            .until("the step shows as a phase", |e| phases(e).contains(&"Removing the old registration"))
+            .until("the step shows as a phase", |e| {
+                phases(e).contains(&"Removing the old registration")
+            })
             .await;
         finish_tx.send(()).unwrap();
         events.until_terminal().await;

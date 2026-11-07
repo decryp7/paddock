@@ -20,8 +20,8 @@ export const INPUTS = {
 };
 
 describe('Pitwall dialogs boot as their windows do', () => {
-  it('are the shared confirmation, the Settings window, the five own dialogs and the shell’s About, Updates and What’s New', () => {
-    expect(ALL.map((d) => d.id).sort()).toEqual(['pd.about', 'pd.confirm', 'pd.settings', 'pd.updates', 'pd.whats-new', 'pw.create-app', 'pw.key-secret', 'pw.mcp-key', 'pw.quit', 'pw.service-consent']);
+  it('are the shared confirmation, the Settings window, the five own dialogs and the shell’s About, Updates, What’s New and Report a problem', () => {
+    expect(ALL.map((d) => d.id).sort()).toEqual(['pd.about', 'pd.confirm', 'pd.report-problem', 'pd.settings', 'pd.updates', 'pd.whats-new', 'pw.create-app', 'pw.key-secret', 'pw.mcp-key', 'pw.quit', 'pw.service-consent']);
   });
 
   for (const def of ALL) {
