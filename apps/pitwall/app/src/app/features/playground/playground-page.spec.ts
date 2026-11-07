@@ -1,6 +1,7 @@
 import { MockBackend } from '../../core/mock-backend';
 import { button, render, settle } from '../../../testing/render';
 import { PlaygroundPage, statsText } from './playground-page';
+import { resetChatBackend } from './chat-backend';
 
 const wait = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
@@ -26,15 +27,45 @@ describe('PlaygroundPage', () => {
     }
     await settle(fixture);
   }
+  /** Opens the Compare tab (Chat is the first one). */
+  const tabsOf = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLElement>('[role=tab]'));
+  async function compare(fixture: Parameters<typeof settle>[0], el: HTMLElement) {
+    await until(fixture, el, () => tabsOf(el).length === 2);
+    tabsOf(el).find((t) => t.textContent?.includes('Compare'))!.click();
+    await until(fixture, el, () => !!el.querySelector('[data-testid=pg-compare]'));
+  }
+  /** The page on its Compare tab; `el` is that tab's body (the chat tab stays in the page, with buttons of its own). */
+  async function renderCompare(be: ReturnType<typeof backend>) {
+    const r = await render(PlaygroundPage, be);
+    await compare(r.fixture, r.el);
+    return { ...r, el: r.el.querySelector<HTMLElement>('[data-testid=pg-compare]')!.parentElement! };
+  }
   const finished = (el: HTMLElement) => () => el.querySelectorAll('.turn.bot').length > 0 && el.querySelectorAll('.caret, .thinking').length === 0 && !!el.querySelector('.stats');
 
+  it('opens on the Chat tab with the assistant pane; Compare is the second tab', async () => {
+    resetChatBackend();
+    const { fixture, el } = await render(PlaygroundPage, backend());
+    await until(fixture, el, () => tabsOf(el).length === 2);
+    const tabs = tabsOf(el);
+    expect(tabs.map((t) => t.textContent?.trim())).toEqual(['Chat', 'Compare']);
+    expect(tabs[0]?.getAttribute('aria-selected')).toBe('true');
+    expect(el.querySelector('pw-playground-chat pd-assistant')).not.toBeNull();
+    expect(el.querySelector('.pane')).toBeNull();
+    expect(el.querySelector('[data-testid=pg-compare]')).toBeNull();
+    await compare(fixture, el);
+    expect(tabs[1]?.getAttribute('aria-selected')).toBe('true');
+    expect(el.querySelectorAll('[data-testid=pg-compare] .pane')).toHaveLength(2);
+    // The chat stays where it was (its conversation and a running turn are kept while Compare is open).
+    expect(el.querySelector('pw-playground-chat pd-assistant')).not.toBeNull();
+  });
+
   it('shows the empty state with suggestions and a disabled Send', async () => {
-    const { el } = await render(PlaygroundPage, backend());
+    const { el } = await renderCompare(backend());
     expect(el.querySelector('.empty')?.textContent).toContain('Ask anything');
     expect(el.querySelectorAll('.sugg .chip')).toHaveLength(3);
     expect(button(el, 'Send').disabled).toBe(true);
     expect(button(el, 'Clear').disabled).toBe(true);
-    expect(el.querySelectorAll('.pane')).toHaveLength(1);
+    expect(el.querySelectorAll('.pane')).toHaveLength(2);
     expect(el.querySelector('.pane-head .status')).not.toBeNull();
     expect(el.textContent).toContain('Hot');
   });
@@ -42,19 +73,19 @@ describe('PlaygroundPage', () => {
   it('tells the user to download a model when there is no chat model', async () => {
     const be = backend();
     be.localModels = () => Promise.resolve([]);
-    const { el } = await render(PlaygroundPage, be);
+    const { el } = await renderCompare(be);
     expect(el.textContent).toContain('Download a chat model in Models first.');
     expect(el.querySelector('.sugg')).toBeNull();
     expect(button(el, 'Send').disabled).toBe(true);
   });
 
   it('shows a retryable error when the models cannot be loaded', async () => {
-    const { el } = await render(PlaygroundPage, backend({ failing: ['localModels'] }));
+    const { el } = await renderCompare(backend({ failing: ['localModels'] }));
     expect(el.textContent).toContain('not responding');
   });
 
   it('sends a typed prompt, streams the answer and shows the stats', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend());
+    const { fixture, el } = await renderCompare(backend());
     type(el, 'Hello there');
     await settle(fixture);
     expect(button(el, 'Send').disabled).toBe(false);
@@ -70,7 +101,7 @@ describe('PlaygroundPage', () => {
   });
 
   it('sends on Enter but not on Shift+Enter', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend());
+    const { fixture, el } = await renderCompare(backend());
     type(el, 'line');
     box(el).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true }));
     await settle(fixture);
@@ -84,7 +115,7 @@ describe('PlaygroundPage', () => {
   });
 
   it('does not send blank text on Enter', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend());
+    const { fixture, el } = await renderCompare(backend());
     type(el, '   ');
     box(el).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle(fixture);
@@ -93,14 +124,14 @@ describe('PlaygroundPage', () => {
   });
 
   it('starts a conversation from a suggestion', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend());
+    const { fixture, el } = await renderCompare(backend());
     (el.querySelector('.sugg .chip') as HTMLButtonElement).click();
     await until(fixture, el, finished(el));
     expect(el.querySelector('.turn.user')?.textContent).toContain('KV cache');
   });
 
   it('stops a running answer and marks it stopped', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend({ streamDelayMs: 3 }));
+    const { fixture, el } = await renderCompare(backend({ streamDelayMs: 3 }));
     type(el, 'go');
     await settle(fixture);
     button(el, 'Send').click();
@@ -115,7 +146,7 @@ describe('PlaygroundPage', () => {
   });
 
   it('clears the conversation', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend());
+    const { fixture, el } = await renderCompare(backend());
     (el.querySelector('.sugg .chip') as HTMLButtonElement).click();
     await until(fixture, el, finished(el));
     button(el, 'Clear').click();
@@ -125,12 +156,7 @@ describe('PlaygroundPage', () => {
   });
 
   it('compares two models with one prompt', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend());
-    const toggle = button(el, 'Compare');
-    expect(toggle.getAttribute('aria-pressed')).toBe('false');
-    toggle.click();
-    await settle(fixture);
-    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+    const { fixture, el } = await renderCompare(backend());
     expect(el.querySelectorAll('.pane')).toHaveLength(2);
     expect(box(el).placeholder).toBe('Message both models…');
     expect(el.querySelector('select')).toBeNull();
@@ -153,7 +179,7 @@ describe('PlaygroundPage', () => {
   });
 
   it('shows the error from a failed stream inline', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend({ failing: ['chat'] }));
+    const { fixture, el } = await renderCompare(backend({ failing: ['chat'] }));
     type(el, 'hi');
     await settle(fixture);
     button(el, 'Send').click();
@@ -163,7 +189,7 @@ describe('PlaygroundPage', () => {
   });
 
   it('feeds system prompt, temperature and max tokens into the store', async () => {
-    const { fixture, el } = await render(PlaygroundPage, backend());
+    const { fixture, el } = await renderCompare(backend());
     const sys = el.querySelector<HTMLTextAreaElement>('#pg-system')!;
     sys.value = 'Be terse';
     sys.dispatchEvent(new Event('input'));

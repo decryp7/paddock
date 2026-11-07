@@ -10,11 +10,22 @@
   padding-bottom: var(--pd-space-6);
 }
 
-/* Compare is on: an accent tint, never a second filled primary (UI review 2 rule 18). */
-.mat-mdc-outlined-button.on {
-  --mat-button-outlined-label-text-color: var(--pd-accent);
-  --mat-button-outlined-outline-color: color-mix(in srgb, var(--pd-accent) 45%, transparent);
-  background: var(--pd-accent-tint);
+.tabs {
+  --mat-tab-container-divider-color: var(--pd-hairline);
+  ::ng-deep .mat-mdc-tab-body-content {
+    padding-top: var(--pd-space-3);
+    overflow: visible;
+  }
+}
+
+/*
+ * The chat keeps its composer in view and scrolls its conversation inside: the pages frame gives a page no height of its
+ * own (the page area scrolls), so the chat takes the window's height less the frame, the heading and the tabs (234 px at
+ * 1440x900), and never less than a usable 420 px.
+ */
+.chat-tab {
+  display: flex;
+  height: max(420px, calc(100dvh - 240px));
 }
 
 .layout {

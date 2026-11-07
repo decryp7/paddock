@@ -4,11 +4,13 @@ import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatIconModule } from '@angular/material/icon';
 import { MatInput } from '@angular/material/input';
 import { MatSlider, MatSliderThumb } from '@angular/material/slider';
+import { MatTab, MatTabContent, MatTabGroup } from '@angular/material/tabs';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import type { LocalModel } from '../../core/api.types';
 import { bytes, duration, int, rate } from '../../shared/format';
 import { Panel } from '../../shared/ui/panel';
+import { PlaygroundChat } from './playground-chat';
 import { PlaygroundStore, type TurnStats } from './playground.store';
 
 const SUGGESTIONS = ['Explain what a KV cache is in two sentences.', 'Write a haiku about a pit stop.', 'Summarise: the service restarted twice after a pool timeout.'];
@@ -20,10 +22,13 @@ export function statsText(s: TurnStats): string {
   return parts.join(' · ');
 }
 
-/** Chat with a local model, or two side by side with the same prompt. */
+/**
+ * The Playground (ADR 0023 Decision 2): two tabs. Chat is the full chat with a connected app's tools (`<pd-assistant>` over
+ * the chat engine); Compare puts two models side by side on one prompt, text only and without tools, as before.
+ */
 @Component({
   selector: 'pw-playground-page',
-  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, Panel, PdSelect],
+  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, MatTabGroup, MatTab, MatTabContent, Panel, PdSelect, PlaygroundChat],
   providers: [PlaygroundStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './playground-page.html',
@@ -32,6 +37,8 @@ export function statsText(s: TurnStats): string {
 export class PlaygroundPage implements OnInit {
   protected readonly store = inject(PlaygroundStore);
   protected readonly prompt = signal('');
+  /** The open tab: 0 Chat, 1 Compare. */
+  protected readonly tab = signal(0);
   protected readonly suggestions = SUGGESTIONS;
   protected readonly stats = statsText;
   protected readonly size = bytes;
@@ -50,6 +57,8 @@ export class PlaygroundPage implements OnInit {
   }
 
   ngOnInit(): void {
+    // Compare always shows its two models; the one-model chat is the Chat tab now.
+    this.store.setCompare(true);
     void this.store.load();
   }
 
