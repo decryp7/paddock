@@ -4,6 +4,7 @@
 
 mod call_ids;
 mod never_panics;
+mod phases;
 mod pitwall;
 mod store;
 mod support;

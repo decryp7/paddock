@@ -47,7 +47,7 @@ pub use conversation::{
 };
 pub use event::{AssistantEvent, EVENT, EndReason, Envelope, ErrorKind, EventSink};
 pub use pitwall::PitwallProvider;
-pub use provider::{LlmProvider, ProviderError};
+pub use provider::{LlmProvider, ProviderError, ProviderPhase};
 pub use run::{Budgets, Decision, Gate, Refused};
 pub use service::{
     Assistant, AssistantConfig, AssistantError, AssistantInfo, MAX_RUNS, MAX_USER_CHARS, SendAck,

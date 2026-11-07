@@ -345,12 +345,18 @@ pub fn run_turn(
             cancel: turn.cancel.clone(),
         };
         let mut streamed = String::new();
-        let response = turn.provider.chat(&req, &mut |d| {
-            streamed.push_str(d);
-            (hooks.emit)(AssistantEvent::Delta {
-                text: d.to_string(),
-            });
-        });
+        // Both callbacks report through `hooks.emit`; they are never called at the same time (one thread, in order).
+        let emit = std::cell::RefCell::new(&mut *hooks.emit);
+        let response = turn.provider.chat_phased(
+            &req,
+            &mut |d| {
+                streamed.push_str(d);
+                (emit.borrow_mut())(AssistantEvent::Delta {
+                    text: d.to_string(),
+                });
+            },
+            &mut |phase| (emit.borrow_mut())(AssistantEvent::Phase { phase }),
+        );
         let mut response = match response {
             Ok(r) => r,
             Err(ProviderError::Cancelled) => {

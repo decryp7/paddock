@@ -48,6 +48,7 @@ fn types() -> String {
         AssistantInfo::decl(),
         SendRequest::decl(),
         SendAck::decl(),
+        crate::provider::ProviderPhase::decl(),
         AssistantEvent::decl(),
         Envelope::decl(),
     ];

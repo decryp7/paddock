@@ -32,6 +32,10 @@ export interface PendingApproval {
   readonly input: unknown;
   /** What it would change cannot be undone. */
   readonly destructive: boolean;
+  /** It changes things (an action): asked every call, its arguments shown at once. */
+  readonly write: boolean;
+  /** The engine offers "Always allow" for it. */
+  readonly remember: boolean;
 }
 
 interface AssistantState {
@@ -138,7 +142,9 @@ export const AssistantStore = signalStore(
       approval: computed<PendingApproval | null>(() => {
         const t = turn();
         if (!t?.running) return null;
-        for (const p of t.parts) if (p.kind === 'tool' && p.card.state === 'awaiting') return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input, destructive: p.card.destructive };
+        for (const p of t.parts)
+          if (p.kind === 'tool' && p.card.state === 'awaiting')
+            return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input, destructive: p.card.destructive, write: p.card.write, remember: p.card.remember === true };
         return null;
       }),
       canSend: computed(() => store.run() === 'idle' && store.draft().trim().length > 0),

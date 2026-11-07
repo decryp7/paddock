@@ -3056,6 +3056,12 @@
       <trans-unit id="pd.wb.assistant.approve.allow-tool" datatype="html">
         <source>Allow <x id="tool"/></source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.always" datatype="html">
+        <source>Always allow</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.always-hint" datatype="html">
+        <source>Run this tool from now on without asking. Every call still shows in the chat.</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.arguments" datatype="html">
         <source>Arguments</source>
       </trans-unit>
@@ -3070,6 +3076,9 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.no-arguments" datatype="html">
         <source>No arguments</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.approve.once" datatype="html">
+        <source>Allow once</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.approve.tool" datatype="html">
         <source>Tool</source>
@@ -3164,6 +3173,15 @@
       <trans-unit id="pd.wb.assistant.no-conversations" datatype="html">
         <source>No conversations yet.</source>
       </trans-unit>
+      <trans-unit id="pd.wb.assistant.phase.loading" datatype="html">
+        <source>Loading the model…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.phase.loading-for" datatype="html">
+        <source>Loading the model… <x id="seconds"/> s</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.phase.queued" datatype="html">
+        <source>Waiting for the model…</source>
+      </trans-unit>
       <trans-unit id="pd.wb.assistant.placeholder" datatype="html">
         <source>Ask the assistant (Enter sends, Shift+Enter adds a line)</source>
       </trans-unit>
@@ -3184,6 +3202,15 @@
       </trans-unit>
       <trans-unit id="pd.wb.assistant.thinking" datatype="html">
         <source>Thinking…</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.approval.always" datatype="html">
+        <source>Always allowed</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.approval.once" datatype="html">
+        <source>Allowed once</source>
+      </trans-unit>
+      <trans-unit id="pd.wb.assistant.tool.approval.remembered" datatype="html">
+        <source>Allowed earlier</source>
       </trans-unit>
       <trans-unit id="pd.wb.assistant.tool.awaiting" datatype="html">
         <source>Waiting for your decision</source>

@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-assistant` and `workbench/assistant`: phases, Always allow and how each call ran (ADR 0023 WP-4a)
+- New `ProviderPhase` (`queued`, `loading` with `elapsedMs`, `generating`) and `LlmProvider::chat_phased` (default: no phases, calls `chat`); the loop forwards a provider's phases as `AssistantEvent::Phase`. Additive.
+- The pane shows "Waiting for the model…" and "Loading the model… 12 s" until the words arrive, instead of "Thinking…".
+- An approval card that offers it has Allow once, Always allow and Decline; an action's arguments are shown open. Each tool card says how its call ran: "Allowed once", "Always allowed" or "Allowed earlier" (nothing for a call the policy did not ask about).
+- `MemoryAssistantBackend`: `/look` (asks first with Always allow, then remembered) and `/cold` (the phases of a cold start).
+
 ### `paddock-assistant`: the tool path for Pitwall's chat (ADR 0023 WP-2a)
 - New `ApprovalPolicy` port (`approval.rs`): per call, `check` says `Verdict::Run`, `Remembered`, `AskEveryTime` or `AskOrRemember`, and `record` hears the user's `ApprovalChoice` (`allowOnce`, `alwaysAllow`, `deny`). `DefaultPolicy` keeps today's behaviour (a write asks every call, a read-only tool runs unasked); an app sets its own in `AssistantConfig::policy`. Malformed calls, unknown tools and bad arguments are refused before the policy sees them.
 - `ApprovalNeeded` gains `remember` (the card offers Always allow); `ToolFinished` and the stored tool message gain `approval` (`notAsked`, `once`, `always`, `remembered`) for a call that ran.

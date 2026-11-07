@@ -59,6 +59,9 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
         <span class="call" [attr.title]="card().summary">{{ card().summary }}</span>
       }
       <span class="result" [class.muted]="declined() || stopped()" data-testid="assistant-tool-result">{{ declined() ? declinedText : stopped() ? stoppedText : stateText() }}</span>
+      @if (approvalText(); as how) {
+        <span class="how" data-testid="assistant-tool-approval">{{ how }}</span>
+      }
     </div>
   `,
   styles: `
@@ -74,6 +77,7 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
     .call { min-width: 0; flex: 1 1 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .result { overflow-wrap: anywhere; }
     .result.muted { color: var(--pd-text-muted); }
+    .how { color: var(--pd-text-muted); }
   `,
 })
 export class PdAssistantToolCard {
@@ -100,6 +104,19 @@ export class PdAssistantToolCard {
     if (this.declined()) return 'close';
     if (this.stopped()) return 'stop';
     return this.card().state === 'awaiting' ? 'lock' : 'clock';
+  }
+  /** How the call that ran was approved (none when the policy did not ask: the app's default for read-only tools). */
+  protected approvalText(): string | null {
+    switch (this.card().approval) {
+      case 'once':
+        return $localize`:@@pd.wb.assistant.tool.approval.once:Allowed once`;
+      case 'always':
+        return $localize`:@@pd.wb.assistant.tool.approval.always:Always allowed`;
+      case 'remembered':
+        return $localize`:@@pd.wb.assistant.tool.approval.remembered:Allowed earlier`;
+      default:
+        return null;
+    }
   }
   protected stateText(): string {
     const c = this.card();
