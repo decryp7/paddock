@@ -4,13 +4,16 @@
 
 use super::volumes;
 use crate::parse::ioreg::parse_gpu;
+use crate::parse::ioreg_disk::{busy_percent, parse_disk_counters, DiskCounters};
 use crate::parse::mac_tools::pressure_from_level;
 use crate::sensors::SensorProbe;
 use dyno_core::metrics::{GpuSample, MemoryPressure, Reading, SystemSample};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The GPU is read every this many ticks (each read starts `ioreg`).
 const GPU_EVERY: u64 = 5;
+/// The disks' service times are read every this many ticks (each read starts `ioreg`).
+const DISK_EVERY: u64 = 2;
 /// After a failed GPU read look again only after this many ticks.
 const GPU_RETRY: u64 = 60;
 
@@ -21,6 +24,8 @@ pub struct MacProbe {
     gpu_missing_until: u64,
     mem_total: u64,
     kinds: Option<(usize, usize)>,
+    disk: Option<(Instant, Vec<DiskCounters>)>,
+    busy: Reading<f32>,
 }
 
 impl MacProbe {
@@ -32,6 +37,8 @@ impl MacProbe {
             gpu_missing_until: 0,
             mem_total: 0,
             kinds: None,
+            disk: None,
+            busy: Reading::unavailable("Measuring (needs two readings)"),
         }
     }
 
@@ -45,6 +52,35 @@ impl MacProbe {
         }
         let (e, p) = self.kinds.unwrap_or((0, 0));
         dyno_core::metrics::kinds_from_counts(total, e, p, true)
+    }
+
+    /// The busiest disk's busy percentage from IOKit's block-storage statistics (read through `ioreg`, bounded by a timeout):
+    /// the growth of the disks' read and write service time over the wall time between two readings.
+    fn read_disk_busy(&mut self) -> Reading<f32> {
+        let mut cmd = crate::process::command("/usr/sbin/ioreg");
+        cmd.args(["-r", "-d", "1", "-w0", "-c", "IOBlockStorageDriver"]);
+        let out = match crate::process::output_text(cmd, Duration::from_secs(2)) {
+            Ok(t) => t,
+            Err(e) => {
+                self.disk = None;
+                return Reading::unavailable(format!("Disk statistics could not be read: {e}"));
+            }
+        };
+        let now = parse_disk_counters(&out);
+        if now.is_empty() {
+            self.disk = None;
+            return Reading::unavailable("This Mac reports no disk statistics");
+        }
+        let at = Instant::now();
+        let busy = self.disk.as_ref().and_then(|(then, prev)| {
+            let wall = u64::try_from(at.duration_since(*then).as_nanos()).unwrap_or(u64::MAX);
+            busy_percent(prev, &now, wall)
+        });
+        self.disk = Some((at, now));
+        match busy {
+            Some(b) => Reading::Available(b),
+            None => Reading::unavailable("Measuring (needs two readings)"),
+        }
     }
 
     fn read_gpu(&mut self) -> Reading<GpuSample> {
@@ -132,7 +168,10 @@ impl SensorProbe for MacProbe {
         sample.gpu = self.gpu.clone();
         sample.disks = volumes::tidy(std::mem::take(&mut sample.disks));
         sample.disk_io.queue = Reading::unavailable("macOS does not report a disk queue length");
-        sample.disk_io.busy = Reading::unavailable("macOS does not report disk busy time");
+        if self.ticks.is_multiple_of(DISK_EVERY) {
+            self.busy = self.read_disk_busy();
+        }
+        sample.disk_io.busy = self.busy.clone();
         if sample.fans.value().is_none() {
             sample.fans = Reading::unavailable("Apple silicon Macs report no fan speeds to apps without administrator rights");
         }
@@ -179,5 +218,23 @@ mod tests {
             Reading::Unavailable(why) => assert!(!why.is_empty()),
         }
         assert!(x.disk_io.queue.value().is_none());
+    }
+
+    #[test]
+    fn this_mac_reports_disk_busy_time_from_two_readings() {
+        let mut p = MacProbe::new();
+        let mut s = SysinfoSensors::new(Box::new(MacProbe::new()));
+        let mut sample = s.sample(Timestamp(1));
+        // Two readings of the real statistics a moment apart (the second drives the percentage).
+        p.enrich(&mut sample);
+        assert!(
+            p.disk.as_ref().is_some_and(|(_, d)| !d.is_empty()),
+            "ioreg lists a block-storage driver"
+        );
+        std::thread::sleep(Duration::from_millis(300));
+        p.ticks = 0;
+        p.enrich(&mut sample);
+        let busy = sample.disk_io.busy.value().copied();
+        assert!(busy.is_some_and(|b| (0.0..=100.0).contains(&b)), "busy: {:?}", sample.disk_io.busy);
     }
 }

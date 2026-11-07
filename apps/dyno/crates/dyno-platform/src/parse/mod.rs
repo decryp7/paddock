@@ -8,6 +8,7 @@ pub mod firewall;
 pub mod gpu;
 pub mod hardware;
 pub mod ioreg;
+pub mod ioreg_disk;
 pub mod launchd;
 pub mod linux_hw;
 pub mod linux_net;
