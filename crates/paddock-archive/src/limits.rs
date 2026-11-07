@@ -106,3 +106,30 @@ pub(crate) fn depth(limit: u64) -> ArchiveError {
 pub(crate) fn path_length(limit: u64) -> ArchiveError {
     exceeded(&PATH_LENGTH, Quantity::Count(limit))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use paddock_testkit::limit_cases;
+
+    fn limit(e: ArchiveError) -> LimitExceeded {
+        match e {
+            ArchiveError::Limit(l) => l,
+            other => panic!("not a limit: {other:?}"),
+        }
+    }
+
+    limit_cases! { REGISTRY;
+        too_many_entries: "archive.entries" => stop(got = limit(entries(10_000)), limit = Quantity::Count(10_000), setting = None),
+        a_file_over_the_limit: "archive.file_bytes" => stop(got = limit(file_bytes(4 << 30)), limit = Quantity::Bytes(4 << 30), setting = None),
+        everything_over_the_limit: "archive.total_bytes" => stop(got = limit(total_bytes(8 << 30)), limit = Quantity::Bytes(8 << 30), setting = None),
+        an_expansion_over_the_ratio: "archive.ratio" => stop(got = limit(ratio(200)), limit = Quantity::Ratio(200), setting = None),
+        folders_too_deep: "archive.depth" => stop(got = limit(depth(32)), limit = Quantity::Count(32), setting = None),
+        a_path_too_long: "archive.path_length" => stop(got = limit(path_length(1024)), limit = Quantity::Count(1024), setting = None),
+    }
+
+    #[test]
+    fn the_registry_is_well_formed() {
+        REGISTRY.check().unwrap();
+    }
+}

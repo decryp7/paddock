@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { caseIds, limitConstants, rowIds } from '../src/checks/C62-limit-completeness.mjs';
+import { caseIds, limitConstants, rowIds, withoutTestItems } from '../src/checks/C62-limit-completeness.mjs';
 import { findingsOf, makeApp, messages } from './helpers.mjs';
 
 const ROWS = 'pub const A: LimitRow = LimitRow::stop("net.body", Quantity::Bytes(1), Quantity::Bytes(1), Quantity::Bytes(2), RowValue::Hard, Remedy::None);\nconst B: LimitRow = LimitRow { id: LimitId::new("net.redirects"), unit: Unit::Count };\n';
@@ -55,4 +55,31 @@ test('C62: a crate with no registry, a skipped crate and fuzz folders are ignore
 test('C62: a row declared in a test module or under tests/ is a fixture', async () => {
   const app = makeApp(crate('paddock-net', { 'src/lib.rs': `#[cfg(test)]\nmod tests {\n${ROWS}\n}\n`, 'tests/it/fixtures.rs': ROWS, 'src/tests.rs': ROWS }));
   assert.deepEqual(await findingsOf('C62', app), []);
+});
+
+// Review of 1.4b: rows built by a crate's own helper (`row("id", ...)`, `hard("id", ...)`) have no `LimitRow::stop("id"` text, and
+// a test module in front of the rows hid everything after it (`split('#[cfg(test)]')[0]`).
+const HELPER = 'const fn row(id: &\'static str, d: Quantity) -> LimitRow { LimitRow::stop(id, d, d, d, RowValue::Hard, Remedy::None) }\n'
+  + 'pub const A: LimitRow = row(\n    "archive.entries",\n    Quantity::Count(1),\n);\n'
+  + 'pub const B: LimitRow = hard("view.nodes", Quantity::Count(2));\n';
+
+test('C62: rows built by a helper are found by the const item, with the id as its first literal', () => {
+  assert.deepEqual(rowIds(HELPER), [{ id: 'archive.entries', line: 3 }, { id: 'view.nodes', line: 6 }]);
+  // The literal of a setting path or a message in the item is not another row.
+  assert.deepEqual(rowIds('const C: LimitRow = row("a.b", Q, RowValue::Setting("x.y"));'), [{ id: 'a.b', line: 1 }]);
+});
+
+test('C62: a helper-built row without a case is reported, with one case it is clean', async () => {
+  const bad = makeApp(crate('paddock-archive', { 'src/limits.rs': HELPER }));
+  assert.match(messages(await findingsOf('C62', bad)), /limit row "archive\.entries" has no limit_cases! case[\s\S]*limit row "view\.nodes"/);
+  const good = makeApp(crate('paddock-archive', { 'src/limits.rs': HELPER, 'tests/it/limits.rs': 'limit_cases! { R;\n a: "archive.entries" => stop(got = x),\n b: "view.nodes" => stop(got = y),\n}\n' }));
+  assert.deepEqual(await findingsOf('C62', good), []);
+});
+
+test('C62: a test module before the rows does not hide them; one after them still is a fixture', async () => {
+  const before = 'use x;\n#[cfg(test)]\nmod tests {\n    fn f() { let s = "}"; }\n}\n' + ROWS;
+  assert.deepEqual(rowIds(withoutTestItems(before)).map((r) => r.id), ['net.body', 'net.redirects']);
+  const app = makeApp(crate('paddock-net', { 'src/limits.rs': before }));
+  assert.equal((await findingsOf('C62', app)).length, 2);
+  assert.deepEqual(rowIds(withoutTestItems(ROWS + '#[cfg(test)]\nmod tests {\n' + ROWS + '}\n')).map((r) => r.id), ['net.body', 'net.redirects']);
 });
