@@ -1,6 +1,6 @@
 # 23. A full chat in the Playground: text, images, speech input and MCP tools
 
-- Status: Proposed (2026-11-05), revision 2 (2026-11-07). Docs only: nothing here is built. The user's decisions D2 to D8 are
+- Status: Proposed (2026-11-05), revision 3 (2026-11-07). WP-2a and WP-4a are built on branches; the rest is docs only. The user's decisions D2 to D8 are
   recorded below (2026-11-05). Revision 2 corrects the Dyno facts (Dyno 1.1.0 has a listener), re-sizes the work packages and
   splits them so the chat with Dyno's tools comes first; the order and the base list are in the plan
   [`docs/plans/pitwall-1-1.md`](../plans/pitwall-1-1.md). Not yet independently reviewed.
@@ -78,7 +78,7 @@ roadmap's router row and Pacenotes' toolsets stay later.
 Conversation { id, title, model, system, params, created, updated, messages }
 Message      { role, parts: [Text | Image{sha256, mime, w, h} | Audio{sha256, seconds} | File{sha256, name}],
                calls: [ToolCallRecord], stats, end }
-ToolCallRecord { id, server, tool, arguments, approval: Remembered | Once | Denied | NotAsked,
+ToolCallRecord { id, server, tool, arguments, approval: NotAsked | Once | Always | Remembered (for a call that ran),
                  outcome, duration_ms, result_text (bounded), result_cut, summary }
 ```
 
@@ -284,8 +284,8 @@ Every tool starts **off the model's list until connected and picked**. Then:
 
 | Kind | First call | Later calls |
 |---|---|---|
-| Read-only tool of a family server | ask: Allow once, Always allow, Deny | runs without asking, shown in the chat |
-| Action tool (`wake_device`, `keep_awake`; listed only once the user allowed it in Dyno, Decision 7) | ask, showing the exact arguments | **ask every call** (decided, D2) |
+| Read-only tool of a family server | ask: Allow once, Always allow, Decline | runs without asking, shown in the chat |
+| Action tool (`wake_device`, `keep_awake`; listed only once the user allowed it in Dyno, Decision 7) | ask with Allow once and Decline, its exact arguments shown open | **ask every call** (decided, D2) |
 | Any tool of a user-added stdio server | as an action | as an action, until the user marks that tool "always allow" in Settings |
 
 - The **card is inline in the chat**, not a dialog: it belongs to the turn, the conversation stays usable, and Stop works.
@@ -296,8 +296,13 @@ Every tool starts **off the model's list until connected and picked**. Then:
   changes them, the approval lapses and Pitwall asks again (the "tool changed after approval" attack).
 - MCP says annotations are untrusted unless the server is trusted. Read-only versus action comes from family servers'
   `readOnlyHint`, with the family identified by a key the user pasted; a stdio server's hints are ignored.
-- Settings > Connected apps lists every remembered approval and revokes it. Deny tells the model it was denied and the turn
-  goes on.
+- Settings > Connected apps lists every remembered approval and revokes it. Decline tells the model it was declined and the
+  turn goes on.
+- How a call ran is its `approval`: `notAsked` (the policy did not ask), `once`, `always` (the first call of an Always allow)
+  or `remembered` (a later call on it). A call that did not run has none; its outcome says `declined` or `stopped`, so the two
+  cannot disagree.
+- No "Allow actions" tick in Pitwall (user, 2026-11-07): the two gates of an action are Dyno's own allow and Pitwall asking on
+  every call. The shared pane keeps the tick for other hosts (`actionsGate: 'tick' | 'per-call'`); Pitwall sets `per-call`.
 - Every call in the chat, always: tool, arguments, status, duration, result (expandable, as text), whether it was cut, how it
   was approved.
 - Audit: the server keeps its own (`paddock_mcp::AuditLog`). The host adds a bounded `AuditLog` in the app and one
@@ -458,6 +463,20 @@ Found in this revision: Decision 7 step 3 (the pasted key in the OS store) met t
 the user chose an owner-only file on macOS (2026-11-07), in line with ADR 0057.
 
 Still to do: an independent review of this ADR before it is Accepted.
+
+## Revision 3 (2026-11-07)
+
+From building WP-2a and WP-4a (`pitwall/1.1-wp2a` `9dc147e24`, `pitwall/1.1-wp4a` `ef8e70c76`), with the user's answers:
+
+- Decision 2's record: `approval` is `NotAsked | Once | Always | Remembered`, only for a call that ran. `Always` is new (the
+  first call of an Always allow; the card says "Always allowed", a later call "Allowed earlier"); a refused call is the
+  outcome `declined`, not an approval value.
+- Decision 8: the UI word is **Decline** (the pane's existing word and its "Declined" card), not Deny; an action's card shows
+  its arguments open; Pitwall has no "Allow actions" tick (the pane's `actionsGate: 'per-call'`).
+- The model picker (Decision 9, D6) is WP-3a's: the Chat tab lists the loaded and catalog models, those without the `tools`
+  capability disabled with the reason, and preselects the starter tool-capable model.
+- The build switch is temporary (plan, Phase A): a Cargo feature `chat` read by the command `chat_enabled`, until ADR 0049's
+  switches exist.
 
 ## Consequences
 

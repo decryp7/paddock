@@ -108,7 +108,19 @@ migration). ADR 0057's D1 to D5 are still open (section 9).
 This needs 3 builders before T, which come out of Debrief's wave 0 (question Q3).
 
 The PoC branch `pitwall/1.1-chat` starts from `pitwall/1.1-merge-rc` once B0 is done, and merges the WP-8, WP-2a and WP-1
-branches (merges, not rebases). Later work goes straight onto it.
+branches (merges, not rebases), and agent 3's `pitwall/1.1-wp4a`, `pitwall/1.1-wp4a-app` and `pitwall/1.1-wp9a`. Later work
+goes straight onto it.
+
+**Temporary: the chat's build switch** (user, 2026-11-07). ADR 0049's switches are not built, so Rust decides from a Cargo
+feature: `chat` in `apps/pitwall/app/src-tauri/Cargo.toml`, reported by the command `chat_enabled`; the Playground shows its
+Chat tab only when it says so, and is the 1.0 Playground otherwise. On for the internal PoC build (`--features chat`), off by
+default, so the release workflow builds without it. **Remove** when ADR 0049 WP-5 lands: the feature becomes a `switches.toml`
+entry and the command reads the generated table.
+
+**Note for WP-3a (agent 2), from the user's answer of 2026-11-07:** the Chat tab gets a model picker of the loaded and catalog
+models; models without the `tools` capability are listed disabled with the reason (ADR 0023 D6), and the starter
+tool-capable model is the default. The pane has no picker of its own: WP-3a's provider takes the chosen model, and the
+picker sits in the Chat tab (`apps/pitwall/app/src/app/features/playground/playground-chat.ts` on `pitwall/1.1-wp4a-app`).
 
 **PoC path:** agent 3's chain WP-2a (2–3) → WP-4a (2–3) → WP-9a (2.5–3.5), then merging the branches into the PoC branch
 and the PoC build P (1–2): **7.5–11.5 working days**. B0 (3–5) reaches WP-9a in time, and WP-8, WP-1 and WP-3a have float.
