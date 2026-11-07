@@ -28,6 +28,7 @@ pub mod files;
 pub mod grants;
 pub mod host;
 pub mod installed;
+pub mod limits;
 pub mod output;
 pub mod services;
 pub mod status;

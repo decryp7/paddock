@@ -2696,6 +2696,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "serde_json",

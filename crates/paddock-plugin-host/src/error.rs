@@ -1,6 +1,7 @@
 //! Errors of calling a plugin.
 
 use paddock_ipc::RemoteError;
+use paddock_limits::LimitExceeded;
 use paddock_plugin_api::protocol::Fail;
 use std::fmt;
 
@@ -34,6 +35,9 @@ pub enum HostError {
     /// The request was wrong before it was sent (arguments that do not match the schema, a path outside the grants, an
     /// unknown tool). Nothing was sent.
     Invalid(String),
+    /// A limit stopped the call before it was sent (a request over the frame limit): the type is kept so the app can show
+    /// the limit and its remedy (ADR 0019). The plugin is not blamed and nothing is counted.
+    Limit(LimitExceeded),
     /// The call was cancelled.
     Cancelled,
 }
@@ -45,6 +49,7 @@ impl fmt::Display for HostError {
             HostError::Fault { message, .. } => f.write_str(message),
             HostError::Failed(x) => f.write_str(&x.message),
             HostError::Remote(r) => f.write_str(&r.message),
+            HostError::Limit(l) => f.write_str(&l.message(&crate::limits::registry_of(l.id))),
             HostError::Cancelled => f.write_str("cancelled"),
         }
     }

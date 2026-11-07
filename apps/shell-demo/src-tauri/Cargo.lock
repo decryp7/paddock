@@ -3122,6 +3122,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-proc",
  "paddock-workspace-hack",
  "serde",

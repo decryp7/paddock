@@ -560,10 +560,11 @@ impl Supervisor {
                 format!("plugin {id} sent an answer of {len} bytes; this side accepts {max}"),
                 false,
             ),
-            // Our own request did not fit a frame: the plugin did nothing wrong.
-            IpcError::TooLarge { len, max } => HostError::Invalid(format!(
-                "the request is {len} bytes; a message to plugin {id} can have {max}"
-            )),
+            // Our own request did not fit a frame: the plugin did nothing wrong, and the limit keeps its type.
+            IpcError::TooLarge { .. } => match e.limit() {
+                Some(limit) => HostError::Limit(limit),
+                None => HostError::Invalid(e.to_string()),
+            },
             IpcError::Timeout => self.faulted(
                 FaultKind::Hang,
                 format!("plugin {id} stopped responding"),
@@ -1105,7 +1106,11 @@ mod tests {
         assert!(matches!(refused, HostError::Remote(r) if r.code == "x.failed"));
         let big = s.classify(IpcError::TooLarge { len: 10, max: 5 });
         assert!(
-            matches!(&big, HostError::Invalid(m) if m.contains("the request is 10 bytes")),
+            matches!(&big, HostError::Limit(l) if l.id.as_str() == "ipc.frame" && l.reached == Some(paddock_limits::Quantity::Bytes(10))),
+            "{big}"
+        );
+        assert!(
+            big.to_string().contains("the limit (ipc.frame) is 5 B"),
             "{big}"
         );
         for e in [

@@ -1087,6 +1087,7 @@ dependencies = [
  "libc",
  "paddock-env",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-proc",
  "paddock-workspace-hack",
  "postcard",

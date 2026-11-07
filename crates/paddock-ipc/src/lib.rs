@@ -27,6 +27,7 @@ pub mod frame;
 pub mod handshake;
 pub mod identity;
 pub mod launch;
+pub mod limit_rows;
 pub mod limits;
 pub mod link;
 pub mod peer;
