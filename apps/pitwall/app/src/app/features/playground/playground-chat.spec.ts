@@ -13,5 +13,8 @@ describe('PlaygroundChat', () => {
     expect(el.querySelector('[data-testid=assistant-input]')).not.toBeNull();
     // Pitwall is the engine itself: the family's "needs local AI" state never shows here.
     expect(el.querySelector('pd-needs-ai')).toBeNull();
+    // Pitwall's own words, and no "Allow actions" tick: Dyno's allow and a question on every action call are the gates.
+    expect(el.querySelector('[data-testid=assistant-empty]')?.textContent).toContain('Connected apps');
+    expect(el.querySelector('[data-testid=assistant-allow-actions]')).toBeNull();
   });
 });
