@@ -1,8 +1,7 @@
 //! Cancelling a model load and a benchmark by the caller's `opId` (`cancel_op`): the work stops, nothing is left behind and
 //! the server stays consistent (ER-18).
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::{harness, harness_with};
 use pitwall_core::ids::ModelId;
 use pitwall_core::llama::Launch;

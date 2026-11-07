@@ -95,20 +95,12 @@ pub fn memory_with(pid: u32, read: impl Fn(u32) -> Option<u64>) -> u64 {
     read(pid).unwrap_or(0)
 }
 
-/// Asks a process to end (SIGTERM; `force`: kills it). Only ever used on engine processes this server started. Where the
-/// platform has no such signal the process is killed.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "ADR 0033 WP-7: sysinfo kill of an unreaped child by pid (safe today); go through paddock_proc"
-)]
-pub fn terminate(pid: u32, force: bool) {
-    let mut s = sysinfo::System::new();
-    let p = sysinfo::Pid::from_u32(pid);
-    s.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[p]), false);
-    if let Some(proc_) = s.process(p) {
-        if force || proc_.kill_with(sysinfo::Signal::Term).is_none() {
-            proc_.kill();
-        }
+/// Asks a process to end (SIGTERM; `force`: kills it). Only ever used on engine processes this server started, by their
+/// identity (rule 53): `id` is the pid with its start time, taken while the server holds the process, and paddock-proc acts
+/// only while the pid still names that process. Where the request cannot be delivered the process is killed.
+pub fn terminate(id: paddock_proc::ProcessId, force: bool) {
+    if force || !paddock_proc::ask(id) {
+        let _ = paddock_proc::end(id);
     }
 }
 

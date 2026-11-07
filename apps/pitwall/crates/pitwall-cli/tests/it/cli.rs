@@ -1,8 +1,6 @@
 //! Runs the built `pitwall` binary against a tiny fake of Pitwall's local API on an ephemeral 127.0.0.1 port (never the
 //! production port, never the user's data folder or credential store: the data folder is a temp dir and the admin key
 //! comes from the environment).
-// Tests start the built binary directly (no console window concerns; each run is short and bounded).
-#![allow(clippy::unwrap_used, clippy::expect_used, clippy::disallowed_methods)]
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -94,6 +92,10 @@ fn rpc(m: &str) -> String {
 }
 
 /// The CLI with an empty environment, except what Windows sockets need to start (without SystemRoot every connect fails).
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test starts the built binary directly: no console window concerns, each run is short and bounded"
+)]
 fn bare(args: &[&str]) -> Command {
     let mut c = Command::new(env!("CARGO_BIN_EXE_pitwall"));
     c.args(args).env_clear();

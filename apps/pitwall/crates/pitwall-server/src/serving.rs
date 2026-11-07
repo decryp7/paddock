@@ -374,9 +374,11 @@ impl Serving {
         lock(&self.inner.sched).set_paused(true);
         self.inner.wake.notify_waiters();
         let models: Vec<Arc<HotModel>> = lock(&self.inner.hot).drain().map(|(_, h)| h).collect();
-        let pids: Vec<u32> = models
+        // Each engine by its identity, read while its handle is held (rule 53).
+        let ids: Vec<paddock_proc::ProcessId> = models
             .iter()
             .filter_map(|h| h.running.child.as_ref().and_then(tokio::process::Child::id))
+            .filter_map(paddock_proc::ProcessId::of)
             .collect();
         self.event(
             EventKind::ServingChanged,
@@ -385,19 +387,19 @@ impl Serving {
         );
         #[cfg(unix)]
         {
-            for pid in &pids {
-                system::terminate(*pid, false);
+            for id in &ids {
+                system::terminate(*id, false);
             }
             let deadline = std::time::Instant::now() + grace;
-            while std::time::Instant::now() < deadline && pids.iter().any(|p| system::pid_alive(*p)) {
+            while std::time::Instant::now() < deadline && ids.iter().any(|id| system::pid_alive(id.pid())) {
                 tokio::time::sleep(Duration::from_millis(50)).await;
             }
-            for pid in pids.iter().filter(|p| system::pid_alive(**p)) {
-                system::terminate(*pid, true);
+            for id in ids.iter().filter(|id| system::pid_alive(id.pid())) {
+                system::terminate(*id, true);
             }
         }
         #[cfg(not(unix))]
-        let _ = (&pids, grace);
+        let _ = (&ids, grace);
         let n = models.len();
         // Dropping the handles kills anything that is left (`kill_on_drop`).
         drop(models);

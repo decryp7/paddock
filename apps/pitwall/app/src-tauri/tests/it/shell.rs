@@ -1,7 +1,6 @@
 //! Pitwall on the shell plugin, on Tauri's mock runtime: nothing is drawn, nothing outside the test's folder is touched,
 //! no keychain is read (ER-14). The start as `run` composes it, without the OS plugins (single instance, autostart,
 //! updater).
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use paddock_shell::testing::{start, Started};
 use paddock_window::launch::LaunchArgs;
@@ -57,7 +56,7 @@ fn a_hidden_start_stays_in_the_tray() {
 }
 
 /// The UI's contributions (`paddock-manifest.json`, written by the UI's contributions spec).
-const MANIFEST: &str = include_str!("../../paddock-manifest.json");
+const MANIFEST: &str = include_str!("../../../paddock-manifest.json");
 
 /// The shell's Quit command (paddock-menu's `QUIT_COMMAND`), which the macOS app menu places last.
 const QUIT_COMMAND: &str = "pd.app.quit";
@@ -137,7 +136,7 @@ fn the_command_table_covers_the_ui_and_narrows_the_tray() {
     let names: Vec<&str> = COMMANDS.specs().iter().map(|s| s.name()).collect();
     // Every command the UI's Tauri backend names (`run('x')`, `job('x')`, `invoke('x')`) is one of Pitwall's: a command the
     // table lacks is refused by the guard at run time.
-    let backend = include_str!("../../src/app/core/tauri-backend.ts");
+    let backend = include_str!("../../../src/app/core/tauri-backend.ts");
     let mut called = Vec::new();
     for opener in ["run('", "job('", "invoke('", "run<", "job<", "invoke<"] {
         for (i, _) in backend.match_indices(opener) {
@@ -446,9 +445,9 @@ fn the_tray_popover_opens_the_main_window_when_none_is_open() {
         "window_focus from the tray built the main window again"
     );
 
-    let caps: serde_json::Value = serde_json::from_str(include_str!("../capabilities/tray.json")).unwrap();
+    let caps: serde_json::Value = serde_json::from_str(include_str!("../../capabilities/tray.json")).unwrap();
     assert!(caps["permissions"].as_array().unwrap().iter().any(|p| p == "paddock-shell:tray"));
-    let sets = include_str!("../../../../../crates/paddock-shell/permissions/window-classes.toml");
+    let sets = include_str!("../../../../../../crates/paddock-shell/permissions/window-classes.toml");
     let tray_set = &sets[sets.find("identifier = \"tray\"").unwrap()..];
     let tray_set = &tray_set[..tray_set.find("]").unwrap()];
     for p in ["allow-window-focus", "allow-tray-close"] {

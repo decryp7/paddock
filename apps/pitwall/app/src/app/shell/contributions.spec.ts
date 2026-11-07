@@ -27,7 +27,7 @@ const env = (name: string): string | undefined => (globalThis as { process?: { e
 /** The shell's Quit command, which the frames contribute; Pitwall only provides what it does (`PITWALL_APP_QUIT`). */
 const QUIT_COMMAND = 'pd.app.quit';
 
-/** Rust reads this file (`paddock_shell::Builder::problems`, `app/src-tauri/tests/shell.rs`). */
+/** Rust reads this file (`paddock_shell::Builder::problems`, `app/src-tauri/tests/it/shell.rs`). */
 const MANIFEST = 'paddock-manifest.json';
 
 function configure(contributions = [CONTRIBUTIONS, QUIT_CONTRIBUTIONS], backend = new MockBackend()): MockBackend {
