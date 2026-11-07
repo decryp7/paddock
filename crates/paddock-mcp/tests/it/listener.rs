@@ -270,6 +270,9 @@ enum PeerGoes {
     /// fails instead of ending.
     #[cfg(unix)]
     ResettingAfterTheFirstRequest,
+    /// Answers the key, then reads until the host's side ends and answers only the requests with these ids, as the server
+    /// does with a call the host cancelled (it never answers it).
+    AnsweringOnly(&'static [i64]),
 }
 
 /// Makes closing `s` reset the connection (SO_LINGER 0).
@@ -346,6 +349,26 @@ fn peer_that_goes(
                 }
                 if line.contains("\"id\"") {
                     seen += 1;
+                }
+            }
+        }
+        if let PeerGoes::AnsweringOnly(ids) = goes {
+            (&stream)
+                .write_all(b"{\"ok\":true,\"client\":\"host\"}\n")
+                .unwrap();
+            loop {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+                let v: Value = serde_json::from_str(&line).unwrap();
+                if let Some(id) = v["id"].as_i64().filter(|id| ids.contains(id)) {
+                    (&stream)
+                        .write_all(
+                            format!("{}\n", json!({"jsonrpc": "2.0", "id": id, "result": {}}))
+                                .as_bytes(),
+                        )
+                        .unwrap();
                 }
             }
         }
@@ -616,4 +639,37 @@ fn the_bridge_says_the_app_is_not_open_when_its_port_refuses_the_connection() {
     )
     .unwrap_err();
     assert!(err.to_string().contains("Demo isn't open"), "{err}");
+}
+
+/// A call the host cancelled is never answered (MCP; `Server::handle`), so it is not left waiting for an answer: the session
+/// ends cleanly instead of with an error for that id (review of 31f2bb60b, P1).
+#[test]
+fn a_call_the_host_cancelled_is_not_reported_unanswered() {
+    let dir = tempfile::tempdir().unwrap();
+    let peer = peer_that_goes(dir.path(), PeerGoes::AnsweringOnly(&[1]), 0);
+    let input = [
+        client::initialize(1, "host", "1"),
+        client::call_tool(2, "system_summary", json!({})),
+        json!({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2, "reason": "user"}}).to_string(),
+    ]
+    .join("\n")
+        + "\n";
+    let mut out = Vec::new();
+    let result = bridge::run(
+        &discovery_path(dir.path()),
+        "pmk_x",
+        Cursor::new(input.into_bytes()),
+        &mut out,
+    );
+    peer.join().unwrap();
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        result.is_ok(),
+        "a cancelled call is not an unanswered one: {result:?}, output {text:?}"
+    );
+    assert_eq!(
+        text.lines().count(),
+        1,
+        "only the initialize answer: {text:?}"
+    );
 }

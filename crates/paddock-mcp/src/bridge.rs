@@ -45,6 +45,14 @@ struct Pending {
     input_ended: bool,
 }
 
+impl Pending {
+    fn forget(&mut self, id: &Value) {
+        if let Some(at) = self.ids.iter().position(|x| x == id) {
+            self.ids.remove(at);
+        }
+    }
+}
+
 fn pending_lock(p: &Mutex<Pending>) -> std::sync::MutexGuard<'_, Pending> {
     p.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -65,6 +73,18 @@ fn request_id(line: &str) -> Option<Value> {
     probe(line)
         .filter(|p| p.method.is_some())
         .and_then(|p| p.id)
+}
+
+/// The id of the request `line` cancels when it is `notifications/cancelled`.
+fn cancelled_id(line: &str) -> Option<Value> {
+    match crate::jsonrpc::parse(line) {
+        Ok(crate::jsonrpc::Incoming::Notification { method, mut params })
+            if method == "notifications/cancelled" =>
+        {
+            params.remove("requestId")
+        }
+        _ => None,
+    }
 }
 
 /// The id of `line` when it is a reply (a result or an error).
@@ -140,6 +160,9 @@ pub fn run(
                         // Noted before it is sent, so an answer can never arrive before its request is known.
                         if let Some(id) = request_id(text) {
                             pending_lock(&pending).ids.push(id);
+                        } else if let Some(id) = cancelled_id(text) {
+                            // The server never answers a call the host cancelled (MCP), so it is no longer waited for.
+                            pending_lock(&pending).forget(&id);
                         }
                         if writer
                             .write_all(text.as_bytes())
@@ -164,10 +187,7 @@ pub fn run(
             Err(e) => break Some(e),
             Ok(_) => {
                 if let Some(id) = reply_id(line.trim_end()) {
-                    let mut p = pending_lock(&pending);
-                    if let Some(at) = p.ids.iter().position(|x| *x == id) {
-                        p.ids.remove(at);
-                    }
+                    pending_lock(&pending).forget(&id);
                 }
                 if output
                     .write_all(line.as_bytes())
