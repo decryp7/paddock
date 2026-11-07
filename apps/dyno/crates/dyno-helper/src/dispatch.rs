@@ -285,6 +285,7 @@ impl Dispatcher {
                 outcome.map(HelperReply::Installed).map_err(|e| remote(&e))
             }
             HelperRequest::ListWakes => self.wakes.list().map(HelperReply::Wakes).map_err(|e| remote(&e)),
+            HelperRequest::Build => Ok(HelperReply::Build(dyno_platform::build_id::own_build_id())),
             HelperRequest::WolState { ifname } => self.wol.read(&ifname).map(HelperReply::Wol).map_err(|e| remote(&e)),
             HelperRequest::ScheduleWake { tag, at_utc } => {
                 let pending = self.wakes.list().map_err(|e| remote(&e))?;
@@ -1074,6 +1075,15 @@ mod tests {
         // A system without wakes says so.
         let none = rig(HelperHost::Windows, Ok(vec![]));
         assert_eq!(none.d.handle(None, HelperRequest::ListWakes).unwrap_err().code, codes::UNSUPPORTED);
+    }
+
+    #[test]
+    fn the_helper_reports_the_build_of_its_own_program_file() {
+        let r = rig(HelperHost::Linux, Ok(vec![]));
+        assert_eq!(
+            r.d.handle(None, HelperRequest::Build).unwrap(),
+            HelperReply::Build(dyno_platform::build_id::own_build_id())
+        );
     }
 
     struct FakeSweep(dyno_core::helper_processes::Sweep);

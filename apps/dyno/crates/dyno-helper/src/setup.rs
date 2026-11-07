@@ -175,6 +175,23 @@ pub enum Refresh {
     },
 }
 
+/// [`refresh_decision`] that also compares builds: a helper of the same version but another build (a release candidate and the
+/// release, a rebuild) is refreshed. `installed_build` is the build id of the installed program file and `this_build` that of this
+/// program; when either cannot be read, or the recorded version is newer (never a downgrade), the version decides alone.
+pub fn refresh_decision_by_build(recorded: Option<&str>, this: &str, installed_build: Option<&str>, this_build: Option<&str>) -> Refresh {
+    match (refresh_decision(recorded, this), recorded, installed_build, this_build) {
+        (Refresh::Current, Some(r), Some(installed), Some(mine)) if installed != mine && !newer_version(r, this) => {
+            Refresh::Refresh { from: r.to_string() }
+        }
+        (decision, ..) => decision,
+    }
+}
+
+/// Whether `recorded` is a newer version than `this` (at least, and not equal).
+fn newer_version(recorded: &str, this: &str) -> bool {
+    dyno_core::helper_wire::version_at_least(recorded, this) && !dyno_core::helper_wire::version_at_least(this, recorded)
+}
+
 /// The refresh decision: `recorded` is the version in `config.json` (`None`: no configuration), `this` the version of this
 /// program.
 pub fn refresh_decision(recorded: Option<&str>, this: &str) -> Refresh {
@@ -207,7 +224,13 @@ pub fn refresh() -> Result<Report, RefreshError> {
             .ensure_root(&paths.data_dir, crate::protect::OnUntrusted::Refuse)
             .map_err(|e| e.to_string())
     };
-    refresh_with(&trusted, &|| HelperConfig::load(&paths.config), &mut |owner, from| {
+    let builds = || {
+        (
+            dyno_platform::build_id::file_build_id(&paths.binary),
+            Some(dyno_platform::build_id::own_build_id()),
+        )
+    };
+    refresh_with(&trusted, &|| HelperConfig::load(&paths.config), &builds, &mut |owner, from| {
         install_recorded(owner, Some(from))
     })
 }
@@ -246,7 +269,7 @@ pub fn log_refusal(e: &RefreshError) {
 }
 
 /// [`refresh`] over its three steps, so each can be replaced in a test: the trust check of the data folder, the read of
-/// `config.json` (only after the check passed), and the install.
+/// `config.json` (only after the check passed), the build ids of the installed and of this program, and the install.
 ///
 /// # Errors
 /// [`RefreshError::Refused`] when the folder is not protected (distinct, so the installer's note can say so),
@@ -254,6 +277,7 @@ pub fn log_refusal(e: &RefreshError) {
 pub fn refresh_with(
     trusted: &dyn Fn() -> Result<(), String>,
     load: &dyn Fn() -> Result<HelperConfig, crate::config::ConfigError>,
+    builds: &dyn Fn() -> (Option<String>, Option<String>),
     install: &mut dyn FnMut(HelperUser, &str) -> Result<Report, String>,
 ) -> Result<Report, RefreshError> {
     if let Err(why) = trusted() {
@@ -271,7 +295,20 @@ pub fn refresh_with(
             )));
         }
     };
-    match refresh_decision(recorded.as_ref().map(|c| c.version.as_str()), crate::VERSION) {
+    // Read only for an installed helper (hashing the program file is not free).
+    let (installed_build, this_build) = if recorded.is_some() { builds() } else { (None, None) };
+    let decision = refresh_decision_by_build(
+        recorded.as_ref().map(|c| c.version.as_str()),
+        crate::VERSION,
+        installed_build.as_deref(),
+        this_build.as_deref(),
+    );
+    log::info!(
+        installed_build = installed_build.as_deref().unwrap_or("unreadable"), this_build = this_build.as_deref().unwrap_or("unreadable"),
+        decision = format!("{decision:?}").as_str();
+        "refresh: decided"
+    );
+    match decision {
         Refresh::NotInstalled => Ok(Report::default()),
         Refresh::Current => {
             log::info!("refresh: the installed helper is current");
@@ -816,6 +853,30 @@ mod refresh_tests {
     fn a_newer_recorded_version_is_not_downgraded() {
         assert_eq!(refresh_decision(Some("1.2.0"), "1.1.0"), Refresh::Current);
     }
+
+    #[test]
+    fn another_build_of_the_same_version_is_refreshed_and_the_same_build_is_left_alone() {
+        // (recorded version, installed build, this build, decision)
+        let refresh = |from: &str| Refresh::Refresh { from: from.into() };
+        let table = [
+            (Some("1.1.0"), Some("aaaa"), Some("bbbb"), refresh("1.1.0")),
+            (Some("1.1.0"), Some("aaaa"), Some("aaaa"), Refresh::Current),
+            (Some("1.0.0"), Some("aaaa"), Some("aaaa"), refresh("1.0.0")),
+            // Never a downgrade, whatever the builds say.
+            (Some("1.2.0"), Some("aaaa"), Some("bbbb"), Refresh::Current),
+            // A build that cannot be read leaves the version to decide.
+            (Some("1.1.0"), None, Some("bbbb"), Refresh::Current),
+            (Some("1.1.0"), Some("aaaa"), None, Refresh::Current),
+            (None, Some("aaaa"), Some("bbbb"), Refresh::NotInstalled),
+        ];
+        for (recorded, installed, mine, want) in table {
+            assert_eq!(
+                refresh_decision_by_build(recorded, "1.1.0", installed, mine),
+                want,
+                "{recorded:?} {installed:?} {mine:?}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -838,6 +899,7 @@ mod refresh_flow_tests {
                 loaded.set(true);
                 Ok(config("0.0.1"))
             },
+            &|| (None, None),
             &mut |_, _| {
                 installed.set(true);
                 Ok(Report::default())
@@ -877,12 +939,39 @@ mod refresh_flow_tests {
     #[test]
     fn a_trusted_older_helper_is_refreshed_for_the_recorded_owner() {
         let seen = RefCell::new(None);
-        let r = refresh_with(&|| Ok(()), &|| Ok(config("0.0.1")), &mut |o, from| {
+        let r = refresh_with(&|| Ok(()), &|| Ok(config("0.0.1")), &|| (None, None), &mut |o, from| {
             *seen.borrow_mut() = Some((o, from.to_string()));
             Ok(Report::default())
         });
         assert!(r.is_ok());
         assert_eq!(seen.into_inner(), Some((HelperUser::Uid(501), "0.0.1".to_string())));
+    }
+
+    #[test]
+    fn a_helper_of_this_version_but_another_build_is_refreshed_for_the_recorded_owner() {
+        let seen = RefCell::new(None);
+        let r = refresh_with(
+            &|| Ok(()),
+            &|| Ok(config(crate::VERSION)),
+            &|| (Some("aaaa".into()), Some("bbbb".into())),
+            &mut |o, from| {
+                *seen.borrow_mut() = Some((o, from.to_string()));
+                Ok(Report::default())
+            },
+        );
+        assert!(r.is_ok());
+        assert_eq!(seen.into_inner(), Some((HelperUser::Uid(501), crate::VERSION.to_string())));
+        let installed = Cell::new(0);
+        let same = refresh_with(
+            &|| Ok(()),
+            &|| Ok(config(crate::VERSION)),
+            &|| (Some("aaaa".into()), Some("aaaa".into())),
+            &mut |_, _| {
+                installed.set(installed.get() + 1);
+                Ok(Report::default())
+            },
+        );
+        assert!(same.is_ok() && installed.get() == 0, "the same build installs nothing");
     }
 
     #[test]
@@ -892,11 +981,22 @@ mod refresh_flow_tests {
             installed.set(installed.get() + 1);
             Ok(Report::default())
         };
-        assert!(refresh_with(&|| Ok(()), &|| Err(ConfigError::Unreadable("missing".into())), &mut count).is_ok());
-        assert!(refresh_with(&|| Ok(()), &|| Ok(config(crate::VERSION)), &mut count).is_ok());
-        let e = refresh_with(&|| Ok(()), &|| Err(ConfigError::Invalid("damaged".into())), &mut count)
-            .unwrap_err()
-            .to_string();
+        assert!(refresh_with(
+            &|| Ok(()),
+            &|| Err(ConfigError::Unreadable("missing".into())),
+            &|| (None, None),
+            &mut count
+        )
+        .is_ok());
+        assert!(refresh_with(&|| Ok(()), &|| Ok(config(crate::VERSION)), &|| (None, None), &mut count).is_ok());
+        let e = refresh_with(
+            &|| Ok(()),
+            &|| Err(ConfigError::Invalid("damaged".into())),
+            &|| (None, None),
+            &mut count,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(e.contains("damaged") && e.contains("Settings"), "{e}");
         assert_eq!(installed.get(), 0);
     }

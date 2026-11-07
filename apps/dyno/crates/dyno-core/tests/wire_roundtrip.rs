@@ -158,6 +158,7 @@ fn tag_helper_request(v: &HelperRequest) -> &'static str {
         HelperRequest::CancelWake { .. } => "CancelWake",
         HelperRequest::ListWakes => "ListWakes",
         HelperRequest::WolState { .. } => "WolState",
+        HelperRequest::Build => "Build",
     }
 }
 
@@ -167,6 +168,7 @@ fn tag_helper_reply(v: &HelperReply) -> &'static str {
         HelperReply::Traffic(_) => "Traffic",
         HelperReply::Entries(_) => "Entries",
         HelperReply::Bye => "Bye",
+        HelperReply::Build(_) => "Build",
         HelperReply::Firewall(_) => "Firewall",
         HelperReply::Wakes(_) => "Wakes",
         HelperReply::WakeCancelled(_) => "WakeCancelled",
@@ -488,6 +490,7 @@ fn helper_request_samples() -> Vec<HelperRequest> {
         HelperRequest::WolState {
             ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
         },
+        HelperRequest::Build,
     ]
 }
 
@@ -497,6 +500,7 @@ fn helper_reply_samples() -> Vec<HelperReply> {
         HelperReply::Traffic(zero()),
         HelperReply::Entries(vec![]),
         HelperReply::Bye,
+        HelperReply::Build("0123456789abcdef".into()),
         HelperReply::Firewall(zero()),
         HelperReply::Wakes(vec![]),
         HelperReply::WakeCancelled(true),

@@ -45,7 +45,39 @@ fn disc(version: &str, protocol: u32) -> Discovery {
         started: 0,
         version: version.into(),
         protocol,
+        build: String::new(),
     }
+}
+
+/// [`disc`] of another build of the same version.
+fn disc_built(version: &str, build: &str) -> Discovery {
+    Discovery {
+        build: build.into(),
+        ..disc(version, 1)
+    }
+}
+
+#[test]
+fn the_discovery_file_names_the_build_not_only_the_version() {
+    use dyno_agent::build_id::build_key;
+    let key = build_key("1.1.0", "aaaa");
+    assert_eq!(plan(Some(&disc_built("1.1.0", "aaaa")), &key, 1), Plan::Connect);
+    assert_eq!(
+        plan(Some(&disc_built("1.1.0", "bbbb")), &key, 1),
+        Plan::Replace,
+        "same version, another build"
+    );
+    assert_eq!(
+        plan(Some(&disc("1.1.0", 1)), &key, 1),
+        Plan::Replace,
+        "an older agent wrote no build id"
+    );
+    assert_eq!(plan(Some(&disc_built("1.0.0", "aaaa")), &key, 1), Plan::Replace);
+    assert_eq!(
+        plan(Some(&disc_built("1.1.0", "bbbb")), "1.1.0", 1),
+        Plan::Connect,
+        "an app that could not read its agent file judges by version alone"
+    );
 }
 
 #[test]
@@ -385,6 +417,11 @@ fn rig(fail: bool) -> Rig {
 }
 
 fn rig_with(fail: bool, tuning: super::machine::Tuning) -> Rig {
+    rig_keyed(fail, tuning, env!("CARGO_PKG_VERSION"))
+}
+
+/// A rig whose app asks for the build `key` (see `dyno_agent::build_id::build_key`).
+fn rig_keyed(fail: bool, tuning: super::machine::Tuning, key: &str) -> Rig {
     let tmp = tempfile::tempdir().unwrap();
     let dirs = Dirs::at(tmp.path().join("data"));
     let (tx, rx) = channel();
@@ -397,14 +434,7 @@ fn rig_with(fail: bool, tuning: super::machine::Tuning) -> Rig {
         fail,
         refused: Mutex::new(Vec::new()),
     });
-    let link = AgentLink::tuned(
-        dirs,
-        env!("CARGO_PKG_VERSION"),
-        sink.clone(),
-        Box::new(Shared(launcher.clone())),
-        FAST,
-        tuning,
-    );
+    let link = AgentLink::tuned(dirs, key, sink.clone(), Box::new(Shared(launcher.clone())), FAST, tuning);
     Rig {
         link,
         sink,
@@ -985,6 +1015,7 @@ fn stale_file() -> Discovery {
         started: 0,
         version: env!("CARGO_PKG_VERSION").into(),
         protocol: dyno_core::protocol::PROTOCOL_VERSION,
+        build: String::new(),
     }
 }
 
@@ -1332,6 +1363,7 @@ fn the_first_look_does_not_ask_the_login_service_when_an_agent_is_there_to_conne
         started: 0,
         version: env!("CARGO_PKG_VERSION").into(),
         protocol: dyno_core::protocol::PROTOCOL_VERSION,
+        build: String::new(),
     }
     .write(&r.link.dirs.discovery())
     .unwrap();
@@ -1410,4 +1442,44 @@ fn the_first_runs_registration_is_done_before_the_first_launch() {
         "the link launched an agent before the registration was done"
     );
     link.quit();
+}
+
+#[test]
+fn an_agent_of_another_build_of_the_same_version_is_asked_to_exit_and_the_new_one_is_used() {
+    use dyno_agent::build_id::{build_key, own_build_id};
+    // The app asks for this build; the running agent's file says it is another one (an older install of the same version).
+    let r = rig_keyed(false, patient(), &build_key(env!("CARGO_PKG_VERSION"), &own_build_id()));
+    let old = other_agent(&r.link.dirs);
+    let mut d = Discovery::read(&r.link.dirs.discovery()).expect("the old agent wrote its file");
+    d.build = "0ld0ld0ld0ld0ld0".into();
+    d.write(&r.link.dirs.discovery()).unwrap();
+    // The old agent's "process": once asked to exit it ends and frees the data folder (what an exiting process does).
+    let asked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ended = asked.clone();
+    let process = std::thread::spawn(move || {
+        while !old.stopped() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        ended.store(true, Ordering::SeqCst);
+        old.stop();
+    });
+    let handle = r.link.spawn().unwrap();
+    running(&r.link, &r.statuses);
+    wait_state(&r.link, "the new agent after the old one was asked to exit", |s| {
+        s.started_by_this_app()
+    });
+    assert!(
+        asked.load(Ordering::SeqCst),
+        "the agent of the older build was asked to exit and is not the one in use"
+    );
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        1,
+        "one new agent, started once the folder was free"
+    );
+    let now = Discovery::read(&r.link.dirs.discovery()).expect("the new agent's file");
+    assert_eq!(now.build, own_build_id(), "the link now talks to the new build");
+    assert!(r.link.quit());
+    handle.join().unwrap();
+    process.join().unwrap();
 }

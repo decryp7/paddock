@@ -39,6 +39,7 @@ pub fn bind(shared: &Shared) -> std::io::Result<(Host, Discovery)> {
         started: crate::agent::now().millis(),
         version: env!("CARGO_PKG_VERSION").to_string(),
         protocol: PROTOCOL_VERSION,
+        build: crate::build_id::own_build_id(),
     };
     d.write(&shared.dirs.discovery())?;
     Ok((host, d))

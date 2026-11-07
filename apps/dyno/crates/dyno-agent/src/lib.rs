@@ -9,6 +9,7 @@ pub mod bench;
 pub mod bench_child;
 pub mod bench_disk_target;
 pub mod bench_scratch;
+pub mod build_id;
 pub mod cache;
 pub mod cli;
 pub mod counters;
@@ -343,6 +344,21 @@ impl Running {
                 .spawn(move || wakes::run(&s))
                 .map_err(|e| format!("could not start the scheduled-wake watcher: {e}"))?,
         );
+        // An agent whose program file is replaced exits (code 0) so its supervisor starts the new build.
+        if let Ok(exe) = std::env::current_exe() {
+            let start = build_id::FileStamp::of(&exe);
+            let s = shared.clone();
+            threads.push(
+                std::thread::Builder::new()
+                    .name("dyno-binary-watch".into())
+                    .spawn(move || {
+                        dyno_platform::priority::lower_current_thread();
+                        build_id::run(&s, exe, start)
+                    })
+                    .map_err(|e| format!("could not start the program file watcher: {e}"))?,
+            );
+        }
+        log::info!(Version = env!("CARGO_PKG_VERSION"), Build = build_id::own_build_id().as_str(); "Agent build");
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()

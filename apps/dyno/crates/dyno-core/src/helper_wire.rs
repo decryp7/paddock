@@ -109,6 +109,10 @@ pub enum HelperRequest {
         /// The interface.
         ifname: IfName,
     },
+    /// The build id of the helper's own program file (the start of its SHA-256), so Dyno can tell two builds of one version
+    /// apart. Any caller. Appended (a minor wire change, no `HELPER_API` bump): a helper that does not know it cannot answer, and
+    /// Dyno then counts it as outdated.
+    Build,
 }
 
 impl HelperRequest {
@@ -134,6 +138,7 @@ impl HelperRequest {
             HelperRequest::CancelWake { .. } => RequestKind::CancelWake,
             HelperRequest::ListWakes => RequestKind::ListWakes,
             HelperRequest::WolState { .. } => RequestKind::WolState,
+            HelperRequest::Build => RequestKind::Build,
         }
     }
 
@@ -199,6 +204,8 @@ pub enum HelperReply {
     Log(Vec<String>),
     /// Answer to `Uninstall`: the helper is going away.
     Bye,
+    /// Answer to `Build`: the helper's build id. Appended.
+    Build(String),
 }
 
 /// The IPC body: one type for both directions (`paddock_ipc::BodyPeer` carries a single body type).
@@ -359,6 +366,39 @@ pub enum Probe {
     Starting(String),
     /// Something that is not Dyno's helper owns the endpoint (pipe squatting): the owner's account id (or uid).
     Foreign(String),
+    /// It answered `Info` with an API and version this Dyno accepts, but it is another build than the one Dyno ships
+    /// ([`BuildVerdict::Other`]): the id it reported (`None`: it cannot answer `Build`, so it is older than that request) and the id
+    /// of the bundled program.
+    AnsweredOtherBuild {
+        /// What it said about itself.
+        info: HelperInfo,
+        /// Recent audit entries.
+        recent: Vec<AuditEntry>,
+        /// The build id the installed helper reported.
+        installed: Option<String>,
+        /// The build id of the helper program that ships with this Dyno.
+        bundled: String,
+    },
+}
+
+/// Whether the installed helper is the build Dyno ships.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildVerdict {
+    /// The same build.
+    Same,
+    /// Another build of whatever version (or one that cannot say): update it.
+    Other,
+    /// The bundled program could not be read, so nothing can be compared: the helper is taken as it is.
+    NotJudged,
+}
+
+/// Compares the build the installed helper reported (`None`: it did not answer `Build`) with the bundled program's.
+pub fn judge_build(installed: Option<&str>, bundled: Option<&str>) -> BuildVerdict {
+    match (installed, bundled) {
+        (_, None) | (_, Some("")) => BuildVerdict::NotJudged,
+        (Some(i), Some(b)) if i == b => BuildVerdict::Same,
+        _ => BuildVerdict::Other,
+    }
 }
 
 /// Whether `have` ("1.2.3", a pre-release suffix is ignored) is at least `min`. An unreadable version is not.
@@ -528,6 +568,23 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
             Some(info.version.clone()),
             recent,
             Some(format!("Installed: version {} (API {}). Needed: API {HELPER_API}, version {MIN_HELPER_VERSION} or newer.", info.version, info.api)),
+        ),
+        Probe::AnsweredOtherBuild {
+            info,
+            recent,
+            installed,
+            bundled,
+        } => status(
+            HelperState::Outdated,
+            "The installed helper is an older build than this Dyno. Update the helper.".into(),
+            Some(info.version.clone()),
+            recent,
+            Some(format!(
+                "Installed: version {} build {} (API {}). This Dyno ships build {bundled}.",
+                info.version,
+                installed.as_deref().unwrap_or("unknown (it does not answer the build request)"),
+                info.api
+            )),
         ),
         Probe::Answered(info, recent) => status(
             HelperState::Ready,
@@ -834,6 +891,23 @@ mod tests {
             let off = assess(host, Ok(()), Probe::Absent, "1.1.0");
             assert_eq!(off.readings, ready.readings, "Off and On list the same readings");
         }
+        // Another build of the same version is outdated, and so is a helper that cannot answer the build request.
+        let other = |installed: Option<&str>| Probe::AnsweredOtherBuild {
+            info: info("1.1.0", HELPER_API),
+            recent: vec![],
+            installed: installed.map(str::to_string),
+            bundled: "bbbb".into(),
+        };
+        for installed in [Some("aaaa"), None] {
+            let s = assess(w, Ok(()), other(installed), "1.1.0");
+            assert_eq!(s.state, HelperState::Outdated, "{installed:?}");
+            assert!(s.message.contains("Update the helper"), "{}", s.message);
+            let d = s.detail.unwrap();
+            assert!(
+                d.contains("bbbb") && d.contains(installed.unwrap_or("does not answer")),
+                "both builds are named: {d}"
+            );
+        }
         // A newer or older-but-supported helper than the app is Ready: the update is offered, never forced.
         let s = assess(w, Ok(()), Probe::Answered(info(MIN_HELPER_VERSION, HELPER_API), vec![]), "1.3.0");
         assert_eq!(s.state, HelperState::Ready);
@@ -842,6 +916,24 @@ mod tests {
                 && prompt_text(HelperHost::Macos, "repair").contains("repair its helper")
         );
         assert!(prompt_text(HelperHost::Linux, "update").contains("polkit"));
+    }
+
+    #[test]
+    fn the_installed_build_is_judged_against_the_bundled_one() {
+        use BuildVerdict::*;
+        // (installed, bundled, verdict)
+        let table = [
+            (Some("aaaa"), Some("aaaa"), Same),
+            (Some("aaaa"), Some("bbbb"), Other),
+            (None, Some("bbbb"), Other),
+            (Some(""), Some("bbbb"), Other),
+            (Some("aaaa"), None, NotJudged),
+            (None, None, NotJudged),
+            (Some("aaaa"), Some(""), NotJudged),
+        ];
+        for (installed, bundled, want) in table {
+            assert_eq!(judge_build(installed, bundled), want, "{installed:?} against {bundled:?}");
+        }
     }
 
     #[test]
@@ -890,6 +982,7 @@ mod tests {
             HelperRequest::WolState {
                 ifname: IfName::parse("eth0").unwrap(),
             },
+            HelperRequest::Build,
         ];
         let kinds: Vec<_> = reqs.iter().map(|r| r.kind()).collect();
         assert_eq!(kinds, RequestKind::ALL, "one kind per request, in the table's order");

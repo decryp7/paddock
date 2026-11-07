@@ -178,11 +178,12 @@ pub enum Plan {
     Replace,
 }
 
-/// The decision for the discovery file's content.
+/// The decision for the discovery file's content. `app_version` is the build key (`dyno_agent::build_id::build_key`): the version,
+/// and the build id of the agent file the app would start when it could read it, so another build of the same version is replaced.
 pub fn plan(found: Option<&Discovery>, app_version: &str, protocol: u32) -> Plan {
     match found {
         None => Plan::Spawn,
-        Some(d) if d.version == app_version && d.protocol == protocol => Plan::Connect,
+        Some(d) if d.protocol == protocol && dyno_agent::build_id::matches_key(app_version, &d.version, &d.build) => Plan::Connect,
         Some(_) => Plan::Replace,
     }
 }

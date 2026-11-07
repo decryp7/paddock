@@ -22,6 +22,10 @@ pub struct Discovery {
     pub version: String,
     /// The app ↔ agent protocol version.
     pub protocol: u32,
+    /// The build id of the agent's program file ([`crate::build_id`]); empty in a file an older agent wrote, which
+    /// therefore never matches a build the app can name.
+    #[serde(default)]
+    pub build: String,
 }
 
 impl Discovery {
@@ -75,6 +79,7 @@ mod tests {
             started: 5,
             version: "0.1.0".into(),
             protocol: 1,
+            build: String::new(),
         }
     }
 

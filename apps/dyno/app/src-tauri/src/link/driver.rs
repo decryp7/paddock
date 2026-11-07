@@ -245,7 +245,10 @@ impl Executor {
                                 Attempts = done.attempts,
                                 SinceBeginMs = done.since_begin_ms,
                                 AgentRun = paddock_log::fingerprint(&d.endpoint),
-                                AgentPid = d.pid;
+                                AgentPid = d.pid,
+                                AgentVersion = d.version.as_str(),
+                                AgentBuild = d.build.as_str(),
+                                AppBuildKey = link.app_version.as_str();
                                 "{}",
                                 ports::describe_connect(purpose, u64::try_from(handshake.elapsed().as_millis()).unwrap_or(u64::MAX))
                             );

@@ -14,6 +14,7 @@ const WEIGHT: Record<IssueKind, number> = {
   memoryExhaustion: 10,
   appCrash: 8,
   driverFailure: 8,
+  stoppedFromOutside: 0,
   appHang: 5,
   serviceFailure: 5,
   updateFailure: 3,
@@ -30,6 +31,7 @@ const SEVERITY: Record<IssueKind, Severity> = {
   driverFailure: 'warning',
   serviceFailure: 'info',
   updateFailure: 'info',
+  stoppedFromOutside: 'info',
 };
 
 interface Seed {

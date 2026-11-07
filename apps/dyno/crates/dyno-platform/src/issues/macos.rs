@@ -3,7 +3,7 @@
 //! plain-text summary and never logs report contents.
 
 use super::{hours_back, parse_timestamp, timeout_for, ToolRunner};
-use dyno_core::issues::{Issue, IssueKind, IssueSource, IssueSourceId, NoControl, ReadControl, MAX_PER_READ};
+use dyno_core::issues::{kind_for_signal, Issue, IssueKind, IssueSource, IssueSourceId, NoControl, ReadControl, MAX_PER_READ};
 use dyno_core::ports::PlatformError;
 use dyno_core::time::Timestamp;
 use std::path::{Path, PathBuf};
@@ -140,10 +140,18 @@ pub fn report_issue(file_name: &str, mtime: Timestamp, head: &[u8], complete: bo
         let bug = header
             .get("bug_type")
             .and_then(|v| v.as_str().map(str::to_string).or_else(|| v.as_i64().map(|n| n.to_string())))?;
-        let kind = match bug.as_str() {
-            "309" => IssueKind::AppCrash,
-            _ => return None,
+        if bug != "309" {
+            return None;
+        }
+        // The signal that ended it: a program others stopped (SIGTERM, SIGKILL) is not a crash.
+        let signal = if complete {
+            serde_json::from_str::<serde_json::Value>(body.trim())
+                .ok()
+                .and_then(|b| b.get("exception")?.get("signal")?.as_str().map(str::to_string))
+        } else {
+            None
         };
+        let kind = kind_for_signal(signal.as_deref());
         let app = header
             .get("app_name")
             .and_then(|v| v.as_str())
@@ -170,7 +178,7 @@ pub fn report_issue(file_name: &str, mtime: Timestamp, head: &[u8], complete: bo
         (kind, app, at, evidence.join(" "), key)
     } else {
         let kind = if lower.ends_with(".crash") {
-            IssueKind::AppCrash
+            kind_for_signal(text_report_signal(&text).as_deref())
         } else if lower.ends_with(".hang") || lower.ends_with(".spin") {
             IssueKind::AppHang
         } else if lower.ends_with(".panic") {
@@ -187,10 +195,18 @@ pub fn report_issue(file_name: &str, mtime: Timestamp, head: &[u8], complete: bo
     };
     let title = match kind {
         IssueKind::AppCrash => format!("{} quit unexpectedly", name_or(&app, "An app")),
+        IssueKind::StoppedFromOutside => format!("{} was stopped from outside", name_or(&app, "An app")),
         IssueKind::AppHang => format!("{} stopped responding", name_or(&app, "An app")),
         _ => "The Mac restarted because of a problem".to_string(),
     };
     Some(Issue::new(IssueSourceId::MacReports, at, kind, &app, &title, &evidence, &key))
+}
+
+/// The signal named in the `Exception Type:  EXC_CRASH (SIGKILL)` line of a text report.
+fn text_report_signal(text: &str) -> Option<String> {
+    let line = text.lines().find(|l| l.trim_start().starts_with("Exception Type:"))?;
+    let inner = line.rsplit_once('(')?.1.split(')').next()?;
+    Some(inner.trim().to_string())
 }
 
 fn name_or<'a>(app: &'a str, fallback: &'a str) -> &'a str {
@@ -380,6 +396,44 @@ mod tests {
 
     const HEADER: &str = r#"{"app_name":"bench_reads_base","timestamp":"2026-10-22 20:48:57.00 +0800","app_version":"1.2","bug_type":"309","os_version":"macOS 27.0.1 (26A434)","incident_id":"C439B0A0","name":"bench_reads_base"}"#;
     const BODY: &str = r#"{"exception":{"type":"EXC_CRASH","signal":"SIGABRT"},"termination":{"namespace":"DYLD","indicator":"Library missing","reasons":["Library not loaded: @rpath/libduckdb.dylib","Referenced from: x"]}}"#;
+
+    #[test]
+    fn a_report_of_a_program_ended_by_a_signal_from_outside_is_not_a_crash() {
+        // (signal in the report, expected kind, expected title)
+        let table = [
+            (
+                "SIGKILL",
+                IssueKind::StoppedFromOutside,
+                "bench_reads_base was stopped from outside",
+            ),
+            (
+                "SIGTERM",
+                IssueKind::StoppedFromOutside,
+                "bench_reads_base was stopped from outside",
+            ),
+            ("SIGABRT", IssueKind::AppCrash, "bench_reads_base quit unexpectedly"),
+            ("SIGSEGV", IssueKind::AppCrash, "bench_reads_base quit unexpectedly"),
+        ];
+        for (signal, kind, title) in table {
+            let body = format!(
+                r#"{{"exception":{{"type":"EXC_CRASH","signal":"{signal}"}},"termination":{{"namespace":"SIGNAL","indicator":"x"}}}}"#
+            );
+            let text = format!("{HEADER}\n{body}");
+            let i = report_issue("bench_reads_base-2026-10-22-204857.ips", Timestamp(1), text.as_bytes(), true).unwrap();
+            assert_eq!((i.kind, i.title.as_str()), (kind, title), "{signal}");
+        }
+        // The old text format names the signal in the exception line.
+        let old = "Process: foo [1]\nException Type:  EXC_CRASH (SIGKILL)\n";
+        let i = report_issue("foo-2026-10-22-204857.crash", Timestamp(1), old.as_bytes(), true).unwrap();
+        assert_eq!(i.kind, IssueKind::StoppedFromOutside);
+        let abort = "Process: foo [1]\nException Type:  EXC_CRASH (SIGABRT)\n";
+        assert_eq!(
+            report_issue("foo-2026-10-22-204857.crash", Timestamp(1), abort.as_bytes(), true)
+                .unwrap()
+                .kind,
+            IssueKind::AppCrash
+        );
+    }
 
     #[test]
     fn a_crash_report_becomes_an_issue_with_evidence() {

@@ -1457,3 +1457,9 @@ Moving Dyno's macOS service code into `paddock-service` took three review rounds
 - Every hold names what happened and a next step that exists for that state: unanswered, refused and register failed are three facts with three messages, and a failed register is not "not installed".
 - A start that cannot save its record changes nothing and tells the UI, with the way out (Repair goes on, loudly).
 - Tests that only restate what the explorer proves are deleted, not rewritten; the ones that pin exact commands, files and words stay.
+
+## A newer Dyno kept talking to an older agent of the same version (2026-11-07, Dyno 1.1.0)
+
+Symptom: after replacing Dyno.app, an agent started on 5 Nov kept running and the new app used it; killing agents by hand then showed "crashed 3 times, Restart loop". First hypothesis: the app never asks an old agent to exit. Refuted: the link already asks an agent of another version or protocol to exit (`Request::Shutdown`), waits for the data folder and starts its own. Root cause: "another build" meant a different `CARGO_PKG_VERSION`, and a release candidate and the release carry the same version. Contributing: nothing watched the agent's own file, so an agent whose bundle was replaced ran on (on Linux a deb upgrade, on macOS a replaced bundle); the issue readers called any `.ips` report a crash, so a SIGKILL or SIGTERM counted toward the crash loop.
+
+Fix: the discovery file carries a build id (SHA-256 prefix of the agent file), the app compares it with the id of the agent file it would start, and the agent exits (code 0, logged) when its own file was replaced or removed on two looks 30 s apart; signals others send are `StoppedFromOutside`, no crash and no stability points. Logs: the connect line now carries the agent's version and build and the app's key. Class: identity by a label that releases share; compare content.
