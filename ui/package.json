@@ -7,7 +7,7 @@
   "scripts": {
     "ng": "ng",
     "build:css": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/build-css.mjs",
-    "build": "npm run build:css && ng build paddock-ui && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/stamp-dist.mjs",
+    "build": "npm run build:css && ng build paddock-ui && node scripts/add-entry-mains.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/stamp-dist.mjs",
     "test": "npm run build:css && ng test paddock-ui --watch=false && ng test workbench-demo --watch=false",
     "test:tokens": "vitest run --config vitest.tokens.config.ts",
     "gallery": "npm run build:css && ng serve gallery --port 4300",
@@ -18,7 +18,7 @@
     "shell-demo:build": "npm run build:css && ng build shell-demo",
     "workbench-demo": "npm run build:css && ng serve workbench-demo --port 4302",
     "workbench-demo:build": "npm run build:css && ng build workbench-demo",
-    "test:scripts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test ../scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs projects/paddock-e2e/src/*.test.ts",
+    "test:scripts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test ../scripts/*.test.mjs scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs projects/paddock-e2e/src/*.test.ts",
     "i18n": "node projects/paddock-ui/bin/paddock-i18n.mjs build",
     "i18n:check": "node projects/paddock-ui/bin/paddock-i18n.mjs build --check",
     "release": "node ../scripts/publish.mjs",
