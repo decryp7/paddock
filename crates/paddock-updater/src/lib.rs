@@ -39,6 +39,7 @@ pub mod state;
 pub mod updater;
 
 pub use about::{About, AboutError, AboutInfo, LegalDocInfo};
+pub mod limits;
 pub use error::{DEFAULT_MAX_DOWNLOAD_BYTES, UpdateError, UpdateErrorDto, UpdateErrorKind};
 pub use manifest::{Manifest, Platform, Target};
 pub use notes::{NotesGroup, ReleaseNotes, WhatsNew, WhatsNewDecision};

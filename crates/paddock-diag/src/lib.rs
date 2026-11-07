@@ -34,6 +34,7 @@
 //! The core is pure Rust with no Tauri dependency, so services and command-line tools can write the same report.
 
 mod error;
+pub mod limits;
 pub mod logging;
 mod manifest;
 mod personal;

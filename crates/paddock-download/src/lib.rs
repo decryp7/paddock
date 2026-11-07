@@ -70,6 +70,7 @@ mod request;
 mod resume;
 mod transport;
 
+pub mod limits;
 #[cfg(feature = "tauri")]
 pub mod tauri;
 
