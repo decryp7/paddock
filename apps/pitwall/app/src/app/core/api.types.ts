@@ -1082,6 +1082,8 @@ export type JobEvent =
 /** One tool of a connected app, as Settings lists it (`chat_host::apps::AppTool`). */
 export interface AppTool {
   name: string;
+  /** Its name for people ("Top processes"). */
+  title: string;
   /** It only looks: asked once, then remembered when allowed. Otherwise an action, asked every call. */
   readOnly: boolean;
 }
@@ -1094,6 +1096,8 @@ export interface ConnectedApp {
   connected: boolean;
   /** Why the last connect failed, with the next step. */
   problem: string | null;
+  /** The app refused the saved key: only a new key helps (Refresh is hidden). */
+  keyRefused: boolean;
   tools: AppTool[];
   /** Tools always allowed. */
   remembered: number;
@@ -1112,4 +1116,6 @@ export interface ChatModel {
 export interface ChatModels {
   models: ChatModel[];
   selected: string | null;
+  /** Why some models can't be chosen, in full (the picker's hint). */
+  note: string | null;
 }

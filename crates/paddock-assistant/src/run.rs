@@ -501,6 +501,7 @@ fn dispatch(
         call_id: call.id.clone(),
         name: call.name.clone(),
         summary: summary.clone(),
+        title: tool.and_then(|t| t.title()),
         write,
         destructive: access.destructive(),
     });

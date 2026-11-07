@@ -9,6 +9,8 @@ export interface ToolCard {
   readonly name: string;
   /** The call as the user reads it. */
   readonly summary: string;
+  /** The tool's name for people, when it has one (shown instead of `name`). */
+  readonly title?: string;
   readonly write: boolean;
   /** What it changes cannot be undone: its approval is a danger choice with Decline as the default. */
   readonly destructive: boolean;
@@ -113,7 +115,7 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
       return { ...t, phase: null, parts: [...t.parts, { kind: 'text', text: e.text }] };
     }
     case 'toolStarted': {
-      const card: ToolCard = { callId: e.callId, name: e.name, summary: e.summary, write: e.write, destructive: e.destructive, state: 'running', result: null, data: undefined };
+      const card: ToolCard = { callId: e.callId, name: e.name, ...(e.title ? { title: e.title } : {}), summary: e.summary, write: e.write, destructive: e.destructive, state: 'running', result: null, data: undefined };
       return { ...t, phase: null, parts: [...t.parts, { kind: 'tool', card }] };
     }
     case 'approvalNeeded':

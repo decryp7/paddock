@@ -24,6 +24,8 @@ pub const MAX_KEY_LEN: usize = 256;
 pub struct AppTool {
     /// The tool's name on that app.
     pub name: String,
+    /// Its name for people.
+    pub title: String,
     /// It only looks (asked once, then remembered when allowed); otherwise an action, asked every call.
     pub read_only: bool,
 }
@@ -42,6 +44,8 @@ pub struct ConnectedApp {
     pub connected: bool,
     /// Why the last connect failed, in the app's words with the next step; `None` when it did not.
     pub problem: Option<String>,
+    /// The app refused the saved key: Refresh cannot help, only a new key.
+    pub key_refused: bool,
     /// Its tools, when connected.
     pub tools: Vec<AppTool>,
     /// How many of its tools are always allowed.
@@ -99,8 +103,12 @@ pub struct ConnectedApps {
     policy: Arc<PitwallPolicy>,
     names: ToolNames,
     live: Mutex<BTreeMap<String, Live>>,
-    problems: Mutex<BTreeMap<String, String>>,
+    problems: Mutex<BTreeMap<String, (String, bool)>>,
+    changed: Mutex<Option<OnChange>>,
 }
+
+/// Told every apps' views after each change.
+type OnChange = Box<dyn Fn(&[ConnectedApp]) + Send + Sync>;
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
@@ -136,7 +144,13 @@ impl ConnectedApps {
             names,
             live: Mutex::default(),
             problems: Mutex::default(),
+            changed: Mutex::default(),
         }
+    }
+
+    /// Calls `f` with every app's view after each change (connect, a new key, forget): the app emits it to every window.
+    pub fn on_change(&self, f: impl Fn(&[ConnectedApp]) + Send + Sync + 'static) {
+        *lock(&self.changed) = Some(Box::new(f));
     }
 
     /// Every known app.
@@ -154,18 +168,21 @@ impl ConnectedApps {
                     .filter_map(|t| {
                         self.names.of(&t.spec().name).map(|(_, name)| AppTool {
                             name,
+                            title: t.title().unwrap_or_default(),
                             read_only: !t.access().writes(),
                         })
                     })
                     .collect()
             })
             .unwrap_or_default();
+        let problem = lock(&self.problems).get(id).cloned();
         ConnectedApp {
             id: id.into(),
             title: title_of(id).unwrap_or(id).into(),
             key_saved: key_name(id).ok().and_then(|n| self.secrets.get(&n).ok().flatten()).is_some(),
             connected: live.contains_key(id),
-            problem: lock(&self.problems).get(id).cloned(),
+            key_refused: problem.as_ref().is_some_and(|p| p.1),
+            problem: problem.map(|p| p.0),
             tools,
             remembered: self.policy.remembered().iter().filter(|r| r.server == id).count(),
         }
@@ -187,17 +204,27 @@ impl ConnectedApps {
     pub fn connect(&self, id: &str) -> Result<ConnectedApp, AppsError> {
         let title = title_of(id)?;
         lock(&self.live).remove(id);
-        let outcome = (|| -> Result<Live, String> {
+        // The failure in words, and whether the app refused the key (then only a new key helps).
+        let outcome = (|| -> Result<Live, (String, bool)> {
+            let plain = |e: String| (e, false);
             let key = self
                 .secrets
-                .get(&key_name(id).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("No key is saved for {title}. Issue one in {title}'s Settings > AI access and paste it here."))?;
-            let file = (self.discovery)(id).ok_or_else(|| format!("Pitwall cannot find {title}'s folders."))?;
-            let link = connect_loopback(&file, key.expose()).map_err(|e| e.to_string())?;
+                .get(&key_name(id).map_err(|e| plain(e.to_string()))?)
+                .map_err(|e| plain(e.to_string()))?
+                .ok_or_else(|| {
+                    plain(format!(
+                        "No key is saved for {title}. Issue one in {title}'s Settings > AI access and paste it here."
+                    ))
+                })?;
+            let file = (self.discovery)(id).ok_or_else(|| plain(format!("Pitwall cannot find {title}'s folders.")))?;
+            let link = connect_loopback(&file, key.expose()).map_err(|e| {
+                let refused = matches!(e, paddock_mcp::client::ConnectError::KeyRefused { .. });
+                (e.to_string(), refused)
+            })?;
             let conn = Arc::new(link.into_connection(ConnectionConfig::default()));
-            conn.initialize("Pitwall", env!("CARGO_PKG_VERSION")).map_err(|e| e.to_string())?;
-            let defs = conn.list_tools().map_err(|e| e.to_string())?;
+            conn.initialize("Pitwall", env!("CARGO_PKG_VERSION"))
+                .map_err(|e| plain(e.to_string()))?;
+            let defs = conn.list_tools().map_err(|e| plain(e.to_string()))?;
             let tools = tools_of(id, title, &defs, true, &conn, &self.names);
             Ok(Live { _conn: conn, tools })
         })();
@@ -207,9 +234,9 @@ impl ConnectedApps {
                 lock(&self.problems).remove(id);
                 lock(&self.live).insert(id.into(), live);
             }
-            Err(why) => {
+            Err((why, refused)) => {
                 log::warn!(target: "pitwall_chat", "connected apps: {id} not connected, cause: {why}");
-                lock(&self.problems).insert(id.into(), why);
+                lock(&self.problems).insert(id.into(), (why, refused));
             }
         }
         self.publish();
@@ -241,5 +268,9 @@ impl ConnectedApps {
     fn publish(&self) {
         let tools = lock(&self.live).values().flat_map(|l| l.tools.iter().cloned()).collect();
         self.assistant.set_tools(tool_set(tools));
+        let views = self.views();
+        if let Some(f) = lock(&self.changed).as_ref() {
+            f(&views);
+        }
     }
 }

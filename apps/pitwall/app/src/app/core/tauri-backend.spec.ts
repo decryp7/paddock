@@ -154,7 +154,7 @@ describe('TauriBackend', () => {
 
   it('covers every request/response method of the backend interface', () => {
     const methods = Object.getOwnPropertyNames(TauriBackend.prototype).filter((m) => m !== 'constructor' && m !== 'run' && m !== 'job');
-    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onPopover', 'onQuitAsk', 'chat', 'jobEvents']);
+    const pinned = new Set([...TABLE.map((r) => r[0]), ...JOBS.map((r) => r[0]), 'subscribe', 'onPopover', 'onQuitAsk', 'onConnectedApps', 'chat', 'jobEvents']);
     expect(methods.filter((m) => !pinned.has(m))).toEqual([]);
   });
 
@@ -215,6 +215,19 @@ describe('TauriBackend', () => {
     const failing = new TauriBackend({ ...fakeBridge().bridge, listen: () => Promise.reject(new Error('no ipc')) }).onQuitAsk(() => undefined);
     await Promise.resolve();
     expect(() => failing()).not.toThrow();
+  });
+
+  it("hears every window's connected-apps change, with the apps, and stops on unsubscribe", async () => {
+    const { bridge, listeners, unlistened } = fakeBridge();
+    const seen: unknown[] = [];
+    const stop = new TauriBackend(bridge).onConnectedApps((apps) => seen.push(apps));
+    await Promise.resolve();
+    listeners[0]!([{ id: 'dyno' }]);
+    expect(seen).toEqual([[{ id: 'dyno' }]]);
+    stop();
+    expect(unlistened).toEqual(['pitwall://connected-apps']);
+    const early = new TauriBackend(fakeBridge().bridge).onConnectedApps(() => undefined);
+    early();
   });
 
   it('unlistens at once when unsubscribed before listening resolved', async () => {

@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { confirm } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import type { CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -35,8 +36,10 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
               <span class="spacer"></span>
               <button type="button" matButton="outlined" [disabled]="busy()" (click)="connect(app)">{{ app.keySaved ? 'Replace key…' : 'Connect…' }}</button>
               @if (app.keySaved) {
-                <button type="button" matButton [disabled]="busy()" (click)="refresh(app)">Refresh</button>
-                <button type="button" matButton [disabled]="busy()" (click)="forget(app)">Forget</button>
+                @if (!app.keyRefused) {
+                  <button type="button" matButton [disabled]="busy()" (click)="refresh(app)">Refresh tools</button>
+                }
+                <button type="button" matButton [disabled]="busy()" (click)="forget(app)">Forget {{ app.title }}…</button>
               }
             </div>
             @if (app.problem) {
@@ -45,7 +48,7 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
             @if (app.connected) {
               <ul class="tools" [attr.aria-label]="app.title + ' tools'">
                 @for (t of app.tools; track t.name) {
-                  <li><span class="tool">{{ t.name }}</span><span class="kind">{{ t.readOnly ? 'Reads' : 'Action: asks every time' }}</span></li>
+                  <li><span class="tool" [attr.title]="t.name">{{ t.title }}</span><span class="kind">{{ t.readOnly ? 'Reads' : 'Action: asks every time' }}</span></li>
                 }
               </ul>
               <p class="note">{{ app.remembered === 0 ? 'No tool is always allowed yet.' : app.remembered + (app.remembered === 1 ? ' tool is' : ' tools are') + ' always allowed. Forget the app to ask again.' }}</p>
@@ -71,7 +74,7 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
     .problem { margin: 0; color: var(--pd-text); overflow-wrap: anywhere; }
     .tools { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--pd-space-1) var(--pd-space-4); }
     .tools li { display: flex; justify-content: space-between; gap: var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); padding: var(--pd-space-1) 0; }
-    .tool { font-family: var(--pd-font-mono); font-size: var(--pd-text-label); }
+    .tool { font-size: var(--pd-text-body); }
     .kind { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .note { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
   `,
@@ -134,7 +137,15 @@ export class ConnectedAppsPage {
     return this.act(() => this.backend.connectApp(app.id));
   }
 
-  protected forget(app: ConnectedApp): Promise<void> {
-    return this.act(() => this.backend.forgetApp(app.id));
+  /** Forget asks first, naming what goes: the key, the connection and the always-allowed tools. */
+  protected async forget(app: ConnectedApp): Promise<void> {
+    const allowed = app.remembered === 0 ? '' : ` and ${app.remembered === 1 ? 'the tool' : `the ${app.remembered} tools`} you always allowed`;
+    const ok = await confirm(this.dialogs, {
+      heading: `Forget ${app.title}?`,
+      message: `Pitwall removes ${app.title}'s key, its connection${allowed}. The chat can't use ${app.title}'s tools until you paste a new key.`,
+      confirm: { label: `Forget ${app.title}`, destructive: true },
+    });
+    if (!ok) return;
+    await this.act(() => this.backend.forgetApp(app.id));
   }
 }

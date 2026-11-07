@@ -76,6 +76,10 @@ pub enum AssistantEvent {
         name: String,
         /// The call as the user reads it.
         summary: String,
+        /// The tool's name for people ("Top processes"), when it has one; the card shows it instead of `name`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
+        title: Option<String>,
         /// The tool changes things.
         write: bool,
         /// What it changes cannot be undone (implies `write`).

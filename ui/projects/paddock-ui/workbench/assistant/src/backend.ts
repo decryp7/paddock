@@ -328,7 +328,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
       }
     } else if (command === '/write' && allowWrite) {
       startCall('call_2', 'erase', 'Erase everything', true, true);
-      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, remember: false, input: {} });
+      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, remember: false, input: { scope: 'everything', keepBackups: false } });
       const approved = (await ask('call_2', false)) !== 'deny';
       if (approved) this.erased++;
       finishCall('erase', approved, approved ? 'Erased' : 'Declined by the user', undefined, approved ? undefined : run.stopped ? 'stopped' : 'declined', approved ? 'once' : undefined);

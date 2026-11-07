@@ -209,6 +209,8 @@ export interface PitwallBackend {
   connectApp(appId: string): Promise<ConnectedApp>;
   /** Forgets an app: its connection, key and remembered approvals. */
   forgetApp(appId: string): Promise<ConnectedApp>;
+  /** Every change of the connected apps, from any window (`pitwall://connected-apps`). */
+  onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe;
   /** The Chat tab's model picker. */
   chatModels(): Promise<ChatModels>;
   /** Chooses the chat's model (one without tools is never chosen). */

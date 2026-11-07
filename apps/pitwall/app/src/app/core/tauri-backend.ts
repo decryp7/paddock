@@ -422,6 +422,21 @@ export class TauriBackend implements PitwallBackend {
   setChatModel(modelId: string): Promise<ChatModels> {
     return this.run('set_chat_model', { modelId });
   }
+  onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
+    let stopped = false;
+    let unlisten: (() => void) | null = null;
+    this.bridge.listen<ConnectedApp[]>('pitwall://connected-apps', (apps) => handler(apps)).then(
+      (u) => {
+        if (stopped) u();
+        else unlisten = u;
+      },
+      () => undefined,
+    );
+    return () => {
+      stopped = true;
+      unlisten?.();
+    };
+  }
   onQuitAsk(handler: () => void): Unsubscribe {
     let stopped = false;
     let unlisten: (() => void) | null = null;

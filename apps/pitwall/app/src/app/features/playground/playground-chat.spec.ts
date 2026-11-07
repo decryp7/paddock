@@ -42,9 +42,9 @@ describe('PlaygroundChat', () => {
     options.find((o) => o.textContent?.includes('Qwen3.5 9B'))!.click();
     await settle(fixture);
     expect((await backend.chatModels()).selected).toBe('qwen3.5-9b-q4_k_m');
+    // Connected in another window (Settings): the chat hears it and follows, with no reload of its own.
     await backend.setAppKey('dyno', 'pmk_good');
-    await (fixture.componentInstance as PlaygroundChat).load();
-    await settle(fixture);
+    await until(fixture, () => !!el.querySelector('[data-testid=chat-apps]')?.textContent?.includes('Dyno'));
     expect(el.querySelector('[data-testid=chat-apps]')?.textContent).toContain('Tools from Dyno (6)');
   });
 

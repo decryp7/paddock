@@ -192,7 +192,11 @@ write: boolean,
 /**
  * What it changes cannot be undone (implies `write`): its approval is a danger choice.
  */
-destructive: boolean, };
+destructive: boolean, 
+/**
+ * Its name for people, when it has one.
+ */
+title?: string, };
 
 export type AssistantInfo = { 
 /**
@@ -263,6 +267,10 @@ name: string,
  * The call as the user reads it.
  */
 summary: string, 
+/**
+ * The tool's name for people ("Top processes"), when it has one; the card shows it instead of `name`.
+ */
+title?: string, 
 /**
  * The tool changes things.
  */
@@ -389,6 +397,10 @@ name: string,
  * The call as the user reads it.
  */
 summary: string, 
+/**
+ * The tool's name for people ("Top processes"), when it has one; the card shows it instead of `name`.
+ */
+title?: string, 
 /**
  * The tool changes things.
  */

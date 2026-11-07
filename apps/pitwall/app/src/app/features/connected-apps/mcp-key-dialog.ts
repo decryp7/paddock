@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
-import { MatFormField, MatHint, MatLabel } from '@angular/material/form-field';
+import { MatError, MatFormField, MatHint, MatLabel } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
@@ -13,20 +13,25 @@ export const MCP_KEY_DIALOG_ID = 'pw.mcp-key';
  */
 @Component({
   selector: 'pw-mcp-key-dialog',
-  imports: [MatFormField, MatLabel, MatHint, MatInput],
+  imports: [MatFormField, MatLabel, MatHint, MatError, MatInput],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <p class="msg">In {{ app() }}, open Settings &gt; AI access, turn it on and choose Issue key. Name it "Pitwall", then paste the key here. {{ app() }} shows it only once.</p>
     <mat-form-field class="key">
       <mat-label>AI access key</mat-label>
       <input matInput id="pw-mcp-key" type="password" autocomplete="off" spellcheck="false" placeholder="pmk_…" [value]="key()" (input)="key.set($any($event.target).value)" />
-      <mat-hint>Pitwall keeps it on this computer and never shows it again.</mat-hint>
+      @if (notAKey()) {
+        <mat-hint class="bad" data-testid="mcp-key-not-a-key">An AI access key starts with pmk_.</mat-hint>
+      } @else {
+        <mat-hint>Kept on this computer, never shown again.</mat-hint>
+      }
     </mat-form-field>
   `,
   styles: `
     :host { display: flex; flex-direction: column; gap: var(--pd-space-3); min-width: 0; }
     .msg { margin: 0; color: var(--pd-text-muted); }
     .key { width: 100%; }
+    .bad { color: var(--pd-text); }
   `,
 })
 export class McpKeyDialog implements DialogContent<string> {
@@ -34,8 +39,10 @@ export class McpKeyDialog implements DialogContent<string> {
   readonly app = input('the app');
   protected readonly key = signal('');
   private readonly trimmed = computed(() => this.key().trim());
+  /** Something was typed or pasted and it is not a key: the hint says why Connect stays off. */
+  protected readonly notAKey = computed(() => this.trimmed().length > 0 && !/^pmk_\S+$/.test(this.trimmed()));
 
-  readonly dialogHeading = computed<string | null>(() => `Connect ${this.app()}`);
+  readonly dialogHeading = computed<string | null>(() => `Paste ${this.app()}'s AI access key`);
 
   readonly dialogActions = computed<readonly DialogAction<string>[]>(() => {
     const key = this.trimmed();

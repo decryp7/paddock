@@ -482,7 +482,8 @@ describe('PdAssistant', () => {
       r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
       await press(r, await type(r, '/write'), { key: 'Enter' });
       expect(text(r, 'assistant-approval-tool')).toBe('erase');
-      expect(text(r, 'assistant-approval-args')).toBe('No arguments');
+      // The demo's action has real arguments, shown open.
+      expect(text(r, 'assistant-approval-args')).toContain('"keepBackups": false');
       expect(r.one('[data-testid=assistant-allow]').classList.contains('pd-btn--sm')).toBe(false);
       expect(r.one('[data-testid=assistant-decline]').classList.contains('pd-btn--sm')).toBe(false);
       backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
@@ -722,6 +723,37 @@ describe('PdAssistant', () => {
       expect(tick.r.all('[data-testid=assistant-allow-actions]')).toHaveLength(1);
       await press(tick.r, await type(tick.r, 'q'), { key: 'Enter' });
       expect(tick.backend.sent[0]?.allowWrite).toBe(false);
+    });
+
+    it('draws an empty state with a title, an icon and a next step when the host gives them', async () => {
+      const { r } = await open({ pitwall: null }, { emptyTitle: 'Chat with a local model', emptyAction: 'Connected apps…' });
+      expect(text(r, 'assistant-empty-title')).toBe('Chat with a local model');
+      expect(r.all('[data-testid=assistant-empty] pd-glyph')).toHaveLength(1);
+      let clicked = 0;
+      (r.fixture.componentInstance as PdAssistant).emptyActionClick.subscribe(() => clicked++);
+      r.one<HTMLButtonElement>('[data-testid=assistant-empty-action]').click();
+      expect(clicked).toBe(1);
+      const plain = await open();
+      expect(plain.r.all('[data-testid=assistant-empty-title]')).toHaveLength(0);
+      expect(plain.r.all('[data-testid=assistant-empty-action]')).toHaveLength(0);
+    });
+
+    it('moves a pulse with the phase line, and shows a tool by its title with the approval after a separator', async () => {
+      const { r, backend } = await open();
+      backend.hold();
+      await press(r, await type(r, 'q'), { key: 'Enter' });
+      backend.emit('m1', { type: 'phase', phase: { kind: 'queued' } });
+      await settle(r.fixture);
+      expect(r.all('[data-testid=assistant-phase] .pulse')).toHaveLength(1);
+      backend.emit('m1', { type: 'toolStarted', callId: 'c9', name: 'dyno_top_processes', title: 'Top processes', summary: 'Read top processes from Dyno', write: false, destructive: false });
+      backend.emit('m1', { type: 'toolFinished', callId: 'c9', name: 'dyno_top_processes', ok: true, summary: '1. build', approval: 'once' });
+      await settle(r.fixture);
+      const card = r.all('[data-testid=assistant-tool-card]').at(-1)!;
+      expect(card.querySelector('.name')?.textContent?.trim()).toBe('Top processes');
+      // Result · approval: the separator sits in the card's gap, between the two parts.
+      expect(card.querySelector('.sep')?.textContent).toBe('·');
+      expect(card.querySelector('.sep')?.getAttribute('aria-hidden')).toBe('true');
+      backend.release();
     });
 
     it("takes the host app's own words for the empty state and the likely cause of a failure (an app that is the engine)", async () => {

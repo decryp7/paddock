@@ -54,13 +54,13 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
       } @else {
         <pd-glyph class="state" [name]="icon()" [size]="14" />
       }
-      <span class="name">{{ card().name || unreadable }}</span>
+      <span class="name">{{ card().title || card().name || unreadable }}</span>
       @if (card().summary) {
         <span class="call" [attr.title]="card().summary">{{ card().summary }}</span>
       }
       <span class="result" [class.muted]="declined() || stopped()" data-testid="assistant-tool-result">{{ declined() ? declinedText : stopped() ? stoppedText : stateText() }}</span>
       @if (approvalText(); as how) {
-        <span class="how" data-testid="assistant-tool-approval">{{ how }}</span>
+        <span class="sep" aria-hidden="true">·</span><span class="how" data-testid="assistant-tool-approval">{{ how }}</span>
       }
     </div>
   `,
@@ -77,7 +77,7 @@ export function rendererFor(renderers: readonly AssistantToolRenderer[], tool: s
     .call { min-width: 0; flex: 1 1 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .result { overflow-wrap: anywhere; }
     .result.muted { color: var(--pd-text-muted); }
-    .how { color: var(--pd-text-muted); }
+    .how, .sep { color: var(--pd-text-muted); }
   `,
 })
 export class PdAssistantToolCard {

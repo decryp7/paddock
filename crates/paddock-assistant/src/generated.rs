@@ -120,6 +120,7 @@ fn fixtures() -> String {
             call_id: "call_1".into(),
             name: "find_events".into(),
             summary: "build failed".into(),
+            title: None,
             write: false,
             destructive: false,
         },

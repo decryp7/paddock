@@ -450,3 +450,53 @@ fn the_config_prints_without_its_policy_and_the_refusal_reads_well() {
         "This tool asks every time it is used, so it cannot be always allowed."
     );
 }
+
+/// A tool with a person-facing title (an MCP tool's `title`) shows it on its card; one without shows its name.
+struct Titled;
+
+impl AssistantTool for Titled {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec {
+            name: "dyno_top_processes".into(),
+            description: "d".into(),
+            input_schema: json!({"type": "object"}),
+        }
+    }
+    fn title(&self) -> Option<String> {
+        Some("Top processes".into())
+    }
+    fn call(&self, _: &serde_json::Value, _: &Cancel) -> ToolOutput {
+        ToolOutput::ok("1. build")
+    }
+}
+
+#[test]
+fn a_tools_title_reaches_its_card_and_the_tool_list() {
+    let r = rig_with(
+        vec![
+            Step::Reply(
+                vec![],
+                calls("", vec![call("c1", "dyno_top_processes", json!({}))]),
+            ),
+            Step::Reply(vec![], text("ok")),
+        ],
+        vec![Arc::new(Titled), Arc::new(Echo(counter()))],
+        |_| {},
+    );
+    let (_, events) = r.turn(ask("go"));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AssistantEvent::ToolStarted { title: Some(t), .. } if t == "Top processes"
+    )));
+    let infos = r.assistant.info().tools;
+    assert_eq!(
+        infos
+            .iter()
+            .find(|t| t.name == "dyno_top_processes")
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("Top processes")
+    );
+    assert_eq!(infos.iter().find(|t| t.name == "echo").unwrap().title, None);
+}

@@ -1409,7 +1409,19 @@ export class MockBackend implements PitwallBackend {
   }
 
   /** Dyno as the mock knows it: a key that starts `pmk_` connects, `pmk_wrong` is refused, and Dyno is "open". */
-  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, tools: [], remembered: 0 };
+  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, tools: [], remembered: 0 };
+  private readonly appsHandlers = new Set<(apps: ConnectedApp[]) => void>();
+
+  onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
+    this.appsHandlers.add(handler);
+    return () => this.appsHandlers.delete(handler);
+  }
+
+  /** As the app does after every change: every window hears the apps. */
+  private appsChanged(): ConnectedApp {
+    for (const h of this.appsHandlers) h([clone(this.dyno_)]);
+    return clone(this.dyno_);
+  }
 
   connectedApps(): Promise<ConnectedApp[]> {
     return this.reply('connectedApps', () => [clone(this.dyno_)]);
@@ -1428,15 +1440,19 @@ export class MockBackend implements PitwallBackend {
   connectApp(appId: string): Promise<ConnectedApp> {
     return this.reply('connectApp', () => {
       if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
-      if (!this.dyno_.keySaved) return clone((this.dyno_ = { ...this.dyno_, problem: "No key is saved for Dyno. Issue one in Dyno's Settings > AI access and paste it here." }));
-      return this.connectDyno(this.dyno_.problem === null || !this.dyno_.problem.includes('refused'));
+      if (!this.dyno_.keySaved) {
+        this.dyno_ = { ...this.dyno_, problem: "No key is saved for Dyno. Issue one in Dyno's Settings > AI access and paste it here." };
+        return this.appsChanged();
+      }
+      return this.connectDyno(!this.dyno_.keyRefused);
     });
   }
 
   forgetApp(appId: string): Promise<ConnectedApp> {
     return this.reply('forgetApp', () => {
       if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
-      return clone((this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, tools: [], remembered: 0 }));
+      this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, tools: [], remembered: 0 };
+      return this.appsChanged();
     });
   }
 
@@ -1446,10 +1462,18 @@ export class MockBackend implements PitwallBackend {
           ...this.dyno_,
           connected: true,
           problem: null,
-          tools: ['alarms', 'cpu_memory', 'disks', 'system_summary', 'top_processes'].map((name) => ({ name, readOnly: true })).concat([{ name: 'keep_awake', readOnly: false }]),
+          keyRefused: false,
+          tools: [
+            { name: 'alarms', title: 'Alarms', readOnly: true },
+            { name: 'cpu_memory', title: 'CPU and memory', readOnly: true },
+            { name: 'disks', title: 'Disks', readOnly: true },
+            { name: 'system_summary', title: 'System summary', readOnly: true },
+            { name: 'top_processes', title: 'Top processes', readOnly: true },
+            { name: 'keep_awake', title: 'Keep this Mac awake', readOnly: false },
+          ],
         }
-      : { ...this.dyno_, connected: false, tools: [], problem: 'Dyno refused the key. Issue a new key in Dyno\'s Settings > AI access and paste it here.' };
-    return clone(this.dyno_);
+      : { ...this.dyno_, connected: false, keyRefused: true, tools: [], problem: 'Dyno refused the key. Issue a new key in Dyno\'s Settings > AI access and paste it here.' };
+    return this.appsChanged();
   }
 
   private chatModel_: string | null = null;
@@ -1466,12 +1490,13 @@ export class MockBackend implements PitwallBackend {
   private picker(wanted: string | null): ChatModels {
     const chat = this.library.filter((m) => m.capabilities.includes('chat'));
     const models = chat
-      .map((m) => ({ id: m.id, name: m.name, loaded: m.loaded, disabled: m.capabilities.includes('tools') ? null : "Can't use tools: its chat template has no tool calls" }))
+      .map((m) => ({ id: m.id, name: m.name, loaded: m.loaded, disabled: m.capabilities.includes('tools') ? null : "Can't use tools" }))
       .sort((a, b) => Number(a.disabled !== null) - Number(b.disabled !== null) || Number(!a.loaded) - Number(!b.loaded) || a.name.localeCompare(b.name));
     const usable = (id: string | null) => models.some((m) => m.id === id && m.disabled === null);
     const selected = usable(wanted) ? wanted : (models.find((m) => m.disabled === null)?.id ?? null);
     this.chatModel_ = selected;
-    return { models, selected };
+    const note = models.some((m) => m.disabled) ? '"Can\'t use tools": the model\'s chat template has no tool calls, so it can\'t use a connected app\'s tools.' : null;
+    return { models, selected, note };
   }
 
   takeQuitAsk(): Promise<boolean> {

@@ -27,7 +27,12 @@ pub struct ChatModels {
     pub models: Vec<ChatModel>,
     /// The chosen model.
     pub selected: Option<String>,
+    /// Why some models can't be chosen, in full (the picker's hint); `None` when every model can.
+    pub note: Option<String>,
 }
+
+/// The picker's hint when some model cannot call tools.
+pub const TOOLS_NOTE: &str = "\"Can't use tools\": the model's chat template has no tool calls, so it can't use a connected app's tools.";
 
 /// What the picker needs to know of a downloaded model.
 #[derive(Debug, Clone, Copy)]
@@ -58,7 +63,7 @@ fn reason(m: &Facts<'_>) -> Option<String> {
     if !m.capabilities.contains(&Capability::Chat) {
         Some("Not a chat model".into())
     } else if !m.capabilities.contains(&Capability::Tools) {
-        Some("Can't use tools: its chat template has no tool calls".into())
+        Some("Can't use tools".into())
     } else {
         None
     }
@@ -84,7 +89,11 @@ pub fn chat_models<'a>(locals: impl IntoIterator<Item = Facts<'a>>, wanted: Opti
         .filter(|w| usable(w))
         .map(str::to_string)
         .or_else(|| models.iter().find(|m| m.disabled.is_none()).map(|m| m.id.clone()));
-    ChatModels { models, selected }
+    let note = models
+        .iter()
+        .any(|m| m.disabled.as_deref() == Some("Can't use tools"))
+        .then(|| TOOLS_NOTE.to_string());
+    ChatModels { models, selected, note }
 }
 
 #[cfg(test)]
@@ -117,7 +126,9 @@ mod tests {
             "no embedding model; tools first, loaded first"
         );
         assert_eq!(p.selected.as_deref(), Some("c-tools"));
-        assert!(p.models[2].disabled.as_deref().unwrap().contains("Can't use tools"));
+        assert_eq!(p.models[2].disabled.as_deref(), Some("Can't use tools"), "short, for the option");
+        assert_eq!(p.note.as_deref(), Some(TOOLS_NOTE), "the detail is the picker's hint");
+        assert_eq!(chat_models(locals[2..3].to_vec(), None).note, None, "no disabled model, no hint");
         assert_eq!(
             chat_models(locals, Some("b-tools")).selected.as_deref(),
             Some("b-tools"),

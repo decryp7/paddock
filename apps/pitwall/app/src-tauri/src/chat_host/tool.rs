@@ -56,6 +56,28 @@ pub fn clean_description(text: &str) -> String {
         .to_string()
 }
 
+/// The tool's name for people: its MCP `title`, else one derived from its name (`top_processes` -> "Top processes").
+pub fn title_of(def: &Tool) -> String {
+    if let Some(t) = def.title.as_deref().map(clean_description).filter(|t| !t.is_empty()) {
+        return t;
+    }
+    let words = def.name.replace(['_', '-'], " ");
+    let mut c = words.trim().chars();
+    c.next().map_or_else(String::new, |f| f.to_uppercase().chain(c).collect())
+}
+
+/// The call as a verb phrase for its card and its approval: "Read top processes from Dyno" for a tool that only looks,
+/// "Keep awake (Dyno)" for an action (its title is already a verb).
+pub fn phrase(app: &str, title: &str, action: bool) -> String {
+    if action {
+        format!("{title} ({app})")
+    } else {
+        let mut c = title.chars();
+        let lower: String = c.next().map_or_else(String::new, |f| f.to_lowercase().chain(c).collect());
+        format!("Read {lower} from {app}")
+    }
+}
+
 /// One MCP tool of one connected app.
 pub struct McpTool {
     server: String,
@@ -133,6 +155,10 @@ impl AssistantTool for McpTool {
         self.access
     }
 
+    fn title(&self) -> Option<String> {
+        Some(title_of(&self.def))
+    }
+
     fn budget(&self) -> ToolBudget {
         ToolBudget {
             max_calls: 8,
@@ -141,11 +167,7 @@ impl AssistantTool for McpTool {
     }
 
     fn describe(&self, _input: &Value) -> String {
-        format!(
-            "{}: {}",
-            self.title,
-            self.def.title.clone().unwrap_or_else(|| self.def.name.clone())
-        )
+        phrase(&self.title, &title_of(&self.def), self.access.writes())
     }
 
     fn call(&self, input: &Value, cancel: &Cancel) -> ToolOutput {

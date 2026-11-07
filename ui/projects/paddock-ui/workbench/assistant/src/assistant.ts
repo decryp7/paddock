@@ -72,7 +72,16 @@ const SCROLL_STICK_PX = 24;
           <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-retry" (click)="store.load()">{{ t.retry }}</button>
         </div>
       } @else if (!store.turns().length && store.isLoaded()) {
-        <p class="hint" data-testid="assistant-empty">{{ emptyHint() ?? t.empty }}</p>
+        <div class="empty-state" data-testid="assistant-empty">
+          @if (emptyTitle(); as title) {
+            <pd-glyph class="empty-icon" name="chat" [size]="22" />
+            <p class="empty-title" data-testid="assistant-empty-title">{{ title }}</p>
+          }
+          <p class="hint">{{ emptyHint() ?? t.empty }}</p>
+          @if (emptyAction(); as action) {
+            <button type="button" class="pd-btn" data-testid="assistant-empty-action" (click)="emptyActionClick.emit()">{{ action }}</button>
+          }
+        </div>
       }
       @for (turn of store.turns(); track $index; let last = $last) {
         <article class="turn" data-testid="assistant-turn">
@@ -100,7 +109,7 @@ const SCROLL_STICK_PX = 24;
               <span class="pulse" aria-hidden="true" data-testid="assistant-streaming"><i></i><i></i><i></i></span>
             }
             @if (phaseOf(turn); as phase) {
-              <p class="hint" role="status" data-testid="assistant-phase">{{ phaseText(phase) }}</p>
+              <p class="hint phase" role="status" data-testid="assistant-phase"><span class="pulse" aria-hidden="true"><i></i><i></i><i></i></span> {{ phaseText(phase) }}</p>
             } @else if (turn.running && !turn.parts.length) {
               <p class="hint" data-testid="assistant-thinking">{{ t.thinking }}</p>
             }
@@ -257,6 +266,10 @@ const SCROLL_STICK_PX = 24;
     .open { all: unset; flex: 1; min-width: 0; padding: var(--pd-space-1) var(--pd-space-2); cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .open:focus-visible { outline: 2px solid var(--pd-focus-ring); border-radius: var(--pd-radius-control); }
     .empty, .hint { color: var(--pd-text-muted); padding: var(--pd-space-2); margin: 0; }
+    .empty-state { display: flex; flex-direction: column; align-items: center; gap: var(--pd-space-1); margin: auto; max-width: 480px; text-align: center; }
+    .empty-icon { color: var(--pd-accent); }
+    .empty-title { margin: 0; font-weight: var(--pd-weight-semibold); }
+    .phase { display: flex; align-items: center; gap: var(--pd-space-2); }
     .needs { margin: var(--pd-space-2); }
     .log { flex: 1; min-height: 0; overflow-y: auto; padding: var(--pd-space-3); display: flex; flex-direction: column; gap: var(--pd-space-4); }
     .turn { display: flex; flex-direction: column; gap: var(--pd-space-2); min-width: 0; }
@@ -318,6 +331,12 @@ export class PdAssistant {
   readonly actionsGate = input<ActionsGate>('tick');
   /** The empty conversation's hint in the host app's words (default: the workbench's "tools of this app"). */
   readonly emptyHint = input<string | null>(null);
+  /** A title over the empty conversation's hint, with the assistant's icon (none: the hint alone). */
+  readonly emptyTitle = input<string | null>(null);
+  /** The empty conversation's next step as a button (none: no button); its click is `emptyActionClick`. */
+  readonly emptyAction = input<string | null>(null);
+  /** The empty state's next step was chosen. */
+  readonly emptyActionClick = output<void>();
   /** The likely cause under a failed answer in the host app's words (default: check that Pitwall is running; an app that
    *  is the engine itself says something else). */
   readonly failedCause = input<string | null>(null);

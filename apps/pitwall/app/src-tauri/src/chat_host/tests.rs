@@ -222,7 +222,7 @@ fn a_read_tool_asks_first_then_is_remembered_and_every_call_is_shown_and_logged(
         _ => unreachable!(),
     };
     assert!(remember, "a read-only tool offers Always allow");
-    assert_eq!(summary, "Dyno: top_processes");
+    assert_eq!(summary, "Read top processes from Dyno");
     h.assistant
         .approve(&ack.conversation_id, &call_id, ApprovalChoice::AlwaysAllow)
         .unwrap();
@@ -446,6 +446,11 @@ fn connected_apps_keep_a_pasted_key_connect_list_tools_say_what_is_wrong_and_for
         names,
     );
 
+    // Every change is told (the app emits it to every window: the Chat tab is another window than Settings).
+    let told = Arc::new(Mutex::new(Vec::<(bool, usize)>::new()));
+    let sink = told.clone();
+    apps.on_change(move |views| sink.lock().unwrap().push((views[0].connected, views[0].tools.len())));
+
     // Nothing saved yet: not connected, and connecting says how to get a key.
     let v = &apps.views()[0];
     assert_eq!(
@@ -465,12 +470,17 @@ fn connected_apps_keep_a_pasted_key_connect_list_tools_say_what_is_wrong_and_for
 
     // A wrong key: kept, but Dyno refuses it and the app says so.
     let v = apps.set_key("dyno", "pmk_wrong").unwrap();
-    assert!(v.key_saved && !v.connected);
+    assert!(v.key_saved && !v.connected && v.key_refused, "{v:?}");
     assert!(v.problem.unwrap().contains("refused the key"));
 
     // The right key: connected, its tools listed with their kind, and the chat offered them.
     let v = apps.set_key("dyno", &format!("  {}\n", dyno.key)).unwrap();
-    assert!(v.connected && v.problem.is_none(), "{v:?}");
+    assert!(v.connected && v.problem.is_none() && !v.key_refused, "{v:?}");
+    assert!(
+        v.tools.iter().any(|t| t.name == "top_processes" && t.title == "Top processes"),
+        "{:?}",
+        v.tools
+    );
     let kinds: Vec<(String, bool)> = v.tools.iter().map(|t| (t.name.clone(), t.read_only)).collect();
     assert!(
         kinds.contains(&("top_processes".into(), true)) && kinds.contains(&("keep_awake".into(), false)),
@@ -500,6 +510,24 @@ fn connected_apps_keep_a_pasted_key_connect_list_tools_say_what_is_wrong_and_for
     assert_eq!(apps.views()[0].remembered, 1);
     let v = apps.forget("dyno").unwrap();
     assert!(!v.key_saved && !v.connected && v.remembered == 0);
+    let told = told.lock().unwrap().clone();
+    assert!(told.contains(&(true, 3)) && told.last() == Some(&(false, 0)), "{told:?}");
     assert!(assistant.info().tools.is_empty());
     assert!(AppsError::Store("x".into()).to_string().contains("could not be kept"));
+}
+
+#[test]
+fn a_tool_reads_as_a_verb_phrase_with_its_title() {
+    let def = |name: &str, title: Option<&str>| -> paddock_mcp::types::Tool {
+        serde_json::from_value(json!({"name": name, "title": title, "description": "d", "inputSchema": {"type": "object"}})).unwrap()
+    };
+    assert_eq!(tool::title_of(&def("top_processes", Some("Top processes"))), "Top processes");
+    assert_eq!(
+        tool::title_of(&def("top_processes", None)),
+        "Top processes",
+        "derived from the name as a fallback"
+    );
+    assert_eq!(tool::title_of(&def("cpu_memory", None)), "Cpu memory");
+    assert_eq!(tool::phrase("Dyno", "Top processes", false), "Read top processes from Dyno");
+    assert_eq!(tool::phrase("Dyno", "Keep awake", true), "Keep awake (Dyno)");
 }

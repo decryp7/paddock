@@ -40,11 +40,11 @@ test.describe('Pitwall dialog windows', () => {
   test('Connect Dyno: Connect waits for a key, the key is never shown, and Enter answers it trimmed', async ({ page }) => {
     const d = await open(page, 'pw.mcp-key', FIXTURES['pw.mcp-key']![0]);
     await expect(d.action('connect')).toBeDisabled();
-    await expect(page.getByLabel('AI access key')).toBeFocused();
-    await expect(page.getByLabel('AI access key')).toHaveAttribute('type', 'password');
-    await page.getByLabel('AI access key').fill('hello');
+    await expect(page.locator('#pw-mcp-key')).toBeFocused();
+    await expect(page.locator('#pw-mcp-key')).toHaveAttribute('type', 'password');
+    await page.locator('#pw-mcp-key').fill('hello');
     await expect(d.action('connect')).toBeDisabled();
-    await page.getByLabel('AI access key').fill('  pmk_abc ');
+    await page.locator('#pw-mcp-key').fill('  pmk_abc ');
     await page.keyboard.press('Enter');
     await expect.poll(() => d.result()).toContain('"pmk_abc"');
   });
