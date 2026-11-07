@@ -166,6 +166,8 @@ impl Executor {
                             recheck,
                         },
                     );
+                    let mut look = look;
+                    look.app_updated = link.app_updated(); // after `wanted_key` above, which updates it
                     *lock(&seen) = found.map(|d| (seq, d));
                     let took = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
                     if let Some(line) = ports::describe_look(&look, deciding, took, service_ms) {

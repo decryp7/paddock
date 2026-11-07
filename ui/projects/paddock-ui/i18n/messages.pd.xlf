@@ -848,6 +848,9 @@
       <trans-unit id="pd.health.see-what-happened" datatype="html">
         <source>See what happened</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.agent-mismatch" datatype="html">
+        <source>needs a reinstall</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.busy" datatype="html">
         <source>busy</source>
       </trans-unit>
@@ -880,6 +883,9 @@
       </trans-unit>
       <trans-unit id="pd.health.state.not-running" datatype="html">
         <source>not running</source>
+      </trans-unit>
+      <trans-unit id="pd.health.state.other-build-returns" datatype="html">
+        <source>another build keeps starting</source>
       </trans-unit>
       <trans-unit id="pd.health.state.other-holds" datatype="html">
         <source>held by another agent</source>

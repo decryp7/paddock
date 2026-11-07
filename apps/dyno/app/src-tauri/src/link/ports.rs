@@ -253,14 +253,25 @@ where
 {
     use dyno_agent::build_id::{build_key, file_build_id, FileStamp};
     let version = version.to_string();
-    let last: std::sync::Mutex<Option<(FileStamp, String)>> = std::sync::Mutex::new(None);
+    // The last good answer, and the last fallback reason that was logged (a reason is logged once per change, ER-27).
+    type Last = Option<(FileStamp, String)>;
+    let state: std::sync::Mutex<(Last, Option<String>)> = std::sync::Mutex::new((None, None));
     std::sync::Arc::new(move || {
-        let mut last = last.lock().unwrap_or_else(|e| e.into_inner());
-        let Ok(path) = program() else {
-            return last.as_ref().map_or_else(|| version.clone(), |(_, k)| k.clone());
+        let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+        let (last, told) = &mut *state;
+        let mut fall_back = |last: &Last, why: String| {
+            if told.as_deref() != Some(why.as_str()) {
+                log::warn!(Kept = last.is_some(); "The agent program could not be read ({why}): the wanted key keeps its last answer, or is the version alone");
+                *told = Some(why);
+            }
+            last.as_ref().map_or_else(|| version.clone(), |(_, k)| k.clone())
+        };
+        let path = match program() {
+            Ok(p) => p,
+            Err(why) => return fall_back(last, format!("no program: {why}")),
         };
         let Some(stamp) = FileStamp::of(&path) else {
-            return last.as_ref().map_or_else(|| version.clone(), |(_, k)| k.clone());
+            return fall_back(last, format!("{} cannot be read", path.display()));
         };
         if let Some((seen, key)) = last.as_ref() {
             if *seen == stamp {
@@ -269,10 +280,11 @@ where
         }
         let began = std::time::Instant::now();
         let Some(id) = file_build_id(&path) else {
-            return last.as_ref().map_or_else(|| version.clone(), |(_, k)| k.clone());
+            return fall_back(last, format!("{} cannot be hashed", path.display()));
         };
         let key = build_key(&version, &id);
         log::info!(Build = id.as_str(), HashMs = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "Agent program hashed");
+        *told = None;
         *last = Some((stamp, key.clone()));
         key
     })
@@ -288,12 +300,14 @@ pub fn now_ms() -> i64 {
 
 /// The discovery file as a hint: what it names, and whether it is of this build.
 pub fn hint_of(d: &Discovery, app_version: &str) -> HintSeen {
+    let same_build = plan(Some(d), app_version, PROTOCOL_VERSION) == Plan::Connect;
     HintSeen {
         pid: d.pid,
         started_ms: d.started,
         version: d.version.clone(),
         protocol: d.protocol,
-        same_build: plan(Some(d), app_version, PROTOCOL_VERSION) == Plan::Connect,
+        same_build,
+        of_disk_file: !same_build && dyno_agent::build_id::key_build(app_version).is_some_and(|b| b == d.build),
     }
 }
 
@@ -364,6 +378,7 @@ pub fn look(
         lock,
         child,
         cpu,
+        app_updated: false,
     };
     (look, found, service_ms)
 }
@@ -533,6 +548,7 @@ mod tests {
             version: "1.0.0".into(),
             protocol: 1,
             same_build,
+            of_disk_file: false,
         }
     }
 
@@ -696,6 +712,7 @@ mod tests {
             service,
             child: None,
             cpu: Cpu::NotRead,
+            app_updated: false,
         }
     }
 

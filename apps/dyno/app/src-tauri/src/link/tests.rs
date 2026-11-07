@@ -72,7 +72,12 @@ fn the_discovery_file_names_the_build_not_only_the_version() {
         Plan::Replace,
         "an older agent wrote no build id"
     );
-    assert_eq!(plan(Some(&disc_built("1.0.0", "aaaa")), &key, 1), Plan::Replace);
+    assert_eq!(
+        plan(Some(&disc_built("1.0.0", "aaaa")), &key, 1),
+        Plan::Connect,
+        "the build is the file on disk: another version of that file is still the agent the app would start"
+    );
+    assert_eq!(plan(Some(&disc_built("1.1.0", "aaaa")), &key, 2), Plan::Replace, "another protocol");
     assert_eq!(
         plan(Some(&disc_built("1.1.0", "bbbb")), "1.1.0", 1),
         Plan::Connect,
@@ -1572,4 +1577,130 @@ fn an_app_updated_while_it_runs_uses_the_agent_of_the_new_build_and_says_to_rest
     assert_eq!(*lock(&r.sink.updated), [true], "the chip is told once to restart Dyno");
     assert!(r.link.quit());
     handle.join().unwrap();
+}
+
+#[test]
+fn an_agent_of_the_file_on_disk_is_used_whatever_version_it_reports() {
+    use dyno_agent::build_id::{build_key, own_build_id};
+    // The app runs as an older version; the files on disk (and the only agent that can start) are a newer one. Before the fix
+    // the version never matched: the agent was asked to exit and started again, forever.
+    let r = rig_keyed(false, patient(), "0.0.1");
+    let key = build_key("0.0.1", &own_build_id());
+    r.link.set_wanted_source(Arc::new(move || key.clone()));
+    let handle = r.link.spawn().unwrap();
+    running(&r.link, &r.statuses);
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        1,
+        "at most one launch, no eviction loop"
+    );
+    assert!(r.launcher.refused.lock().unwrap().is_empty());
+    assert!(r.link.quit());
+    handle.join().unwrap();
+}
+
+#[test]
+fn an_unreadable_agent_program_is_logged_once_per_reason_with_the_reason() {
+    let _ = crate::logging::testlog::lines(); // installs the capture before anything is logged
+    let marker = format!("unique-{}", std::process::id());
+    let why = marker.clone();
+    let no_program = super::ports::wanted_key_source("1.1.0", move || Err(format!("{why} is missing")));
+    let gone = std::env::temp_dir().join(format!("{marker}-gone"));
+    let g = gone.clone();
+    let no_file = super::ports::wanted_key_source("1.1.0", move || Ok(g.clone()));
+    for _ in 0..3 {
+        assert_eq!(no_program(), "1.1.0");
+        assert_eq!(no_file(), "1.1.0");
+    }
+    let lines = crate::logging::testlog::lines();
+    let told = |needle: &str| lines.iter().filter(|l| l.contains(needle)).count();
+    assert_eq!(
+        told(&format!("{marker} is missing")),
+        1,
+        "one line per reason, however many reads: {lines:?}"
+    );
+    assert_eq!(told(&format!("{} cannot be read", gone.display())), 1, "{lines:?}");
+}
+
+#[test]
+fn the_updated_flag_latches_once_the_files_have_changed() {
+    use dyno_agent::build_id::build_key;
+    let r = rig_keyed(false, patient(), "1.0.0");
+    let key = std::sync::Arc::new(Mutex::new(build_key("1.0.0", "aaaaaaaaaaaaaaaa")));
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    r.link.wanted_key();
+    *lock(&key) = build_key("1.0.0", "bbbbbbbbbbbbbbbb");
+    r.link.wanted_key();
+    assert!(r.link.app_updated());
+    // Another read (the look and connect threads both read) that sees the old key again does not clear it.
+    *lock(&key) = build_key("1.0.0", "aaaaaaaaaaaaaaaa");
+    r.link.wanted_key();
+    assert!(r.link.app_updated(), "the flag flapped back");
+    assert_eq!(*lock(&r.sink.updated), [true], "the chip is told once");
+}
+
+#[test]
+fn an_agent_of_the_file_on_disk_with_another_protocol_is_marked_so_it_is_not_evicted() {
+    use dyno_agent::build_id::build_key;
+    let key = build_key("1.1.0", "aaaa");
+    let mut d = disc_built("1.2.0", "aaaa");
+    d.protocol = dyno_core::protocol::PROTOCOL_VERSION + 1;
+    let h = super::ports::hint_of(&d, &key);
+    assert!(!h.same_build && h.of_disk_file, "{h:?}");
+    let other = super::ports::hint_of(&disc_built("1.1.0", "bbbb"), &key);
+    assert!(!other.same_build && !other.of_disk_file, "another build is replaced as before");
+}
+
+#[test]
+fn a_first_read_without_a_build_id_does_not_make_a_later_hashed_read_an_update() {
+    use dyno_agent::build_id::build_key;
+    let r = rig_keyed(false, patient(), "1.0.0");
+    let key = std::sync::Arc::new(Mutex::new("1.0.0".to_string())); // the file could not be hashed yet
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    r.link.wanted_key();
+    *lock(&key) = build_key("1.0.0", "aaaaaaaaaaaaaaaa");
+    r.link.wanted_key();
+    assert!(!r.link.app_updated(), "a key that gained its build id is not a replaced file");
+    *lock(&key) = build_key("1.0.0", "bbbbbbbbbbbbbbbb");
+    r.link.wanted_key();
+    assert!(r.link.app_updated(), "the hashed build changed: updated");
+}
+
+/// The wiring from the link's `wanted_key` latch through the driver's look to the machine: an agent that holds the folder, is the
+/// installed file (its build is the wanted one) and speaks another protocol is left alone, and the chip's cause depends on whether this
+/// app really was updated while it ran.
+fn installed_agent_of_another_protocol(updated: bool) -> Option<Stall> {
+    use dyno_agent::build_id::build_key;
+    let r = stub_rig(Child::Exited {
+        code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
+    });
+    let holder = other_agent(&r.link.dirs);
+    let mut file = holder.discovery.clone();
+    file.protocol = dyno_core::protocol::PROTOCOL_VERSION + 1;
+    file.build = "aaaaaaaaaaaaaaaa".into();
+    file.write(&r.link.dirs.discovery()).unwrap();
+    let key = Arc::new(Mutex::new(build_key(
+        env!("CARGO_PKG_VERSION"),
+        if updated { "bbbbbbbbbbbbbbbb" } else { "aaaaaaaaaaaaaaaa" },
+    )));
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    r.link.wanted_key(); // the build this app started from
+    *lock(&key) = build_key(env!("CARGO_PKG_VERSION"), "aaaaaaaaaaaaaaaa"); // the files on disk now
+    let handle = r.link.spawn().unwrap();
+    let s = wait_state(&r.link, "a stall for the installed agent of another protocol", |s| {
+        matches!(s.stall.map(|(_, k)| k), Some(Stall::AppUpdated | Stall::AgentMismatch))
+    });
+    assert_eq!(r.launcher.launches(), 0, "nothing is started beside it");
+    r.link.quit();
+    handle.join().unwrap();
+    s.stall.map(|(_, k)| k)
+}
+
+#[test]
+fn the_installed_agent_of_another_protocol_is_an_update_only_when_the_link_saw_the_files_change() {
+    assert_eq!(installed_agent_of_another_protocol(true), Some(Stall::AppUpdated));
+    assert_eq!(installed_agent_of_another_protocol(false), Some(Stall::AgentMismatch));
 }

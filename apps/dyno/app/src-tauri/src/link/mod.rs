@@ -138,6 +138,13 @@ pub enum Stall {
     AgentKeepsFailing,
     /// The agent this app started is stopped by the OS or another app (App Tamer): it is waited for, never ended (ADR 0031).
     AgentPaused,
+    /// The app was updated while it ran and the agent is the new build, which it cannot speak to: nothing to retry, restart Dyno.
+    AppUpdated,
+    /// The agent is the installed file of another protocol, yet this app was not updated while it ran (a half-done install, a stale
+    /// development binary): restarting does not help, reinstalling does.
+    AgentMismatch,
+    /// Agents of another build keep coming back after being asked to exit (another install or its login service starts them).
+    OtherBuildKeepsComing,
 }
 
 impl From<StallCause> for Stall {
@@ -351,11 +358,16 @@ impl AgentLink {
             return self.app_version.clone();
         };
         let key = source();
+        // Only keys with a build id (the file was hashed) can tell a replaced file: a version-only key (the file could not be read yet)
+        // is no baseline, and gaining a build id later is not an update.
+        let Some(build) = dyno_agent::build_id::key_build(&key) else {
+            return key;
+        };
         let first = self.first_key.get_or_init(|| key.clone());
-        let updated = *first != key;
-        if self.updated.swap(updated, Ordering::SeqCst) != updated {
-            log::warn!(Started = first.as_str(), OnDisk = key.as_str(), Updated = updated; "Dyno's program files changed while it ran");
-            self.sink.app_updated(updated);
+        // Latched: the files changed once, and this app is outdated from then on, whichever thread reads the key next.
+        if dyno_agent::build_id::key_build(first) != Some(build) && !self.updated.swap(true, Ordering::SeqCst) {
+            log::warn!(Started = first.as_str(), OnDisk = key.as_str(); "Dyno's program files changed while it ran");
+            self.sink.app_updated(true);
         }
         key
     }

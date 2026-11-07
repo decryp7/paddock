@@ -23,10 +23,17 @@ pub fn build_key(version: &str, build: &str) -> String {
     }
 }
 
-/// Whether an agent that reports `version` and `build` is the one `key` (see [`build_key`]) asks for.
+/// The build id a key asks for, or `None` for a version-only key.
+pub fn key_build(key: &str) -> Option<&str> {
+    key.rsplit_once(SEP).map(|(_, build)| build)
+}
+
+/// Whether an agent that reports `version` and `build` is the one `key` (see [`build_key`]) asks for. With a build id in the key
+/// the build alone decides: it is the hash of the agent file the app would start, so an agent of that build is that file, whatever
+/// version it reports (an app updated while it runs wants the old version but runs the new file). Without one, the version does.
 pub fn matches_key(key: &str, version: &str, build: &str) -> bool {
     match key.rsplit_once(SEP) {
-        Some((want_version, want_build)) => version == want_version && build == want_build,
+        Some((_, want_build)) => build == want_build,
         None => version == key,
     }
 }
@@ -240,6 +247,11 @@ mod tests {
         assert!(matches_key("1.1.0#ab", "1.1.0", "ab"));
         assert!(!matches_key("1.1.0#ab", "1.1.0", "cd"), "same version, other build");
         assert!(!matches_key("1.1.0#ab", "1.1.0", ""), "an older agent that wrote no build id");
-        assert!(!matches_key("1.1.0#ab", "1.0.0", "ab"));
+        assert!(
+            matches_key("1.1.0#ab", "1.2.0", "ab"),
+            "the build id is the file on disk: whatever version it reports, it is the agent the app would start"
+        );
+        assert_eq!(key_build("1.1.0#ab"), Some("ab"));
+        assert_eq!(key_build("1.1.0"), None);
     }
 }

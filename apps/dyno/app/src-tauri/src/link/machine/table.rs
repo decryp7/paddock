@@ -15,6 +15,7 @@ fn look(seq: Seq) -> Look {
         service: None,
         child: None,
         cpu: Cpu::NotRead,
+        app_updated: false,
     }
 }
 
@@ -25,6 +26,7 @@ fn hint(pid: u32, started_ms: i64, same_build: bool) -> HintSeen {
         version: "1.0.0".into(),
         protocol: 1,
         same_build,
+        of_disk_file: false,
     }
 }
 
@@ -1608,4 +1610,310 @@ fn the_service_recheck_of_a_wait_is_marked_so_a_held_lock_can_skip_it() {
         Some((false, true)),
         "a service change always asks"
     );
+}
+
+#[test]
+fn an_agent_of_the_file_on_disk_that_the_app_cannot_speak_to_is_never_asked_to_exit() {
+    // The app was updated while it runs: the agent is the new build (the file on disk) with another protocol. Asking it to exit
+    // only makes the service start the same agent again, forever (Dyno lesson 2026-11-07).
+    let (s, cmds) = first(|l| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(9, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        ..l
+    });
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Connect { .. } | Command::Launch { .. } | Command::RemoveHint { .. })),
+        "the agent of the new build was dealt with: {cmds:?}"
+    );
+    assert!(!matches!(s.phase(), Phase::Connecting { .. }), "{:?}", s.phase());
+}
+
+#[test]
+fn repeated_replacements_of_agents_that_come_back_give_up_within_a_bound() {
+    // A service restarts the agent after each eviction and it is of another build each time.
+    let mut s = Supervisor::new();
+    let mut seq = look_seq(&s.step(Event::Begin));
+    let mut asks = 0;
+    for _ in 0..30 {
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(9, 500, false)),
+            lock: Some(LockSeen::Held),
+            ..look(seq)
+        }));
+        let Some(c) = cmds.iter().find_map(|c| match c {
+            Command::Connect { seq, .. } => Some(*seq),
+            _ => None,
+        }) else {
+            break; // gave up: no connection to evict through
+        };
+        let cmds = s.step(Event::Connected {
+            seq: c,
+            peer: 5,
+            pid: Some(9),
+        });
+        if cmds.contains(&Command::AskToExit { peer: 5 }) {
+            asks += 1;
+        }
+        // It exits: the lock is free, the file goes, and a new look follows.
+        let t = tick_look(&mut s);
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(9, 500, false)),
+            ..look(t)
+        }));
+        seq = look_seq(&cmds);
+    }
+    assert!(asks <= 3, "asked {asks} agents to exit in a row; it never gave up");
+}
+
+/// The lines logged so far: a test counts only what comes after this mark (the capture is process-wide and never cleared).
+fn log_mark() -> usize {
+    crate::logging::testlog::lines().len()
+}
+
+/// How many lines logged after `mark` contain `needle`. Use a pid of the test's own in `needle`: tests run in parallel.
+fn lines_since(mark: usize, needle: &str) -> usize {
+    crate::logging::testlog::lines()
+        .iter()
+        .skip(mark)
+        .filter(|l| l.contains(needle))
+        .count()
+}
+
+/// [`starting`] for an agent with the pid `pid` (a test that counts log lines names its own).
+fn starting_as(pid: u32) -> Supervisor {
+    let (mut s, _) = first(|l| l);
+    s.step(Event::Launched {
+        child: 1,
+        result: Ok(Launch {
+            at_ms: 1_000,
+            pid: Some(pid),
+        }),
+    });
+    s
+}
+
+#[test]
+fn an_own_agent_of_the_file_on_disk_with_another_protocol_is_waited_for_not_connected_to() {
+    // No login service: the app's old agent exited and the app launched the new file, which this app cannot speak to.
+    let pid = 880_010;
+    let mark = log_mark();
+    let mut s = starting_as(pid);
+    let cmds = run_ticks(&mut s, NOTE_AFTER * 4, |seq, _| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(pid, 1_500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        child: Some((1, Child::Running { pid })),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Connect { .. } | Command::EndHeldChild { .. } | Command::Launch { .. })),
+        "a connection that the driver refuses, or the child ended: {:?}",
+        cmds.iter().filter(|c| matches!(c, Command::Connect { .. })).count()
+    );
+    assert_eq!(
+        s.snapshot().stall.map(|(_, k)| k),
+        Some(Stall::AppUpdated),
+        "the update state, not a holder"
+    );
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::Stall { .. })).count(), 1, "one note");
+    assert_eq!(
+        lines_since(mark, &format!("pid {pid} is the installed build")),
+        1,
+        "logged on entering the state only"
+    );
+}
+
+#[test]
+fn the_update_wait_shows_the_update_state_at_once_and_logs_once() {
+    let mark = log_mark();
+    let (s, cmds) = first(|l| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(880_001, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated), "{cmds:?}");
+    let mut s = s;
+    run_ticks(&mut s, NOTE_AFTER * 3, |seq, _| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(880_001, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert_eq!(
+        s.snapshot().stall.map(|(_, k)| k),
+        Some(Stall::AppUpdated),
+        "never the holder's note"
+    );
+    assert_eq!(lines_since(mark, "pid 880001 is the installed build"), 1);
+}
+
+#[test]
+fn giving_up_on_replacing_agents_says_so_with_its_own_stall_and_logs_once() {
+    let mark = log_mark();
+    let mut s = Supervisor::new();
+    let mut seq = look_seq(&s.step(Event::Begin));
+    let mut gave_up = None;
+    for _ in 0..8 {
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(880_002, 500, false)),
+            lock: Some(LockSeen::Held),
+            ..look(seq)
+        }));
+        if let Some(st) = stall_of(&cmds) {
+            gave_up = Some(st);
+            break;
+        }
+        let c = connect_seq(&cmds);
+        s.step(Event::Connected {
+            seq: c,
+            peer: 5,
+            pid: Some(880_002),
+        });
+        let t = tick_look(&mut s);
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(880_002, 500, false)),
+            ..look(t)
+        }));
+        seq = look_seq(&cmds);
+    }
+    assert_eq!(gave_up, Some(Stall::OtherBuildKeepsComing));
+    run_ticks(&mut s, NOTE_AFTER * 2, |seq, _| Look {
+        hint: Some(hint(880_002, 500, false)),
+        lock: Some(LockSeen::Held),
+        ..look(seq)
+    });
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
+    assert_eq!(
+        lines_since(mark, "pid 880002 keep coming back"),
+        1,
+        "logged once, not on every look"
+    );
+}
+
+fn disk_hint(pid: u32) -> Option<HintSeen> {
+    Some(HintSeen {
+        of_disk_file: true,
+        ..hint(pid, 1_500, false)
+    })
+}
+
+#[test]
+fn a_look_without_a_file_does_not_end_the_update_wait_of_a_running_own_agent() {
+    let pid = 880_011;
+    let mut s = starting_as(pid);
+    let cmds = run_ticks(&mut s, 60, |seq, _| Look {
+        // Every third look misses the discovery file (it is read while the agent rewrites it).
+        hint: if seq % 3 == 0 { None } else { disk_hint(pid) },
+        lock: Some(LockSeen::Held),
+        child: Some((1, Child::Running { pid })),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert_eq!(
+        cmds.iter().filter(|c| matches!(c, Command::Stall { .. })).count(),
+        1,
+        "the note was cleared and shown again: {cmds:?}"
+    );
+    assert!(!cmds.iter().any(|c| matches!(c, Command::ClearStall)), "{cmds:?}");
+    assert_eq!(*s.phase(), Phase::WaitingForHolder);
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::AppUpdated));
+}
+
+#[test]
+fn an_agent_of_the_installed_file_is_an_update_only_when_the_app_was_updated_otherwise_a_mismatch() {
+    for (updated, want) in [(true, Stall::AppUpdated), (false, Stall::AgentMismatch)] {
+        let mut s = starting();
+        let cmds = run_ticks(&mut s, 5, |seq, _| Look {
+            hint: disk_hint(PID),
+            lock: Some(LockSeen::Held),
+            child: Some((1, Child::Running { pid: PID })),
+            app_updated: updated,
+            ..look(seq)
+        });
+        assert_eq!(stall_of(&cmds), Some(want), "app_updated {updated}");
+        assert!(!cmds.iter().any(|c| matches!(c, Command::Connect { .. })));
+    }
+}
+
+#[test]
+fn a_later_stall_of_another_kind_replaces_the_one_shown() {
+    let (mut s, cmds) = first(|l| Look {
+        hint: disk_hint(880_003),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated));
+    // Eviction attempts were used up meanwhile; the next look sees an ordinary agent of another build.
+    s.evictions = MAX_EVICTIONS;
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        hint: Some(hint(880_003, 500, false)),
+        lock: Some(LockSeen::Held),
+        ..look(seq)
+    }));
+    assert_eq!(stall_of(&cmds), Some(Stall::OtherBuildKeepsComing), "{cmds:?}");
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::ClearStall)),
+        "the old note was not cleared first: {cmds:?}"
+    );
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
+}
+
+#[test]
+fn a_look_without_a_file_does_not_end_the_update_wait_when_the_login_service_supervises() {
+    let (mut s, cmds) = first(|l| Look {
+        hint: disk_hint(880_012),
+        lock: Some(LockSeen::Held),
+        service: Some(SUPERVISING),
+        app_updated: true,
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated));
+    let cmds = run_ticks(&mut s, 60, |seq, _| Look {
+        hint: if seq % 3 == 0 { None } else { disk_hint(880_012) },
+        lock: Some(LockSeen::Held),
+        service: Some(SUPERVISING),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::ClearStall | Command::Stall { .. })),
+        "the note was cleared or shown again: {cmds:?}"
+    );
+    assert_eq!(*s.phase(), Phase::WaitingForHolder);
+}
+
+#[test]
+fn the_update_wait_ends_when_the_agent_is_gone_and_the_lock_is_free() {
+    let (mut s, _) = first(|l| Look {
+        hint: disk_hint(880_013),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..l
+    });
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        hint: None,
+        lock: Some(LockSeen::Free),
+        ..look(seq)
+    }));
+    assert_eq!(launches(&cmds), 1, "an agent that is gone is started again: {cmds:?}");
 }

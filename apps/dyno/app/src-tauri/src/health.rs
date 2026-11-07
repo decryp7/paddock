@@ -23,6 +23,10 @@ pub const TRAY: &str = "dy.tray";
 /// installer again clears it at the next start.
 pub const SETUP: &str = "dy.setup";
 
+/// Dyno itself: a line on the chip when its files were replaced while it ran (Restart Dyno to finish). Nothing to retry; it ends with
+/// the restart. Its own row, so clearing it never clears the installer program's mismatch.
+pub const UPDATE: &str = "dy.update";
+
 /// How long a repair waits for the link to come back before it says it did not.
 const REPAIR_WAIT: Duration = Duration::from_secs(8);
 
@@ -79,13 +83,23 @@ pub fn stall_problem(stall: Stall) -> Cause {
                 "It may still be starting. If it stays, choose Retry; if the data folder is shared with another computer, quit Dyno there.",
             )
             .code("dy.agent.other-holds"),
+        Stall::AppUpdated => updated_problem(),
+        Stall::AgentMismatch => Cause::new("The Dyno agent on this computer does not match this Dyno.")
+            .hint("It speaks another protocol, and Dyno was not updated while it ran. Reinstall Dyno, then choose Retry.")
+            .code("dy.agent.mismatch"),
+        Stall::OtherBuildKeepsComing => Cause::new("Another Dyno install keeps starting another build of the agent.")
+            .hint(
+                "Dyno stopped asking it to exit. Quit the other Dyno or switch off its login service, then choose Retry. \
+                 Reinstalling Dyno does not help while the other one runs.",
+            )
+            .code("dy.agent.other-build-returns"),
     }
 }
 
 /// What the chip offers for a stall: Retry, except for a paused agent (nothing to retry: it continues by itself, ADR 0031).
 pub fn stall_repair(stall: Stall) -> Option<RepairAction> {
     match stall {
-        Stall::AgentPaused => None,
+        Stall::AgentPaused | Stall::AppUpdated => None,
         _ => Some(RepairAction::Retry),
     }
 }
@@ -112,7 +126,7 @@ pub fn setup_problem(check: &paddock_setup::versioncheck::VersionCheck) -> Optio
 pub fn updated_problem() -> Cause {
     Cause::new("Dyno was updated.")
         .hint("Restart Dyno to finish: quit it and open it again.")
-        .code("dy.setup.updated")
+        .code("dy.update.restart")
 }
 
 /// Checks the installed `paddock-setup.exe` against this Dyno's version (Windows, at start) and reports a mismatch.
@@ -183,6 +197,7 @@ impl<R: Runtime> Hub<R> {
             ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect()),
             ServiceSpec::new(TRAY, "the tray icons"),
             ServiceSpec::new(SETUP, "the installer program"),
+            ServiceSpec::new(UPDATE, "Dyno itself"),
         ]
     }
 
@@ -204,15 +219,15 @@ impl<R: Runtime> Hub<R> {
             .code("dy.agent.failed"))
     }
 
-    /// Tells the chip that Dyno was updated while it ran (its program files are a newer build), or that this no longer holds.
+    /// Tells the chip that Dyno was updated while it ran (its program files are a newer build). It stays until Dyno restarts.
     pub fn report_updated(&self, updated: bool) {
         let Some(health) = self.app.get().and_then(|a| a.try_state::<Arc<Health>>().map(|h| h.inner().clone())) else {
             return;
         };
         if updated {
-            health.down(SETUP, updated_problem(), None);
-        } else if health.is_in_outage(SETUP) {
-            health.ok(SETUP);
+            health.down(UPDATE, updated_problem(), None);
+        } else if health.is_in_outage(UPDATE) {
+            health.ok(UPDATE);
         }
     }
 
@@ -276,8 +291,20 @@ mod tests {
     #[test]
     fn an_app_updated_while_it_runs_is_told_to_restart_with_its_own_cause_code() {
         let cause = updated_problem();
-        assert_eq!(cause.code.as_deref(), Some("dy.setup.updated"));
+        assert_eq!(cause.code.as_deref(), Some("dy.update.restart"));
         assert!(cause.message.contains("updated") && cause.hint.as_deref().is_some_and(|h| h.contains("Restart Dyno")));
+    }
+
+    #[test]
+    fn the_updated_notice_has_its_own_service_row_apart_from_the_installer_program() {
+        assert_ne!(
+            UPDATE, SETUP,
+            "clearing the update notice must not clear a paddock-setup.exe mismatch"
+        );
+        let hub = Hub::<tauri::test::MockRuntime>::default();
+        let services = hub.services();
+        let ids: Vec<&str> = services.iter().map(ServiceSpec::id).collect();
+        assert!(ids.contains(&UPDATE) && ids.contains(&SETUP), "{ids:?}");
     }
 
     #[test]
@@ -295,6 +322,8 @@ mod tests {
             (Stall::OtherAgentHolds, "dy.agent.other-holds", "data folder"),
             (Stall::ServiceNotAnswering, "dy.agent.system-silent", "system"),
             (Stall::AgentKeepsFailing, "dy.agent.keeps-failing", "failing"),
+            (Stall::OtherBuildKeepsComing, "dy.agent.other-build-returns", "another build"),
+            (Stall::AgentMismatch, "dy.agent.mismatch", "Reinstall Dyno"),
         ] {
             let cause = stall_problem(stall);
             assert_eq!(cause.code.as_deref(), Some(code));
@@ -310,6 +339,11 @@ mod tests {
         assert!(paused.message.contains("Paused by macOS or another app"), "{paused:?}");
         assert!(!paused.hint.as_deref().unwrap_or("").contains("Retry"), "{paused:?}");
         assert_eq!(stall_repair(Stall::AgentPaused), None);
+        let updated = stall_problem(Stall::AppUpdated);
+        assert_eq!(updated.code.as_deref(), Some("dy.update.restart"));
+        assert!(updated.hint.as_deref().is_some_and(|h| h.contains("Restart Dyno")) && !updated.hint.as_deref().unwrap().contains("Retry"));
+        assert_eq!(stall_repair(Stall::AppUpdated), None, "an update has nothing to retry");
+        assert_eq!(stall_repair(Stall::OtherBuildKeepsComing), Some(RepairAction::Retry));
         assert_eq!(stall_repair(Stall::AgentNotAnswering), Some(RepairAction::Retry));
         // The plain "still starting" status stays no outage: only the stall the link reports after a while is one.
         assert!(agent_problem(&status(AgentState::Starting, Some("still starting"))).is_none());

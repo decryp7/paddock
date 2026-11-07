@@ -168,6 +168,7 @@ impl World {
             version: "1".into(),
             protocol: 1,
             same_build,
+            of_disk_file: false,
         };
         if matches!(self.own, Proc::Ready | Proc::Exiting) {
             Some(seen(self.own_pid(), self.own_started_ms, true))
@@ -284,6 +285,7 @@ impl World {
                     }),
                     child: self.child_view(),
                     cpu: Cpu::Unavailable,
+                    app_updated: false,
                 };
                 self.truth.push((seq, self.other != Other::None));
                 if self.truth.len() > 6 {

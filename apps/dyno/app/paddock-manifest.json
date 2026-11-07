@@ -308,7 +308,8 @@
   "healthServices": [
     "dy.agent",
     "dy.setup",
-    "dy.tray"
+    "dy.tray",
+    "dy.update"
   ],
   "notificationKinds": {
     "dy.alarm": {
@@ -334,6 +335,7 @@
     "dy.health.agent": "the Dyno agent",
     "dy.health.setup": "the installer program",
     "dy.health.tray": "the tray icons",
+    "dy.health.update": "Dyno itself",
     "dy.lockers.title": "What is locking this file?",
     "dy.notification.alarm": "Alarm",
     "dy.page.alarms": "Alarms",

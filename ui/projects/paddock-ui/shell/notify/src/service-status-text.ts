@@ -64,9 +64,12 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'dy.agent.keeps-failing': () => $localize`:@@pd.health.state.keeps-failing:keeps failing to start`,
   'dy.agent.paused': () => $localize`:@@pd.health.state.paused:paused`,
   'dy.agent.other-holds': () => $localize`:@@pd.health.state.other-holds:held by another agent`,
+  'dy.agent.other-build-returns': () =>
+    $localize`:@@pd.health.state.other-build-returns:another build keeps starting`,
+  'dy.agent.mismatch': () => $localize`:@@pd.health.state.agent-mismatch:needs a reinstall`,
   'dy.tray.no-host': () => $localize`:@@pd.health.state.tray-hidden:not shown`,
   'dy.setup.version': () => $localize`:@@pd.health.state.setup-version:out of date`,
-  'dy.setup.updated': () => $localize`:@@pd.health.state.updated-restart:updated: restart to finish`,
+  'dy.update.restart': () => $localize`:@@pd.health.state.updated-restart:updated: restart to finish`,
   'sd.engine.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.damaged': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.rebuild': () => $localize`:@@pd.health.state.stopped:stopped`,
