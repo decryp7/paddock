@@ -1,0 +1,11 @@
+#!/bin/bash
+# Replacement 56M runs for groups with fewer than two runs whose highest 1-minute load stayed at most 12.
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial
+$T/bin/run2.sh f-56m-base-5 base 56m
+$T/bin/run2.sh f-56m-pruned-4 pruned 56m
+$T/bin/run2.sh f-56m-mirror-4 mirror 56m
+$T/bin/run2.sh f-56m-native-4 native 56m
+$T/bin/run2.sh rg-56m-131072-4 base 56m DEBRIEF_TRIAL_ROW_GROUP=131072
+$T/bin/run2.sh rg-56m-131072-5 base 56m DEBRIEF_TRIAL_ROW_GROUP=131072
+$T/bin/run2.sh rg-56m-16384-4 base 56m DEBRIEF_TRIAL_ROW_GROUP=16384
+echo "$(date '+%F %T') repl2 done" >> $T/log2.txt

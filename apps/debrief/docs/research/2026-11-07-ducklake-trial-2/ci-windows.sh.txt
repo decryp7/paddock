@@ -1,0 +1,15 @@
+#!/bin/bash
+# Lists every macOS CI job of runs 7600 onward (skipping missing ids) with its start and end (UTC), for checking run windows.
+rid=7600; miss=0
+while [ $miss -lt 40 ]; do
+  body=$(curl -s -m 15 -w '\n%{http_code}' "https://dev.decryptology.net/api/v1/repos/decryp7/paddock/actions/runs/$rid/jobs?limit=200")
+  code=${body##*$'\n'}; json=${body%$'\n'*}
+  if [ "$code" = 200 ]; then miss=0; printf '%s' "$json" | python3 -I -c '
+import json,sys
+d=json.load(sys.stdin)
+for x in d.get("jobs",[]):
+    if "macos-latest" in (x.get("labels") or []):
+        print(sys.argv[1], x["id"], x.get("status"), x.get("started_at"), x.get("completed_at"), x.get("name","")[:40].replace(" ","_"))' $rid
+  else miss=$((miss+1)); fi
+  rid=$((rid+1))
+done

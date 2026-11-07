@@ -1,0 +1,9 @@
+#!/bin/bash
+# Trial 2 with the WP-1 fix: layouts, store variants and the row-group sweep at 10M, then 56M; every run quiet-gated.
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial
+for Z in 10m 56m; do
+  for i in 1 2 3; do $T/bin/lrun.sh lay-$Z-$i $Z; done
+  for i in 1 2 3; do for v in base pruned mirror native; do $T/bin/run2.sh f-$Z-$v-$i $v $Z; done; done
+  for i in 1 2 3; do for g in 16384 32768 131072; do $T/bin/run2.sh rg-$Z-$g-$i base $Z DEBRIEF_TRIAL_ROW_GROUP=$g; done; done
+  echo "$(date '+%F %T') all2 $Z done" >> $T/log2.txt
+done

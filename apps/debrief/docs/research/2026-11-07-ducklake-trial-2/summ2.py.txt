@@ -1,0 +1,97 @@
+"""Trial 2: ranges (min-max over the runs of each group) of the store-mode and layout-mode results.
+
+usage: python3 -I summ2.py store PREFIX...   (groups f-10m-base, ... from out2/<group>-<n>.txt)
+       python3 -I summ2.py layout PREFIX     (lay-10m: one line per layout and measure)
+"""
+import glob, os, re, sys
+from collections import defaultdict
+
+T = "/Volumes/d7sst7/dev-targets/scratch/ducklake-trial"
+
+
+def kv(line):
+    return dict(re.findall(r"(\w+)=([^\s]+)", line))
+
+
+def fl(v):
+    try:
+        return float(v)
+    except Exception:
+        return None
+
+
+def rng(vals, digits=1):
+    v = [x for x in vals if x is not None]
+    if not v:
+        return "-"
+    lo, hi = min(v), max(v)
+    f = f"{{:.{digits}f}}"
+    return f.format(lo) if lo == hi else f"{f.format(lo)}–{f.format(hi)}"
+
+
+def lines(path):
+    d = {}
+    for line in open(path):
+        line = line.replace("test ducklake_trial ... ", "")
+        if line.startswith("trial: "):
+            rest = line[7:].strip()
+            d.setdefault(rest.split()[0], kv(rest))
+    return d
+
+
+STORE = [
+    ("import_main", "s", 2), ("import_main", "events_per_s", 0), ("import_main", "peak_fp_mb", 0), ("import_extra", "s", 2),
+    ("import_main_query", "p50_ms", 1), ("import_main_query", "max_ms", 1), ("import_main_plain", "p50_ms", 1),
+    ("import_extra_query", "p50_ms", 1), ("import_extra_query", "max_ms", 1),
+    ("background_index_and_catalogue", "s", 1), ("background_index_and_catalogue", "peak_fp_mb", 0), ("ready_end_to_end", "s", 1),
+    ("disk_after_import", "total_mb", 0), ("disk_after_import", "files", 0), ("disk_after_import", "lake_catalog_mb", 1),
+    ("quiet_query_after_import", "p50_ms", 1), ("quiet_query_after_import", "max_ms", 1), ("quiet_plain_after_import", "p50_ms", 1),
+    ("undo_import", "s", 3), ("undo_import", "searchable_s", 3), ("undo_import", "peak_fp_mb", 0), ("disk_after_undo", "total_mb", 0),
+    ("time_shift", "s", 2), ("time_shift", "searchable_s", 2), ("time_shift", "peak_fp_mb", 0),
+    ("disk_after_shift", "total_mb", 0), ("disk_after_shift", "lake_data_mb", 0), ("quiet_query_after_shift", "p50_ms", 1),
+    ("compact", "s", 3), ("compact", "peak_fp_mb", 0), ("disk_after_compact", "total_mb", 0), ("disk_after_compact", "files", 0),
+    ("quiet_query_after_compact", "p50_ms", 1), ("quiet_plain_after_compact", "p50_ms", 1), ("move_reopen", "s", 3),
+]
+
+mode = sys.argv[1]
+# CLEAN=1: only runs whose highest 1-minute load stayed at most 12 (log2.txt; runs overlapping macOS CI also peaked above it).
+CLEAN = os.environ.get("CLEAN") == "1"
+maxload = {}
+for line in open(f"{T}/log2.txt"):
+    m = re.match(r"\S+ \S+ (\S+) end rc=\d+ load1 \S+ maxload1 (\S+)", line)
+    if m:
+        maxload[m.group(1)] = float(m.group(2))
+
+
+def keep(path):
+    lab = os.path.basename(path)[:-4]
+    return not CLEAN or maxload.get(lab, 99) <= 12
+if mode == "store":
+    for prefix in sys.argv[2:]:
+        runs = [r for r in sorted(glob.glob(f"{T}/out2/{prefix}-[0-9].txt")) if keep(r)]
+        ds = [lines(r) for r in runs]
+        out = [f"{prefix} (runs {len(ds)}: {','.join(os.path.basename(r)[len(prefix) + 1:-4] for r in runs)})"]
+        for a, b, dg in STORE:
+            out.append(f"{a}.{b}={rng([fl(d.get(a, {}).get(b)) for d in ds], dg)}")
+        same = sorted({d.get("move_reopen", {}).get("same_answers", "-") for d in ds})
+        rows = sorted({d.get("quiet_query_after_shift", {}).get("rows_last", "-") for d in ds})
+        panics = sum(1 for r in runs if "panicked" in open(r).read())
+        out.append(f"move_same_answers={','.join(same)} rows_after_shift={','.join(rows)} panics={panics}")
+        print(" | ".join(out))
+else:
+    prefix = sys.argv[2]
+    runs = sorted(glob.glob(f"{T}/out2/{prefix}-[0-9].txt"))
+    groups = defaultdict(lambda: defaultdict(list))
+    for r in runs:
+        for line in open(r):
+            line = line.replace("test ducklake_trial ... ", "")
+            if not line.startswith("trial: "):
+                continue
+            rest = line[7:].strip()
+            d = kv(rest)
+            key = rest.split()[0] + ":" + d.get("layout", "")
+            for k, v in d.items():
+                if k != "layout" and fl(v) is not None:
+                    groups[key][k].append(fl(v))
+    for key, m in groups.items():
+        print(key, " ".join(f"{k}={rng(v, 1)}" for k, v in m.items()))

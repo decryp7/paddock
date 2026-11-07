@@ -1,0 +1,26 @@
+"""Marks each run in log.txt / log2.txt whose window (local +08:00) overlaps a macOS CI job in ci-mac-jobs.txt (UTC)."""
+import re, sys
+from datetime import datetime, timedelta, timezone
+T = "/Volumes/d7sst7/dev-targets/scratch/ducklake-trial"
+jobs = []
+for line in open(f"{T}/ci-mac-jobs.txt"):
+    p = line.split()
+    if p[3].startswith("1970"):
+        continue  # never started (queued, skipped or cancelled before running)
+    s = datetime.fromisoformat(p[3].replace("Z", "+00:00"))
+    e = datetime.fromisoformat(p[4].replace("Z", "+00:00")) if not p[4].startswith("1970") else datetime.now(timezone.utc)
+    jobs.append((s, e, p[0] + "/" + p[1]))
+tz = timezone(timedelta(hours=8))
+for log in sys.argv[1:]:
+    starts = {}
+    for line in open(log):
+        m = re.match(r"(\S+ \S+) (\S+) (start|end) ", line)
+        if not m:
+            continue
+        t = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").replace(tzinfo=tz)
+        if m.group(3) == "start":
+            starts[m.group(2)] = t
+        elif m.group(2) in starts:
+            s = starts.pop(m.group(2))
+            hit = [j for (a, b, j) in jobs if a < t and b > s]
+            print(m.group(2), "OVERLAP " + ",".join(hit) if hit else "clear")

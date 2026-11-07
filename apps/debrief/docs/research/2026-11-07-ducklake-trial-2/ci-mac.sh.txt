@@ -1,0 +1,17 @@
+#!/bin/bash
+# Prints macOS CI jobs in progress (Gitea API through curl): scans run ids from 7630 upward, skipping missing ids (the ids
+# have gaps), stopping after 40 missing ids in a row. "mac_ci=none", the jobs, or "mac_ci=unknown" when the API fails.
+out=""; miss=0; seen=0; rid=7630; last=0
+while [ $miss -lt 40 ] && [ $rid -lt 9000 ]; do
+  body=$(curl -s -m 15 -w '\n%{http_code}' "https://dev.decryptology.net/api/v1/repos/decryp7/paddock/actions/runs/$rid/jobs?limit=200")
+  code=${body##*$'\n'}; json=${body%$'\n'*}
+  case $code in
+    200) miss=0; seen=$((seen+1)); last=$rid
+         j=$(printf '%s' "$json" | python3 -I /Volumes/d7sst7/dev-targets/scratch/ducklake-trial/bin/ci-jobs.py) || { echo "mac_ci=unknown (unreadable run $rid)"; exit 0; }
+         [ -n "$j" ] && out="$out${out:+,}$rid/$j" ;;
+    404) miss=$((miss+1)) ;;
+    *) echo "mac_ci=unknown (http $code at run $rid)"; exit 0 ;;
+  esac
+  rid=$((rid+1))
+done
+echo "mac_ci=${out:-none} (runs_seen=$seen, last=$last)"

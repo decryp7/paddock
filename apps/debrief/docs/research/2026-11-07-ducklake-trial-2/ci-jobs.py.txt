@@ -1,0 +1,6 @@
+"""Reads one Gitea run's jobs JSON on stdin; prints the ids of macOS jobs in progress, comma-separated."""
+import json
+import sys
+d = json.load(sys.stdin)
+print(",".join(str(x["id"]) + ":" + x.get("name", "")[:30].replace(" ", "_") for x in d.get("jobs", [])
+               if "macos-latest" in (x.get("labels") or []) and x.get("status") == "in_progress"))

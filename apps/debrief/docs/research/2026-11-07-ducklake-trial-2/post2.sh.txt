@@ -1,0 +1,11 @@
+#!/bin/bash
+# After all2.sh: build the harness with the bucket fix as ducklake_trial2b, rerun the 56M 1 h bucket layouts, the worker
+# imports at 56M (base and mirror) and the base run that overlapped macOS CI. Each run quiet-gated.
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial; L=/Volumes/d7sst7/dev-targets/debrief-libduckdb/2.0.0/duckdb-shared-libs-osx-arm64
+/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock run --lane normal ducklake-trial-2 -- bash -c "cd /Volumes/d7sst7/dev-targets/wt/ducklake-trial-bench/apps/debrief/crates/debrief-store-duck && CARGO_TARGET_DIR=/Volumes/d7sst7/dev-targets/target/ducklake-trial CARGO_BUILD_JOBS=2 DUCKDB_LIB_DIR=$L DUCKDB_INCLUDE_DIR=$L cargo test --release --test ducklake_trial --no-run" > $T/build3.log 2>&1
+B1=$(sed -n 's/.*Executable tests\/ducklake_trial.rs (\(.*\))/\1/p' $T/build3.log); cp "$B1" $T/bin/ducklake_trial2b || { echo "$(date '+%F %T') post2 build failed" >> $T/log2.txt; exit 1; }
+for i in 1 2 3; do $T/bin/lrun2.sh lay60-56m-$i 56m TRIAL_LAYOUTS=b60,bs60; done
+$T/bin/wrun.sh w-56m-base-1 base 56m
+$T/bin/wrun.sh w-56m-mirror-1 mirror 56m
+$T/bin/run2.sh f-56m-base-4 base 56m
+echo "$(date '+%F %T') post2 done" >> $T/log2.txt

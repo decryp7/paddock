@@ -83,6 +83,101 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-07, DuckLake trial 2 (branch `docs/debrief-ducklake-trial-2`)
+
+Quoted by [research/2026-11-07-ducklake-trial-2.md](research/2026-11-07-ducklake-trial-2.md). Runs taken 2026-11-07 10:26
+to 15:57.
+
+- **Commit:** store at 19aff3b83 (`debrief/1.2-int` plus the DuckDB 2.0 storage format) with the WP-1 page fix
+  cherry-picked (c149483e9 and 13e165c75 from `origin/perf/debrief-grid-query`), plus a test-only patch selecting the
+  variants (`DEBRIEF_TRIAL_STORE`, `DEBRIEF_TRIAL_ROW_GROUP`; copy:
+  [trial2-store-patch.diff.txt](research/2026-11-07-ducklake-trial-2/trial2-store-patch.diff.txt),
+  [trial_lake.rs.txt](research/2026-11-07-ducklake-trial-2/trial_lake.rs.txt)) and the harness
+  ([ducklake_trial.rs.txt](research/2026-11-07-ducklake-trial-2/ducklake_trial.rs.txt)). None of it is in the product.
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; data and build on d7 (APFS).
+- **Load and CI:**
+  - **Start gate:** every run started only at a 1-minute load of 12 or less with no macOS CI job in progress (`run2.sh`,
+    checked before and again inside the lock).
+  - **Peak loads:** the highest load during each run is in [runs.txt](research/2026-11-07-ducklake-trial-2/runs.txt).
+    10M and layout runs: 3.6 to 7.0. Many 56M store runs peaked at 13 to 32 from other agents' jobs. They are counted and
+    flagged; replacements at 15:37–15:57 were no quieter (16.2 and 16.4), so the time box stopped them.
+  - **CI overlap:** `f-56m-base-1` overlapped macOS CI (7657/30879) and is excluded. Earlier runs of the day (`t2-*`,
+    `q-*`) are not counted: they ran before the WP-1 fix, or while the CI probe was blind, and most overlapped macOS CI.
+- **Build:** release, `CARGO_BUILD_JOBS=2`, mimalloc, duckdb-rs 1.20000.0 with libduckdb 2.0.0, `ducklake`
+  `417a9117f5` loaded by path. Every store variant uses the store's own connection settings: 4 DuckDB threads, 192 MB,
+  768 MB while an import compacts and orders. B3's lake UPDATE ran at 768 MB without insertion order (at 192 MB it ran
+  out of memory). The layout runs used 4 threads and 192 MB for queries, 768 MB for writes.
+- **Corpus:** as trial 1 (invented; 10M: `gen_large.py OUT 0.18`; 56M: `large10`), two imports, the same query.
+- **Commands:**
+  - `all2.sh` (layouts with `lrun.sh`, store variants and the row-group sweep with `run2.sh`, at 10M then 56M);
+  - `post2.sh` (1-hour buckets, worker imports through `wrun.sh`, one replacement run);
+  - `repl2.sh` (replacements).
+
+  The scripts are in [research/2026-11-07-ducklake-trial-2/](research/2026-11-07-ducklake-trial-2/) as `.txt` copies.
+- **Runs:** 3 per cell (B0 at 56M: 4 counted). The worker run and the 1-hour bucket runs were single passes and 3 failed
+  passes respectively.
+- **Numbers and verdicts against the budgets:**
+
+  | Measure (56M unless stated) | B0 | B1 pruned | B2 mirror | B3 native | Budget | Verdict |
+  |---|---|---|---|---|---|---|
+  | Page query quiet, p50 | 168–176 ms | 91–108 ms | 91–100 ms | 117–123 ms | interactive < 0.5 s | all met; B1 and B2 about 1.8x faster than B0 |
+  | Page query during import 2, p50 / max | 295–1,900 / 3,265–4,542 ms | 174–1,737 / 410–4,484 ms | 172–1,769 / 3,112–4,981 ms | 208–1,674 / 3,698–4,244 ms | < 0.5 s | all over at p50 in some runs; at max in every run but one B1 run (410 ms) |
+  | Plain field filter, quiet p50 | 1,621–1,649 ms | 1,616–1,777 ms | 1,687–1,745 ms | 1,730–1,758 ms | < 0.5 s | all over |
+  | Import 1 (54.4M) | 30.3–41.7 s | 35.6–43.3 s | 40.9–45.4 s | 34.8–42.9 s | ≥ 218k events/s | all met (1.2–1.8M/s) |
+  | Searchable end to end | 306–332 s | 317–329 s | 275–290 s | 274–287 s | none (exploratory) | — |
+  | Undo, searchable again | 5.22–5.55 s | 4.97–5.77 s | 5.71–8.20 s | 5.41–6.16 s | none (exploratory) | — |
+  | Time shift (6.4M rows), searchable again | 33.5–41.3 s | 32.3–37.9 s | 35.2–42.8 s | 29.8–37.0 s | none (exploratory) | — |
+  | Disk after shift | 4,902–4,976 MB | 4,894–5,034 MB | 4,874–4,966 MB | 5,567–5,696 MB | none (exploratory) | — |
+  | Moved folder answers the same | yes | yes | yes | no | correctness | B3 fails |
+  | Peak footprint, import phase (in-process) | 1,263–1,581 MB | 1,383–1,487 MB | 1,234–1,282 MB | 1,461–1,521 MB | worker ≤ 768 MB importing (2 GB cap) | not comparable in-process; see the worker row |
+  | Worker peak footprint, import 1 (`debrief import`) | 1,388 MB | not measured | check broken | not measured | ≤ 768 MB, cap 2 GB | B0 over the budget, under the cap |
+  | `tests/it` (95) | 95 pass | 95 pass | 93 pass | 88 pass | all pass | B2 and B3 fail |
+
+  10M, page query quiet p50:
+
+  - **B0:** 78.4–78.9 ms;
+  - **B1:** 64.7–67.0 ms;
+  - **B2:** 71.3–73.7 ms;
+  - **B3:** 89.3–91.2 ms.
+
+  Undo searchable 0.79–0.93 s and shift searchable 4.5–8.0 s for all. All under the 0.5 s interactive budget except the
+  plain filter (332–393 ms, met at 10M).
+
+  C2, rows per row group, 56M page query quiet p50: the budget is interactive < 0.5 s, met by all four; 65,536 is fastest
+  at 56M.
+
+  - **16,384:** 249.9–273.4 ms;
+  - **32,768:** 172.9–189.2 ms;
+  - **65,536:** 167.6–175.5 ms;
+  - **131,072:** 200.9–206.6 ms.
+
+  At 10M the order was 61.6–61.9, 57.7–63.4, 78.4–78.9 and 120.1–125.8 ms.
+
+  C1, C3 and C4 at the SQL level, 56M (the page's SQL shape, standard window p50; 10 runs):
+
+  - **seg (all files):** 112.3–114.1 ms;
+  - **seg_pruned (ts min/max):** 24.2–24.8 ms;
+  - **lake (DuckLake adopt):** 52.7–56.7 ms;
+  - **sorted (C3):** 9.6–12.4 ms;
+  - **b10 (C4):** 11.8–14.7 ms, and 8.7–8.8 ms after its merge.
+
+  Budget: none (exploratory). Costs of the rewritten layouts:
+
+  - **sorted rewrite:** 74.5–87.7 s, peak 1.3–1.6 GB;
+  - **b10 write:** import 1 160.4–189.4 s, import 2 1.8–3.3 s, producing 58 late files; the merge took 21.2–21.8 s;
+  - **b60 (1-hour buckets):** out of memory at 768 MB in 6 of 6 runs.
+
+  C1 per 45 s window, 56M segments: 18.3 files and 22.8 row groups by range, against 12.3 files and 12.7 row groups
+  holding rows (sorted: 1.6 / 1.7; b10: 1.6 / 6.3).
+
+- **Memory measure:** physical footprint (`ri_phys_footprint`): in-process 20 ms phase peaks and the `procsample.py`
+  whole-run peak; for the worker run, `procsample.py` over the CLI and its worker process.
+- **Notes:**
+  - B2 and B3 are measured with the correctness failures listed in the note.
+  - The worker run for B2 is "check broken": the worker does not inherit `DEBRIEF_TRIAL_STORE`. A 10M check made no lake.
+  - C1, C3 and C4 are SQL-level only.
+  - Raw output is in `/Volumes/d7sst7/dev-targets/scratch/ducklake-trial/out2/`.
+
 ### 2026-11-06, DuckLake trial (branch `docs/debrief-ducklake-trial`)
 
 Quoted by [research/2026-11-06-ducklake-trial.md](research/2026-11-06-ducklake-trial.md). Runs taken 2026-11-07 01:15 to
@@ -94,8 +189,11 @@ Quoted by [research/2026-11-06-ducklake-trial.md](research/2026-11-06-ducklake-t
 - **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; data and build on d7 (APFS)
 - **Load:** the 1-minute load at the start and end of every run and its highest 5-second sample are in
   [runs.txt](research/2026-11-06-ducklake-trial/runs.txt). Counted runs: highest 1-minute load 3.0 to 9.5, except
-  `l10m-sqlite-1..3` (13.1 to 14.7: flagged, replaced by `l10m-sqlite-4..6` at 3.6 to 4.5). No macOS CI job was in
-  progress at any run's start or end (Gitea API, runs 7630 onwards). A first 56M pass used a query window that matched 37
+  `l10m-sqlite-1..3` (13.1 to 14.7: flagged, replaced by `l10m-sqlite-4..6` at 3.6 to 4.5). macOS CI: the probe used during
+  these runs could not read the Gitea API (a Python certificate error it reported as "none"), so the check was blind at
+  the time (ER-33). Reconstructed on 2026-11-07 from the job start and end times of every macOS job of runs 7600 onwards
+  ([ci-mac-jobs.txt](research/2026-11-07-ducklake-trial-2/ci-mac-jobs.txt), `overlap.py`): no counted run overlapped a
+  macOS CI job. A first 56M pass used a query window that matched 37
   rows; it was discarded and rerun (one of its store runs peaked at load 70.9). The review runs (768 MB with 4 threads,
   4-thread raw and adopt queries, 03:31 to 03:36) ran at a highest 1-minute load of 1.9 to 3.8.
 - **Build:** release (`cargo test --release --test ducklake_trial --no-run`, `CARGO_BUILD_JOBS=2`), mimalloc (the store

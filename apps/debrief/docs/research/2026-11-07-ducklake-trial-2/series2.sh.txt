@@ -1,0 +1,5 @@
+#!/bin/bash
+# usage: series2.sh SIZE TAG  3 rounds of base, pruned, mirror, native (interleaved), each through run2.sh (quiet-gated).
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial; Z=$1; G=$2
+for i in 1 2 3; do for v in base pruned mirror native; do $T/bin/run2.sh $G-$Z-$v-$i $v $Z; done; done
+echo "$(date '+%F %T') series2 $Z $G done" >> $T/log2.txt

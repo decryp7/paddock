@@ -1,0 +1,68 @@
+"""Trial 2: one line per run from out2/<label>.txt, the footprint CSV and log2.txt (load at start, highest load).
+
+usage: python3 -I table2.py GLOB [--tsv]
+"""
+import csv, glob, os, re, sys
+
+T = "/Volumes/d7sst7/dev-targets/scratch/ducklake-trial"
+pat = sys.argv[1]
+tsv = "--tsv" in sys.argv
+
+
+def kv(line):
+    return dict(re.findall(r"(\w+)=([^\s]+)", line))
+
+
+loads = {}
+for line in open(f"{T}/log2.txt"):
+    m = re.match(r"\S+ \S+ (\S+) start load1 (\S+)", line)
+    if m:
+        loads.setdefault(m.group(1), {})["start"] = m.group(2)
+    m = re.match(r"\S+ \S+ (\S+) end rc=(\d+) load1 (\S+) maxload1 (\S+)", line)
+    if m:
+        loads.setdefault(m.group(1), {}).update(rc=m.group(2), end=m.group(3), max=m.group(4))
+
+COLS = [
+    ("import_main", "s"), ("import_main", "events_per_s"), ("import_main", "peak_fp_mb"), ("import_extra", "s"),
+    ("import_main_query", "p50_ms"), ("import_main_query", "max_ms"), ("import_main_plain", "p50_ms"), ("import_main_plain", "max_ms"),
+    ("import_extra_query", "p50_ms"), ("import_extra_query", "max_ms"), ("import_extra_plain", "p50_ms"),
+    ("background_index_and_catalogue", "s"), ("background_index_and_catalogue", "peak_fp_mb"), ("ready_end_to_end", "s"),
+    ("disk_after_import", "total_mb"), ("disk_after_import", "segments_mb"), ("disk_after_import", "db_mb"),
+    ("disk_after_import", "index_mb"), ("disk_after_import", "lake_catalog_mb"),
+    ("quiet_query_after_import", "p50_ms"), ("quiet_query_after_import", "max_ms"), ("quiet_query_after_import", "rows_last"),
+    ("quiet_plain_after_import", "p50_ms"), ("quiet_plain_after_import", "rows_last"),
+    ("undo_import", "s"), ("undo_import", "searchable_s"), ("undo_import", "peak_fp_mb"), ("undo_import", "hits_after"),
+    ("disk_after_undo", "total_mb"),
+    ("time_shift", "s"), ("time_shift", "searchable_s"), ("time_shift", "peak_fp_mb"),
+    ("disk_after_shift", "total_mb"), ("disk_after_shift", "lake_data_mb"), ("quiet_query_after_shift", "p50_ms"),
+    ("quiet_query_after_shift", "rows_last"),
+    ("compact", "s"), ("compact", "peak_fp_mb"), ("disk_after_compact", "total_mb"),
+    ("quiet_query_after_compact", "p50_ms"), ("quiet_plain_after_compact", "p50_ms"), ("quiet_plain_after_compact", "rows_last"),
+    ("move_reopen", "s"), ("move_reopen", "same_answers"),
+]
+if tsv:
+    print("\t".join(["label", "load_start", "load_max", "rc", "life_fp_mb"] + [f"{a}.{b}" for a, b in COLS]))
+for f in sorted(glob.glob(f"{T}/out2/{pat}.txt")):
+    lab = os.path.basename(f)[:-4]
+    d = {}
+    for line in open(f):
+        line = line.replace("test ducklake_trial ... ", "")
+        if line.startswith("trial: "):
+            rest = line[7:].strip()
+            d[rest.split()[0]] = kv(rest)
+        if "panicked" in line:
+            d["panic"] = {"at": line.strip()[:80]}
+    life = 0
+    try:
+        for r in csv.DictReader(open(f"{T}/out2/{lab}.csv")):
+            if r.get("max_footprint"):
+                life = max(life, int(float(r["max_footprint"])))
+    except Exception:
+        pass
+    L = loads.get(lab, {})
+    vals = [d.get(a, {}).get(b, "-") for a, b in COLS]
+    if tsv:
+        print("\t".join([lab, L.get("start", "-"), L.get("max", "-"), L.get("rc", "-"), str(life >> 20)] + vals))
+    else:
+        print(lab, "load", L.get("start"), "max", L.get("max"), "rc", L.get("rc"), "life_fp", life >> 20,
+              " ".join(f"{a}.{b}={v}" for (a, b), v in zip(COLS, vals) if v != "-"), "PANIC" if "panic" in d else "")
