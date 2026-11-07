@@ -24,6 +24,7 @@ import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field'
 import { ErrorStateMatcher } from '@angular/material/core';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+import { spaceRefreshChoices } from './space-refresh';
 
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
@@ -183,7 +184,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
               <div class="row">
                 <div class="lbl"><strong>Free space refresh</strong><small>How often Dyno reads the free space of every disk, whether or not a window is open. Auto: every minute.</small></div>
-                <pd-select [options]="spaceRefreshChoices" [value]="String(disk().spaceRefreshSecs ?? 0)" ariaLabel="Free space refresh" (valueChange)="setDisk({ spaceRefreshSecs: +$event })" />
+                <pd-select [options]="spaceRefreshOptions()" [value]="String(disk().spaceRefreshSecs ?? 0)" ariaLabel="Free space refresh" (valueChange)="setDisk({ spaceRefreshSecs: +$event })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Jobs at once</strong><small>Searches, log reads and checks that run side by side; the rest wait their turn. Takes effect the next time Dyno starts.</small></div>
@@ -463,14 +464,7 @@ export class SettingsPage implements OnInit {
   protected readonly jobs = computed<JobSettings>(() => this.draft()?.jobs ?? {});
   protected readonly readThreadChoices = threadChoices(16);
   protected readonly jobWorkerChoices = threadChoices(8);
-  protected readonly spaceRefreshChoices: PdSelectOption[] = [
-    { value: '0', label: 'Auto' },
-    { value: '10', label: '10 seconds' },
-    { value: '30', label: '30 seconds' },
-    { value: '120', label: '2 minutes' },
-    { value: '300', label: '5 minutes' },
-    { value: '600', label: '10 minutes' },
-  ];
+  protected readonly spaceRefreshOptions = computed(() => spaceRefreshChoices(this.disk().spaceRefreshSecs));
   protected readonly String = String;
   protected threadsValue(t: Threads | undefined): string {
     return t === undefined || t === 'auto' ? 'auto' : String(t.fixed);
