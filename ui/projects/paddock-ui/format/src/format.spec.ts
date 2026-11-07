@@ -1,3 +1,4 @@
+import storageCases from './storage-cases.json';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PSEUDO_LOCALE, setActiveLocale, SOURCE_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
 import {
@@ -38,6 +39,10 @@ describe('bytes', () => {
     for (const bad of [null, undefined, -1, Number.NaN]) expect(formatStorage(bad)).toBe(NONE);
     // The same number is a different size in the two kinds: 16 GiB of memory is 17.2 GB of storage.
     expect([formatBytes(16 * 1024 ** 3), formatStorage(16 * 1024 ** 3)]).toEqual(['16 GB', '17 GB']);
+  });
+  it('writes the shared case table of storage sizes (dyno-core reads the same file)', () => {
+    expect(storageCases.cases.length).toBeGreaterThanOrEqual(10);
+    for (const [bytes, text] of storageCases.cases as [number, string][]) expect(formatStorage(bytes), `${bytes} bytes`).toBe(text);
   });
   it('shows a dash for anything that is not a size, and the exact value for a tooltip', () => {
     for (const bad of [null, undefined, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(formatBytes(bad)).toBe(NONE);
