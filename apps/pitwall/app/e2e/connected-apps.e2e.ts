@@ -38,6 +38,11 @@ test.describe('connected apps and the chat model', () => {
     await expect(dyno.getByText('Top processes')).toBeVisible();
     await expect(dyno.getByRole('button', { name: 'Refresh tools' })).toBeVisible();
 
+    // One tool is always allowed: Ask again forgets just that one.
+    await dyno.getByRole('button', { name: 'Ask again before System summary' }).click();
+    await expect(dyno.getByText('Always allowed', { exact: true })).toHaveCount(0);
+    await expect(dyno.getByText('No tool is always allowed yet.')).toBeVisible();
+
     // The Chat tab is another window: it hears the connect and says so without being opened again.
     await expect(chat.getByTestId('chat-apps')).toHaveText('Tools from Dyno (6).');
 

@@ -194,6 +194,7 @@
         "popover_shape",
         "popover_values",
         "popover_view",
+        "revoke_tool_approval",
         "save_settings",
         "service_state",
         "set_app_key",

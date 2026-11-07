@@ -28,6 +28,8 @@ pub struct AppTool {
     pub title: String,
     /// It only looks (asked once, then remembered when allowed); otherwise an action, asked every call.
     pub read_only: bool,
+    /// The user said Always allow for it (Settings can ask again).
+    pub remembered: bool,
 }
 
 /// A family app as Settings > Connected apps shows it.
@@ -160,6 +162,13 @@ impl ConnectedApps {
 
     fn view(&self, id: &str) -> ConnectedApp {
         let live = lock(&self.live);
+        let allowed: Vec<String> = self
+            .policy
+            .remembered()
+            .into_iter()
+            .filter(|r| r.server == id)
+            .map(|r| r.tool)
+            .collect();
         let tools = live
             .get(id)
             .map(|l| {
@@ -167,6 +176,7 @@ impl ConnectedApps {
                     .iter()
                     .filter_map(|t| {
                         self.names.of(&t.spec().name).map(|(_, name)| AppTool {
+                            remembered: allowed.contains(&name),
                             name,
                             title: t.title().unwrap_or_default(),
                             read_only: !t.access().writes(),
@@ -250,6 +260,15 @@ impl ConnectedApps {
                 let _ = self.connect(id);
             }
         }
+    }
+
+    /// Asks again for one tool: its Always allow is forgotten.
+    pub fn revoke(&self, id: &str, tool: &str) -> Result<ConnectedApp, AppsError> {
+        title_of(id)?;
+        self.policy.revoke(id, tool);
+        log::info!(target: "pitwall_chat", "connected apps: {id} {tool} asks again");
+        self.publish();
+        Ok(self.view(id))
     }
 
     /// Forgets an app: its connection, its key and its remembered approvals.

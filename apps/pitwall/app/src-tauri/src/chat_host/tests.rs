@@ -508,6 +508,25 @@ fn connected_apps_keep_a_pasted_key_connect_list_tools_say_what_is_wrong_and_for
         ApprovalChoice::AlwaysAllow,
     );
     assert_eq!(apps.views()[0].remembered, 1);
+    let top = |v: &super::apps::ConnectedApp| v.tools.iter().find(|t| t.name == "top_processes").unwrap().remembered;
+    assert!(top(&apps.views()[0]), "the tool says it is always allowed");
+    // Ask again for one tool: its approval goes, the others stay; an unknown app or tool is refused.
+    let v = apps.revoke("dyno", "top_processes").unwrap();
+    assert!(!top(&v) && v.remembered == 0);
+    assert!(matches!(apps.revoke("recce", "x"), Err(AppsError::Unknown(_))));
+    assert_eq!(
+        apps.revoke("dyno", "top_processes").unwrap().remembered,
+        0,
+        "revoking twice is harmless"
+    );
+    policy.record(
+        &CallInfo {
+            tool: &spec,
+            access: Access::ReadOnly,
+            call: &call,
+        },
+        ApprovalChoice::AlwaysAllow,
+    );
     let v = apps.forget("dyno").unwrap();
     assert!(!v.key_saved && !v.connected && v.remembered == 0);
     let told = told.lock().unwrap().clone();

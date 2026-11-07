@@ -1086,6 +1086,8 @@ export interface AppTool {
   title: string;
   /** It only looks: asked once, then remembered when allowed. Otherwise an action, asked every call. */
   readOnly: boolean;
+  /** The user said Always allow for it. */
+  remembered: boolean;
 }
 
 /** A family app the chat can use, in Settings > Connected apps (`chat_host::apps::ConnectedApp`, ADR 0023 Decision 7). */

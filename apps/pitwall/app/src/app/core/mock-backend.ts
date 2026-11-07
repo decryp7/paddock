@@ -115,7 +115,7 @@ const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
-  'connectedApps', 'setAppKey', 'connectApp', 'forgetApp',
+  'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -1456,6 +1456,15 @@ export class MockBackend implements PitwallBackend {
     });
   }
 
+  revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp> {
+    return this.reply('revokeToolApproval', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      const tools = this.dyno_.tools.map((t) => (t.name === tool ? { ...t, remembered: false } : t));
+      this.dyno_ = { ...this.dyno_, tools, remembered: tools.filter((t) => t.remembered).length };
+      return this.appsChanged();
+    });
+  }
+
   private connectDyno(keyOk: boolean): ConnectedApp {
     this.dyno_ = keyOk
       ? {
@@ -1464,13 +1473,15 @@ export class MockBackend implements PitwallBackend {
           problem: null,
           keyRefused: false,
           tools: [
-            { name: 'alarms', title: 'Alarms', readOnly: true },
-            { name: 'cpu_memory', title: 'CPU and memory', readOnly: true },
-            { name: 'disks', title: 'Disks', readOnly: true },
-            { name: 'system_summary', title: 'System summary', readOnly: true },
-            { name: 'top_processes', title: 'Top processes', readOnly: true },
-            { name: 'keep_awake', title: 'Keep this Mac awake', readOnly: false },
+            { name: 'alarms', title: 'Alarms', readOnly: true, remembered: false },
+            { name: 'cpu_memory', title: 'CPU and memory', readOnly: true, remembered: false },
+            { name: 'disks', title: 'Disks', readOnly: true, remembered: false },
+            // One tool always allowed already (as after a chat), so Settings shows "Ask again".
+            { name: 'system_summary', title: 'System summary', readOnly: true, remembered: true },
+            { name: 'top_processes', title: 'Top processes', readOnly: true, remembered: false },
+            { name: 'keep_awake', title: 'Keep this Mac awake', readOnly: false, remembered: false },
           ],
+          remembered: 1,
         }
       : { ...this.dyno_, connected: false, keyRefused: true, tools: [], problem: 'Dyno refused the key. Issue a new key in Dyno\'s Settings > AI access and paste it here.' };
     return this.appsChanged();

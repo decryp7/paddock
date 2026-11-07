@@ -63,6 +63,7 @@ export const APP_COMMANDS = {
   resolve_preset: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   retry_engine_setup: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   revoke_key: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+  revoke_tool_approval: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   rollback_build: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   save_settings: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   search_models: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },

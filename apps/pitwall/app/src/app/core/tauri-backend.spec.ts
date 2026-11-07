@@ -90,6 +90,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['setAppKey', (b) => b.setAppKey('dyno', 'pmk_x'), 'set_app_key', { appId: 'dyno', key: 'pmk_x' }],
   ['connectApp', (b) => b.connectApp('dyno'), 'connect_app', { appId: 'dyno' }],
   ['forgetApp', (b) => b.forgetApp('dyno'), 'forget_app', { appId: 'dyno' }],
+  ['revokeToolApproval', (b) => b.revokeToolApproval('dyno', 'disks'), 'revoke_tool_approval', { appId: 'dyno', tool: 'disks' }],
   ['chatModels', (b) => b.chatModels(), 'chat_models_list', undefined],
   ['setChatModel', (b) => b.setChatModel('m1'), 'set_chat_model', { modelId: 'm1' }],
   ['removeLeftover', (b) => b.removeLeftover('pack-llamafile'), 'remove_leftover', { id: 'pack-llamafile' }],

@@ -48,7 +48,15 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
             @if (app.connected) {
               <ul class="tools" [attr.aria-label]="app.title + ' tools'">
                 @for (t of app.tools; track t.name) {
-                  <li><span class="tool" [attr.title]="t.name">{{ t.title }}</span><span class="kind">{{ t.readOnly ? 'Reads' : 'Action: asks every time' }}</span></li>
+                  <li>
+                    <span class="tool" [attr.title]="t.name">{{ t.title }}</span>
+                    @if (t.remembered) {
+                      <span class="kind">Always allowed</span>
+                      <button type="button" matButton class="again" [disabled]="busy()" [attr.aria-label]="'Ask again before ' + t.title" (click)="askAgain(app, t.name)">Ask again</button>
+                    } @else {
+                      <span class="kind">{{ t.readOnly ? 'Reads: asks the first time' : 'Action: asks every time' }}</span>
+                    }
+                  </li>
                 }
               </ul>
               <p class="note">{{ app.remembered === 0 ? 'No tool is always allowed yet.' : app.remembered + (app.remembered === 1 ? ' tool is' : ' tools are') + ' always allowed. Forget the app to ask again.' }}</p>
@@ -73,7 +81,8 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
     .spacer { flex: 1; }
     .problem { margin: 0; color: var(--pd-text); overflow-wrap: anywhere; }
     .tools { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--pd-space-1) var(--pd-space-4); }
-    .tools li { display: flex; justify-content: space-between; gap: var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); padding: var(--pd-space-1) 0; }
+    .tools li { display: flex; align-items: center; gap: var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); padding: var(--pd-space-1) 0; min-height: 36px; }
+    .tools .tool { flex: 1; }
     .tool { font-size: var(--pd-text-body); }
     .kind { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .note { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
@@ -135,6 +144,11 @@ export class ConnectedAppsPage {
 
   protected refresh(app: ConnectedApp): Promise<void> {
     return this.act(() => this.backend.connectApp(app.id));
+  }
+
+  /** Asks again before one tool (its Always allow is forgotten). */
+  protected askAgain(app: ConnectedApp, tool: string): Promise<void> {
+    return this.act(() => this.backend.revokeToolApproval(app.id, tool));
   }
 
   /** Forget asks first, naming what goes: the key, the connection and the always-allowed tools. */

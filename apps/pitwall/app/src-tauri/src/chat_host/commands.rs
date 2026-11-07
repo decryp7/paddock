@@ -151,6 +151,12 @@ pub async fn connect_app<R: Runtime>(app: AppHandle<R>, app_id: String) -> Resul
     on_apps(&app, move |a| a.connect(&app_id)).await
 }
 
+/// Asks again for one tool of `app_id`: its Always allow is forgotten.
+#[tauri::command]
+pub async fn revoke_tool_approval<R: Runtime>(app: AppHandle<R>, app_id: String, tool: String) -> Result<ConnectedApp, CommandError> {
+    on_apps(&app, move |a| a.revoke(&app_id, &tool)).await
+}
+
 /// Forgets `app_id`: its connection, its key and its remembered approvals.
 #[tauri::command]
 pub async fn forget_app<R: Runtime>(app: AppHandle<R>, app_id: String) -> Result<ConnectedApp, CommandError> {

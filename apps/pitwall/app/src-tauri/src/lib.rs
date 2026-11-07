@@ -130,6 +130,7 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => chat_host::commands::set_app_key,
     Mutation [WINDOW] => chat_host::commands::connect_app,
     Mutation [WINDOW] => chat_host::commands::forget_app,
+    Mutation [WINDOW] => chat_host::commands::revoke_tool_approval,
     Query [WINDOW] => chat_host::commands::chat_models_list,
     Mutation [WINDOW] => chat_host::commands::set_chat_model,
     Query [WINDOW] => commands::benchmarks,

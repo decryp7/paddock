@@ -52,6 +52,7 @@ paddock_dialogs::dialogs! {
             app::set_app_key,
             app::connect_app,
             app::forget_app,
+            app::revoke_tool_approval,
         ],
     },
     // "New app": the name (Create app is disabled until it is valid); the window that opened it creates the app.
@@ -108,6 +109,7 @@ mod tests {
             "set_app_key",
             "connect_app",
             "forget_app",
+            "revoke_tool_approval",
         ] {
             assert!(c.allows("pd.settings", command), "the Settings window may call {command}");
         }

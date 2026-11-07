@@ -416,6 +416,9 @@ export class TauriBackend implements PitwallBackend {
   forgetApp(appId: string): Promise<ConnectedApp> {
     return this.run('forget_app', { appId });
   }
+  revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp> {
+    return this.run('revoke_tool_approval', { appId, tool });
+  }
   chatModels(): Promise<ChatModels> {
     return this.run('chat_models_list');
   }
