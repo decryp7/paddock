@@ -3810,6 +3810,7 @@ dependencies = [
  "paddock-log",
  "paddock-mcp",
  "paddock-menu",
+ "paddock-net",
  "paddock-packs",
  "paddock-pitwall",
  "paddock-service",

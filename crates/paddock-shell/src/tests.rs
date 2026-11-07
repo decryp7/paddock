@@ -132,6 +132,7 @@ fn building_a_shell_registers_the_shared_limit_registries() {
         "storage.walk_entries",
         "updater.download_bytes",
         "diag.files",
+        "net.redirects",
         "bounded.cuts",
     ] {
         assert!(LimitId::is_registered(id), "{id} was not registered");
@@ -154,4 +155,57 @@ fn building_a_shell_registers_the_shared_limit_registries() {
     assert!(LimitId::is_registered(
         "app.limit_registered_by_the_builder"
     ));
+}
+
+/// Every crate the shell links that has a limit registry is registered by `register_shared_limits` (a registry left out would
+/// make its ids unknown to `LimitId::parse`, and a flood of them could refuse the known ones). The linked crates come from
+/// `cargo metadata` (the normal dependencies of this crate, transitively); a registry is a `pub const REGISTRY` in the crate's
+/// `limits.rs` or `limit_rows.rs`.
+#[test]
+fn every_limit_registry_the_shell_links_is_registered() {
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let out = std::process::Command::new(env!("CARGO"))
+        .args(["metadata", "--format-version", "1", "--offline", "--manifest-path"])
+        .arg(manifest.join("Cargo.toml"))
+        .output()
+        .expect("cargo metadata runs");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let meta: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let nodes = meta["resolve"]["nodes"].as_array().unwrap();
+    let find = |id: &str| nodes.iter().find(|n| n["id"] == id).unwrap();
+    let root = meta["resolve"]["root"].as_str().expect("a package, not a virtual workspace");
+    let mut seen = std::collections::BTreeSet::new();
+    let mut todo = vec![root.to_owned()];
+    while let Some(id) = todo.pop() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        for dep in find(&id)["deps"].as_array().unwrap() {
+            let normal = dep["dep_kinds"].as_array().unwrap().iter().any(|k| k["kind"].is_null());
+            if normal {
+                todo.push(dep["pkg"].as_str().unwrap().to_owned());
+            }
+        }
+    }
+    let builder = include_str!("builder.rs");
+    let mut missing = Vec::new();
+    let mut found = 0;
+    for pkg in meta["packages"].as_array().unwrap() {
+        if !seen.contains(pkg["id"].as_str().unwrap()) {
+            continue;
+        }
+        let dir = std::path::Path::new(pkg["manifest_path"].as_str().unwrap()).parent().unwrap().to_owned();
+        let name = pkg["name"].as_str().unwrap().replace('-', "_");
+        for module in ["limits", "limit_rows"] {
+            let file = dir.join("src").join(format!("{module}.rs"));
+            if std::fs::read_to_string(&file).is_ok_and(|t| t.contains("pub const REGISTRY")) {
+                found += 1;
+                if !builder.contains(&format!("{name}::{module}::REGISTRY")) {
+                    missing.push(format!("{name}::{module}::REGISTRY"));
+                }
+            }
+        }
+    }
+    assert!(found >= 4, "the scan found only {found} registries: it cannot see the graph");
+    assert!(missing.is_empty(), "register_shared_limits misses: {missing:?}");
 }
