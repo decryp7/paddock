@@ -159,7 +159,10 @@ const fmtTray = (r) => [`visible taskbar area (UI Automation, explorer buttons n
 
 /** After a restart, before Dyno is started by hand: what (if anything) started it, by which mechanism, how long after logon; and the tray. */
 async function afterRestartRecord(actor, label) {
-  const auto = autoStartRecord();
+  // Windows starts Run-key programs a little after the logon (its startup delay, longer under x64 emulation on this Arm guest): a condition wait of up to 120 s
+  // for Dyno to run before "nothing started it" is concluded.
+  let auto = autoStartRecord();
+  for (let i = 0; i < 12 && !auto.running; i++) { await sleep(10_000); auto = autoStartRecord(); }
   // After a restart the in-session actor may not start at once (the console session is still being set up): start it again until it
   // answers, bounded, and record how long that took.
   let actorUp = null;
