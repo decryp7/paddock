@@ -8,14 +8,13 @@
 //! Stop is honoured within [`CANCEL_POLL`], also while the model is still loading or the server is silent; the connection is
 //! dropped then, which makes the server cancel the work.
 //!
-//! [`SessionChats`] keeps a conversation for the session only: its store lives in a folder of its own, under a parent the host
-//! names, that is removed when the value is dropped. The saved store, attachments and "Don't save this chat" are WP-3b.
+//! The chat's conversations are kept by the assistant's `ConversationStore` in memory (`chat_host::commands::chat_store`);
+//! this module only talks to the server. The saved store, attachments and "Don't save this chat" are WP-3b.
 
 use crate::server_client::{FrameStream, ServerClient};
 use paddock_assistant::protocol::{DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE};
 use paddock_assistant::{
-    Cancel, ChatMessage, ChatRequest, ChatResponse, ConversationStore, LlmProvider, ProviderError, ProviderPhase, Role, StopReason,
-    ToolCall, Usage,
+    Cancel, ChatMessage, ChatRequest, ChatResponse, LlmProvider, ProviderError, ProviderPhase, Role, StopReason, ToolCall, Usage,
 };
 use pitwall_core::chat::Role as WireRole;
 use pitwall_core::mgmt::{
@@ -23,7 +22,6 @@ use pitwall_core::mgmt::{
     PlaygroundToolChoice,
 };
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -303,48 +301,12 @@ impl ServerChatProvider {
     }
 }
 
-/// A conversation store for the session only: its file lives in a folder of its own, removed when this is dropped.
-pub struct SessionChats {
-    dir: PathBuf,
-    store: Arc<ConversationStore>,
-}
-
-impl SessionChats {
-    /// A new, empty store in a folder of its own under `parent` (the app's cache folder from `paddock-env`; this crate never
-    /// reaches for the shared temporary folder).
-    pub fn new(parent: &std::path::Path) -> std::io::Result<SessionChats> {
-        static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let dir = parent.join(format!(
-            "chat-session-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&dir)?;
-        let store = Arc::new(ConversationStore::open(
-            dir.join("chats.json"),
-            Arc::new(paddock_health::SystemClock),
-        ));
-        Ok(SessionChats { dir, store })
-    }
-
-    /// The store the assistant is built over.
-    pub fn store(&self) -> Arc<ConversationStore> {
-        self.store.clone()
-    }
-}
-
-impl Drop for SessionChats {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::server_client::fake::FakeServer;
     use crate::server_client::BoxFuture;
-    use paddock_assistant::{StoredMessage, ToolSpec};
+    use paddock_assistant::ToolSpec;
     use pitwall_core::mgmt::{CommandError, ErrorCode, PlaygroundPhase};
     use serde_json::{json, Value};
 
@@ -724,24 +686,5 @@ mod tests {
 
         let all = LOGGED.lock().unwrap_or_else(PoisonError::into_inner).join("\n");
         assert!(!all.contains("secret-"), "no content in the log: {all}");
-    }
-
-    #[test]
-    fn a_session_chat_store_lives_in_its_own_folder_and_leaves_nothing_behind() {
-        let parent = tempfile::tempdir().unwrap();
-        let chats = SessionChats::new(parent.path()).unwrap();
-        let store = chats.store();
-        let (id, _, saved) = store.create(StoredMessage::user("hello", vec![], 1));
-        saved.unwrap();
-        assert!(store.get(&id).is_some());
-        let dir = chats.dir.clone();
-        assert!(dir.join("chats.json").exists());
-        drop(store);
-        drop(chats);
-        assert!(!dir.exists(), "the session's folder is removed");
-        assert_ne!(
-            SessionChats::new(parent.path()).unwrap().dir,
-            SessionChats::new(parent.path()).unwrap().dir
-        );
     }
 }

@@ -685,3 +685,14 @@ fn not_installed_and_too_old_are_said_in_pitwalls_own_words() {
     let closed = paddock_mcp::client::ClientError::Closed { cause: "x".into() };
     assert_eq!(init_problem(&closed, "Dyno"), closed.to_string());
 }
+
+/// ADR 0023 D3 note: until the saved store exists (WP-3b), every chat is "Don't save": kept in memory, no file at all, so
+/// nothing is left behind even when the app is killed.
+#[test]
+fn the_chats_store_is_in_memory_and_writes_no_file() {
+    let store = super::commands::chat_store();
+    assert!(!store.is_saved());
+    let (id, _, saved) = store.create(paddock_assistant::StoredMessage::user("q", vec![], 1));
+    assert!(saved.is_ok());
+    assert!(store.get(&id).is_some());
+}

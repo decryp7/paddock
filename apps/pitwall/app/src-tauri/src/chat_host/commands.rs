@@ -6,7 +6,7 @@
 use super::apps::{AppsError, ConnectedApp, ConnectedApps, Opened};
 use super::models::{chat_models, ChatModels, Facts};
 use super::{ChatLog, PitwallPolicy, ToolNames};
-use crate::chat_provider::{ServerChatProvider, SessionChats};
+use crate::chat_provider::ServerChatProvider;
 use crate::commands::{forward, SharedClient};
 use paddock_assistant::{Assistant, AssistantConfig, EventSink, Tools};
 use pitwall_core::mgmt::{CommandError, ErrorCode, LocalModel};
@@ -32,7 +32,6 @@ pub struct ChatState {
     /// Settings > Connected apps.
     pub apps: Arc<ConnectedApps>,
     client: SharedClient,
-    _chats: SessionChats,
 }
 
 fn secrets(data_dir: &Path) -> Arc<dyn paddock_secrets::Secrets> {
@@ -59,7 +58,6 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
             .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
     };
     let policy = Arc::new(PitwallPolicy::new(Some(data_dir), names.clone(), now));
-    let chats = SessionChats::new(&data_dir.join("cache"))?;
     let provider = Arc::new(ServerChatProvider::new(client.clone(), runtime, ""));
     let mut cfg = AssistantConfig::new("Pitwall", SYSTEM);
     cfg.budgets.max_wall = None;
@@ -70,7 +68,7 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
     let assistant = Assistant::new(
         provider.clone(),
         Tools::none(),
-        chats.store(),
+        chat_store(),
         Arc::new(paddock_health::SystemClock),
         cfg,
     );
@@ -87,8 +85,15 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
         provider,
         apps,
         client,
-        _chats: chats,
     })
+}
+
+/// The chat's conversations: in memory only until the saved store (ADR 0023 WP-3b, Decision 3); a chat then marked "Don't
+/// save" keeps using one like this (D3 note): no file, so nothing is left behind even when the app is killed.
+pub fn chat_store() -> Arc<paddock_assistant::ConversationStore> {
+    Arc::new(paddock_assistant::ConversationStore::in_memory(Arc::new(
+        paddock_health::SystemClock,
+    )))
 }
 
 /// Puts the chat in the app: the assistant's commands and events (each turn's sink logs one line per call), and the saved
