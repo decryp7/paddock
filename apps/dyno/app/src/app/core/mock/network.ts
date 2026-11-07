@@ -53,8 +53,16 @@ const CONNECTIONS: ConnectionRow[] = [
   conn('Spotify', 1544, '/Applications/Spotify.app', '35.186.224.25', 4070, 'closeWait', 'CLOSE_WAIT', 25, 52188),
 ];
 
+/** `?rows=many`: a busy machine, 12 programs with 12 sockets each, so the table needs its own scroller in any window. */
+function manyConnections(): ConnectionRow[] {
+  return Array.from({ length: 12 }, (_, p) =>
+    Array.from({ length: 12 }, (_, i) =>
+      conn(`Busy app ${String(p + 1).padStart(2, '0')}`, 7000 + p, `/Applications/Busy app ${p + 1}.app`, `34.224.${p}.${i + 1}`, 443, 'established', 'ESTABLISHED', i + 1, 50000 + p * 100 + i)),
+  ).flat();
+}
+
 /** The engine's filter, for the mock only. */
-export function mockNetwork(q: NetworkQuery, at: number): NetworkSnapshot {
+export function mockNetwork(q: NetworkQuery, at: number, many = false): NetworkSnapshot {
   const search = q.search.trim().toLowerCase();
   const name = (o: NetOwner) => (o.kind === 'process' ? o.name : 'owner unknown');
   const hit = (parts: (string | number)[]) => !search || parts.some((p) => String(p).toLowerCase().includes(search));
@@ -66,7 +74,7 @@ export function mockNetwork(q: NetworkQuery, at: number): NetworkSnapshot {
       (!q.state || q.state === 'listen') &&
       hit([l.port, l.local, name(l.owner)]),
   ).sort((a, b) => a.port - b.port);
-  const connections = CONNECTIONS.filter(
+  const connections = (many ? [...CONNECTIONS, ...manyConnections()] : CONNECTIONS).filter(
     (c) => (q.showLoopback || !c.remoteIsLoopback) && !q.exposedOnly && (!q.proto || q.proto === c.proto) && (!q.state || q.state === c.state) && (!q.country || c.country === q.country) && hit([c.remotePort, c.remote, c.localPort, name(c.owner)]),
   );
   const ago = <T extends { firstSeen: number | null }>(r: T): T => ({ ...r, firstSeen: r.firstSeen === null ? null : at - r.firstSeen });

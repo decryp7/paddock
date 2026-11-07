@@ -372,6 +372,11 @@ code,
   margin: 0 auto;
 }
 
+/* Table pages use the whole page area: the table is the content, so a width cap only wastes it (design guide section 2). */
+.page.wide {
+  max-width: none;
+}
+
 /* Forms and settings are narrower than data pages. */
 .page.narrow {
   max-width: 880px;

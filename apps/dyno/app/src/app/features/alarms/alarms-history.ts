@@ -18,14 +18,16 @@ interface HistoryRow {
   template: `
     <dy-async [loaded]="store.historyLoaded()" [error]="store.historyError()" [empty]="store.history().length === 0" emptyTitle="No alarm history yet" emptyText="Every change to an alarm is listed here: raised, acknowledged, shelved and more." emptyIcon="clock" what="alarm history" [rows]="4" (retry)="store.loadHistory()">
       <p class="lead num">The last {{ store.history().length }} changes</p>
-      <pd-table [toolbar]="false" label="Alarm history" [rows]="rows()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" height="window">
+      <pd-table [toolbar]="false" label="Alarm history" [rows]="rows()" [columns]="columns" [rowKey]="rowKey" [filterable]="false" height="fill">
         <ng-template pdCell="rule" let-r><span class="id">{{ ruleName(r.change.alarm.rule) }}</span></ng-template>
       </pd-table>
     </dy-async>
   `,
   styles: `
-    :host { display: block; }
-    dy-async { display: grid; gap: var(--sp-3); }
+    :host { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+    dy-async { display: flex; flex-direction: column; flex: 1 1 0; min-height: 360px; gap: var(--sp-3); }
+    dy-async > * { flex: none; }
+    dy-async > pd-table { flex: 1 1 0; }
     .id { font-size: var(--fs-sm); line-height: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
   `,
 })

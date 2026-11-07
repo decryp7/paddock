@@ -23,7 +23,7 @@ import { ExtrasStore } from '../../state/extras.store';
   imports: [MatTabsModule, JobProgressCard, ExtrasChanges, ExtrasSleep, ExtrasBoot, ExtrasApps, ExtrasGpu, ExtrasFiles, ExtrasInventory, ExtrasMaintenance],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="page">
+    <div class="page" [class.table-page]="tab() === 'inventory'">
       <header class="page-head">
         <div class="titles">
           <h1>Extras</h1>
@@ -56,9 +56,13 @@ import { ExtrasStore } from '../../state/extras.store';
     </div>
   `,
   styles: `
-    :host { display: block; }
+    :host { display: block; height: 100%; }
     .page { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-content: start; max-width: 1440px; }
     .page-head { margin-bottom: 0; }
+    /* The Inventory tab is one table: the whole page area, the table fills the height left (the other tabs are sections). */
+    .page.table-page { display: flex; flex-direction: column; max-width: none; min-height: 100%; padding-bottom: var(--sp-4); }
+    .page.table-page > * { flex: none; }
+    .page.table-page > mat-tab-nav-panel { flex: 1 1 auto; display: flex; flex-direction: column; }
   `,
 })
 export class ExtrasPage {

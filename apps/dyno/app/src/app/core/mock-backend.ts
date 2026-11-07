@@ -962,7 +962,7 @@ export class MockBackend implements DynoBackend {
   }
 
   network(query: NetworkQuery): Promise<NetworkSnapshot> {
-    return this.reply('network', () => mockNetwork(query, this.now()));
+    return this.reply('network', () => mockNetwork(query, this.now(), this.rowsMany));
   }
 
   resolveHosts(addresses: string[]): Promise<HostName[]> {

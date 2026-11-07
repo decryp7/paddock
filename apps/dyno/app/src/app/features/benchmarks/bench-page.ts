@@ -356,7 +356,7 @@ const KINDS: { kind: BenchKind; text: string }[] = [
     .metrics { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
     .metrics li { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--sp-3); }
     .metrics .label { color: var(--text-2); font-size: var(--fs-sm); }
-    .metrics .spread { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
+    .metrics .spread { white-space: nowrap; margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); }
     .metrics .value { font: var(--fw-semibold) var(--fs-lg) / 1.2 var(--font-display); font-variant-numeric: tabular-nums; text-align: right; }
     .metrics .value small { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-sans); color: var(--text-3); }
     .bar { position: relative; grid-column: 1 / -1; height: 7px; border-radius: 3px; background: var(--surface-active); }

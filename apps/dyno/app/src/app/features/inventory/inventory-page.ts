@@ -137,6 +137,7 @@ const HINT_TONE: Record<HintKind, string> = {
     :host { display: block; --hw-focus: var(--focus); }
     .page { display: grid; gap: var(--sp-4); align-content: start; }
     .page-head { margin-bottom: 0; }
+    dy-async { display: grid; gap: var(--sp-4); }
     .card { padding-bottom: var(--sp-4); }
     .stats { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-2); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
     .stats dt { color: var(--text-3); font-size: var(--fs-sm); }

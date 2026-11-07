@@ -201,7 +201,7 @@ function buildListRows(input: RowInput): Row[] {
         unavailable: unavailableOf(g.cpu, g.memory, g.diskBps),
         partial: g.partial,
         user: sharedUser(members),
-        pid: null,
+        pid: g.pids.length === 1 ? g.pids[0]! : null,
         ref: null,
         groupId: g.id,
         expandable: g.pids.length > 1,

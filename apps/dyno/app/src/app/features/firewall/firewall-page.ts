@@ -36,7 +36,7 @@ export function rulesLine(s: FirewallSource): string {
   imports: [AsyncState, FullTextTip, Icon, MatButton, PdCell, PdPathText, PdTable, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="page">
+    <div class="page wide fill">
       <header class="page-head">
         <div class="titles">
           <h1>Firewall</h1>
@@ -49,7 +49,7 @@ export function rulesLine(s: FirewallSource): string {
       <dy-async [loaded]="!!store.view()" [error]="store.error()" what="the firewall" [rows]="4" (retry)="store.load()">
         @if (store.view(); as v) {
           @for (s of v.sources; track s.source) {
-            <section class="source" [attr.data-source]="s.source" [attr.aria-label]="name(s.source)">
+            <section class="source" [class.has-table]="!s.rulesHidden && s.rules.length > 0" [attr.data-source]="s.source" [attr.aria-label]="name(s.source)">
               <h2>{{ name(s.source) }}</h2>
               @if (s.states.length > 0 || s.switches.length > 0) {
                 <p class="states">
@@ -70,7 +70,7 @@ export function rulesLine(s: FirewallSource): string {
               @if (!s.rulesHidden) {
                 <p class="faint num">{{ line(s) }}</p>
                 @if (s.rules.length > 0) {
-                  <pd-table [toolbar]="false" [label]="name(s.source) + ' rules'" [rows]="s.rules" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" height="window">
+                  <pd-table [toolbar]="false" [label]="name(s.source) + ' rules'" [rows]="s.rules" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" height="fill">
                     <ng-template pdCell="program" let-r let-folded="folded">
                       <span class="prog">
                         @if (r.program) { <pd-path-text [value]="r.program" /> } @else { <span class="faint">—</span> }
@@ -90,11 +90,17 @@ export function rulesLine(s: FirewallSource): string {
     </div>
   `,
   styles: `
-    :host { display: block; }
-    .page { display: grid; gap: var(--sp-3); align-content: start; }
+    :host { display: block; height: 100%; }
+    /* One table per source; the page fills the page area and each table takes what is left (at least 360 px per source, then the page scrolls). */
+    .page { display: flex; flex-direction: column; gap: var(--sp-3); min-height: 100%; padding-bottom: var(--sp-4); }
+    .page > * { flex: none; }
+    .page > dy-async { flex: 1 1 auto; }
     .page-head { display: flex; justify-content: space-between; gap: var(--sp-3); align-items: flex-start; }
-    dy-async { display: grid; gap: var(--sp-3); }
-    .source { display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+    dy-async { display: flex; flex-direction: column; gap: var(--sp-3); }
+    .source { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-2); }
+    .source.has-table { flex: 1 1 0; min-height: 360px; }
+    .source > * { flex: none; }
+    .source > pd-table { flex: 1 1 0; }
     h2 { margin: 0; font-size: var(--fs-md); }
     .states { margin: 0; display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
     .chip { padding: 2px 10px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: var(--fs-xs); }
@@ -121,7 +127,7 @@ export class FirewallPage implements OnInit {
     { key: 'enabled', header: 'On', value: (r) => r.enabled, text: (r) => (r.enabled ? 'Yes' : 'No'), width: '48px' },
     { key: 'program', header: 'Program', value: (r) => r.program ?? '', width: 'minmax(0, 2fr)', foldBelow: 760 },
     { key: 'ports', header: 'Ports', value: (r) => r.ports, text: (r) => r.ports ?? '—', width: '64px', hideBelow: 760 },
-    { key: 'addresses', header: 'Addresses', value: (r) => r.addresses, text: (r) => r.addresses ?? '—', width: 'minmax(6rem, 0.7fr)', hideBelow: 760 },
+    { key: 'addresses', header: 'Addresses', value: (r) => r.addresses, text: (r) => r.addresses ?? '—', width: 'minmax(10rem, 0.9fr)', hideBelow: 760 },
     { key: 'profile', header: 'Network', value: (r) => r.profile, text: (r) => PROFILE[r.profile], width: '120px', hideBelow: 760 },
   ];
   /** Where the window is too narrow for the Direction, Network, Ports and Addresses columns, they sit under the program. */
