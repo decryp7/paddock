@@ -345,7 +345,7 @@ describe('dy-extras-page', () => {
     await settle(f);
     btn(el, '1 GB').click();
     await settle(f);
-    expect(store.minMib()).toBe(1024);
+    expect(store.minMb()).toBe(1000);
     expect(el.querySelector('.none strong')).toBeNull();
     const limit = { limit: 'files' as const, message: 'Stopped after 500000 files and folders. Choose a smaller folder to see everything in it.' };
     vi.spyOn(mock, 'jobResult').mockResolvedValue({ finder: { scanId: 's', folder: '/x', large: [], duplicates: [], scanned: 10, unreadable: 0, limit, wastedBytes: 0 } });

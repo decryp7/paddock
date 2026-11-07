@@ -487,6 +487,8 @@ export interface DiskSettings {
   finderHashGib?: number;
   /** The disk maps kept for the next time (ADR 0029). */
   savedMaps?: SavedMapsSettings;
+  /** Seconds between two readings of the volumes' free space: 0 is Auto (60), else 10 to 600. */
+  spaceRefreshSecs?: number;
 }
 
 /** When a saved map is refreshed by itself: never (the default), or at the first look at the page when it is older than this. */
@@ -536,6 +538,10 @@ export interface Volume {
   reachable: boolean;
   /** Whether used space is a fixed scale for a scan; false for a network share (scanned like a folder). */
   wholeVolume: boolean;
+  /** When capacity and free were read (ms since 1970); absent before the agent stamped it. A share that stopped answering keeps its last figures and this time. */
+  measuredAt?: number | null;
+  /** How old the figures are against the refresh interval, decided by the agent. */
+  freshness?: 'fresh' | 'late' | 'stale';
 }
 
 /** What a scan covers. */

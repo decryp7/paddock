@@ -3,6 +3,8 @@
  * rules here (thresholds, scores and diagnoses come from the engine); only how numbers read.
  */
 
+import { formatStorage as sharedStorage } from '@decryp7/paddock-ui/format';
+
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const;
 
 /** Rounds to a precision that reads well: 3 significant digits below 100, none above (`1.23`, `12.3`, `123`). */
@@ -16,7 +18,10 @@ function trimZero(s: string): string {
   return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
 }
 
-/** `1536` → `1.5 KB` (binary multiples, labelled as users expect from Explorer / Finder). */
+/**
+ * Memory and transfer sizes, binary multiples: `1536` → `1.5 KB`. Memory is labelled KB / MB / GB as Task Manager and Activity
+ * Monitor do. Disks, volumes and files are storage: use {@link formatStorage} (decimal, like Finder).
+ */
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
   const sign = bytes < 0 ? '−' : '';
@@ -32,6 +37,18 @@ export function formatBytes(bytes: number | null | undefined): string {
     unit++;
   }
   return `${sign}${unit === 0 ? Math.round(value) : compact(value)} ${BYTE_UNITS[unit]}`;
+}
+
+/**
+ * Storage sizes (disks, volumes, files), decimal multiples like Finder and the disk makers: `994_662_584_320` → `995 GB`. The
+ * numbers come from the family's one formatter (`formatStorage` of `@decryp7/paddock-ui/format`); this adds only the app's
+ * conventions: a dash for nothing, a real minus sign, and `B` for bytes.
+ */
+export function formatStorage(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
+  const sign = bytes < 0 ? '−' : '';
+  const value = Math.abs(bytes);
+  return `${sign}${value < 1000 ? `${Math.round(value)} B` : sharedStorage(value)}`;
 }
 
 /** A byte delta with an explicit sign: `+12 MB`, `−3.4 GB`, `0 B`. */

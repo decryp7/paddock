@@ -182,6 +182,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
                 <pd-select [options]="readThreadChoices" [value]="threadsValue(disk().readThreads)" ariaLabel="Threads reading folders" (valueChange)="setDisk({ readThreads: threadsFrom($event) })" />
               </div>
               <div class="row">
+                <div class="lbl"><strong>Free space refresh</strong><small>How often Dyno reads the free space of every disk, whether or not a window is open. Auto: every minute.</small></div>
+                <pd-select [options]="spaceRefreshChoices" [value]="String(disk().spaceRefreshSecs ?? 0)" ariaLabel="Free space refresh" (valueChange)="setDisk({ spaceRefreshSecs: +$event })" />
+              </div>
+              <div class="row">
                 <div class="lbl"><strong>Jobs at once</strong><small>Searches, log reads and checks that run side by side; the rest wait their turn. Takes effect the next time Dyno starts.</small></div>
                 <pd-select [options]="jobWorkerChoices" [value]="threadsValue(jobs().workers)" ariaLabel="Jobs at once" (valueChange)="setJobs({ workers: threadsFrom($event) })" />
               </div>
@@ -459,6 +463,15 @@ export class SettingsPage implements OnInit {
   protected readonly jobs = computed<JobSettings>(() => this.draft()?.jobs ?? {});
   protected readonly readThreadChoices = threadChoices(16);
   protected readonly jobWorkerChoices = threadChoices(8);
+  protected readonly spaceRefreshChoices: PdSelectOption[] = [
+    { value: '0', label: 'Auto' },
+    { value: '10', label: '10 seconds' },
+    { value: '30', label: '30 seconds' },
+    { value: '120', label: '2 minutes' },
+    { value: '300', label: '5 minutes' },
+    { value: '600', label: '10 minutes' },
+  ];
+  protected readonly String = String;
   protected threadsValue(t: Threads | undefined): string {
     return t === undefined || t === 'auto' ? 'auto' : String(t.fixed);
   }

@@ -688,10 +688,10 @@ export class MockWidgets {
         if (state === 'error') return error("Couldn't read volumes", "The volume list didn't answer.");
         const GB = 1e9;
         if (this.longLists) {
-          const rows = Array.from({ length: 30 }, (_, i) => ({ id: `/Volumes/V${i}`, name: `Invented volume ${i + 1}`, usedPercent: (i * 7) % 100, freeBytes: (100 - ((i * 7) % 100)) * GB, totalBytes: 100 * GB, tone: 'ok' as const, reachable: true }));
+          const rows = Array.from({ length: 30 }, (_, i) => ({ id: `/Volumes/V${i}`, name: `Invented volume ${i + 1}`, usedPercent: (i * 7) % 100, freeBytes: (100 - ((i * 7) % 100)) * GB, totalBytes: 100 * GB, tone: 'ok' as const, reachable: true, measuredAt: null, freshness: 'fresh' as const }));
           return ready({ diskSpace: { rows, more: 0 } }, stale);
         }
-        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true }], more: 0 } }, stale);
+        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true, measuredAt: null, freshness: 'fresh' as const }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true, measuredAt: null, freshness: 'fresh' as const }], more: 0 } }, stale);
       }
       case 'cpuMemory':
         return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3 * 1024 ** 3, memoryTotal: 32 * 1024 ** 3, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);

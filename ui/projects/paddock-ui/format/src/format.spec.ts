@@ -4,6 +4,7 @@ import {
   NONE,
   TransferMeter,
   formatBytes,
+  formatStorage,
   formatCompact,
   formatCount,
   formatDateTime,
@@ -29,6 +30,14 @@ describe('bytes', () => {
     expect([formatBytes(0), formatBytes(1), formatBytes(12), formatBytes(1023)]).toEqual(['0 bytes', '1 byte', '12 bytes', '1,023 bytes']);
     expect([formatBytes(1500), formatBytes(850 * 1024), formatBytes(1.2 * 1024 ** 3), formatBytes(1023.9 * 1024)]).toEqual(['1.5 KB', '850 KB', '1.2 GB', '1 MB']);
     expect(formatBytes(5 * 1024 ** 5)).toBe('5 PB');
+  });
+  it('writes storage sizes in decimal steps like Finder, and memory sizes in binary steps', () => {
+    expect([formatStorage(994_662_584_320), formatStorage(4_000_577_273_856), formatStorage(1_000_000_000_000)]).toEqual(['995 GB', '4 TB', '1 TB']);
+    expect([formatStorage(0), formatStorage(999), formatStorage(1500), formatStorage(999_900)]).toEqual(['0 bytes', '999 bytes', '1.5 KB', '1 MB']);
+    expect(formatStorage(1000 ** 5)).toBe('1 PB');
+    for (const bad of [null, undefined, -1, Number.NaN]) expect(formatStorage(bad)).toBe(NONE);
+    // The same number is a different size in the two kinds: 16 GiB of memory is 17.2 GB of storage.
+    expect([formatBytes(16 * 1024 ** 3), formatStorage(16 * 1024 ** 3)]).toEqual(['16 GB', '17 GB']);
   });
   it('shows a dash for anything that is not a size, and the exact value for a tooltip', () => {
     for (const bad of [null, undefined, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(formatBytes(bad)).toBe(NONE);

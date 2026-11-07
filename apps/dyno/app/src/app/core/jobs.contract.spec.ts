@@ -42,7 +42,7 @@ const specs: JobSpec[] = [
   { helper: { action: 'turnOff' } },
 ];
 
-const diskDefaults: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' } };
+const diskDefaults: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' }, spaceRefreshSecs: 0 };
 const jobDefaults: JobSettings = { workers: 'auto' };
 
 describe('the jobs wire contract with the engine', () => {

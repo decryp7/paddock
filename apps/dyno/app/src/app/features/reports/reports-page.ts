@@ -3,7 +3,7 @@ import { PdPathText, SuSparkline } from '@decryp7/paddock-ui';
 import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { Consumer } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
+import { formatBytes, formatStorage, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { SEVERITY_LABEL } from '../../shared/labels';
 import { ReportsStore } from '../../state/reports.store';
@@ -189,7 +189,7 @@ export class ReportsPage implements OnInit {
     { key: 'cpu', header: 'CPU (average)', value: (a) => a.cpuAvg, text: (a) => formatPercent(a.cpuAvg, 0), align: 'end', sortable: false, width: '150px' },
     { key: 'memory', header: 'Memory (average)', value: (a) => a.memoryAvg, text: (a) => formatBytes(a.memoryAvg), align: 'end', sortable: false, width: '150px' },
   ];
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatStorage;
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly plural = plural;
   protected readonly count = formatCount;

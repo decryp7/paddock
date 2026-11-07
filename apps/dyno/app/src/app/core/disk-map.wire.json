@@ -306,7 +306,8 @@
       "maxMb": 1024,
       "refreshOnOpen": "off"
     },
-    "scanFolders": 2000000
+    "scanFolders": 2000000,
+    "spaceRefreshSecs": 0
   },
   "statuses": [
     {
@@ -343,9 +344,11 @@
       "volume": {
         "capacity": 1000,
         "free": 400,
+        "freshness": "fresh",
         "fs": "apfs",
         "id": "Macintosh HD",
         "location": "internal",
+        "measuredAt": null,
         "mount": "/Volumes/Macintosh HD",
         "name": "Macintosh HD",
         "reachable": true,
@@ -684,9 +687,11 @@
     {
       "capacity": 1000,
       "free": 400,
+      "freshness": "fresh",
       "fs": "apfs",
       "id": "Macintosh HD",
       "location": "internal",
+      "measuredAt": null,
       "mount": "/Volumes/Macintosh HD",
       "name": "Macintosh HD",
       "reachable": true,
@@ -697,6 +702,7 @@
     {
       "capacity": 1000,
       "free": 400,
+      "freshness": "fresh",
       "fs": "apfs",
       "id": "Photos",
       "location": {
@@ -704,6 +710,7 @@
           "bus": "USB"
         }
       },
+      "measuredAt": null,
       "mount": "/Volumes/Photos",
       "name": "Photos",
       "reachable": true,
@@ -714,6 +721,7 @@
     {
       "capacity": 1000,
       "free": 400,
+      "freshness": "fresh",
       "fs": "apfs",
       "id": "Media",
       "location": {
@@ -722,6 +730,7 @@
           "protocol": "webDav"
         }
       },
+      "measuredAt": null,
       "mount": "/Volumes/Media",
       "name": "Media",
       "reachable": true,

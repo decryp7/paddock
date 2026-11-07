@@ -31,6 +31,14 @@ pub const MAX_KEPT: usize = 3;
 pub const MAX_KEPT_NODES: usize = 8_000_000;
 /// How long the first look at a scan's root may take before the start is refused (a dead share must not hold the request).
 pub const STAT_LIMIT: std::time::Duration = std::time::Duration::from_secs(5);
+/// A cached volume list older than this when the popup or the Disk map asks is read again in the background (the answer to the ask
+/// itself stays instant and the new figures arrive through the change event).
+pub const OPEN_FRESH_MS: u64 = 5_000;
+/// Every this many space readings the mounts are listed again (a volume that came or went), the safety net for the missing OS hooks.
+pub const RELIST_EVERY: u64 = 5;
+/// A volume's free space moving by more than this share of its capacity is announced.
+const MOVED_FRACTION: f64 = 0.01;
+
 /// Threads of one server still inside calls that never returned before a new scan of it is refused.
 pub const MAX_ABANDONED_PER_HOST: usize = 4;
 
@@ -401,8 +409,18 @@ pub struct DiskCentre {
     starting: Mutex<HashSet<String>>,
     kept_nodes: AtomicUsize,
     refreshing: std::sync::atomic::AtomicBool,
+    /// An OS event arrived while a listing ran: list once more when it ends.
+    relist_again: std::sync::atomic::AtomicBool,
     listing_ticket: AtomicU64,
     listing_applied: AtomicU64,
+    /// When the volumes' figures were last read (listing or space reading), on the clock.
+    space_at: Mutex<Option<u64>>,
+    /// Seconds between two space readings, as the Setting resolved it.
+    space_secs: AtomicU64,
+    space_ticks: AtomicU64,
+    space_reading: std::sync::atomic::AtomicBool,
+    space_ticket: AtomicU64,
+    space_applied: AtomicU64,
     next: AtomicU64,
     scans: Mutex<Vec<Arc<Entry>>>,
     live: Mutex<HashMap<String, Arc<LiveWorkers>>>,
@@ -412,6 +430,14 @@ pub struct DiskCentre {
     tick: AtomicU64,
     /// The Setting `disk.savedMaps.enabled` as last applied.
     saved_on: std::sync::atomic::AtomicBool,
+}
+
+/// Whether the free space of a volume moved by more than 1% of its capacity between two readings.
+fn moved(old: &Volume, new: &Volume) -> bool {
+    match (old.free, new.free, new.capacity.or(old.capacity)) {
+        (Some(a), Some(b), Some(cap)) if cap > 0 => (a.abs_diff(b) as f64) / (cap as f64) > MOVED_FRACTION,
+        (a, b, _) => a != b,
+    }
 }
 
 fn err(code: ErrorCode, m: impl Into<String>) -> AgentError {
@@ -443,8 +469,15 @@ impl DiskCentre {
             starting: Mutex::new(HashSet::new()),
             kept_nodes: AtomicUsize::new(MAX_KEPT_NODES),
             refreshing: std::sync::atomic::AtomicBool::new(false),
+            relist_again: std::sync::atomic::AtomicBool::new(false),
             listing_ticket: AtomicU64::new(0),
             listing_applied: AtomicU64::new(0),
+            space_at: Mutex::new(None),
+            space_secs: AtomicU64::new(u64::from(dyno_core::disk::settings::SPACE_REFRESH_AUTO_SECS)),
+            space_ticks: AtomicU64::new(0),
+            space_reading: std::sync::atomic::AtomicBool::new(false),
+            space_ticket: AtomicU64::new(0),
+            space_applied: AtomicU64::new(0),
             next: AtomicU64::new(1),
             scans: Mutex::new(Vec::new()),
             live: Mutex::new(HashMap::new()),
@@ -481,33 +514,169 @@ impl DiskCentre {
             // The last answer now; the system is asked again in the background for the next call.
             Some(k) => {
                 self.refresh_in_background();
-                k.into_iter().map(|l| l.volume).collect()
+                k.into_iter().map(|l| self.stamped(l.volume)).collect()
             }
-            None => self.refresh().into_iter().map(|l| l.volume).collect(),
+            None => self.refresh().into_iter().map(|l| self.stamped(l.volume)).collect(),
         }
     }
 
     /// The volumes as last listed, without asking the system and without starting a listing on the caller's thread: `None`
-    /// before the first listing has finished (one is started in the background). The popup reads this on every ask.
+    /// before the first listing has finished (one is started in the background). The popup reads this on every ask. When the
+    /// figures are older than [`OPEN_FRESH_MS`] a space reading is started in the background; this ask still answers from the
+    /// cache and the new figures arrive through the change event.
     pub fn cached_volumes(self: &Arc<Self>) -> Option<Vec<Volume>> {
         let known = lock(&self.known).clone();
         if known.is_none() {
             self.refresh_in_background();
+        } else if self.age_ms().is_some_and(|age| age > OPEN_FRESH_MS) {
+            self.read_space_in_background("page");
         }
-        known.map(|k| k.into_iter().map(|l| l.volume).collect())
+        known.map(|k| k.into_iter().map(|l| self.stamped(l.volume)).collect())
+    }
+
+    /// The volume as handed out: with how old its figures are against the refresh interval (the views say so; the rule is not theirs).
+    fn stamped(&self, mut v: Volume) -> Volume {
+        let secs = u32::try_from(self.space_secs.load(Ordering::Relaxed)).unwrap_or(u32::MAX);
+        v.freshness = dyno_core::disk::volume::freshness(v.measured_at, self.clock.wall_ms(), secs);
+        v
+    }
+
+    /// Milliseconds since the figures were last read; `None` when they never were.
+    fn age_ms(&self) -> Option<u64> {
+        (*lock(&self.space_at)).map(|at| self.clock.now_ms().saturating_sub(at))
+    }
+
+    /// The Setting `disk.spaceRefreshSecs` (0 is Auto): how often the space ticker reads the volumes' figures.
+    pub fn set_space_refresh(&self, secs: u32) {
+        self.space_secs
+            .store(u64::from(dyno_core::disk::settings::space_refresh_secs(secs)), Ordering::Relaxed);
+    }
+
+    /// Called often by the agent's space ticker (and by tests with a fake clock): reads the figures when the interval has passed
+    /// since they were last read; every [`RELIST_EVERY`]th time the mounts are listed again instead. Never on a request path.
+    pub fn tick(self: &Arc<Self>) {
+        let interval_ms = self.space_secs.load(Ordering::Relaxed) * 1000;
+        if self.age_ms().is_some_and(|age| age < interval_ms) {
+            return;
+        }
+        if self.space_ticks.fetch_add(1, Ordering::SeqCst) % RELIST_EVERY == RELIST_EVERY - 1 {
+            self.refresh_as("timer");
+        } else {
+            self.read_space("timer");
+        }
+    }
+
+    /// A space reading on a thread of its own; does nothing while one is running or before the first listing.
+    fn read_space_in_background(self: &Arc<Self>, trigger: &'static str) {
+        if self.space_reading.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let me = self.clone();
+        let spawned = std::thread::Builder::new().name("dyno-space".into()).spawn(move || {
+            dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+            me.read_space_now(trigger);
+            me.space_reading.store(false, Ordering::SeqCst);
+        });
+        if spawned.is_err() {
+            self.space_reading.store(false, Ordering::SeqCst);
+        }
+    }
+
+    /// A space reading on the caller's thread (the ticker's), skipped while a background one runs.
+    fn read_space(&self, trigger: &'static str) {
+        if self.space_reading.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.read_space_now(trigger);
+        self.space_reading.store(false, Ordering::SeqCst);
+    }
+
+    /// Reads capacity and free of every listed volume again and updates the kept list in place (a volume that did not answer keeps
+    /// its last figures and its time, and is marked not answering if it is a share). Announces a change like a listing does.
+    fn read_space_now(&self, trigger: &'static str) {
+        let began = std::time::Instant::now();
+        let ticket = self.space_ticket.fetch_add(1, Ordering::SeqCst) + 1;
+        let Some(listed) = lock(&self.known).clone() else { return };
+        let reads: Vec<(String, Option<(u64, u64)>)> = listed.iter().map(|l| (l.volume.id.clone(), self.lister.space_now(l))).collect();
+        let (wall, now) = (self.clock.wall_ms(), self.clock.now_ms());
+        let (changed, volumes) = {
+            let mut known = lock(&self.known);
+            let Some(known) = known.as_mut() else { return };
+            if ticket <= self.space_applied.load(Ordering::SeqCst) {
+                return;
+            }
+            self.space_applied.store(ticket, Ordering::SeqCst);
+            let mut changed = false;
+            for (id, read) in &reads {
+                let Some(l) = known.iter_mut().find(|l| &l.volume.id == id) else {
+                    continue;
+                };
+                let network = matches!(l.volume.location, VolumeLocation::Network { .. });
+                match read {
+                    Some((total, free)) => {
+                        let new = Volume {
+                            capacity: Some(*total),
+                            free: Some((*free).min(*total)),
+                            reachable: true,
+                            measured_at: Some(wall),
+                            ..l.volume.clone()
+                        };
+                        changed |= moved(&l.volume, &new) || new.reachable != l.volume.reachable;
+                        l.volume = new;
+                    }
+                    None if network => {
+                        changed |= l.volume.reachable;
+                        l.volume.reachable = false;
+                    }
+                    None => {}
+                }
+            }
+            (changed, known.iter().map(|l| self.stamped(l.volume.clone())).collect::<Vec<_>>())
+        };
+        *lock(&self.space_at) = Some(now);
+        log::info!(
+            "disk space read: trigger={trigger} volumes={} ms={} ticket={ticket} changed={changed}",
+            volumes.len(),
+            began.elapsed().as_millis()
+        );
+        for (id, read) in &reads {
+            if read.is_none() {
+                log::warn!("disk space not answered: volume={id} trigger={trigger}");
+            }
+        }
+        if changed {
+            self.sink.volumes_changed(ticket, volumes);
+        }
     }
 
     /// Asks the system for the volumes on a thread of its own and remembers the answer; does nothing while such a call is
     /// already running. Never blocks the caller (the system can take seconds when a share has gone away).
     pub fn refresh_in_background(self: &Arc<Self>) {
+        self.refresh_in_background_for("start");
+    }
+
+    /// The OS said the mounts changed (a volume came or went, or the computer woke): lists them again at once on a thread of its
+    /// own. An event that arrives while a listing runs makes that listing run once more, so the last change is never missed.
+    pub fn on_system_event(self: &Arc<Self>, trigger: &'static str) {
+        log::info!("disk volumes: system event trigger={trigger}");
+        self.refresh_in_background_for(trigger);
+    }
+
+    fn refresh_in_background_for(self: &Arc<Self>, trigger: &'static str) {
         if self.refreshing.swap(true, Ordering::SeqCst) {
+            self.relist_again.store(true, Ordering::SeqCst);
             return;
         }
         let me = self.clone();
         let spawned = std::thread::Builder::new().name("dyno-volumes".into()).spawn(move || {
             // The Disk map's volume list fills from it: live work (rule 52).
             dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
-            me.refresh();
+            loop {
+                me.refresh_as(trigger);
+                if !me.relist_again.swap(false, Ordering::SeqCst) {
+                    break;
+                }
+            }
             me.refreshing.store(false, Ordering::SeqCst);
         });
         if spawned.is_err() {
@@ -515,11 +684,21 @@ impl DiskCentre {
         }
     }
 
-    /// Asks the lister and keeps the answer unless a later question has already been answered (two listings can overlap, and the
-    /// older one may come back last). Tells the sink when the set of volumes differs from the one kept before.
     fn refresh(&self) -> Vec<ListedVolume> {
+        self.refresh_as("ask")
+    }
+
+    /// Asks the lister and keeps the answer unless a later question has already been answered (two listings can overlap, and the
+    /// older one may come back last). Tells the sink when the set of volumes differs from the one kept before, or when a volume's
+    /// free space moved by more than 1% of its capacity.
+    fn refresh_as(&self, trigger: &'static str) -> Vec<ListedVolume> {
+        let began = std::time::Instant::now();
         let ticket = self.listing_ticket.fetch_add(1, Ordering::SeqCst) + 1;
-        let listed = self.lister.list();
+        let mut listed = self.lister.list();
+        let (wall, now) = (self.clock.wall_ms(), self.clock.now_ms());
+        for l in &mut listed {
+            l.volume.measured_at = l.volume.capacity.map(|_| wall);
+        }
         let changed = {
             let mut known = lock(&self.known);
             if ticket <= self.listing_applied.load(Ordering::SeqCst) {
@@ -527,12 +706,22 @@ impl DiskCentre {
             }
             self.listing_applied.store(ticket, Ordering::SeqCst);
             let identity = |l: &Vec<ListedVolume>| l.iter().map(|v| (v.volume.id.clone(), v.volume.reachable)).collect::<Vec<_>>();
-            let changed = known.as_ref().is_some_and(|old| identity(old) != identity(&listed));
+            let changed = known
+                .as_ref()
+                .is_some_and(|old| identity(old) != identity(&listed) || old.iter().zip(&listed).any(|(o, n)| moved(&o.volume, &n.volume)));
             *known = Some(listed.clone());
+            // Before the list is visible, so an ask never sees a list without its age.
+            *lock(&self.space_at) = Some(now);
             changed
         };
+        log::info!(
+            "disk volumes listed: trigger={trigger} count={} ms={} ticket={ticket} changed={changed}",
+            listed.len(),
+            began.elapsed().as_millis()
+        );
         if changed {
-            self.sink.volumes_changed(ticket, listed.iter().map(|l| l.volume.clone()).collect());
+            self.sink
+                .volumes_changed(ticket, listed.iter().map(|l| self.stamped(l.volume.clone())).collect());
         }
         listed
     }
@@ -1263,7 +1452,7 @@ mod tests {
     }
 
     /// A fixed volume list that counts how often it was asked.
-    struct Fixed(Mutex<Vec<ListedVolume>>, AtomicUsize, Mutex<Option<(u64, u64)>>);
+    struct Fixed(Mutex<Vec<ListedVolume>>, AtomicUsize, Mutex<Option<(u64, u64)>>, AtomicUsize);
 
     impl VolumeLister for Fixed {
         fn list(&self) -> Vec<ListedVolume> {
@@ -1273,6 +1462,15 @@ mod tests {
 
         fn capacity_now(&self, _: &ListedVolume) -> Option<(u64, u64)> {
             *lock(&self.2)
+        }
+
+        /// What the listed volume has now (a volume the test marks unreachable does not answer), counting the asks.
+        fn space_now(&self, v: &ListedVolume) -> Option<(u64, u64)> {
+            self.3.fetch_add(1, Ordering::SeqCst);
+            lock(&self.0)
+                .iter()
+                .find(|l| l.volume.id == v.volume.id && l.volume.reachable)
+                .and_then(|l| Some((l.volume.capacity?, l.volume.free?)))
         }
     }
 
@@ -1291,6 +1489,8 @@ mod tests {
                 read_only: false,
                 reachable: true,
                 whole_volume: !network,
+                measured_at: None,
+                freshness: Default::default(),
             },
             root: root.to_path_buf(),
             identity: None,
@@ -1335,7 +1535,12 @@ mod tests {
             Arc::new(Manual::default()),
             Arc::new(Access::default()),
         );
-        let lister = Arc::new(Fixed(Mutex::new(volumes), AtomicUsize::new(0), Mutex::new(None)));
+        let lister = Arc::new(Fixed(
+            Mutex::new(volumes),
+            AtomicUsize::new(0),
+            Mutex::new(None),
+            AtomicUsize::new(0),
+        ));
         let centre = DiskCentre::new(
             source,
             lister.clone(),
@@ -1369,8 +1574,20 @@ mod tests {
             None,
             "the first call lists nothing on the caller's thread"
         );
+        let listed = wait_cached(&r);
+        assert_eq!(listed.len(), 1);
+        let after = r.lister.1.load(Ordering::SeqCst);
+        assert_eq!(r.centre.cached_volumes().map(|v| v.len()), Some(1));
+        assert_eq!(
+            r.lister.1.load(Ordering::SeqCst),
+            after,
+            "a cached read within the freshness window never asks the system again"
+        );
+    }
+
+    fn wait_cached(r: &Rig) -> Vec<Volume> {
         let began = std::time::Instant::now();
-        let listed = loop {
+        loop {
             if let Some(v) = r.centre.cached_volumes() {
                 break v;
             }
@@ -1379,15 +1596,139 @@ mod tests {
                 "the background listing never finished"
             );
             std::thread::yield_now();
-        };
-        assert_eq!(listed.len(), 1);
-        let after = r.lister.1.load(Ordering::SeqCst);
-        assert_eq!(r.centre.cached_volumes().map(|v| v.len()), Some(1));
+        }
+    }
+
+    /// Waits until `reads` space readings have been asked and none is running.
+    fn wait_reads(r: &Rig, reads: usize) {
+        let began = std::time::Instant::now();
+        while r.lister.3.load(Ordering::SeqCst) < reads || r.centre.space_reading.load(Ordering::SeqCst) {
+            assert!(
+                began.elapsed() < std::time::Duration::from_secs(60),
+                "the background reading never ran"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    fn free_of(r: &Rig) -> Option<u64> {
+        r.centre.cached_volumes().unwrap()[0].free
+    }
+
+    /// The popup reads the cached list on every ask: figures older than the freshness window must be read again in the
+    /// background (the free space it showed was 589 GB for hours on a Mac that had 1,256 GB).
+    #[test]
+    fn cached_volumes_refresh_once_they_are_older_than_the_freshness_window() {
+        let fs = Arc::new(FakeFs::new());
+        let mut v = vol("Macintosh HD", &fs.root(), VolumeLocation::Internal);
+        v.volume.capacity = Some(2_000_000_000_000);
+        v.volume.free = Some(589_000_000_000);
+        let r = rig(fs.clone(), vec![v]);
+        assert_eq!(r.centre.cached_volumes(), None);
+        wait_cached(&r);
+        assert_eq!(free_of(&r), Some(589_000_000_000));
+
+        lock(&r.lister.0)[0].volume.free = Some(1_256_000_000_000);
+        r.clock.0.store(3_000, Ordering::SeqCst);
+        assert_eq!(free_of(&r), Some(589_000_000_000));
         assert_eq!(
-            r.lister.1.load(Ordering::SeqCst),
-            after,
-            "a cached read never asks the system again"
+            r.lister.3.load(Ordering::SeqCst),
+            0,
+            "an ask within the freshness window reads nothing"
         );
+
+        r.clock.0.store(61_000, Ordering::SeqCst);
+        assert_eq!(free_of(&r), Some(589_000_000_000), "the ask itself answers at once from the cache");
+        wait_reads(&r, 1);
+        assert_eq!(free_of(&r), Some(1_256_000_000_000));
+        let seen = lock(&r.events.1).clone();
+        assert_eq!(seen.len(), 1, "free space that moved by more than 1% of the capacity is announced");
+        assert_eq!(seen[0][0].free, Some(1_256_000_000_000));
+        assert_eq!(
+            r.centre.cached_volumes().unwrap()[0].measured_at,
+            Some(1_700_000_061_000),
+            "stamped with the clock"
+        );
+    }
+
+    /// The volumes are handed out with how old their figures are, against the Setting's interval.
+    #[test]
+    fn volumes_are_handed_out_with_their_freshness() {
+        use dyno_core::disk::volume::Freshness;
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        let at = |ms: u64| {
+            r.clock.0.store(ms, Ordering::SeqCst);
+            let v = lock(&r.centre.known).clone().unwrap()[0].volume.clone();
+            r.centre.stamped(v).freshness
+        };
+        assert_eq!(at(119_000), Freshness::Fresh);
+        assert_eq!(at(121_000), Freshness::Late);
+        assert_eq!(at(301_000), Freshness::Stale);
+        r.centre.set_space_refresh(600);
+        assert_eq!(at(301_000), Freshness::Fresh, "the interval is the Setting's");
+    }
+
+    /// The ticker reads the figures at the interval, with nobody asking.
+    #[test]
+    fn space_is_read_again_once_the_interval_has_passed() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        r.clock.0.store(59_000, Ordering::SeqCst);
+        r.centre.tick();
+        assert_eq!(r.lister.3.load(Ordering::SeqCst), 0, "59 s: not due");
+        lock(&r.lister.0)[0].volume.free = Some(100 * MB);
+        r.clock.0.store(60_000, Ordering::SeqCst);
+        r.centre.tick();
+        assert_eq!(r.lister.3.load(Ordering::SeqCst), 1, "60 s: read");
+        let v = r.centre.cached_volumes().unwrap();
+        assert_eq!((v[0].free, v[0].measured_at), (Some(100 * MB), Some(1_700_000_060_000)));
+        r.centre.set_space_refresh(10);
+        r.clock.0.store(70_000, Ordering::SeqCst);
+        r.centre.tick();
+        assert_eq!(r.lister.3.load(Ordering::SeqCst), 2, "the Setting moves the interval");
+    }
+
+    /// Every fifth reading lists the mounts again, so a volume that came or went is found without OS hooks.
+    #[test]
+    fn every_fifth_tick_lists_the_mounts_again() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        let listings = || r.lister.1.load(Ordering::SeqCst);
+        assert_eq!(listings(), 1);
+        for i in 1..=4u64 {
+            r.clock.0.store(i * 60_000, Ordering::SeqCst);
+            r.centre.tick();
+        }
+        assert_eq!((listings(), r.lister.3.load(Ordering::SeqCst)), (1, 4));
+        lock(&r.lister.0).push(vol("W", &fs.root(), VolumeLocation::External { bus: None }));
+        r.clock.0.store(5 * 60_000, Ordering::SeqCst);
+        r.centre.tick();
+        assert_eq!(listings(), 2, "the fifth tick lists");
+        assert_eq!(r.centre.cached_volumes().unwrap().len(), 2);
+    }
+
+    /// A share that stops answering keeps its last figures and time, marked not answering.
+    #[test]
+    fn a_network_volume_that_stops_answering_is_marked_stale_not_current() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("S", &fs.root(), net("nas"))]);
+        r.centre.refresh();
+        lock(&r.lister.0)[0].volume.reachable = false;
+        r.clock.0.store(60_000, Ordering::SeqCst);
+        r.centre.tick();
+        let v = r.centre.cached_volumes().unwrap();
+        assert!(!v[0].reachable, "not answering");
+        assert_eq!(v[0].free, Some(400 * MB), "the last figure is kept");
+        assert_eq!(
+            v[0].measured_at,
+            Some(1_700_000_000_000),
+            "with the time it was measured, not the time of the failed read"
+        );
+        assert_eq!(lock(&r.events.1).len(), 1, "going stale is announced");
     }
 
     /// root with a (5 MB + 100 B), b (3 MB), c (2 KB), loose 7 B.
@@ -2163,14 +2504,17 @@ mod tests {
     }
 
     #[test]
-    fn a_change_in_the_volumes_is_announced_but_not_a_change_in_free_space() {
+    fn a_change_in_the_volumes_is_announced_but_not_a_small_change_in_free_space() {
         let fs = Arc::new(FakeFs::new());
         let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
         r.centre.refresh();
         assert!(lock(&r.events.1).is_empty(), "the first listing is not a change");
-        lock(&r.lister.0)[0].volume.free = Some(1);
+        lock(&r.lister.0)[0].volume.free = Some(400 * MB - MB / 2);
         r.centre.refresh();
-        assert!(lock(&r.events.1).is_empty(), "free space moves all the time");
+        assert!(
+            lock(&r.events.1).is_empty(),
+            "free space moves all the time: under 1% of the capacity is not announced"
+        );
         lock(&r.lister.0).push(vol("W", &fs.root(), VolumeLocation::External { bus: None }));
         r.centre.refresh();
         let seen = lock(&r.events.1).clone();
@@ -2179,6 +2523,85 @@ mod tests {
         lock(&r.lister.0)[1].volume.reachable = false;
         r.centre.refresh();
         assert_eq!(lock(&r.events.1).len(), 2, "a volume that stopped answering is a change");
+    }
+
+    fn wait_listings(r: &Rig, listings: usize) {
+        let began = std::time::Instant::now();
+        while r.lister.1.load(Ordering::SeqCst) < listings || r.centre.refreshing.load(Ordering::SeqCst) {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the listing never ran");
+            std::thread::yield_now();
+        }
+    }
+
+    /// A mount event from the OS lists the mounts again at once, without waiting for the ticker.
+    #[test]
+    fn a_mount_event_lists_the_mounts_again_at_once() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        lock(&r.lister.0).push(vol("USB", &fs.root(), VolumeLocation::External { bus: None }));
+        r.centre.on_system_event("mount");
+        wait_listings(&r, 2);
+        assert_eq!(
+            r.centre.cached_volumes().unwrap().len(),
+            2,
+            "the new volume is known without a tick"
+        );
+        assert_eq!(lock(&r.events.1).len(), 1, "and announced");
+    }
+
+    /// The fake source of the agent's mount-event thread drives the centre the way the OS adapters do.
+    #[test]
+    fn the_mount_event_thread_passes_each_trigger_to_the_centre() {
+        struct Fake(Vec<&'static str>);
+        impl crate::disk::mounts::MountEvents for Fake {
+            fn watch(&self, _stopped: &(dyn Fn() -> bool + Sync), on_event: &(dyn Fn(&'static str) + Sync)) {
+                for t in &self.0 {
+                    on_event(t);
+                }
+            }
+        }
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        crate::disk::mounts::run(&r.centre, &Fake(vec!["mount"]), &|| false);
+        wait_listings(&r, 2);
+        assert!(r.lister.1.load(Ordering::SeqCst) >= 2);
+    }
+
+    /// A listing that is running when another event arrives runs once more, so a change in between is not lost.
+    #[test]
+    fn an_event_during_a_listing_makes_it_run_again() {
+        let fs = Arc::new(FakeFs::new());
+        let (tx, asked) = std::sync::mpsc::channel();
+        let hold = Gate::new();
+        let lister = Arc::new(Overlapping {
+            calls: AtomicUsize::new(0),
+            hold: hold.clone(),
+            first_asked: Mutex::new(tx),
+            old: vec![vol("OLD", &fs.root(), VolumeLocation::Internal)],
+            new: vec![vol("NEW", &fs.root(), VolumeLocation::Internal)],
+        });
+        let centre = Arc::new(DiskCentre::new(
+            fs.clone(),
+            lister.clone(),
+            Arc::new(Events::default()),
+            Arc::new(Manual::default()),
+            Arc::new(Access::default()),
+            8,
+            ScanLimits::default(),
+        ));
+        centre.on_system_event("mount");
+        asked.recv().unwrap();
+        centre.on_system_event("mount");
+        hold.open();
+        let began = std::time::Instant::now();
+        while lister.calls.load(Ordering::SeqCst) < 2 || centre.refreshing.load(Ordering::SeqCst) {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the second listing never ran");
+            std::thread::yield_now();
+        }
+        let names: Vec<String> = lock(&centre.known).clone().unwrap().iter().map(|l| l.volume.id.clone()).collect();
+        assert_eq!(names, ["NEW"]);
     }
 
     /// A lister whose first answer is held (an older question that comes back last).

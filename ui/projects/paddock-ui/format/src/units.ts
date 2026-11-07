@@ -4,9 +4,11 @@
  * go through `$localize` with `@@pd.format.` ids. Unknown, negative or non-finite input shows as "—" (`NONE`), except
  * where the value is optional decoration (a rate or an ETA), which returns '' so callers can drop the whole fragment.
  *
- * Byte sizes use binary steps (1024) with the short labels KB / MB / GB / TB, as Windows Explorer does, so a file
- * shown in an app matches what the file manager shows. Keep exact values in a tooltip (`formatExactBytes`). Domain
- * wording (token counts, GHz) stays in the apps.
+ * Two kinds of size, both labelled KB / MB / GB / TB. Memory and transfer use binary steps (1024; `formatBytes`,
+ * `formatRate`), as Task Manager and Activity Monitor do. Storage (disks, volumes, files) uses decimal steps (1000;
+ * `formatStorage`), as Finder and the disk makers do, so a 1 TB disk reads "1.0 TB" and not "931 GB". Pick the kind by
+ * what the number measures, never by taste. Keep exact values in a tooltip (`formatExactBytes`). Domain wording
+ * (token counts, GHz) stays in the apps.
  */
 import { activeLocale, groupedNumber, PSEUDO_LOCALE, plural, SOURCE_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
 
@@ -105,17 +107,26 @@ function roundSize(value: number): number {
   return value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
 }
 
-/** "12 bytes", "1 byte", "850 KB", "1.2 GB". 1023.9 KB rounds up to "1 MB", not "1,024 KB". */
-export function formatBytes(bytes: number | null | undefined): string {
+function scaledSize(bytes: number | null | undefined, step: number): string {
   if (!usable(bytes)) return NONE;
-  if (bytes < 1024) return plainBytes(Math.round(bytes));
-  let value = bytes / 1024;
+  if (bytes < step) return plainBytes(Math.round(bytes));
+  let value = bytes / step;
   let i = 0;
-  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= 1024) {
-    value /= 1024;
+  while (i < BYTE_UNITS.length - 1 && roundSize(value) >= step) {
+    value /= step;
     i++;
   }
   return `${nf(value < 10 ? 1 : 0).format(value)} ${BYTE_UNITS[i]}`;
+}
+
+/** Memory and transfer sizes, binary steps: "12 bytes", "1 byte", "850 KB", "1.2 GB". 1023.9 KB rounds up to "1 MB", not "1,024 KB". */
+export function formatBytes(bytes: number | null | undefined): string {
+  return scaledSize(bytes, 1024);
+}
+
+/** Storage sizes (disks, volumes, files), decimal steps like Finder: "995 GB", "4 TB", "12 bytes". 999.9 KB rounds up to "1 MB". */
+export function formatStorage(bytes: number | null | undefined): string {
+  return scaledSize(bytes, 1000);
 }
 
 /** The exact size for a tooltip: "1,234,567 bytes". */

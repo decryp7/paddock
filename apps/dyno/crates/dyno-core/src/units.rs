@@ -17,6 +17,23 @@ pub fn bytes(n: u64) -> String {
     }
 }
 
+/// Storage sizes (disks, volumes, files) in decimal units with one decimal, as Finder and the disk makers count: "994.7 GB" for
+/// 994,662,584,320 bytes (KB = 1000 bytes). Memory and transfer use [`bytes`]. The UI's `formatStorage` follows the same steps.
+pub fn storage(n: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
+    let mut v = n as f64;
+    let mut u = 0;
+    while v >= 1000.0 && u < UNITS.len() - 1 {
+        v /= 1000.0;
+        u += 1;
+    }
+    if u == 0 {
+        format!("{n} B")
+    } else {
+        format!("{v:.1} {}", UNITS[u])
+    }
+}
+
 /// A duration in the two largest units: "45s", "15m", "2h 5m", "3d 4h".
 pub fn duration(secs: u64) -> String {
     let (d, h, m, s) = (secs / 86_400, secs / 3_600 % 24, secs / 60 % 60, secs % 60);
@@ -47,6 +64,17 @@ mod tests {
                 .replace("EB", "PB")
                 .replace("16.0", &format!("{:.1}", u64::MAX as f64 / 1024f64.powi(5)))
         );
+    }
+
+    #[test]
+    fn storage_reads_in_decimal_steps_like_finder() {
+        assert_eq!(storage(0), "0 B");
+        assert_eq!(storage(999), "999 B");
+        assert_eq!(storage(1_500), "1.5 KB");
+        assert_eq!(storage(994_662_584_320), "994.7 GB");
+        assert_eq!(storage(4_000_577_273_856), "4.0 TB");
+        assert_eq!(bytes(1000 * 1000 * 1000), "953.7 MB", "memory stays binary");
+        assert_eq!(storage(1000 * 1000 * 1000), "1.0 GB");
     }
 
     #[test]

@@ -253,6 +253,20 @@ fn a_nearly_full_volume_is_bad_and_an_unanswering_share_says_so() {
 }
 
 #[test]
+fn a_row_carries_when_its_figures_were_read_and_how_old_the_agent_says_they_are() {
+    use crate::disk::volume::Freshness;
+    let mut v = volumes();
+    v[0].measured_at = Some(1_700_000_000_000);
+    v[0].freshness = Freshness::Stale;
+    let PopoverValue::DiskSpace { rows, .. } = value(run(&PopoverWidget::disk(VolumeChoice::All), |i| i.volumes = Source::Ready(&v)))
+    else {
+        panic!()
+    };
+    let row = rows.iter().find(|r| r.id == v[0].id).unwrap();
+    assert_eq!((row.measured_at, row.freshness), (Some(1_700_000_000_000), Freshness::Stale));
+}
+
+#[test]
 fn the_system_volume_is_found_by_mount_or_as_the_first_internal_one() {
     let v = volumes();
     assert_eq!(system_volume(&v).unwrap().id, "/");

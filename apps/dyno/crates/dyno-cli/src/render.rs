@@ -10,7 +10,7 @@ use dyno_core::grouping::AppGroup;
 use dyno_core::health::Severity;
 use dyno_core::metrics::{MemoryPressure, Reading};
 use dyno_core::protocol::LiveUpdate;
-use dyno_core::units::{bytes, duration};
+use dyno_core::units::{bytes, duration, storage};
 use serde::Serialize;
 
 /// Pretty JSON for any serialisable value (the structures here cannot fail to serialise; a failure prints `null`).
@@ -147,7 +147,7 @@ pub fn status_text(u: &LiveUpdate, agent: &AgentInfo) -> String {
         out += &format!("Swap      {} of {}\n", bytes(s.memory.swap_used), bytes(s.memory.swap_total));
     }
     for d in &s.disks {
-        out += &format!("Disk      {}: {} free of {}\n", d.name, bytes(d.free), bytes(d.total));
+        out += &format!("Disk      {}: {} free of {}\n", d.name, storage(d.free), storage(d.total));
     }
     let (down, up) = (
         s.network.iter().map(|n| n.rx_bps).sum::<f64>(),

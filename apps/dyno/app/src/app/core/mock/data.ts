@@ -204,7 +204,7 @@ export function demoSettings(): Settings {
     retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },
     alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10, trayAlertPercent: 90 },
     // What the engine's DiskSettings::default() gives (crates/dyno-core/src/disk/settings.rs).
-    disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' } },
+    disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' }, spaceRefreshSecs: 0 },
     jobs: { workers: 'auto' },
     webApi: { enabled: false, port: 7878, lan: false },
     ipLookup: { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' },

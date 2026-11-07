@@ -26,6 +26,7 @@ pub mod helper_sweep;
 pub mod inventory;
 pub mod issues;
 pub mod links;
+pub mod mount_events;
 pub mod network;
 pub mod nt;
 pub mod parse;

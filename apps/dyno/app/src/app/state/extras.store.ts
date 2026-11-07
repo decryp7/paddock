@@ -20,9 +20,9 @@ import { toCommandError } from '../core/command-error';
 import type { JobOutput, JobSpec } from '../core/api.types';
 import { JobStarter, progressOf, type JobRun } from '../core/job-starter';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
-import { DEFAULT_MIN_MIB, mibToBytes } from '../features/extras/files-model';
+import { DEFAULT_MIN_MB, mbToBytes } from '../features/extras/files-model';
 import type { ExtrasTab } from '../features/extras/extras-model';
-import { fileName, formatBytes } from '../shared/format';
+import { fileName, formatStorage } from '../shared/format';
 import { Notifier } from '../shared/notifier';
 import { SettingsStore } from './settings.store';
 
@@ -54,7 +54,7 @@ interface ExtrasState {
   // The file finder.
   folder: string | null;
   mode: FinderMode;
-  minMib: number;
+  minMb: number;
   finder: Resource<FinderResult>;
   /** The running search's job id (its progress is the shell's job status). */
   finderJobId: number | null;
@@ -99,7 +99,7 @@ export const ExtrasStore = signalStore(
     saveError: null,
     folder: null,
     mode: 'both',
-    minMib: DEFAULT_MIN_MIB,
+    minMb: DEFAULT_MIN_MB,
     finder: idle<FinderResult>(),
     finderJobId: null,
     readJobIds: {},
@@ -168,7 +168,7 @@ export const ExtrasStore = signalStore(
       const current = store.finder();
       patchState(store, { finder: { ...current, loading: true, error: null }, finderJobId: null, finderCancelled: false });
       const run = (finderRun = starter.run(
-        { findFiles: { query: { folder, mode: store.mode(), minBytes: mibToBytes(store.minMib()) } } },
+        { findFiles: { query: { folder, mode: store.mode(), minBytes: mbToBytes(store.minMb()) } } },
         (finderJobId) => {
           if (mine === tokens['finder']) patchState(store, { finderJobId });
         },
@@ -262,9 +262,9 @@ export const ExtrasStore = signalStore(
         patchState(store, { mode });
         await search();
       },
-      async setMinMib(minMib: number): Promise<void> {
-        if (minMib === store.minMib()) return;
-        patchState(store, { minMib });
+      async setMinMb(minMb: number): Promise<void> {
+        if (minMb === store.minMb()) return;
+        patchState(store, { minMb });
         await search();
       },
       // -------------------------------------------------------------------------------------- inventory
@@ -277,7 +277,7 @@ export const ExtrasStore = signalStore(
           patchState(store, { exporting: false });
           if (saved) {
             patchState(store, { saved });
-            notifier.show(`Saved ${fileName(saved.path)} (${formatBytes(saved.bytes)})`);
+            notifier.show(`Saved ${fileName(saved.path)} (${formatStorage(saved.bytes)})`);
           }
         } catch (e) {
           patchState(store, { exporting: false, saveError: toCommandError(e) });

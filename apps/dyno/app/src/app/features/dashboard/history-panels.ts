@@ -6,7 +6,7 @@ import { Chart } from '../../shared/chart';
 import { AsyncState } from '../../shared/async-state';
 import { Icon } from '../../shared/icon';
 import { EVENT_LABEL, forecastText } from '../../shared/labels';
-import { formatBytes, formatPercent } from '../../shared/format';
+import { formatPercent, formatStorage } from '../../shared/format';
 import { LiveStore } from '../../state/live.store';
 import { HistoryStore } from '../../state/history.store';
 import { EVENT_STYLE, consumersOption, diskTrendOption, eventCounts, historyOption } from './history-options';
@@ -145,7 +145,7 @@ export class DiskTrendPanel {
   protected readonly tone = computed(() => (typeof this.trend()?.forecast === 'object' ? 'warn' : 'ok'));
   protected readonly option = computed(() => (this.trend() ? diskTrendOption(this.trend()!, this.theme.tokens()) : null));
   protected readonly last = computed(() => this.trend()?.points.at(-1)?.free ?? 0);
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatStorage;
 }
 
 /** The apps that used the most CPU over the range. */

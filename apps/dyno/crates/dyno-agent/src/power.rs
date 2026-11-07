@@ -263,6 +263,10 @@ impl PowerCentre {
                 PowerEvent::Woke => ("the computer woke", Event::Woke),
             };
             log::info!(target: "dyno_agent::power", "power event: {text}");
+            if event == PowerEvent::Woke {
+                // Volumes may have come or gone, and free space moved, while the computer slept.
+                shared.disk.on_system_event("wake");
+            }
             self.apply(shared, mapped, now());
         }
     }
