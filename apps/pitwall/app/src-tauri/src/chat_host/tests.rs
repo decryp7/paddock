@@ -179,6 +179,7 @@ fn ask(text: &str, conversation: Option<String>) -> SendRequest {
         context: vec![],
         allow_write: true,
         attachments: vec![],
+        save: true,
     }
 }
 

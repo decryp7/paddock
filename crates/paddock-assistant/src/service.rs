@@ -83,6 +83,16 @@ pub struct SendRequest {
     #[serde(default)]
     #[cfg_attr(test, ts(as = "Option<Vec<Attachment>>", optional))]
     pub attachments: Vec<Attachment>,
+    /// Whether the conversation this question starts is saved (ADR 0023 D3: "Don't save this chat" sends `false`); a
+    /// follow-up keeps its conversation's choice. Left out: `true`. A store that keeps every conversation one way ignores it
+    /// ([`Conversations::create_saved`]).
+    #[serde(default = "saved_by_default")]
+    #[cfg_attr(test, ts(as = "Option<bool>", optional))]
+    pub save: bool,
+}
+
+fn saved_by_default() -> bool {
+    true
 }
 
 /// The answer to a send: the turn runs on and reports through events.
@@ -354,7 +364,7 @@ impl Assistant {
                     .ok_or(AssistantError::NotFound)?;
                 (id, title, saved)
             }
-            None => self.store.create(user),
+            None => self.store.create_saved(user, req.save),
         };
         let run = Arc::new(Run {
             cancel: Cancel::new(),
