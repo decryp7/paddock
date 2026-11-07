@@ -58,11 +58,11 @@ mod tests {
     }
 
     limit_cases! { REGISTRY;
-        encoded_over_the_limit: "view.encoded_bytes" => stop(got = ViewError::TooLarge { bytes: MAX_ENCODED + 1 }.limit().unwrap(), limit = Quantity::Bytes(MAX_ENCODED as u64), setting = None),
-        too_many_nodes: "view.nodes" => stop(got = ViewError::TooManyNodes { path: at("root") }.limit().unwrap(), limit = Quantity::Count(MAX_NODES as u64), setting = None),
-        too_many_rows: "view.inline_rows" => stop(got = ViewError::TooManyRows { path: at("root.rows"), rows: MAX_INLINE_ROWS + 1 }.limit().unwrap(), limit = Quantity::Count(MAX_INLINE_ROWS as u64), setting = None),
-        string_too_long: "view.string_bytes" => stop(got = ViewError::StringTooLong { path: at("root.text"), len: MAX_STRING + 1 }.limit().unwrap(), limit = Quantity::Bytes(MAX_STRING as u64), setting = None),
-        too_deep: "view.depth" => stop(got = ViewError::TooDeep { path: at("root") }.limit().unwrap(), limit = Quantity::Count(MAX_DEPTH as u64), setting = None),
+        encoded_over_the_limit: "view.encoded_bytes" => stop(got = ViewError::TooLarge { bytes: MAX_ENCODED + 1 }.limit().unwrap(), limit = Quantity::Bytes(MAX_ENCODED as u64), setting = None, reached = Some(Quantity::Bytes(MAX_ENCODED as u64 + 1))),
+        too_many_nodes: "view.nodes" => stop(got = ViewError::TooManyNodes { path: at("root") }.limit().unwrap(), limit = Quantity::Count(MAX_NODES as u64), setting = None, reached = None),
+        too_many_rows: "view.inline_rows" => stop(got = ViewError::TooManyRows { path: at("root.rows"), rows: MAX_INLINE_ROWS + 1 }.limit().unwrap(), limit = Quantity::Count(MAX_INLINE_ROWS as u64), setting = None, reached = Some(Quantity::Count(MAX_INLINE_ROWS as u64 + 1))),
+        string_too_long: "view.string_bytes" => stop(got = ViewError::StringTooLong { path: at("root.text"), len: MAX_STRING + 1 }.limit().unwrap(), limit = Quantity::Bytes(MAX_STRING as u64), setting = None, reached = Some(Quantity::Bytes(MAX_STRING as u64 + 1))),
+        too_deep: "view.depth" => stop(got = ViewError::TooDeep { path: at("root") }.limit().unwrap(), limit = Quantity::Count(MAX_DEPTH as u64), setting = None, reached = None),
     }
 
     #[test]

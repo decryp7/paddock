@@ -39,6 +39,9 @@ pub struct StopExpect {
     pub limit: Quantity,
     /// The Setting path the message must name, or `None` for a hard limit.
     pub setting: Option<&'static str>,
+    /// The observed value the error must carry: `None` checks nothing, `Some(None)` requires that the error knows none,
+    /// `Some(Some(q))` requires `q`.
+    pub reached: Option<Option<Quantity>>,
 }
 
 /// The stop form: see the module.
@@ -72,6 +75,12 @@ pub fn assert_stop_case(
         row_path, expect.setting,
         "limit {id}: the registry row's Setting path differs from the case"
     );
+    if let Some(reached) = expect.reached {
+        assert_eq!(
+            got.reached, reached,
+            "limit {id}: the error carries another observed value"
+        );
+    }
     let text = got.message(registry);
     assert!(
         text.contains(id.as_str()),
@@ -161,6 +170,20 @@ macro_rules! limit_case {
             &$crate::limits::StopExpect {
                 limit: $limit,
                 setting: $setting,
+                reached: None,
+            },
+        )
+    };
+    (stop, $registry:expr, $id:literal, got = $got:expr, limit = $limit:expr, setting = $setting:expr,
+     reached = $reached:expr $(,)?) => {
+        $crate::limits::assert_stop_case(
+            &$registry,
+            $id,
+            $got,
+            &$crate::limits::StopExpect {
+                limit: $limit,
+                setting: $setting,
+                reached: Some($reached),
             },
         )
     };

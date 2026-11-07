@@ -117,6 +117,69 @@ fn a_wrong_value_fails() {
 }
 
 #[test]
+#[should_panic(expected = "another observed value")]
+fn a_wrong_reached_value_fails() {
+    limit_case!(
+        stop,
+        REGISTRY,
+        "kit.frame",
+        got = exceeded("kit.frame", Quantity::Bytes(16 << 20), Scope::Process)
+            .reaching(Quantity::Bytes(20 << 20))
+            .unwrap(),
+        limit = Quantity::Bytes(16 << 20),
+        setting = None,
+        reached = Some(Quantity::Bytes(21 << 20))
+    );
+}
+
+#[test]
+#[should_panic(expected = "another observed value")]
+fn a_dropped_reached_value_fails_when_the_case_names_one() {
+    limit_case!(
+        stop,
+        REGISTRY,
+        "kit.frame",
+        got = exceeded("kit.frame", Quantity::Bytes(16 << 20), Scope::Process),
+        limit = Quantity::Bytes(16 << 20),
+        setting = None,
+        reached = Some(Quantity::Bytes(20 << 20))
+    );
+}
+
+#[test]
+fn a_matching_reached_value_or_none_passes_and_no_reached_checks_nothing() {
+    let with = exceeded("kit.frame", Quantity::Bytes(16 << 20), Scope::Process)
+        .reaching(Quantity::Bytes(20 << 20))
+        .unwrap();
+    limit_case!(
+        stop,
+        REGISTRY,
+        "kit.frame",
+        got = with,
+        limit = Quantity::Bytes(16 << 20),
+        setting = None,
+        reached = Some(Quantity::Bytes(20 << 20))
+    );
+    limit_case!(
+        stop,
+        REGISTRY,
+        "kit.frame",
+        got = exceeded("kit.frame", Quantity::Bytes(16 << 20), Scope::Process),
+        limit = Quantity::Bytes(16 << 20),
+        setting = None,
+        reached = None
+    );
+    limit_case!(
+        stop,
+        REGISTRY,
+        "kit.frame",
+        got = with,
+        limit = Quantity::Bytes(16 << 20),
+        setting = None
+    );
+}
+
+#[test]
 #[should_panic(expected = "Setting path differs")]
 fn a_setting_the_row_does_not_have_fails() {
     limit_case!(

@@ -4,7 +4,7 @@
 use crate::model::Cause;
 use paddock_limits::{LimitExceeded, Quantity, Registry, SettingLabels};
 
-/// The largest cap suggested, in MiB (a `u32` of them).
+/// The largest cap suggested, in MiB (a `u32` of them), when the row names no maximum of its own.
 const MAX_SUGGESTED_MB: u64 = u32::MAX as u64;
 
 impl Cause {
@@ -14,7 +14,9 @@ impl Cause {
     /// - `detail`: the logging form of the same message, with the id and the observed value;
     /// - `code`: `limit.<id>`, the stable key of the wording;
     /// - `settings`: the section of the Setting that raises the limit (the part of its path before the first `.`);
-    /// - `raise_cap`: for a limit in bytes that a Setting raises, the plugin or process (`target`) and double the limit, in MiB.
+    /// - `raise_cap`: for a limit in bytes that a Setting raises, the plugin or process (`target`) and a larger cap in MiB: double
+    ///   the limit, at least 1 MiB and at most the row's maximum. None when the limit is already at that maximum (nothing larger can
+    ///   be set).
     pub fn from_limit(
         limit: &LimitExceeded,
         registry: &Registry,
@@ -31,10 +33,15 @@ impl Cause {
         if let Some(path) = limit.setting_path(registry) {
             cause.settings = path.as_str().split('.').next().map(Box::from);
             if let Quantity::Bytes(bytes) = limit.limit {
-                let mb = (bytes / (1 << 20))
-                    .saturating_mul(2)
-                    .clamp(1, MAX_SUGGESTED_MB);
-                cause = cause.raise_cap(target, u32::try_from(mb).unwrap_or(u32::MAX));
+                let ceiling = match registry.get(limit.id).map(|row| row.max) {
+                    Some(Quantity::Bytes(max)) => (max / (1 << 20)).clamp(1, MAX_SUGGESTED_MB),
+                    _ => MAX_SUGGESTED_MB,
+                };
+                let now = bytes / (1 << 20);
+                let mb = now.saturating_mul(2).clamp(1, ceiling);
+                if mb > now {
+                    cause = cause.raise_cap(target, u32::try_from(mb).unwrap_or(u32::MAX));
+                }
             }
         }
         cause
@@ -46,7 +53,22 @@ mod tests {
     use super::*;
     use paddock_limits::{LimitId, LimitRow, Remedy, RowKind, RowValue, Scope, SettingPath, Unit};
 
-    static ROWS: [LimitRow; 2] = [
+    static ROWS: [LimitRow; 3] = [
+        LimitRow {
+            id: LimitId::new("open.memory"),
+            unit: Unit::Bytes,
+            default: Quantity::Bytes(1 << 30),
+            min: Quantity::Bytes(1),
+            max: Quantity::Bytes(u64::MAX),
+            value: RowValue::Setting {
+                path: SettingPath::new("performance.openMb"),
+            },
+            kind: RowKind::Stop,
+            selections: &[],
+            remedy: Remedy::RaiseSetting {
+                path: SettingPath::new("performance.openMb"),
+            },
+        },
         LimitRow {
             id: LimitId::new("plugin.memory"),
             unit: Unit::Bytes,
@@ -118,6 +140,32 @@ mod tests {
         assert!(plain.message.contains("performance.pluginMemoryMb"));
     }
 
+    fn memory(bytes: u64) -> LimitExceeded {
+        LimitExceeded::new(
+            LimitId::new("plugin.memory"),
+            Quantity::Bytes(bytes),
+            Scope::Plugin,
+        )
+    }
+
+    fn suggested(bytes: u64) -> Option<u32> {
+        let reg = Registry::new(&ROWS);
+        Cause::from_limit(&memory(bytes), &reg, None, "plugin:p")
+            .raise_cap
+            .map(|c| c.suggested_mb)
+    }
+
+    #[test]
+    fn the_suggested_cap_is_at_least_one_mib_and_at_most_the_rows_maximum() {
+        // Below one MiB the doubled limit rounds to 0 MiB; the suggestion is 1.
+        assert_eq!(suggested(100 << 10), Some(1));
+        // Double 3 GiB is 6 GiB; the row's maximum is 4 GiB.
+        assert_eq!(suggested(3 << 30), Some(4096));
+        // Already at the maximum: nothing larger to suggest, so no cap is offered (the section still is).
+        assert_eq!(suggested(4 << 30), None);
+        assert_eq!(suggested(1 << 30), Some(2048));
+    }
+
     #[test]
     fn a_hard_limit_has_no_cap_and_no_settings_section() {
         let reg = Registry::new(&ROWS);
@@ -166,14 +214,17 @@ mod tests {
     #[test]
     fn a_huge_limit_saturates_the_suggestion() {
         let reg = Registry::new(&ROWS);
-        let limit = LimitExceeded::new(
-            LimitId::new("plugin.memory"),
-            Quantity::Bytes(u64::MAX),
+        // A row with no maximum of its own: the suggestion saturates at the largest `u32` of MiB.
+        let open = LimitExceeded::new(
+            LimitId::new("open.memory"),
+            Quantity::Bytes(((1u64 << 31) + 1) << 20),
             Scope::Plugin,
         );
-        let cap = Cause::from_limit(&limit, &reg, None, "p")
+        let cap = Cause::from_limit(&open, &reg, None, "p")
             .raise_cap
             .expect("cap");
         assert_eq!(cap.suggested_mb, u32::MAX);
+        // A limit above its row's maximum cannot be raised to anything the row allows.
+        assert_eq!(suggested(u64::MAX), None);
     }
 }
