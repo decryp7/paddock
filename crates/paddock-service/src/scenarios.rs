@@ -1986,8 +1986,11 @@ fn watched_manager(
             *a > answers_after
         },
     );
+    assert!(!m.watches_start());
     if watch {
-        m.with_start_watch(Box::new(crate::StartWait::new()))
+        let m = m.with_start_watch(Box::new(crate::StartWait::new()));
+        assert!(m.watches_start());
+        m
     } else {
         m
     }
