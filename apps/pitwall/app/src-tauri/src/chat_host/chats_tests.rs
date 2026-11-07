@@ -386,7 +386,7 @@ fn unsaved_chats_past_their_bound_are_refused_in_words_never_dropped() {
     let Err(AssistantError::Invalid(words)) = assistant.send(ask("third", false), sink.clone()) else {
         panic!("a third unsaved chat must be refused");
     };
-    assert!(words.contains("not saved") && words.contains("at most 2"), "{words}");
+    assert!(words == "Pitwall keeps at most 2 unsaved chats (1 MiB) and never drops one to make room. Save or delete an unsaved chat, then ask again.", "{words}");
     for id in &ids {
         assert_eq!(chats.get(id).unwrap().messages.len(), 2, "nothing was dropped");
     }
@@ -394,7 +394,14 @@ fn unsaved_chats_past_their_bound_are_refused_in_words_never_dropped() {
     // Moving a saved chat in is refused the same way; a saved new chat is still fine.
     let (saved, _, ok) = chats.create(user("saved one"));
     assert_eq!(ok, Ok(()));
-    assert!(matches!(chats.set_saved(&saved, false), Err(ChatsError::Save(w)) if w.contains("not saved")));
+    assert!(matches!(chats.set_saved(&saved, false), Err(ChatsError::Save(w)) if w.contains("at most 2 unsaved chats")));
     assert_eq!(chats.is_saved(&saved), Some(true), "it stays saved");
+    // A long unsaved chat says what is long about it, not that there are too many chats.
+    let roomy = ChatStores::new(data.path(), Arc::new(c.clone()));
+    let (long, _, _) = roomy.create_saved(user("long"), false);
+    let answers = (0..paddock_assistant::MAX_MESSAGES).map(|_| answer("a")).collect();
+    assert_eq!(roomy.append(&long, answers), Some(Ok(())));
+    let words = roomy.admits(Some(&long), false).unwrap_err().0;
+    assert!(words.starts_with("This chat holds as many messages as a chat can (400)"), "{words}");
     assistant.shutdown();
 }

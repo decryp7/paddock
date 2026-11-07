@@ -7,7 +7,7 @@
 use super::saved::{SavedChats, Usage, CHATS_DIR};
 use paddock_assistant::{
     Attachment, ChatMessage, Conversation, ConversationStore, ConversationSummary, Conversations, Overflow, SaveError, StoreLimits,
-    StoredMessage,
+    StoredMessage, MAX_MESSAGES,
 };
 use paddock_env::VersionedFile;
 use paddock_health::Clock;
@@ -203,11 +203,10 @@ impl ChatStores {
     fn unsaved_full(&self, why: &SaveError) -> SaveError {
         log::info!(target: "pitwall_chat", "chats: a chat that is not saved was refused ({})", why.0);
         SaveError(format!(
-            "Chats that are not saved stay in memory until Pitwall closes, at most {} of them and {} MiB in all, so none is \
-             ever dropped to make room: {} Save a chat or delete one, then try again.",
+            "Pitwall keeps at most {} unsaved chats ({} MiB) and never drops one to make room. Save or delete an unsaved chat, \
+             then ask again.",
             self.unsaved.conversations,
             self.unsaved.file_bytes >> 20,
-            why.0
         ))
     }
 
@@ -328,6 +327,17 @@ impl Conversations for ChatStores {
             // The saved store refuses past its limits in words and keeps the chat for the session: never a drop.
             return Ok(());
         }
-        self.memory.admits(conversation_id, false).map_err(|e| self.unsaved_full(&e))
+        let long = conversation_id
+            .and_then(|id| self.memory.get(id))
+            .is_some_and(|c| c.messages.len() >= MAX_MESSAGES);
+        self.memory.admits(conversation_id, false).map_err(|e| {
+            if long {
+                SaveError(format!(
+                    "This chat holds as many messages as a chat can ({MAX_MESSAGES}). Start a new chat to go on."
+                ))
+            } else {
+                self.unsaved_full(&e)
+            }
+        })
     }
 }
