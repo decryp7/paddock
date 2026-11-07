@@ -149,12 +149,15 @@ fn a_store_takes_a_conversation_in_with_its_id_once() {
     let mem = ConversationStore::in_memory(Arc::new(clock));
     let (first, _, _) = mem.create(StoredMessage::user("a", vec![], 1));
     let taken = Conversation {
-        id: format!("{}-x", first),
+        // The id the next create would make: create must step past it.
+        id: format!("{}2", first.strip_suffix('1').unwrap()),
         ..from.get(&id).unwrap()
     };
+    let taken_id = taken.id.clone();
     mem.adopt(taken).unwrap();
     let (second, _, _) = mem.create(StoredMessage::user("b", vec![], 2));
     assert_ne!(second, first);
+    assert_ne!(second, taken_id);
     assert_eq!(mem.summaries().len(), 3);
 }
 
@@ -292,4 +295,39 @@ fn a_question_the_store_cannot_take_is_refused_in_its_words_and_no_turn_starts()
     assert_eq!(err, AssistantError::Invalid("full (save false)".into()));
     assert!(store.summaries().is_empty(), "the question is not kept");
     assert!(rx.try_recv().is_err(), "no turn started");
+}
+
+#[test]
+fn a_refusing_store_never_shortens_a_conversation_and_refuses_one_too_long() {
+    let clock = FakeClock::at_wall_ms(1_700_000_000_000);
+    let store = ConversationStore::in_memory_with(
+        Arc::new(clock.clone()),
+        StoreLimits {
+            conversations: 10,
+            file_bytes: 64 << 20,
+        },
+    )
+    .with_overflow(Overflow::Refuse);
+    let (id, _, _) = store.create(StoredMessage::user("long", vec![], 1));
+    let answers: Vec<StoredMessage> = (0..MAX_MESSAGES)
+        .map(|i| StoredMessage::assistant(format!("a{i}"), vec![], None, 2))
+        .collect();
+    assert_eq!(store.append(&id, answers), Some(Ok(())));
+    assert_eq!(
+        store.get(&id).unwrap().messages.len(),
+        MAX_MESSAGES + 1,
+        "nothing dropped"
+    );
+    let why = store.admits(Some(&id), true).unwrap_err();
+    assert!(
+        why.0.contains(&format!("at most {MAX_MESSAGES} messages")),
+        "{why}"
+    );
+    // Taking in a conversation longer than that is refused, not cut.
+    let mut long = store.get(&id).unwrap();
+    long.id = "elsewhere".into();
+    assert!(store.adopt(long).unwrap_err().0.contains("at most"));
+    // The port's default has no problem to tell.
+    let port = Full(ConversationStore::in_memory(Arc::new(clock)));
+    assert!(port.take_problem().is_none());
 }
