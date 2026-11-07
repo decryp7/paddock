@@ -2,9 +2,13 @@
 //! client's key (ADR 0007 rule 1). Only loopback peers are served; no remote listener exists.
 //!
 //! ```text
-//! client -> {"key":"pmk_..."}\n        server -> {"ok":true,"client":"Pitwall"}\n   (or {"ok":false,"error":"..."} and close)
+//! client -> {"key":"pmk_..."}\n        server -> {"ok":true,"client":"Pitwall"}\n
+//!                                        or {"ok":false,"code":"key"|"handshake"|"busy","error":"..."}\n and close
 //! then the same lines as stdio.
 //! ```
+//!
+//! A client says "the key was refused" only for `code` `key`; `handshake` means the key line did not arrive in a usable form
+//! and `busy` that every place is taken.
 
 use crate::keys::KeyVerifier;
 use crate::lines::{Line, read_line, serve_lines};
@@ -27,13 +31,16 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 const STOP_SLICE: Duration = Duration::from_millis(100);
 
 /// The read half of a connection: reads in [`STOP_SLICE`]s, ends (as end of input) once the server stops, and fails with
-/// `TimedOut` when its deadline (the handshake's) has passed. A read that a signal interrupted is read again: the app's
-/// process has signal handlers (on Linux zbus' async-process handles SIGCHLD), and on Linux a socket with a receive timeout
-/// returns EINTR even under SA_RESTART (signal(7)), which once ended connections and turned right keys down (2026-11-07).
+/// `TimedOut` when its deadline (the handshake's) has passed. A read that a signal interrupted is read again. On Linux a
+/// read on a socket with a receive timeout fails with EINTR when a signal handler runs on its thread, even under SA_RESTART
+/// (signal(7)); macOS restarts it under SA_RESTART. Passing EINTR on ended connections and turned right keys down in the
+/// Linux field case of 2026-11-07; which signal reached the connection's thread there is still to be confirmed.
 struct Watched {
     stream: TcpStream,
     stop: Arc<AtomicBool>,
     deadline: Option<Instant>,
+    /// The receive timeout set on the socket now: [`STOP_SLICE`], or less when the deadline is nearer.
+    slice: Duration,
     /// How many reads a signal interrupted (and were read again), for the connection's log line. Shared so a test can wait
     /// until a signal has landed inside a read.
     interrupted: Arc<AtomicU64>,
@@ -46,6 +53,7 @@ impl Watched {
             stream,
             stop,
             deadline: None,
+            slice: STOP_SLICE,
             interrupted: Arc::default(),
         })
     }
@@ -56,6 +64,22 @@ impl Read for Watched {
         loop {
             if self.stop.load(Ordering::SeqCst) {
                 return Ok(0);
+            }
+            // The deadline is checked before every read, an interrupted one included, and a slice never runs past it: a
+            // storm of signals cannot stretch it.
+            let slice = match self.deadline {
+                Some(d) => {
+                    let left = d.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        return Err(io::ErrorKind::TimedOut.into());
+                    }
+                    left.min(STOP_SLICE)
+                }
+                None => STOP_SLICE,
+            };
+            if slice != self.slice {
+                self.stream.set_read_timeout(Some(slice))?;
+                self.slice = slice;
             }
             let read = self.stream.read(buf);
             if read
@@ -72,9 +96,6 @@ impl Read for Watched {
             });
             if !slice_ended {
                 return read;
-            }
-            if self.deadline.is_some_and(|d| Instant::now() >= d) {
-                return Err(io::ErrorKind::TimedOut.into());
             }
         }
     }
@@ -437,30 +458,75 @@ mod tests {
         assert_eq!(w.read(&mut buf).unwrap(), 0);
     }
 
-    /// The Linux field case of 2026-11-07: a signal that lands while a connection's thread waits in a read slice (the app's
-    /// SIGCHLD handler, installed by zbus' async-process, runs whenever a child such as `systemctl` ends, which the app's agent
-    /// link does while the agent restarts) made the read fail with `Interrupted`. The handshake took that for "no key line"
-    /// and the serving loop for the end of the connection. On Linux a socket with a receive timeout returns EINTR even under
-    /// SA_RESTART (signal(7)); the handler here has no SA_RESTART so that macOS shows it too.
+    /// Signal tests share SIGUSR2 and its handler, so they take turns.
     #[cfg(unix)]
-    #[test]
-    fn a_signal_that_lands_during_a_read_slice_is_not_the_end_of_the_input() {
+    static SIGNAL_TESTS: Mutex<()> = Mutex::new(());
+
+    /// A SIGUSR2 handler with `flags`, put back to the one before when dropped.
+    #[cfg(unix)]
+    struct Handler {
+        before: libc::sigaction,
+    }
+
+    #[cfg(unix)]
+    static HANDLED: AtomicUsize = AtomicUsize::new(0);
+
+    #[cfg(unix)]
+    extern "C" fn on_signal(_: libc::c_int) {
+        HANDLED.fetch_add(1, Ordering::SeqCst);
+    }
+
+    #[cfg(unix)]
+    impl Handler {
+        fn install(flags: libc::c_int) -> Handler {
+            // SAFETY: a handler that only touches an atomic, for a signal nothing else in this test binary uses; the
+            // previous action is kept and put back on drop.
+            unsafe {
+                let mut action: libc::sigaction = std::mem::zeroed();
+                action.sa_sigaction = on_signal as extern "C" fn(libc::c_int) as usize;
+                action.sa_flags = flags;
+                libc::sigemptyset(&mut action.sa_mask);
+                let mut before: libc::sigaction = std::mem::zeroed();
+                assert_eq!(libc::sigaction(libc::SIGUSR2, &action, &mut before), 0);
+                Handler { before }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for Handler {
+        fn drop(&mut self) {
+            // SAFETY: puts back the action read in `install`.
+            unsafe { libc::sigaction(libc::SIGUSR2, &self.before, std::ptr::null_mut()) };
+        }
+    }
+
+    /// Sends SIGUSR2 to `thread` until `done` holds, each once the previous one was handled (conditions, not times). The bound
+    /// is only a hang guard.
+    #[cfg(unix)]
+    fn signal_until(thread: libc::pthread_t, done: impl Fn() -> bool) {
+        let base = HANDLED.load(Ordering::SeqCst);
+        for n in 1..=10_000_000 {
+            if done() {
+                return;
+            }
+            // SAFETY: the caller's thread is not joined yet, so its handle is valid.
+            unsafe { libc::pthread_kill(thread, libc::SIGUSR2) };
+            while HANDLED.load(Ordering::SeqCst) < base + n && !done() {
+                std::thread::yield_now();
+            }
+        }
+    }
+
+    /// A read slice with a handler of `flags` running on the reading thread: the signal is not the end of the input, and the
+    /// key line sent afterwards is read.
+    #[cfg(unix)]
+    fn a_signal_during_a_read_slice_is_survived(flags: libc::c_int) {
         use std::os::unix::thread::JoinHandleExt;
-        static HANDLED: AtomicUsize = AtomicUsize::new(0);
-        extern "C" fn on_signal(_: libc::c_int) {
-            HANDLED.fetch_add(1, Ordering::SeqCst);
-        }
-        // SAFETY: a handler that only touches an atomic, installed for a signal nothing else in this test binary uses.
-        unsafe {
-            let mut action: libc::sigaction = std::mem::zeroed();
-            action.sa_sigaction = on_signal as extern "C" fn(libc::c_int) as usize;
-            action.sa_flags = 0;
-            libc::sigemptyset(&mut action.sa_mask);
-            assert_eq!(
-                libc::sigaction(libc::SIGUSR2, &action, std::ptr::null_mut()),
-                0
-            );
-        }
+        let _turn = SIGNAL_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _handler = Handler::install(flags);
         let (server_end, mut client) = pair();
         let w = Watched::new(server_end, Arc::new(AtomicBool::new(false))).unwrap();
         let interrupted = w.interrupted.clone();
@@ -468,25 +534,13 @@ mod tests {
             let mut r = BufReader::new(w);
             read_line(&mut r, HANDSHAKE_MAX).map_err(|e| e.kind())
         });
-        let thread = reader.as_pthread_t();
-        let base = HANDLED.load(Ordering::SeqCst);
-        // Signals until one has landed inside a read (the reader counts it) or the read has ended: conditions, not times.
-        // Each is sent once the previous one was handled. The bound is only a hang guard.
-        for n in 1..=100_000 {
-            if reader.is_finished() || interrupted.load(Ordering::SeqCst) > 0 {
-                break;
-            }
-            // SAFETY: the thread is not joined yet, so its handle is valid.
-            unsafe { libc::pthread_kill(thread, libc::SIGUSR2) };
-            while HANDLED.load(Ordering::SeqCst) < base + n && !reader.is_finished() {
-                std::thread::yield_now();
-            }
-        }
+        signal_until(reader.as_pthread_t(), || {
+            reader.is_finished() || interrupted.load(Ordering::SeqCst) > 0
+        });
         client.write_all(b"{\"key\":\"pmk_x\"}\n").unwrap();
         let line = reader.join().unwrap();
-        let interrupted = interrupted.load(Ordering::SeqCst);
         assert!(
-            interrupted > 0,
+            interrupted.load(Ordering::SeqCst) > 0,
             "precondition (ER-33): no signal landed inside a read, so this run did not test the case"
         );
         assert_eq!(
@@ -494,6 +548,55 @@ mod tests {
             Ok(Line::Text("{\"key\":\"pmk_x\"}".into())),
             "a signal during a read is not the end of the input"
         );
+    }
+
+    /// The mechanism of the Linux field case of 2026-11-07: a signal handled while a connection's thread waits in a read
+    /// slice made the read fail with `Interrupted`, which the handshake took for "no key line" and the serving loop for the
+    /// end of the connection. Without SA_RESTART every Unix interrupts the read.
+    #[cfg(unix)]
+    #[test]
+    fn a_signal_that_lands_during_a_read_slice_is_not_the_end_of_the_input() {
+        a_signal_during_a_read_slice_is_survived(0);
+    }
+
+    /// A storm of signals does not stretch the handshake's deadline: an interrupted read checks it too, so a client that
+    /// sends nothing is timed out on time however often the reading thread is interrupted (review of 31f2bb60b, P2).
+    #[cfg(unix)]
+    #[test]
+    fn a_storm_of_signals_does_not_stretch_the_handshake_deadline() {
+        use std::os::unix::thread::JoinHandleExt;
+        let _turn = SIGNAL_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let _handler = Handler::install(0);
+        let (server_end, _client) = pair();
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut w = Watched::new(server_end, stop.clone()).unwrap();
+        w.deadline = Some(Instant::now() + STOP_SLICE * 3);
+        let reader = std::thread::spawn(move || {
+            let mut r = BufReader::new(w);
+            read_line(&mut r, HANDSHAKE_MAX).map_err(|e| e.kind())
+        });
+        // The storm goes on until the read ends, or (only a hang guard) far past the deadline.
+        let guard = Instant::now() + Duration::from_secs(5);
+        signal_until(reader.as_pthread_t(), || {
+            reader.is_finished() || Instant::now() > guard
+        });
+        let ended_by_itself = reader.is_finished();
+        stop.store(true, Ordering::SeqCst);
+        let line = reader.join().unwrap();
+        assert!(
+            ended_by_itself,
+            "the read went on past its deadline while signals came"
+        );
+        assert_eq!(line, Err(io::ErrorKind::TimedOut));
+    }
+
+    /// Linux interrupts a read with a receive timeout even under SA_RESTART (signal(7)), which most handlers use.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn under_sa_restart_linux_still_interrupts_a_read_slice_and_it_is_survived() {
+        a_signal_during_a_read_slice_is_survived(libc::SA_RESTART);
     }
 
     /// Field case C: a handshake whose key line could not be read was refused with "send {\"key\": ...} as the first line",
