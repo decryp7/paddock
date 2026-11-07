@@ -47,11 +47,18 @@ export function windowsLoginJobsDriver(browser, { openSettings, mainPage }) {
       const preset = p.getByRole('radio', { name: /^Sustained processor/ }).or(p.getByRole('button', { name: /^Sustained processor/ })).first();
       if (!(await preset.waitFor({ timeout: 15_000 }).then(() => true, () => false))) return false;
       await preset.click().catch(() => {});
+      const card = p.locator('section[aria-label="Run benchmarks"]').first();
+      const cardText = async () => (await card.innerText({ timeout: 2000 }).catch(() => '')).replace(/\s+/g, ' ').slice(0, 400);
       const run = p.getByRole('button', { name: /Run benchmarks$/ }).first();
-      if (!(await run.isEnabled().catch(() => false))) return false;
+      if (!(await run.isEnabled().catch(() => false))) return { ok: false, detail: `Run benchmarks is not enabled; the Run card says: ${await cardText()}` };
       await run.click();
+      // Started when the card shows its own Cancel (a run in progress); only then is the page left, so that only the Jobs list carries a Cancel.
+      let started = false;
+      for (let i = 0; i < 20 && !started; i++) { await new Promise((r) => setTimeout(r, 500)); started = (await card.getByRole('button', { name: /Cancel$/ }).count().catch(() => 0)) > 0; }
+      const text = await cardText();
+      if (!started) return { ok: false, detail: `the benchmark did not start within 10 s of Run benchmarks; the Run card says: ${text}` };
       await p.getByRole('link', { name: /^Processes$/ }).first().click().catch(() => {});
-      return true;
+      return { ok: true, detail: `benchmark running: ${text}` };
     },
     async stopLongJob() {
       const p = mainPage(browser); if (!p) return;

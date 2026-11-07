@@ -159,3 +159,15 @@ test('Arm guest fallbacks: an unreadable notification area says what was read in
   assert.equal(parseBootTime(''), null);
   for (const s of ['Get-CimInstance', 'Get-WmiObject', 'wmic os get lastbootuptime', 'System Up Time', 'systeminfo']) assert.ok(BOOT_TIME_PS.includes(s), s);
 });
+
+// 2026-11-08: two restart rounds saw no dyno-app after the boot with the Run value in place. A guest that started NO Run-key program at that logon (the control: OneDrive,
+// Edge's auto-launch) did not process the Run key at all: that is the guest, a broken check. A disabled StartupApproved entry is the product's (or the user's) state: a fail.
+test('autostart: no Run-key program started at all is a broken check; others started but not Dyno is a product fail', () => {
+  const B = '2026-11-08T04:43:31';
+  const none = judgeAutostart({ boot: B, procs: [], expectOn: true, control: { othersStarted: [], approved: 'enabled' } });
+  assert.ok(none.filter((c) => !c.ok).every((c) => c.kind === 'check'), JSON.stringify(none));
+  const fail = judgeAutostart({ boot: B, procs: [], expectOn: true, control: { othersStarted: ['OneDrive'], approved: 'enabled' } });
+  assert.ok(fail.some((c) => !c.ok && c.kind !== 'check'));
+  const off = judgeAutostart({ boot: B, procs: [], expectOn: true, control: { othersStarted: [], approved: 'disabled' } });
+  assert.ok(off.some((c) => !c.ok && c.kind !== 'check' && /StartupApproved/.test(c.detail)));
+});

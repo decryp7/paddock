@@ -241,6 +241,8 @@ export async function winQuitStop() {
   return quitStopStep({
     now: () => Date.now(), sleep,
     trigger: async () => {
+      // The hidden-start row before this left a Dyno without the DevTools port running; a launch would hand over to it. Start a fresh one with the port.
+      ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(4000);
       launch(); await sleep(25_000);
       const t = tunnel();
       try {

@@ -72,8 +72,12 @@ export function autoStartRecord() {
   const procs = ssh(`Get-CimInstance Win32_Process -Filter "Name='dyno-app.exe' OR Name='dyno-agent.exe'" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name -replace '\\.exe$','') pid=$($_.ProcessId) started=$($_.CreationDate.ToString('s')) cmd=$($_.CommandLine)" }`);
   const boot = bootTime();
   const rows = parseProcs(procs);
+  // The control for "nothing started": did Windows start ANY Run-key program at this logon, and is the Dyno value approved (StartupApproved\Run byte 0: 02/06 on, 03/07 off)?
+  const others = ssh("Get-Process OneDrive,msedge -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt (Get-Process explorer | Sort-Object StartTime | Select-Object -First 1).StartTime.AddSeconds(-5) } | ForEach-Object { $_.Name } | Sort-Object -Unique").split('\n').map((l) => l.trim()).filter(Boolean);
+  const approvedRaw = ssh("$v = (Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run' -ErrorAction SilentlyContinue).Dyno; if ($v) { '{0:X2}' -f $v[0] } else { 'none' }").trim().split('\n').at(-1);
+  const approved = /^0[37]$/.test(approvedRaw) ? 'disabled' : 'enabled';
   // `running` is the APP started after the boot, never the agent alone (the agent is what the helper service keeps up).
-  return { run, startup, tasks, logon, procs, boot, rows, running: rows.some((r) => r.name === 'dyno-app' && boot !== null && r.started > boot) };
+  return { run, startup, tasks, logon, procs, boot, rows, control: { othersStarted: others, approved, approvedRaw }, running: rows.some((r) => r.name === 'dyno-app' && boot !== null && r.started > boot) };
 }
 
 /**
@@ -177,7 +181,7 @@ async function afterRestartRecord(actor, label) {
   // An autostarted app builds its tray icons a little after it starts: poll up to 60 s when it is running and nothing shows yet.
   for (let i = 0; i < 6 && auto.running && (!tray.measured || tray.visible.length + tray.overflow.length === 0); i++) { await sleep(10_000); tray = await trayRecord(actor); }
   await actor.send('quit', 5000).catch(() => {});
-  const evidence = [`logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'}`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, `--- actor: ${actorUp === null ? 'did NOT answer after 8 starts' : `answered after ${actorUp + 1} start(s)`}`, '--- tray', ...fmtTray(tray)];
+  const evidence = [`control: Run-key programs started at this logon: ${auto.control.othersStarted.join(', ') || 'none'}; StartupApproved\\Run "Dyno" first byte: ${auto.control.approvedRaw}`, `logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'}`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, `--- actor: ${actorUp === null ? 'did NOT answer after 8 starts' : `answered after ${actorUp + 1} start(s)`}`, '--- tray', ...fmtTray(tray)];
   return { auto, tray, evidence };
 }
 
@@ -247,7 +251,7 @@ async function runRebootSteps(ctx, steps) {
     { ok: true, info: true, detail: `${delay}: ${rec1.auto.procs.replace(/\n/g, '; ') || 'no Dyno process'}` },
     // The setting must have been read (true or false), else the expectation below is a guess.
     ...(launchDefault === 'true' || launchDefault === 'false' ? [] : [{ ok: false, kind: 'check', detail: `Launch at login could not be read after the install (${launchDefault})` }]),
-    ...judgeAutostart({ boot: rec1.auto.boot, procs: rec1.auto.rows, expectOn }),
+    ...judgeAutostart({ boot: rec1.auto.boot, procs: rec1.auto.rows, expectOn, control: rec1.auto.control }),
   ], rec1.evidence, expectOn ? 'dyno-app started by itself after the boot with --hidden' : 'Dyno is off at logon as configured'));
   steps.push(result('Windows restart: tray icons after the restart (compared with before)', [
     { ok: true, info: true, detail: `before: ${trayBefore.visible.length} visible, ${trayBefore.overflow.length} overflow; after (no hand start): ${rec1.tray.visible.length} visible, ${rec1.tray.overflow.length} overflow` },
@@ -307,7 +311,7 @@ async function runRebootSteps(ctx, steps) {
       const rec2 = await afterRestartRecord(actor, 'on');
       steps.push(result('Windows restart: auto start with Launch at login switched ON', [
         { ok: nowOn === 'true', ...(nowOn === 'true' || nowOn === 'false' ? {} : { kind: 'check' }), detail: `Launch at login after switching it on: ${nowOn}` },
-        ...judgeAutostart({ boot: rec2.auto.boot, procs: rec2.auto.rows, expectOn: true }),
+        ...judgeAutostart({ boot: rec2.auto.boot, procs: rec2.auto.rows, expectOn: true, control: rec2.auto.control }),
         ...judgeRestartService({ bootBefore: rs2.bootBefore, bootAfter: rs2.bootAfter, samples: rs2.samples }),
       ], rec2.evidence, 'dyno-app started by itself after the boot with --hidden and the helper service ran'));
       steps.push(result('Windows restart: tray icons after the restart (Launch at login ON)', judgeTrayCount({ metrics: rec2.tray.metrics, visible: rec2.tray.visible.length, overflow: rec2.tray.overflow.length, measured: rec2.tray.measured, registered: rec2.tray.registered, running: rec2.auto.running }), fmtTray(rec2.tray), 'every icon the app created is in the notification area'));
@@ -335,8 +339,13 @@ async function quitStopWithRestart(ctx) {
       const t = tunnel();
       try {
         const browser = await connect();
-        const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
-        if (!main) throw new Error('no Dyno main window over the DevTools port');
+        // The main window is the page with the app's File menu (a hidden start or a dialog page has none): polled up to 20 s.
+        let main = null;
+        for (let i = 0; i < 10 && !main; i++) {
+          for (const p of browser.contexts().flatMap((c) => c.pages()).filter((x) => !x.url().includes('dialog?id='))) if (await p.evaluate(() => [...document.querySelectorAll('button')].some((b) => b.textContent.trim() === 'File')).catch(() => false)) { main = p; break; }
+          if (!main) await sleep(2000);
+        }
+        if (!main) throw new Error(`no Dyno window with a File menu over the DevTools port (pages: ${browser.contexts().flatMap((c) => c.pages()).map((p) => p.url()).join(', ').slice(0, 200)})`);
         const clicked = await main.evaluate(async () => {
           const items = () => [...document.querySelectorAll('[role=menuitem]')];
           if (!items().some((e) => e.textContent.trim().startsWith('Quit and stop'))) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File')?.click(); await new Promise((r) => setTimeout(r, 600)); }

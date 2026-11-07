@@ -80,7 +80,10 @@ async function longJobCancel(d, until, { seenGuardMs, endGuardMs }) {
   const checks = [];
   const evidence = [];
   try {
-    if (!(await d.startLongJob())) return { measured: false, why: 'the long benchmark job could not be started', checks: [{ ok: false, detail: 'the long benchmark job could not be started' }], evidence };
+    const st = await d.startLongJob();
+    const started = st === true || st?.ok === true;
+    if (st?.detail) evidence.push(`long job: ${st.detail}`);
+    if (!started) return { measured: false, why: `the long benchmark job could not be started${st?.detail ? ` (${st.detail.slice(0, 160)})` : ''}`, checks: [{ ok: false, detail: `the long benchmark job could not be started${st?.detail ? `: ${st.detail.slice(0, 200)}` : ''}` }], evidence };
     await d.openJobs();
     const seen = await until(async () => { const t = await d.jobsText(); return LONG_JOB.test(t) ? t : null; }, seenGuardMs);
     if (!seen) return { measured: false, why: 'the benchmark job never showed in the Jobs list', checks: [{ ok: false, detail: `no "${LONG_JOB.source}" job in the Jobs list within ${seenGuardMs / 1000} s` }], evidence };

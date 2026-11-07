@@ -5,10 +5,12 @@
 // "other users" total instead. Needs the helper ON (helperSteps runs it between Turn on and Turn off) and the host's admin SSH key.
 import { randomBytes } from 'node:crypto';
 import { ssh } from './win-helper.mjs';
+import { makeResult } from './verdict.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PUB = 'C:\\Users\\Public';
-const result = (title, checks, evidence = [], pass = '') => { const bad = checks.filter((c) => !c.ok); return { title, status: bad.length ? 'fail' : 'pass', summary: bad.length ? bad.map((c) => c.detail).join('; ').slice(0, 240) : pass, checks, evidence }; };
+// A broken measurement (the task never ran, the positive control unseen) is check-broken, never a product FAIL (ER-33).
+const result = makeResult;
 
 export async function scopingStep() {
   const checks = [];
@@ -17,7 +19,11 @@ export async function scopingStep() {
   const dyno = 'C:\\Program Files\\Dyno'; // the per-machine install (family ADR 0053)
   // The owner: a probe process with a name nobody else has, and the owner's own view (the positive control).
   // A busy probe (a copy of powershell.exe under a unique name) so it ranks in `dyno top` by CPU.
-  ssh(`Copy-Item "$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" "C:\\Users\\paddock-test\\owner-secret-probe.exe" -Force; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -ArgumentList "-NoProfile","-Command","while($true){ }" -WindowStyle Hidden`);
+  // `dyno top` groups processes by the program's own name (FileDescription first): a renamed powershell.exe shows as "Windows PowerShell" (7d06 and 0ad rounds), so the
+  // probe is a tiny program built here whose title, product and file name are all owner-secret-probe.
+  const probeSrc = 'using System.Reflection; [assembly: AssemblyTitle("owner-secret-probe")] [assembly: AssemblyProduct("owner-secret-probe")] [assembly: AssemblyDescription("owner-secret-probe")] public static class P { public static void Main() { while (true) { } } }';
+  const built = ssh(`Add-Type -TypeDefinition '${probeSrc}' -OutputAssembly "C:\\Users\\paddock-test\\owner-secret-probe.exe" -OutputType ConsoleApplication -ErrorAction Stop 2>&1 | Out-String; (Get-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe").VersionInfo.FileDescription; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -WindowStyle Hidden; Start-Sleep 2; (Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Measure-Object).Count`);
+  evidence.push(`probe built and started (FileDescription, running count): ${built.trim().replace(/\s+/g, ' ').slice(0, 200)}`);
   await sleep(4000);
   const ownerView = ssh(`& "${dyno}\\dyno.exe" top --by cpu -n 100 --json 2>&1 | Out-String`);
   checks.push({ ok: /owner-secret-probe/i.test(ownerView), kind: /owner-secret-probe/i.test(ownerView) ? undefined : 'check', detail: /owner-secret-probe/i.test(ownerView) ? 'positive control: the owner sees its own probe process' : 'positive control failed: the owner does not see its own probe process in `dyno top`' });
@@ -43,7 +49,7 @@ export async function scopingStep() {
   const who = ssh(`Get-Content ${PUB}\\dyno2-whoami.txt -ErrorAction SilentlyContinue`, { admin: true });
   const top = ssh(`Get-Content ${PUB}\\dyno2-top.json -Raw -ErrorAction SilentlyContinue`, { admin: true });
   const snap = ssh(`Get-Content ${PUB}\\dyno2-snapshot.json -Raw -ErrorAction SilentlyContinue`, { admin: true });
-  evidence.push(`second account: ${who.trim() || '(whoami unreadable)'}`, `its top view: ${top.length} chars; snapshot: ${snap.length} chars`);
+  evidence.push(`second account: ${who.trim() || '(whoami unreadable)'}`, `its top view: ${top.length} chars; snapshot: ${snap.length} chars`, `--- its top view (full): ${top.replace(/\s+/g, ' ').slice(0, 2000)}`);
   checks.push({ ok: /paddock-user2/i.test(who), detail: `the run was the second standard account (${who.trim() || 'unknown'})` });
   const both = `${top}\n${snap}`;
   checks.push({ ok: top.length > 50 && !/owner-secret-probe/i.test(both), detail: /owner-secret-probe/i.test(both) ? 'D6 VIOLATION: the second account sees the owner\'s process name owner-secret-probe in its views' : 'the second account does not see the owner\'s process name' });
@@ -53,5 +59,8 @@ export async function scopingStep() {
   evidence.push(`traffic in the snapshot: ${/traffic|bytes/i.test(snap) ? 'present' : 'not carried by `dyno snapshot`; Network > By program as a second account needs its own window'}`);
   // Clean up what this step made.
   ssh(`schtasks /delete /tn Dyno2 /f 2>$null | Out-Null; Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe","${PUB}\\dyno2*" -Recurse -Force -ErrorAction SilentlyContinue; net user paddock-user2 /delete 2>$null | Out-Null`, { admin: true });
-  return result('Windows: D6 scoping, a second standard account sees only its own and the system\'s programs', checks, evidence, 'the second account sees no other account\'s programs and gets an "other users" total');
+  // Without the positive control (the owner sees its own probe) nothing the second account does not see proves anything: those checks are the measurement's.
+  const control = checks[0]?.ok === true;
+  const judged = control ? checks : checks.map((c, i) => (i === 0 || c.ok ? c : { ...c, kind: 'check', detail: `${c.detail} (not conclusive: the positive control failed)` }));
+  return result('Windows: D6 scoping, a second standard account sees only its own and the system\'s programs', judged, evidence, 'the second account sees no other account\'s programs and gets an "other users" total');
 }

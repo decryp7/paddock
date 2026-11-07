@@ -16,7 +16,17 @@ export function parseProcs(text) {
  * running `dyno-agent` alone is not the app: it is what the user's report looked like while the app never came (the audit's false pass).
  * @param {{boot:string|null, procs:ReturnType<typeof parseProcs>, expectOn:boolean}} f boot: LastBootUpTime as ISO "s" text.
  */
-export function judgeAutostart({ boot, procs, expectOn }) {
+export function judgeAutostart({ boot, procs, expectOn, control = null }) {
+  const out = judgeAutostartCore({ boot, procs, expectOn });
+  if (!control || !expectOn || out.every((c) => c.ok)) return out;
+  // Why nothing started: the StartupApproved state of the "Dyno" value (disabled there = Windows was told not to run it) and whether ANY other Run-key program started at
+  // this logon (none = the guest did not process the Run key at all: the measurement's, not Dyno's).
+  if (control.approved === 'disabled') return [...out, chk(false, 'StartupApproved\\Run marks the Dyno value disabled: Windows was told not to run it at logon')];
+  if (!control.othersStarted?.length) return [...out.map((c) => (c.ok ? c : { ...c, kind: 'check', detail: `${c.detail} (no other Run-key program started at this logon either: the guest did not process the Run key)` })), chk(false, 'control: no Run-key program (OneDrive, Edge auto-launch) started after this logon', 'check')];
+  return [...out, { ok: true, info: true, detail: `control: other Run-key programs started at this logon (${control.othersStarted.join(', ')}), so the Run key was processed` }];
+}
+
+function judgeAutostartCore({ boot, procs, expectOn }) {
   if (!boot || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$/.test(boot)) return [chk(false, `the boot time could not be read (${boot ?? 'nothing'}), so "started after the boot" cannot be judged`, 'check')];
   const apps = procs.filter((p) => /^dyno-app(\.exe)?$/i.test(p.name));
   const agents = procs.filter((p) => /^dyno-agent(\.exe)?$/i.test(p.name));
