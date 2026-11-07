@@ -28,10 +28,14 @@ describe('playground helpers', () => {
     const a = applyEvent(pane, { kind: 'delta', text: 'ab' });
     const b = applyEvent(a, { kind: 'delta', text: 'c' });
     expect(b.turns[1]!.content).toBe('abc');
-    const done = applyEvent(b, { kind: 'done', promptTokens: 1, completionTokens: 2, ttftMs: 3, genTps: 4, coldStartMs: null });
+    const done = applyEvent(b, { kind: 'done', finish: 'stop', promptTokens: 1, completionTokens: 2, ttftMs: 3, genTps: 4, coldStartMs: null });
     expect(done.turns[1]).toMatchObject({ streaming: false, stats: { promptTokens: 1, completionTokens: 2, ttftMs: 3, genTps: 4, coldStartMs: null } });
     expect(done.turns[1]!.stats).not.toHaveProperty('kind');
     expect(applyEvent(done, { kind: 'delta', text: 'late' })).toBe(done);
+    // Events that only the Chat tab shows leave a Compare pane as it is.
+    for (const ignored of [{ kind: 'phase', phase: { kind: 'generating' } }, { kind: 'reasoning', text: 't' }, { kind: 'toolCall', index: 0, id: 'c', name: 'n', arguments: '{}' }] as const) {
+      expect(applyEvent(pane, ignored)).toBe(pane);
+    }
     const err = applyEvent(pane, { kind: 'error', error: { code: 'internal', message: 'boom' } });
     expect(err.turns[1]).toMatchObject({ streaming: false, error: { message: 'boom' } });
     expect(applyEvent({ modelId: null, turns: [] }, { kind: 'delta', text: 'x' }).turns).toEqual([]);
