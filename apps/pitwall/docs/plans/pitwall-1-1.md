@@ -320,6 +320,7 @@ Holidays are not counted; the end of December will move these dates.
 - **Rule 55:** no `pitwall-v1.1.0` entry left in `docs/known-copies.toml` (B8; `copies --tag pitwall-v1.1.0`). **Waivers:**
   none of Pitwall's left (B7).
 - **B6 and B6b are a gate:** no Windows build ships whose LocalSystem service runs a program the user can write (B6: the install verb refuses one; B6b: the installer never puts one there).
+- **B6b lands before any 1.1 release claim.** Until it does, the installer's PREINSTALL hook and the app's elevated Settings > Service path still run `"$INSTDIR\pitwall-server.exe" uninstall` before any folder check (B6 security review P2-4, 2026-11-08); B6 only refuses at `install`.
 - **Rule 22 / ER-23:** independent reviews of the screenshots and diagrams (B10), of the host's security (ADR 0023 WP-11),
   of ADR 0023 and this plan, and of each landing's code (ER-25).
 - **ER-15, ER-16:** the tag from CI, on a commit that is not `[skip ci]`; ER-31 if the tag is made on a release branch.
