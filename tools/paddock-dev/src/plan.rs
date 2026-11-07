@@ -107,7 +107,10 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^apps/(shell-demo|workbench-demo)/README\.md$"), Marks::Projects(&["tools"])),
         (re(r"(^|/)REVIEWED\.md$"), Marks::Reviewed),
-        (re(r"^ui/projects/paddock-ui/format/src/storage-cases\.json$"), Marks::Projects(&["ui", "app:dyno"])),
+        (
+            re(r"^ui/projects/paddock-ui/format/src/storage-cases\.json$"),
+            Marks::Projects(&["ui", "app:dyno"]),
+        ),
         (re(r"^apps/debrief/docs/ai/sql-views\.md$"), Marks::Owner),
         (re(r"^apps/debrief/docs/testing/quarantine\.md$"), Marks::Owner),
     ]
