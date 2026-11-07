@@ -51,13 +51,16 @@ export function judgeDisk(f) {
   const w = f.writeBytes ?? WRITE_BYTES;
   // Control: the OS's own figure must have fallen by the write, else the write did not take space and a Dyno that does not move is not at fault.
   if (Number.isFinite(f.osAfterWrite) && Number.isFinite(f.osBaseline)) checks.push(chk(f.osBaseline - f.osAfterWrite >= w * 0.9, `control: the OS figure fell by ${f.osBaseline - f.osAfterWrite} bytes right after the ${w}-byte write`, 'check'));
+  // When the OS's own figure did not fall by the write, the guest did not take the space (or the OS reports it late): the refresh checks below cannot judge Dyno then and are broken checks.
+  const controlBroken = Number.isFinite(f.osAfterWrite) && Number.isFinite(f.osBaseline) && f.osBaseline - f.osAfterWrite < w * 0.9;
+  const ctl = (c) => (controlBroken && !c.ok ? { ...c, kind: 'check', detail: `${c.detail} (not judged: the OS's own figure did not fall by the write)` } : c);
   if (Number.isFinite(f.afterWriteFree)) {
     const drop = f.baselineFree - f.afterWriteFree;
-    checks.push(chk(drop >= w * 0.9 && f.writeSecs <= REFRESH_LIMIT_S, drop >= w * 0.9 ? `after writing ${w} bytes Dyno's free figure fell by ${drop} bytes after ${f.writeSecs} s (limit 60 s plus 5 s of polling slack)` : `after ${f.writeSecs} s Dyno's free figure fell by only ${drop} bytes for a ${w}-byte write (needs at least ${Math.round(w * 0.9)})`));
+    checks.push(ctl(chk(drop >= w * 0.9 && f.writeSecs <= REFRESH_LIMIT_S, drop >= w * 0.9 ? `after writing ${w} bytes Dyno's free figure fell by ${drop} bytes after ${f.writeSecs} s (limit 60 s plus 5 s of polling slack)` : `after ${f.writeSecs} s Dyno's free figure fell by only ${drop} bytes for a ${w}-byte write (needs at least ${Math.round(w * 0.9)})`)));
   } else checks.push(chk(false, 'Dyno\'s free figure was not read after the write', 'check'));
   if (Number.isFinite(f.afterDeleteFree)) {
     const rise = f.afterDeleteFree - (f.afterWriteFree ?? f.baselineFree);
-    checks.push(chk(rise >= w * 0.9 && f.deleteSecs <= REFRESH_LIMIT_S, rise >= w * 0.9 ? `after deleting the file the figure rose by ${rise} bytes after ${f.deleteSecs} s (limit 60 s plus 5 s of polling slack)` : `after deleting the file the figure rose by only ${rise} bytes in ${f.deleteSecs} s`));
+    checks.push(ctl(chk(rise >= w * 0.9 && f.deleteSecs <= REFRESH_LIMIT_S, rise >= w * 0.9 ? `after deleting the file the figure rose by ${rise} bytes after ${f.deleteSecs} s (limit 60 s plus 5 s of polling slack)` : `after deleting the file the figure rose by only ${rise} bytes in ${f.deleteSecs} s`)));
   }
   return checks;
 }

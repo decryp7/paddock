@@ -28,6 +28,7 @@ async function runSetup(file, label) {
 const launchApp = () => ssh(`Set-Content ${V}\\launch-swap.ps1 'Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe"'; schtasks /create /tn DynoSwapLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File ${V}\\launch-swap.ps1" | Out-Null; schtasks /run /tn DynoSwapLaunch | Out-Null`);
 
 export async function winSwapRow({ oldStaged }) {
+  let helperBefore = '';
   if (!oldStaged) return swapNotDriven('no older build was given (--old-installer <older setup.exe>), so there is nothing to install over');
   const prims = {
     now: () => Date.now(), sleep,
@@ -45,6 +46,7 @@ export async function winSwapRow({ oldStaged }) {
       ssh(`& '${PROG}\\dyno-helper.exe' install --for sid:${sid} 2>&1`, { admin: true, ms: 120_000 });
       let on = false; for (let i = 0; i < 20 && !on; i++) { on = /Running/.test(ssh('(Get-Service DynoHelper -ErrorAction SilentlyContinue).Status', { admin: true })); if (!on) await sleep(3000); }
       const v = versionOf(ssh(`(Get-Item '${PROG}\\dyno-app.exe').VersionInfo.ProductVersion`));
+      helperBefore = hash(`${HELPER_DIR}\\dyno-helper.exe`);
       return { oldVersion: v, helperWasOn: on };
     },
     async oldAgentBuild16() { return build16(ssh(`Get-Content '${AGENT_JSON}' -Raw -ErrorAction SilentlyContinue`)); },
@@ -66,8 +68,12 @@ export async function winSwapRow({ oldStaged }) {
       const running = ssh("(Get-Process dyno-helper -ErrorAction SilentlyContinue | Select-Object -First 1).Path", { admin: true }).trim().split('\n').at(-1);
       const rh = running ? hash(running) : '';
       out.push(chk(Boolean(rh) && rh === bundled, rh && rh === bundled ? `the running helper image (${running}) is the bundled one` : `the running helper image ${running || '(none)'} hashes ${rh.slice(0, 16) || 'unreadable'}, not the bundled ${bundled.slice(0, 16)}`));
-      const line = ssh(`(Select-String -Path '${HELPER_LOG_GLOB}' -Pattern 'refresh: replacing the installed helper' -ErrorAction SilentlyContinue | Measure-Object).Count`, { admin: true }).trim().split('\n').at(-1);
-      out.push(chk(Number(line) > 0, Number(line) > 0 ? 'the helper log has "refresh: replacing the installed helper"' : 'the helper log has no "refresh: replacing the installed helper" line', Number(line) > 0 ? undefined : 'check'));
+      const unchanged = Boolean(helperBefore) && helperBefore === bundled;
+      if (unchanged) out.push(chk(true, `the helper file was already the bundled one before the install (SHA-256 ${bundled.slice(0, 16)}): no helper refresh is expected, so the refresh log line is not required`));
+      else {
+        const line = ssh(`(Select-String -Path '${HELPER_LOG_GLOB}' -Pattern 'refresh: replacing the installed helper' -ErrorAction SilentlyContinue | Measure-Object).Count`, { admin: true }).trim().split('\n').at(-1);
+        out.push(chk(Number(line) > 0, Number(line) > 0 ? 'the helper log has "refresh: replacing the installed helper"' : `the helper changed (${helperBefore.slice(0, 12)} then ${bundled.slice(0, 12)}) but the helper log has no "refresh: replacing the installed helper" line`));
+      }
       const svc = ssh('(Get-Service DynoHelper -ErrorAction SilentlyContinue).Status', { admin: true }).trim().split('\n').at(-1);
       out.push(chk(/Running/.test(svc), `the DynoHelper service is ${svc || 'absent'}`));
       return out;

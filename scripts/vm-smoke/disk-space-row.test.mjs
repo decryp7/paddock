@@ -40,3 +40,8 @@ test('a failing write is not measured', async () => {
   const r = await diskSpaceStep({ exec, sleep: async () => {}, now: () => 0, adapter });
   assert.equal(r.status, 'not-measured');
 });
+test('when the OS figure itself did not fall, the refresh checks are broken checks, not a fail of Dyno', () => {
+  const cs = judgeDisk({ ...base, afterWriteFree: 49.9 * GB, writeSecs: 60, afterDeleteFree: 49.9 * GB, deleteSecs: 60, osBaseline: 50 * GB, osAfterWrite: 49.95 * GB });
+  assert.ok(cs.filter((c) => !c.ok).every((c) => c.kind === 'check'));
+  assert.ok(cs.some((c) => !c.ok));
+});
