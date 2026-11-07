@@ -124,6 +124,13 @@ impl Manager {
         self
     }
 
+    /// Whether a start watch judges the wait for the service ([`Manager::with_start_watch`]); a backend that cannot observe the
+    /// job keeps the fixed wait all the same.
+    #[must_use]
+    pub fn watches_start(&self) -> bool {
+        self.start_watch.is_some()
+    }
+
     /// Asks whether the app's own agent holds the data folder: it keeps a refused job from being replaced while the app
     /// measures, and never settles a registration (only the service's own answer does).
     #[must_use]

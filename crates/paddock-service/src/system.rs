@@ -211,10 +211,13 @@ mod tests {
         // Only this test process is looked at (read-only).
         assert!(sys.cpu_time(std::process::id()).is_some());
         assert_eq!(sys.cpu_time(u32::MAX), None);
-        assert_eq!(
-            sys.run_state(std::process::id()),
+        // Windows reads no run state of a process (`cpu_sample` has `stopped: None`), so there it is not known.
+        let own = if cfg!(windows) {
+            paddock_proc::RunState::Unknown
+        } else {
             paddock_proc::RunState::Running
-        );
+        };
+        assert_eq!(sys.run_state(std::process::id()), own);
         assert_eq!(sys.run_state(u32::MAX), paddock_proc::RunState::Unknown);
     }
 

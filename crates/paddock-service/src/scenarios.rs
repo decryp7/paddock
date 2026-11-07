@@ -2078,6 +2078,8 @@ fn a_launchd_file_job_is_observed_with_its_pid_runs_exit_and_cpu() {
         Output::ok("\tstate = running\n\tpid = 41\n\truns = 2\n\tlast exit code = 3\n"),
     );
     sys.set_cpu_time(41, Duration::from_millis(1500));
+    let started = paddock_proc::ProcessId::new(41, paddock_proc::StartTime::from_micros(5));
+    sys.put_process(started);
     let mut b = LaunchdFile::new(
         pitwall(),
         501,
@@ -2090,7 +2092,7 @@ fn a_launchd_file_job_is_observed_with_its_pid_runs_exit_and_cpu() {
         (f.job, f.pid, f.runs, f.last_exit, f.cpu),
         (
             Job::Running,
-            Some(41),
+            Some(started),
             Some(2),
             Some(3),
             Some(Duration::from_millis(1500))

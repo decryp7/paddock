@@ -16,18 +16,20 @@
 
 use crate::backend::{Job, StartFacts};
 use paddock_proc::{
-    Cpu, Liveness, Patience, Reading, RunState, StallCause, StartJudge, StartState,
+    Cpu, Liveness, Patience, ProcessId, Reading, RunState, StallCause, StartJudge, StartState,
 };
 use std::time::Duration;
 
 /// How often the service is asked while waiting (one poll is one tick of the judge); the default of
 /// [`Timings::start_poll`](crate::Timings).
 pub const POLL: Duration = Duration::from_secs(3);
-/// The backstop: after this many polls (about ten minutes at [`POLL`]) a start that is still neither answering nor stuck
-/// is given up on, so a wait always ends. It counts polls, not seconds, so a paused or starved Mac does not spend it. It
-/// is not the judge: a start that is alive and not stuck keeps being waited for until it.
+/// The judge's own ceiling: after this many polls (about ten minutes at [`POLL`]) a start that is still neither answering nor
+/// stuck is no longer waited for, so a wait always ends. It counts polls, not seconds, so a paused or starved Mac does not
+/// spend it. How it ends depends on what was seen: a job that ran and is not stuck is [`StartVerdict::GaveUp`] (the repair ends
+/// `Registered`, it may still start); a job that never ran is [`StartVerdict::Failed`]. The state machine has a backstop of its
+/// own a few polls later ([`Timings::judged_ceiling_polls`](crate::Timings)), for a watch that does not end itself.
 pub const START_CEILING_POLLS: u32 = 200;
-/// After this many polls (one minute) alive and not answering, the wait says it is still working.
+/// After this many polls (one minute) alive and not answering, the wait says it is still working, and again every this many.
 pub const STILL_WORKING_AFTER_POLLS: u32 = 20;
 /// The job must be missing from the OS on this many polls in a row before that counts (launchd can lag after a register).
 pub const VANISHED_POLLS: u32 = 3;
@@ -70,6 +72,9 @@ pub enum StartVerdict {
     Refused(String),
     /// It will not come up; the text says what was observed.
     Failed(String),
+    /// The judge stops waiting, but nothing says the start failed (the job ran and is not stuck, only slow): the repair ends
+    /// `Registered` ("it may still start") and gives no advice to repair again. The text says what was observed.
+    GaveUp(String),
 }
 
 /// Judges a service that is starting, one observation per poll. [`Manager`](crate::Manager) asks it while a repair waits
@@ -89,9 +94,14 @@ pub struct StartWait {
     polls: u32,
     vanished: u32,
     first_runs: Option<u32>,
-    noted: bool,
-    /// The job's process on the last look that had one.
-    pid: Option<u32>,
+    /// The poll the last note was said at (`None`: none yet); a note is repeated every [`STILL_WORKING_AFTER_POLLS`].
+    noted_at: Option<u32>,
+    /// The job was seen running on some look of this wait.
+    ever_ran: bool,
+    /// The polls after which the wait is given up on.
+    ceiling: u32,
+    /// The job's process (pid and start time) on the last look that had one.
+    process: Option<ProcessId>,
 }
 
 impl Default for StartWait {
@@ -108,14 +118,21 @@ impl StartWait {
 
     /// A wait polled every `tick` (match [`Timings::start_poll`](crate::Timings)), with nothing seen.
     pub fn with_poll(tick: Duration) -> Self {
+        Self::with_ceiling(tick, START_CEILING_POLLS)
+    }
+
+    /// [`StartWait::with_poll`] giving up after `ceiling` polls (a model shrinks it; production uses [`START_CEILING_POLLS`]).
+    pub fn with_ceiling(tick: Duration, ceiling: u32) -> Self {
         Self {
             tick,
+            ceiling,
             judge: StartJudge::new(patience(tick), "the background service"),
             polls: 0,
             vanished: 0,
             first_runs: None,
-            noted: false,
-            pid: None,
+            noted_at: None,
+            ever_ran: false,
+            process: None,
         }
     }
 
@@ -126,11 +143,22 @@ impl StartWait {
         }
         let f = &o.facts;
         self.polls += 1;
-        let seen = describe(f);
-        if self.polls > START_CEILING_POLLS {
-            return StartVerdict::Failed(format!(
-                "the service did not answer after {START_CEILING_POLLS} checks (observed: {seen}); this is the longest the app waits"
-            ));
+        // Only formatted when a verdict or a note says it: a look is hot (a model takes millions) and costs nothing otherwise.
+        let seen = Seen(f);
+        if f.job == Job::Running {
+            self.ever_ran = true;
+        }
+        if self.polls > self.ceiling {
+            let ceiling = self.ceiling;
+            return if self.ever_ran {
+                StartVerdict::GaveUp(format!(
+                    "still starting after {ceiling} checks (observed: {seen}); this is the longest the app waits, and it may still start"
+                ))
+            } else {
+                StartVerdict::Failed(format!(
+                    "the service never started after {ceiling} checks (observed: {seen}); this is the longest the app waits"
+                ))
+            };
         }
         if f.job == Job::Absent {
             self.vanished += 1;
@@ -144,7 +172,7 @@ impl StartWait {
             self.vanished = 0;
         }
         if f.job == Job::Refused {
-            return StartVerdict::Refused(seen);
+            return StartVerdict::Refused(seen.to_string());
         }
         let running = f.job == Job::Running;
         if let Some(runs) = f.runs {
@@ -160,11 +188,11 @@ impl StartWait {
         }
         // The OS started the job again as another process: what the judge counted belongs to the one that is gone. The run
         // count and the poll count are the whole start's and stay.
-        if let Some(pid) = f.pid {
-            if self.pid.is_some_and(|old| old != pid) {
+        if let Some(process) = f.pid {
+            if self.process.is_some_and(|old| old != process) {
                 self.judge = StartJudge::new(patience(self.tick), "the background service");
             }
-            self.pid = Some(pid);
+            self.process = Some(process);
         }
         // A job the OS has not started yet (or between restarts) is `Paused`: it spends no patience.
         // Also a process the OS or an app (App Tamer) has stopped: it goes on when it is resumed, so it is waited for.
@@ -208,39 +236,50 @@ impl StartWait {
                 _ => StartVerdict::StillWorking(self.note(&seen)),
             },
         };
-        // The judge spends no patience on a job that is not running, so it never notes one; the note is counted here.
-        if verdict == StartVerdict::Waiting
-            && !self.noted
-            && self.polls >= STILL_WORKING_AFTER_POLLS
-        {
+        // The judge spends no patience on a job that is not running, so it never notes one; the note is counted here, and
+        // repeated every [`STILL_WORKING_AFTER_POLLS`] so a long wait keeps saying how long it has been (ER-18).
+        let due = self
+            .noted_at
+            .map_or(self.polls >= STILL_WORKING_AFTER_POLLS, |at| {
+                self.polls - at >= STILL_WORKING_AFTER_POLLS
+            });
+        if verdict == StartVerdict::Waiting && due {
             return StartVerdict::StillWorking(self.note(&seen));
-        }
-        if let StartVerdict::StillWorking(_) = verdict {
-            self.noted = true;
         }
         verdict
     }
 
-    fn note(&mut self, seen: &str) -> String {
+    fn note(&mut self, seen: &dyn std::fmt::Display) -> String {
+        let secs = u64::from(self.polls) * self.tick.as_secs();
         self.said(format!(
-            "still working: the service has not answered yet (observed: {seen})"
+            "still working: the service has not answered after {} checks (about {secs} s; observed: {seen})",
+            self.polls
         ))
     }
 
-    /// A note said: the generic one is not repeated after it.
+    /// A note said: the next one is due after [`STILL_WORKING_AFTER_POLLS`] more polls.
     fn said(&mut self, text: String) -> String {
-        self.noted = true;
+        self.noted_at = Some(self.polls);
         text
     }
 }
 
 impl StartWatch for StartWait {
     fn reset(&mut self) {
-        *self = Self::with_poll(self.tick);
+        *self = Self::with_ceiling(self.tick, self.ceiling);
     }
 
     fn poll(&mut self, obs: &StartObservation) -> StartVerdict {
         self.observe(obs)
+    }
+}
+
+/// What the facts say, formatted when displayed.
+struct Seen<'a>(&'a StartFacts);
+
+impl std::fmt::Display for Seen<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&describe(self.0))
     }
 }
 
@@ -265,6 +304,12 @@ fn describe(f: &StartFacts) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paddock_proc::StartTime;
+
+    /// A process by identity: the same pid at another start time is another process.
+    fn proc(pid: u32) -> ProcessId {
+        ProcessId::new(pid, StartTime::from_micros(1))
+    }
     use paddock_proc::RunState;
 
     fn facts(job: Job) -> StartFacts {
@@ -282,7 +327,7 @@ mod tests {
     fn running(cpu: u64) -> StartObservation {
         obs(StartFacts {
             job: Job::Running,
-            pid: Some(7),
+            pid: Some(proc(7)),
             runs: Some(1),
             last_exit: None,
             cpu: Some(Duration::from_secs(cpu)),
@@ -336,7 +381,7 @@ mod tests {
     fn a_new_process_of_the_job_starts_the_judge_afresh_but_keeps_the_crash_count() {
         let with_pid = |pid: u32| {
             let mut o = running(5);
-            o.facts.pid = Some(pid);
+            o.facts.pid = Some(proc(pid));
             o
         };
         // 15 idle polls of one process, 15 of the process launchd restarted it as: each is under the idle patience.
@@ -372,7 +417,7 @@ mod tests {
         let mut o = pending();
         o.facts.runs = Some(1 + CRASH_RUNS);
         o.facts.last_exit = Some(3);
-        o.facts.pid = Some(9);
+        o.facts.pid = Some(proc(9));
         assert!(matches!(w.observe(&o), StartVerdict::Failed(_)));
         // The restart itself (pid 9, runs 2) keeps the first look's run count, so a later look three runs on is a loop.
         let mut w = StartWait::new();
@@ -440,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_job_says_it_is_still_working_once_after_the_note_threshold() {
+    fn a_pending_job_says_it_is_still_working_after_the_threshold_and_again_with_the_time_so_far() {
         let mut w = StartWait::new();
         let mut notes = Vec::new();
         for i in 1..=100 {
@@ -448,9 +493,20 @@ mod tests {
                 notes.push((i, m));
             }
         }
-        assert_eq!(notes.len(), 1, "{notes:?}");
-        assert_eq!(notes[0].0, STILL_WORKING_AFTER_POLLS);
+        let at: Vec<u32> = notes.iter().map(|n| n.0).collect();
+        assert_eq!(at, [20, 40, 60, 80, 100], "{notes:?}");
         assert!(notes[0].1.contains("still working") && notes[0].1.contains("not running"));
+        // Each note says how long it has been (ER-18).
+        assert!(
+            notes[0].1.contains("20 checks") && notes[0].1.contains("about 60 s"),
+            "{}",
+            notes[0].1
+        );
+        assert!(
+            notes[4].1.contains("100 checks") && notes[4].1.contains("about 300 s"),
+            "{}",
+            notes[4].1
+        );
     }
 
     #[test]
@@ -471,7 +527,7 @@ mod tests {
     }
 
     #[test]
-    fn a_slow_but_alive_start_says_it_is_still_working_once_and_goes_on() {
+    fn a_slow_but_alive_start_says_it_is_still_working_every_twenty_polls_and_goes_on() {
         let mut w = StartWait::new();
         let mut notes = 0;
         for i in 0..100 {
@@ -485,7 +541,10 @@ mod tests {
                 other => panic!("{i}: {other:?}"),
             }
         }
-        assert_eq!(notes, 1, "the note is said once");
+        assert_eq!(
+            notes, 5,
+            "the note is said again every twenty polls, 100 polls say it five times"
+        );
     }
 
     #[test]
@@ -599,26 +658,97 @@ mod tests {
     }
 
     #[test]
-    fn the_ceiling_ends_a_wait_that_is_neither_answering_nor_stuck_and_names_what_was_seen() {
+    fn at_the_ceiling_a_job_that_ran_and_is_not_stuck_is_given_up_on_not_failed() {
         let mut w = StartWait::new();
         let mut verdict = StartVerdict::Waiting;
         let mut polls = 0;
-        // Alive with CPU growing slowly forever: never stuck, so only the backstop ends it.
-        while !matches!(verdict, StartVerdict::Failed(_)) && polls < START_CEILING_POLLS + 5 {
+        // Alive with CPU growing slowly forever: never stuck, so only the ceiling ends it, and it is not a failure (ER-19).
+        while !matches!(verdict, StartVerdict::GaveUp(_) | StartVerdict::Failed(_))
+            && polls < START_CEILING_POLLS + 5
+        {
             polls += 1;
             let mut o = pending();
             o.facts.job = Job::Running;
             o.facts.cpu = Some(Duration::from_millis(u64::from(polls) * 100));
             verdict = w.observe(&o);
         }
-        let StartVerdict::Failed(m) = verdict else {
-            panic!("{verdict:?}")
+        let StartVerdict::GaveUp(m) = verdict else {
+            panic!("a running job is never failed for being slow: {verdict:?}")
         };
         assert_eq!(polls, START_CEILING_POLLS + 1, "{m}");
         assert!(
-            m.contains("longest the app waits") && m.contains("observed: running"),
+            m.contains("still starting")
+                && m.contains("may still start")
+                && m.contains("observed: running"),
             "{m}"
         );
+        assert!(
+            !m.contains("Repair"),
+            "no advice to repair a job that is only slow: {m}"
+        );
+    }
+
+    /// The positive control of the ceiling (P1-4): looks that only ever show a job the OS has not started end at the 201st
+    /// poll, and as a failure, because nothing ever ran.
+    #[test]
+    fn looks_that_only_ever_show_a_pending_job_fail_at_the_201st_poll() {
+        let mut w = StartWait::new();
+        for polls in 1..=START_CEILING_POLLS {
+            assert!(
+                !matches!(
+                    w.observe(&pending()),
+                    StartVerdict::Failed(_) | StartVerdict::GaveUp(_)
+                ),
+                "poll {polls} is inside the wait"
+            );
+        }
+        let StartVerdict::Failed(m) = w.observe(&pending()) else {
+            panic!("the 201st poll must end the wait")
+        };
+        assert!(
+            m.contains("never started") && m.contains(&START_CEILING_POLLS.to_string()),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn a_shrunk_ceiling_survives_a_reset() {
+        let mut w = StartWait::with_ceiling(POLL, 3);
+        w.reset();
+        for _ in 0..3 {
+            assert!(!matches!(w.observe(&pending()), StartVerdict::Failed(_)));
+        }
+        assert!(matches!(w.observe(&pending()), StartVerdict::Failed(_)));
+    }
+
+    #[test]
+    fn a_shrunk_ceiling_ends_the_wait_at_its_own_poll() {
+        let mut w = StartWait::with_ceiling(POLL, 5);
+        for _ in 0..5 {
+            assert!(!matches!(w.observe(&pending()), StartVerdict::Failed(_)));
+        }
+        assert!(matches!(w.observe(&pending()), StartVerdict::Failed(_)));
+    }
+
+    #[test]
+    fn the_same_pid_at_another_start_time_is_another_process() {
+        let mut w = StartWait::new();
+        let mut o = running(5);
+        o.facts.pid = Some(ProcessId::new(7, StartTime::from_micros(1)));
+        // 15 idle polls of one process, 15 of a process that got the same pid after a restart: each is under the idle patience.
+        for i in 0..15 {
+            assert!(
+                !matches!(w.observe(&o), StartVerdict::Failed(_)),
+                "first {i}"
+            );
+        }
+        o.facts.pid = Some(ProcessId::new(7, StartTime::from_micros(2)));
+        for i in 0..15 {
+            assert!(
+                !matches!(w.observe(&o), StartVerdict::Failed(_)),
+                "restarted {i}"
+            );
+        }
     }
 
     #[test]

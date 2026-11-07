@@ -49,7 +49,7 @@ fn start_facts(sys: &mut dyn System, target: &str) -> StartFacts {
     };
     StartFacts {
         job,
-        pid: report.pid,
+        pid: running_pid.and_then(|pid| sys.process(pid)),
         runs: report.runs,
         last_exit: report.last_exit_code,
         cpu: running_pid.and_then(|pid| sys.cpu_time(pid)),
