@@ -1,17 +1,23 @@
 # 23. A full chat in the Playground: text, images, speech input and MCP tools
 
-- Status: Proposed (2026-11-05). Docs only: nothing here is built. The user's decisions D2 to D8 are recorded below (2026-11-05).
-  Not yet independently reviewed. The revision of the work packages is not done: see "Not finished in this revision".
-- Date: 2026-11-05
+- Status: Proposed (2026-11-05), revision 2 (2026-11-07). Docs only: nothing here is built. The user's decisions D2 to D8 are
+  recorded below (2026-11-05). Revision 2 corrects the Dyno facts (Dyno 1.1.0 has a listener), re-sizes the work packages and
+  splits them so the chat with Dyno's tools comes first; the order and the base list are in the plan
+  [`docs/plans/pitwall-1-1.md`](../plans/pitwall-1-1.md). Not yet independently reviewed.
+- Date: 2026-11-05; revision 2 2026-11-07
 - Related: ADR 0001 (local only), 0003 (API surface), 0007 (security), 0018 (capability gating), 0019 (caching), 0020
   (llama.cpp is the only engine), 0006 (memory). Family: ADR 0007 (MCP across the family), ADR 0013 (workbench and
   assistant),
   ADR 0026 (dialogs), ADR 0031 (patience, not wall clocks), ADR 0037 (composition), ADR 0049 (small merges behind
   switches),
-  ADR 0052 on `origin/docs/adr-wiring-outcomes-ui` (wired features). Rules 12, 17, 22, 42, 46, 48, 51, 53; ER-19, ER-22.
-  Recce's role: branch `docs/pitwall-rag-via-recce` (Pitwall builds no index of its own).
-- Code read: `origin/pitwall/1.1-final` at `b7151a57f`, `origin/main` at `0e667eca7`, `origin/feat/dyno-mcp-readings` at
-  `791f26090`.
+  ADR 0052 (wired features, now on `main`), ADR 0056 (service repair, on `origin/dyno/1.1.0-rc`). Dyno ADR 0032 amendments
+  ("2026-11-05: the listener", `apps/dyno/docs/adr/0032-amendments.md:28-46` at `f63a3eea2`). Rules 12, 17, 22, 42, 46, 48,
+  51, 53, 55, 71; ER-19, ER-22, ER-33. Recce's role: branch `docs/pitwall-rag-via-recce` `e075ab2b0` (Pitwall builds no index
+  of its own; knowledge collections wait for Recce's MCP server, so nothing of it is in 1.1). Keychain research: branch
+  `docs/keychain-unsigned-updates` `95b27810d`.
+- Code read: revision 1 read `origin/pitwall/1.1-final` `b7151a57f`, `origin/main` `0e667eca7`, `origin/feat/dyno-mcp-readings`
+  `791f26090`. Revision 2 read `origin/pitwall/1.1-final` `b7151a57f` (unchanged), `origin/main` `87c9b8449` and
+  `origin/dyno/1.1.0-rc` `f63a3eea2` (2026-11-07). Paths with a line number below are at those commits.
 
 **What is measured and what is judged.** This ADR contains **no measurement of ours**. Code facts were read in git;
 nothing
@@ -39,8 +45,8 @@ What exists, read in the code:
 | `parse_projector` | reads projectors | refuses an audio-only projector |
 | `capabilities.json` and `capabilities_of` | gate tools by the chat template containing `tool`, vision by a projector | no audio; the substring test is crude |
 | `paddock-assistant` + `@decryp7/paddock-ui/workbench/assistant` | tool loop with budgets, `Gate` approvals, `Cancel`, malformed calls reported and never run, versioned store, `<pd-assistant>` with markdown, tool cards and `PendingApproval`; only the workbench demo uses it on main | see Decision 1 |
-| `paddock-mcp` | server, policy, audit, keys, loopback and stdio serving | client side is request builders only: no connection, no read loop, no cancel, no loopback handshake |
-| Dyno's tools | 10 read-only, 2 opt-in actions (`wake_device`, `keep_awake`), results capped at 32 KiB | **nothing listens.** See Decision 7 |
+| `paddock-mcp` (at `f63a3eea2`) | server, policy, audit, keys; the app-side loopback `Listener` with its discovery file (`listener.rs:1-5`, `:19`); `bridge::run`, which reads the discovery file, checks the writer's pid and start time, connects, sends the key line and carries lines both ways (`bridge.rs:1-4`, `:107-150`) | the client is request builders only (`client.rs`, 103 lines: `initialize`, `list_tools`, `call_tool`, `ping` and their parsers): no connection type with request ids, no read loop shared by calls, no cancel, no paged `tools/list` loop. The handshake and the discovery check exist only inside `bridge::run` |
+| Dyno's tools (at `f63a3eea2`) | 10 read-only: 8 readings (`system_summary`, `cpu_memory`, `disks`, `top_processes`, `network_summary`, `alarms`, `history`, `sensors`; `mcp_readings.rs:56-132`) plus `power_state` and `wol_devices` (`mcp.rs:172-178`); 2 actions `wake_device` and `keep_awake` (`mcp.rs:180`, `:191`), hidden and refused until the user allows them by name in Dyno (`lib.rs:14-15`). Served by the Dyno app process on 127.0.0.1 while AI access is on and a key exists (`mcp.rs:155-157`), at most 4 clients (`mcp.rs:24`). `tools.listChanged` is `false` (`server.rs:368`) | none for the proof of concept. See Decision 7 |
 
 ## Decision
 
@@ -236,13 +242,16 @@ a clip. Nothing about it reaches logs except duration, size, engine time and out
 
 | Transport | In 1.1 | Why |
 |---|---|---|
-| Family loopback (`pmk_` key handshake, then JSON lines on 127.0.0.1) | **Yes, first** | what family apps with a running process offer. Not HTTP, so ADR 0001's HTTP rule is untouched; the address type admits only 127.0.0.1, as `pitwall-loopback` does; `privacy-check.sh` and a test extend to it |
-| stdio, program chosen by the user | **Yes, last and cuttable** (WP-10) | most third-party servers. MCP's security guidance: show the exact untruncated command, say it runs code with the user's rights, require approval. Spawned through `paddock_proc`, stderr to the log capped. All its tools are treated as actions (Decision 8) |
+| Family loopback (`pmk_` key handshake, then JSON lines on 127.0.0.1) | **Yes, first** | what family apps with a running process offer, and what Dyno 1.1.0 serves (`loopback.rs:4-8`: `{"key":"pmk_..."}` answered by `{"ok":true,"client":...}` or `{"ok":false,"code":"key"\|"handshake"\|"busy",...}`). Not HTTP, so ADR 0001's HTTP rule is untouched; the address type admits only 127.0.0.1, as `pitwall-loopback` does and as `bridge::run` connects (`bridge.rs:118`); `privacy-check.sh` and a test extend to it |
+| stdio, program chosen by the user | **Yes, last and cuttable** (WP-10) | most third-party servers. MCP's security guidance: show the exact untruncated command, say it runs code with the user's rights, require approval. Spawned through `paddock_proc`, stderr to the log capped. All its tools are treated as actions (Decision 8). Pitwall does not need `dyno mcp` (Dyno's stdio bridge for third-party hosts, `dyno-cli/src/lib.rs:35-66`): it speaks loopback itself |
 | Streamable HTTP | **No** | any remote form is an outbound connection, which needs its own ADR and the user's approval (AGENTS.md, ADR 0001) |
 
 `paddock_mcp::client` grows a `Connection` over any reader and writer: requests with ids, one read loop, paged
-`tools/list`, cancel through
-`notifications/cancelled`, a line limit, typed errors. Plus `connect_loopback` and `spawn_stdio`.
+`tools/list`, cancel through `notifications/cancelled`, a line limit, typed errors. **`connect_loopback` is not new code:**
+it is the first half of `bridge::run` (read the discovery file, `Discovery::writer_alive`, connect with a 5 s connect limit,
+send the key line, read the one answer line and tell a key refusal from the others; `bridge.rs:107-150`) moved into the
+client, and `bridge::run` then calls it, so the family has one handshake (rule 55). A 5 s limit on the TCP connect to
+127.0.0.1 is a connect, not a running job, so ER-19 does not apply. `spawn_stdio` moves to WP-10 with the stdio transport.
 
 **Protocol version.** `paddock-mcp` speaks 2025-06-18 (with two older versions). MCP's current revision is
 **2026-07-28**, which removes
@@ -252,39 +261,60 @@ not affect Dyno or Recce now. A third-party stdio server that is 2026-07-28-only
 the client learns the new
 shape (2 to 3 days, not in this ADR's table).
 
-### 7. Connecting to Dyno, and the gap in front of it
+### 7. Connecting to Dyno
 
-**Nothing serves MCP today.** At `791f26090`, `serve_loopback` and `serve_stdio` have no production caller in any app:
-only Dyno's test
-calls `serve_stdio` over a buffer. Dyno builds `McpControl`, keys and settings, but opens no listener and has no `--mcp`
-mode. Its user
-guide says a client can connect. Its tools call `shell.call_agent` in the app process, so loopback in Dyno's app is the
-natural form, and
-stdio would need a different design. This must be fixed in Dyno before Pitwall can connect at all (WP-13).
+**Revision 2: Dyno 1.1.0 serves.** Revision 1 read `791f26090`, where nothing listened. At `origin/dyno/1.1.0-rc`
+`f63a3eea2` the gap is closed on Dyno's side (Dyno ADR 0032 amendments, "2026-11-05: the listener",
+`apps/dyno/docs/adr/0032-amendments.md:28-46`):
 
-Proposed flow:
+- **The Dyno app process serves**, because its tools ask the agent through the shell's link, which only the app holds. The
+  window need not be open: the app stays in the tray. When Dyno is quit the listener is gone (`0032-amendments.md:33-35`).
+- `paddock_mcp::listener::Listener::reconcile` listens on an **ephemeral 127.0.0.1 port only while AI access is on and at
+  least one unrevoked key exists** (`listener.rs:1-5`, `:140`), at most 4 clients (`mcp.rs:24`).
+- It writes **`mcp-listener.json`** in Dyno's config folder (`listener.rs:19-25`): pid, start time in microseconds, port, app
+  name and version, never a key (`listener.rs:28-41`). It is a hint (rule 53): a client checks `Discovery::writer_alive`
+  (same pid, same start time, through `paddock_proc::ProcessId`; `listener.rs:47-50`) before it sends a key.
+- Keys are issued in Dyno's Settings > AI access through the `pd.mcp.key` dialog, shown once; Dyno keeps only a hash per key
+  in an owner-only `mcp-keys.json`, not in the OS credential store (`mcp.rs:118-120`, `:147`).
+- `dyno mcp` bridges stdio hosts to the listener (`dyno-cli/src/lib.rs:35-66` over `bridge::run`), with the key in
+  `DYNO_MCP_KEY`. A real listener-plus-bridge test exists (`apps/dyno/app/src-tauri/tests/mcp_listener.rs:120`).
+- The server announces `tools: { listChanged: false }` (`server.rs:368`) and negotiates the protocol version from the
+  client's request (`server.rs:377`).
 
-1. Shared: when MCP is on, the serving app listens on an ephemeral 127.0.0.1 port and writes a small discovery file in
-   its data folder:
-   port, pid, start time, protocol. It is a hint only (rule 53): the handshake proves the server. The listener follows
-   the
-   master switch.
-2. Dyno: Settings > AI access > turn on > Issue key > name it "Pitwall". The key is shown once, as today (`pd.mcp.key`).
-3. Pitwall: Settings > Connected apps lists family apps found with `paddock-siblings`. Connect opens a credential
-   dialog, an OS window
-   (rule 17), to paste the key. It is kept in the OS store (`paddock-secrets`), never in a file or log, never shown
-   again.
-4. Pitwall connects, shows the server's name and tool list, and the user picks which tools chats may offer.
-5. Dyno not running: the connection reads "Dyno is not running" with Open Dyno (`paddock-siblings`), and retries with
-   the family's
-   back-off. A chat never fails because of it; the tools are simply not offered, and the composer says so.
+Pitwall's flow, on that listener:
+
+1. Dyno: Settings > AI access > turn on > Issue key > name it "Pitwall". The key is shown once.
+2. Pitwall: Settings > Connected apps lists family apps found with `paddock-siblings`. For each, Pitwall derives the discovery
+   path from the app's config folder the way `dyno mcp` does (`paddock_env::AppDirs::for_app` then
+   `paddock_mcp::listener::discovery_path`, `dyno-cli/src/lib.rs:50-57`). Connect opens a credential dialog, an OS window
+   (rule 17), to paste the key.
+3. **Where the pasted key is kept** (changed from revision 1, which said the OS store). Pitwall holds the key itself, not a
+   hash, so it must keep a secret. On macOS a Keychain item made by an ad-hoc build is bound to that build, and the next
+   build blocks on it before its window (Dyno measured it in a VM; the reason Dyno moved its key list to a file,
+   `mcp.rs:118-120`; research `95b27810d`). Pitwall's own admin-key copy already uses `keyring` (`credentials.rs:44-45` on
+   `1.1-final`) and has the same exposure. Proposed: an owner-only file behind the `paddock-secrets` port on macOS, the OS
+   store on Windows and Linux; never in a log, never shown again. **This needs the user's decision** (plan, open question
+   Q1), because the family question is open.
+4. Pitwall connects with `paddock_mcp::client::connect_loopback` (Decision 6), shows the server's name and tool list, and the
+   user picks which tools chats may offer.
+5. **No `list_changed` from Dyno.** Pitwall lists tools on connect, when a chat is opened and on Refresh in Connected apps;
+   never per turn. An action the user allows later in Dyno appears at the next listing. The approval hash (Decision 8) is
+   checked at every listing.
+6. **Two consents for an action.** Dyno hides `wake_device` and `keep_awake` until the user allows them by name in Dyno
+   (`lib.rs:14-15`); Pitwall then still asks on every call (D2).
+7. Dyno not running, AI access off, or no key: the discovery check or the connect fails, and the connection reads "Dyno isn't
+   open, or AI access is off" with Open Dyno (`paddock-siblings`), retrying with the family's back-off. A refusal with code
+   `key` reads "Dyno refused the key" with the step to issue a new one; `busy` says all places are taken. The words follow
+   `bridge.rs:36-40` and `:143-150`. A chat never fails because of it: the tools are simply not offered, and the composer says
+   so.
 
 A one-click pairing like Pitwall's own six-digit flow (ADR 0004) would be nicer, but it needs new consent UI in each
 server app. Later.
 
-Threat note (judgement): a process of the same user could listen on the port and receive the key. A same-user attacker
-can read much
-more already, so this is accepted, in line with ADR 0007's loopback model. The key is per client and revocable in Dyno.
+Threat note (judgement): a process of the same user could write a discovery file or listen on the port and receive the
+key. The pid-and-start-time check stops a stale file, not a live same-user process that writes its own. A same-user attacker
+can read much more already, so this is accepted, in line with ADR 0007's loopback model. The key is per client and
+revocable in Dyno.
 
 ### 8. Approval, as the user decided, and where actions differ
 
@@ -293,7 +323,7 @@ Every tool starts **off the model's list until connected and picked**. Then:
 | Kind | First call | Later calls |
 |---|---|---|
 | Read-only tool of a family server | ask: Allow once, Always allow, Deny | runs without asking, shown in the chat |
-| Action tool (`wake_device`, `keep_awake`) | ask, showing the exact arguments | **ask every call** (decided, D2) |
+| Action tool (`wake_device`, `keep_awake`; listed only once the user allowed it in Dyno, Decision 7) | ask, showing the exact arguments | **ask every call** (decided, D2) |
 | Any tool of a user-added stdio server | as an action | as an action, until the user marks that tool "always allow" in Settings |
 
 - The **card is inline in the chat**, not a dialog: it belongs to the turn, the conversation stays usable, and Stop
@@ -360,7 +390,7 @@ limit), sorted by name so the prompt prefix stays the same. The composer's conte
 | A tool description lies, or changes later | Descriptions are shown before the first approval; the hash in Decision 8 re-asks on a change. Descriptions are capped in length and control characters are stripped, since they go to the model |
 | A malicious stdio server | Exact command shown, explicit consent, no one-click import from a file or link, user rights only, nothing elevated. Sandboxing is not attempted in 1.1 and the dialog says so |
 | Cloud models | None. ADR 0001 stands: there is no remote backend, so tool results and images stay on this computer. Family ADR 0007 rule 7 is met by construction |
-| Keys | `pmk_` keys only in the OS store. Both redactors know `pw_` and `pmk_`. Never in chats |
+| Keys | `pmk_` keys only in the secret store of Decision 7 step 3 (an owner-only file on macOS if the user agrees, the OS store elsewhere). Both redactors know `pw_` and `pmk_`. Never in chats |
 | Bad files | Images and audio decode with limits, off the UI thread, in Rust with proptests that never panic; the engine gets checked, re-encoded input where it can |
 | Webview compromise | Tauri capabilities do not grow; every new command is in the shell's guard and manifest (C-checks); key and approval commands take typed ids |
 
@@ -383,8 +413,8 @@ limit), sorted by name so the prompt prefix stays the same. The composer's conte
 | Image preparation | Bounded worker, 2 at a time (judgement: CPU and memory heavy) | Downscale to the projector's budget, dedupe by SHA-256, keep the prepared copy so a later turn does not decode again | To measure in WP-5 |
 | Speech | One at a time; other chat work waits through the same scheduler at `Interactive` priority | 16 kHz mono; trim leading and trailing silence by a simple energy check first (a VAD model only if measured worthwhile); keep the model loaded under the existing idle rules | WP-6 measures. Whether speech and chat models fit together goes through the fit check; never into swap (ADR 0006) |
 | Saving | One writer per conversation | Save at turn ends and each tool result, never per token; one file per conversation | By design |
-| `tools/list` | Bounded per connection | Cached per connection, refreshed on `list_changed` and on opening the chat, not per turn | By design |
-| Tool schemas in the prompt | n/a | They take context on every turn: a per-chat tool chooser, and the meter shows the cost. 12 Dyno tools' token cost to be measured in WP-9 | To measure |
+| `tools/list` | Bounded per connection | Cached per connection, refreshed on connect, on opening a chat and on Refresh, never per turn; `list_changed` is honoured when a server sends it, which Dyno does not (`server.rs:368`) | By design |
+| Tool schemas in the prompt | n/a | They take context on every turn: a per-chat tool chooser, and the meter shows the cost. The token cost of Dyno's 10 read tools (12 with both actions allowed) is measured in WP-9a and recorded per rule 48 | To measure |
 
 Thread counts stay Settings with Auto where they are settings at all. None of this is a large job, so rule 46 does not
 apply: one person's chat
@@ -396,9 +426,10 @@ turn is the LLM's own purpose. Priority: live work, normal level on Windows (rul
   `pitwall-core` keeps 99 % lines.
 - A failing test first for each found bug: tool calls lost at `/mgmt/v1/chat`, `ttft_ms`, the pixel budget not wired,
   the slow cold load.
-- A real MCP pair in one test: `serve_loopback` with fake tools against the new client, including the hung tool, Stop,
-  the dropped connection, a
-  changed tool, a revoked key, an over-long line.
+- A real MCP pair in one test: a `Listener` with fake tools and its discovery file (as
+  `apps/dyno/app/src-tauri/tests/mcp_listener.rs` does for the bridge) against the new client, including the hung tool, Stop,
+  the dropped connection, a changed tool, a revoked key, `busy`, a stale discovery file (dead pid, reused pid with another
+  start time) and an over-long line. `bridge::run`'s existing tests keep passing on the shared handshake.
 - Injection fixtures: a tool result that says to call `keep_awake`. The test asserts that the action does **not** run
   without a decision, whatever the
   fake model does.
@@ -412,29 +443,38 @@ turn is the LLM's own purpose. Priority: live work, normal level on Windows (rul
 
 ## Work packages
 
-Agent-days, ranges, judged from the sizes of similar family work; not measured. Shared-code packages land behind a
-switch and after the Dyno tag, or are additive
-(`paddock-assistant` has no Dyno or Spotter user). Numbers in **bold** block others.
+Agent-days, ranges, judged from the sizes of similar family work; not measured. Revision 2 re-sized them against the code at
+`f63a3eea2` and `b7151a57f` and split WP-2, WP-3, WP-4 and WP-9 so that the chat with Dyno's tools (the proof of concept, **PoC**)
+needs only the first halves. "Where" says whether a package changes shared code (`crates/`, `ui/projects/`) or only
+`apps/pitwall/`; a shared package is written on a branch now and lands after the Dyno 1.1.0 tag. The order, the agents and
+the dates are in the plan ([`docs/plans/pitwall-1-1.md`](../plans/pitwall-1-1.md)). Numbers in **bold** are on the path to
+the PoC.
 
-| WP | What | Days | Needs |
-|---|---|---|---|
-| 1 | Wire: parts, tools, phases and events at `/mgmt/v1/chat`; response before the load; `ttft_ms`; contract tests | 1.5–2.5 | 1.1 base landed |
-| 2 | `paddock-assistant`: parts, `ApprovalPolicy`, optional wall limits, per-turn tools, native calls, store port; TypeScript regenerated; the demo updated | **3–5** | |
-| 3 | Pitwall's provider, store, attachments on disk, retention, Report-a-problem exclusion, prompt-cache measurement | 2–3 | 1, 2 |
-| 4 | UI: Chat and Compare tabs, `<pd-assistant>` extended (attachments, mic, approval cards, phases, meter), layout at 900 to 1440, a11y, e2e | 4–6 | 2, 3 |
-| 5 | Images: picker, paste, drop, decode, downscale, gating, fixtures; real-model test | 2–3 | 3 |
-| 6 | Speech spike: the Decision 5 comparison on real hardware; capability test against the catalog; results in `performance.md`; **the user sees the result** | **1–2** | |
-| 7 | Speech: capture port and `cpal`, OS permissions and Repair, transcribe path, `Part::Audio`, projector, capability, catalog entry, first-use download, push-to-talk | 4–6.5 (+3–4 if the helper) | 1, 4, 6 |
-| 8 | `paddock_mcp::client`: connection, cancel, loopback, stdio; discovery file; tests | **2.5–4** | |
-| 9 | Host: Connected apps page, key dialog, tool chooser, approvals store and hash, MCP-to-tool adapter, limits, audit | 3–5 | 2, 8 |
-| 10 | User-added stdio servers with consent (cuttable) | 1.5–2.5 | 8, 9 |
-| 11 | Security tests and an independent security review of the host | 1.5–2.5 | 9 |
-| 12 | Docs: user guide, features, roadmap, `features.toml` rows; images reviewed; real-engine and Dyno tests | 2–3 | all |
-| | **Chat total** | **28–45** | |
-| 13 | Dyno's listener and switch, with the shared discovery. Counted to Dyno, not here | 1–1.5 | decision D1 |
+| WP | What | Where | Days | Needs | PoC |
+|---|---|---|---|---|---|
+| 1 | Wire: `tools`, `toolChoice`, phases and events at `/mgmt/v1/chat` (text parts; image and audio parts are added by WP-5 and WP-7); response before the cold load (the 30 s open, `commands.rs:387`); tool-call events kept; `ttft_ms`; contract tests and `api.types.ts` | app | **1.5–2.5** | `1.1-final` (app-only; merges into the PoC branch) | yes |
+| 2a | `paddock-assistant`, the tool path: `ApprovalPolicy` port, optional wall limits, a tool set per turn, native tool calls; TypeScript regenerated; the workbench demo updated (its only other user) | shared | **2–3** | | yes |
+| 2b | `paddock-assistant`: message parts and the `ConversationStore` port | shared | 1.5–2.5 | 2a | |
+| 3a | Pitwall's `LlmProvider` over `ServerClient`; conversations kept for the session only | app | **1–1.5** | 1, 2a | yes |
+| 3b | The saved store (Decision 3), attachments on disk, limits, "Don't save this chat", Report-a-problem exclusion test, prompt-cache measurement | app | 1.5–2.5 | 2b, 3a | |
+| 4a | UI: Chat and Compare tabs, `<pd-assistant>` with tool-call cards, approval cards, phases, Stop and "Still working"; mock first | app + shared (`workbench/assistant`) | **2–3** | 2a | yes |
+| 4b | UI: attachments, mic, context meter, layout at 900 to 1440, a11y, e2e, screenshots for review | app + shared | 2.5–4 | 4a, 2b | |
+| 5 | Images: picker, paste, drop, decode, downscale to `max_image_pixels`, gating, fixtures; real-model test | app | 2–3 | 3b, 4b | |
+| 6 | Speech spike: the Decision 5 comparison on real hardware (night window); capability test against the catalog; `performance.md`; **the user sees the result** | app (measure) | 1–2 | | |
+| 7 | Speech: capture port and `cpal`, OS permissions and Repair, transcribe path, `Part::Audio`, projector, capability, catalog entry, first-use download, push-to-talk | app | 4–6.5 (+3–4 if the helper) | 1, 4b, 6 | |
+| 8 | `paddock_mcp::client`: `Connection` (ids, one read loop, paged `tools/list`, cancel, line limit, typed errors); `connect_loopback` moved out of `bridge::run`, which then uses it. Smaller than revision 1's 2.5–4: discovery, the pid check and the handshake exist | shared | **1.5–2.5** | | yes |
+| 9a | Host, first half: Connected apps entry for Dyno, key dialog (OS window), key storage (Decision 7 step 3), MCP-to-tool adapter, approvals with the hash and D2, one `pitwall_chat` log line per call, the injection test (Testing) | app | **2.5–3.5** | 2a, 8, merged base | yes |
+| 9b | Host, second half: per-chat tool chooser, remembered approvals listed and revoked, reconnect and back-off, "Dyno isn't open" with Open Dyno, result and definition limits, the tool-cost measurement | app | 1.5–2.5 | 9a | |
+| P | PoC build: the PoC branch built locally for the user (ER-15: never published), a short try-it sheet, one connected run against Dyno 1.1.0 on the user's Mac recorded with its precondition (rule 71) | app | **0.5–1** | 1, 3a, 4a, 9a | yes |
+| 10 | User-added stdio servers with consent; `spawn_stdio` in `paddock-mcp` (moved here from WP-8) (cuttable) | shared + app | 2–3 | 8, 9b | |
+| 11 | Security tests and an independent security review of the host | app | 1.5–2.5 | 9b | |
+| 12 | Docs: user guide, features, roadmap, `features.toml` rows; images reviewed; real-engine and Dyno tests | app | 2–3 | all | |
+| | **Chat total** | | **30.5–48.5** | | PoC part: 11–17 |
+| 13 | Dyno's listener and discovery: **done** on `origin/dyno/1.1.0-rc` (`listener.rs`, `mcp.rs:136-157`); lands with the Dyno tag. 0 days here | Dyno | 0 | | |
 
-The rest of the release (shell landing, Report a problem, ADRs 0052, 0053, 0054, VM rounds) is in the 1.1 readiness
-report, not here.
+Revision 1's chat total was 28–45. The rise (+2.5 to +3.5) is the PoC build P, `spawn_stdio` moving into WP-10, and the
+hand-over between the split halves of WP-2, 3, 4 and 9 (0.5 to 1 day each); WP-8 fell by 1 to 1.5 days. WP-13 was never in the
+chat total. The base list (the rest of 1.1, 23.5–41 days) and the reviews (3–5) are in the plan.
 
 ## Decisions
 
@@ -451,21 +491,28 @@ The user accepted D2 to D8 as recommended on 2026-11-05. The sections above foll
 | D8 | Who may use MCP through Pitwall: only the Playground chat, or other apps' API requests too? | Only the chat in 1.1 |
 
 D1 (Dyno has no MCP listener) was not part of that acceptance and is overtaken: the listener was built for Dyno 1.1.0 (Dyno ADR 0032
-amendments, 2026-11-05, on `origin/dyno/wp-int`).
+amendments, 2026-11-05; at `origin/dyno/1.1.0-rc` `f63a3eea2`, Decision 7).
 
 Later, not open now: the user sees WP-6's result (D4), which may reopen the 805 MB model against a smaller engine.
 
-## Not finished in this revision
+Open in revision 2 (asked in the plan, not decided here): where Pitwall keeps the pasted key on macOS (Decision 7 step 3,
+plan Q1).
 
-Stopped on 2026-11-05 when Pitwall moved back in the release order. Still to do before the independent review:
+## Revision 2 (2026-11-07)
 
-- **Decisions 6 and 7, the Dyno row of Context, and WP-8 and WP-13 are stale.** They describe `feat/dyno-mcp-readings` `791f26090`, where
-  nothing listened. `origin/dyno/wp-int` `76c662c36` has the listener, the discovery file and the `dyno mcp` bridge, and 10 read tools
-  (8 readings plus `power_state`, `wol_devices`). They have not been rewritten here.
-- **Work packages:** not re-checked or re-sized, and not marked as app-folder only or shared.
-- **Missing packages:** diagnostic bundle adoption, per-machine install, ADR 0052 checks, rule 71 rows, the six `pitwall-v1.1.0`
-  entries in `docs/known-copies.toml`.
-- **The base work list** (the "1.1 readiness report" named under Work packages) is not in the repo yet.
+Done in this revision, from revision 1's "Not finished" list:
+
+- Decisions 6 and 7 and the Context rows for `paddock-mcp` and Dyno's tools now describe `origin/dyno/1.1.0-rc` `f63a3eea2`
+  (the listener, the discovery file, `bridge::run`, 10 read tools, `listChanged: false`). WP-8 is re-sized and WP-13 is
+  marked done on Dyno's side.
+- The work packages are re-sized, split for the PoC and marked shared or app-only.
+- The missing packages (diagnostic bundle, per-machine install, ADR 0052 checks, rule 71 rows, the six `pitwall-v1.1.0`
+  entries in `docs/known-copies.toml`) and the base work list are in the plan, `docs/plans/pitwall-1-1.md`, section 1.
+
+Found in this revision: Decision 7 step 3 (the pasted key in the OS store) meets the Keychain finding on ad-hoc macOS builds;
+it is now a proposal with an open question.
+
+Still to do: an independent review of this ADR before it is Accepted.
 
 ## Consequences
 
