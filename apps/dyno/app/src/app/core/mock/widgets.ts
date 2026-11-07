@@ -715,7 +715,7 @@ export class MockWidgets {
 
 const METRIC_TITLES: [Metric, string][] = [
   ['cpuTotal', 'CPU'], ['cpuPerCore', 'CPU per core'], ['memory', 'Memory'], ['memoryPressure', 'Memory pressure'], ['swap', 'Swap'],
-  ['diskActivity', 'Disk activity'], ['diskFree', 'Disk free'], ['networkDown', 'Network down'], ['networkUp', 'Network up'],
+  ['diskActivity', 'Disk activity'], ['diskFree', 'Disk free'], ['networkDown', 'Network down'], ['networkUp', 'Network up'], ['networkBoth', 'Network (up and down)'],
   ['gpuLoad', 'GPU'], ['temperature', 'Temperature'], ['fan', 'Fan'], ['battery', 'Battery'],
 ];
 const PERCENT: Metric[] = ['cpuTotal', 'memory', 'swap', 'diskFree', 'gpuLoad', 'battery'];
@@ -790,6 +790,8 @@ function rateReading(bps: number, query: ReadingQuery): MetricReading {
 export function mockMetricReading(query: ReadingQuery, system: MockSystem): MetricReading {
   if (query.metric === 'networkDown' && system.rxBps !== undefined) return rateReading(system.rxBps, query);
   if (query.metric === 'networkUp' && system.txBps !== undefined) return rateReading(system.txBps, query);
+  // The total, as the engine reads it (the menu bar draws the two rates apart).
+  if (query.metric === 'networkBoth' && system.rxBps !== undefined && system.txBps !== undefined) return rateReading(system.rxBps + system.txBps, query);
   const raw =
     query.metric === 'cpuTotal' ? system.cpu
     : query.metric === 'memory' ? system.memory

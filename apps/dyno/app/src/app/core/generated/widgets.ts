@@ -677,7 +677,7 @@ placements: Array<PlacementState<V, A>>, };
 
 export type DynoSurface = "popover" | "dashboard" | "menuBar";
 
-export type Metric = "cpuTotal" | "cpuPerCore" | "memory" | "memoryPressure" | "swap" | "diskActivity" | "diskFree" | "networkUp" | "networkDown" | "gpuLoad" | "temperature" | "fan" | "battery" | { "process": string } | { "perfCounter": string };
+export type Metric = "cpuTotal" | "cpuPerCore" | "memory" | "memoryPressure" | "swap" | "diskActivity" | "diskFree" | "networkUp" | "networkDown" | "networkBoth" | "gpuLoad" | "temperature" | "fan" | "battery" | { "process": string } | { "perfCounter": string };
 
 export type VolumeChoice = "all" | "system" | { "mount": string };
 

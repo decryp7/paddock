@@ -11,7 +11,7 @@ use dyno_core::protocol::LiveUpdate;
 use dyno_core::tray::text::TextRaster;
 use dyno_core::tray::{menu_bar, pixel};
 use dyno_core::widgets::menu_bar::MAX_ITEMS;
-use dyno_core::widgets::{read_metric, MenuBarItem, Metric, NumberFormat, Thresholds};
+use dyno_core::widgets::{read_metric, MenuBarItem, Metric, MetricReading, NumberFormat, Thresholds};
 use paddock_widgets::Placement;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -140,7 +140,7 @@ pub fn parse_items(text: &str) -> Vec<ItemSpec> {
             Some("memory") => Metric::Memory,
             Some("swap") => Metric::Swap,
             Some("disk") => Metric::DiskActivity,
-            Some("network") => Metric::NetworkDown,
+            Some("network") => Metric::NetworkBoth,
             Some("gpu") => Metric::GpuLoad,
             Some("temp") => Metric::Temperature,
             Some("battery") => Metric::Battery,
@@ -380,6 +380,7 @@ pub fn metric_name(m: &Metric) -> String {
         Metric::DiskFree => "Free space".into(),
         Metric::NetworkUp => "Upload".into(),
         Metric::NetworkDown => "Download".into(),
+        Metric::NetworkBoth => "Network".into(),
         Metric::GpuLoad => "GPU".into(),
         Metric::Temperature => "Temperature".into(),
         Metric::Fan => "Fan".into(),
@@ -480,6 +481,11 @@ impl TrayItems {
         let scale = match (r.percent, m) {
             (Some(p), _) => p,
             (None, Metric::NetworkUp | Metric::NetworkDown) => ((value / self.net_peak) * 100.0).clamp(0.0, 100.0) as f32,
+            // The combined item scales by its busier direction against the busiest second seen in either.
+            (None, Metric::NetworkBoth) => {
+                let (rx, tx) = u.system.network_totals();
+                ((rx.max(tx) / self.net_peak) * 100.0).clamp(0.0, 100.0) as f32
+            }
             (None, Metric::MemoryPressure) => match u.pressure {
                 dyno_core::metrics::MemoryPressure::Normal => 20.0,
                 dyno_core::metrics::MemoryPressure::Elevated => 60.0,
@@ -487,10 +493,21 @@ impl TrayItems {
             },
             (None, _) => (value as f32).clamp(0.0, 100.0),
         };
-        let text = match r.unit.as_str() {
+        let words = |r: MetricReading| match r.unit.as_str() {
             "" => r.text,
             "%" => format!("{}%", r.text),
             unit => format!("{} {unit}", r.text),
+        };
+        let text = if *m == Metric::NetworkBoth {
+            // The item draws both rates, so its words give both, not the total the engine reads for other consumers.
+            let t = Thresholds::default();
+            format!(
+                "{} up, {} down",
+                words(read_metric(&Metric::NetworkUp, u, &t)),
+                words(read_metric(&Metric::NetworkDown, u, &t))
+            )
+        } else {
+            words(r)
         };
         Some(Measured { scale, raw: value, text })
     }
@@ -580,7 +597,7 @@ impl TrayItems {
             );
             return self.frame(&spec, &s, Visual::Normal, dark, tooltip);
         }
-        let network = matches!(spec.metric, Metric::NetworkUp | Metric::NetworkDown);
+        let network = matches!(spec.metric, Metric::NetworkUp | Metric::NetworkDown | Metric::NetworkBoth);
         let Some(m) = self.measure(u, &spec.metric) else {
             self.state[i].alert = AlertGate::default();
             let tooltip = item_tooltip(&name, &TipState::Unavailable);
@@ -1116,6 +1133,31 @@ mod tests {
         assert!(f[2].1.tooltip.contains("Upload 1.0 MB/s"));
         assert!(f[3].1.tooltip.contains("Normal"));
         assert!(f[4].1.tooltip.contains("Swap 0%"), "{}", f[4].1.tooltip);
+    }
+
+    #[test]
+    fn the_combined_network_item_says_both_rates_and_follows_either() {
+        let mut u = update(250.0);
+        u.system.network[0].rx_bps = 5_000_000.0;
+        u.system.network[0].tx_bps = 1_000_000.0;
+        let mut m = TrayItems::new(vec![item("n", Metric::NetworkBoth, Glyph::Number)], win_env(32));
+        let first = m.frames(&u, true);
+        assert!(
+            first[0].1.tooltip.contains("Network 1.0 MB/s up, 5.0 MB/s down"),
+            "{}",
+            first[0].1.tooltip
+        );
+        u.system.network[0].tx_bps = 3_000_000.0;
+        assert_eq!(m.frames(&u, true).len(), 1, "an upload change redraws the item");
+        u.system.network[0].rx_bps = 2_000_000.0;
+        assert_eq!(m.frames(&u, true).len(), 1, "a download change redraws the item");
+    }
+
+    #[test]
+    fn the_legacy_network_setting_that_showed_both_maps_to_the_combined_metric() {
+        let items = parse_items("network:number");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].metric, Metric::NetworkBoth);
     }
 
     // Windows keeps 127 UTF-16 units of a tip (128 with the terminating zero); a longer name must be cut by us, visibly, not
