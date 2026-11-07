@@ -170,7 +170,8 @@ async function main(argv) {
         const exec = /^Exec=(.*)$/m.exec(out)?.[1]?.replace(/"/g, '');
         return { present: count > 0 && exec !== undefined, count, ...(exec !== undefined ? { command: exec } : {}) };
       };
-      push(await loginSwitchStep({ sleep, readSwitch: async () => { const s = await lj.readSwitch(); return s === 'on' || s === 'off' ? s : 'unknown'; }, pressSwitch: () => lj.pressSwitch(), readEntry }));
+      push(await loginSwitchStep({ sleep, readSwitch: async () => { const s = await lj.readSwitch(); return s === 'on' || s === 'off' ? s : 'unknown'; }, pressSwitch: () => lj.pressSwitch(), apply: () => lj.apply(), readEntry,
+        witness: async () => g('grep -rh -i -E "autostart|start at login|launch at login" "$HOME/.local/share/dyno" "$HOME/.cache/dyno" 2>/dev/null | tail -n 12').stdout.split('\n') }));
     }
 
     if (o.reboot) {

@@ -16,6 +16,20 @@ export function windowsLoginJobsDriver(browser, { openSettings, mainPage }) {
   return {
     async readSwitch() { const b = await box(); if (!b || !(await b.count().catch(() => 0))) return 'unknown'; const v = await b.getAttribute('aria-checked').catch(() => null); return v === 'true' ? 'on' : v === 'false' ? 'off' : 'unknown'; },
     async pressSwitch() { const b = await box(); if (!b) return false; return b.click().then(() => true, () => false); },
+    // The switch edits a draft; "Save changes" applies it (settings-page.ts). save() only presses it; apply() also waits for "Applying…" to end and reads the SAVED value
+    // from a reloaded Settings page (the draft is dropped by the reload).
+    async save() { const s = await settings(); if (!s) return false; return s.getByRole('button', { name: /^Save changes$/ }).first().click({ timeout: 5000 }).then(() => true, () => false); },
+    async apply() {
+      const s = await settings(); if (!s) return { ok: false, detail: 'Settings did not open' };
+      const pressed = await s.getByRole('button', { name: /^Save changes$/ }).first().click({ timeout: 5000 }).then(() => true, () => false);
+      if (!pressed) return { ok: false, detail: 'no "Save changes" button (nothing to save, or the button is disabled)' };
+      for (let i = 0; i < 60; i++) { await new Promise((r) => setTimeout(r, 500)); if (!(await s.getByText(/Applying…/).count().catch(() => 0)) && !(await s.getByRole('button', { name: /^Save changes$/ }).count().catch(() => 0))) break; }
+      const err = await s.locator('.save-error').first().innerText({ timeout: 500 }).catch(() => '');
+      await s.reload().catch(() => {});
+      const b = await box(); await b?.waitFor({ timeout: 15_000 }).catch(() => {});
+      const v = b ? await b.getAttribute('aria-checked').catch(() => null) : null;
+      return { ok: !err, saved: v === 'true' ? 'on' : v === 'false' ? 'off' : 'unknown', detail: err ? `the save failed: ${err}` : 'saved' };
+    },
     async openJobs() {
       const p = mainPage(browser); if (!p) return false;
       await p.bringToFront().catch(() => {});
@@ -55,6 +69,15 @@ export function macLoginJobsDriver(gui) {
   return {
     async readSwitch() { await gui.openSettingsSection('^Dyno$'); const c = await find(); return !c ? 'unknown' : c.value === '1' ? 'on' : c.value === '0' ? 'off' : 'unknown'; },
     async pressSwitch() { const c = await find(); return c ? gui.press(gui.app, 'Start Dyno at login', c.role) : false; },
+    async save() { return gui.press(gui.app, '^Save changes$', 'AXButton'); },
+    async apply() {
+      if (!(await gui.press(gui.app, '^Save changes$', 'AXButton'))) return { ok: false, detail: 'no "Save changes" button' };
+      await gui.waitFor(async () => !(await gui.texts()).some((t) => /Applying…|^Save changes$/.test(t.text)), 30_000);
+      const err = (await gui.texts()).find((t) => /could not|failed/i.test(t.text) && t.role === 'AXStaticText');
+      await gui.closeSettings(); await gui.openSettingsSection('^Dyno$');
+      const c = await find();
+      return { ok: !err, saved: !c ? 'unknown' : c.value === '1' ? 'on' : c.value === '0' ? 'off' : 'unknown', detail: err ? `the save failed: ${err.text}` : 'saved' };
+    },
     async openJobs() { await gui.closeSettings?.(); await gui.ensureMainWindow(); return (await gui.has(gui.app, STATUS, 'AXButton')) ? gui.press(gui.app, STATUS, 'AXButton') : (await gui.texts()).some((t) => /Jobs/i.test(t.text)); },
     async startLongJob() {
       await gui.closeSettings?.(); await gui.ensureMainWindow();
@@ -76,6 +99,16 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
   return {
     async readSwitch() { const r = atspi(`state dyno ${SW}`); return r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; },
     async pressSwitch() { return atspi(`press dyno ${SW}`).code === 0; },
+    async save() { return atspi('press dyno "^Save changes$" "push button"').code === 0; },
+    async apply() {
+      if (atspi('press dyno "^Save changes$" "push button"').code !== 0) return { ok: false, detail: 'no "Save changes" button' };
+      for (let i = 0; i < 15 && /Applying…|Save changes/.test(atspi('tree dyno 60').stdout); i++) await new Promise((r) => setTimeout(r, 2000));
+      // Reopen Settings (File > Settings…, Dyno) so the switch shows the saved value, not the draft.
+      atspi('press dyno "^Close$" "push button"'); atspi('press dyno "^File$" "menu item"'); await new Promise((r) => setTimeout(r, 1000));
+      atspi('press dyno "^Settings…$" "menu item"'); await new Promise((r) => setTimeout(r, 4000)); atspi('press dyno "^Dyno$" "push button"'); await new Promise((r) => setTimeout(r, 1500));
+      const r = atspi(`state dyno ${SW}`); const v = r.code === 0 ? parseSwitchState(r.stdout) : 'unknown';
+      return { ok: true, saved: v, detail: 'saved' };
+    },
     async openJobs() { atspi('press dyno "^Close$" "push button"'); return atspi(`press dyno ${JSON.stringify(STATUS)} "push button|toggle button"`).code === 0 || /Jobs/.test(atspi('tree dyno 60').stdout); },
     async startLongJob() {
       atspi('press dyno "^Close$" "push button"');

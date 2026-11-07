@@ -388,7 +388,8 @@ export const helperSteps = [
   async ({ browser }) => {
     const d = windowsLoginJobsDriver(browser, { openSettings, mainPage });
     const RUN = "(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).Dyno";
-    return loginSwitchStep({ sleep, readSwitch: () => d.readSwitch(), pressSwitch: () => d.pressSwitch(), readEntry: async () => { const c = ssh(RUN).trim().split('\n').at(-1); return { present: Boolean(c), command: c, count: c ? 1 : 0 }; } });
+    return loginSwitchStep({ sleep, readSwitch: () => d.readSwitch(), pressSwitch: () => d.pressSwitch(), apply: () => d.apply(),
+      witness: async () => ssh(APP_LOG_PS).split('\n').filter((l) => /Run value|start at login|launch at login/i.test(l)).slice(-12), readEntry: async () => { const c = ssh(RUN).trim().split('\n').at(-1); return { present: Boolean(c), command: c, count: c ? 1 : 0 }; } });
   },
   // Row 5a: the Start at login change in the Jobs list (login-jobs-row.mjs). The raw `wbadmin` evidence step is gone with Backup health (removed in 1.1.0).
   async ({ browser }) => loginJobsRow(windowsLoginJobsDriver(browser, { openSettings, mainPage }), { now: () => Date.now(), sleep }),

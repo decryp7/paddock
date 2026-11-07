@@ -34,8 +34,9 @@ export function judgeLoginSwitch(f) {
 }
 
 /**
- * The step. p: { readSwitch() -> 'on'|'off'|'unknown', pressSwitch() -> bool, readEntry() -> {present, command?, count}, sleep, now }. A change is polled for up to 20 s (the switch is a job).
- * The default is read FIRST, before anything touches the switch.
+ * The step. p: { readSwitch() -> 'on'|'off'|'unknown', pressSwitch() -> bool, apply()? -> {ok, saved?, detail}, readEntry() -> {present, command?, count}, witness()? -> app-log
+ * lines, sleep, now }. Dyno's Settings switches edit a draft and "Save changes" applies it: `apply` presses Save, waits for "Applying…" to end and reads the saved switch. A change
+ * that could not be saved is a broken check (the probe did not make the change). Each saved change is polled in the OS for up to 20 s. The default is read FIRST.
  */
 export async function loginSwitchStep(p) {
   try {
@@ -43,10 +44,31 @@ export async function loginSwitchStep(p) {
     const defaultEntry = await p.readEntry();
     const switchBefore = await p.readSwitch();
     const poll = async (want) => { for (let i = 0; i < 10; i++) { const e = await p.readEntry(); if (e.present === want) return e; await sleep(2000); } return p.readEntry(); };
-    let afterOff = null, afterOn = null;
-    if (switchBefore === 'on' && (await p.pressSwitch())) { afterOff = await poll(false); if (await p.pressSwitch()) afterOn = await poll(true); }
-    else if (switchBefore === 'on') afterOff = null;
-    return makeResult(TITLE_LOGIN, judgeLoginSwitch({ defaultEntry, afterOff, afterOn, switchBefore }), [JSON.stringify({ defaultEntry, afterOff, afterOn })], 'on by default; off removes the entry; on restores it once');
+    const applied = [];
+    // press, then Save changes; null when the change could not be made and saved (then nothing about the OS entry is concluded)
+    const change = async (want) => {
+      if (!(await p.pressSwitch())) { applied.push(`switch ${want}: could not be pressed`); return false; }
+      if (!p.apply) return true;
+      const a = await p.apply();
+      applied.push(`switch ${want}: ${a.ok ? `saved, the switch reads ${a.saved ?? 'unknown'} after Settings was reopened` : `not saved: ${a.detail}`}`);
+      return a.ok && (a.saved === undefined || a.saved === want);
+    };
+    let afterOff = null, afterOn = null, unsaved = null;
+    if (switchBefore === 'on') {
+      if (await change('off')) { afterOff = await poll(false); if (await change('on')) afterOn = await poll(true); else unsaved = 'on'; } else unsaved = 'off';
+    }
+    const checks = judgeLoginSwitch({ defaultEntry, afterOff, afterOn, switchBefore });
+    for (const a of applied) checks.push({ ok: true, info: true, detail: a });
+    if (unsaved) checks.push({ ok: false, kind: 'check', detail: `the change to ${unsaved} was not saved ("Save changes" in Settings), so the OS entry was not tested for it` });
+    if (p.witness) {
+      const lines = (await p.witness().catch(() => [])).filter((l) => /Run value Dyno|autostart|login item|start at login/i.test(l));
+      const removed = lines.some((l) => /per-user Run value Dyno removed|removed/i.test(l));
+      checks.push({ ok: true, info: true, detail: lines.length ? `app log (second witness): ${removed ? 'per-user Run value Dyno removed is logged; ' : ''}${lines.slice(-4).join(' | ').slice(0, 300)}` : 'app log (second witness): no start-at-login line found' });
+    }
+    const r = makeResult(TITLE_LOGIN, checks, [JSON.stringify({ defaultEntry, afterOff, afterOn }), ...applied], 'on by default; off removes the entry; on restores it once');
+    if (unsaved && r.status === 'fail' && !checks.some((c) => !c.ok && c.kind !== 'check')) r.status = 'check-broken';
+    if (unsaved) r.summary = `${r.status === 'check-broken' ? 'broken check: ' : ''}the change to ${unsaved} was not saved (Save changes); ${r.summary}`.slice(0, 300);
+    return r;
   } catch (e) {
     return { title: TITLE_LOGIN, status: 'not-measured', cls: 'check', summary: `not measured: ${String(e.message ?? e).split('\n')[0]}`, checks: [{ ok: false, kind: 'check', detail: String(e.message ?? e) }], evidence: [] };
   }

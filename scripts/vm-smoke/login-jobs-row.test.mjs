@@ -61,3 +61,21 @@ test('a long job with no Cancel to press stays not measured; a login job never l
   assert.equal(s.status, 'not-measured');
   assert.equal(await n.d.readSwitch(), 'on');
 });
+
+test('draft model: the job starts only when the change is saved; the row presses Save changes after the switch and on the way back', async () => {
+  let t = 0, draft = 'on', saved = 'on', state = 'idle'; const calls = [];
+  const clock = { now: () => t, sleep: async (ms) => { t += ms; } };
+  const d = {
+    readSwitch: async () => draft,
+    pressSwitch: async () => { calls.push('press'); draft = draft === 'on' ? 'off' : 'on'; return true; },
+    save: async () => { calls.push('save'); if (draft !== saved) { saved = draft; state = 'running'; } return true; },
+    apply: async () => { calls.push('apply'); saved = draft; return { ok: true, saved }; },
+    openJobs: async () => true,
+    jobsText: async () => (state === 'running' ? 'Start Dyno at login Working Cancel' : state === 'cancelled' ? 'Start Dyno at login Cancelled' : ''),
+    pressCancel: async () => { if (state === 'running') { state = 'cancelled'; draft = saved = 'on'; return true; } return false; },
+  };
+  const s = await loginJobsRow(d, clock);
+  assert.equal(s.status, 'pass', s.summary);
+  assert.deepEqual(calls.slice(0, 2), ['press', 'save']);
+  assert.equal(saved, 'on');
+});

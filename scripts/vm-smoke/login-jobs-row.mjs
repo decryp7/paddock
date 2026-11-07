@@ -24,6 +24,8 @@ export async function loginJobsRow(d, c, { seenGuardMs = 20_000, endGuardMs = 30
   if (before === 'unknown') return makeResult(TITLE_5A, [{ ok: false, kind: 'check', detail: 'the "Start Dyno at login" switch could not be found or read, so nothing was changed' }]);
   checks.push({ ok: true, info: true, detail: `"Start Dyno at login" was ${before}` });
   if (!(await d.pressSwitch())) return makeResult(TITLE_5A, [...checks, { ok: false, kind: 'check', detail: 'the "Start Dyno at login" switch could not be pressed' }]);
+  // The switch edits a draft; "Save changes" starts the job (settings-page.ts). Pressed without waiting, so the running job can be seen.
+  if (d.save) checks.push({ ok: await d.save(), kind: 'check', detail: 'pressed "Save changes" after the switch' });
   const opened = await d.openJobs();
   checks.push({ ok: opened, kind: 'check', detail: opened ? 'the Jobs list is open' : 'the Jobs list could not be opened' });
   const seen = opened ? await until(async () => { const t = await d.jobsText(); return JOB_NAME.test(t) ? t : null; }, seenGuardMs) : null;
@@ -56,7 +58,7 @@ export async function loginJobsRow(d, c, { seenGuardMs = 20_000, endGuardMs = 30
   checks.push({ ok: Boolean(ended), detail: ended ? 'Cancel pressed; the job ends as Cancelled' : `Cancel pressed but the job never showed Cancelled within ${endGuardMs / 1000} s` });
   if (ended) evidence.push(`after Cancel: ${ended.slice(0, 300)}`);
   // The second change is accepted and runs.
-  const second = await d.pressSwitch();
+  const second = (await d.pressSwitch()) && (d.save ? await d.save() : true);
   checks.push({ ok: second, detail: second ? 'a second change is accepted (the switch can be pressed again)' : 'the switch could not be pressed again after Cancel' });
   const settled = second ? await until(async () => { const s = await d.readSwitch(); return s !== 'unknown' ? s : null; }, endGuardMs) : null;
   checks.push({ ok: Boolean(settled), kind: settled ? undefined : 'check', detail: settled ? `after the second change the switch reads ${settled}` : 'the switch could not be read after the second change' });
@@ -67,7 +69,7 @@ export async function loginJobsRow(d, c, { seenGuardMs = 20_000, endGuardMs = 30
 }
 
 async function restore(d, before, now, until, guard) {
-  if (before !== 'unknown' && now !== before) { await d.pressSwitch(); await until(async () => (await d.readSwitch()) === before, guard); }
+  if (before !== 'unknown' && now !== before) { await d.pressSwitch(); if (d.apply) await d.apply(); else if (d.save) await d.save(); await until(async () => (await d.readSwitch()) === before, guard); }
 }
 
 /**

@@ -30,7 +30,8 @@ async function setLaunchAtLogin(browser, on) {
   const s = await openSettings(browser);
   const box = s.getByRole('switch', { name: /Start Dyno at login/i }).or(s.getByRole('checkbox', { name: /Start Dyno at login/i }));
   const now = (await box.first().getAttribute('aria-checked').catch(() => 'false')) === 'true';
-  if (now !== on) await box.first().click();
+  if (now !== on) { await box.first().click(); await s.getByRole('button', { name: /^Save changes$/ }).first().click({ timeout: 5000 }).catch(() => {}); } // the switch edits a draft
+  for (let i = 0; i < 30 && (await s.getByText(/Applying…/).count().catch(() => 0)); i++) await sleep(1000);
   await sleep(2500);
 }
 
