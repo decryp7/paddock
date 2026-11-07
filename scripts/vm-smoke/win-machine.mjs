@@ -60,7 +60,8 @@ export async function uninstall() {
   const has = hasState === 'yes';
   checks.push({ ok: has, ...(hasState === 'unreadable' ? { kind: 'check' } : {}), detail: has ? 'uninstall.exe is in the install folder' : hasState === 'unreadable' ? 'the install folder could not be read (SSH printed nothing)' : 'no uninstall.exe in the install folder' });
   if (!has) return result('Windows: uninstall removes the programs and the machine-wide entries', checks);
-  ssh(`Start-Process '${un}' -ArgumentList '/S'`, { admin: true });
+  // The uninstaller's own exit code and log are kept (a silent uninstall that does nothing must be explained): started as before over the administrator's ssh, waited for up to 60 s.
+  const sshRun = ssh(`$p = Start-Process '${un}' -ArgumentList '/S' -PassThru; $null = $p.WaitForExit(60000); 'EXIT=' + $(if ($p.HasExited) { $p.ExitCode } else { 'still-running' })`, { admin: true, ms: 120_000 });
   let facts = {};
   // Three-state reads (yes, no, unreadable): a dead SSH prints nothing and must not read as "removed". The start-at-login value of the standard
   // user is read over the user's own SSH (that is paddock-test's HKCU, not the administrator's).
@@ -84,11 +85,30 @@ export async function uninstall() {
     };
     if (facts.folder === 'no' && facts.uninstallKey === 'no') break;
   }
+  const evidence = [`uninstall.exe /S over the administrator's ssh: ${sshRun.trim().split('\n').at(-1)}`];
+  if (facts.folder !== 'no') {
+    evidence.push('--- setup.log tail', ...ssh(`Get-Content '${PROG}\\updates\\setup.log' -Tail 30 -ErrorAction SilentlyContinue`, { admin: true }).split('\n').slice(-30));
+    evidence.push('--- temp uninstaller leftovers', ssh("Get-ChildItem $env:TEMP,'C:\\Windows\\Temp' -Filter '~nsu*' -ErrorAction SilentlyContinue | ForEach-Object FullName", { admin: true }));
+    // The second way: the same uninstaller from the interactive session of the test user, with its own UAC prompt answered over VNC (the GUI-automation path).
+    const w = await interactiveUninstall();
+    evidence.push(`uninstall.exe /S from the interactive session: ${w}`);
+    checks.push({ ok: true, info: true, detail: `second way (interactive session + UAC): ${w}; folder afterwards: ${triState(ssh(`Test-Path '${PROG}'`, { admin: true }))}` });
+  }
   checks.push(...judgeUninstall(facts));
-  return result('Windows: uninstall removes the programs and the machine-wide entries', checks, [JSON.stringify(facts)], 'the programs, the uninstall entry and the start-at-login values are gone');
+  return result('Windows: uninstall removes the programs and the machine-wide entries', checks, evidence, 'the programs, the uninstall entry and the start-at-login values are gone');
 }
 
 const SETUP = 'C:\\paddock-test\\vmcheck\\setup.exe';
+
+/** The uninstaller started from the test user's interactive session (scheduled task, /it) with a UAC prompt answered over VNC; returns its exit code text. */
+async function interactiveUninstall() {
+  ssh(`Remove-Item C:\\paddock-test\\vmcheck\\un.out -ErrorAction SilentlyContinue; Set-Content C:\\paddock-test\\vmcheck\\un.ps1 '$p = Start-Process "${PROG}\\uninstall.exe" -ArgumentList "/S" -PassThru; $null = $p.WaitForExit(90000); "EXIT=" + $(if ($p.HasExited) { $p.ExitCode } else { "still-running" }) | Set-Content C:\\paddock-test\\vmcheck\\un.out'; schtasks /end /tn DynoUninstall 2>$null | Out-Null; schtasks /create /tn DynoUninstall /sc once /st 00:00 /ru paddock-test /it /f /tr "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\un.ps1" | Out-Null; schtasks /run /tn DynoUninstall | Out-Null`);
+  const uac = await answerUac('uninstall-interactive');
+  let out = '';
+  for (let i = 0; i < 40 && !/EXIT=/.test(out); i++) { await sleep(3000); out = ssh('Get-Content C:\\paddock-test\\vmcheck\\un.out -ErrorAction SilentlyContinue'); }
+  await sleep(10_000);
+  return `${uac.ok ? 'UAC answered' : uac.detail}; ${out.trim() || 'no exit code'}`;
+}
 
 /**
  * Starts the staged installer in the test user's console session. A task cannot run a requireAdministrator program directly (error 740, no prompt): the task runs a
