@@ -60,6 +60,8 @@ pub struct SysinfoSensors {
     ticks: u64,
     last_storage: Option<Instant>,
     storage_refreshes: u64,
+    /// Capacity and free by `volumes::capacity`, read only when the space is due (the call is not free on macOS).
+    space: std::collections::HashMap<String, (u64, u64)>,
     temperatures: Reading<Vec<Temperature>>,
 }
 
@@ -84,6 +86,7 @@ impl SysinfoSensors {
             ticks: 0,
             last_storage: None,
             storage_refreshes: 0,
+            space: std::collections::HashMap::new(),
             temperatures: Reading::unavailable(NO_TEMPERATURES),
         }
     }
@@ -159,12 +162,25 @@ impl SysinfoSensors {
             }
             seen.push(mount.clone());
             let name = volume_name(&mount, &d.name().to_string_lossy());
+            // One definition of free for the tray, the dashboard and the disk map (rule 55): `volumes::space`.
+            // A network mount is not asked here (the call can block as long as the server is gone): sysinfo's figures stand.
+            let local = dyno_core::disk::volume::network_protocol(&d.file_system().to_string_lossy()).is_none();
+            if storage_due && local {
+                if let Some(c) = crate::volumes::capacity(&mount) {
+                    self.space.insert(mount.clone(), c);
+                }
+            }
+            let (total, free) = self
+                .space
+                .get(&mount)
+                .copied()
+                .unwrap_or((d.total_space(), d.available_space().min(d.total_space())));
             out.push(DiskSample {
                 id: mount.clone(),
                 name,
                 mount,
-                total: d.total_space(),
-                free: d.available_space().min(d.total_space()),
+                total,
+                free,
                 removable: d.is_removable(),
             });
         }

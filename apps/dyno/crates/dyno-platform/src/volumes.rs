@@ -121,21 +121,148 @@ fn statvfs(path: &Path) -> Option<(u64, u64)> {
     ))
 }
 
-/// Capacity and free bytes of the volume mounted at `mount`; `None` when the OS will not say. May block on a dead
-/// network mount: callers on a network mount run it on an abandonable thread.
-pub fn capacity(mount: &str) -> Option<(u64, u64)> {
-    #[cfg(unix)]
+/// The space of one volume as the person means it: what is free to write, counting what the OS gives back on demand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Space {
+    /// Capacity in bytes.
+    pub total: u64,
+    /// Free bytes by the one definition every Dyno view shares (on macOS Finder's "available": purgeable space counts as free).
+    pub free: u64,
+    /// Bytes the OS would give back when asked (macOS purgeable space: local snapshots, caches); `None` where there is no such notion.
+    pub purgeable: Option<u64>,
+}
+
+/// Picks the free bytes from what macOS can report, best first: the "important usage" figure (Finder's), the plain available
+/// figure, then `statvfs`'s `f_bavail` (which leaves purgeable space out). A missing or zero figure falls through to the next
+/// (zero is what a volume that cannot say reports), and the pick never exceeds the capacity.
+pub fn choose_free(important: Option<u64>, available: Option<u64>, bavail: Option<u64>, total: u64) -> Option<u64> {
+    [important, available, bavail]
+        .into_iter()
+        .flatten()
+        .find(|v| *v > 0)
+        .or(bavail)
+        .map(|v| v.min(total))
+}
+
+/// Capacity and free bytes of the volume mounted at `mount`, by the one definition of free (see [`Space`]); `None` when the OS
+/// will not say. May block on a dead network mount: callers on a network mount run it on an abandonable thread.
+pub fn space(mount: &str) -> Option<Space> {
+    #[cfg(target_os = "macos")]
     {
-        statvfs(Path::new(mount))
+        let (total, bavail) = statvfs(Path::new(mount)).map_or((None, None), |(t, b)| (Some(t), Some(b)));
+        let q = macos_space::read(mount);
+        let total = q.as_ref().and_then(|q| q.total).filter(|t| *t > 0).or(total)?;
+        let free = choose_free(
+            q.as_ref().and_then(|q| q.important),
+            q.as_ref().and_then(|q| q.available),
+            bavail,
+            total,
+        )?;
+        let purgeable = q
+            .as_ref()
+            .and_then(|q| Some(q.important?.saturating_sub(q.available?)))
+            .filter(|p| *p > 0);
+        Some(Space { total, free, purgeable })
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        statvfs(Path::new(mount)).map(|(total, free)| Space {
+            total,
+            free,
+            purgeable: None,
+        })
     }
     #[cfg(windows)]
     {
-        win::capacity(mount)
+        win::capacity(mount).map(|(total, free)| Space {
+            total,
+            free,
+            purgeable: None,
+        })
     }
     #[cfg(not(any(unix, windows)))]
     {
         let _ = mount;
         None
+    }
+}
+
+/// Capacity and free bytes of the volume mounted at `mount` (see [`space`]).
+pub fn capacity(mount: &str) -> Option<(u64, u64)> {
+    space(mount).map(|s| (s.total, s.free))
+}
+
+/// macOS volume figures from CoreFoundation. A fresh URL is made for every read: a URL object caches the resource values it
+/// has been asked for, so a long-lived one would show the first answer forever.
+#[cfg(target_os = "macos")]
+mod macos_space {
+    use std::ffi::c_void;
+    use std::os::unix::ffi::OsStrExt;
+
+    type CFTypeRef = *const c_void;
+
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        static kCFURLVolumeTotalCapacityKey: CFTypeRef;
+        static kCFURLVolumeAvailableCapacityKey: CFTypeRef;
+        static kCFURLVolumeAvailableCapacityForImportantUsageKey: CFTypeRef;
+        fn CFURLCreateFromFileSystemRepresentation(alloc: CFTypeRef, buf: *const u8, len: isize, is_dir: u8) -> CFTypeRef;
+        fn CFURLCopyResourcePropertyForKey(url: CFTypeRef, key: CFTypeRef, value: *mut CFTypeRef, error: *mut CFTypeRef) -> u8;
+        fn CFNumberGetValue(number: CFTypeRef, kind: isize, out: *mut i64) -> u8;
+        fn CFGetTypeID(cf: CFTypeRef) -> usize;
+        fn CFNumberGetTypeID() -> usize;
+        fn CFRelease(cf: CFTypeRef);
+    }
+
+    /// kCFNumberSInt64Type.
+    const SINT64: isize = 4;
+
+    /// What the OS said; each figure is `None` when it did not say.
+    pub struct Figures {
+        pub total: Option<u64>,
+        pub available: Option<u64>,
+        pub important: Option<u64>,
+    }
+
+    fn number(url: CFTypeRef, key: CFTypeRef) -> Option<u64> {
+        let mut value: CFTypeRef = std::ptr::null();
+        let mut error: CFTypeRef = std::ptr::null();
+        // SAFETY: `url` and `key` are live CF objects; the out pointers are valid. Both outputs are released below when set.
+        let ok = unsafe { CFURLCopyResourcePropertyForKey(url, key, &mut value, &mut error) } != 0;
+        if !error.is_null() {
+            // SAFETY: the call returned an owned error object.
+            unsafe { CFRelease(error) };
+        }
+        if !ok || value.is_null() {
+            return None;
+        }
+        let mut out = 0i64;
+        // SAFETY: `value` is an owned CF object; it is read only as a CFNumber after its type is checked, then released.
+        let got = unsafe { CFGetTypeID(value) == CFNumberGetTypeID() && CFNumberGetValue(value, SINT64, &mut out) != 0 };
+        // SAFETY: balances the copy above.
+        unsafe { CFRelease(value) };
+        got.then(|| u64::try_from(out).ok()).flatten()
+    }
+
+    /// The three figures of the volume holding `mount`; `None` when the URL could not be made.
+    pub fn read(mount: &str) -> Option<Figures> {
+        let bytes = std::path::Path::new(mount).as_os_str().as_bytes();
+        // SAFETY: `bytes` is valid for its length; the null allocator is the default one.
+        let url = unsafe { CFURLCreateFromFileSystemRepresentation(std::ptr::null(), bytes.as_ptr(), bytes.len() as isize, 1) };
+        if url.is_null() {
+            return None;
+        }
+        // SAFETY: the keys are CoreFoundation's own constants, valid for the life of the process.
+        let figures = unsafe {
+            Figures {
+                total: number(url, kCFURLVolumeTotalCapacityKey),
+                available: number(url, kCFURLVolumeAvailableCapacityKey),
+                important: number(url, kCFURLVolumeAvailableCapacityForImportantUsageKey),
+            }
+        };
+        // SAFETY: balances the create above.
+        unsafe { CFRelease(url) };
+        Some(figures)
     }
 }
 
@@ -517,6 +644,40 @@ mod tests {
         let (total, free) = capacity(&t.path().to_string_lossy()).unwrap();
         assert!(total > 0 && free <= total);
         assert!(capacity("no-such-mount-for-dyno-tests").is_none());
+    }
+
+    /// The pick of the free figure: best first, a missing or zero figure falls through, never above the capacity.
+    #[test]
+    fn choose_free_takes_the_best_figure_that_is_there() {
+        let t = 1_000;
+        // (important, available, bavail) -> expected
+        type Figures = (Option<u64>, Option<u64>, Option<u64>);
+        let table: [(Figures, Option<u64>); 9] = [
+            ((Some(600), Some(400), Some(380)), Some(600)),
+            ((Some(0), Some(400), Some(380)), Some(400)),
+            ((None, Some(400), Some(380)), Some(400)),
+            ((None, Some(0), Some(380)), Some(380)),
+            ((None, None, Some(380)), Some(380)),
+            ((Some(0), Some(0), Some(0)), Some(0)),
+            ((None, None, None), None),
+            ((Some(5_000), None, None), Some(t)),
+            ((None, None, Some(0)), Some(0)),
+        ];
+        for ((i, a, b), want) in table {
+            assert_eq!(choose_free(i, a, b, t), want, "important {i:?}, available {a:?}, bavail {b:?}");
+        }
+    }
+
+    /// Purgeable space counts as free, so the figure is never below what `statvfs` reports (the tray used to show that one and the
+    /// dashboard Finder's: 589 GB against 1,256 GB on one Mac).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn free_on_macos_is_never_below_statvfs() {
+        let t = tempfile::tempdir().unwrap();
+        let (_, bavail) = statvfs(t.path()).unwrap();
+        let s = space(&t.path().to_string_lossy()).unwrap();
+        assert!(s.free >= bavail, "free {} below statvfs {}", s.free, bavail);
+        assert!(s.total > 0 && s.free <= s.total);
     }
 
     /// The one test that lists this machine's real mounts (ER-14: tests never depend on them). It does nothing unless
