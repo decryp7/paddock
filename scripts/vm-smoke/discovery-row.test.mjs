@@ -6,7 +6,7 @@ const ok = { livePid: 10, startBefore: '10@a', startAfter: '10@a', deleted: { re
 test('pidOf', () => { assert.equal(pidOf('{"pid": 7}'), 7); assert.equal(pidOf('nope'), null); });
 test('rewritten in time with the live pid passes', () => assert.ok(judgeDiscovery(ok).every((c) => c.ok)));
 test('too slow, wrong pid, restart and a dead status each fail', () => {
-  assert.ok(judgeDiscovery({ ...ok, deleted: { rewritten: true, ms: 40000, pid: 10 } }).some((c) => !c.ok));
+  assert.ok(judgeDiscovery({ ...ok, deleted: { rewritten: true, ms: 50000, pid: 10 } }).some((c) => !c.ok));
   assert.ok(judgeDiscovery({ ...ok, foreign: { rewritten: true, ms: 1000, pid: 99 } }).some((c) => !c.ok));
   assert.ok(judgeDiscovery({ ...ok, startAfter: '11@b' }).some((c) => !c.ok));
   assert.ok(judgeDiscovery({ ...ok, statusOk: false }).some((c) => !c.ok));

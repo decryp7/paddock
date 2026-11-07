@@ -60,8 +60,8 @@ export async function uninstall() {
   const has = hasState === 'yes';
   checks.push({ ok: has, ...(hasState === 'unreadable' ? { kind: 'check' } : {}), detail: has ? 'uninstall.exe is in the install folder' : hasState === 'unreadable' ? 'the install folder could not be read (SSH printed nothing)' : 'no uninstall.exe in the install folder' });
   if (!has) return result('Windows: uninstall removes the programs and the machine-wide entries', checks);
-  // The uninstaller's own exit code and log are kept (a silent uninstall that does nothing must be explained): started as before over the administrator's ssh, waited for up to 60 s.
-  const sshRun = ssh(`$p = Start-Process '${un}' -ArgumentList '/S' -PassThru; $null = $p.WaitForExit(60000); 'EXIT=' + $(if ($p.HasExited) { $p.ExitCode } else { 'still-running' })`, { admin: true, ms: 120_000 });
+  // The uninstaller runs from the interactive session (see interactiveUninstall); its own exit code, the ~nsu copy's pid and exit code, and setup.log are kept.
+  const runText = await interactiveUninstall('uninstall');
   let facts = {};
   // Three-state reads (yes, no, unreadable): a dead SSH prints nothing and must not read as "removed". The start-at-login value of the standard
   // user is read over the user's own SSH (that is paddock-test's HKCU, not the administrator's).
@@ -85,29 +85,26 @@ export async function uninstall() {
     };
     if (facts.folder === 'no' && facts.uninstallKey === 'no') break;
   }
-  const evidence = [`uninstall.exe /S over the administrator's ssh: ${sshRun.trim().split('\n').at(-1)}`];
-  if (facts.folder !== 'no') {
-    evidence.push('--- setup.log tail', ...ssh(`Get-Content '${PROG}\\updates\\setup.log' -Tail 30 -ErrorAction SilentlyContinue`, { admin: true }).split('\n').slice(-30));
-    evidence.push('--- temp uninstaller leftovers', ssh("Get-ChildItem $env:TEMP,'C:\\Windows\\Temp' -Filter '~nsu*' -ErrorAction SilentlyContinue | ForEach-Object FullName", { admin: true }));
-    // The second way: the same uninstaller from the interactive session of the test user, with its own UAC prompt answered over VNC (the GUI-automation path).
-    const w = await interactiveUninstall();
-    evidence.push(`uninstall.exe /S from the interactive session: ${w}`);
-    checks.push({ ok: true, info: true, detail: `second way (interactive session + UAC): ${w}; folder afterwards: ${triState(ssh(`Test-Path '${PROG}'`, { admin: true }))}` });
-  }
+  const evidence = [`uninstall.exe /S from the interactive session: ${runText}`];
+  if (facts.folder !== 'no') evidence.push('--- setup.log tail', ...ssh(`Get-Content '${PROG}\\updates\\setup.log' -Tail 30 -ErrorAction SilentlyContinue`, { admin: true }).split('\n').slice(-30));
   checks.push(...judgeUninstall(facts));
   return result('Windows: uninstall removes the programs and the machine-wide entries', checks, evidence, 'the programs, the uninstall entry and the start-at-login values are gone');
 }
 
 const SETUP = 'C:\\paddock-test\\vmcheck\\setup.exe';
 
-/** The uninstaller started from the test user's interactive session (scheduled task, /it) with a UAC prompt answered over VNC; returns its exit code text. */
-async function interactiveUninstall() {
-  ssh(`Remove-Item C:\\paddock-test\\vmcheck\\un.out -ErrorAction SilentlyContinue; Set-Content C:\\paddock-test\\vmcheck\\un.ps1 '$p = Start-Process "${PROG}\\uninstall.exe" -ArgumentList "/S" -PassThru; $null = $p.WaitForExit(90000); "EXIT=" + $(if ($p.HasExited) { $p.ExitCode } else { "still-running" }) | Set-Content C:\\paddock-test\\vmcheck\\un.out'; schtasks /end /tn DynoUninstall 2>$null | Out-Null; schtasks /create /tn DynoUninstall /sc once /st 00:00 /ru paddock-test /it /f /tr "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\un.ps1" | Out-Null; schtasks /run /tn DynoUninstall | Out-Null`);
-  const uac = await answerUac('uninstall-interactive');
+/**
+ * The uninstaller started from the test user's interactive session (scheduled task /it) with its UAC prompt answered over VNC. The NSIS uninstaller copies itself to
+ * %TEMP%\~nsuN.tmp\Un_A.exe and exits 0 at once, so the exit code of the first process proves nothing: the copy is found by its path, waited for, and its pid and exit code are logged.
+ * (An admin ssh session ends the copy with the session: the 2026-11-07 rounds saw exit 0 and nothing removed there.) Returns the log text.
+ */
+async function interactiveUninstall(label = 'uninstall-interactive') {
+  const script = `$p = Start-Process '${PROG}\\uninstall.exe' -ArgumentList '/S' -PassThru; $null = $p.WaitForExit(90000); $first = 'first process pid ' + $p.Id + ' exit ' + $(if ($p.HasExited) { $p.ExitCode } else { 'still-running' }); $seen = @{}; $end = (Get-Date).AddSeconds(150); $quiet = 0; while ((Get-Date) -lt $end -and $quiet -lt 4) { $n = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*~nsu*' }); if ($n.Count -eq 0) { $quiet++ } else { $quiet = 0; foreach ($q in $n) { if (-not $seen.ContainsKey($q.Id)) { $seen[$q.Id] = $q } } }; Start-Sleep -Seconds 2 }; $copies = ($seen.Values | ForEach-Object { 'copy pid ' + $_.Id + ' exit ' + $(if ($_.HasExited) { $_.ExitCode } else { 'unknown' }) }) -join '; '; ($first + '; ' + $(if ($copies) { $copies } else { 'no ~nsu copy seen' })) | Set-Content C:\\paddock-test\\vmcheck\\un.out`;
+  ssh(`Remove-Item C:\\paddock-test\\vmcheck\\un.out -ErrorAction SilentlyContinue; Set-Content C:\\paddock-test\\vmcheck\\un.ps1 '${script.replace(/'/g, "''")}'; schtasks /end /tn DynoUninstall 2>$null | Out-Null; schtasks /create /tn DynoUninstall /sc once /st 00:00 /ru paddock-test /it /f /tr "powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\un.ps1" | Out-Null; schtasks /run /tn DynoUninstall | Out-Null`);
+  const uac = await answerUac(label);
   let out = '';
-  for (let i = 0; i < 40 && !/EXIT=/.test(out); i++) { await sleep(3000); out = ssh('Get-Content C:\\paddock-test\\vmcheck\\un.out -ErrorAction SilentlyContinue'); }
-  await sleep(10_000);
-  return `${uac.ok ? 'UAC answered' : uac.detail}; ${out.trim() || 'no exit code'}`;
+  for (let i = 0; i < 80 && !/first process/.test(out); i++) { await sleep(3000); out = ssh('Get-Content C:\\paddock-test\\vmcheck\\un.out -ErrorAction SilentlyContinue'); }
+  return `${uac.ok ? 'UAC answered' : uac.detail}; ${out.trim() || 'no result written'}`;
 }
 
 /**
@@ -164,7 +161,8 @@ export async function installRows() {
 /** The first uninstall after a boot (run at the end of the restart run, when the guest has just come up): see judgeColdUninstall. Accepts what fix/uninstall-cold-leftover defines. */
 export async function coldUninstallStep() {
   ssh('Get-Process dyno-app,dyno-agent,dyno-bench -ErrorAction SilentlyContinue | Stop-Process -Force', { admin: true });
-  ssh(`Start-Process '${PROG}\\uninstall.exe' -ArgumentList '/S'`, { admin: true });
+  // From the interactive session (an admin ssh session ends the NSIS copy with the session); the ~nsu copy's pid and exit code are logged and waited for.
+  const runText = await interactiveUninstall('cold-uninstall');
   let folder = 'unreadable';
   for (let i = 0; i < 20; i++) { await sleep(3000); folder = triState(ssh(`Test-Path '${PROG}'`, { admin: true })); if (folder === 'no') break; }
   const names = ssh(`(Get-ChildItem '${PROG}' -Force -Name -ErrorAction SilentlyContinue) -join ','`, { admin: true }).split(',').filter(Boolean);
@@ -172,7 +170,7 @@ export async function coldUninstallStep() {
   const f = { folder, onlyUninstallExe: folder === 'yes' ? names.filter((n) => !/^(uninstall\.exe|updates)$/i.test(n)).length === 0 : null, noteLogged: /uninstall.*(left|leftover|holder|lock)|XtaCache/i.test(log), reinstallOk: null };
   if (f.folder === 'yes' && f.onlyUninstallExe && f.noteLogged) { const r = await installOnce('cold-uninstall-reinstall'); f.reinstallOk = r.exit === 0 && facts().app === 'yes'; }
   const checks = judgeColdUninstall(f);
-  const res = result(ROW_TITLES.winFirstUninstall, checks, [JSON.stringify(f), `left: ${names.join(', ') || '(nothing)'}`, ...log.split('\n').slice(-12)], 'gone after the retries, or the noted fallback with a working reinstall');
+  const res = result(ROW_TITLES.winFirstUninstall, checks, [JSON.stringify(f), `uninstall: ${runText}`, `left: ${names.join(', ') || '(nothing)'}`, ...log.split('\n').slice(-12)], 'gone after the retries, or the noted fallback with a working reinstall');
   return coldUninstallAccepted(f) ? { ...res, status: 'pass', summary: 'the first uninstall after boot left nothing, or only the noted leftover and a reinstall works' } : res;
 }
 

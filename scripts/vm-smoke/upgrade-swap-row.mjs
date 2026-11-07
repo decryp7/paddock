@@ -1,84 +1,72 @@
-// Release row: "install 1.1.0 over a running older build" (product fix fix/dyno-agent-version-swap). An older build runs with the helper on; the new build is installed
-// over it (macOS: replace the .app; Windows: the new setup; Linux: dpkg -i); the app is opened; within a bounded wait (60 s) the RUNNING dyno-agent and the helper must be
-// the new version, and no process from the old binary may be left, found by path and start time (rule 53: never by name alone).
-//
-// ER-33 preconditions, each checked: the old build really ran (an agent answered, version read) and its version differs from the new one (else the row cannot tell the
-// two apart), and the helper was on before. A precondition that does not hold is a broken check, not a pass; an old build that cannot be installed is NOT MEASURED.
+// Release row: "install the new build over a running older one" (fix/dyno-agent-version-swap and the dy.update.restart chip). Judged by what the product promises, not by pids:
+//  - the AGENT: agent.json `build` equals the first 16 hex of the SHA-256 of the new bundle's dyno-agent within 60 s of opening the app, and no restart loop follows (at most one
+//    agent that started after the install began, watched for 2 minutes). The boundary "before the install" is taken on the GUEST clock just before the installer starts.
+//  - the HELPER and the APP are OS specific (extraChecks of the primitives): Windows by the helper file's hash and its refresh log line; macOS by the helper card (Update available,
+//    "Update the helper" with one prompt, then the build matches), the "Restart Dyno to finish" chip and log line, and no process from before the install after Quit and reopen;
+//    Linux by the dpkg result and a helper that restarted.
+// ER-33 preconditions, each checked: the old build really ran (agent answered, version read), its agent file differs from the new bundle's (else old and new cannot be told apart) and the
+// helper was on before. A precondition that does not hold is a broken check; an install that fails is NOT MEASURED with the installer's own output.
 import { makeResult } from './verdict.mjs';
 
 export const TITLE_SWAP = 'Release row: installing the new build over a running older one swaps the agent and the helper within 60 s';
 export const SWAP_WAIT_MS = 60_000;
+export const LOOP_SAMPLES = 12;
 const VERSION = /\b(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/;
+const chk = (ok, detail, kind) => ({ ok, detail, ...(kind ? { kind } : {}) });
 
 /** The first version in a command's output, or null. */
 export const versionOf = (text) => VERSION.exec(String(text ?? ''))?.[1] ?? null;
 
 /**
- * Pure judge. f: { oldVersion, newVersion, helperWasOn, agentVersion, helperVersion (null: unreadable, or no helper), helperReadable, tookMs, waited, procs:[{name,pid,exe,startMs}], installedAtMs, newExePrefix }.
- * A process counts as left over from the old binary when it started before the install finished (startMs < installedAtMs) and is still alive.
+ * Pure judge. f: { oldVersion, helperWasOn, oldAgentBuild16, expectedBuild16, agentBuild (last read), tookMs, agentStarts:[ids of agents that started after the boundary], extra:[checks] }.
  */
 export function judgeSwap(f) {
-  const chk = (ok, detail, kind) => ({ ok, detail, ...(kind ? { kind } : {}) });
-  const buildsDiffer = Boolean(f.oldBuild && f.newBuild && f.oldBuild !== f.newBuild);
-  const sameVersion = f.oldVersion === f.newVersion;
   const pre = [
     chk(Boolean(f.oldVersion), f.oldVersion ? `precondition: the older build ran and reported ${f.oldVersion}` : 'precondition NOT met: the older build\'s version could not be read', 'check'),
-    chk(Boolean(f.oldVersion && f.newVersion && (f.oldVersion !== f.newVersion || buildsDiffer)), f.oldVersion !== f.newVersion ? `precondition: the old (${f.oldVersion}) and new (${f.newVersion}) versions differ` : buildsDiffer ? `precondition: the old and new build report the same version (${f.newVersion}) but are different builds (agent file ${f.oldBuild?.slice(0, 12)} then ${f.newBuild?.slice(0, 12)}); the swap is judged by process identity` : `precondition NOT met: the old and new build report the same version (${f.newVersion}) and the agent file is the same (or unreadable), so a swap cannot be seen`, 'check'),
+    chk(Boolean(f.expectedBuild16) && Boolean(f.oldAgentBuild16) && f.oldAgentBuild16 !== f.expectedBuild16,
+      f.expectedBuild16 && f.oldAgentBuild16 && f.oldAgentBuild16 !== f.expectedBuild16 ? `precondition: the old agent build (${f.oldAgentBuild16}) differs from the new bundle's (${f.expectedBuild16})` : `precondition NOT met: the old agent build (${f.oldAgentBuild16 ?? 'unreadable'}) and the new bundle's (${f.expectedBuild16 ?? 'unreadable'}) are the same or unreadable, so a swap cannot be seen`, 'check'),
     chk(f.helperWasOn === true, f.helperWasOn ? 'precondition: the helper was on before the install' : 'precondition NOT met: the helper was not on before the install', 'check'),
   ];
   if (pre.some((c) => !c.ok)) return pre;
   const checks = [...pre];
-  const fresh = (re) => (f.procs ?? []).some((p) => re.test(p.name) && p.startMs >= f.installedAtMs);
-  if (sameVersion) {
-    // Same version string, different build: the version cannot tell old from new, so the swap is judged by process identity (a process that started after the install).
-    checks.push(chk(fresh(/agent/), fresh(/agent/) ? 'the running dyno-agent started after the install (it was swapped)' : 'no dyno-agent that started after the install is running: the old agent was not swapped'));
-    if (f.helperReadable || f.helperWasOn) checks.push(chk(fresh(/helper/), fresh(/helper/) ? 'the running helper started after the install (it was swapped)' : 'no helper that started after the install is running: the old helper was not swapped'));
-  } else {
-  checks.push(chk(f.agentVersion === f.newVersion, f.agentVersion === f.newVersion ? `the running agent reports ${f.newVersion} ${Math.round((f.tookMs ?? 0) / 1000)} s after the app was opened` : `the running agent reports ${f.agentVersion ?? 'nothing'} after ${Math.round((f.waited ?? 0) / 1000)} s, not ${f.newVersion}: the old agent was not swapped`));
-  if (!f.helperReadable) checks.push(chk(false, 'the helper\'s version could not be read, so its swap was not measured', 'check'));
-  else checks.push(chk(f.helperVersion === f.newVersion, f.helperVersion === f.newVersion ? `the helper reports ${f.newVersion}` : `the helper reports ${f.helperVersion ?? 'nothing'}, not ${f.newVersion}: the old helper was not swapped`));
-  }
-  if (f.agentStarts) checks.push(chk(f.agentStarts.length <= 1, f.agentStarts.length <= 1 ? `no restart loop: ${f.agentStarts.length} agent started after the install over 2 minutes (${f.agentStarts.join(', ') || 'none seen'})` : `restart loop: ${f.agentStarts.length} different agents started after the install within 2 minutes (${f.agentStarts.join(', ')})`));
-  const old = (f.procs ?? []).filter((p) => p.startMs < f.installedAtMs);
-  checks.push(chk(old.length === 0, old.length ? `${old.length} process(es) from before the install still run: ${old.map((p) => `${p.name} pid ${p.pid} ${p.exe} started ${new Date(p.startMs).toISOString()}`).join('; ')}` : 'no process started before the install is still running (by pid, path and start time)'));
+  checks.push(chk(f.agentBuild === f.expectedBuild16, f.agentBuild === f.expectedBuild16 ? `agent.json build is ${f.expectedBuild16} (the new bundle's) ${Math.round((f.tookMs ?? 0) / 1000)} s after the app was opened` : `agent.json build is ${f.agentBuild ?? 'unreadable'} after ${Math.round((f.tookMs ?? 0) / 1000)} s, not ${f.expectedBuild16}: the old agent was not swapped`));
+  const n = f.agentStarts?.length ?? 0;
+  checks.push(chk(n <= 1, n <= 1 ? `no restart loop: ${n} agent started after the install began, over ${LOOP_SAMPLES * 10 - 10} s of watching (${(f.agentStarts ?? []).join(', ') || 'none seen'})` : `restart loop: ${n} different agents started after the install began (${f.agentStarts.join(', ')})`));
+  checks.push(...(f.extra ?? []));
   return checks;
 }
 
 /**
- * The step. p (primitives of one OS): { now(), sleep(ms), installOld() , startOldWithHelper() -> {oldVersion, helperWasOn}, installNew() -> installedAtMs, openApp(), newVersion(),
- * agentVersion() , helperVersion() -> {version, readable}, procs() -> [{name,pid,exe,startMs}] }. Any primitive that throws makes the row NOT MEASURED with its message.
+ * The step. p (primitives of one OS): { now(), sleep(ms), installOld(), startOldWithHelper() -> {oldVersion, helperWasOn}, oldAgentBuild16(), expectedAgentBuild16(), beginInstall() -> guest ms,
+ * installNew() (throws with the installer output when it fails), openApp(), agentBuild16() -> string|null, agentProcs() -> [{pid,startMs}] (agents of this install), extraChecks({boundaryMs}) -> checks[] }.
+ * Any primitive that throws makes the row NOT MEASURED with its message.
  */
 export async function upgradeSwapStep(p) {
   let ctx;
   try {
     await p.installOld();
     const old = await p.startOldWithHelper();
-    const newVersion = await p.newVersion();
-    const oldBuild = p.buildId ? await p.buildId().catch(() => null) : null;
-    const installedAtMs = await p.installNew();
-    const newBuild = p.buildId ? await p.buildId().catch(() => null) : null;
+    const oldAgentBuild16 = await p.oldAgentBuild16();
+    const boundaryMs = await p.beginInstall();
+    await p.installNew();
+    const expectedBuild16 = await p.expectedAgentBuild16();
     await p.openApp();
     const t0 = p.now();
-    let agentVersion = null, helper = { version: null, readable: false };
+    let agentBuild = null;
     for (;;) {
-      agentVersion = await p.agentVersion();
-      helper = await p.helperVersion();
-      const procs = await p.procs();
-      const sameVersion = old.oldVersion === newVersion;
-      const swapped = procs.length > 0 && procs.every((x) => x.startMs >= installedAtMs) && procs.some((x) => /agent/.test(x.name)) && (!old.helperWasOn || procs.some((x) => /helper/.test(x.name)));
-      if (sameVersion ? swapped : (agentVersion === newVersion && (!helper.readable || helper.version === newVersion))) break;
-      if (p.now() - t0 >= SWAP_WAIT_MS) break;
+      agentBuild = await p.agentBuild16();
+      if (agentBuild === expectedBuild16 || p.now() - t0 >= SWAP_WAIT_MS) break;
       await p.sleep(2000);
     }
-    // No restart loop: watch the agents for 2 minutes (12 samples, 10 s apart); every distinct agent (pid + start time) that started after the install is counted.
+    const tookMs = p.now() - t0;
     const seen = new Map();
-    for (let i = 0; i < 12; i++) { for (const x of await p.procs()) if (/agent/.test(x.name) && x.startMs >= installedAtMs) seen.set(`${x.pid}@${x.startMs}`, x); if (i < 11) await p.sleep(10_000); }
-    const agentStarts = [...seen.keys()];
-    ctx = { ...old, agentStarts, oldBuild, newBuild, newVersion, installedAtMs, agentVersion, helperVersion: helper.version, helperReadable: helper.readable, tookMs: p.now() - t0, waited: p.now() - t0, procs: await p.procs() };
+    for (let i = 0; i < LOOP_SAMPLES; i++) { for (const x of await p.agentProcs()) if (x.startMs >= boundaryMs) seen.set(`${x.pid}@${x.startMs}`, x); if (i < LOOP_SAMPLES - 1) await p.sleep(10_000); }
+    const extra = p.extraChecks ? await p.extraChecks({ boundaryMs }) : [];
+    ctx = { ...old, oldAgentBuild16, expectedBuild16, agentBuild, tookMs, agentStarts: [...seen.keys()], extra };
   } catch (e) {
     return { title: TITLE_SWAP, status: 'not-measured', cls: 'check', summary: `not measured: ${String(e.message ?? e).split('\n')[0]}`, checks: [{ ok: false, kind: 'check', detail: String(e.message ?? e) }], evidence: [] };
   }
-  return makeResult(TITLE_SWAP, judgeSwap(ctx), [JSON.stringify({ ...ctx, procs: ctx.procs.length })], 'the agent and the helper are the new build within 60 s and nothing of the old one runs');
+  return makeResult(TITLE_SWAP, judgeSwap(ctx), [JSON.stringify({ ...ctx, extra: ctx.extra.length })], 'the agent is the new build within 60 s without a restart loop, and the OS specific parts hold');
 }
 
 /** A row nobody can drive in this run, with its reason. */
