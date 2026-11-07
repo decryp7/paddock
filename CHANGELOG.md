@@ -13,7 +13,26 @@ Conventional Commits; one semver tag for the whole repo.
   A page over a stale total never panics and never hides missing rows: the total is unknown.
 - `paddock-testkit::limits`: `limit_cases!` (one `#[test]` per limit, stop and cut forms, and a test that the cases and the registry's rows are the same
   set), `limit_case!`, `assert_cases_match`.
-- Nothing adopts it yet (package 1.4b).
+
+### Limits adopted (package 1.4b): breaking and added public shapes
+
+- `paddock-jobs`: `JobState::Failed` is now `Failed { message, limit }` and `wire::WireState::Failed(String)` is now
+  `Failed { message, limit: Option<LimitExceeded> }` (`limit` is a type, kept on the wire as postcard, so it is not skipped when absent).
+  `JobError::Limit(LimitExceeded)` is new; a job that a limit stopped keeps the limit.
+- `paddock-archive`: `ArchiveError::Limit(LimitExceeded)` is new (converts to `JobError::Limit`); the archive limits are registry rows.
+- `paddock-plugin-host`: `HostError::Limit(LimitExceeded)` is new (the plugin id is kept in the message).
+- `paddock-ipc`: `IpcError::limit()` is new (`TooLarge` and `ReplyTooLarge` are the frame row).
+- `paddock-net`: `limit()` on `NetError`; `NetError::TooManyRedirects` is now `TooManyRedirects(u32)` and carries the number the policy
+  allowed; `DEFAULT_REDIRECTS` (5) is new and is the default of `Policy` and of the row `net.redirects`.
+- `paddock-download`: `limit()` on `DownloadError`; `DownloadError::ReplyTooLarge { size, limit }` is new for a small GET (`Fetch`, row
+  `download.fetch_size`, 16 MiB), `TooLarge` stays the file's (row `download.size`, 64 GiB); `DEFAULT_MAX_BYTES` and `DEFAULT_FETCH_BYTES` are new.
+- `paddock-updater`, `paddock-view`: `limit()` on `UpdateError` and on the view's errors (`TooManyRows` and the others).
+- `paddock-health`: `Cause::from_limit` builds a health cause from a `LimitExceeded` (code `limit.<id>`).
+- `paddock-shell`: `Builder::limits(Registry)` registers the app's own rows so their `LimitId`s decode from the wire (idempotent); the shared
+  crates' registries are registered by `Builder::new`.
+- `paddock-ui`: `SuLimitExceeded` and `SuQuantity` (the UI shape of a limit and its quantity, generated from `paddock-limits`) are exported;
+  `JobState` `failed` carries the optional `limit`.
+- Dyno: `PROTOCOL_VERSION` is 5 (was 4 in 1.1.0), because `WireState::Failed` changed inside `Message::Job` and `Reply::Job`.
 
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
