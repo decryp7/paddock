@@ -7,7 +7,8 @@
 //!   whether a load fits, ADR 0006), [`pressure`] (the OS's own pressure and foreground signals), [`select`] (capability-based model choice), [`presets`] (aliases with defaults, ADR 0014), [`backoff`] and [`supervise`] (engine restarts and the crash-loop guard).
 //! - Models and engines: [`gguf`], [`quant`], [`fit`], [`hf`] (Hugging Face API answers), [`runtimes`] (the pinned
 //!   llama.cpp builds), [`hardware`].
-//! - Security and privacy: [`privacy`] (the download allow-list, ADR 0001), [`keys`] and [`limits`] (ADR 0007).
+//! - Security and privacy: [`privacy`] (the download allow-list, ADR 0001), [`keys`] and [`limits`] (ADR 0007),
+//!   [`approvals`] (the chat's remembered tool approvals, ADR 0023).
 //! - State: [`config`] (versioned settings), [`metrics`], [`events`], [`usage`], [`discovery`], [`mgmt`] (the UI's
 //!   wire contract), [`tasks`] (versioned task prompts), [`tokens`], [`cache`].
 //! - The tray popup: [`widgets`] (the closed widget catalogue of the popup, what each widget shows and the rules behind it,
@@ -16,6 +17,7 @@
 
 pub mod affinity;
 pub mod api;
+pub mod approvals;
 pub mod backoff;
 pub mod benchmarks;
 pub mod cache;
