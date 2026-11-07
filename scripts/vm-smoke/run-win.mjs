@@ -38,7 +38,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep') o.keep = true; else if (a === '--only') o.only = v(); else if (a === '--ui') o.ui = true; else if (a === '--vnc') o.vnc = true; else if (a === '--scale') o.scale = Number(v()); else if (a === '--reboot-check') o.reboot = true; else if (a === '--expect-commit') o.expectCommit = v(); else if (a === '--partial') o.partial = true;
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--old-installer') o.oldInstaller = v(); else if (a === '--keep') o.keep = true; else if (a === '--only') o.only = v(); else if (a === '--ui') o.ui = true; else if (a === '--vnc') o.vnc = true; else if (a === '--scale') o.scale = Number(v()); else if (a === '--reboot-check') o.reboot = true; else if (a === '--expect-commit') o.expectCommit = v(); else if (a === '--partial') o.partial = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Windows suite');
@@ -143,6 +143,7 @@ async function main(argv) {
     ssh(`Remove-Item ${GUEST} -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force ${GUEST}\\out | Out-Null`);
     const guestExe = `${GUEST}\\setup.exe`;
     if (scp(exe, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe`).code !== 0) throw new Error('copying the installer failed');
+    if (o.oldInstaller) { if (scp(resolve(o.oldInstaller), `paddock-test@${ip}:C:/paddock-test/vmcheck/setup-old.exe`).code !== 0) throw new Error('copying the older installer failed'); process.env.PADDOCK_OLD_SETUP = '1'; }
     if (existsSync(`${exe}.sig`)) scp(`${exe}.sig`, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe.sig`);
     if (scp(join(HERE, 'win-suite.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-suite.ps1`).code !== 0) throw new Error('copying win-suite.ps1 failed');
     // A script that does not parse never starts (no run.log, no steps.json) and the poll below would wait 40 minutes: parse it in the guest first.

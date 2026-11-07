@@ -87,7 +87,9 @@ export function judgeAfterQuit({ code, out, discovery }) {
  */
 export function judgeQuitStop({ samples, reopened, rebooted }) {
   const span = samples.length ? samples.at(-1).t - samples[0].t : 0;
-  const alive = samples.filter((s) => s.count > 0);
+  // A process may still be exiting in the first seconds after the click: only a Dyno process later than GRACE_S counts, and the time to reach zero is reported.
+  const GRACE_S = 20;
+  const alive = samples.filter((s) => s.count > 0 && s.t > GRACE_S);
   return [
     chk(span >= 60 && samples.length >= 3, `observed ${samples.length} samples over ${span} s (60 s needed)`, span >= 60 && samples.length >= 3 ? undefined : 'check'),
     chk(alive.length === 0, alive.length ? `a Dyno process was running ${alive[0].t} s after Quit and stop (${alive[0].count})` : 'no Dyno process for the whole window'),

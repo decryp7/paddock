@@ -46,7 +46,7 @@ export async function quitViaMenu(browser) {
   let label = null;
   const clicked = await main?.evaluate(async () => {
     // Item text may carry an icon ligature or a shortcut hint: match the label inside, never "Quit and stop measuring" (its own row).
-    const pick = () => [...document.querySelectorAll('[role=menuitem]')].find((e) => /(^|\s)(Quit Dyno|Exit)( \(keeps measuring\))?(\s|$)/.test(e.textContent.trim()) && !/stop/i.test(e.textContent));
+    const pick = () => [...document.querySelectorAll('[role=menuitem]')].find((e) => /^(Quit Dyno|Exit)/.test(e.textContent.trim()) && !/stop/i.test(e.textContent));
     if (!pick()) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File')?.click(); await new Promise((r) => setTimeout(r, 600)); }
     const it = pick();
     if (!it) return null;

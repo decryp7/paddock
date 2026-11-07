@@ -38,6 +38,7 @@ export function judgeSwap(f) {
   if (!f.helperReadable) checks.push(chk(false, 'the helper\'s version could not be read, so its swap was not measured', 'check'));
   else checks.push(chk(f.helperVersion === f.newVersion, f.helperVersion === f.newVersion ? `the helper reports ${f.newVersion}` : `the helper reports ${f.helperVersion ?? 'nothing'}, not ${f.newVersion}: the old helper was not swapped`));
   }
+  if (f.agentStarts) checks.push(chk(f.agentStarts.length <= 1, f.agentStarts.length <= 1 ? `no restart loop: ${f.agentStarts.length} agent started after the install over 2 minutes (${f.agentStarts.join(', ') || 'none seen'})` : `restart loop: ${f.agentStarts.length} different agents started after the install within 2 minutes (${f.agentStarts.join(', ')})`));
   const old = (f.procs ?? []).filter((p) => p.startMs < f.installedAtMs);
   checks.push(chk(old.length === 0, old.length ? `${old.length} process(es) from before the install still run: ${old.map((p) => `${p.name} pid ${p.pid} ${p.exe} started ${new Date(p.startMs).toISOString()}`).join('; ')}` : 'no process started before the install is still running (by pid, path and start time)'));
   return checks;
@@ -69,7 +70,11 @@ export async function upgradeSwapStep(p) {
       if (p.now() - t0 >= SWAP_WAIT_MS) break;
       await p.sleep(2000);
     }
-    ctx = { ...old, oldBuild, newBuild, newVersion, installedAtMs, agentVersion, helperVersion: helper.version, helperReadable: helper.readable, tookMs: p.now() - t0, waited: p.now() - t0, procs: await p.procs() };
+    // No restart loop: watch the agents for 2 minutes (12 samples, 10 s apart); every distinct agent (pid + start time) that started after the install is counted.
+    const seen = new Map();
+    for (let i = 0; i < 12; i++) { for (const x of await p.procs()) if (/agent/.test(x.name) && x.startMs >= installedAtMs) seen.set(`${x.pid}@${x.startMs}`, x); if (i < 11) await p.sleep(10_000); }
+    const agentStarts = [...seen.keys()];
+    ctx = { ...old, agentStarts, oldBuild, newBuild, newVersion, installedAtMs, agentVersion, helperVersion: helper.version, helperReadable: helper.readable, tookMs: p.now() - t0, waited: p.now() - t0, procs: await p.procs() };
   } catch (e) {
     return { title: TITLE_SWAP, status: 'not-measured', cls: 'check', summary: `not measured: ${String(e.message ?? e).split('\n')[0]}`, checks: [{ ok: false, kind: 'check', detail: String(e.message ?? e) }], evidence: [] };
   }

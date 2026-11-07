@@ -24,6 +24,7 @@ import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep, quitStopStep } from './mcp-judges.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { diskSpaceStep, unixAdapter } from './disk-space-row.mjs';
+import { discoveryStep, unixDiscoveryPrims } from './discovery-row.mjs';
 import { NOT_DRIVEN, ROW_TITLES, judgeLinuxHelperLogDir, notDriven, rowStep } from './release-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -259,6 +260,9 @@ async function main(argv) {
 
     // Release row: disk space (Dyno's figure against the OS's, decimal units, refresh within 60 s of a 1 GB write).
     push(await diskSpaceStep({ exec: async (c) => ses(c, 300_000), sleep, now: () => Date.now(), adapter: unixAdapter({ os: 'linux', dyno: '/usr/bin/dyno' }) }));
+
+    // Release row: the discovery file is rewritten within 30 s when deleted or naming another agent.
+    push(await discoveryStep(unixDiscoveryPrims({ exec: async (c) => ses(c, 120_000), sleep, now: () => Date.now(), file: '$HOME/.local/share/dyno/agent.json', dyno: '/usr/bin/dyno' })));
 
     // 7. Quit: File > Quit ends the app and the agent.
     press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit Dyno( \\(keeps measuring\\))?$', 'menu item'); await sleep(8000);
