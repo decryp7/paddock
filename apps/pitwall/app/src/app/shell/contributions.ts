@@ -41,6 +41,14 @@ export const SETTINGS_PAGES = [
     load: () => import('../features/settings/settings-page').then((m) => m.SettingsPage),
   }),
   // Which widgets the tray popup shows (family ADR 0035); "Customize widgets…" in the popup opens Settings here.
+  // The apps whose tools the Playground chat may use (ADR 0023 Decision 7). In a build without the chat it says so.
+  defineSettingsPage({
+    id: 'pw.connected-apps',
+    group: 'application',
+    title: msg('pw.settings.connected-apps', 'Connected apps'),
+    order: 15,
+    load: () => import('../features/connected-apps/connected-apps-page').then((m) => m.ConnectedAppsPage),
+  }),
   defineSettingsPage({
     id: 'pw.tray',
     group: 'application',
@@ -55,6 +63,13 @@ export const CREATE_APP_DIALOG = defineDialog(DIALOG_CONTRACTS['pw.create-app'],
   title: msg('pw.create-app.title', 'New app'),
   result: type<string>(),
   load: () => import('../features/apps/create-app-dialog').then((m) => m.CreateAppDialog),
+});
+
+/** "Connect <app>" (a modal form): the AI access key the user pastes. Answers the key, trimmed. */
+export const MCP_KEY_DIALOG = defineDialog(DIALOG_CONTRACTS['pw.mcp-key'], {
+  title: msg('pw.mcp-key.title', 'Connect app'),
+  result: type<string>(),
+  load: () => import('../features/connected-apps/mcp-key-dialog').then((m) => m.McpKeyDialog),
 });
 
 /** A new key, shown once (a required choice). Answers true once the user saved it. */
@@ -86,7 +101,7 @@ export const CONFIRM_DIALOG = defineConfirmDialog({
   load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
 });
 
-export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, CREATE_APP_DIALOG, KEY_SECRET_DIALOG, QUIT_DIALOG, CONSENT_DIALOG, ...ABOUT_DIALOGS] as const;
+export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, CREATE_APP_DIALOG, MCP_KEY_DIALOG, KEY_SECRET_DIALOG, QUIT_DIALOG, CONSENT_DIALOG, ...ABOUT_DIALOGS] as const;
 
 /** About's commands, Help menu items and notice kind. */
 export const ABOUT_CONTRIBUTIONS = aboutContributions([]);

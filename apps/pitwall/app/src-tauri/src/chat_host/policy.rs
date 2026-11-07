@@ -72,6 +72,18 @@ impl PitwallPolicy {
         }
     }
 
+    /// Forgets every approval of a server (the user forgot the app).
+    pub fn revoke_server(&self, server: &str) {
+        let mut book = self.book.lock().unwrap_or_else(PoisonError::into_inner);
+        if book.revoke_server(server) > 0 {
+            if let Some(path) = &self.path {
+                if let Err(e) = save(path, &book) {
+                    log::warn!(target: "pitwall_chat", "tool approvals could not be saved: {e}; next step: check the data folder's permissions");
+                }
+            }
+        }
+    }
+
     /// The remembered approvals (Settings > Connected apps).
     pub fn remembered(&self) -> Vec<approvals::Remembered> {
         self.book.lock().unwrap_or_else(PoisonError::into_inner).entries()

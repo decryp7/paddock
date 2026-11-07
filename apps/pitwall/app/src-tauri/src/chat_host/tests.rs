@@ -422,3 +422,84 @@ fn the_book_file_falls_back_to_its_backup_and_a_changed_tool_asks_again() {
     p.record(&info, ApprovalChoice::AllowOnce);
     assert_eq!(p.remembered().len(), 1, "Allow once is not remembered");
 }
+
+#[test]
+fn connected_apps_keep_a_pasted_key_connect_list_tools_say_what_is_wrong_and_forget() {
+    use super::apps::{parse_key, AppsError, ConnectedApps};
+    let dyno = fake_dyno();
+    let file = discovery_path(dyno.dir.path());
+    let names = ToolNames::default();
+    let data = tempfile::tempdir().unwrap();
+    let policy = Arc::new(PitwallPolicy::new(Some(data.path()), names.clone(), || 7));
+    let model = Arc::new(Script(Mutex::default(), Mutex::default()));
+    let clock = paddock_health::FakeClock::at_wall_ms(1_700_000_000_000);
+    let store = Arc::new(ConversationStore::open(data.path().join("c.json"), Arc::new(clock.clone())));
+    let mut cfg = AssistantConfig::new("Pitwall", "sys");
+    cfg.policy = policy.clone();
+    let assistant = Assistant::new(model, paddock_assistant::Tools::none(), store, Arc::new(clock), cfg);
+    let secrets = Arc::new(paddock_secrets::MemorySecrets::new("Pitwall"));
+    let apps = ConnectedApps::new(
+        secrets,
+        move |id| (id == "dyno").then(|| file.clone()),
+        assistant.clone(),
+        policy.clone(),
+        names,
+    );
+
+    // Nothing saved yet: not connected, and connecting says how to get a key.
+    let v = &apps.views()[0];
+    assert_eq!(
+        (v.id.as_str(), v.title.as_str(), v.key_saved, v.connected),
+        ("dyno", "Dyno", false, false)
+    );
+    let v = apps.connect("dyno").unwrap();
+    assert!(v.problem.unwrap().contains("Settings > AI access"));
+
+    // Not a key: refused before anything is kept.
+    for bad in ["", "hello", "pmk_ with space", &format!("pmk_{}", "x".repeat(300))] {
+        assert_eq!(parse_key(bad), Err(AppsError::BadKey), "{bad:?}");
+        assert_eq!(apps.set_key("dyno", bad).unwrap_err(), AppsError::BadKey);
+    }
+    assert!(AppsError::BadKey.to_string().contains("pmk_"));
+    assert!(matches!(apps.set_key("recce", &dyno.key), Err(AppsError::Unknown(_))));
+
+    // A wrong key: kept, but Dyno refuses it and the app says so.
+    let v = apps.set_key("dyno", "pmk_wrong").unwrap();
+    assert!(v.key_saved && !v.connected);
+    assert!(v.problem.unwrap().contains("refused the key"));
+
+    // The right key: connected, its tools listed with their kind, and the chat offered them.
+    let v = apps.set_key("dyno", &format!("  {}\n", dyno.key)).unwrap();
+    assert!(v.connected && v.problem.is_none(), "{v:?}");
+    let kinds: Vec<(String, bool)> = v.tools.iter().map(|t| (t.name.clone(), t.read_only)).collect();
+    assert!(
+        kinds.contains(&("top_processes".into(), true)) && kinds.contains(&("keep_awake".into(), false)),
+        "{kinds:?}"
+    );
+    assert_eq!(assistant.info().tools.len(), 3);
+
+    // Remembered approvals are counted, and forgetting removes the key, the tools and the approvals.
+    let spec = ToolSpec {
+        name: "dyno_top_processes".into(),
+        description: "d".into(),
+        input_schema: json!({"type": "object"}),
+    };
+    let call = ToolCall {
+        id: "c".into(),
+        name: spec.name.clone(),
+        input: json!({}),
+    };
+    policy.record(
+        &CallInfo {
+            tool: &spec,
+            access: Access::ReadOnly,
+            call: &call,
+        },
+        ApprovalChoice::AlwaysAllow,
+    );
+    assert_eq!(apps.views()[0].remembered, 1);
+    let v = apps.forget("dyno").unwrap();
+    assert!(!v.key_saved && !v.connected && v.remembered == 0);
+    assert!(assistant.info().tools.is_empty());
+    assert!(AppsError::Store("x".into()).to_string().contains("could not be kept"));
+}

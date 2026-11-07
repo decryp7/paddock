@@ -64,7 +64,7 @@ impl ServerChatProvider {
         self.context.store(tokens, Ordering::Relaxed);
     }
 
-    fn model(&self) -> String {
+    pub(crate) fn model(&self) -> String {
         self.model.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 }

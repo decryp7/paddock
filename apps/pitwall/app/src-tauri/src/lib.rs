@@ -125,6 +125,12 @@ paddock_commands::command_table! {
     Mutation [WINDOW] limit 9 * paddock_commands::MIB => commands::chat,
     Mutation [WINDOW] => commands::chat_cancel,
     Query [WINDOW] => chat_switch::chat_enabled,
+    Query [WINDOW] => chat_host::commands::connected_apps,
+    Mutation [WINDOW] => chat_host::commands::set_app_key,
+    Mutation [WINDOW] => chat_host::commands::connect_app,
+    Mutation [WINDOW] => chat_host::commands::forget_app,
+    Query [WINDOW] => chat_host::commands::chat_models_list,
+    Mutation [WINDOW] => chat_host::commands::set_chat_model,
     Query [WINDOW] => commands::benchmarks,
     Query [WINDOW] => commands::settings,
     Mutation [WINDOW] => commands::save_settings,
@@ -214,6 +220,11 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
             app.manage(quit::PendingAsk::default());
             app.manage(quit::MenuQuit::default());
             pitwall_setup(app, installed);
+            // The chat (the `chat` feature), only in the installed app: a test composes nothing that reaches the user's
+            // folders or other apps (ER-14).
+            if chat_switch::CHAT_ENABLED && installed {
+                compose_chat(app);
+            }
             Ok(())
         })
         // Quit in the menu bar with the last window closed to the tray goes through Pitwall's own quit (the setting, or the ask).
@@ -227,6 +238,19 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
         builder
     } else {
         builder.in_memory().native_menu(false)
+    }
+}
+
+/// The chat in the installed app; a chat that cannot be built is logged with its cause and the window works without it.
+fn compose_chat<R: Runtime>(app: &AppHandle<R>) {
+    let client = app.state::<SharedClient>().inner().clone();
+    let Some(dir) = app_state::data_dir() else {
+        log::warn!(target: "pitwall_chat", "the chat is off: Pitwall's data folder is unknown; next step: set PITWALL_HOME");
+        return;
+    };
+    match chat_host::commands::compose(client, &dir, tauri::async_runtime::handle().inner().clone()) {
+        Ok(chat) => chat_host::commands::install(app, chat),
+        Err(e) => log::warn!(target: "pitwall_chat", "the chat is off: {e}; next step: check that {} is writable", dir.display()),
     }
 }
 
@@ -407,7 +431,16 @@ pub fn run() {
             Some(vec![paddock_window::launch::HIDDEN_FLAG]),
         ))
         .plugin(tauri_plugin_updater::Builder::new().build());
-    let builder = app(builder, shell(Place::Installed), launch, tray::native()).invoke_handler(invoke_handler());
+    // With the chat, the assistant's commands (`assistant_*`, their own guard) go in front of Pitwall's.
+    let handler: Box<dyn Fn(tauri::ipc::Invoke) -> bool + Send + Sync> = if chat_switch::CHAT_ENABLED {
+        Box::new(paddock_assistant::tauri::route(
+            paddock_assistant::tauri::handler(),
+            invoke_handler(),
+        ))
+    } else {
+        Box::new(invoke_handler())
+    };
+    let builder = app(builder, shell(Place::Installed), launch, tray::native()).invoke_handler(handler);
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
     let builder = builder.on_web_content_process_terminate(paddock_startup::tauri::web_content_terminated);

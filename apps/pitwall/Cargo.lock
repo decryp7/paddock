@@ -3146,12 +3146,14 @@ dependencies = [
 name = "paddock-assistant"
 version = "0.1.0"
 dependencies = [
+ "paddock-commands",
  "paddock-env",
  "paddock-health",
  "paddock-pitwall",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "tauri",
 ]
 
 [[package]]
@@ -3413,6 +3415,7 @@ dependencies = [
 name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
+ "keyring",
  "paddock-env",
  "paddock-proc",
  "paddock-workspace-hack",
@@ -3818,12 +3821,14 @@ dependencies = [
  "paddock-build",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-env",
  "paddock-health",
  "paddock-jobs",
  "paddock-log",
  "paddock-mcp",
  "paddock-menu",
  "paddock-proc",
+ "paddock-secrets",
  "paddock-service",
  "paddock-shell",
  "paddock-startup",

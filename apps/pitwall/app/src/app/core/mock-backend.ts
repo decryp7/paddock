@@ -1,6 +1,8 @@
 import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
+  ChatModels,
+  ConnectedApp,
   ModelPreset,
   PresetDraft,
   PresetEntry,
@@ -113,6 +115,7 @@ const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
+  'connectedApps', 'setAppKey', 'connectApp', 'forgetApp',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -1403,6 +1406,72 @@ export class MockBackend implements PitwallBackend {
 
   chatEnabled(): Promise<boolean> {
     return this.reply('chatEnabled', () => this.chat_);
+  }
+
+  /** Dyno as the mock knows it: a key that starts `pmk_` connects, `pmk_wrong` is refused, and Dyno is "open". */
+  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, tools: [], remembered: 0 };
+
+  connectedApps(): Promise<ConnectedApp[]> {
+    return this.reply('connectedApps', () => [clone(this.dyno_)]);
+  }
+
+  setAppKey(appId: string, key: string): Promise<ConnectedApp> {
+    return this.reply('setAppKey', () => {
+      const k = key.trim();
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      if (!/^pmk_\S+$/.test(k)) throw { code: 'bad_request', message: 'That is not an AI access key. Copy the key Dyno shows in Settings > AI access (it starts with pmk_).' };
+      this.dyno_ = { ...this.dyno_, keySaved: true };
+      return this.connectDyno(k !== 'pmk_wrong');
+    });
+  }
+
+  connectApp(appId: string): Promise<ConnectedApp> {
+    return this.reply('connectApp', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      if (!this.dyno_.keySaved) return clone((this.dyno_ = { ...this.dyno_, problem: "No key is saved for Dyno. Issue one in Dyno's Settings > AI access and paste it here." }));
+      return this.connectDyno(this.dyno_.problem === null || !this.dyno_.problem.includes('refused'));
+    });
+  }
+
+  forgetApp(appId: string): Promise<ConnectedApp> {
+    return this.reply('forgetApp', () => {
+      if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
+      return clone((this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, tools: [], remembered: 0 }));
+    });
+  }
+
+  private connectDyno(keyOk: boolean): ConnectedApp {
+    this.dyno_ = keyOk
+      ? {
+          ...this.dyno_,
+          connected: true,
+          problem: null,
+          tools: ['alarms', 'cpu_memory', 'disks', 'system_summary', 'top_processes'].map((name) => ({ name, readOnly: true })).concat([{ name: 'keep_awake', readOnly: false }]),
+        }
+      : { ...this.dyno_, connected: false, tools: [], problem: 'Dyno refused the key. Issue a new key in Dyno\'s Settings > AI access and paste it here.' };
+    return clone(this.dyno_);
+  }
+
+  private chatModel_: string | null = null;
+
+  chatModels(): Promise<ChatModels> {
+    return this.reply('chatModels', () => this.picker(this.chatModel_));
+  }
+
+  setChatModel(modelId: string): Promise<ChatModels> {
+    return this.reply('setChatModel', () => this.picker(modelId));
+  }
+
+  /** The picker as Rust builds it (`chat_host::models`): tool models first, the others disabled with the reason. */
+  private picker(wanted: string | null): ChatModels {
+    const chat = this.library.filter((m) => m.capabilities.includes('chat'));
+    const models = chat
+      .map((m) => ({ id: m.id, name: m.name, loaded: m.loaded, disabled: m.capabilities.includes('tools') ? null : "Can't use tools: its chat template has no tool calls" }))
+      .sort((a, b) => Number(a.disabled !== null) - Number(b.disabled !== null) || Number(!a.loaded) - Number(!b.loaded) || a.name.localeCompare(b.name));
+    const usable = (id: string | null) => models.some((m) => m.id === id && m.disabled === null);
+    const selected = usable(wanted) ? wanted : (models.find((m) => m.disabled === null)?.id ?? null);
+    this.chatModel_ = selected;
+    return { models, selected };
   }
 
   takeQuitAsk(): Promise<boolean> {

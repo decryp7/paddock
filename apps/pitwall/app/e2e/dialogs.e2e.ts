@@ -15,8 +15,8 @@ const open = async (page: Page, id: string, input: unknown) => {
 };
 
 test.describe('Pitwall dialog windows', () => {
-  test('are the nine Pitwall registers', () => {
-    expect(Object.keys(CONTRACTS).sort()).toEqual(['pd.about', 'pd.confirm', 'pd.settings', 'pd.updates', 'pd.whats-new', 'pw.create-app', 'pw.key-secret', 'pw.quit', 'pw.service-consent']);
+  test('are the ten Pitwall registers', () => {
+    expect(Object.keys(CONTRACTS).sort()).toEqual(['pd.about', 'pd.confirm', 'pd.settings', 'pd.updates', 'pd.whats-new', 'pw.create-app', 'pw.key-secret', 'pw.mcp-key', 'pw.quit', 'pw.service-consent']);
   });
 
   test('every dialog fits at device scale 1 and 1.5 on 1920x1080 and 1366x768: its footer in view, on top, no gap (ADR 0026 §6)', async ({ browser, baseURL }) => {
@@ -35,6 +35,18 @@ test.describe('Pitwall dialog windows', () => {
     await page.getByLabel('Name').fill('  Obsidian ');
     await page.keyboard.press('Enter');
     await expect.poll(() => d.result()).toContain('"Obsidian"');
+  });
+
+  test('Connect Dyno: Connect waits for a key, the key is never shown, and Enter answers it trimmed', async ({ page }) => {
+    const d = await open(page, 'pw.mcp-key', FIXTURES['pw.mcp-key']![0]);
+    await expect(d.action('connect')).toBeDisabled();
+    await expect(page.getByLabel('AI access key')).toBeFocused();
+    await expect(page.getByLabel('AI access key')).toHaveAttribute('type', 'password');
+    await page.getByLabel('AI access key').fill('hello');
+    await expect(d.action('connect')).toBeDisabled();
+    await page.getByLabel('AI access key').fill('  pmk_abc ');
+    await page.keyboard.press('Enter');
+    await expect.poll(() => d.result()).toContain('"pmk_abc"');
   });
 
   test('the new key: no way out but "I\'ve saved it"; Escape does nothing', async ({ page }) => {

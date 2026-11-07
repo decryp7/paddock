@@ -1,6 +1,8 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
+  ChatModels,
+  ConnectedApp,
   AppInfo,
   CacheClearScope,
   CacheInfo,
@@ -401,6 +403,24 @@ export class TauriBackend implements PitwallBackend {
   }
   chatEnabled(): Promise<boolean> {
     return this.run('chat_enabled');
+  }
+  connectedApps(): Promise<ConnectedApp[]> {
+    return this.run('connected_apps');
+  }
+  setAppKey(appId: string, key: string): Promise<ConnectedApp> {
+    return this.run('set_app_key', { appId, key });
+  }
+  connectApp(appId: string): Promise<ConnectedApp> {
+    return this.run('connect_app', { appId });
+  }
+  forgetApp(appId: string): Promise<ConnectedApp> {
+    return this.run('forget_app', { appId });
+  }
+  chatModels(): Promise<ChatModels> {
+    return this.run('chat_models_list');
+  }
+  setChatModel(modelId: string): Promise<ChatModels> {
+    return this.run('set_chat_model', { modelId });
   }
   onQuitAsk(handler: () => void): Unsubscribe {
     let stopped = false;

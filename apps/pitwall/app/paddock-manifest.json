@@ -111,6 +111,7 @@
   ],
   "settingsPages": [
     "pd.appearance",
+    "pw.connected-apps",
     "pw.general",
     "pw.tray"
   ],
@@ -153,9 +154,12 @@
         "apply_preset",
         "cache_info",
         "clear_cache",
+        "connect_app",
+        "connected_apps",
         "decline_service",
         "dialog_open",
         "edit_popover",
+        "forget_app",
         "get_autostart",
         "open_service_login_items",
         "overview",
@@ -165,6 +169,7 @@
         "popover_view",
         "save_settings",
         "service_state",
+        "set_app_key",
         "set_autostart",
         "set_update_check",
         "settings",
@@ -224,6 +229,15 @@
       "height": null,
       "commands": []
     },
+    "pw.mcp-key": {
+      "kind": "form",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
+    },
     "pw.quit": {
       "kind": "decision",
       "modality": "modal",
@@ -267,6 +281,7 @@
     "pw.category.server": "Server",
     "pw.create-app.title": "New app",
     "pw.key-secret.title": "New key",
+    "pw.mcp-key.title": "Connect app",
     "pw.page.apps": "Apps & keys",
     "pw.page.benchmarks": "Benchmarks",
     "pw.page.dashboard": "Dashboard",
@@ -280,6 +295,7 @@
     "pw.release-memory": "Release memory",
     "pw.resume-serving": "Resume serving",
     "pw.service-consent.title": "Run in the background",
+    "pw.settings.connected-apps": "Connected apps",
     "pw.settings.general": "Pitwall",
     "pw.settings.tray": "Tray popup",
     "pw.status.memory": "Memory in use",

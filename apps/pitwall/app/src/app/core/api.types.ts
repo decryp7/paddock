@@ -1078,3 +1078,38 @@ export type JobEvent =
   | { kind: 'done'; jobId: number; result: unknown }
   | { kind: 'failed'; jobId: number; error: CommandError }
   | { kind: 'cancelled'; jobId: number; stoppedWaiting: boolean };
+
+/** One tool of a connected app, as Settings lists it (`chat_host::apps::AppTool`). */
+export interface AppTool {
+  name: string;
+  /** It only looks: asked once, then remembered when allowed. Otherwise an action, asked every call. */
+  readOnly: boolean;
+}
+
+/** A family app the chat can use, in Settings > Connected apps (`chat_host::apps::ConnectedApp`, ADR 0023 Decision 7). */
+export interface ConnectedApp {
+  id: string;
+  title: string;
+  keySaved: boolean;
+  connected: boolean;
+  /** Why the last connect failed, with the next step. */
+  problem: string | null;
+  tools: AppTool[];
+  /** Tools always allowed. */
+  remembered: number;
+}
+
+/** One model of the Chat tab's picker (`chat_host::models::ChatModel`). */
+export interface ChatModel {
+  id: string;
+  name: string;
+  loaded: boolean;
+  /** Why it can't be chosen (no tool calls); null when it can. */
+  disabled: string | null;
+}
+
+/** The Chat tab's picker: tool-capable models first, and the one the chat uses (`chat_host::models::ChatModels`). */
+export interface ChatModels {
+  models: ChatModel[];
+  selected: string | null;
+}
