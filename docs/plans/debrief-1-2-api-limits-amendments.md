@@ -82,3 +82,19 @@ package, **1.4b**, after IP1, on its own branch:
 | JSON arrays | `["bytes", 5]` is still accepted (compact formats write a struct as a sequence); documented on `Deserialize for Quantity` |
 | Aggregate words | The count can include lists counted before and added again, so `describe()` says "up to N" (`the value: the first 31 cuts of up to 40 are listed (bounded.cuts)`) |
 | Row helper | `LimitRow::stop` builds the usual stop row; 1.4b uses it for the other shared crates |
+
+## Package 1.4b: what it covers and what it leaves (coordinator decisions, 2026-11-08)
+
+Built (branch `debrief/1.2-limits-adopt`): `LimitExceeded` kept in `ArchiveError::Limit`, `JobError::Limit`, `JobState::Failed`
+and `WireState::Failed` (with the UI's `SuJobState.limit` and parser); `IpcError::limit()` and `HostError::Limit`;
+`Cause::from_limit`; rows with `limit_cases!` for ipc (51), plugin host (52, 53), guard (54), archive (55), net (56), download
+(57), updater (58), view (59), diag (60) and storage (61); `LimitId::register` from the shell builder; conformance check C62 in
+warning mode (a row without a case, and limit-shaped constants no registry file mentions: today it lists the older constants of
+diag, download, guard, ipc, net, shell, storage and updater, to be turned into rows or waived by name).
+
+Follow-ups, deliberately not in 1.4b:
+- Debrief's, Pitwall's and Spotter's job models (their own `JobState`) keep their failure text; they adopt the limit with their
+  own registries (Debrief 3.6, B3).
+- Row 62 (the UI's IPC call timeout) is TypeScript and goes with the UI package (2.3, `LimitNotice`).
+- `Cause::from_limit` is not yet called by an app; the first caller is the plugin host's memory kill (2.6a).
+- C62 becomes an error when Debrief's list is reasoned (ADR 0019 phases it).

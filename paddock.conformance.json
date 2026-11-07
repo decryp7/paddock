@@ -1,5 +1,6 @@
 {
   "app": "paddock",
+  "limitSkip": ["paddock-limits"],
   "screenshotDirs": [
     "ui/docs/screenshots"
   ],

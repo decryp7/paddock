@@ -1,0 +1,77 @@
+// C62: every limit is in a registry and every registry row has a test (ADR 0019 check 2, plan 1.4b; Debrief ADR 0065 part 3).
+// Two directions, both at warning level until the Debrief list is reasoned (ADR 0019 phases it so):
+//  1. a row declared in a crate (`LimitRow::stop("id", ...)` or `id: LimitId::new("id")`) has a case in that crate, a
+//     `limit_cases!` entry (`name: "id" => stop(...)`) or a `limit_case!(stop|cut, REGISTRY, "id", ...)` call;
+//  2. in a crate that has a registry, a limit-shaped constant (`MAX_*`, `*_LIMIT`, `*_TIMEOUT`, `*_CAP`, `*_BUDGET`) that no
+//     registry file mentions is reported once per crate with its first names. Input-validation lengths are waived by name in
+//     `paddock.conformance.json` ("limitWaivers": ["MAX_NAME", ...]) or whole crates ("limitSkip": ["crate"]).
+// Rows in `#[cfg(test)]` modules, in tests/ and in tests.rs are fixtures and are not checked. The tests themselves run in Rust (`limit_cases!` compares the cases with the registry's rows both ways); this check finds a
+// missing case without compiling, and the unregistered constants that no test can find.
+import { warn } from '../finding.mjs';
+
+const ROW_ID = /\bLimitRow::stop\s*\(\s*"([a-z][a-z0-9_.]*)"|\bid\s*:\s*LimitId::new\s*\(\s*"([a-z][a-z0-9_.]*)"/g;
+const CASE_ID = /"([a-z][a-z0-9_.]*)"\s*=>\s*(?:stop|cut)\s*\(|\blimit_case!\s*\(\s*(?:stop|cut)\s*,[^"]*"([a-z][a-z0-9_.]*)"/g;
+const LIMIT_CONST = /\bconst\s+((?:MAX_[A-Z0-9_]+|[A-Z0-9_]+_(?:LIMIT|TIMEOUT|CAP|BUDGET)))\s*:/g;
+
+/** Ids of the limit rows declared in a Rust source: [{ id, line }]. */
+export function rowIds(source) {
+  return [...source.matchAll(ROW_ID)].map((m) => ({ id: m[1] ?? m[2], line: source.slice(0, m.index).split('\n').length }));
+}
+
+/** Ids that a source has a case for. */
+export function caseIds(source) {
+  return [...source.matchAll(CASE_ID)].map((m) => m[1] ?? m[2]);
+}
+
+/** Names of the limit-shaped constants of a source (test modules are not skipped: a constant there is no limit either way). */
+export function limitConstants(source) {
+  return [...source.matchAll(LIMIT_CONST)].map((m) => m[1]);
+}
+
+const crateOf = (file) => /^(.*?\/?(?:crates\/)?[^/]+)\/(?:src|tests)\//.exec(file)?.[1] ?? null;
+
+export default {
+  id: 'C62',
+  title: 'Every limit row has a case, and limit-shaped constants are in a registry',
+  rule: 40,
+  run(ctx) {
+    const skip = new Set(ctx.config.limitSkip ?? []);
+    const waived = new Set(ctx.config.limitWaivers ?? []);
+    const byCrate = new Map();
+    for (const f of ctx.files().filter((x) => x.endsWith('.rs') && !/(^|\/)(fuzz|target)\//.test(x))) {
+      const crate = crateOf(f);
+      if (!crate || skip.has(crate.split('/').pop())) continue;
+      if (!byCrate.has(crate)) byCrate.set(crate, []);
+      byCrate.get(crate).push(f);
+    }
+    const out = [];
+    for (const [crate, files] of byCrate) {
+      const rows = [];
+      const cases = new Set();
+      const registryText = [];
+      const constants = [];
+      for (const f of files) {
+        const src = ctx.read(f) ?? '';
+        // A row declared in a `#[cfg(test)]` module or under tests/ is a fixture, not a limit.
+        const found = /(^|\/)(tests\/|tests\.rs$)/.test(f) ? [] : rowIds(src.split('#[cfg(test)]')[0]);
+        for (const r of found) rows.push({ ...r, file: f });
+        for (const id of caseIds(src)) cases.add(id);
+        if (found.length > 0) registryText.push(src);
+        for (const name of limitConstants(src)) constants.push({ name, file: f });
+      }
+      for (const r of rows) {
+        if (!cases.has(r.id)) {
+          out.push(warn('C62', 40, r.file, r.line, `limit row "${r.id}" has no limit_cases! case in ${crate}`, 'Add `name: "' + r.id + '" => stop(got = ..., limit = ..., setting = ...)` (or `=> cut(...)`) to the crate\'s limit_cases! with the data at and over the limit.'));
+        }
+      }
+      if (rows.length === 0) continue;
+      const mentioned = registryText.join('\n');
+      const loose = [...new Set(constants.filter((c) => !waived.has(c.name) && !new RegExp(`\\b${c.name}\\b`).test(mentioned)).map((c) => c.name))];
+      if (loose.length > 0) {
+        const at = constants.find((c) => c.name === loose[0]);
+        out.push(warn('C62', 40, at.file, 1, `${crate} has ${loose.length} limit-shaped constant(s) no registry file mentions (first: ${loose.slice(0, 5).join(', ')})`, 'Make each a row of the crate\'s registry with a case, or list the input-validation ones in "limitWaivers" of paddock.conformance.json.'));
+      }
+    }
+    return out;
+  },
+};
