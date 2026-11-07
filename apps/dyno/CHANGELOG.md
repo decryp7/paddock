@@ -63,6 +63,7 @@ To keep your data, open Settings > Apps, uninstall Dyno and leave "Delete the ap
 - macOS: menu-bar icons no longer flash, and show their reading when you hover.
 - "Is this normal?" counts days by your own calendar.
 - About: "See all releases" opens the releases page.
+- AI access: `dyno mcp` answers every request. If Dyno ends the connection first, for example while its agent restarts, each open request gets an error and `dyno mcp` exits with code 1 and says what to do. It no longer ends with code 0 after answering nothing. It says "refused the key" only when the key was wrong.
 
 ### Removed
 
