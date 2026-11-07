@@ -694,6 +694,7 @@ describe('the dialogs', () => {
             endpointHost: 'updates.example',
             releasesPage: 'https://updates.example/releases',
             canInstall: true,
+            install: { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null },
           };
         }
       })({ currentVersion: '1.4.0', server: 'release', release: RELEASE });
