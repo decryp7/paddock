@@ -23,6 +23,10 @@ pub const TRAY: &str = "dy.tray";
 /// installer again clears it at the next start.
 pub const SETUP: &str = "dy.setup";
 
+/// Dyno itself: a line on the chip when its files were replaced while it ran (Restart Dyno to finish). Nothing to retry; it ends with
+/// the restart. Its own row, so clearing it never clears the installer program's mismatch.
+pub const UPDATE: &str = "dy.update";
+
 /// How long a repair waits for the link to come back before it says it did not.
 const REPAIR_WAIT: Duration = Duration::from_secs(8);
 
@@ -183,6 +187,7 @@ impl<R: Runtime> Hub<R> {
             ServiceSpec::new(AGENT, "the Dyno agent").repair(move || hub.reconnect()),
             ServiceSpec::new(TRAY, "the tray icons"),
             ServiceSpec::new(SETUP, "the installer program"),
+            ServiceSpec::new(UPDATE, "Dyno itself"),
         ]
     }
 
@@ -204,15 +209,15 @@ impl<R: Runtime> Hub<R> {
             .code("dy.agent.failed"))
     }
 
-    /// Tells the chip that Dyno was updated while it ran (its program files are a newer build), or that this no longer holds.
+    /// Tells the chip that Dyno was updated while it ran (its program files are a newer build). It stays until Dyno restarts.
     pub fn report_updated(&self, updated: bool) {
         let Some(health) = self.app.get().and_then(|a| a.try_state::<Arc<Health>>().map(|h| h.inner().clone())) else {
             return;
         };
         if updated {
-            health.down(SETUP, updated_problem(), None);
-        } else if health.is_in_outage(SETUP) {
-            health.ok(SETUP);
+            health.down(UPDATE, updated_problem(), None);
+        } else if health.is_in_outage(UPDATE) {
+            health.ok(UPDATE);
         }
     }
 
@@ -278,6 +283,18 @@ mod tests {
         let cause = updated_problem();
         assert_eq!(cause.code.as_deref(), Some("dy.setup.updated"));
         assert!(cause.message.contains("updated") && cause.hint.as_deref().is_some_and(|h| h.contains("Restart Dyno")));
+    }
+
+    #[test]
+    fn the_updated_notice_has_its_own_service_row_apart_from_the_installer_program() {
+        assert_ne!(
+            UPDATE, SETUP,
+            "clearing the update notice must not clear a paddock-setup.exe mismatch"
+        );
+        let hub = Hub::<tauri::test::MockRuntime>::default();
+        let services = hub.services();
+        let ids: Vec<&str> = services.iter().map(ServiceSpec::id).collect();
+        assert!(ids.contains(&UPDATE) && ids.contains(&SETUP), "{ids:?}");
     }
 
     #[test]

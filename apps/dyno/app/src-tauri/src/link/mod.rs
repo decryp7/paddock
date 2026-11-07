@@ -352,10 +352,10 @@ impl AgentLink {
         };
         let key = source();
         let first = self.first_key.get_or_init(|| key.clone());
-        let updated = *first != key;
-        if self.updated.swap(updated, Ordering::SeqCst) != updated {
-            log::warn!(Started = first.as_str(), OnDisk = key.as_str(), Updated = updated; "Dyno's program files changed while it ran");
-            self.sink.app_updated(updated);
+        // Latched: the files changed once, and this app is outdated from then on, whichever thread reads the key next.
+        if *first != key && !self.updated.swap(true, Ordering::SeqCst) {
+            log::warn!(Started = first.as_str(), OnDisk = key.as_str(); "Dyno's program files changed while it ran");
+            self.sink.app_updated(true);
         }
         key
     }

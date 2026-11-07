@@ -103,6 +103,9 @@ impl Default for Tuning {
     }
 }
 
+/// Agents of another build that are asked to exit in a row before the link stops asking.
+const MAX_EVICTIONS: u32 = 3;
+
 /// What a look found about the discovery file: a hint, never proof.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HintSeen {
@@ -116,6 +119,9 @@ pub struct HintSeen {
     pub protocol: u32,
     /// The file is of this build (version and protocol): its agent can be used, otherwise it is asked to exit.
     pub same_build: bool,
+    /// The agent is the build of the agent file on disk, yet this app cannot use it (another protocol): the app was updated while it
+    /// ran. Such an agent is never asked to exit (the next one would be the same).
+    pub of_disk_file: bool,
 }
 
 /// Whether some process holds the agent's lock (the authority for "is an agent running here").
@@ -545,6 +551,8 @@ pub struct Supervisor {
     gave_up: bool,
     launch_anyway: bool,
     reask: bool,
+    /// Agents of another build asked to exit since the last connection to one that was used.
+    evictions: u32,
     wait: Wait,
     stall: Option<(StallId, Stall)>,
     stall_ids: StallId,
@@ -582,6 +590,7 @@ impl Supervisor {
             gave_up: false,
             launch_anyway: false,
             reask: false,
+            evictions: 0,
             wait: Wait::default(),
             stall: None,
             stall_ids: 0,
@@ -1083,7 +1092,25 @@ impl Supervisor {
                         self.connect(Purpose::Use, look, out);
                         return;
                     }
+                } else if h.of_disk_file {
+                    // The agent is the file on disk and this app cannot speak to it: the app was updated while it ran. Asking it to
+                    // exit would only have it started again; the chip says to restart Dyno (the link's `app_updated`).
+                    log::warn!(AgentPid = h.pid, AgentProtocol = h.protocol, AgentVersion = h.version.as_str(); "The agent is the installed build but of another protocol: not replaced, Dyno needs a restart");
+                    self.set_phase(Phase::WaitingForHolder, out);
+                    return;
                 } else if look.lock == Some(LockSeen::Held) {
+                    if self.evictions >= MAX_EVICTIONS {
+                        // Agents of another build keep coming back after being asked to exit: stop (a loop of exits and launches).
+                        log::warn!(Evictions = self.evictions; "Agents of another build keep coming back: no longer asked to exit");
+                        self.show_stall(
+                            Stall::AgentKeepsFailing,
+                            "Agents of another build keep coming back after being asked to exit.",
+                            out,
+                        );
+                        self.set_phase(Phase::WaitingForHolder, out);
+                        return;
+                    }
+                    self.evictions += 1;
                     self.connect(Purpose::AskToExit, look, out);
                     return;
                 } else {
@@ -1205,6 +1232,7 @@ impl Supervisor {
                     self.fallback = false; // the service's agent is up after all
                 }
                 self.ever_connected = true;
+                self.evictions = 0;
                 self.connected_ticks = 0;
                 self.look_out = None;
                 out.push(Command::UsePeer(Some(peer)));
@@ -1288,7 +1316,8 @@ impl Supervisor {
                 return; // it answers a stall that is over
             }
         }
-        // A paused agent is never ended or replaced by a Retry (ADR 0031): it continues by itself.
+        self.evictions = 0; // a person asking again starts the count over
+                            // A paused agent is never ended or replaced by a Retry (ADR 0031): it continues by itself.
         if matches!(self.stall, Some((_, Stall::AgentPaused))) {
             return;
         }

@@ -25,6 +25,7 @@ fn hint(pid: u32, started_ms: i64, same_build: bool) -> HintSeen {
         version: "1.0.0".into(),
         protocol: 1,
         same_build,
+        of_disk_file: false,
     }
 }
 
@@ -1608,4 +1609,62 @@ fn the_service_recheck_of_a_wait_is_marked_so_a_held_lock_can_skip_it() {
         Some((false, true)),
         "a service change always asks"
     );
+}
+
+#[test]
+fn an_agent_of_the_file_on_disk_that_the_app_cannot_speak_to_is_never_asked_to_exit() {
+    // The app was updated while it runs: the agent is the new build (the file on disk) with another protocol. Asking it to exit
+    // only makes the service start the same agent again, forever (Dyno lesson 2026-11-07).
+    let (s, cmds) = first(|l| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(9, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        ..l
+    });
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Connect { .. } | Command::Launch { .. } | Command::RemoveHint { .. })),
+        "the agent of the new build was dealt with: {cmds:?}"
+    );
+    assert!(!matches!(s.phase(), Phase::Connecting { .. }), "{:?}", s.phase());
+}
+
+#[test]
+fn repeated_replacements_of_agents_that_come_back_give_up_within_a_bound() {
+    // A service restarts the agent after each eviction and it is of another build each time.
+    let mut s = Supervisor::new();
+    let mut seq = look_seq(&s.step(Event::Begin));
+    let mut asks = 0;
+    for _ in 0..30 {
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(9, 500, false)),
+            lock: Some(LockSeen::Held),
+            ..look(seq)
+        }));
+        let Some(c) = cmds.iter().find_map(|c| match c {
+            Command::Connect { seq, .. } => Some(*seq),
+            _ => None,
+        }) else {
+            break; // gave up: no connection to evict through
+        };
+        let cmds = s.step(Event::Connected {
+            seq: c,
+            peer: 5,
+            pid: Some(9),
+        });
+        if cmds.contains(&Command::AskToExit { peer: 5 }) {
+            asks += 1;
+        }
+        // It exits: the lock is free, the file goes, and a new look follows.
+        let t = tick_look(&mut s);
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(9, 500, false)),
+            ..look(t)
+        }));
+        seq = look_seq(&cmds);
+    }
+    assert!(asks <= 3, "asked {asks} agents to exit in a row; it never gave up");
 }
