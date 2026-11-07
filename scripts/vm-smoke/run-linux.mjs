@@ -77,7 +77,7 @@ async function main(argv) {
     log(`cloning ${BASE} as ${vm}`);
     cloned = true;
     if (sh('tart', ['clone', BASE, vm], 600_000).code !== 0) throw new Error('tart clone failed');
-    run = spawn('tart', ['run', '--no-graphics', '--vnc-experimental', '--rosetta=rosetta', vm], { env: { ...process.env, TART_HOME }, stdio: 'ignore' });
+    run = spawn('tart', ['run', '--no-audio', '--no-graphics', '--vnc-experimental', '--rosetta=rosetta', vm], { env: { ...process.env, TART_HOME }, stdio: 'ignore' });
     for (let i = 0; i < 75 && g('true', 20_000).code !== 0; i++) await sleep(4000);
     // the desktop session: gnome-shell running as admin, Rosetta registered
     for (let i = 0; i < 60 && !/gnome-shell/.test(g('pgrep -x gnome-shell || true').stdout); i++) await sleep(3000);

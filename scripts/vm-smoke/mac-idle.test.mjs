@@ -20,7 +20,7 @@ test('a failed start under the idle rule is reported with its failing checks and
 
 // ER-33: "waits while audio plays" is only tested when audio really plays; the sound file is made before the timed idle window, and a sound that never
 // holds the OS's power assertion is a broken check, not a product fail (run 4 of 2026-11-05: no assertion, the rule fired, "the rule did not report waiting").
-function audioRig({ assertionAppears, say = true }) {
+function audioRig({ assertionAppears, say = true, audioDevice }) {
   let t = 0; const cmds = []; let played = false, mode = 'counting';
   const g = { now: () => t, sleep: async (ms) => { t += ms; }, exec: async (c) => {
     cmds.push({ c, at: t });
@@ -35,11 +35,12 @@ function audioRig({ assertionAppears, say = true }) {
     if (played && assertionAppears) return { code: 0, stdout: 'Waiting because audio is playing' };
     return { code: 0, stdout: mode === 'counting' ? 'Counting down to sleep' : mode === 'snoozed' ? 'Snoozed for now' : 'Watching: idle for 5 s' }; } };
   const check = { quit: async () => ({}), startAndJudge: async () => ({ status: 'pass', checks: [], summary: '' }) };
-  return { cmds, idle: new MacIdleChecks(g, power, check, {}) };
+  return { cmds, idle: new MacIdleChecks(g, power, check, { audioDevice: audioDevice ?? true }) };
 }
 test('the sound is made before the activity that starts the idle clock, and a sound that never holds an assertion is a broken check', async () => {
   const { cmds, idle } = audioRig({ assertionAppears: false });
-  const s = await idle.run();
+  await idle.run();
+  const s = idle.audioStep;
   const iSay = cmds.findIndex((x) => /say -o/.test(x.c));
   const lastActivity = cmds.map((x, i) => [x, i]).filter(([x]) => /axdrive drag/.test(x.c)).at(-1)?.[1] ?? -1;
   assert.ok(iSay >= 0 && iSay < lastActivity, 'the file is rendered before the last activity event, outside the timed window');
@@ -47,8 +48,16 @@ test('the sound is made before the activity that starts the idle clock, and a so
   assert.ok(s.checks.some((c) => c.kind === 'check' && /never held a power assertion/.test(c.detail)));
 });
 test('with the assertion present the audio check is judged as before; a sound file that cannot be made is a broken check too', async () => {
-  assert.equal((await audioRig({ assertionAppears: true }).idle.run()).status, 'pass');
-  const s = await audioRig({ assertionAppears: true, say: false }).idle.run();
+  const ok = audioRig({ assertionAppears: true }).idle; await ok.run(); assert.equal(ok.audioStep.status, 'pass');
+  const bad = audioRig({ assertionAppears: true, say: false }).idle; await bad.run(); const s = bad.audioStep;
   assert.equal(s.status, 'check-broken');
   assert.ok(s.checks.some((c) => c.kind === 'check' && /sound file/.test(c.detail)));
+});
+test('no guest audio device: the audio step is not measured with the reason, nothing is played, and the other idle checks still pass', async () => {
+  const { cmds, idle } = audioRig({ assertionAppears: true, audioDevice: false });
+  const main = await idle.run();
+  assert.equal(main.status, 'pass');
+  assert.equal(idle.audioStep.status, 'not-measured');
+  assert.match(idle.audioStep.summary, /no audio device/);
+  assert.ok(!cmds.some((x) => /afplay|say -o/.test(x.c)));
 });

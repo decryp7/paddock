@@ -275,7 +275,7 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
     for (const fn of extra) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // a function may return several steps
     if (gui) push(await gui.helperOff());
     for (const fn of post) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // after Turn off: steps that read what the helper left behind
-    if (idle && !helperOnly) push(await idle.run());
+    if (idle && !helperOnly) { push(await idle.run()); if (idle.audioStep) push(idle.audioStep); }
   }
   push(await check.quit('Quit after the power checks'));
   for (const m of manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });

@@ -234,7 +234,7 @@ async function main(argv) {
     log('booting headless');
     // The power suite also needs the VM's own VNC server (real pointer drags); it listens on 127.0.0.1 only and the URL stays in memory.
     const vnc = o.suite === 'power' || o.suite === 'helper';
-    runChild = spawn(tartBin, ['run', '--no-graphics', ...(vnc ? ['--vnc-experimental'] : []), `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: ['ignore', 'pipe', 'ignore'] });
+    runChild = spawn(tartBin, ['run', '--no-audio', '--no-graphics', ...(vnc ? ['--vnc-experimental'] : []), `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: ['ignore', 'pipe', 'ignore'] });
     let vncUrl = null;
     runChild.stdout.on('data', (d) => { vncUrl ??= /vnc:\/\/\S+/.exec(String(d))?.[0] ?? null; });
     const exec = async (cmd, opts = {}) => {
@@ -274,7 +274,7 @@ async function main(argv) {
         const pw = process.env.PADDOCK_VM_PASSWORD ?? 'admin'; // the pinned image's admin account; never printed
         const gui = new MacGui(guest, { password: pw, fetch, log });
         power.ui = gui;
-        const idle = new MacIdleChecks(guest, power, check, { log, ui: gui });
+        const idle = new MacIdleChecks(guest, power, check, { log, ui: gui, audioDevice: false });
         const { loadRules, MacTour } = await import('./mac-tour.mjs');
         const { macHelperLogStep } = await import('./mac-helper-log.mjs');
         const tour = new MacTour(guest, gui, await loadRules(), { log, check });

@@ -1,17 +1,18 @@
-// The guest side of the rule 71 MCP row: seeds what the PRODUCT reads, so no product flag is needed. Read from origin/dyno/wp-int (2026-11-05):
+// The guest side of the rule 71 MCP row: seeds what the PRODUCT reads, so no product flag is needed. Read from origin/dyno/1.1.0-rc (a19d8d288, 2026-11-07):
 //   - the switch: `mcp.json` in the app's config folder, a versioned JSON file ({"version":1,"enabled":true,"resources":true,"disabledTools":[],"allowedActions":[]})
 //     (crates/paddock-mcp/src/control.rs McpSettings, crates/paddock-env VersionedFile);
-//   - the keys: ONE credential-store entry, service "Dyno", account "mcp:keys" (paddock-secrets Name "mcp"/"keys"), whose value is the JSON list of
-//     {id, client, sha256, created_ms, revoked}; the key itself is never stored, only its SHA-256 (hex). A key is `pmk_` + 64 hex digits (keys.rs).
+//   - the keys: `mcp-keys.json` in the same config folder, an owner-only versioned file {"version":1,"keys":[{id, client, sha256, created_ms, revoked}]}
+//     (crates/paddock-mcp/src/key_list.rs FileKeys, commit 3d03ede45; apps/dyno/app/src-tauri/src/mcp.rs). NOT the OS credential store: 1.0-era seeding
+//     through security / secret-tool / cmdkey is gone. On Unix the file must be owned by the user running the app and not writable by group or others
+//     (mode 600), and its folder not writable by others, or the list is refused and no key works. The key itself is never stored, only its SHA-256 (hex).
+//     A key is `pmk_` + 64 hex digits (keys.rs).
 //   - the app reads both at START (control.rs load_keys), so they are written while the app is stopped, then the app is started.
 //   - the client: `DYNO_MCP_KEY=<key> dyno mcp` speaks JSON-RPC lines on stdio to the app's loopback listener found through `<config>/mcp-listener.json`.
-// The credential-store commands are per OS (security / secret-tool / cmdkey) and UNVERIFIED on a real guest until a run shows the app accepting the key.
 // Guest only: never on the developer's Mac.
 import { createHash, randomBytes } from 'node:crypto';
 import { mcpInput, mcpStep } from './mcp-judges.mjs';
 
-export const KEY_SERVICE = 'Dyno';
-export const KEY_ACCOUNT = 'mcp:keys';
+export const KEYS_FILE = 'mcp-keys.json';
 
 /** A key in the product's format and the credential entry that makes the product accept it. */
 export function makeKey(entropy = randomBytes(32), now = Date.now()) {
@@ -26,25 +27,18 @@ export const settingsJson = (allowedActions = []) => JSON.stringify({ version: 1
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`; // POSIX single quote
 const psq = (s) => `'${String(s).replace(/'/g, "''")}'`; // PowerShell single quote
 
+/** The versioned key-list file the product reads (`entries` is the JSON list made by makeKey). */
+export const keysFileJson = (entries) => JSON.stringify({ version: 1, keys: JSON.parse(entries) });
+
 /**
- * The shell command that stores the key entry in the OS credential store for the user of the session.
- * macOS: an entry made by /usr/bin/security gets the partition `apple-tool:` only, which the app (another signing identity) is not in, so the app blocks
- * on the keychain ("Dyno wants to use your confidential information") before it shows a window. Measured in a clone of the macOS image, 2026-11-05, with the
- * ad-hoc 1.1.0 build: `-T` alone, an empty partition list, `apple-tool:,apple:` and `...,unsigned:` (each with `-A` too) all still blocked (no window in 30 s);
- * `apple-tool:,apple:,cdhash:<the app's CDHash>` after the add opened the window in 4 s (with `-T <bundle>`) and 8 s (with `-A`). So the app's own CDHash is
- * read from the installed bundle in the guest and put into the partition list, with the login keychain password of the throw-away guest (`password`).
- * The product's own case (a key made by one build blocking another) is NOT covered by this: it is the release-rows.mjs measurement `keychainOtherBuild`.
+ * The shell command that writes the key-list file next to `mcp.json`, owner-only (mode 600 on Unix, as the product demands; Windows: the per-user
+ * config folder is already private). `dir` is the config folder found at run time.
  */
-export function storeEntryCommand(os, entries, password = 'admin', bundle = '/Applications/Dyno.app') {
-  if (os === 'macos') {
-    return `H=$(codesign -dvvv ${sq(bundle)} 2>&1 | sed -n 's/^CDHash=//p'); [ -n "$H" ] && security add-generic-password -U -T ${sq(bundle)} -s ${KEY_SERVICE} -a ${sq(KEY_ACCOUNT)} -w ${sq(entries)} && security set-generic-password-partition-list -S "apple-tool:,apple:,cdhash:$H" -s ${KEY_SERVICE} -a ${sq(KEY_ACCOUNT)} -k ${sq(password)} >/dev/null`;
-  }
-  if (os === 'linux') return `printf %s ${sq(entries)} | secret-tool store --label=${KEY_SERVICE} service ${KEY_SERVICE} username ${sq(KEY_ACCOUNT)}`;
-  // Windows Credential Manager: cmdkey refuses a network (SSH) logon ("Credentials cannot be saved from this logon session"), so it runs in the test user's
-  // console session through a scheduled task (/it); the entry is passed base64 so no quoting can damage it, and the task's own output is read back.
-  const b64 = Buffer.from(entries, 'utf8').toString('base64');
-  const script = `$j = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}')); cmdkey /generic:'${KEY_ACCOUNT}.${KEY_SERVICE}' /user:'${KEY_ACCOUNT}' ("/pass:" + $j.Replace('"', '\\"')) *> C:\\paddock-test\\vmcheck\\store-key.out; 'DONE' | Add-Content C:\\paddock-test\\vmcheck\\store-key.out`;
-  return `Remove-Item C:\\paddock-test\\vmcheck\\store-key.out -ErrorAction SilentlyContinue; Set-Content C:\\paddock-test\\vmcheck\\store-key.ps1 ${psq(script)}; schtasks /create /tn DynoStoreKey /sc once /st 00:00 /ru paddock-test /it /f /tr "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\store-key.ps1" | Out-Null; schtasks /run /tn DynoStoreKey | Out-Null; for ($i = 0; $i -lt 30; $i++) { Start-Sleep 1; if ((Get-Content C:\\paddock-test\\vmcheck\\store-key.out -ErrorAction SilentlyContinue) -match 'DONE') { break } }; $o = Get-Content C:\\paddock-test\\vmcheck\\store-key.out -Raw -ErrorAction SilentlyContinue; $o; if ($o -notmatch 'successfully') { exit 1 }`;
+export function writeKeysCommand(os, dir, entries) {
+  const json = keysFileJson(entries);
+  if (os === 'windows') return `[IO.File]::WriteAllText((Join-Path ${psq(dir)} '${KEYS_FILE}'), ${psq(json)}, (New-Object Text.UTF8Encoding $false))`;
+  const f = sq(`${dir}/${KEYS_FILE}`);
+  return `(umask 077; printf %s ${sq(json)} > ${f}) && chmod 600 ${f}`;
 }
 
 /** The command that writes `mcp.json` next to the app's settings (the folder found at run time, never guessed). */
@@ -84,7 +78,7 @@ export function makeMcpGuest(p) {
       const { key, entries } = makeKey();
       await p.stopApp();
       await must('writing mcp.json', writeSettingsCommand(p.os, dir, settingsJson()));
-      await must('storing the key entry in the credential store', storeEntryCommand(p.os, entries, p.password));
+      await must('writing the owner-only key list file', writeKeysCommand(p.os, dir, entries));
       await p.startApp();
       return key;
     },

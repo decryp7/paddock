@@ -11,8 +11,9 @@ export const idleRule = { enabled: true, action: 'sleep', afterSecs: 60, countdo
 
 export class MacIdleChecks {
   /** @param power a PowerChecks (for dyno()), @param check the vm-smoke Check (start/quit/reset), @param opts {log} */
-  constructor(guest, power, check, { log = () => {}, ui = null } = {}) {
-    Object.assign(this, { g: guest, power, check, log, ui });
+  constructor(guest, power, check, { log = () => {}, ui = null, audioDevice = null } = {}) {
+    // audioDevice: true/false when the harness knows (tart runs with --no-audio, so false); null = ask the guest.
+    Object.assign(this, { g: guest, power, check, log, ui, audioDevice, audioStep: null });
   }
 
   async seedRule() {
@@ -52,7 +53,10 @@ export class MacIdleChecks {
   }
 
   async run() {
-    const title = 'Idle action: countdown, Cancel, Snooze, and waiting while audio plays';
+    const title = 'Idle action: countdown, Cancel and Snooze';
+    const audioTitle = 'Idle action: waits while audio plays';
+    const audioChecks = [];
+    this.audioStep = null;
     const checks = [];
     const evidence = [];
     await this.check.quit('Quit before seeding the idle rule');
@@ -102,31 +106,39 @@ export class MacIdleChecks {
     checks.push({ ok: snooze.code === 0 && snoozed.ok && !/Counting down/.test(snoozed.text), detail: snoozed.ok ? 'Snooze 30 minutes: the rule is watching and snoozed' : 'the rule was not snoozed' });
     await this.power.dyno('idle cancel');
 
-    // 3. Audio: the rule waits and says so. The sound is a long spoken file played by the guest's own audio device.
-    // The sound is rendered BEFORE the activity event that starts the idle clock, so the rendering (39 s on a loaded host) is not part of the 60 s + 90 s window.
-    const made = await this.g.exec('[ -s /tmp/vmsmoke-long.aiff ] || ( yes hello | head -400 | say -o /tmp/vmsmoke-long.aiff ); [ -s /tmp/vmsmoke-long.aiff ]', { timeoutMs: 170_000 });
-    if (made.code !== 0) checks.push({ ok: false, kind: 'check', detail: `the sound file could not be made (say exit ${made.code}), so "waits while audio plays" was not tested` });
-    await this.activity();
-    if (made.code === 0) {
-      await this.g.exec('(nohup afplay /tmp/vmsmoke-long.aiff >/dev/null 2>&1 &)');
-      // The precondition (ER-33): the OS must show the sound holding a power assertion before the rule is judged on it.
-      const holding = await this.poll2(async () => (await this.g.exec('pmset -g assertions | grep -i coreaudiod')).stdout.trim() !== '', 30_000);
-      if (!holding) checks.push({ ok: false, kind: 'check', detail: 'the sound never held a power assertion within 30 s (afplay or the guest audio device is not playing), so "waits while audio plays" was not tested' });
-      else {
-        const wait = await this.poll(/Waiting because .*audio/i, 240_000);
-        evidence.push('$ dyno idle (audio playing)', ...wait.text.trimEnd().split('\n'));
-        checks.push({ ok: wait.ok && !/Counting down/.test(wait.text), detail: wait.ok ? 'with a sound playing the rule waits and says: ' + wait.text.match(/Waiting because [^\n]*/)[0] : 'the rule did not report waiting for audio' });
+    // 3. Audio: the rule waits and says so. The sound is a long spoken file played by the guest's own audio device. Its own step: with no guest audio
+    // device it is "not measured" with the reason (never played through the host, ER-14; never a pass, ER-33), and the other idle checks still count.
+    const hasAudio = this.audioDevice ?? (await this.g.exec(`system_profiler SPAudioDataType 2>/dev/null | grep -qiE 'Output Channels|Default Output Device'`)).code === 0;
+    if (!hasAudio) {
+      this.audioStep = { title: audioTitle, status: 'not-measured', cls: 'check', summary: 'not measured: the guest has no audio device (tart run --no-audio, so the VM cannot play a sound and the host is never used for it)', checks: [{ ok: false, kind: 'check', detail: 'no guest audio device' }], evidence: ['guest audio device: none (tart run --no-audio)'] };
+    } else {
+      // The sound is rendered BEFORE the activity event that starts the idle clock, so the rendering (39 s on a loaded host) is not part of the 60 s + 90 s window.
+      const made = await this.g.exec('[ -s /tmp/vmsmoke-long.aiff ] || ( yes hello | head -400 | say -o /tmp/vmsmoke-long.aiff ); [ -s /tmp/vmsmoke-long.aiff ]', { timeoutMs: 170_000 });
+      if (made.code !== 0) audioChecks.push({ ok: false, kind: 'check', detail: `the sound file could not be made (say exit ${made.code}), so "waits while audio plays" was not tested` });
+      await this.activity();
+      const audioEv = [];
+      if (made.code === 0) {
+        await this.g.exec('(nohup afplay /tmp/vmsmoke-long.aiff >/dev/null 2>&1 &)');
+        // The precondition (ER-33): the OS must show the sound holding a power assertion before the rule is judged on it.
+        const holding = await this.poll2(async () => (await this.g.exec('pmset -g assertions | grep -i coreaudiod')).stdout.trim() !== '', 30_000);
+        if (!holding) audioChecks.push({ ok: false, kind: 'check', detail: 'the sound never held a power assertion within 30 s (afplay or the guest audio device is not playing), so "waits while audio plays" was not tested' });
+        else {
+          const wait = await this.poll(/Waiting because .*audio/i, 240_000);
+          audioEv.push('$ dyno idle (audio playing)', ...wait.text.trimEnd().split('\n'));
+          audioChecks.push({ ok: wait.ok && !/Counting down/.test(wait.text), detail: wait.ok ? 'with a sound playing the rule waits and says: ' + wait.text.match(/Waiting because [^\n]*/)[0] : 'the rule did not report waiting for audio' });
+        }
       }
+      const audio = await this.g.exec('pmset -g assertions | grep -i coreaudiod');
+      audioEv.push('$ pmset -g assertions | grep coreaudiod', audio.stdout.trim() || '(none)');
+      await this.g.exec('pkill afplay');
+      this.audioStep = makeResult(audioTitle, audioChecks, audioEv, 'with a sound playing the rule waits and says why');
     }
-    const audio = await this.g.exec('pmset -g assertions | grep -i coreaudiod');
-    evidence.push('$ pmset -g assertions | grep coreaudiod', audio.stdout.trim() || '(none)');
-    await this.g.exec('pkill afplay');
 
     // 4. The OS call Dyno would have made, and what the agent logged. The VM is not slept.
     const log = await this.g.exec(`grep -ih "sleep\\|idle\\|countdown\\|snooze" "$HOME/Library/Logs/Dyno/agent.log" | tail -20`);
     evidence.push('--- agent log (idle lines)', ...(log.stdout.trim() ? log.stdout.trimEnd().split('\n') : ['(none)']));
     evidence.push('OS call for Sleep on macOS: /usr/bin/pmset sleepnow (apps/dyno/crates/dyno-platform/src/power_actions.rs command_for). Not made: the VM is not slept.');
     const failed = checks.filter((c) => !c.ok);
-    return makeResult(title, checks, evidence, 'countdown, Cancel, Snooze and the audio wait all worked; no sleep was made (VM)');
+    return makeResult(title, checks, evidence, 'countdown, Cancel and Snooze worked; no sleep was made (VM)');
   }
 }
