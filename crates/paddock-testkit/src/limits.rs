@@ -1,59 +1,35 @@
-//! `limit_case!`: one test per limit (family ADR 0019 check 1, Debrief ADR 0065 check 4).
+//! `limit_cases!` and `limit_case!`: one test per limit (family ADR 0019 check 1, Debrief ADR 0065 check 4).
 //!
-//! The stop form drives the code to the limit and passes the `LimitExceeded` it returned; the cut form passes a reply with
-//! the data at the limit (no cut) and one over it (a cut with exact numbers). Both look the row up in the registry, assert
-//! the id, the value, the Setting path and the rendered message, and record the id, so [`assert_all_exercised`] fails
-//! when a registry row has no case. Triggers use fake clocks and sizes set small, never sleeps.
+//! `limit_cases!` is the form a crate uses: it lists every case of a registry, generates one `#[test]` per case (so each
+//! runs in its own process under nextest too) and one test that compares the list of ids with the registry's rows in both
+//! directions, so a limit without a case, and a case for a limit that is not in the registry, both fail. The stop form
+//! drives the code to the limit and passes the `LimitExceeded` it returned; the cut form passes a reply with the data at the
+//! limit (no cut) and one over it (a cut with exact numbers). Triggers use fake clocks and sizes set small, never sleeps.
 //!
 //! ```ignore
-//! limit_case!(stop, REGISTRY, "plugin.memory", got = run_fake_plugin_over_cap(), limit = Quantity::Bytes(64 << 20),
-//!             setting = Some("performance.pluginMemoryMb"));
-//! limit_case!(cut, REGISTRY, "traces.list", at = list(200), over = list(201), of = "traces", shown = 200,
-//!             total = Total::AtLeast { n: 201 }, selection = Selection::First { from: 0 });
+//! limit_cases! { REGISTRY;
+//!     plugin_memory: "plugin.memory" => stop(got = run_fake_plugin_over_cap(), limit = Quantity::Bytes(64 << 20),
+//!                                            setting = Some("performance.pluginMemoryMb")),
+//!     traces_list: "traces.list" => cut(at = list(200), over = list(201), of = "traces", shown = 200,
+//!                                       total = Total::AtLeast { n: 201 }, selection = Selection::First { from: 0 }),
+//! }
 //! ```
 
 use paddock_limits::{
     Bounded, LimitExceeded, LimitId, Quantity, Registry, RowKind, RowValue, Selection, Total,
 };
-use std::collections::BTreeSet;
-use std::sync::Mutex;
 
-static EXERCISED: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
-
-fn record(id: LimitId) {
-    EXERCISED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(id.as_str());
-}
-
-/// The ids the cases in this process have exercised so far.
-#[must_use]
-pub fn exercised() -> Vec<&'static str> {
-    EXERCISED
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .iter()
-        .copied()
-        .collect()
-}
-
-/// Fails (panics) listing every row of `registry` that no case has exercised in this process. Call it from one test that
-/// runs after the others, or from a test binary's last test with the cases in the same binary.
+/// Fails (panics) unless `ids` (the ids of a crate's `limit_cases!`) and the rows of `registry` are the same set.
 ///
 /// # Panics
-/// When a row has no case.
-pub fn assert_all_exercised(registry: &Registry) {
-    let seen = exercised();
-    let missing: Vec<_> = registry
-        .rows()
-        .iter()
-        .filter(|r| !seen.contains(&r.id.as_str()))
-        .map(|r| r.id.as_str())
-        .collect();
+/// Listing the rows without a case and the cases without a row.
+pub fn assert_cases_match(registry: &Registry, ids: &[&str]) {
+    let rows: Vec<&str> = registry.rows().iter().map(|r| r.id.as_str()).collect();
+    let without_case: Vec<&&str> = rows.iter().filter(|r| !ids.contains(r)).collect();
+    let without_row: Vec<&&str> = ids.iter().filter(|i| !rows.contains(i)).collect();
     assert!(
-        missing.is_empty(),
-        "limit rows without a limit_case!: {missing:?}"
+        without_case.is_empty() && without_row.is_empty(),
+        "limit rows without a case: {without_case:?}; cases without a row: {without_row:?}"
     );
 }
 
@@ -115,7 +91,6 @@ pub fn assert_stop_case(
             "limit {id}: a hard limit must not send the person to Settings: {text}"
         ),
     }
-    record(id);
 }
 
 /// What a cut case expects of the reply over the limit.
@@ -173,7 +148,6 @@ pub fn assert_cut_case<T, U>(
         cut.describe().contains(id.as_str()),
         "limit {id}: describe() does not name the limit"
     );
-    record(id);
 }
 
 /// One test per limit, in the stop or the cut form (see the module).
@@ -204,5 +178,25 @@ macro_rules! limit_case {
                 selection: $selection,
             },
         )
+    };
+}
+
+/// Every case of a registry, as `#[test]`s: `name: "limit.id" => stop(..)` or `=> cut(..)` with the arguments of
+/// [`limit_case!`], plus `LIMIT_CASE_IDS` and the test that compares the ids with the registry. Once per module.
+#[macro_export]
+macro_rules! limit_cases {
+    ($registry:expr; $( $name:ident : $id:literal => $kind:ident ( $($body:tt)* ) ),* $(,)?) => {
+        $(
+            #[test]
+            fn $name() {
+                $crate::limit_case!($kind, $registry, $id, $($body)*)
+            }
+        )*
+        /// The ids this module has a case for.
+        const LIMIT_CASE_IDS: &[&str] = &[$($id),*];
+        #[test]
+        fn every_limit_row_has_a_case_and_every_case_a_row() {
+            $crate::limits::assert_cases_match(&$registry, LIMIT_CASE_IDS)
+        }
     };
 }

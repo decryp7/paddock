@@ -108,6 +108,15 @@ fn kind_and_selections_must_agree() {
         r.max = Quantity::Bytes(100);
     });
     assert!(check_one(bytes).unwrap_err().contains("counts items"));
+    // A row that can cut counts items too, whichever way it is used.
+    let both = row(|r| {
+        r.kind = RowKind::Both;
+        r.unit = Unit::Bytes;
+        r.default = Quantity::Bytes(4);
+        r.min = Quantity::Bytes(1);
+        r.max = Quantity::Bytes(100);
+    });
+    assert!(check_one(both).unwrap_err().contains("counts items"));
     // A stop row in bytes is fine.
     let stop = row(|r| {
         r.kind = RowKind::Stop;

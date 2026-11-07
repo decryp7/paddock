@@ -12,7 +12,7 @@ const MAX_KEY: usize = 64;
 const MAX_INTERNED: usize = 4096;
 
 /// Whether `s` is a dotted, lower-case key: parts of `[a-z][a-z0-9_]*` joined by `.`, at most 64 bytes.
-const fn is_key(s: &str, camel: bool) -> bool {
+const fn is_key(s: &str) -> bool {
     let b = s.as_bytes();
     if b.is_empty() || b.len() > MAX_KEY {
         return false;
@@ -31,16 +31,32 @@ const fn is_key(s: &str, camel: bool) -> bool {
                 return false;
             }
             at_start = false;
-        } else if !(c.is_ascii_lowercase()
-            || c.is_ascii_digit()
-            || c == b'_'
-            || (camel && c.is_ascii_uppercase()))
-        {
+        } else if !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_') {
             return false;
         }
         i += 1;
     }
     !at_start
+}
+
+/// The longest [`SettingPath`] (`paddock_settings::schema::MAX_ID_LEN`).
+const MAX_SETTING_PATH: usize = 128;
+
+/// The grammar of `paddock_settings::valid_id`: 1 to 128 characters of `A-Z a-z 0-9 . _ -`.
+const fn is_setting_path(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.is_empty() || b.len() > MAX_SETTING_PATH {
+        return false;
+    }
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        if !(c.is_ascii_alphanumeric() || c == b'.' || c == b'_' || c == b'-') {
+            return false;
+        }
+        i += 1;
+    }
+    true
 }
 
 /// A stable key for one limit: dotted, lower-case, such as `"import.record_bytes"` or `"plugin.memory"`.
@@ -56,7 +72,7 @@ impl LimitId {
     #[must_use]
     pub const fn new(key: &'static str) -> Self {
         assert!(
-            is_key(key, false),
+            is_key(key),
             "a LimitId is dotted lower-case: parts of [a-z][a-z0-9_]*, at most 64 bytes"
         );
         Self(key)
@@ -68,30 +84,73 @@ impl LimitId {
         self.0
     }
 
-    /// A key read from the wire. Registry ids are `'static`; a key from outside is validated and interned once
-    /// (bounded at 4 096 distinct keys), so equal keys compare equal.
+    /// A key read from the wire. A key of a registered registry ([`LimitId::register`]) resolves to its `'static` text and
+    /// can never be refused; any other key is validated and interned once (bounded at 4 096 distinct unknown keys), so
+    /// equal keys compare equal and a flood of junk keys cannot make a registered key undecodable.
     ///
     /// # Errors
-    /// [`BadKey`] for a malformed key or when the intern table is full.
+    /// [`BadKey`] for a malformed key, or for an unknown key when the table of unknown keys is full.
     pub fn parse(key: &str) -> Result<Self, BadKey> {
-        if !is_key(key, false) {
+        if !is_key(key) {
             return Err(BadKey::Syntax);
         }
-        static TABLE: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
-        let mut guard = TABLE
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let table = guard.get_or_insert_with(HashSet::new);
-        if let Some(found) = table.get(key) {
-            return Ok(Self(found));
+        with_table(|t| t.parse(key)).map(Self)
+    }
+
+    /// Makes the ids of `registry` known to [`LimitId::parse`] (idempotent). An app or crate calls it once at start-up, before
+    /// it decodes anything; the built-in `bounded.cuts` row is always known.
+    pub fn register(registry: &crate::Registry) {
+        with_table(|t| {
+            for row in registry.rows() {
+                t.known.insert(row.id.0);
+            }
+        });
+    }
+}
+
+/// The keys [`LimitId::parse`] resolves: the registered ones without a bound (they are `'static` rows), and the unknown
+/// ones it interned, at most `cap`.
+pub(crate) struct Interner {
+    known: HashSet<&'static str>,
+    unknown: HashSet<&'static str>,
+    cap: usize,
+}
+
+impl Interner {
+    pub(crate) fn new(cap: usize) -> Self {
+        Self {
+            known: HashSet::new(),
+            unknown: HashSet::new(),
+            cap,
         }
-        if table.len() >= MAX_INTERNED {
+    }
+
+    pub(crate) fn parse(&mut self, key: &str) -> Result<&'static str, BadKey> {
+        if let Some(found) = self.known.get(key).or_else(|| self.unknown.get(key)) {
+            return Ok(found);
+        }
+        if self.unknown.len() >= self.cap {
             return Err(BadKey::Full);
         }
         let leaked: &'static str = Box::leak(key.to_owned().into_boxed_str());
-        table.insert(leaked);
-        Ok(Self(leaked))
+        self.unknown.insert(leaked);
+        Ok(leaked)
     }
+}
+
+fn with_table<R>(f: impl FnOnce(&mut Interner) -> R) -> R {
+    static TABLE: Mutex<Option<Interner>> = Mutex::new(None);
+    let mut guard = TABLE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let table = guard.get_or_insert_with(|| {
+        let mut t = Interner::new(MAX_INTERNED);
+        for row in crate::BUILTIN.rows() {
+            t.known.insert(row.id.0);
+        }
+        t
+    });
+    f(table)
 }
 
 impl fmt::Debug for LimitId {
@@ -162,9 +221,8 @@ impl fmt::Display for BadKey {
 
 impl std::error::Error for BadKey {}
 
-/// The path of a Setting that raises a limit, as the Settings schema names it (`"performance.pluginMemoryMb"`): dotted
-/// parts of letters, digits and `_`, starting with a lower-case letter, at most 64 bytes. Registry tests resolve it
-/// against the schema.
+/// The path of a Setting that raises a limit, as the Settings schema names it (`"performance.pluginMemoryMb"`), with the
+/// grammar of a Settings id. Registry tests resolve it against the schema.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SettingPath(&'static str);
 
@@ -172,14 +230,21 @@ impl SettingPath {
     /// A path from a literal; a bad one fails the build in a `const`.
     ///
     /// # Panics
-    /// If `path` is malformed (see the type).
+    /// If `path` is not a setting path (see [`SettingPath::is_valid`]). Paths are literals, never input.
     #[must_use]
     pub const fn new(path: &'static str) -> Self {
         assert!(
-            is_key(path, true),
-            "a SettingPath is dotted: parts of [a-z][a-zA-Z0-9_]*, at most 64 bytes"
+            is_setting_path(path),
+            "a SettingPath is 1 to 128 characters of A-Z, a-z, 0-9, '.', '_' or '-'"
         );
         Self(path)
+    }
+
+    /// Whether `path` has the grammar of a Setting id: the same as `paddock_settings::valid_id` (a test in that crate keeps
+    /// them equal).
+    #[must_use]
+    pub const fn is_valid(path: &str) -> bool {
+        is_setting_path(path)
     }
 
     /// The path.
@@ -246,7 +311,7 @@ pub enum Unit {
 }
 
 /// A value with its unit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "kind", content = "n", rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 pub enum Quantity {
@@ -301,6 +366,69 @@ impl Quantity {
                 | (Self::Ratio(_), Self::Ratio(_))
                 | (Self::Millis(_), Self::Millis(_))
                 | (Self::Percent(_), Self::Percent(_))
+        )
+    }
+}
+
+/// What `Quantity` reads from the wire; [`Quantity`]'s own `Deserialize` refuses a percentage over 100.
+#[derive(Deserialize)]
+#[serde(tag = "kind", content = "n", rename_all = "camelCase")]
+enum QuantityRepr {
+    Bytes(u64),
+    Count(u64),
+    Ratio(u32),
+    Millis(u64),
+    Percent(u8),
+}
+
+impl<'de> Deserialize<'de> for Quantity {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(match QuantityRepr::deserialize(d)? {
+            QuantityRepr::Bytes(n) => Self::Bytes(n),
+            QuantityRepr::Count(n) => Self::Count(n),
+            QuantityRepr::Ratio(n) => Self::Ratio(n),
+            QuantityRepr::Millis(n) => Self::Millis(n),
+            QuantityRepr::Percent(n) if n <= 100 => Self::Percent(n),
+            QuantityRepr::Percent(n) => {
+                return Err(serde::de::Error::custom(format!(
+                    "a percentage is 0 to 100, not {n}"
+                )));
+            }
+        })
+    }
+}
+
+impl Quantity {
+    /// The text for a value that was *measured* (the amount a limit was reached with): bytes and times are rounded to one
+    /// decimal of the largest unit (`1.2 GiB`, `1.5 s`), because 1,210,123,456 bytes is not information. A limit itself
+    /// reads exact through `Display`.
+    #[must_use]
+    pub fn approx(self) -> String {
+        match self {
+            Self::Bytes(n) => {
+                const UNITS: [(&str, u64); 3] =
+                    [("GiB", 1 << 30), ("MiB", 1 << 20), ("KiB", 1 << 10)];
+                match UNITS.iter().find(|&&(_, size)| n >= size) {
+                    Some(&(name, size)) => format!("{} {name}", tenths(n, size)),
+                    None => format!("{n} B"),
+                }
+            }
+            Self::Millis(n) if n >= 1000 => format!("{} s", tenths(n, 1000)),
+            other => other.to_string(),
+        }
+    }
+}
+
+/// `n / size` rounded to one decimal, without a trailing `.0`.
+fn tenths(n: u64, size: u64) -> String {
+    let t = (u128::from(n) * 10 + u128::from(size) / 2) / u128::from(size);
+    let (whole, frac) = (t / 10, t % 10);
+    if frac == 0 {
+        grouped(u64::try_from(whole).unwrap_or(u64::MAX))
+    } else {
+        format!(
+            "{}.{frac}",
+            grouped(u64::try_from(whole).unwrap_or(u64::MAX))
         )
     }
 }
@@ -383,5 +511,35 @@ impl Scope {
             Self::Query => "query",
             Self::Process => "process",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review P1-3: a flood of junk keys fills only the table of unknown keys; the registered ones stay decodable. (A local
+    /// table: the process-wide one is shared by every test of the binary.)
+    #[test]
+    fn a_flood_of_unknown_keys_never_refuses_a_registered_one() {
+        let mut t = Interner::new(8);
+        t.known.insert("registered.id");
+        let mut refused = 0;
+        for i in 0..100 {
+            if t.parse(&format!("junk.k{i}")) == Err(BadKey::Full) {
+                refused += 1;
+            }
+        }
+        assert_eq!(refused, 92, "8 unknown keys fit, the rest are refused");
+        assert_eq!(t.parse("registered.id"), Ok("registered.id"));
+        // Keys already interned stay decodable too.
+        assert_eq!(t.parse("junk.k0"), Ok("junk.k0"));
+        assert_eq!(t.parse("junk.new"), Err(BadKey::Full));
+        assert!(BadKey::Full.to_string().contains("too many"));
+    }
+
+    #[test]
+    fn the_process_table_knows_the_built_in_row_from_the_start() {
+        assert_eq!(with_table(|t| t.parse("bounded.cuts")), Ok("bounded.cuts"));
     }
 }

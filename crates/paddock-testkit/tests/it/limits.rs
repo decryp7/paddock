@@ -2,8 +2,8 @@ use paddock_limits::{
     Bounded, CutRow, FieldPath, First, LimitExceeded, LimitId, LimitRow, Quantity, Registry,
     Remedy, RowKind, RowValue, Scope, Selection, SelectionKind, SettingPath, Total, Unit,
 };
-use paddock_testkit::limit_case;
-use paddock_testkit::limits::{assert_all_exercised, exercised};
+use paddock_testkit::limits::assert_cases_match;
+use paddock_testkit::{limit_case, limit_cases};
 
 static ROWS: [LimitRow; 3] = [
     LimitRow {
@@ -51,56 +51,56 @@ fn rows(n: usize) -> Bounded<Vec<usize>> {
     Bounded::first(0..n, &ROW, FieldPath::lit("rows"))
 }
 
-#[test]
-fn cases_in_both_forms_pass_and_are_recorded() {
-    limit_case!(
-        stop,
-        REGISTRY,
-        "kit.memory",
-        got = LimitExceeded::new(
-            LimitId::new("kit.memory"),
-            Quantity::Bytes(64 << 20),
-            Scope::Plugin
-        )
-        .reaching(Quantity::Bytes(70 << 20)),
+fn exceeded(id: &'static str, limit: Quantity, scope: Scope) -> LimitExceeded {
+    LimitExceeded::new(LimitId::new(id), limit, scope)
+}
+
+// One #[test] per case, plus the test that the cases and the registry's rows are the same set.
+limit_cases! { REGISTRY;
+    memory_cap: "kit.memory" => stop(
+        got = exceeded("kit.memory", Quantity::Bytes(64 << 20), Scope::Plugin).reaching(Quantity::Bytes(70 << 20)).unwrap(),
         limit = Quantity::Bytes(64 << 20),
         setting = Some("performance.kitMemory")
-    );
-    limit_case!(
-        stop,
-        REGISTRY,
-        "kit.frame",
-        got = LimitExceeded::new(
-            LimitId::new("kit.frame"),
-            Quantity::Bytes(16 << 20),
-            Scope::Process
-        ),
+    ),
+    frame_size: "kit.frame" => stop(
+        got = exceeded("kit.frame", Quantity::Bytes(16 << 20), Scope::Process),
         limit = Quantity::Bytes(16 << 20),
         setting = None
-    );
-    limit_case!(
-        cut,
-        REGISTRY,
-        "kit.rows",
+    ),
+    row_list: "kit.rows" => cut(
         at = rows(3),
         over = rows(4),
         of = "rows",
         shown = 3,
         total = Total::AtLeast { n: 4 },
         selection = Selection::First { from: 0 }
-    );
-    assert!(exercised().contains(&"kit.rows"));
-    assert_all_exercised(&REGISTRY);
+    ),
 }
 
 #[test]
-#[should_panic(expected = "without a limit_case!")]
-fn a_row_without_a_case_fails_the_completeness_check() {
-    static EXTRA: [LimitRow; 1] = [LimitRow {
-        id: LimitId::new("kit.never_run"),
-        ..ROWS[1]
-    }];
-    assert_all_exercised(&Registry::new(&EXTRA));
+fn the_case_list_is_checked_against_the_rows_both_ways() {
+    assert_cases_match(&REGISTRY, LIMIT_CASE_IDS);
+    // A row without a case.
+    let missing =
+        std::panic::catch_unwind(|| assert_cases_match(&REGISTRY, &["kit.memory", "kit.frame"]));
+    assert!(panic_text(missing).contains("without a case: [\"kit.rows\"]"));
+    // A case without a row.
+    let extra = std::panic::catch_unwind(|| {
+        assert_cases_match(
+            &REGISTRY,
+            &["kit.memory", "kit.frame", "kit.rows", "kit.ghost"],
+        )
+    });
+    assert!(panic_text(extra).contains("without a row: [\"kit.ghost\"]"));
+}
+
+fn panic_text(r: std::thread::Result<()>) -> String {
+    let payload = r.expect_err("it must panic");
+    payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|s| (*s).to_owned()))
+        .unwrap_or_default()
 }
 
 #[test]
@@ -110,11 +110,7 @@ fn a_wrong_value_fails() {
         stop,
         REGISTRY,
         "kit.frame",
-        got = LimitExceeded::new(
-            LimitId::new("kit.frame"),
-            Quantity::Bytes(2),
-            Scope::Process
-        ),
+        got = exceeded("kit.frame", Quantity::Bytes(2), Scope::Process),
         limit = Quantity::Bytes(1),
         setting = None
     );
@@ -127,11 +123,7 @@ fn a_setting_the_row_does_not_have_fails() {
         stop,
         REGISTRY,
         "kit.frame",
-        got = LimitExceeded::new(
-            LimitId::new("kit.frame"),
-            Quantity::Bytes(16 << 20),
-            Scope::Process
-        ),
+        got = exceeded("kit.frame", Quantity::Bytes(16 << 20), Scope::Process),
         limit = Quantity::Bytes(16 << 20),
         setting = Some("a.b")
     );
@@ -208,7 +200,7 @@ fn the_wrong_form_for_a_cut_row_fails() {
         stop,
         REGISTRY,
         "kit.rows",
-        got = LimitExceeded::new(LimitId::new("kit.rows"), Quantity::Count(3), Scope::Query),
+        got = exceeded("kit.rows", Quantity::Count(3), Scope::Query),
         limit = Quantity::Count(3),
         setting = None
     );
@@ -221,11 +213,7 @@ fn an_unknown_id_fails() {
         stop,
         REGISTRY,
         "kit.unknown",
-        got = LimitExceeded::new(
-            LimitId::new("kit.unknown"),
-            Quantity::Count(3),
-            Scope::Query
-        ),
+        got = exceeded("kit.unknown", Quantity::Count(3), Scope::Query),
         limit = Quantity::Count(3),
         setting = None
     );

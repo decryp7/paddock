@@ -50,15 +50,25 @@ fn bad_key_texts_name_the_problem() {
 }
 
 #[test]
-fn intern_table_is_bounded() {
-    let mut refused = None;
-    for i in 0..5000 {
-        if let Err(e) = LimitId::parse(&format!("flood.k{i}")) {
-            refused = Some(e);
-            break;
-        }
-    }
-    assert!(refused.is_some_and(|e| e.to_string().contains("too many")));
+fn registered_ids_resolve_to_their_static_text() {
+    static ROWS: [paddock_limits::LimitRow; 1] = [paddock_limits::LimitRow {
+        id: LimitId::new("registered.one"),
+        unit: Unit::Count,
+        default: Quantity::Count(1),
+        min: Quantity::Count(1),
+        max: Quantity::Count(1),
+        value: paddock_limits::RowValue::Hard,
+        kind: paddock_limits::RowKind::Stop,
+        selections: &[],
+        remedy: paddock_limits::Remedy::None,
+    }];
+    LimitId::register(&paddock_limits::Registry::new(&ROWS));
+    LimitId::register(&paddock_limits::Registry::new(&ROWS));
+    assert_eq!(LimitId::parse("registered.one").unwrap(), ROWS[0].id);
+    assert_eq!(
+        LimitId::parse("bounded.cuts").unwrap(),
+        paddock_limits::BOUNDED_CUTS.id
+    );
 }
 
 #[test]
@@ -71,6 +81,12 @@ fn setting_path_allows_camel_case() {
         format!("{} {:?}", SettingPath::new("a.b"), SettingPath::new("a.b")),
         "a.b SettingPath(a.b)"
     );
+    // The grammar of a Settings id (`paddock_settings::valid_id`).
+    assert!(SettingPath::is_valid("a-b_c.D9"));
+    for bad in ["", "a b", "a/b", "\u{e9}", &"a".repeat(129)] {
+        assert!(!SettingPath::is_valid(bad), "{bad:?}");
+    }
+    assert!(SettingPath::is_valid(&"a".repeat(128)));
 }
 
 #[test]

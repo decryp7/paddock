@@ -63,11 +63,12 @@ fn memory_kill_names_the_value_the_limit_and_the_setting() {
         Quantity::Bytes(1024 << 20),
         Scope::Plugin,
     )
-    .reaching(Quantity::Bytes(1210 << 20));
+    .reaching(Quantity::Bytes(1210 << 20))
+    .unwrap();
     let text = e.message(&reg());
     assert_eq!(
         text,
-        "The plugin stopped: it reached 1,210 MiB; the limit (plugin.memory) is 1 GiB. Raise it in Settings \u{2192} performance.pluginMemoryMb."
+        "The plugin stopped: it reached 1.2 GiB; the limit (plugin.memory) is 1 GiB. Raise it in Settings \u{2192} performance.pluginMemoryMb."
     );
 }
 
@@ -100,4 +101,65 @@ fn no_remedy_without_a_row_and_no_reached_without_a_value() {
     );
     let err: &dyn std::error::Error = &e;
     assert!(err.to_string().contains("missing.row"));
+}
+
+struct Labels;
+impl paddock_limits::SettingLabels for Labels {
+    fn label(&self, path: SettingPath) -> Option<(&str, &str)> {
+        (path.as_str() == "performance.pluginMemoryMb").then_some(("Performance", "Plugin memory"))
+    }
+}
+
+#[test]
+fn the_schema_words_replace_the_dotted_path_when_the_schema_knows_it() {
+    let e = LimitExceeded::new(
+        LimitId::new("plugin.memory"),
+        Quantity::Bytes(1024 << 20),
+        Scope::Plugin,
+    );
+    assert!(
+        e.message_with(&reg(), &Labels)
+            .ends_with("Raise it in Settings \u{2192} Performance \u{2192} Plugin memory.")
+    );
+    // A path the schema does not know falls back to the dotted path, which stays the structured log field.
+    struct Unknown;
+    impl paddock_limits::SettingLabels for Unknown {
+        fn label(&self, _: SettingPath) -> Option<(&str, &str)> {
+            None
+        }
+    }
+    assert!(
+        e.message_with(&reg(), &Unknown)
+            .ends_with("performance.pluginMemoryMb.")
+    );
+    assert_eq!(
+        e.setting_path(&reg()),
+        Some(SettingPath::new("performance.pluginMemoryMb"))
+    );
+    assert_eq!(
+        LimitExceeded::new(LimitId::new("ipc.frame"), Quantity::Bytes(1), Scope::File)
+            .setting_path(&reg()),
+        None
+    );
+    assert_eq!(
+        LimitExceeded::new(LimitId::new("missing.id"), Quantity::Bytes(1), Scope::File)
+            .setting_path(&reg()),
+        None
+    );
+}
+
+#[test]
+fn measured_values_are_rounded_and_limits_stay_exact() {
+    assert_eq!(Quantity::Bytes(1_210_123_456).approx(), "1.1 GiB");
+    assert_eq!(Quantity::Bytes(3 << 30).approx(), "3 GiB");
+    assert_eq!(Quantity::Bytes(70 << 20).approx(), "70 MiB");
+    assert_eq!(Quantity::Bytes(1536).approx(), "1.5 KiB");
+    assert_eq!(Quantity::Bytes(900).approx(), "900 B");
+    assert_eq!(Quantity::Millis(1_540).approx(), "1.5 s");
+    assert_eq!(Quantity::Millis(250).approx(), "250 ms");
+    assert_eq!(Quantity::Count(1_204).approx(), "1,204");
+    assert_eq!(
+        Quantity::Bytes(1_210_123_456).to_string(),
+        "1,210,123,456 B"
+    );
 }

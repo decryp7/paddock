@@ -11,20 +11,26 @@
 //!   it. Fields are private; the constructors enforce the arithmetic and deserializing runs the same checks.
 //! - [`Limit`], [`Page`], [`Buckets`]: the request-side types of ADR 0018.
 //!
-//! `limit_case!` (one test per limit) lives in `paddock-testkit`.
+//! `limit_cases!` (one test per limit) lives in `paddock-testkit`.
+//!
+//! **Wire format:** JSON or another self-describing format. The cut variants are internally tagged, which postcard cannot
+//! decode; a postcard boundary carries the cuts as its own typed field.
 
 mod bounded;
 mod exceeded;
+mod fieldpath;
 mod id;
 mod request;
 mod row;
 
 pub use bounded::{
-    Bounded, BoundedError, BoundedWire, Cut, CutRow, CutWire, FieldPath, First, Last, MAX_CUTS,
-    MAX_FIELD_PATH, Maybe, Next, Order, Sample, Selection, SortKey, TopBy, Total,
+    Bounded, BoundedError, BoundedWire, Cut, CutRow, CutWire, First, Last, LimitOutOfRange,
+    MAX_CUTS, Maybe, Next, Order, RowLimit, Sample, Selection, SelectionMarker, SortKey, TopBy,
+    Total,
 };
-pub use exceeded::LimitExceeded;
-pub use id::{LimitId, Quantity, Scope, SettingPath, Unit};
+pub use exceeded::{LimitExceeded, SettingLabels, UnitMismatch};
+pub use fieldpath::{FieldPath, MAX_FIELD_PATH};
+pub use id::{BadKey, LimitId, Quantity, Scope, SettingPath, Unit};
 pub use request::{Buckets, Limit, Page, RequestError};
 pub use row::{
     BOUNDED_CUTS, BUILTIN, LimitRow, Registry, RegistryError, Remedy, RowKind, RowValue,

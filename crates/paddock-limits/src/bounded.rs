@@ -5,17 +5,15 @@
 //! constructor takes a [`CutRow`], a handle on a registry row that declares the selection it is used for, so passing a stop
 //! row or a row of another selection does not compile (a `const` handle of a wrong row fails the build).
 
+use crate::fieldpath::FieldPath;
 use crate::id::{LimitId, grouped};
 use crate::row::{BOUNDED_CUTS, LimitRow, Remedy, RowKind, RowValue, SelectionKind};
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 use std::fmt;
 use std::marker::PhantomData;
 
 /// The most cuts one value may carry, the aggregate included.
 pub const MAX_CUTS: usize = 32;
-/// The longest [`FieldPath`].
-pub const MAX_FIELD_PATH: usize = 64;
 
 /// Why a bounded value or one of its parts was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,139 +43,6 @@ impl fmt::Display for BoundedError {
 }
 
 impl std::error::Error for BoundedError {}
-
-// ---- FieldPath -------------------------------------------------------------------------------------------------
-
-/// A dotted path of field names in the reply's camelCase (`durationMs`, `callees.selfMs`), where a part may carry one
-/// index into a list (`groups[3].ids`). Parsed once, at most 64 bytes; never shown to a person (the words come from the
-/// message), never starting with `result`. The empty path means the value itself.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct FieldPath(Cow<'static, str>);
-
-const fn valid_path(b: &[u8]) -> bool {
-    if b.is_empty() {
-        return true;
-    }
-    if b.len() > MAX_FIELD_PATH {
-        return false;
-    }
-    let mut i = 0;
-    let n = b.len();
-    // `result` as the first part would restate the wrapper.
-    if n >= 6
-        && b[0] == b'r'
-        && b[1] == b'e'
-        && b[2] == b's'
-        && b[3] == b'u'
-        && b[4] == b'l'
-        && b[5] == b't'
-        && (n == 6 || b[6] == b'.' || b[6] == b'[')
-    {
-        return false;
-    }
-    loop {
-        if i >= n || !b[i].is_ascii_lowercase() {
-            return false;
-        }
-        i += 1;
-        while i < n && (b[i].is_ascii_alphanumeric()) {
-            i += 1;
-        }
-        if i < n && b[i] == b'[' {
-            i += 1;
-            let start = i;
-            let mut value: u64 = 0;
-            while i < n && b[i].is_ascii_digit() {
-                value = value * 10 + (b[i] - b'0') as u64;
-                if value > u32::MAX as u64 {
-                    return false;
-                }
-                i += 1;
-            }
-            if i == start || i >= n || b[i] != b']' {
-                return false;
-            }
-            i += 1;
-        }
-        if i == n {
-            return true;
-        }
-        if b[i] != b'.' {
-            return false;
-        }
-        i += 1;
-    }
-}
-
-impl FieldPath {
-    /// A path from a literal; in a `const` a bad one fails the build.
-    ///
-    /// # Panics
-    /// If `path` is not a field path. Paths are literals chosen by the programmer, never input.
-    #[must_use]
-    pub const fn lit(path: &'static str) -> Self {
-        assert!(valid_path(path.as_bytes()), "not a field path");
-        Self(Cow::Borrowed(path))
-    }
-
-    /// The value itself.
-    #[must_use]
-    pub const fn root() -> Self {
-        Self(Cow::Borrowed(""))
-    }
-
-    /// A path from text outside the program.
-    ///
-    /// # Errors
-    /// [`BoundedError::Path`].
-    pub fn parse(path: &str) -> Result<Self, BoundedError> {
-        if valid_path(path.as_bytes()) {
-            Ok(Self(Cow::Owned(path.to_owned())))
-        } else {
-            Err(BoundedError::Path)
-        }
-    }
-
-    /// The text.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl Serialize for FieldPath {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_str(&self.0)
-    }
-}
-
-impl<'de> Deserialize<'de> for FieldPath {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let text = <Cow<'de, str>>::deserialize(d)?;
-        Self::parse(&text).map_err(serde::de::Error::custom)
-    }
-}
-
-#[cfg(feature = "ts")]
-impl ts_rs::TS for FieldPath {
-    type WithoutGenerics = Self;
-    type OptionInnerType = Self;
-    fn name() -> String {
-        "FieldPath".into()
-    }
-    fn inline() -> String {
-        "string".into()
-    }
-    fn inline_flattened() -> String {
-        "string".into()
-    }
-    fn decl() -> String {
-        "type FieldPath = string;".into()
-    }
-    fn decl_concrete() -> String {
-        "type FieldPath = string;".into()
-    }
-}
 
 // ---- the parts of a cut ----------------------------------------------------------------------------------------
 
@@ -315,7 +180,8 @@ macro_rules! marker {
 marker!(First => First, Last => Last, TopBy => TopBy, Sample => Sample, Maybe => Maybe);
 
 /// A handle on a registry row of `kind` cut or both that declares selection `S`. Made in a `const` (or `static`) so a row
-/// that cannot cut, or does not declare `S`, fails the build.
+/// that cannot cut, or does not declare `S`, fails the build. Each constructor takes the handle of the one selection it
+/// reports, so a call with the wrong kind of row does not compile.
 #[derive(Debug)]
 pub struct CutRow<S> {
     row: &'static LimitRow,
@@ -334,6 +200,7 @@ impl<S: SelectionMarker> CutRow<S> {
     ///
     /// # Panics
     /// In a `const`, a compile error: if the row is a stop row, does not declare selection `S`, or does not count items.
+    /// Rows are literals chosen by the programmer, never input.
     #[must_use]
     pub const fn of(row: &'static LimitRow) -> Self {
         assert!(
@@ -360,6 +227,43 @@ impl<S: SelectionMarker> CutRow<S> {
     }
 }
 
+/// A limit value that was checked against its row's bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowLimit(u64);
+
+impl RowLimit {
+    /// The number of items.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+/// A limit value outside the row's `min ..= max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LimitOutOfRange {
+    /// The row.
+    pub id: LimitId,
+    /// What was given.
+    pub value: u64,
+    /// The row's lowest value.
+    pub min: u64,
+    /// The row's highest value.
+    pub max: u64,
+}
+
+impl fmt::Display for LimitOutOfRange {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "limit {}: {} is outside {} to {}",
+            self.id, self.value, self.min, self.max
+        )
+    }
+}
+
+impl std::error::Error for LimitOutOfRange {}
+
 impl<S> CutRow<S> {
     /// The row.
     #[must_use]
@@ -371,6 +275,24 @@ impl<S> CutRow<S> {
     #[must_use]
     pub const fn limit(&self) -> u64 {
         self.row.default.amount()
+    }
+
+    /// `value` (what a Setting holds) if it lies within the row's `min ..= max`.
+    ///
+    /// # Errors
+    /// [`LimitOutOfRange`].
+    pub fn limit_of(&self, value: u64) -> Result<RowLimit, LimitOutOfRange> {
+        let (min, max) = (self.row.min.amount(), self.row.max.amount());
+        if (min..=max).contains(&value) {
+            Ok(RowLimit(value))
+        } else {
+            Err(LimitOutOfRange {
+                id: self.row.id,
+                value,
+                min,
+                max,
+            })
+        }
     }
 
     /// What the person can do, from the row: a Setting gives `RaiseSetting`, otherwise the row's remedy.
@@ -418,16 +340,19 @@ pub struct Cut {
     next: Next,
 }
 
+/// What a cut can show on its own: something was left out and the numbers fit. `AtLeast` exists only for the first items
+/// from 0 (a lower bound of what a scan looked at); every other window has an exact total or none.
 fn check(shown: u64, total: Total, selection: &Selection) -> Result<(), BoundedError> {
-    let end = selection
-        .from()
-        .checked_add(shown)
-        .ok_or(BoundedError::Arithmetic)?;
-    let fits = match (total, &selection) {
-        (Total::Exact { n }, _) => shown < n && end <= n,
-        (Total::AtLeast { n }, Selection::First { .. }) => shown < n && end < n,
-        (Total::AtLeast { n }, _) => shown < n && end <= n,
-        (Total::Unknown, _) => true,
+    let fits = match total {
+        Total::Unknown => true,
+        Total::Exact { n } => {
+            shown < n
+                && selection
+                    .from()
+                    .checked_add(shown)
+                    .is_some_and(|end| end <= n)
+        }
+        Total::AtLeast { n } => matches!(selection, Selection::First { from: 0 }) && shown < n,
     };
     if fits {
         Ok(())
@@ -464,25 +389,39 @@ impl From<Cut> for CutWire {
     }
 }
 
+/// How a window of `shown` items starting at `from` relates to `total` (`None`: the window is everything).
+///
+/// The numbers come from requests and from stores that count and read at different moments, so they may disagree. They
+/// never panic and never hide missing rows: a window that does not start at 0 is a cut even when it ends at the total,
+/// and one that ends past the total (the count is stale) has an unknown total.
+fn window(shown: u64, total: u64, from: u64) -> Option<Total> {
+    if from == 0 && shown >= total {
+        None
+    } else if from.saturating_add(shown) <= total {
+        Some(Total::Exact { n: total })
+    } else {
+        Some(Total::Unknown)
+    }
+}
+
 impl Cut {
-    fn make<S: SelectionMarker>(
-        row: &CutRow<S>,
+    fn new(
+        limit: LimitId,
         of: FieldPath,
         shown: u64,
         total: Total,
         selection: Selection,
         next: Next,
     ) -> Self {
-        // A mismatch here is a programmer error, found by the first test that runs the call.
-        assert!(
-            S::KIND == selection.kind() || matches!(S::KIND, SelectionKind::Maybe),
-            "selection does not match the row's handle"
-        );
-        if let Err(e) = check(shown, total, &selection) {
-            panic!("limit {}: {e}", row.row.id);
-        }
+        // `window` and the callers give numbers `check` accepts; if one ever did not, the total is "unknown" rather than a
+        // value the wire would refuse.
+        let total = if check(shown, total, &selection).is_ok() {
+            total
+        } else {
+            Total::Unknown
+        };
         Self {
-            limit: row.row.id,
+            limit,
             of,
             shown,
             total,
@@ -491,36 +430,28 @@ impl Cut {
         }
     }
 
-    /// A cut for a total the caller already knows. `None` when nothing was left out (`shown >= total`).
-    ///
-    /// # Panics
-    /// If `selection` is not the kind the handle declares, or `from + shown` is past `total`.
-    /// The panics are programmer-error assertions: every argument is a literal, a registry row or a count the caller computed from its own data, so no user or I/O data can reach them (a reply that is merely wrong in size yields `None`, never a panic).
+    /// The first `shown` items from `from` of a list whose store counted `total`. `None` when nothing was left out.
     #[must_use]
-    pub fn counted<S: SelectionMarker>(
-        row: &CutRow<S>,
+    pub fn counted_first(
+        row: &CutRow<First>,
         of: FieldPath,
         shown: u64,
         total: u64,
-        selection: Selection,
+        from: u64,
     ) -> Option<Self> {
-        (shown < total).then(|| {
-            Self::make(
-                row,
+        window(shown, total, from).map(|t| {
+            Self::new(
+                row.row.id,
                 of,
                 shown,
-                Total::Exact { n: total },
-                selection,
+                t,
+                Selection::First { from },
                 row.next(),
             )
         })
     }
 
-    /// A page `offset .. offset + shown` of `total`, with a way to the rest. `None` when the page is everything.
-    ///
-    /// # Panics
-    /// If `offset + shown` is past `total`.
-    /// The panics are programmer-error assertions: every argument is a literal, a registry row or a count the caller computed from its own data, so no user or I/O data can reach them (a reply that is merely wrong in size yields `None`, never a panic).
+    /// A page `offset .. offset + shown` with a way to the rest (`Next::Page`). `None` when the page is everything.
     #[must_use]
     pub fn page(
         row: &CutRow<First>,
@@ -529,24 +460,65 @@ impl Cut {
         shown: u64,
         total: u64,
     ) -> Option<Self> {
-        (shown < total).then(|| {
-            Self::make(
-                row,
+        window(shown, total, offset).map(|t| {
+            Self::new(
+                row.row.id,
                 of,
                 shown,
-                Total::Exact { n: total },
+                t,
                 Selection::First { from: offset },
                 Next::Page,
             )
         })
     }
 
+    /// Ranks `from + 1 ..= from + shown` by `key` out of `total`. `None` when nothing was left out.
+    #[must_use]
+    pub fn counted_top(
+        row: &CutRow<TopBy>,
+        of: FieldPath,
+        shown: u64,
+        total: u64,
+        key: SortKey,
+        from: u64,
+    ) -> Option<Self> {
+        window(shown, total, from).map(|t| {
+            Self::new(
+                row.row.id,
+                of,
+                shown,
+                t,
+                Selection::TopBy { key, from },
+                row.next(),
+            )
+        })
+    }
+
+    /// The last `shown` items out of `total`. `None` when nothing was left out.
+    #[must_use]
+    pub fn counted_last(row: &CutRow<Last>, of: FieldPath, shown: u64, total: u64) -> Option<Self> {
+        window(shown, total, 0)
+            .map(|t| Self::new(row.row.id, of, shown, t, Selection::Last, row.next()))
+    }
+
+    /// A sample of `shown` items out of `total`. `None` when nothing was left out.
+    #[must_use]
+    pub fn counted_sample(
+        row: &CutRow<Sample>,
+        of: FieldPath,
+        shown: u64,
+        total: u64,
+    ) -> Option<Self> {
+        window(shown, total, 0)
+            .map(|t| Self::new(row.row.id, of, shown, t, Selection::Sample, row.next()))
+    }
+
     /// The first `shown` of more than `n - 1` (`n` is one past what was looked at). `None` when `shown >= n`.
     #[must_use]
     pub fn at_least(row: &CutRow<First>, of: FieldPath, shown: u64, n: u64) -> Option<Self> {
         (shown < n).then(|| {
-            Self::make(
-                row,
+            Self::new(
+                row.row.id,
                 of,
                 shown,
                 Total::AtLeast { n },
@@ -556,10 +528,11 @@ impl Cut {
         })
     }
 
-    /// Something may have been left out of this list, and the producer does not know how much.
+    /// Something may have been left out of this list, and the producer does not know how much. `selection` says which
+    /// items were kept.
     #[must_use]
     pub fn maybe(row: &CutRow<Maybe>, of: FieldPath, shown: u64, selection: Selection) -> Self {
-        Self::make(row, of, shown, Total::Unknown, selection, row.next())
+        Self::new(row.row.id, of, shown, Total::Unknown, selection, row.next())
     }
 
     /// The limit.
@@ -593,49 +566,46 @@ impl Cut {
         self.next
     }
 
-    /// One English line for logs and the AI (no user content: ids, field paths and counts). The UI has its own words.
+    /// One English line for logs and the AI (ids, field paths and counts only; the UI has its own words):
+    /// `rows: showing 501 to 503 of 1,204 (test.first)`.
     #[must_use]
     pub fn describe(&self) -> String {
         let total = match self.total {
-            Total::Exact { n } => format!("of {}", grouped(n)),
-            Total::AtLeast { n } => format!("of more than {}", grouped(n.saturating_sub(1))),
-            Total::Unknown => "of an unknown number".to_owned(),
+            Total::Exact { n } => grouped(n),
+            Total::AtLeast { n } => format!("more than {}", grouped(n.saturating_sub(1))),
+            Total::Unknown => "an unknown number".to_owned(),
         };
-        let how = match &self.selection {
-            Selection::First { from: 0 } => "the first".to_owned(),
-            Selection::First { from } => format!("from {}", grouped(*from + 1)),
-            Selection::Last => "the last".to_owned(),
-            Selection::TopBy { key, from } => {
-                format!(
-                    "ranked by {} {}{}",
-                    key.field.as_str(),
-                    if key.order == Order::Desc {
-                        "desc"
-                    } else {
-                        "asc"
-                    },
-                    if *from > 0 {
-                        format!(" from rank {}", from + 1)
-                    } else {
-                        String::new()
-                    }
-                )
+        let shown = grouped(self.shown);
+        let showing = match &self.selection {
+            Selection::First { from: 0 } => format!("the first {shown}"),
+            Selection::First { from } if self.shown == 0 => {
+                format!("none from {}", grouped(from + 1))
             }
-            Selection::Sample => "a sample".to_owned(),
+            Selection::First { from } => {
+                format!("{} to {}", grouped(from + 1), grouped(from + self.shown))
+            }
+            Selection::Last => format!("the last {shown}"),
+            Selection::TopBy { key, from } => {
+                let order = if key.order == Order::Desc {
+                    "descending"
+                } else {
+                    "ascending"
+                };
+                let skipped = if *from > 0 {
+                    format!(", from rank {}", grouped(from + 1))
+                } else {
+                    String::new()
+                };
+                format!("the top {shown} by {} {order}{skipped}", key.field.as_str())
+            }
+            Selection::Sample => format!("a sample of {shown}"),
         };
         let of = if self.of.as_str().is_empty() {
             "the value"
         } else {
             self.of.as_str()
         };
-        format!(
-            "{}: {} {} shown {} in {}",
-            self.limit,
-            how,
-            grouped(self.shown),
-            total,
-            of
-        )
+        format!("{of}: showing {showing} of {total} ({})", self.limit)
     }
 
     fn same_list(&self, other: &Self) -> bool {
@@ -660,16 +630,39 @@ pub struct BoundedWire<T> {
     pub cuts: Vec<Cut>,
 }
 
+/// What is serialized: the value and the cuts by reference, so a large reply is not copied to be written.
+#[derive(Serialize)]
+struct BoundedRef<'a, T> {
+    result: &'a T,
+    cuts: &'a [Cut],
+}
+
 /// A value and what was left out of it. An empty `cuts` means complete.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "BoundedWire<T>", into = "BoundedWire<T>")]
-#[serde(bound(
-    serialize = "T: Serialize + Clone",
-    deserialize = "T: Deserialize<'de>"
-))]
+///
+/// The wire is JSON or another self-describing format: the cut variants are internally tagged, which postcard cannot
+/// decode. A command reply is JSON; a postcard boundary carries `cuts` as its own typed field instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bounded<T> {
     result: T,
     cuts: Vec<Cut>,
+}
+
+impl<T: Serialize> Serialize for Bounded<T> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        BoundedRef {
+            result: &self.result,
+            cuts: &self.cuts,
+        }
+        .serialize(s)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Bounded<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        BoundedWire::<T>::deserialize(d)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl<T> TryFrom<BoundedWire<T>> for Bounded<T> {
@@ -679,7 +672,7 @@ impl<T> TryFrom<BoundedWire<T>> for Bounded<T> {
             return Err(BoundedError::TooManyCuts);
         }
         for (i, cut) in w.cuts.iter().enumerate() {
-            if cut.is_aggregate() && i + 1 != w.cuts.len() {
+            if cut.is_aggregate() && !aggregate_is_well_formed(cut, i, w.cuts.len()) {
                 return Err(BoundedError::Aggregate);
             }
             if w.cuts[..i].iter().any(|c| c.same_list(cut)) {
@@ -691,6 +684,19 @@ impl<T> TryFrom<BoundedWire<T>> for Bounded<T> {
             cuts: w.cuts,
         })
     }
+}
+
+/// The aggregate (ADR 0065 section 1) is the last of exactly 32 cuts, of the value itself, shows the 31 before it, says
+/// how many cuts there were (more than 31) and offers nothing.
+fn aggregate_is_well_formed(cut: &Cut, index: usize, len: usize) -> bool {
+    let kept = (MAX_CUTS - 1) as u64;
+    len == MAX_CUTS
+        && index == len - 1
+        && cut.of.as_str().is_empty()
+        && cut.shown == kept
+        && matches!(cut.total, Total::Exact { n } if n > kept)
+        && cut.selection == (Selection::First { from: 0 })
+        && cut.next == Next::None
 }
 
 impl<T> From<Bounded<T>> for BoundedWire<T> {
@@ -718,42 +724,42 @@ impl<T> Bounded<T> {
         Self::complete(result).and(cut)
     }
 
-    /// Adds a cut (`None` adds nothing). A cut of a list and limit already cut replaces the earlier one. Past 32 cuts the
-    /// first 31 stay in the order they were added and one aggregate on the `bounded.cuts` row says how many more there were;
-    /// `.and` on a value that has an aggregate re-aggregates, and the aggregate stays last.
+    /// Adds a cut (`None` adds nothing). A cut of a list and limit already cut replaces the earlier one. The cuts are kept
+    /// in the structural order of their lists (a list before the lists inside it, siblings by name, entries by index), so
+    /// the result does not depend on the order they were added in. Past 32 cuts the 31 first in that order stay and one
+    /// aggregate on the `bounded.cuts` row says how many there were; `.and` on a value that has an aggregate
+    /// re-aggregates, and the aggregate stays last.
     #[must_use]
     pub fn and(mut self, cut: Option<Cut>) -> Self {
         let Some(cut) = cut else { return self };
+        let kept = (MAX_CUTS - 1) as u64;
         let mut extra = match self.cuts.last() {
             Some(last) if last.is_aggregate() => match self.cuts.pop().map(|a| a.total) {
-                Some(Total::Exact { n }) => n.saturating_sub(MAX_CUTS as u64 - 1),
+                Some(Total::Exact { n }) => n.saturating_sub(kept),
                 _ => 0,
             },
             _ => 0,
         };
-        if let Some(i) = self.cuts.iter().position(|c| c.same_list(&cut)) {
-            self.cuts[i] = cut;
-        } else if extra == 0 && self.cuts.len() < MAX_CUTS {
-            self.cuts.push(cut);
-        } else {
-            if extra == 0 {
-                extra = (self.cuts.len() - (MAX_CUTS - 1)) as u64;
-                self.cuts.truncate(MAX_CUTS - 1);
-            }
-            extra += 1;
+        match self.cuts.iter().position(|c| c.same_list(&cut)) {
+            Some(i) => self.cuts[i] = cut,
+            None => self.cuts.push(cut),
         }
-        if extra > 0 {
-            let row = CutRow::<First>::of(&BOUNDED_CUTS);
-            let shown = MAX_CUTS as u64 - 1;
-            self.cuts.push(Cut {
-                limit: row.row.id,
-                of: FieldPath::root(),
-                shown,
-                total: Total::Exact { n: shown + extra },
-                selection: Selection::First { from: 0 },
-                next: Next::None,
-            });
+        self.cuts
+            .sort_by(|a, b| a.of.cmp(&b.of).then(a.limit.cmp(&b.limit)));
+        if extra == 0 && self.cuts.len() <= MAX_CUTS {
+            return self;
         }
+        let total = self.cuts.len() as u64 + extra;
+        self.cuts.truncate(MAX_CUTS - 1);
+        extra = total - kept;
+        self.cuts.push(Cut {
+            limit: BOUNDED_CUTS.id,
+            of: FieldPath::root(),
+            shown: kept,
+            total: Total::Exact { n: kept + extra },
+            selection: Selection::First { from: 0 },
+            next: Next::None,
+        });
         self
     }
 
@@ -800,31 +806,34 @@ impl<T> Bounded<Vec<T>> {
     /// answers `AtLeast { n: limit + 1 }`; it never counts further just to print a number (rule 51).
     #[must_use]
     pub fn first<I: IntoIterator<Item = T>>(iter: I, row: &CutRow<First>, of: FieldPath) -> Self {
-        Self::first_with(iter, row, row.limit(), of)
+        Self::first_with(iter, row, RowLimit(row.limit()), of)
     }
 
-    /// As [`Bounded::first`] with the limit the Setting currently holds; the row names the limit and its remedy.
+    /// As [`Bounded::first`] with the limit the Setting currently holds, checked against the row's bounds by
+    /// [`CutRow::limit_of`].
     #[must_use]
     pub fn first_with<I: IntoIterator<Item = T>>(
         iter: I,
         row: &CutRow<First>,
-        limit: u64,
+        limit: RowLimit,
         of: FieldPath,
     ) -> Self {
+        let limit = limit.get();
         let mut items: Vec<T> = iter
             .into_iter()
             .take(to_usize(limit.saturating_add(1)))
             .collect();
         let cut = if items.len() as u64 > limit {
             items.truncate(to_usize(limit));
-            Cut::at_least(row, of, limit, limit + 1)
+            Cut::at_least(row, of, limit, limit.saturating_add(1))
         } else {
             None
         };
         Self::with(items, cut)
     }
 
-    /// A page: `items` are `offset ..` of `total`. The cut says where the page starts and has `Next::Page`.
+    /// A page: `items` are `offset ..` of `total`. The cut says where the page starts and has `Next::Page`. A total that
+    /// disagrees with the page (the list changed between the count and the read) gives an unknown total, never a panic.
     #[must_use]
     pub fn page(
         items: Vec<T>,
@@ -842,40 +851,138 @@ impl<T> Bounded<Vec<T>> {
     pub fn ranked(mut items: Vec<T>, row: &CutRow<TopBy>, of: FieldPath, key: SortKey) -> Self {
         let seen = items.len() as u64;
         items.truncate(to_usize(row.limit()));
-        let cut = Cut::counted(
-            row,
-            of,
-            items.len() as u64,
-            seen,
-            Selection::TopBy { key, from: 0 },
-        );
+        let cut = Cut::counted_top(row, of, items.len() as u64, seen, key, 0);
         Self::with(items, cut)
     }
 
     /// The first items (from 0) when the store already knows the `total`.
     #[must_use]
     pub fn counted(items: Vec<T>, total: u64, row: &CutRow<First>, of: FieldPath) -> Self {
-        let cut = Cut::counted(
-            row,
-            of,
-            items.len() as u64,
-            total,
-            Selection::First { from: 0 },
-        );
+        let cut = Cut::counted_first(row, of, items.len() as u64, total, 0);
         Self::with(items, cut)
     }
 
     /// The last items, out of `total`.
     #[must_use]
     pub fn last(items: Vec<T>, total: u64, row: &CutRow<Last>, of: FieldPath) -> Self {
-        let cut = Cut::counted(row, of, items.len() as u64, total, Selection::Last);
+        let cut = Cut::counted_last(row, of, items.len() as u64, total);
         Self::with(items, cut)
     }
 
     /// A sample, out of `total`.
     #[must_use]
     pub fn sampled(items: Vec<T>, total: u64, row: &CutRow<Sample>, of: FieldPath) -> Self {
-        let cut = Cut::counted(row, of, items.len() as u64, total, Selection::Sample);
+        let cut = Cut::counted_sample(row, of, items.len() as u64, total);
         Self::with(items, cut)
+    }
+}
+
+// ---- TypeScript ------------------------------------------------------------------------------------------------
+
+/// `Bounded<T>` and `Cut` cross the wire as `BoundedWire<T>` and `CutWire`; their declarations are those, so a struct
+/// that holds them can derive `TS`.
+#[cfg(feature = "ts")]
+mod ts_impls {
+    use super::{Bounded, BoundedWire, Cut, CutWire};
+    use ts_rs::{TS, TypeVisitor};
+
+    macro_rules! delegate {
+        () => {
+            fn ident() -> String {
+                <<Self as Wired>::Wire as TS>::ident()
+            }
+            fn name() -> String {
+                <<Self as Wired>::Wire as TS>::name()
+            }
+            fn inline() -> String {
+                <<Self as Wired>::Wire as TS>::inline()
+            }
+            fn inline_flattened() -> String {
+                <<Self as Wired>::Wire as TS>::inline_flattened()
+            }
+            fn decl() -> String {
+                <<Self as Wired>::Wire as TS>::decl()
+            }
+            fn decl_concrete() -> String {
+                <<Self as Wired>::Wire as TS>::decl_concrete()
+            }
+            fn visit_dependencies(v: &mut impl TypeVisitor)
+            where
+                Self: 'static,
+            {
+                <<Self as Wired>::Wire as TS>::visit_dependencies(v)
+            }
+            fn visit_generics(v: &mut impl TypeVisitor)
+            where
+                Self: 'static,
+            {
+                <<Self as Wired>::Wire as TS>::visit_generics(v)
+            }
+        };
+    }
+
+    trait Wired {
+        type Wire: TS + 'static;
+    }
+    impl Wired for Cut {
+        type Wire = CutWire;
+    }
+    impl<T: TS + 'static> Wired for Bounded<T> {
+        type Wire = BoundedWire<T>;
+    }
+
+    impl TS for Cut {
+        type WithoutGenerics = Self;
+        type OptionInnerType = Self;
+        delegate!();
+    }
+
+    impl<T: TS + 'static> TS for Bounded<T> {
+        type WithoutGenerics = Bounded<ts_rs::Dummy>;
+        type OptionInnerType = Self;
+        delegate!();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::row::{LimitRow, Remedy};
+    use crate::{Quantity, RowValue, Unit};
+
+    static ROW: LimitRow = LimitRow {
+        id: LimitId::new("unit.rows"),
+        unit: Unit::Count,
+        default: Quantity::Count(5),
+        min: Quantity::Count(1),
+        max: Quantity::Count(10),
+        value: RowValue::Hard,
+        kind: RowKind::Cut,
+        selections: &[SelectionKind::First],
+        remedy: Remedy::None,
+    };
+
+    fn cut(of: &str) -> Cut {
+        Cut::at_least(
+            &CutRow::<First>::of(&ROW),
+            FieldPath::parse(of).unwrap(),
+            5,
+            6,
+        )
+        .unwrap()
+    }
+
+    /// A well-formed aggregate always has an exact count (the wire refuses any other); if one ever did not, `.and` counts
+    /// again from the cuts it has instead of trusting it.
+    #[test]
+    fn an_aggregate_without_an_exact_count_is_not_trusted_by_and() {
+        let mut aggregate = cut("");
+        aggregate.limit = BOUNDED_CUTS.id;
+        aggregate.total = Total::Unknown;
+        let mut cuts: Vec<Cut> = (0..31).map(|i| cut(&format!("l{i}"))).collect();
+        cuts.push(aggregate);
+        let b = Bounded { result: (), cuts }.and(Some(cut("zz")));
+        assert_eq!(b.cuts().len(), 32);
+        assert!(b.cuts().iter().all(|c| !c.is_aggregate()));
     }
 }

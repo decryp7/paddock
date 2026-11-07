@@ -3478,6 +3478,7 @@ name = "paddock-limits"
 version = "0.1.0"
 dependencies = [
  "paddock-workspace-hack",
+ "postcard",
  "proptest",
  "serde",
  "serde_json",
@@ -3820,6 +3821,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-health",
+ "paddock-limits",
  "paddock-testkit",
  "paddock-workspace-hack",
  "regex",

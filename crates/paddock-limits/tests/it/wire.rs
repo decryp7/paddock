@@ -1,6 +1,7 @@
 use crate::*;
 use paddock_limits::{
     Bounded, BoundedError, Buckets, Cut, CutRow, FieldPath, Limit, LimitExceeded, Page, Scope,
+    Total,
 };
 use proptest::prelude::*;
 
@@ -206,9 +207,6 @@ fn bounded_refuses_too_many_misplaced_and_duplicate_cuts() {
     agg["limit"] = "bounded.cuts".into();
     agg["of"] = "".into();
     assert!(
-        serde_json::from_value::<Bounded<i32>>(bounded_json(vec![one(1), agg.clone()])).is_ok()
-    );
-    assert!(
         serde_json::from_value::<Bounded<i32>>(bounded_json(vec![agg, one(1)]))
             .unwrap_err()
             .to_string()
@@ -232,7 +230,8 @@ fn limit_exceeded_round_trips() {
         Quantity::Bytes(1 << 30),
         Scope::Plugin,
     )
-    .reaching(Quantity::Bytes(3 << 30));
+    .reaching(Quantity::Bytes(3 << 30))
+    .unwrap();
     let json = serde_json::to_value(e).unwrap();
     assert_eq!(
         json,
@@ -259,9 +258,10 @@ fn request_types_are_never_zero() {
 }
 
 proptest! {
-    /// No constructor yields a cut with nothing left out, and what a constructor makes survives the wire.
+    /// No constructor yields a cut with nothing left out or panics, whatever the numbers (a stale offset, a total that
+    /// grew or shrank); what a constructor makes survives the wire; a page is complete only when it is everything.
     #[test]
-    fn constructors_never_make_an_empty_cut(len in 0usize..40, total in 0u64..60, offset in 0u64..30) {
+    fn constructors_never_panic_and_never_make_an_empty_or_a_hidden_cut(len in 0usize..40, total in 0u64..60, offset in 0u64..60) {
         let first = Bounded::first(0..len, &F5, FieldPath::lit("rows"));
         prop_assert_eq!(first.is_complete(), len <= 5);
         prop_assert_eq!(first.result().len(), len.min(5));
@@ -269,12 +269,18 @@ proptest! {
         let counted = Bounded::counted(vec![0u8; len], total, &F5, FieldPath::lit("rows"));
         prop_assert_eq!(counted.is_complete(), (len as u64) >= total);
 
-        if offset + len as u64 <= total.max(offset + len as u64) && offset + (len as u64) <= total {
-            let page = Bounded::page(vec![0u8; len], offset, total, &F5, FieldPath::lit("rows"));
-            prop_assert_eq!(page.is_complete(), (len as u64) >= total);
-            let back: Bounded<Vec<u8>> = serde_json::from_str(&serde_json::to_string(&page).unwrap()).unwrap();
-            prop_assert_eq!(back, page);
+        let page = Bounded::page(vec![0u8; len], offset, total, &F5, FieldPath::lit("rows"));
+        prop_assert_eq!(page.is_complete(), offset == 0 && (len as u64) >= total);
+        for cut in page.cuts() {
+            let end = offset + len as u64;
+            match cut.total() {
+                Total::Exact { n } => prop_assert!(end <= n && cut.shown() < n),
+                Total::Unknown => prop_assert!(end > total),
+                Total::AtLeast { .. } => prop_assert!(false, "a page never has a lower bound"),
+            }
         }
+        let back: Bounded<Vec<u8>> = serde_json::from_str(&serde_json::to_string(&page).unwrap()).unwrap();
+        prop_assert_eq!(back, page);
         let back: Bounded<Vec<usize>> = serde_json::from_str(&serde_json::to_string(&first).unwrap()).unwrap();
         prop_assert_eq!(back, first);
     }
@@ -285,7 +291,7 @@ proptest! {
         let total = match kind { 0 => serde_json::json!({"kind":"exact","n":n}), 1 => serde_json::json!({"kind":"atLeast","n":n}), _ => serde_json::json!({"kind":"unknown"}) };
         let v = cut_json(shown, total, serde_json::json!({"kind":"first","from":from}));
         let accepted = serde_json::from_value::<Cut>(v).is_ok();
-        let valid = match kind { 0 => shown < n && from + shown <= n, 1 => shown < n && from + shown < n, _ => true };
+        let valid = match kind { 0 => shown < n && from + shown <= n, 1 => shown < n && from == 0, _ => true };
         prop_assert_eq!(accepted, valid);
     }
 
@@ -296,36 +302,120 @@ proptest! {
 }
 
 #[test]
-fn an_at_least_total_with_a_ranking_checks_the_same_arithmetic() {
-    let top = |shown: u64, n: u64| {
+fn an_at_least_total_exists_only_for_the_first_items_from_zero() {
+    let at_least = |shown: u64, n: u64, selection: serde_json::Value| {
         cut_json(
             shown,
             serde_json::json!({"kind": "atLeast", "n": n}),
-            serde_json::json!({"kind": "topBy", "key": {"field": "ms", "order": "desc"}, "from": 0}),
+            selection,
         )
     };
-    assert!(serde_json::from_value::<Cut>(top(3, 3)).is_err());
-    assert!(serde_json::from_value::<Cut>(top(3, 4)).is_ok());
+    let first = |from: u64| serde_json::json!({"kind": "first", "from": from});
+    let top = |from: u64| serde_json::json!({"kind": "topBy", "key": {"field": "ms", "order": "desc"}, "from": from});
+    assert!(serde_json::from_value::<Cut>(at_least(3, 4, first(0))).is_ok());
+    assert!(serde_json::from_value::<Cut>(at_least(3, 3, first(0))).is_err());
+    // A page from the middle, a ranking and a tail have an exact or an unknown total, never a lower bound.
+    assert!(serde_json::from_value::<Cut>(at_least(3, 9, first(2))).is_err());
+    assert!(serde_json::from_value::<Cut>(at_least(3, 4, top(0))).is_err());
+    assert!(serde_json::from_value::<Cut>(at_least(3, 9, top(2))).is_err());
+    assert!(
+        serde_json::from_value::<Cut>(at_least(3, 9, serde_json::json!({"kind": "last"}))).is_err()
+    );
+}
+
+fn aggregate_json(
+    of: &str,
+    shown: u64,
+    total: serde_json::Value,
+    selection: serde_json::Value,
+    next: &str,
+) -> serde_json::Value {
+    let mut agg = cut_json(shown, total, selection);
+    agg["limit"] = "bounded.cuts".into();
+    agg["of"] = of.into();
+    agg["next"] = next.into();
+    agg
 }
 
 #[test]
-fn an_aggregate_that_arrived_without_a_count_is_replaced_not_trusted() {
-    let mut agg = cut_json(
-        31,
-        serde_json::json!({"kind": "unknown"}),
-        serde_json::json!({"kind": "first", "from": 0}),
-    );
-    agg["limit"] = "bounded.cuts".into();
-    agg["of"] = "".into();
-    let b: Bounded<i32> = serde_json::from_value(bounded_json(vec![agg])).unwrap();
-    let b = b.and(Cut::at_least(&F5, FieldPath::lit("x"), 5, 6));
-    // The aggregate is dropped and rebuilt from the cuts that are really there.
+fn the_aggregate_must_have_the_shape_the_constructors_give_it() {
+    let one = |i: usize| {
+        let mut c = cut_json(
+            1,
+            serde_json::json!({"kind": "exact", "n": 9}),
+            serde_json::json!({"kind": "last"}),
+        );
+        c["of"] = format!("l{i}").into();
+        c
+    };
+    let exact = |n: u64| serde_json::json!({"kind": "exact", "n": n});
+    let first0 = serde_json::json!({"kind": "first", "from": 0});
+    let with = |agg: serde_json::Value| {
+        let mut cuts: Vec<_> = (0..31).map(one).collect();
+        cuts.push(agg);
+        serde_json::from_value::<Bounded<i32>>(bounded_json(cuts))
+    };
+    assert!(with(aggregate_json("", 31, exact(40), first0.clone(), "none")).is_ok());
+    // Each part of the shape on its own.
     assert!(
-        b.cuts()
-            .iter()
-            .all(|c| c.limit().as_str() != "bounded.cuts")
+        with(aggregate_json(
+            "rows",
+            31,
+            exact(40),
+            first0.clone(),
+            "none"
+        ))
+        .is_err(),
+        "of must be empty"
     );
-    assert_eq!(b.cuts().len(), 1);
+    assert!(
+        with(aggregate_json("", 30, exact(40), first0.clone(), "none")).is_err(),
+        "shown is the 31 before it"
+    );
+    assert!(
+        with(aggregate_json("", 31, exact(31), first0.clone(), "none")).is_err(),
+        "the count is more than 31"
+    );
+    assert!(
+        with(aggregate_json(
+            "",
+            31,
+            serde_json::json!({"kind": "unknown"}),
+            first0.clone(),
+            "none"
+        ))
+        .is_err()
+    );
+    assert!(
+        with(aggregate_json(
+            "",
+            31,
+            exact(40),
+            serde_json::json!({"kind": "first", "from": 1}),
+            "none"
+        ))
+        .is_err()
+    );
+    assert!(
+        with(aggregate_json(
+            "",
+            31,
+            exact(40),
+            serde_json::json!({"kind": "last"}),
+            "none"
+        ))
+        .is_err()
+    );
+    assert!(
+        with(aggregate_json("", 31, exact(40), first0.clone(), "page")).is_err(),
+        "it offers nothing"
+    );
+    // Only as the 32nd cut.
+    let short: Vec<_> = (0..5)
+        .map(one)
+        .chain([aggregate_json("", 31, exact(40), first0, "none")])
+        .collect();
+    assert!(serde_json::from_value::<Bounded<i32>>(bounded_json(short)).is_err());
 }
 
 #[test]
@@ -337,4 +427,69 @@ fn rows_serialize_with_their_setting_path() {
     );
     assert_eq!(json["remedy"]["path"], "performance.testCap");
     assert_eq!(json["id"], "test.setting");
+}
+
+#[test]
+fn quantities_and_limits_exceeded_are_checked_on_the_wire() {
+    assert!(
+        serde_json::from_value::<Quantity>(serde_json::json!({"kind": "percent", "n": 100}))
+            .is_ok()
+    );
+    assert!(
+        serde_json::from_value::<Quantity>(serde_json::json!({"kind": "percent", "n": 101}))
+            .is_err()
+    );
+    let e = |limit: serde_json::Value, reached: serde_json::Value| serde_json::json!({"id": "plugin.memory", "limit": limit, "reached": reached, "scope": "plugin"});
+    let bytes = |n: u64| serde_json::json!({"kind": "bytes", "n": n});
+    assert!(serde_json::from_value::<LimitExceeded>(e(bytes(1), bytes(2))).is_ok());
+    assert!(
+        serde_json::from_value::<LimitExceeded>(e(
+            bytes(1),
+            serde_json::json!({"kind": "count", "n": 2})
+        ))
+        .is_err()
+    );
+    let mismatch = LimitExceeded::new(LimitId::new("a.b"), Quantity::Bytes(1), Scope::File)
+        .reaching(Quantity::Count(1));
+    assert!(mismatch.unwrap_err().to_string().contains("observed value"));
+}
+
+/// Serializing borrows the reply: a value that cannot be cloned is still written.
+#[test]
+fn serializing_a_bounded_does_not_need_a_clone() {
+    #[derive(serde::Serialize)]
+    struct NotClone(Vec<u8>);
+    let b = Bounded::with(
+        NotClone(vec![1, 2]),
+        Cut::at_least(&F5, FieldPath::lit("rows"), 5, 6),
+    );
+    let json = serde_json::to_value(&b).unwrap();
+    assert_eq!(json["result"], serde_json::json!([1, 2]));
+    assert_eq!(json["cuts"].as_array().unwrap().len(), 1);
+}
+
+/// The wire is for self-describing formats: postcard cannot read the internally tagged variants back.
+#[test]
+fn postcard_cannot_carry_a_bounded() {
+    let b = Bounded::with(vec![1u8], Cut::at_least(&F5, FieldPath::lit("rows"), 5, 6));
+    let bytes = postcard::to_stdvec(&b);
+    let back = bytes.map(|bytes| postcard::from_bytes::<Bounded<Vec<u8>>>(&bytes));
+    assert!(matches!(back, Err(_) | Ok(Err(_))), "{back:?}");
+}
+
+#[test]
+fn every_quantity_reads_back_from_the_wire() {
+    for q in [
+        Quantity::Bytes(7),
+        Quantity::Count(7),
+        Quantity::Ratio(7),
+        Quantity::Millis(7),
+        Quantity::Percent(7),
+    ] {
+        let back: Quantity = serde_json::from_value(serde_json::to_value(q).unwrap()).unwrap();
+        assert_eq!(back, q);
+    }
+    let without: LimitExceeded =
+        serde_json::from_value(serde_json::json!({"id": "a.b", "limit": {"kind": "count", "n": 3}, "reached": null, "scope": "query"})).unwrap();
+    assert_eq!(without.reached, None);
 }

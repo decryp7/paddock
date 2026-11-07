@@ -11,7 +11,7 @@
 //! - [`never_panics`] and [`corpus`]: run a parser over deterministic hostile inputs and fail on any panic.
 //! - [`net::HeldPort`]: a loopback port held for the test where every connection is closed or reset, instead of a
 //!   port read off a listener that was then dropped (ADR 0023).
-//! - [`limits`]: `limit_case!`, one test per limit (ADR 0019), stop and cut forms.
+//! - [`limits`]: `limit_cases!`, one test per limit (ADR 0019), stop and cut forms, and the check that cases and rows match.
 //! - [`FakeClock`]: the deterministic clock of `paddock_jobs::time`, re-exported so a test needs one dependency.
 //!
 //! Nothing here touches the user's folders, starts a process or sleeps.

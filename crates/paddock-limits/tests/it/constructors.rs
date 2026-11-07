@@ -57,16 +57,13 @@ fn first_reads_one_more_item_and_no_further() {
 
 #[test]
 fn first_with_uses_the_setting_value() {
-    let b = Bounded::first_with(0..100, &SETTING, 10, ROWS);
+    let b = Bounded::first_with(0..100, &SETTING, SETTING.limit_of(10).unwrap(), ROWS);
     assert_eq!(b.result().len(), 10);
     let c = only_cut(&b);
     assert_eq!(c.total(), Total::AtLeast { n: 11 });
     assert_eq!(c.next(), Next::RaiseSetting);
-    assert!(Bounded::first_with(0..10, &SETTING, 10, ROWS).is_complete());
-    assert!(Bounded::first_with(0..0, &SETTING, 0, ROWS).is_complete());
-    assert_eq!(
-        Bounded::first_with(0..3, &SETTING, 0, ROWS).result().len(),
-        0
+    assert!(
+        Bounded::first_with(0..10, &SETTING, SETTING.limit_of(10).unwrap(), ROWS).is_complete()
     );
 }
 
@@ -160,31 +157,22 @@ fn complete_with_and_map() {
     assert_eq!(b.into_result(), 2);
     assert!(Cut::at_least(&F5, ROWS, 6, 6).is_none());
     assert!(Cut::page(&F5, ROWS, 0, 6, 6).is_none());
+    assert!(Cut::counted_top(&TOP, ROWS, 6, 5, key(), 0).is_none());
+}
+
+#[test]
+fn a_limit_outside_the_rows_bounds_is_refused() {
+    // SETTING_ROW: min 1, max 100.
     assert!(
-        Cut::counted(
-            &TOP,
-            ROWS,
-            6,
-            5,
-            Selection::TopBy {
-                key: key(),
-                from: 0
-            }
-        )
-        .is_none()
+        SETTING
+            .limit_of(0)
+            .unwrap_err()
+            .to_string()
+            .contains("outside 1 to 100")
     );
-}
-
-#[test]
-#[should_panic(expected = "does not match")]
-fn a_selection_of_another_kind_is_a_programmer_error() {
-    let _ = Cut::counted(&TOP, ROWS, 1, 9, Selection::Sample);
-}
-
-#[test]
-#[should_panic(expected = "test.first")]
-fn from_plus_shown_past_the_total_is_a_programmer_error() {
-    let _ = Cut::page(&F5, ROWS, 9, 3, 10);
+    assert!(SETTING.limit_of(101).is_err());
+    assert_eq!(SETTING.limit_of(1).unwrap().get(), 1);
+    assert_eq!(SETTING.limit_of(100).unwrap().get(), 100);
 }
 
 #[test]
@@ -235,31 +223,31 @@ fn thirty_two_cuts_fit_and_the_thirty_third_makes_the_aggregate() {
 }
 
 #[test]
-fn describe_has_ids_paths_and_counts_only() {
+fn describe_reads_as_a_sentence_with_ids_paths_and_counts_only() {
     let top = Bounded::ranked((0..10).collect(), &TOP, FieldPath::lit("traces"), key());
     assert_eq!(
         only_cut(&top).describe(),
-        "test.top: ranked by durationMs desc 3 shown of 10 in traces"
+        "traces: showing the top 3 by durationMs descending of 10 (test.top)"
     );
     let first = Bounded::first(0..99, &F5, ROWS);
     assert_eq!(
         only_cut(&first).describe(),
-        "test.first: the first 5 shown of more than 5 in rows"
+        "rows: showing the first 5 of more than 5 (test.first)"
     );
     let page = Bounded::page(vec![0; 3], 500, 1204, &F5, ROWS);
     assert_eq!(
         only_cut(&page).describe(),
-        "test.first: from 501 3 shown of 1,204 in rows"
+        "rows: showing 501 to 503 of 1,204 (test.first)"
     );
     let last = Bounded::last(vec![1], 5, &LAST, FieldPath::root());
     assert_eq!(
         only_cut(&last).describe(),
-        "test.last: the last 1 shown of 5 in the value"
+        "the value: showing the last 1 of 5 (test.last)"
     );
     let s = Bounded::sampled(vec![1], 5, &SAMPLE, ROWS);
     assert_eq!(
         only_cut(&s).describe(),
-        "test.sample: a sample 1 shown of 5 in rows"
+        "rows: showing a sample of 1 of 5 (test.sample)"
     );
     let c = Cut::maybe(
         &MAYBE_ROW,
@@ -275,7 +263,94 @@ fn describe_has_ids_paths_and_counts_only() {
     );
     assert_eq!(
         c.describe(),
-        "test.maybe: ranked by n asc from rank 5 512 shown of an unknown number in rows"
+        "rows: showing the top 512 by n ascending, from rank 5 of an unknown number (test.maybe)"
+    );
+    let stale = Bounded::page(Vec::<u8>::new(), 5000, 1204, &F5, ROWS);
+    assert_eq!(
+        only_cut(&stale).describe(),
+        "rows: showing none from 5,001 of an unknown number (test.first)"
+    );
+}
+
+/// Review P1-1, the three probes: no number panics, nothing is reported complete that is not, and a window that overshoots
+/// the total has an unknown total.
+#[test]
+fn windows_over_stale_totals_are_cuts_with_an_unknown_total() {
+    for (len, offset, total) in [(0usize, 5000u64, 1204u64), (300, 1000, 1204), (5, 10, 5)] {
+        let b = Bounded::page(vec![0u8; len], offset, total, &F5, ROWS);
+        let c = only_cut(&b);
+        assert_eq!(c.total(), Total::Unknown, "{len} {offset} {total}");
+        assert_eq!(c.selection(), &Selection::First { from: offset });
+        assert_eq!(c.next(), Next::Page);
+    }
+    // The last page ends exactly at the total: still a cut (the earlier rows are not in it) with an exact total.
+    let last = Bounded::page(vec![0u8; 4], 6, 10, &F5, ROWS);
+    assert_eq!(only_cut(&last).total(), Total::Exact { n: 10 });
+    // Numbers at the edge of u64 do not overflow.
+    let huge = Bounded::page(vec![0u8; 2], u64::MAX, u64::MAX, &F5, ROWS);
+    assert_eq!(only_cut(&huge).total(), Total::Unknown);
+    let top = Cut::counted_top(&TOP, ROWS, 2, 3, key(), u64::MAX).unwrap();
+    assert_eq!(top.total(), Total::Unknown);
+    // The remaining windows.
+    assert!(Cut::counted_first(&F5, ROWS, 5, 5, 0).is_none());
+    assert!(Cut::counted_last(&LAST, ROWS, 2, 2).is_none());
+    assert!(Cut::counted_sample(&SAMPLE, ROWS, 3, 2).is_none());
+}
+
+/// Review L6: the cuts kept past 32 are the 31 smallest in the structural order of their lists, whatever order they were
+/// added in.
+#[test]
+fn the_cuts_kept_past_thirty_two_do_not_depend_on_the_order_they_were_added_in() {
+    let paths: Vec<String> = (0..40)
+        .map(|i| format!("lists[{}].ids", (i * 7) % 40))
+        .collect();
+    let build = |order: &[usize]| {
+        let mut b = Bounded::complete(());
+        for &i in order {
+            b = b.and(Cut::at_least(
+                &F5,
+                FieldPath::parse(&paths[i]).unwrap(),
+                5,
+                6,
+            ));
+        }
+        b
+    };
+    let forward: Vec<usize> = (0..40).collect();
+    let backward: Vec<usize> = (0..40).rev().collect();
+    let a = build(&forward);
+    let b = build(&backward);
+    assert_eq!(a, b);
+    let kept: Vec<&str> = a.cuts()[..31].iter().map(|c| c.of().as_str()).collect();
+    let expected: Vec<String> = (0..31).map(|i| format!("lists[{i}].ids")).collect();
+    assert_eq!(
+        kept,
+        expected.iter().map(String::as_str).collect::<Vec<_>>()
+    );
+    assert_eq!(a.cuts()[31].total(), Total::Exact { n: 40 });
+}
+
+#[test]
+fn field_paths_order_structurally() {
+    let order = |a: &str, b: &str| {
+        FieldPath::parse(a)
+            .unwrap()
+            .cmp(&FieldPath::parse(b).unwrap())
+    };
+    use std::cmp::Ordering::{Greater, Less};
+    assert_eq!(order("groups", "groups[0]"), Less);
+    assert_eq!(order("groups[0]", "groups[0].ids"), Less);
+    assert_eq!(
+        order("groups[2]", "groups[10]"),
+        Less,
+        "numeric, not string, order of indexes"
+    );
+    assert_eq!(order("callees", "callers"), Less);
+    assert_eq!(order("b", "a.z"), Greater);
+    assert_eq!(order("", "a"), Less);
+    assert_eq!(
+        FieldPath::lit("a").partial_cmp(&FieldPath::lit("a")),
+        Some(std::cmp::Ordering::Equal)
     );
 }
 
@@ -286,4 +361,30 @@ fn a_row_handle_is_copyable_and_names_its_row() {
     let cloned = copy.clone();
     assert_eq!(cloned.row().id.as_str(), "test.first");
     assert_eq!(cloned.limit(), 5);
+}
+
+#[test]
+fn selections_know_their_kind_and_wire_forms_convert_both_ways() {
+    use paddock_limits::{BoundedWire, CutWire, SelectionKind};
+    let kinds = [
+        (Selection::First { from: 0 }, SelectionKind::First),
+        (Selection::Last, SelectionKind::Last),
+        (
+            Selection::TopBy {
+                key: key(),
+                from: 0,
+            },
+            SelectionKind::TopBy,
+        ),
+        (Selection::Sample, SelectionKind::Sample),
+    ];
+    for (selection, kind) in kinds {
+        assert_eq!(selection.kind(), kind);
+    }
+    let b = Bounded::with(vec![1], Cut::at_least(&F5, ROWS, 5, 6));
+    let cut = b.cuts()[0].clone();
+    let wire = CutWire::from(cut.clone());
+    assert_eq!(Cut::try_from(wire).unwrap(), cut);
+    let wire = BoundedWire::from(b.clone());
+    assert_eq!(Bounded::try_from(wire).unwrap(), b);
 }
