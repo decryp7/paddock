@@ -790,6 +790,7 @@ mod tests {
             started,
             version: "0".into(),
             protocol: 0,
+            build: String::new(),
         };
         std::fs::create_dir_all(dirs.root()).unwrap();
         d.write(&dirs.discovery()).unwrap();
