@@ -86,7 +86,10 @@ export class Check {
     await this.until(async () => (await stillThere()).length === 0, 8_000);
     for (const p of await stillThere()) await end(p, '-KILL');
     const gone = await this.until(async () => (await stillThere()).length === 0, 12_000);
-    const survivors = await stillThere();
+    // A supervised agent is restarted by launchd/systemd within seconds of the kill, with a NEW pid and a fresh discovery file: judge what runs NOW by name, not only
+    // the pids seen before (the 2026-11-07 round deleted the replacement's agent.json this way, and the app then never found its agent).
+    const nowProcs = await this.snapshot();
+    const survivors = [...await stillThere(), ...this.config.processes.flatMap((s) => instancesOf(nowProcs, s, this.bundle))];
     const specOf = (p) => p.command.split(/\s/)[0].split('/').at(-1); // a login-item agent shows as a bare `dyno-agent run`
     const kept = [];
     for (const f of this.config.stateFiles ?? []) {
