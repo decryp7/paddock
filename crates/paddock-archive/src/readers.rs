@@ -1,6 +1,7 @@
 //! The format readers: each walks its archive and hands every entry to the [`Writer`].
 
 use crate::control::Control;
+use crate::limits;
 use crate::error::{ArchiveError, Result, io};
 use crate::options::Options;
 use crate::writer::{Cap, Kind, Report, Writer};
@@ -287,10 +288,7 @@ fn zip_into(
     let file = std::fs::File::open(archive).map_err(io("open", archive))?;
     let mut zip = zip::ZipArchive::new(BufReader::new(file)).map_err(corrupt)?;
     if zip.len() > opts.limits.max_entries {
-        return Err(ArchiveError::Limit {
-            what: "entries",
-            limit: opts.limits.max_entries as u64,
-        });
+        return Err(limits::entries(opts.limits.max_entries as u64));
     }
     let mut total = 0u64;
     for i in 0..zip.len() {

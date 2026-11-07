@@ -415,6 +415,7 @@ fn run_save(
         Err(JobError::Cancelled(_)) if dismissed => SaveOutcome::Dismissed,
         Err(JobError::Cancelled(_)) => SaveOutcome::Cancelled,
         Err(JobError::Failed(message)) => SaveOutcome::Failed { message },
+        Err(e @ JobError::Limit(_)) => SaveOutcome::Failed { message: e.to_string() },
         Err(JobError::Panicked(_)) => SaveOutcome::Failed {
             message: "The report could not be saved because of an internal error.".into(),
         },

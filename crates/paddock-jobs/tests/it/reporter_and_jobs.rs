@@ -128,7 +128,8 @@ fn terminal_state_is_final_and_sets_no_cancel() {
     assert!(!r.finish(JobState::Queued), "not terminal");
     r.start();
     assert!(r.finish(JobState::Failed {
-        message: "disk full".into()
+        message: "disk full".into(),
+        limit: None,
     }));
     let n = sink.all().len();
     assert!(!r.finish(JobState::Done));
@@ -282,14 +283,14 @@ fn run_maps_outcomes_and_emits_one_terminal() {
     assert_eq!(snaps.len(), 4);
     assert!(snaps.windows(2).all(|w| w[0].id < w[1].id));
     assert!(matches!(snaps[0].state, JobState::Done));
-    assert!(matches!(&snaps[1].state, JobState::Failed { message } if message == "bad"));
+    assert!(matches!(&snaps[1].state, JobState::Failed { message, .. } if message == "bad"));
     assert!(matches!(
         snaps[2].state,
         JobState::Cancelled {
             reason: CancelReason::User
         }
     ));
-    assert!(matches!(&snaps[3].state, JobState::Failed { message } if message.contains("boom")));
+    assert!(matches!(&snaps[3].state, JobState::Failed { message, .. } if message.contains("boom")));
     let terminal = sink.all().iter().filter(|s| s.state.is_terminal()).count();
     assert_eq!(terminal, 4);
     assert_eq!(reg.forget_finished(), 4);
@@ -546,4 +547,18 @@ fn finish_publishes_an_update_dropped_by_a_busy_lock_before_the_terminal_event()
         Some(7),
         "the 7 went out before the terminal snapshot"
     );
+}
+
+/// A job that a limit stopped keeps the limit as a type in its failure (ADR 0019), not only in the message.
+#[test]
+fn a_limit_that_stops_a_job_is_kept_in_its_failed_state() {
+    use paddock_limits::{LimitExceeded, LimitId, Quantity, Scope};
+    let sink = Collect::new();
+    let reg = JobRegistry::new(sink.clone());
+    let limit = LimitExceeded::new(LimitId::new("archive.entries"), Quantity::Count(5), Scope::File);
+    let job = reg.register("x", "X", None);
+    assert!(matches!(job.run::<()>(|_| Err(JobError::Limit(limit))), Err(JobError::Limit(l)) if l == limit));
+    let snaps = reg.snapshots();
+    assert!(matches!(&snaps[0].state, JobState::Failed { limit: Some(l), message } if *l == limit && message.contains("archive.entries")));
+    assert!(matches!(JobError::from(limit), JobError::Limit(_)));
 }

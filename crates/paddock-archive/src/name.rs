@@ -1,5 +1,6 @@
 //! Entry names: parsed once into safe components, or refused.
 
+use crate::limits;
 use crate::error::{ArchiveError, Result};
 use crate::options::{Layout, Limits};
 
@@ -51,10 +52,7 @@ pub(crate) fn components(raw: &str, limits: &Limits) -> Result<Vec<String>> {
         return Err(unsafe_entry(raw, "is an absolute path"));
     }
     if raw.chars().count() > limits.max_path_len {
-        return Err(ArchiveError::Limit {
-            what: "path length",
-            limit: limits.max_path_len as u64,
-        });
+        return Err(limits::path_length(limits.max_path_len as u64));
     }
     let mut out = Vec::new();
     for c in raw.split('/').filter(|c| !c.is_empty() && *c != ".") {
@@ -65,10 +63,7 @@ pub(crate) fn components(raw: &str, limits: &Limits) -> Result<Vec<String>> {
         out.push(c.to_string());
     }
     if out.len() > limits.max_depth {
-        return Err(ArchiveError::Limit {
-            what: "folder depth",
-            limit: limits.max_depth as u64,
-        });
+        return Err(limits::depth(limits.max_depth as u64));
     }
     Ok(out)
 }
@@ -180,17 +175,11 @@ mod tests {
         };
         assert!(matches!(
             components("a/b/c", &tight),
-            Err(ArchiveError::Limit {
-                what: "folder depth",
-                ..
-            })
+            Err(ArchiveError::Limit(l)) if l.id.as_str() == "archive.depth"
         ));
         assert!(matches!(
             components("aaaaaaaaaaaa", &tight),
-            Err(ArchiveError::Limit {
-                what: "path length",
-                ..
-            })
+            Err(ArchiveError::Limit(l)) if l.id.as_str() == "archive.path_length"
         ));
     }
 

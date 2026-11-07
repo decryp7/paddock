@@ -1,4 +1,5 @@
 use crate::cancel::{CancelReason, Cancelled};
+use paddock_limits::LimitExceeded;
 use std::fmt;
 
 /// Why a job body ended without a result. Typed; the app edge turns it into a message.
@@ -8,6 +9,8 @@ pub enum JobError {
     Cancelled(CancelReason),
     /// The work failed; the text says what to fix.
     Failed(String),
+    /// A limit stopped the work. The type is kept so the job's failure can offer the remedy (ADR 0019).
+    Limit(LimitExceeded),
     /// A worker panicked (contained; the message is the panic payload when it was text).
     Panicked(String),
 }
@@ -17,12 +20,19 @@ impl fmt::Display for JobError {
         match self {
             JobError::Cancelled(r) => write!(f, "cancelled ({r})"),
             JobError::Failed(m) => f.write_str(m),
+            JobError::Limit(l) => write!(f, "{l}"),
             JobError::Panicked(m) => write!(f, "internal error: {m}"),
         }
     }
 }
 
 impl std::error::Error for JobError {}
+
+impl From<LimitExceeded> for JobError {
+    fn from(l: LimitExceeded) -> Self {
+        JobError::Limit(l)
+    }
+}
 
 impl From<Cancelled> for JobError {
     fn from(c: Cancelled) -> Self {

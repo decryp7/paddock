@@ -1,4 +1,4 @@
-import type { SuJobPhase, SuJobSnapshot } from '@decryp7/paddock-ui';
+import type { SuJobPhase, SuJobSnapshot, SuLimitExceeded, SuQuantity } from '@decryp7/paddock-ui';
 
 /** The event every job snapshot arrives on (`paddock_jobs::tauri::EVENT`). */
 export const JOBS_EVENT = 'paddock://jobs';
@@ -48,8 +48,12 @@ export function parseJobSnapshot(v: unknown): SuJobSnapshot | null {
       const p = phase(v['phase']);
       return p === undefined && v['phase'] !== undefined ? null : { ...base, state, phase: p ?? null };
     }
-    case 'failed':
-      return typeof v['message'] === 'string' ? { ...base, state, message: v['message'] } : null;
+    case 'failed': {
+      if (typeof v['message'] !== 'string') return null;
+      const limit = limitExceeded(v['limit']);
+      // A limit that is present but malformed is dropped, not the whole job: the message still says what happened.
+      return limit === null ? { ...base, state, message: v['message'] } : { ...base, state, message: v['message'], limit };
+    }
     case 'cancelled': {
       const reason = v['reason'];
       return reason === 'user' || reason === 'deadline' ? { ...base, state, reason } : null;
@@ -57,6 +61,28 @@ export function parseJobSnapshot(v: unknown): SuJobSnapshot | null {
     default:
       return null;
   }
+}
+
+const QUANTITY_KINDS = ['bytes', 'count', 'ratio', 'millis', 'percent'];
+const SCOPES = ['file', 'source', 'import', 'plugin', 'query', 'process'];
+
+function quantity(v: unknown): SuQuantity | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const q = v as Record<string, unknown>;
+  return typeof q['kind'] === 'string' && QUANTITY_KINDS.includes(q['kind']) && typeof q['n'] === 'number'
+    ? ({ kind: q['kind'], n: q['n'] } as SuQuantity)
+    : null;
+}
+
+/** The `limit` of a failed job, or null when absent or malformed. */
+function limitExceeded(v: unknown): SuLimitExceeded | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const l = v as Record<string, unknown>;
+  const limit = quantity(l['limit']);
+  const reached = l['reached'] === null || l['reached'] === undefined ? null : quantity(l['reached']);
+  if (typeof l['id'] !== 'string' || limit === null || typeof l['scope'] !== 'string' || !SCOPES.includes(l['scope'])) return null;
+  if (l['reached'] != null && reached === null) return null;
+  return { id: l['id'], limit, reached, scope: l['scope'] as SuLimitExceeded['scope'] };
 }
 
 /** Every valid snapshot of a `jobs_snapshot` answer (invalid entries are dropped; a non-array is empty). */

@@ -65,6 +65,18 @@ describe('the jobs wire model', () => {
     expect(parseJobSnapshots({ jobs: [] })).toEqual([]);
   });
 
+  it('keeps the limit that stopped a job as a typed value and drops a malformed one without dropping the job', () => {
+    const limit = { id: 'archive.entries', limit: { kind: 'count', n: 5 }, reached: { kind: 'count', n: 9 }, scope: 'file' };
+    expect(parseJobSnapshot({ ...good, state: 'failed', message: 'no', limit })).toMatchObject({ message: 'no', limit });
+    const noReached = { ...limit, reached: null };
+    expect(parseJobSnapshot({ ...good, state: 'failed', message: 'no', limit: noReached })).toMatchObject({ limit: noReached });
+    for (const bad of [{ ...limit, id: 5 }, { ...limit, scope: 'galaxy' }, { ...limit, limit: { kind: 'furlongs', n: 1 } }, { ...limit, reached: 7 }, 'x']) {
+      const parsed = parseJobSnapshot({ ...good, state: 'failed', message: 'no', limit: bad });
+      expect(parsed).toMatchObject({ state: 'failed', message: 'no' });
+      expect(parsed).not.toHaveProperty('limit');
+    }
+  });
+
   it('keeps a failed message and a cancel reason', () => {
     expect(parseJobSnapshot({ ...good, state: 'failed', message: 'no' })).toMatchObject({ message: 'no' });
     expect(parseJobSnapshot({ ...good, state: 'done' })).toMatchObject({ state: 'done' });

@@ -2,6 +2,7 @@
 //! only a failed job has a message, only a cancelled job has a reason.
 
 use crate::cancel::CancelReason;
+use paddock_limits::LimitExceeded;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -105,6 +106,9 @@ pub enum JobState {
     Done,
     Failed {
         message: String,
+        /// The limit that stopped the job, when one did (ADR 0019): the UI offers its remedy (Raise it, Retry).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<LimitExceeded>,
     },
     Cancelled {
         reason: CancelReason,

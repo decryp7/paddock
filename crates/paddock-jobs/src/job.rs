@@ -72,6 +72,10 @@ impl JobContext {
             Err(JobError::Cancelled(reason)) => JobState::Cancelled { reason: *reason },
             Err(e) => JobState::Failed {
                 message: e.to_string(),
+                limit: match e {
+                    JobError::Limit(l) => Some(*l),
+                    _ => None,
+                },
             },
         };
         self.reporter.finish(end);

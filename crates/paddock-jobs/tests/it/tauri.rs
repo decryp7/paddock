@@ -355,6 +355,7 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
     failed.start();
     failed.finish(JobState::Failed {
         message: "The folder is not readable".into(),
+        limit: None,
     });
     let user = reporter(7, "scan", "Scanning", None);
     user.finish(JobState::Cancelled {
