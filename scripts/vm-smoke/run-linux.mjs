@@ -289,9 +289,16 @@ async function main(argv) {
     }
     // Release rows: the Linux uninstall must leave the helper's log folder; the rest are not driven here.
     {
+      // The precondition is set up here, always: the helper was turned off by the step above, so it is installed again the way the Settings button does it (as root,
+      // `dyno-helper install --for uid:1000`, no prompt), and the row only judges when the unit is active and the folder already lists its log.
+      g('sudo /usr/bin/dyno-helper install --for uid:1000 >/dev/null 2>&1; true', 120_000);
+      for (let n = 0; n < 20 && g('systemctl is-active dyno-helper.service').stdout.trim() !== 'active'; n++) await sleep(3000);
+      const helperActive = g('systemctl is-active dyno-helper.service').stdout.trim() === 'active';
+      for (let n = 0; n < 10 && !g('sudo ls /var/log/dyno-helper 2>/dev/null').stdout.trim(); n++) await sleep(2000);
+      const logBefore = g('sudo ls /var/log/dyno-helper 2>/dev/null').stdout;
       g('sudo apt-get remove -y -qq dyno >/dev/null 2>&1; true', 300_000);
       const ls = g('ls /var/log/dyno-helper 2>&1');
-      push(rowStep(ROW_TITLES.linuxLogDir, judgeLinuxHelperLogDir({ code: ls.code, out: ls.stdout }), 'the helper log folder survives the uninstall'));
+      push(rowStep(ROW_TITLES.linuxLogDir, judgeLinuxHelperLogDir({ code: ls.code, out: ls.stdout, helperActive, logBefore }), 'the helper log folder survives the uninstall (helper on at the removal)'));
     }
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });
     const started = new Date().toISOString();

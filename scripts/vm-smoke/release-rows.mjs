@@ -17,11 +17,22 @@ export function judgeLifecycleLog({ code, out }) {
   ];
 }
 
-/** Linux: after the package is removed the helper's log folder must still list its log (`ls /var/log/dyno-helper`). */
-export function judgeLinuxHelperLogDir({ code, out }) {
-  if (code === null) return [chk(false, 'ls /var/log/dyno-helper could not be run', 'check')];
+/**
+ * Linux: after the package is removed (`apt remove`, not purge) the helper's log folder must still list its log (`ls /var/log/dyno-helper`).
+ * The precondition (ER-33) is set up explicitly by the runner and checked here: the helper was ON at the removal (its unit active) and the folder already listed a
+ * log before it. Without it the row is a broken check ("precondition not met"), never a pass or a product fail. "Turn off, then remove" is NOT a separate row: the
+ * 1.1.0 release notes promise nothing about the log folder (the package's postrm only removes it on purge).
+ * @param {{code:number|null, out:string, helperActive?:boolean, logBefore?:string}} f
+ */
+export function judgeLinuxHelperLogDir({ code, out, helperActive = true, logBefore = 'x' }) {
+  const pre = [
+    chk(helperActive === true, helperActive ? 'precondition: the helper was on (dyno-helper.service active) at the removal' : 'precondition NOT met: the helper was not on at the removal, so the row cannot see the log folder survive', 'check'),
+    chk(String(logBefore ?? '').trim().length > 0, String(logBefore ?? '').trim() ? `precondition: /var/log/dyno-helper listed ${String(logBefore).trim().split('\n').join(', ')} before the removal` : 'precondition NOT met: /var/log/dyno-helper was empty or missing before the removal (the probe cannot see a log survive)', 'check'),
+  ];
+  if (pre.some((c) => !c.ok)) return pre;
+  if (code === null) return [...pre, chk(false, 'ls /var/log/dyno-helper could not be run', 'check')];
   const names = String(out ?? '').split('\n').map((l) => l.trim()).filter(Boolean);
-  return [chk(code === 0 && names.length > 0, code === 0 && names.length ? `/var/log/dyno-helper still lists ${names.join(', ')} after the uninstall` : `/var/log/dyno-helper is ${code === 0 ? 'empty' : 'gone'} after the uninstall (ls exit ${code})`)];
+  return [...pre, chk(code === 0 && names.length > 0, code === 0 && names.length ? `/var/log/dyno-helper still lists ${names.join(', ')} after the uninstall` : `/var/log/dyno-helper is ${code === 0 ? 'empty' : 'gone'} after the uninstall (ls exit ${code})`)];
 }
 
 /**

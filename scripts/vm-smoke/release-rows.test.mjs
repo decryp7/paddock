@@ -15,6 +15,13 @@ test('dead state: a gone or empty /var/log/dyno-helper after the uninstall fails
   assert.ok(bad(judgeLinuxHelperLogDir({ code: 0, out: '' })).length);
   assert.equal(bad(judgeLinuxHelperLogDir({ code: 0, out: 'helper.log\n' })).length, 0);
 });
+test('ER-33: the Linux log row without its precondition (helper on, a log before the removal) is a broken check, not a pass or a product fail', () => {
+  const off = judgeLinuxHelperLogDir({ code: 0, out: 'lifecycle.log\n', helperActive: false, logBefore: 'lifecycle.log' });
+  assert.ok(off.some((c) => !c.ok && c.kind === 'check'));
+  const empty = judgeLinuxHelperLogDir({ code: 2, out: '', helperActive: true, logBefore: '' });
+  assert.ok(empty.every((c) => c.ok || c.kind === 'check'), 'a missing folder before the removal is not blamed on the product');
+  assert.equal(bad(judgeLinuxHelperLogDir({ code: 0, out: 'lifecycle.log\n', helperActive: true, logBefore: 'lifecycle.log' })).length, 0);
+});
 test('macOS reopen: no agent fails; the notification is information; a switched-on item fails; an untested off state is a broken check', () => {
   const base = { agentBack: true, notificationSeen: false, loginItemWasOff: true, loginItemNowOff: true };
   assert.equal(bad(judgeMacReopen(base)).length, 0);
