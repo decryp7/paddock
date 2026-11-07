@@ -61,12 +61,6 @@ paths = ["crates/paddock-service/src/backend/**", "crates/paddock-service/src/na
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/service_install.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.2.0"
-  note = "Pitwall 1.1: macOS goes through paddock_service::Manager (service_manager.rs, repair_schedule.rs). What stays a copy is the Windows elevated install and the Linux `pitwall-server install` verbs, until pitwall-server's own service module moves onto paddock-service."
-
-  [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/service_install.rs"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"

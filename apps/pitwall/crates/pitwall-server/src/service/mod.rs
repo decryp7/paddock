@@ -1,53 +1,25 @@
-//! Running Pitwall's server as an OS service (docs/suite-lessons.md, adapted from Pitcrew): the verbs the installers and
-//! the app call (`install`, `uninstall`, `status`, `print-unit`, and `--service` for the Windows Service Control
-//! Manager), the user's login `PATH` for a supervised server, and the restart after an update.
+//! Running Pitwall's server as an OS service, on the shared service crate (rule 55, ADR 0056): the verbs the installers and
+//! the app call (`install`, `uninstall`, `status`, `print-unit`, `print-plist`, and `--service` for the Windows Service Control
+//! Manager), the user's login `PATH` for a supervised server, and the restart after an update. What the service is lives in
+//! [`pitwall_service`]; the registration is the shared [`Manager`] over the backend of this OS.
 //!
-//! - **Windows**: a service (`--service`, LocalSystem) that starts the server in the logged-on user's session, picked
-//!   with `WTSEnumerateSessionsW` (active first, then the console, then the lowest id); `windows.rs`.
-//! - **macOS**: the bundled launch agent, registered by the app through `SMAppService`; nothing here (the plist is in
-//!   the app bundle, `app/src-tauri/macos`).
-//! - **Linux**: a systemd user unit written by `install` ([`systemd`]).
+//! - **Windows**: a service (`--service`, LocalSystem) that starts the server in the logged-on user's session
+//!   ([`paddock_service::native::host_program`]); `install` and `uninstall` are what the app runs elevated through Windows' own
+//!   prompt, and what the installer runs.
+//! - **macOS**: the bundled launch agent, registered by the app through `SMAppService`; `install` and `uninstall` say so.
+//! - **Linux**: a systemd user unit written by `install`.
 //!
-//! Everything that is a decision (names, per-OS paths, the unit text, session choice, restart-on-update) is a pure
-//! function in [`spec`]; the rest is thin.
+//! The decisions are the shared crate's and are tested there; what is tested here is the wiring: which verb asks the manager
+//! what, and what is printed.
 
-pub mod exec;
-pub mod login_path;
-pub mod spec;
-#[cfg(unix)]
-pub mod systemd;
 pub mod watch;
-#[cfg(windows)]
-mod windows;
 
 use crate::paths::Dirs;
-
-/// What `pitwall-server <first argument>` asks of the service integration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verb {
-    /// Register the service with the OS and start it.
-    Install,
-    /// Stop and remove it.
-    Uninstall,
-    /// Say whether it is installed and running.
-    Status,
-    /// Print the systemd unit `install` would write (Linux).
-    PrintUnit,
-    /// Run under the Windows Service Control Manager.
-    WindowsService,
-}
-
-/// The verb in the arguments (after the program name), if the first one is a service verb.
-pub fn parse_verb(args: &[String]) -> Option<Verb> {
-    match args.first().map(String::as_str) {
-        Some("install") => Some(Verb::Install),
-        Some("uninstall") => Some(Verb::Uninstall),
-        Some("status") => Some(Verb::Status),
-        Some("print-unit") => Some(Verb::PrintUnit),
-        Some("--service") => Some(Verb::WindowsService),
-        _ => None,
-    }
-}
+use paddock_service::backend::Side;
+use paddock_service::{Manager, ServiceError, Timings, Verb};
+use pitwall_service::{spec, LABEL, NAME, SUPERVISED_ENV};
+use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
 /// The value of `--data-dir`, if given.
 pub fn data_dir_arg(args: &[String]) -> Option<String> {
@@ -60,18 +32,57 @@ pub fn data_dir_arg(args: &[String]) -> Option<String> {
 /// A server started by hand is left alone. Returns `None` when `main` should go on.
 pub fn dispatch() -> Option<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(verb) = parse_verb(&args) {
-        return Some(run_verb(verb));
+    if let Some(verb) = Verb::parse(&args) {
+        return Some(run_verb(verb, &args));
     }
-    login_path::apply_to_process();
+    if let Some(path) = paddock_service::supervised::supervised_path(SUPERVISED_ENV) {
+        std::env::set_var("PATH", path);
+    }
     if tokio::runtime::Handle::try_current().is_ok() {
         watch::spawn(data_dir_arg(&args).map_or_else(Dirs::for_user, Dirs::at));
     }
     None
 }
 
-/// Prints a verb's outcome and gives its exit code (Windows' own verb runner reports for itself).
-#[cfg_attr(windows, allow(dead_code))]
+/// The shared manager over this OS's backend, for the program side. `install` does not wait for the service to answer (the
+/// installer and the elevated child must return).
+fn manager(program: &Path, data: &Path) -> Result<Manager, ServiceError> {
+    let backend = paddock_service::native::host_backend(&spec(), program, Side::Program, data)?;
+    Ok(manager_over(backend, data))
+}
+
+/// [`manager`] over a backend (the tests pass a fake one).
+fn manager_over(backend: Box<dyn paddock_service::Backend>, data: &Path) -> Manager {
+    Manager::new(NAME, backend, data, LABEL, env!("CARGO_PKG_VERSION"), || false).with_timings(Timings::default().without_start_wait())
+}
+
+/// What a verb prints, or why it failed. Pure over the manager.
+pub fn run_with(verb: Verb, m: &mut Manager, program: &Path) -> Result<String, String> {
+    let err = |e: ServiceError| e.to_string();
+    match verb {
+        Verb::Install => m
+            .install(&AtomicBool::new(false))
+            .map(|_| "Pitwall's service is installed and started".to_string())
+            .map_err(err),
+        Verb::Uninstall => m.uninstall().map(|()| "Pitwall's service is removed".to_string()).map_err(err),
+        Verb::Status => {
+            let s = m.status();
+            Ok(match (s.installed, s.running) {
+                (false, _) => "not installed (run `pitwall-server install`)".to_string(),
+                (true, true) => "installed; the server runs".to_string(),
+                (true, false) => format!("installed; not running{}", s.message.map(|t| format!(" ({t})")).unwrap_or_default()),
+            })
+        }
+        Verb::PrintUnit => Ok(paddock_service::render::systemd_unit(&spec(), &program.to_string_lossy(), None)),
+        Verb::PrintPlist => Ok(paddock_service::render::launchd_plist(
+            &spec(),
+            paddock_service::render::LaunchdProgram::Bundled,
+        )),
+        Verb::Stop => Err("stop is not a verb of the Pitwall server; stop the service from Settings or the OS".to_string()),
+        Verb::WindowsService => Err("--service is for the Windows Service Control Manager".to_string()),
+    }
+}
+
 fn report(result: Result<String, String>) -> i32 {
     match result {
         Ok(m) => {
@@ -85,65 +96,118 @@ fn report(result: Result<String, String>) -> i32 {
     }
 }
 
-fn run_verb(verb: Verb) -> i32 {
-    #[cfg(windows)]
-    return windows::run_verb(verb);
-    #[cfg(target_os = "linux")]
-    return report(match verb {
-        Verb::Install => systemd::install(),
-        Verb::Uninstall => systemd::uninstall(),
-        Verb::Status => linux_status(),
-        Verb::PrintUnit => systemd::print_unit(),
-        Verb::WindowsService => Err("--service is for the Windows Service Control Manager".into()),
-    });
-    #[cfg(not(any(windows, target_os = "linux")))]
-    return report(match verb {
-        Verb::PrintUnit => Err("print-unit is for Linux (systemd)".into()),
-        Verb::WindowsService => Err("--service is for the Windows Service Control Manager".into()),
-        _ => Err("on macOS the Pitwall app registers the launch agent (Settings, Service); this program has nothing to install".into()),
-    });
+fn run_verb(verb: Verb, args: &[String]) -> i32 {
+    let program = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => return report(Err(format!("the server program cannot be found: {e}"))),
+    };
+    if verb == Verb::WindowsService {
+        return host(&program);
+    }
+    // print-unit and print-plist need no registration and no OS access.
+    if matches!(verb, Verb::PrintUnit | Verb::PrintPlist | Verb::Stop) {
+        return report(run_with_none(verb, &program));
+    }
+    if cfg!(target_os = "macos") {
+        return report(Err(
+            "on macOS the Pitwall app registers the launch agent (Settings, Service); this program has nothing to install".to_string(),
+        ));
+    }
+    let data = data_dir_arg(args).map_or_else(Dirs::for_user, Dirs::at);
+    match manager(&program, &data.root) {
+        Ok(mut m) => report(run_with(verb, &mut m, &program)),
+        Err(e) => report(Err(e.to_string())),
+    }
 }
 
-#[cfg(target_os = "linux")]
-fn linux_status() -> Result<String, String> {
-    let env = spec::PathEnv::from_process();
-    let file = spec::systemd_unit_file(&env).ok_or("HOME is not set")?;
-    if !std::path::Path::new(&file).exists() {
-        return Ok("not installed (run `pitwall-server install`)".into());
+/// The verbs that read nothing of the OS.
+fn run_with_none(verb: Verb, program: &Path) -> Result<String, String> {
+    match verb {
+        Verb::PrintUnit => Ok(paddock_service::render::systemd_unit(&spec(), &program.to_string_lossy(), None)),
+        Verb::PrintPlist => Ok(paddock_service::render::launchd_plist(
+            &spec(),
+            paddock_service::render::LaunchdProgram::Bundled,
+        )),
+        _ => Err("stop is not a verb of the Pitwall server; stop the service from Settings or the OS".to_string()),
     }
-    let out = exec::run_with_timeout(
-        std::ffi::OsStr::new("systemctl"),
-        &["--user", "is-active", spec::SYSTEMD_UNIT],
-        &[],
-        std::time::Duration::from_secs(10),
-    )?;
-    Ok(format!("installed ({file}); state: {}", out.stdout.trim()))
+}
+
+/// Runs under the Windows Service Control Manager: the shared host starts this program in the logged-on user's session.
+#[cfg(windows)]
+fn host(program: &Path) -> i32 {
+    match paddock_service::native::host_program(&spec(), program.to_path_buf()) {
+        Ok(code) => i32::try_from(code).unwrap_or(1),
+        Err(e) => report(Err(e.to_string())),
+    }
+}
+
+#[cfg(not(windows))]
+fn host(_program: &Path) -> i32 {
+    report(Err("--service is for the Windows Service Control Manager".to_string()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paddock_service::backend::{Systemd, Target};
+    use paddock_service::testing::FakeSystem;
 
-    fn a(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
-    }
-
-    #[test]
-    fn only_a_leading_service_verb_is_taken() {
-        assert_eq!(parse_verb(&a(&["install"])), Some(Verb::Install));
-        assert_eq!(parse_verb(&a(&["uninstall"])), Some(Verb::Uninstall));
-        assert_eq!(parse_verb(&a(&["status"])), Some(Verb::Status));
-        assert_eq!(parse_verb(&a(&["print-unit"])), Some(Verb::PrintUnit));
-        assert_eq!(parse_verb(&a(&["--service"])), Some(Verb::WindowsService));
-        assert_eq!(parse_verb(&a(&["--port", "1", "install"])), None);
-        assert_eq!(parse_verb(&a(&[])), None);
+    fn over_fake_systemd(dir: &Path) -> (Manager, FakeSystem) {
+        let sys = FakeSystem::new();
+        let backend = Systemd::new(
+            pitwall_service::spec_of(false),
+            dir.join("pitwall.service"),
+            Target::exe("/opt/pitwall/pitwall-server"),
+            Box::new(sys.clone()),
+        );
+        (manager_over(Box::new(backend), dir), sys)
     }
 
     #[test]
     fn the_data_dir_argument_is_found() {
+        let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         assert_eq!(data_dir_arg(&a(&["--port", "1", "--data-dir", "/x"])).as_deref(), Some("/x"));
         assert_eq!(data_dir_arg(&a(&["--data-dir"])), None);
         assert_eq!(data_dir_arg(&a(&[])), None);
+    }
+
+    #[test]
+    fn install_and_uninstall_go_through_the_manager_and_say_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut m, sys) = over_fake_systemd(dir.path());
+        let program = Path::new("/opt/pitwall/pitwall-server");
+        assert_eq!(
+            run_with(Verb::Status, &mut m, program).unwrap(),
+            "not installed (run `pitwall-server install`)"
+        );
+        let said = run_with(Verb::Install, &mut m, program).unwrap();
+        assert!(said.contains("installed and started"), "{said}");
+        assert!(
+            sys.commands().iter().any(|c| c.contains("systemctl") && c.contains("enable")),
+            "the unit is enabled through systemctl: {:?}",
+            sys.commands()
+        );
+        assert!(sys
+            .file(&dir.path().join("pitwall.service"))
+            .is_some_and(|u| u.contains("PITWALL_SERVICE=1")));
+        let gone = run_with(Verb::Uninstall, &mut m, program).unwrap();
+        assert!(gone.contains("removed"), "{gone}");
+        assert!(sys.file(&dir.path().join("pitwall.service")).is_none());
+    }
+
+    #[test]
+    fn print_unit_and_print_plist_render_the_one_spec_and_the_other_verbs_refuse_with_a_reason() {
+        let program = Path::new("/opt/pitwall/pitwall-server");
+        let unit = run_with_none(Verb::PrintUnit, program).unwrap();
+        assert!(unit.contains("ExecStart=") && unit.contains("PITWALL_SERVICE=1"), "{unit}");
+        let plist = run_with_none(Verb::PrintPlist, program).unwrap();
+        assert!(plist.contains("net.decryptology.pitwall.service"), "{plist}");
+        assert!(run_with_none(Verb::Stop, program).unwrap_err().contains("not a verb"));
+        let dir = tempfile::tempdir().unwrap();
+        let (mut m, _) = over_fake_systemd(dir.path());
+        assert!(run_with(Verb::WindowsService, &mut m, program)
+            .unwrap_err()
+            .contains("Service Control Manager"));
     }
 
     #[test]

@@ -20,6 +20,10 @@ path = "src/main.rs"
 [dependencies]
 pitwall-core.workspace = true
 pitwall-loopback = { path = "../pitwall-loopback" }
+# The service: the shared registration, host and watch (rule 55) and the one spec that the app builds from too.
+paddock-service = { path = "../../../../crates/paddock-service" }
+pitwall-service = { path = "../pitwall-service" }
+log = { version = "0.4", features = ["kv"] }
 # Process memory as real memory per OS (physical footprint on macOS, PSS on Linux), never the resident size.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
@@ -39,9 +43,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "tim
 toml.workspace = true
 zip = { version = "9", default-features = false, features = ["deflate"] }
 
-# The Windows service (Service Control Manager, session enumeration); see src/service/windows.rs.
+# The signals of a console on Windows (os_signals.rs).
 [target.'cfg(windows)'.dependencies]
-windows-service = "0.8"
 windows = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_Security",
