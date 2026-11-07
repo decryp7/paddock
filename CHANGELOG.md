@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: new entry `@decryp7/paddock-ui/locale` (pure); `format` no longer depends on `shell/i18n`
+- The locale helpers (`activeLocale`, `groupedNumber`, `plural`, `SOURCE_LOCALE`, ...) moved to their own pure entry; `@decryp7/paddock-ui/shell/i18n` re-exports them, so imports from there keep working. The `format` entry imports only `locale`, so a formatter loads in Node (a Playwright spec, a script) without the language store or Angular's JIT compiler.
+- The built package gets a `main` in each secondary entry's `package.json` (next to `module`), so Node-based loaders resolve `dist/paddock-ui/<entry>`.
+
 ### `paddock-service`: the manager reads an injected clock
 - New `Manager::with_clock(Arc<dyn Clock>)` and `Manager::clock()` (`paddock_health::Clock`, the real `SystemClock` by default): the waits, the repair notice and the register stamp read it, so a test or a model never touches the system's clocks (a clock read costs 13 to 25 microseconds on some virtual machines).
 - Breaking (before v1): `RepairTracker::start`, `finish` and `current` take a `Duration`, a reading of the caller's monotonic clock, instead of an `Instant`; `repair::Bounds` loses `now` and gains `clock` (the stamp is `repair::start_time_of(clock.wall())`); new `repair::start_time_of(SystemTime) -> StartTime`.

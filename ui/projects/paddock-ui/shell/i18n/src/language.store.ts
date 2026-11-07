@@ -1,7 +1,7 @@
 import { computed, inject, InjectionToken } from '@angular/core';
 import { patchState, signalStore, withComputed, withMethods, withState } from '@ngrx/signals';
 import { LocalStorageLanguageStorage, type LanguageStorage } from './language-storage';
-import { activeLocale, resolveLocale, type LanguageChoice } from './locale';
+import { activeLocale, resolveLocale, type LanguageChoice } from '@decryp7/paddock-ui/locale';
 
 /** The language preference's ports: storage, the system languages, the shipped locales and how the window restarts. */
 export interface LanguageConfig {

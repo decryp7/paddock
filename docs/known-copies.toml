@@ -861,7 +861,7 @@ adr = "0012"
 id = "ui-locale"
 title = "The UI language and the locale every formatter uses"
 canonical = "@decryp7/paddock-ui"
-paths = ["ui/projects/paddock-ui/shell/i18n/src/locale.ts"]
+paths = ["ui/projects/paddock-ui/locale/src/locale.ts"]
 status = "built"
 adr = "0012"
 

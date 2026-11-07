@@ -5,7 +5,6 @@
  * menus, dialogs and Settings; layout scenarios; the fake Tauri IPC; screenshots of a settled frame; the app version from its single source; and the
  * retried-test reporter (`@decryp7/paddock-e2e/retried-reporter`).
  */
-import './angular-jit.ts';
 export { test, expect, type PaddockFixtures } from './fixtures.ts';
 export type { Page, Locator, BrowserContext } from '@playwright/test';
 export { e2ePort } from './env.ts';

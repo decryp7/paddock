@@ -27,8 +27,7 @@
   },
   "peerDependencies": {
     "@playwright/test": "^1.64.0",
-    "@axe-core/playwright": "^4.14.0",
-    "@angular/compiler": "^22.0.0"
+    "@axe-core/playwright": "^4.14.0"
   },
   "publishConfig": {
     "registry": "https://dev.decryptology.net/api/packages/decryp7/npm/",

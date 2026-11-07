@@ -11,7 +11,7 @@
  * what the number measures, never by taste. Keep exact values in a tooltip (`formatExactBytes`). Domain wording
  * (token counts, GHz) stays in the apps.
  */
-import { activeLocale, groupedNumber, PSEUDO_LOCALE, plural, SOURCE_LOCALE } from '@decryp7/paddock-ui/shell/i18n';
+import { activeLocale, groupedNumber, PSEUDO_LOCALE, plural, SOURCE_LOCALE } from '@decryp7/paddock-ui/locale';
 
 /** Shown for a value that is missing or not a usable number. */
 export const NONE = '—';
