@@ -366,78 +366,72 @@ jobs:
           path: .nightly-installers
           key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
 
-  # IP1 item 6 (plan 1.2): every shared crate's fuzz targets run for a bounded time each, so a decoder that panics on
-  # hostile bytes is found by the night and not by a plugin. Each crate's fuzz folder is its own workspace
-  # (`crates/<crate>/fuzz`); a crash fails its shard and its reproducer is uploaded.
-  shared-fuzz:
-    name: fuzz (${{ matrix.crate }})
+  # IP1 item 6 (plan 1.2): every shared crate's fuzz targets run for a bounded time each, through the reusable app-fuzz workflow
+  # (rule 55: one implementation of the fuzz run). A crash fails its job, uploads the reproducer and keeps the night from being
+  # marked green. Each crate's fuzz folder is its own workspace (`crates/<crate>/fuzz`).
+  fuzz-ipc:
+    name: fuzz (paddock-ipc)
     needs: [gate]
     if: ${{ needs.gate.outputs.run == 'true' }}
-    runs-on: ubuntu-latest
-    container:
-      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - crate: paddock-ipc
-            targets: frame plugin_request
-          - crate: paddock-plugin-package
-            targets: manifest package
-          - crate: paddock-view
-            targets: decode
-          - crate: paddock-archive
-            targets: archive
-          - crate: paddock-testplan
-            targets: formats
-    env:
-      FUZZ_SECONDS: "120"
-      FUZZ_TOOLCHAIN: nightly-2026-10-01
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.gitea/actions/build-jobs
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin/cargo-fuzz
-            crates/${{ matrix.crate }}/fuzz/target
-          key: shared-fuzz-${{ matrix.crate }}-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-${{ hashFiles(format('crates/{0}/fuzz/Cargo.toml', matrix.crate)) }}
-          restore-keys: shared-fuzz-${{ matrix.crate }}-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-
-      - name: Install cargo-fuzz
-        run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
-      - name: Fuzz ${{ matrix.targets }}
-        working-directory: crates/${{ matrix.crate }}
-        shell: bash
-        run: |
-          failed=()
-          for target in ${{ matrix.targets }}; do
-            echo "::group::${{ matrix.crate }} $target"
-            mkdir -p "fuzz/work/$target" "fuzz/corpus/$target"
-            if ! cargo fuzz run "$target" "fuzz/work/$target" "fuzz/corpus/$target" -- -max_total_time=$FUZZ_SECONDS -rss_limit_mb=2048 -max_len=131072 -timeout=20; then
-              failed+=("$target")
-            fi
-            echo "::endgroup::"
-          done
-          if [ ${#failed[@]} -gt 0 ]; then
-            echo "::error::${{ matrix.crate }}: crashed or timed out: ${failed[*]}. Reproducers: the crashes-${{ matrix.crate }} artifact; replay with cargo fuzz run <target> <file> in crates/${{ matrix.crate }}."
-            exit 1
-          fi
-      - name: Upload crashes
-        if: failure()
-        uses: actions/upload-artifact@v3
-        with:
-          name: crashes-${{ matrix.crate }}
-          path: crates/${{ matrix.crate }}/fuzz/artifacts/
-          if-no-files-found: ignore
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-ipc/fuzz
+      shards: '[{"shard":1,"targets":"frame plugin_request"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
+  fuzz-plugin-package:
+    name: fuzz (paddock-plugin-package)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-plugin-package/fuzz
+      shards: '[{"shard":1,"targets":"manifest package"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
+  fuzz-view:
+    name: fuzz (paddock-view)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-view/fuzz
+      shards: '[{"shard":1,"targets":"decode"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
+  fuzz-archive:
+    name: fuzz (paddock-archive)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-archive/fuzz
+      shards: '[{"shard":1,"targets":"archive"}]'
+      seconds: "120"
+      timeout-minutes: 45
+
+  fuzz-testplan:
+    name: fuzz (paddock-testplan)
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    uses: ./.gitea/workflows/app-fuzz.yml
+    with:
+      paddock-ref: ${{ github.sha }}
+      fuzz-dir: crates/paddock-testplan/fuzz
+      shards: '[{"shard":1,"targets":"formats"}]'
+      seconds: "120"
+      timeout-minutes: 45
 
   mark:
     name: mark the green nightly
-    needs: [ci, dialog-commands, shared-fuzz]
+    needs: [ci, dialog-commands, fuzz-ipc, fuzz-plugin-package, fuzz-view, fuzz-archive, fuzz-testplan]
     if: ${{ github.event_name == 'schedule' && success() }}
     runs-on: ubuntu-latest
     container:
