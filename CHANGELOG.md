@@ -16,11 +16,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### Limits adopted (package 1.4b): breaking and added public shapes
 
-- `paddock-jobs`: `JobState::Failed` is now `Failed { message, limit }` and `wire::WireState::Failed(String)` is now
+- `paddock-jobs`: `JobError::Limit` is `Limit { limit, message }` (the message is what a person reads, built where the registry is known);
+  `JobState::Failed` is now `Failed { message, limit }` and `wire::WireState::Failed(String)` is now
   `Failed { message, limit: Option<LimitExceeded> }` (`limit` is a type, kept on the wire as postcard, so it is not skipped when absent).
   `JobError::Limit(LimitExceeded)` is new; a job that a limit stopped keeps the limit.
 - `paddock-archive`: `ArchiveError::Limit(LimitExceeded)` is new (converts to `JobError::Limit`); the archive limits are registry rows.
-- `paddock-plugin-host`: `HostError::Limit(LimitExceeded)` is new (the plugin id is kept in the message).
+- `paddock-plugin-host`: `HostError::Limit { plugin, limit }` is new (the text starts with the plugin).
+- `paddock-limits`: `LimitExceeded::for_person(registry)` is the message without the dotted id; the testkit's stop cases take `reached = ...`.
+- `paddock-health`: `Cause::from_limit` suggests a cap of at least 1 MiB and at most the row's maximum, and none at the maximum.
 - `paddock-ipc`: `IpcError::limit()` is new (`TooLarge` and `ReplyTooLarge` are the frame row).
 - `paddock-net`: `limit()` on `NetError`; `NetError::TooManyRedirects` is now `TooManyRedirects(u32)` and carries the number the policy
   allowed; `DEFAULT_REDIRECTS` (5) is new and is the default of `Policy` and of the row `net.redirects`.
