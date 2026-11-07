@@ -39,6 +39,7 @@ impl VolumeLister for OneVolume {
                 reachable: true,
                 whole_volume: true,
                 measured_at: None,
+                freshness: Default::default(),
             },
             root: self.0.clone(),
             identity: None,

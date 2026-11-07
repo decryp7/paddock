@@ -862,7 +862,16 @@ tone: ValueTone,
 /**
  * False for a network volume that did not answer ("Not answering").
  */
-reachable: boolean, };
+reachable: boolean, 
+/**
+ * When the figures were read, ms since the epoch; none before the agent stamped them. For "as of 14:05" and
+ * "Not answering since 14:05".
+ */
+measuredAt: number | null, 
+/**
+ * How old the figures are against the refresh interval (the agent decides; the app only words it).
+ */
+freshness: "fresh" | "late" | "stale", };
 
 export type CounterRow = { 
 /**

@@ -233,6 +233,7 @@ mod tests {
             reachable: true,
             whole_volume: true,
             measured_at: None,
+            freshness: Default::default(),
         }
     }
 

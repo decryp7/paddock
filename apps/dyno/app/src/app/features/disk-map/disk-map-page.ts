@@ -445,7 +445,7 @@ import {
               <dy-icon [name]="g.id === 'network' ? 'network' : g.id === 'external' ? 'external' : 'disk'" />
               <span class="vol">
                 <strong>{{ v.name }}</strong>
-                <span class="muted">{{ meta(v) }} · @if (v.reachable) { {{ free(v) }} } @else { <span class="warn-text"><dy-icon name="alert" /> Not answering</span> }</span>
+                <span class="muted">{{ meta(v) }} · @if (v.reachable) { {{ free(v) }} } @else { <span class="warn-text"><dy-icon name="alert" /> {{ free(v) }}</span> }</span>
               </span>
             </button>
           }

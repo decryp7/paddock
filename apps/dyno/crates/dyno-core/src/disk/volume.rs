@@ -42,6 +42,34 @@ pub enum VolumeLocation {
     },
 }
 
+/// How old a volume's figures are against the refresh interval, for a view that must say so (the rule lives here, not in the UI).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Freshness {
+    /// Read within twice the interval (or never stamped).
+    #[default]
+    Fresh,
+    /// Older than twice the interval: the view says "as of 14:05".
+    Late,
+    /// Older than five times the interval: the view greys the row and says why.
+    Stale,
+}
+
+/// The freshness of figures measured at `measured_at` (ms since 1970) when it is `now_ms` and the figures are meant to be read
+/// every `interval_secs`. Never-stamped figures are fresh; a clock that went back counts as zero age.
+pub fn freshness(measured_at: Option<i64>, now_ms: i64, interval_secs: u32) -> Freshness {
+    let Some(at) = measured_at else { return Freshness::Fresh };
+    let age = u64::try_from(now_ms.saturating_sub(at)).unwrap_or(0);
+    let interval = u64::from(interval_secs.max(1)) * 1000;
+    if age > 5 * interval {
+        Freshness::Stale
+    } else if age > 2 * interval {
+        Freshness::Late
+    } else {
+        Freshness::Fresh
+    }
+}
+
 /// A volume the disk map can scan.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -73,6 +101,9 @@ pub struct Volume {
     /// volume that stopped answering keeps its last figures and this time, so a view can say "as of 14:05".
     #[serde(default)]
     pub measured_at: Option<i64>,
+    /// How old those figures are against the refresh interval, set by the agent when it hands the volume out.
+    #[serde(default)]
+    pub freshness: Freshness,
 }
 
 impl Volume {
@@ -240,6 +271,7 @@ pub fn classify(m: &RawMount, traits: &MediaTraits, capacity: Option<(u64, u64)>
         reachable,
         whole_volume,
         measured_at: None,
+        freshness: Default::default(),
     }
 }
 
@@ -293,6 +325,19 @@ fn unescape_octal(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn freshness_is_late_after_twice_and_stale_after_five_times_the_interval() {
+        use super::{freshness, Freshness::*};
+        let at = Some(1_000_000);
+        // (age in seconds, interval 60 s)
+        for (age, want) in [(0, Fresh), (120, Fresh), (121, Late), (300, Late), (301, Stale), (86_400, Stale)] {
+            assert_eq!(freshness(at, 1_000_000 + age * 1000, 60), want, "age {age} s");
+        }
+        assert_eq!(freshness(None, i64::MAX, 60), Fresh, "never stamped");
+        assert_eq!(freshness(at, 0, 60), Fresh, "a clock that went back");
+        assert_eq!(freshness(at, 1_000_000 + 21_000, 10), Late, "a 10 s interval is late after 20 s");
+    }
+
     use super::*;
 
     fn raw(mount: &str, fs: &str, source: &str) -> RawMount {

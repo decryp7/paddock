@@ -28,6 +28,7 @@ fn volume(id: &str, location: VolumeLocation, whole: bool) -> Volume {
         reachable: true,
         whole_volume: whole,
         measured_at: None,
+        freshness: Default::default(),
     }
 }
 

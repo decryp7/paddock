@@ -243,6 +243,13 @@ pub struct VolumeRow {
     pub tone: ValueTone,
     /// False for a network volume that did not answer ("Not answering").
     pub reachable: bool,
+    /// When the figures were read, ms since the epoch; none before the agent stamped them. For "as of 14:05" and
+    /// "Not answering since 14:05".
+    #[cfg_attr(any(test, feature = "ts"), ts(type = "number | null"))]
+    pub measured_at: Option<i64>,
+    /// How old the figures are against the refresh interval (the agent decides; the app only words it).
+    #[cfg_attr(any(test, feature = "ts"), ts(type = "\"fresh\" | \"late\" | \"stale\""))]
+    pub freshness: crate::disk::volume::Freshness,
 }
 
 /// One pinned counter row.
@@ -604,6 +611,8 @@ fn volume_row(v: &Volume) -> VolumeRow {
         total_bytes: v.capacity,
         tone: DISK_THRESHOLDS.tone(used_percent.map(f64::from)),
         reachable: v.reachable,
+        measured_at: v.measured_at,
+        freshness: v.freshness,
     }
 }
 

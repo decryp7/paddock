@@ -540,6 +540,8 @@ export interface Volume {
   wholeVolume: boolean;
   /** When capacity and free were read (ms since 1970); absent before the agent stamped it. A share that stopped answering keeps its last figures and this time. */
   measuredAt?: number | null;
+  /** How old the figures are against the refresh interval, decided by the agent. */
+  freshness?: 'fresh' | 'late' | 'stale';
 }
 
 /** What a scan covers. */

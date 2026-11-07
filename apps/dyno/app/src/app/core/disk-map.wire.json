@@ -344,6 +344,7 @@
       "volume": {
         "capacity": 1000,
         "free": 400,
+        "freshness": "fresh",
         "fs": "apfs",
         "id": "Macintosh HD",
         "location": "internal",
@@ -686,6 +687,7 @@
     {
       "capacity": 1000,
       "free": 400,
+      "freshness": "fresh",
       "fs": "apfs",
       "id": "Macintosh HD",
       "location": "internal",
@@ -700,6 +702,7 @@
     {
       "capacity": 1000,
       "free": 400,
+      "freshness": "fresh",
       "fs": "apfs",
       "id": "Photos",
       "location": {
@@ -718,6 +721,7 @@
     {
       "capacity": 1000,
       "free": 400,
+      "freshness": "fresh",
       "fs": "apfs",
       "id": "Media",
       "location": {

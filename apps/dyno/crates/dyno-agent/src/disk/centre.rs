@@ -514,9 +514,9 @@ impl DiskCentre {
             // The last answer now; the system is asked again in the background for the next call.
             Some(k) => {
                 self.refresh_in_background();
-                k.into_iter().map(|l| l.volume).collect()
+                k.into_iter().map(|l| self.stamped(l.volume)).collect()
             }
-            None => self.refresh().into_iter().map(|l| l.volume).collect(),
+            None => self.refresh().into_iter().map(|l| self.stamped(l.volume)).collect(),
         }
     }
 
@@ -531,7 +531,14 @@ impl DiskCentre {
         } else if self.age_ms().is_some_and(|age| age > OPEN_FRESH_MS) {
             self.read_space_in_background("page");
         }
-        known.map(|k| k.into_iter().map(|l| l.volume).collect())
+        known.map(|k| k.into_iter().map(|l| self.stamped(l.volume)).collect())
+    }
+
+    /// The volume as handed out: with how old its figures are against the refresh interval (the views say so; the rule is not theirs).
+    fn stamped(&self, mut v: Volume) -> Volume {
+        let secs = u32::try_from(self.space_secs.load(Ordering::Relaxed)).unwrap_or(u32::MAX);
+        v.freshness = dyno_core::disk::volume::freshness(v.measured_at, self.clock.wall_ms(), secs);
+        v
     }
 
     /// Milliseconds since the figures were last read; `None` when they never were.
@@ -624,7 +631,7 @@ impl DiskCentre {
                     None => {}
                 }
             }
-            (changed, known.iter().map(|l| l.volume.clone()).collect::<Vec<_>>())
+            (changed, known.iter().map(|l| self.stamped(l.volume.clone())).collect::<Vec<_>>())
         };
         *lock(&self.space_at) = Some(now);
         log::info!(
@@ -713,7 +720,8 @@ impl DiskCentre {
             began.elapsed().as_millis()
         );
         if changed {
-            self.sink.volumes_changed(ticket, listed.iter().map(|l| l.volume.clone()).collect());
+            self.sink
+                .volumes_changed(ticket, listed.iter().map(|l| self.stamped(l.volume.clone())).collect());
         }
         listed
     }
@@ -1482,6 +1490,7 @@ mod tests {
                 reachable: true,
                 whole_volume: !network,
                 measured_at: None,
+                freshness: Default::default(),
             },
             root: root.to_path_buf(),
             identity: None,
@@ -1640,6 +1649,25 @@ mod tests {
             Some(1_700_000_061_000),
             "stamped with the clock"
         );
+    }
+
+    /// The volumes are handed out with how old their figures are, against the Setting's interval.
+    #[test]
+    fn volumes_are_handed_out_with_their_freshness() {
+        use dyno_core::disk::volume::Freshness;
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        let at = |ms: u64| {
+            r.clock.0.store(ms, Ordering::SeqCst);
+            let v = lock(&r.centre.known).clone().unwrap()[0].volume.clone();
+            r.centre.stamped(v).freshness
+        };
+        assert_eq!(at(119_000), Freshness::Fresh);
+        assert_eq!(at(121_000), Freshness::Late);
+        assert_eq!(at(301_000), Freshness::Stale);
+        r.centre.set_space_refresh(600);
+        assert_eq!(at(301_000), Freshness::Fresh, "the interval is the Setting's");
     }
 
     /// The ticker reads the figures at the interval, with nobody asking.

@@ -8,6 +8,7 @@ import type { AlarmRow, AppRow, CounterRow, IssueValue, Level, Page, PopoverValu
 import { FullTextTip } from '../../../shared/full-text-tip';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../../shared/format';
 import { volumeSpaceText } from './popover-meta';
+import { volumeAgeNote, volumeIsGreyed } from '../../../shared/volume-state';
 import { formatCounter } from '../../counters/counters-model';
 import { SPARK_CAPACITY } from '../../../state/live.store';
 
@@ -18,7 +19,7 @@ const LEVEL_WORD: Record<Level, string> = { info: 'Info', warning: 'Warning', cr
 
 /** Shapes drawn while a widget is loading: the same rows as a ready one, so the heights agree (their text is hidden). */
 const SK_ALARMS: AlarmRow[] = [1, 2].map((id) => ({ id, title: 'Memory pressure is high', level: 'warning', since: 0, acknowledged: false }));
-const SK_VOLUMES: VolumeRow[] = [1, 2, 3].map((n) => ({ id: `${n}`, name: 'Macintosh HD', usedPercent: 50, freeBytes: 1, totalBytes: 2, tone: 'ok', reachable: true }));
+const SK_VOLUMES: VolumeRow[] = [1, 2, 3].map((n) => ({ id: `${n}`, name: 'Macintosh HD', usedPercent: 50, freeBytes: 1, totalBytes: 2, tone: 'ok', reachable: true, measuredAt: null, freshness: 'fresh' }));
 const SK_COUNTERS: CounterRow[] = [1, 2, 3, 4].map((n) => ({ path: `${n}`, name: 'GPU memory in use', value: 1, unit: 'bytes', percent: null, tone: 'ok' }));
 const SK_APPS: AppRow[] = [1, 2, 3].map((n) => ({ name: `App ${n}`, cpuPercent: 10 }));
 const SK_ISSUE: IssueValue = { title: 'Disk write errors on disk4', app: '', kind: '', level: 'warning', at: 0, days: 7 };
@@ -57,10 +58,10 @@ const SK_ISSUE: IssueValue = { title: 'Disk write errors on disk4', app: '', kin
       @let d = disks(value);
       <ul class="dy-pw-list dy-pw-scroll" tabindex="0" aria-label="Volumes">
         @for (v of d?.rows ?? skVolumes; track v.id) {
-          <li class="dy-pw-vol" [attr.data-tone]="v.tone">
+          <li class="dy-pw-vol" [attr.data-tone]="v.tone" [attr.data-stale]="greyed(v) ? 'true' : null">
             <span class="dy-pw-vname"><span class="dy-pw-grow" pdSkeleton>{{ v.name }}</span>
-              @if (v.tone !== 'ok') { <span class="dy-pw-flag" [attr.data-tone]="v.tone"><pd-status-glyph [status]="v.tone === 'bad' ? 'error' : 'warning'" [size]="14" />{{ v.tone === 'bad' ? 'Full' : 'Low' }}</span> }
-              <span class="dy-pw-muted" pdSkeleton>{{ !v.reachable ? 'Not answering' : v.freeBytes === null ? 'Unavailable' : free(v) }}</span></span>
+              @if (v.tone !== 'ok' && !greyed(v)) { <span class="dy-pw-flag" [attr.data-tone]="v.tone"><pd-status-glyph [status]="v.tone === 'bad' ? 'error' : 'warning'" [size]="14" />{{ v.tone === 'bad' ? 'Full' : 'Low' }}</span> }
+              <span class="dy-pw-muted" pdSkeleton>{{ !v.reachable ? note(v) : v.freeBytes === null ? 'Unavailable' : free(v) }}@if (v.reachable && note(v); as n) { · {{ n }} }</span></span>
             <span class="dy-pw-meter" role="img" [attr.aria-label]="v.usedPercent === null ? 'Used space unavailable' : pct(v.usedPercent) + ' used'" pdSkeleton><i [style.width.%]="v.usedPercent ?? 0"></i></span>
           </li>
         }
@@ -157,6 +158,7 @@ const SK_ISSUE: IssueValue = { title: 'Disk write errors on disk4', app: '', kin
     .dy-pw-lvl[data-level='info'] { background: var(--pd-info-tint); } .dy-pw-lvl[data-level='warning'], .dy-pw-flag[data-state='stale'] { background: var(--pd-warning-tint); }
     .dy-pw-lvl[data-level='critical'] { background: var(--pd-danger-tint); } .dy-pw-flag[data-state='healthy'] { background: var(--pd-success-tint); }
     .dy-pw-vol { display: grid; gap: 4px; }
+    .dy-pw-vol[data-stale='true'] { opacity: 0.6; }
     .dy-pw-vname { display: flex; align-items: center; gap: 8px; }
     .dy-pw-meter { display: block; height: 4px; border-radius: 2px; background: var(--pd-surface-3); overflow: hidden; }
     .dy-pw-meter i { display: block; height: 100%; background: var(--pd-meter-neutral); }
@@ -219,6 +221,8 @@ export class DynoPopoverWidgets {
   protected rate(bps: number): [string, string] {
     return splitValue(formatRate(bps));
   }
+  protected readonly note = volumeAgeNote;
+  protected readonly greyed = volumeIsGreyed;
   protected free(v: VolumeRow): string {
     return volumeSpaceText(v.freeBytes, v.totalBytes);
   }

@@ -2,6 +2,7 @@ import type { PdSunburstNode } from '@decryp7/paddock-ui/chart';
 import type { DiskChildren, DiskNode, RingNode, DiskScanStatus, ScanFailure, ScanProgress, ScanState, Volume } from '../../core/api.types';
 import { formatStorage, formatCount, formatDuration, plural } from '../../shared/format';
 import type { WindowPlatform } from '../../core/platform';
+import { volumeAgeNote } from '../../shared/volume-state';
 
 /**
  * Presentation helpers of the disk map. The engine owns every size, count and state; this file only turns what it sent into
@@ -31,11 +32,16 @@ export function volumeMeta(v: Volume): string {
   return `${NETWORK_NAME[v.location.network.protocol] ?? 'Network'} network volume`;
 }
 
-/** "Free space not reported" or "378.2 GB free" (a share's is the server's: "of the server"). */
+/**
+ * "Free space not reported" or "378.2 GB free" (a share's is the server's: "on the server"); figures that are not current say
+ * so: "378.2 GB free · As of 14:05", "Not answering since 14:05".
+ */
 export function volumeFree(v: Volume): string {
-  if (!v.reachable) return 'Not answering';
+  if (!v.reachable) return volumeAgeNote(v) ?? 'Not answering';
   if (v.free === null) return 'Free space not reported';
-  return v.wholeVolume ? `${formatStorage(v.free)} free` : `${formatStorage(v.free)} free on the server`;
+  const free = v.wholeVolume ? `${formatStorage(v.free)} free` : `${formatStorage(v.free)} free on the server`;
+  const note = volumeAgeNote(v);
+  return note ? `${free} · ${note}` : free;
 }
 
 /** The share (0 to 100) of `part` in `whole`; 0 when the whole is empty. */

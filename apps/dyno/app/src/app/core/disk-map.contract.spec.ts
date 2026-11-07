@@ -19,6 +19,7 @@ const internal: Volume = {
   reachable: true,
   wholeVolume: true,
   measuredAt: null,
+  freshness: 'fresh',
 };
 const usb: Volume = { ...internal, id: 'Photos', name: 'Photos', mount: '/Volumes/Photos', location: { external: { bus: 'USB' } } };
 const share: Volume = { ...internal, id: 'Media', name: 'Media', mount: '/Volumes/Media', location: { network: { protocol: 'webDav', host: 'nas.local' } }, wholeVolume: false };
