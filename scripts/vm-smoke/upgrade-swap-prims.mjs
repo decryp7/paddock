@@ -36,7 +36,7 @@ export function macSwapPrimitives({ guest, gui, check, share, bundle, beforeDmg 
       return { oldVersion, helperWasOn: on.status === 'pass' };
     },
     async newVersion() {
-      const r = await exec(`hdiutil attach -nobrowse -readonly -mountpoint /tmp/vmsmoke-swap ${sq(`${share}/${afterDmg}`)} >/dev/null 2>&1; defaults read /tmp/vmsmoke-swap/*.app/Contents/Info CFBundleShortVersionString; hdiutil detach /tmp/vmsmoke-swap >/dev/null 2>&1`);
+      const r = await exec(`hdiutil detach /tmp/vmsmoke-swap >/dev/null 2>&1; mkdir -p /tmp/vmsmoke-swap; hdiutil attach -nobrowse -readonly -mountpoint /tmp/vmsmoke-swap ${sq(`${share}/${afterDmg}`)} >/dev/null 2>&1; defaults read /tmp/vmsmoke-swap/*.app/Contents/Info CFBundleShortVersionString; hdiutil detach /tmp/vmsmoke-swap >/dev/null 2>&1`);
       return versionOf(r.stdout);
     },
     async buildId() { return (await exec(`shasum -a 256 ${sq(bin('dyno-agent'))} | cut -c1-64`)).stdout.trim() || null; },
