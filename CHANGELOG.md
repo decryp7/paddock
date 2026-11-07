@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-service`: the app's own login item per OS, the first run and the old launch agent are shared (from Dyno)
+- New `login::AppItem` (an app's login item described once: name, XDG file stem, `Run` value, arguments) with `for_this_os` (`MainAppItem` on macOS, `UserRunEntry` on Windows, `XdgAutostart` elsewhere; the app passes its executable, its environment and the `System`), `xdg` and `windows_run`; `login::xdg_config_dir` (an absolute `$XDG_CONFIG_HOME`, else `~/.config`); `login::UnavailableItem` (refuses every change with its reason).
+- New `login::apply_first_run_with` and `login::FirstRun`: the first sight of the settings with the switch on and no `FirstRunMarker` registers once; an off switch only leaves the marker; a failure leaves none.
+- New `login::LegacyLaunchAgent` and `login::LegacyPlist`: recognises exactly the `~/Library/LaunchAgents/<App>.plist` that `tauri-plugin-autostart` wrote, deletes only that file and registers the new item in its place (`migrate`).
+- Moved from Dyno (`login.rs`, `login_item.rs`), which now uses them; Dyno's behaviour is unchanged. The register's two Dyno copies of `launch-at-login` are removed.
+
 ### `@decryp7/paddock-ui`: the status chip has words for Dyno's update and agent-mismatch causes
 - `service-status-text.ts`: `dy.setup.updated` is now `dy.update.restart` ("updated: restart to finish"); new `dy.agent.other-build-returns` ("another build keeps starting") and `dy.agent.mismatch` ("needs a reinstall"). The planner marks ui when an app's `src-tauri/src/**/*.rs` changes, since `cause-codes.spec.ts` scans those sources against the table.
 
