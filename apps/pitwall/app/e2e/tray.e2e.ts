@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { openApp, settingsDialog } from './app';
 
 /** The popover is 360 px wide inside a 6 px margin; the shell fits the window to it, up to the family's 520 px cap. */
@@ -17,6 +17,27 @@ async function openTray(page: Page, scenario: 'demo' | 'empty' | 'worst' | 'down
   return popup;
 }
 
+/** Every text in the popup's widgets that runs past its widget's padding or is cut without an ellipsis, as "widget: element what". */
+async function textOutOfWidgets(popup: Locator): Promise<string[]> {
+  return popup.locator('section.pd-w').evaluateAll((sections) =>
+    sections.flatMap((s) => {
+      const frame = s.getBoundingClientRect();
+      const pad = parseFloat(getComputedStyle(s).paddingRight) || 0;
+      const title = s.querySelector('.pd-w-title')?.textContent?.trim();
+      // Elements that hold text themselves (a non-blank text node as a child).
+      const texts = Array.from(s.querySelectorAll('*')).filter((e) => Array.from(e.childNodes).some((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.trim() !== ''));
+      return texts.flatMap((e) => {
+        const r = e.getBoundingClientRect();
+        const cs = getComputedStyle(e);
+        const out: string[] = [];
+        if (r.width > 0 && r.right > frame.right - pad + 1) out.push('past the frame padding');
+        if (cs.textOverflow !== 'ellipsis' && cs.display !== 'contents' && e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0) out.push('scrolls sideways');
+        return out.map((w) => `${title}: ${e.className || e.tagName} ${w}`);
+      });
+    }),
+  );
+}
+
 test.describe('the tray popup', () => {
   // The default popup fits the family's 520 px cap whole, with nothing to scroll, in every state, the worst included. A layout
   // that grows past the cap fails here (the numbers are measured, not assumed).
@@ -32,36 +53,33 @@ test.describe('the tray popup', () => {
   }
 
   // Text must stay inside its widget in every state, also with another font: the letter-spacing widening makes every text about
-  // 6 % wider, as a wider system font would (Windows), so a fit that is only a pixel or two away fails here too. A text that
-  // is truncated on purpose (ellipsis) is allowed to be scrolled; any other text must not overflow its box or the frame's padding.
+  // 6 % wider, as a wider system font would (Windows), so a fit that is only a pixel or two away fails here too. What is checked
+  // is every element that holds text itself, not the boxes around it: the shared frame's body and a row's hover tint reach past
+  // the padding on purpose (paddock-ui's `.pd-w-body` bleed, ADR 0044), and their containers then measure that bleed as
+  // overflow, which is no text running out. A text truncated on purpose (ellipsis) may be scrolled.
   for (const scenario of ['demo', 'empty', 'worst', 'down'] as const) {
     test(`no text runs out of its widget, with a wider font too: ${scenario}`, async ({ page }) => {
       const popup = await openTray(page, scenario);
       await page.addStyleTag({ content: '* { letter-spacing: 0.06em !important; }' });
       await page.evaluate(async () => document.fonts.ready);
-      const bad = await popup.locator('section.pd-w').evaluateAll((sections) =>
-        sections.flatMap((s) => {
-          const frame = s.getBoundingClientRect();
-          const pad = parseFloat(getComputedStyle(s).paddingRight) || 0;
-          const title = s.querySelector('.pd-w-title')?.textContent;
-          return Array.from(s.querySelectorAll('*')).flatMap((e) => {
-            const r = e.getBoundingClientRect();
-            const cs = getComputedStyle(e);
-            const out: string[] = [];
-            // A row's hover box reaches past the padding on purpose; its texts are checked below.
-            const hoverBox = /(^|\s)(row|rows)(\s|$)/.test(String(e.className)) || e.tagName === 'LI';
-            if (!hoverBox && r.width > 0 && r.right > frame.right - pad + 1) out.push('past the frame padding');
-            if (!hoverBox && cs.textOverflow !== 'ellipsis' && cs.display !== 'contents' && e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0) out.push('scrolls sideways');
-            return out.map((w) => `${title}: ${e.className || e.tagName} ${w}`);
-          });
-        }),
-      );
-      expect(bad).toEqual([]);
+      expect(await textOutOfWidgets(popup)).toEqual([]);
       // The main word of a widget (its state, its figure) is never cut, not even by the ellipsis kept as a safety net.
       const cut = await popup.locator('section.pd-w .big').evaluateAll((els) => els.filter((e) => e.scrollWidth > e.clientWidth).map((e) => e.textContent!.trim()));
       expect(cut, 'no main word is truncated').toEqual([]);
     });
   }
+
+  // The check above sees a text that runs out (a positive control, ER-33): a title wider than its widget and a figure clipped
+  // without an ellipsis are both reported.
+  test('the text check reports a text past the frame and a clipped text', async ({ page }) => {
+    const popup = await openTray(page, 'demo');
+    await page.addStyleTag({
+      content: 'section.pd-w .pd-w-title { white-space: nowrap; min-width: 600px; } section.pd-w .big { width: 4px; overflow: hidden; text-overflow: clip; white-space: nowrap; }',
+    });
+    const bad = await textOutOfWidgets(popup);
+    expect(bad.some((b) => b.endsWith('past the frame padding')), bad.join('\n')).toBe(true);
+    expect(bad.some((b) => b.endsWith('scrolls sideways')), bad.join('\n')).toBe(true);
+  });
 
   // The loading twin is the ready widget: same rows (the engine's shape), so the popup does not jump when the values arrive.
   test('each widget is as tall while loading as when ready (the engine says how many rows)', async ({ page }) => {
