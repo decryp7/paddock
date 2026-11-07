@@ -49,6 +49,31 @@ pub enum Restart {
     OnFailure,
 }
 
+/// What systemd ends when it stops the unit (`KillMode=`). Only systemd reads it; launchd and Windows ignore it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillMode {
+    /// Every process of the unit's control group (systemd's default).
+    ControlGroup,
+    /// The main process gets SIGTERM, the rest of the group SIGKILL.
+    Mixed,
+    /// Only the main process: the children it started live on.
+    Process,
+    /// No process is ended (the stop command must do it).
+    None,
+}
+
+impl KillMode {
+    /// The systemd value.
+    pub fn systemd(self) -> &'static str {
+        match self {
+            KillMode::ControlGroup => "control-group",
+            KillMode::Mixed => "mixed",
+            KillMode::Process => "process",
+            KillMode::None => "none",
+        }
+    }
+}
+
 /// The longest label, bundle id or name part.
 pub const MAX_NAME: usize = 128;
 /// The longest display name or description.
@@ -79,6 +104,7 @@ pub struct ServiceSpec {
     docs_url: Option<String>,
     hardening: Option<Hardening>,
     windows_start: WindowsStart,
+    kill_mode: Option<KillMode>,
 }
 
 impl ServiceSpec {
@@ -106,6 +132,7 @@ impl ServiceSpec {
                 docs_url: None,
                 hardening: None,
                 windows_start: WindowsStart::Delayed,
+                kill_mode: None,
             },
         }
     }
@@ -186,6 +213,10 @@ impl ServiceSpec {
     /// The documentation link (systemd `Documentation=`).
     pub fn docs_url(&self) -> Option<&str> {
         self.docs_url.as_deref()
+    }
+    /// What systemd ends when it stops the unit; `None`: systemd's own default, no `KillMode=` line.
+    pub fn kill_mode(&self) -> Option<KillMode> {
+        self.kill_mode
     }
     /// What a privileged service gives up (Windows token privileges, who may start it, the systemd sandbox).
     pub fn hardening(&self) -> Option<&Hardening> {
@@ -287,6 +318,11 @@ impl SpecBuilder {
     /// A soft memory limit in MiB (systemd `MemoryHigh=`; 16 to 65536).
     pub fn memory_high_mb(mut self, mb: u32) -> Self {
         self.spec.memory_high_mb = Some(mb);
+        self
+    }
+    /// What systemd ends when it stops the unit (`KillMode=`; default: not written, systemd's own default applies).
+    pub fn kill_mode(mut self, mode: KillMode) -> Self {
+        self.spec.kill_mode = Some(mode);
         self
     }
     /// The documentation link (`https://` only).

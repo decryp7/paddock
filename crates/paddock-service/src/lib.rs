@@ -135,7 +135,7 @@ pub use plan::{Hold, Plan, Reason, Refusal, ResumePath};
 pub use port::{AppService, AppServiceStatus, Elevator, Output, RegisterError, RunError, System};
 pub use repair::{RepairOutcome, Step, Timings};
 pub use service_main::{Context, Hosting, Outcome, ServiceExit, ServiceMainError, service_main};
-pub use spec::{Kind, ProcessType, Restart, ServiceSpec, SpecBuilder, WindowsStart};
+pub use spec::{KillMode, Kind, ProcessType, Restart, ServiceSpec, SpecBuilder, WindowsStart};
 pub use status::{Condition, HealthReport, LOGIN_SECTION, ServiceStatus};
 pub use system::RealSystem;
 pub use tracker::{RepairNotice, RepairState, RepairTracker};
