@@ -47,6 +47,8 @@ export function judgeDisk(f) {
     if (dec) { const bytes = p.free * 1000 ** POW[p.freeUnit]; const rel = Math.abs(bytes - d.freeBytes) / d.freeBytes; checks.push(chk(rel <= 0.06, `the printed figure ${p.free} ${p.freeUnit} is the JSON ${d.freeBytes} bytes in 10^3 steps (${(rel * 100).toFixed(1)} % off, rounding allowed)`)); }
   }
   const w = f.writeBytes ?? WRITE_BYTES;
+  // Control: the OS's own figure must have fallen by the write, else the write did not take space and a Dyno that does not move is not at fault.
+  if (Number.isFinite(f.osAfterWrite) && Number.isFinite(f.osBaseline)) checks.push(chk(f.osBaseline - f.osAfterWrite >= w * 0.9, `control: the OS figure fell by ${f.osBaseline - f.osAfterWrite} bytes right after the ${w}-byte write`, 'check'));
   if (Number.isFinite(f.afterWriteFree)) {
     const drop = f.baselineFree - f.afterWriteFree;
     checks.push(chk(drop >= w * 0.9 && f.writeSecs <= 60, drop >= w * 0.9 ? `after writing ${w} bytes Dyno's free figure fell by ${drop} bytes after ${f.writeSecs} s (limit 60 s)` : `after ${f.writeSecs} s Dyno's free figure fell by only ${drop} bytes for a ${w}-byte write (needs at least ${Math.round(w * 0.9)})`));
@@ -80,12 +82,13 @@ export async function diskSpaceStep({ exec, sleep, now, adapter }) {
     const baselineFree = freeOf((await read())) ?? freeOf(disks);
     const w0 = await exec(adapter.writeCmd);
     if (w0.code !== 0 || (adapter.writeOkPattern && !adapter.writeOkPattern.test(w0.stdout))) throw new Error(`writing the 1 GB file failed: ${String(w0.stdout).trim().slice(-160)}`);
+    const osAfterWrite = (await adapter.osFree(exec)).bytes;
     const t0 = now(); let afterWriteFree = NaN, writeSecs = NaN;
     for (;;) { afterWriteFree = freeOf(await read()); writeSecs = Math.round((now() - t0) / 1000); if (baselineFree - afterWriteFree >= WRITE_BYTES * 0.9 || now() - t0 >= REFRESH_WAIT_MS) break; await sleep(3000); }
     await exec(adapter.deleteCmd);
     const t1 = now(); let afterDeleteFree = NaN, deleteSecs = NaN;
     for (;;) { afterDeleteFree = freeOf(await read()); deleteSecs = Math.round((now() - t1) / 1000); if (afterDeleteFree - afterWriteFree >= WRITE_BYTES * 0.9 || now() - t1 >= REFRESH_WAIT_MS) break; await sleep(3000); }
-    const checks = judgeDisk({ disks, volumeName, osFreeBytes: os.bytes, osSource: os.source, osAltFreeBytes: alt?.bytes, osAltSource: alt?.source, statusText, baselineFree, afterWriteFree, writeSecs, afterDeleteFree, deleteSecs });
+    const checks = judgeDisk({ disks, volumeName, osFreeBytes: os.bytes, osSource: os.source, osAltFreeBytes: alt?.bytes, osAltSource: alt?.source, statusText, baselineFree, afterWriteFree, writeSecs, afterDeleteFree, deleteSecs, osBaseline: os.bytes, osAfterWrite });
     return makeResult(TITLE_DISK, checks, [`OS: ${os.source} ${os.bytes}`, `status: ${statusText.split('\n').filter((l) => /^\s*Disk/.test(l)).join(' | ')}`], 'the disk figures match the OS, use decimal units and follow a 1 GB write and delete within 60 s');
   } catch (e) {
     await exec(adapter.deleteCmd).catch(() => {});
@@ -120,7 +123,8 @@ export function windowsAdapter({ ssh, dyno = 'C:\\Program Files\\Dyno\\dyno.exe'
     statusJsonCmd: `& '${dyno}' status --json 2>$null`, statusTextCmd: `& '${dyno}' status 2>$null`,
     writeCmd: `$f=[IO.File]::Create('${tmp}'); $b=New-Object byte[] 1000000; for($i=0;$i -lt 1000;$i++){$f.Write($b,0,$b.Length)}; $f.Flush($true); $f.Close(); 'WROTE'`,
     deleteCmd: `Remove-Item '${tmp}' -Force -ErrorAction SilentlyContinue`,
-    async osFree(exec) { return { bytes: num((await exec(`(Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'").FreeSpace`)).stdout), source: 'Explorer (Win32_LogicalDisk C:)' }; },
+    // Explorer's figure is the volume's free bytes (GetDiskFreeSpaceEx); Get-Volume and Get-PSDrive read the same.
+    async osFree(exec) { return { bytes: num((await exec(`(Get-Volume -DriveLetter C).SizeRemaining`)).stdout), source: 'Explorer (Get-Volume C:)' }; },
     async osAlt(exec) { return { bytes: num((await exec(`(Get-PSDrive C).Free`)).stdout), source: 'Get-PSDrive C' }; },
   };
 }

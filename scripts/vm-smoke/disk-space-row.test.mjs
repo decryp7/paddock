@@ -29,7 +29,7 @@ test('the step runs against a fake guest', async () => {
     if (c === 'del') { free += GB; return { code: 0, stdout: '' }; }
     return { code: 0, stdout: '' };
   };
-  const adapter = { volumeName: '/', statusJsonCmd: 'json', statusTextCmd: 'text', writeCmd: 'write', deleteCmd: 'del', osFree: async () => ({ bytes: 50 * GB, source: 'fake' }) };
+  const adapter = { volumeName: '/', statusJsonCmd: 'json', statusTextCmd: 'text', writeCmd: 'write', deleteCmd: 'del', osFree: async () => ({ bytes: free, source: 'fake' }) };
   const r = await diskSpaceStep({ exec, sleep: async (ms) => { t += ms; }, now: () => t, adapter });
   assert.equal(r.title, TITLE_DISK);
   assert.equal(r.status, 'pass');

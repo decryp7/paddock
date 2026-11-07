@@ -45,7 +45,8 @@ export async function quitViaMenu(browser) {
   const checks = [];
   let label = null;
   const clicked = await main?.evaluate(async () => {
-    const pick = () => [...document.querySelectorAll('[role=menuitem]')].find((e) => /^Quit Dyno( \(keeps measuring\))?$/.test(e.textContent.trim()));
+    // Item text may carry an icon ligature or a shortcut hint: match the label inside, never "Quit and stop measuring" (its own row).
+    const pick = () => [...document.querySelectorAll('[role=menuitem]')].find((e) => /(^|\s)(Quit Dyno|Exit)( \(keeps measuring\))?(\s|$)/.test(e.textContent.trim()) && !/stop/i.test(e.textContent));
     if (!pick()) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File')?.click(); await new Promise((r) => setTimeout(r, 600)); }
     const it = pick();
     if (!it) return null;
@@ -54,7 +55,8 @@ export async function quitViaMenu(browser) {
     return text;
   }).catch(() => 'Quit Dyno'); // the page goes away with the app
   label = clicked;
-  checks.push({ ok: Boolean(clicked), detail: clicked ? `File > "${clicked}" pressed` : 'no "Quit Dyno" / "Quit Dyno (keeps measuring)" item under File' });
+  const labels = clicked ? [] : await main?.evaluate(() => [...document.querySelectorAll('[role=menuitem]')].map((e) => e.textContent.trim())).catch(() => []);
+  checks.push({ ok: Boolean(clicked), detail: clicked ? `File > "${clicked}" pressed` : `no "Quit Dyno" / "Quit Dyno (keeps measuring)" item under File; the menu items read: ${JSON.stringify(labels)}` });
   const count = (names) => Number(ssh(`(Get-Process ${names} -ErrorAction SilentlyContinue | Measure-Object).Count`));
   let app = NaN;
   for (let i = 0; i < 8; i++) { // condition wait, up to 15 s
