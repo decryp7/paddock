@@ -60,9 +60,22 @@ pub struct Updates {
     jobs: Arc<JobRegistry>,
     pool: Arc<JobPool>,
     stopped: Arc<AtomicBool>,
+    /// Test seam: runs right after a job is spawned, so a test can let the job finish before the command replies.
+    #[cfg(test)]
+    after_spawn: std::sync::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Updates {
+    #[cfg(test)]
+    fn spawned(&self) {
+        let hook = self.after_spawn.lock().unwrap().clone();
+        if let Some(h) = hook {
+            h();
+        }
+    }
+    #[cfg(not(test))]
+    fn spawned(&self) {}
+
     /// Stops the background thread at its next wake-up (at exit; tests).
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::SeqCst);
@@ -87,6 +100,7 @@ impl Updates {
             self.updater.abandon(ticket);
             return Ok(self.updater.status());
         }
+        self.spawned();
         Ok(started)
     }
 
@@ -117,6 +131,7 @@ impl Updates {
             self.updater.abandon(ticket);
             return Ok(self.updater.status());
         }
+        self.spawned();
         Ok(started)
     }
 
@@ -416,6 +431,8 @@ pub fn install<R: Runtime>(
         jobs: paddock_jobs::tauri::manage(app),
         pool: Arc::new(JobPool::new(Workers::new(2))),
         stopped: Arc::new(AtomicBool::new(false)),
+        #[cfg(test)]
+        after_spawn: std::sync::Mutex::new(None),
     });
     app.manage(updates.clone());
     log::info!(Available = available; "Updates are {}", if available { "available" } else { "not available in this build" });
