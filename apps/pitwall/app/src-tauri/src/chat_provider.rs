@@ -14,11 +14,13 @@
 use crate::server_client::{FrameStream, ServerClient};
 use paddock_assistant::protocol::{DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE};
 use paddock_assistant::{
-    Cancel, ChatMessage, ChatRequest, ChatResponse, ConversationStore, LlmProvider, ProviderError, Role, StopReason, ToolCall, Usage,
+    Cancel, ChatMessage, ChatRequest, ChatResponse, ConversationStore, LlmProvider, ProviderError, ProviderPhase, Role, StopReason,
+    ToolCall, Usage,
 };
 use pitwall_core::chat::Role as WireRole;
 use pitwall_core::mgmt::{
-    PlaygroundEvent, PlaygroundFinish, PlaygroundMessage, PlaygroundRequest, PlaygroundTool, PlaygroundToolCall, PlaygroundToolChoice,
+    PlaygroundEvent, PlaygroundFinish, PlaygroundMessage, PlaygroundPhase, PlaygroundRequest, PlaygroundTool, PlaygroundToolCall,
+    PlaygroundToolChoice,
 };
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -136,10 +138,18 @@ enum Step {
 }
 
 impl Answer {
-    fn fold(&mut self, event: PlaygroundEvent, on_delta: &mut dyn FnMut(&str)) -> Step {
+    fn fold(&mut self, event: PlaygroundEvent, on_delta: &mut dyn FnMut(&str), on_phase: &mut dyn FnMut(ProviderPhase)) -> Step {
         match event {
-            // Loading and generating are for the Chat tab's labels; reasoning is not part of the visible answer.
-            PlaygroundEvent::Phase { .. } | PlaygroundEvent::Reasoning { .. } => Step::More,
+            // Loading and generating are the Chat tab's live label (ER-18).
+            PlaygroundEvent::Phase { phase } => {
+                on_phase(match phase {
+                    PlaygroundPhase::Loading { elapsed_ms } => ProviderPhase::Loading { elapsed_ms },
+                    PlaygroundPhase::Generating => ProviderPhase::Generating,
+                });
+                Step::More
+            }
+            // Reasoning is not part of the visible answer.
+            PlaygroundEvent::Reasoning { .. } => Step::More,
             PlaygroundEvent::Delta { text } => {
                 on_delta(&text);
                 self.text.push_str(&text);
@@ -220,10 +230,19 @@ impl LlmProvider for ServerChatProvider {
     }
 
     fn chat(&self, req: &ChatRequest, on_delta: &mut dyn FnMut(&str)) -> Result<ChatResponse, ProviderError> {
+        self.chat_phased(req, on_delta, &mut |_| {})
+    }
+
+    fn chat_phased(
+        &self,
+        req: &ChatRequest,
+        on_delta: &mut dyn FnMut(&str),
+        on_phase: &mut dyn FnMut(ProviderPhase),
+    ) -> Result<ChatResponse, ProviderError> {
         let model = self.model();
         let started = std::time::Instant::now();
         log::info!(target: "pitwall_chat", "model call started: model {model}, {} messages, {} tools", req.messages.len(), req.tools.len());
-        let result = self.run(&model, req, on_delta);
+        let result = self.run(&model, req, on_delta, on_phase);
         let ms = started.elapsed().as_millis();
         match &result {
             Ok(r) => log::info!(
@@ -242,7 +261,13 @@ impl LlmProvider for ServerChatProvider {
 
 impl ServerChatProvider {
     /// One model call, without its log lines (see [`LlmProvider::chat`]).
-    fn run(&self, model: &str, req: &ChatRequest, on_delta: &mut dyn FnMut(&str)) -> Result<ChatResponse, ProviderError> {
+    fn run(
+        &self,
+        model: &str,
+        req: &ChatRequest,
+        on_delta: &mut dyn FnMut(&str),
+        on_phase: &mut dyn FnMut(ProviderPhase),
+    ) -> Result<ChatResponse, ProviderError> {
         let body = playground_request(model, req)?;
         let body = serde_json::to_value(&body).map_err(|e| ProviderError::Failed(format!("The app built an unusable request ({e}).")))?;
         let cancel = req.cancel.clone();
@@ -270,7 +295,7 @@ impl ServerChatProvider {
                         "Pitwall's server sent an answer this app does not understand. Update both to the same release.".into(),
                     )
                 })?;
-                if let Step::Finished(done) = answer.fold(event, on_delta) {
+                if let Step::Finished(done) = answer.fold(event, on_delta, on_phase) {
                     return done;
                 }
             }
@@ -397,6 +422,44 @@ mod tests {
         p.set_model("other");
         p.set_context_length(4096);
         assert_eq!((p.display_name().as_str(), p.context_length()), ("Pitwall (other)", 4096));
+    }
+
+    /// The Chat tab's live label (ER-18): the server's load and generate phases reach the assistant as provider phases,
+    /// before the first word.
+    #[test]
+    fn the_servers_phases_reach_the_chat_before_the_words() {
+        let rt = runtime();
+        let server = Arc::new(FakeServer::new());
+        server.stream(Ok(vec![
+            frame(&PlaygroundEvent::Phase {
+                phase: PlaygroundPhase::Loading { elapsed_ms: 0 },
+            }),
+            frame(&PlaygroundEvent::Phase {
+                phase: PlaygroundPhase::Loading { elapsed_ms: 1200 },
+            }),
+            frame(&PlaygroundEvent::Phase {
+                phase: PlaygroundPhase::Generating,
+            }),
+            frame(&PlaygroundEvent::Delta { text: "Hi".into() }),
+            frame(&done(PlaygroundFinish::Stop)),
+        ]));
+        let p = provider(server, &rt);
+        let seen = std::cell::RefCell::new(Vec::new());
+        let out = p
+            .chat_phased(&request(), &mut |d| seen.borrow_mut().push(format!("delta {d}")), &mut |ph| {
+                seen.borrow_mut().push(format!("{ph:?}"))
+            })
+            .unwrap();
+        assert_eq!(out.text, "Hi");
+        assert_eq!(
+            *seen.borrow(),
+            [
+                "Loading { elapsed_ms: 0 }",
+                "Loading { elapsed_ms: 1200 }",
+                "Generating",
+                "delta Hi"
+            ]
+        );
     }
 
     #[test]
