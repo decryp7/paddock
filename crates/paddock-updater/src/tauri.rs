@@ -75,6 +75,8 @@ impl Updates {
             .jobs
             .register("update-check", "Checking for updates", None);
         self.updater.set_job(ticket, ctx.id().0);
+        // Taken before the job can run: once spawned it may finish (and change the phase) before this returns.
+        let started = self.updater.status();
         let updater = self.updater.clone();
         if self
             .pool
@@ -83,8 +85,9 @@ impl Updates {
         {
             self.jobs.cancel(ctx.id());
             self.updater.abandon(ticket);
+            return Ok(self.updater.status());
         }
-        Ok(self.updater.status())
+        Ok(started)
     }
 
     /// Starts downloading the update found as a job; returns the status (Downloading with its job) at once.
@@ -102,6 +105,8 @@ impl Updates {
             .jobs
             .register("update-download", "Downloading the update", Some(&version));
         self.updater.set_job(ticket, ctx.id().0);
+        // Taken before the job can run, as in `start_check`.
+        let started = self.updater.status();
         let updater = self.updater.clone();
         if self
             .pool
@@ -110,8 +115,9 @@ impl Updates {
         {
             self.jobs.cancel(ctx.id());
             self.updater.abandon(ticket);
+            return Ok(self.updater.status());
         }
-        Ok(self.updater.status())
+        Ok(started)
     }
 
     /// Cancels the check or download in flight (its job), or drops a verified download.
