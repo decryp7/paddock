@@ -10,7 +10,12 @@ pub enum JobError {
     /// The work failed; the text says what to fix.
     Failed(String),
     /// A limit stopped the work. The type is kept so the job's failure can offer the remedy (ADR 0019).
-    Limit(LimitExceeded),
+    Limit {
+        /// The limit, as a type.
+        limit: LimitExceeded,
+        /// What a person reads, built where the limit's registry is known (the layer that made the error).
+        message: String,
+    },
     /// A worker panicked (contained; the message is the panic payload when it was text).
     Panicked(String),
 }
@@ -20,7 +25,7 @@ impl fmt::Display for JobError {
         match self {
             JobError::Cancelled(r) => write!(f, "cancelled ({r})"),
             JobError::Failed(m) => f.write_str(m),
-            JobError::Limit(l) => write!(f, "{l}"),
+            JobError::Limit { message, .. } => f.write_str(message),
             JobError::Panicked(m) => write!(f, "internal error: {m}"),
         }
     }
@@ -30,7 +35,11 @@ impl std::error::Error for JobError {}
 
 impl From<LimitExceeded> for JobError {
     fn from(l: LimitExceeded) -> Self {
-        JobError::Limit(l)
+        // No registry here: the message has the value and no remedy. A layer that knows its registry builds the variant itself.
+        JobError::Limit {
+            message: l.for_person(&paddock_limits::Registry::new(&[])),
+            limit: l,
+        }
     }
 }
 

@@ -103,6 +103,30 @@ fn no_remedy_without_a_row_and_no_reached_without_a_value() {
     assert!(err.to_string().contains("missing.row"));
 }
 
+#[test]
+fn a_message_for_a_person_leaves_the_id_out_and_keeps_the_value_and_the_remedy() {
+    let e = LimitExceeded::new(LimitId::new("ipc.frame"), Quantity::Bytes(5), Scope::File)
+        .reaching(Quantity::Bytes(10))
+        .unwrap();
+    let text = e.for_person(&reg());
+    assert!(!text.contains("ipc.frame"), "{text}");
+    assert!(text.contains("the limit is 5 B."), "{text}");
+    assert!(
+        e.to_string().contains("ipc.frame"),
+        "the log form keeps the id"
+    );
+    // A Setting-backed row names its dotted path when nothing knows the schema.
+    let mem = LimitExceeded::new(
+        LimitId::new("plugin.memory"),
+        Quantity::Bytes(1024 << 20),
+        Scope::Plugin,
+    );
+    assert!(
+        mem.for_person(&reg())
+            .ends_with("performance.pluginMemoryMb.")
+    );
+}
+
 struct Labels;
 impl paddock_limits::SettingLabels for Labels {
     fn label(&self, path: SettingPath) -> Option<(&str, &str)> {

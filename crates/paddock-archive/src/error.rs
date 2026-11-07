@@ -58,7 +58,7 @@ impl fmt::Display for ArchiveError {
             ArchiveError::Limit(l) => write!(
                 f,
                 "the archive is refused. {}",
-                l.message(&crate::limits::REGISTRY)
+                l.for_person(&crate::limits::REGISTRY)
             ),
             ArchiveError::Duplicate(name) => {
                 write!(f, "the archive is refused: {name:?} appears twice.")
@@ -80,7 +80,10 @@ impl From<ArchiveError> for JobError {
     fn from(e: ArchiveError) -> Self {
         match e {
             ArchiveError::Cancelled(r) => JobError::Cancelled(r),
-            ArchiveError::Limit(l) => JobError::Limit(l),
+            ArchiveError::Limit(l) => JobError::Limit {
+                limit: l,
+                message: ArchiveError::Limit(l).to_string(),
+            },
             other => JobError::Failed(other.to_string()),
         }
     }

@@ -415,7 +415,9 @@ fn run_save(
         Err(JobError::Cancelled(_)) if dismissed => SaveOutcome::Dismissed,
         Err(JobError::Cancelled(_)) => SaveOutcome::Cancelled,
         Err(JobError::Failed(message)) => SaveOutcome::Failed { message },
-        Err(e @ JobError::Limit(_)) => SaveOutcome::Failed {
+        // Not reached today (the body returns only Cancelled and Failed); kept so the match stays exhaustive, and a limit that
+        // ever comes out of the body shows its person-facing text.
+        Err(e @ JobError::Limit { .. }) => SaveOutcome::Failed {
             message: e.to_string(),
         },
         Err(JobError::Panicked(_)) => SaveOutcome::Failed {

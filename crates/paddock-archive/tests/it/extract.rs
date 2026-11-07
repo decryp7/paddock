@@ -402,7 +402,7 @@ fn an_expansion_bomb_is_stopped_by_the_ratio_in_every_format() {
             "{name}: {e:?}"
         );
         assert!(
-            e.to_string().contains("archive.ratio") && e.to_string().contains("50:1"),
+            !e.to_string().contains("archive.ratio") && e.to_string().contains("50:1"),
             "{e}"
         );
     }
@@ -888,11 +888,23 @@ fn error_messages_say_what_to_do() {
         paddock_limits::Quantity::Count(3),
         paddock_limits::Scope::File,
     ));
-    assert!(limit.to_string().contains("archive.entries") && limit.to_string().contains("is 3"));
-    // The job it ran in keeps the type, not only the text.
+    // A person reads the message: the archive context, the limit's value, no dotted id.
+    assert!(
+        limit.to_string().starts_with("the archive is refused."),
+        "{limit}"
+    );
+    assert!(limit.to_string().contains("the limit is 3."), "{limit}");
+    assert!(!limit.to_string().contains("archive.entries"), "{limit}");
+    // The job it ran in keeps the type, and its failed message is the same person-facing text (never the raw id).
+    let as_job = paddock_jobs::JobError::from(limit);
+    assert!(!as_job.to_string().contains("archive.entries"), "{as_job}");
+    assert!(
+        as_job.to_string().starts_with("the archive is refused."),
+        "{as_job}"
+    );
     assert!(matches!(
-        paddock_jobs::JobError::from(limit),
-        paddock_jobs::JobError::Limit(l) if l.id.as_str() == "archive.entries"
+        as_job,
+        paddock_jobs::JobError::Limit { limit: l, .. } if l.id.as_str() == "archive.entries"
     ));
     let j: paddock_jobs::JobError = ArchiveError::Cancelled(CancelReason::Deadline).into();
     assert!(matches!(

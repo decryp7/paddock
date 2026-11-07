@@ -37,7 +37,12 @@ pub enum HostError {
     Invalid(String),
     /// A limit stopped the call before it was sent (a request over the frame limit): the type is kept so the app can show
     /// the limit and its remedy (ADR 0019). The plugin is not blamed and nothing is counted.
-    Limit(LimitExceeded),
+    Limit {
+        /// The plugin the call was for.
+        plugin: String,
+        /// The limit.
+        limit: LimitExceeded,
+    },
     /// The call was cancelled.
     Cancelled,
 }
@@ -49,7 +54,11 @@ impl fmt::Display for HostError {
             HostError::Fault { message, .. } => f.write_str(message),
             HostError::Failed(x) => f.write_str(&x.message),
             HostError::Remote(r) => f.write_str(&r.message),
-            HostError::Limit(l) => f.write_str(&l.message(&crate::limits::registry_of(l.id))),
+            HostError::Limit { plugin, limit } => write!(
+                f,
+                "plugin {plugin}: {}",
+                limit.for_person(&crate::limits::registry_of(limit.id))
+            ),
             HostError::Cancelled => f.write_str("cancelled"),
         }
     }

@@ -33,6 +33,15 @@ pub trait SettingLabels {
     fn label(&self, path: SettingPath) -> Option<(&str, &str)>;
 }
 
+/// No schema words: a Setting path is shown by its dotted path. See [`LimitExceeded::for_person`].
+struct NoLabels;
+
+impl SettingLabels for NoLabels {
+    fn label(&self, _: SettingPath) -> Option<(&str, &str)> {
+        None
+    }
+}
+
 /// A limit stopped the work. Every layer between the check and the person keeps this type (ADR 0019 decision 1); none
 /// turns it into a `String`. `limit` and `reached` are in the same unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -124,6 +133,13 @@ impl LimitExceeded {
     #[must_use]
     pub fn message_with(&self, registry: &Registry, labels: &dyn SettingLabels) -> String {
         self.compose(registry, Some(labels))
+    }
+
+    /// The message for a person when no Settings schema is at hand (a library layer, a job): like [`LimitExceeded::message_with`],
+    /// it leaves the dotted id out (the id is for logs) and shows the limit's value.
+    #[must_use]
+    pub fn for_person(&self, registry: &Registry) -> String {
+        self.message_with(registry, &NoLabels)
     }
 
     fn compose(&self, registry: &Registry, labels: Option<&dyn SettingLabels>) -> String {

@@ -562,7 +562,17 @@ impl Supervisor {
             ),
             // Our own request did not fit a frame: the plugin did nothing wrong, and the limit keeps its type.
             IpcError::TooLarge { .. } => match e.limit() {
-                Some(limit) => HostError::Limit(limit),
+                Some(limit) => {
+                    log::warn!(
+                        target: "paddock_plugin",
+                        "plugin {id}: a limit stopped the call before it was sent: {limit} (reached {:?})",
+                        limit.reached
+                    );
+                    HostError::Limit {
+                        plugin: id.to_string(),
+                        limit,
+                    }
+                }
                 None => HostError::Invalid(e.to_string()),
             },
             IpcError::Timeout => self.faulted(
@@ -1106,11 +1116,12 @@ mod tests {
         assert!(matches!(refused, HostError::Remote(r) if r.code == "x.failed"));
         let big = s.classify(IpcError::TooLarge { len: 10, max: 5 });
         assert!(
-            matches!(&big, HostError::Limit(l) if l.id.as_str() == "ipc.frame" && l.reached == Some(paddock_limits::Quantity::Bytes(10))),
+            matches!(&big, HostError::Limit { limit: l, plugin } if plugin == "net.example.p" && l.id.as_str() == "ipc.frame" && l.reached == Some(paddock_limits::Quantity::Bytes(10))),
             "{big}"
         );
         assert!(
-            big.to_string().contains("the limit (ipc.frame) is 5 B"),
+            big.to_string().starts_with("plugin net.example.p: ")
+                && big.to_string().contains("the limit is 5 B"),
             "{big}"
         );
         for e in [

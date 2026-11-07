@@ -194,7 +194,7 @@ fn a_contract_is_called_through_a_guarded_proxy() {
         .call(&FixtureRequest::Echo("x".repeat(600_000)))
         .unwrap_err();
     assert!(
-        matches!(&huge, HostError::Limit(l) if l.id.as_str() == "ipc.frame"),
+        matches!(&huge, HostError::Limit { limit: l, .. } if l.id.as_str() == "ipc.frame"),
         "{huge}"
     );
     assert_eq!(rig.quarantine.status(fixture::ID).total, 0);

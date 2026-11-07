@@ -67,13 +67,25 @@ impl JobContext {
         let result = catch_unwind(AssertUnwindSafe(|| body(self)))
             .unwrap_or_else(|p| Err(JobError::Panicked(panic_text(&*p))));
         self.reporter.flush();
+        if let Err(JobError::Limit { limit, .. }) = &result {
+            // ER-27: the bundle shows which limit stopped which job, with its values.
+            log::warn!(
+                target: "paddock_jobs",
+                "job {} stopped by limit {}: limit {}, reached {:?}, scope {:?}",
+                self.id().0,
+                limit.id,
+                limit.limit,
+                limit.reached,
+                limit.scope
+            );
+        }
         let end = match &result {
             Ok(_) => JobState::Done,
             Err(JobError::Cancelled(reason)) => JobState::Cancelled { reason: *reason },
             Err(e) => JobState::Failed {
                 message: e.to_string(),
                 limit: match e {
-                    JobError::Limit(l) => Some(*l),
+                    JobError::Limit { limit, .. } => Some(*limit),
                     _ => None,
                 },
             },

@@ -552,6 +552,52 @@ fn finish_publishes_an_update_dropped_by_a_busy_lock_before_the_terminal_event()
 }
 
 /// A job that a limit stopped keeps the limit as a type in its failure (ADR 0019), not only in the message.
+static LOGGED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+struct Capture;
+impl log::Log for Capture {
+    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+        true
+    }
+    fn log(&self, record: &log::Record<'_>) {
+        if record.target() == "paddock_jobs" {
+            LOGGED
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(record.args().to_string());
+        }
+    }
+    fn flush(&self) {}
+}
+
+#[test]
+fn a_limit_that_stops_a_job_is_logged_with_its_id_and_values() {
+    use paddock_limits::{LimitExceeded, LimitId, Quantity, Scope};
+    let _ = log::set_logger(&Capture);
+    log::set_max_level(log::LevelFilter::Trace);
+    let reg = JobRegistry::new(Collect::new());
+    let limit = LimitExceeded::new(
+        LimitId::new("logged.limit"),
+        Quantity::Count(7),
+        Scope::File,
+    )
+    .reaching(Quantity::Count(9))
+    .unwrap();
+    let job = reg.register("x", "X", None);
+    let id = job.id().0;
+    let _ = job.run::<()>(|_| Err(JobError::from(limit)));
+    let logged = LOGGED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    assert!(
+        logged.iter().any(
+            |l| l.contains(&format!("job {id} stopped by limit logged.limit"))
+                && l.contains("Count(9)")
+        ),
+        "{logged:?}"
+    );
+}
+
 #[test]
 fn a_limit_that_stops_a_job_is_kept_in_its_failed_state() {
     use paddock_limits::{LimitExceeded, LimitId, Quantity, Scope};
@@ -564,11 +610,11 @@ fn a_limit_that_stops_a_job_is_kept_in_its_failed_state() {
     );
     let job = reg.register("x", "X", None);
     assert!(
-        matches!(job.run::<()>(|_| Err(JobError::Limit(limit))), Err(JobError::Limit(l)) if l == limit)
+        matches!(job.run::<()>(|_| Err(JobError::from(limit))), Err(JobError::Limit { limit: l, .. }) if l == limit)
     );
     let snaps = reg.snapshots();
     assert!(
-        matches!(&snaps[0].state, JobState::Failed { limit: Some(l), message } if *l == limit && message.contains("archive.entries"))
+        matches!(&snaps[0].state, JobState::Failed { limit: Some(l), message } if *l == limit && !message.contains("archive.entries") && message.contains("the limit is 5."))
     );
-    assert!(matches!(JobError::from(limit), JobError::Limit(_)));
+    assert!(matches!(JobError::from(limit), JobError::Limit { .. }));
 }
