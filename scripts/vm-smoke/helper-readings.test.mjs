@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { READINGS, linuxDriver, readingStep, readingSteps } from './helper-readings.mjs';
+import { READINGS, linuxDriver, pollText, readingStep, readingSteps } from './helper-readings.mjs';
 
 const driver = (text, opens = true) => ({ openPage: async () => opens, text: async () => text });
 const by = (id) => READINGS.find((r) => r.id === id);
@@ -53,7 +53,7 @@ test('real values pass: a wear forecast, a backup count, memory modules, a traff
   assert.equal((await run('lifespan-smart', 'linux', 'Lifespan SSD vda Not enough history for a forecast yet Have 6 of 14 days')).status, 'pass');
   assert.equal((await run('memory-modules', 'linux', 'Inventory Memory modules Slot Size Part number DIMM0 8 GB')).status, 'pass');
   assert.equal((await run('memory-modules', 'linux', 'Inventory Memory modules 4 GB installed Dyno could not read the individual modules: no DMI data in this virtual machine')).status, 'pass');
-  assert.equal((await run('traffic-by-program', 'windows', 'Network Program ↓ ↑ curl.exe 1.2 MB 40 KB Read by the administrator helper')).status, 'pass');
+  assert.equal((await run('traffic-by-program', 'windows', 'Network Program ↓ ↑ curl.exe ↓ 196 KB/s 1.2 MB 40 KB Read by the administrator helper')).status, 'pass');
   assert.equal((await run('firewall', 'linux', 'Linux nftables 2 rules tcp dport 59999 accept Read by the administrator helper')).status, 'pass');
   assert.equal((await run('wake-requests', 'windows', 'Extras Read by the administrator helper Keeping this computer awake 1 program Program It prevents Reason Held for Dyno The system from sleeping 4 s')).status, 'pass');
   assert.equal((await run('wol-state', 'linux', 'Power This computer What Dyno can read Wake for network Fine')).status, 'pass');
@@ -168,4 +168,23 @@ test('linux driver: honours minWidth (collapses the sidebar, resizes) and polls 
   const d2 = linuxDriver({ press: () => true, tree: () => 'Processes', resize: () => {}, sleep: async (ms) => { t += ms; }, now: () => t });
   await d2.text(by('processes-all-accounts'));
   assert.ok(t <= 33_000 && t >= 30_000, `waited ${t}`);
+});
+
+// 2026-11-08 triage of 7d06 rows 23 and 24: the Windows driver read once after a fixed delay; traffic had no live transfer while the page was open.
+test('pollText: re-reads every 3 s until every expectation shows, bounded by the reading\'s limit (30 s by default)', async () => {
+  let t = 0; let n = 0;
+  const c = { sleep: async (ms) => { t += ms; }, now: () => t };
+  const got = await pollText(async () => (++n >= 4 ? 'Account SYSTEM Read by the administrator helper' : 'Loading'), [/SYSTEM/, /Read by/], c);
+  assert.match(got, /SYSTEM/); assert.equal(n, 4); assert.equal(t, 9000);
+  t = 0; await pollText(async () => 'x', [/y/], c); assert.ok(t >= 30_000 && t <= 33_000, `t=${t}`);
+  t = 0; await pollText(async () => 'x', [/y/], { ...c, limitMs: 45_000 }); assert.ok(t >= 45_000 && t <= 48_000, `t=${t}`);
+});
+test('traffic: the page is opened and grouped by Program BEFORE the transfer starts; a live curl.exe row with a rate passes', async () => {
+  const order = [];
+  const d = { openPage: async () => { order.push('open'); return true; }, prepare: async () => { order.push('prepare'); return { ok: true }; }, cleanup: async () => order.push('cleanup'), text: async () => 'Network Program curl.exe ↓ 195 KB/s 4.1 MB Read by the administrator helper' };
+  const r = await readingStep(by('traffic-by-program'), 'windows', d);
+  assert.deepEqual(order, ['open', 'prepare', 'cleanup']);
+  assert.equal(r.status, 'pass', r.summary);
+  const idle = await readingStep(by('traffic-by-program'), 'windows', { ...d, text: async () => 'Network Program svchost.exe 2 KB Read by the administrator helper' });
+  assert.equal(idle.status, 'fail');
 });

@@ -24,8 +24,10 @@ export const READINGS = [
     expect: { windows: [/Account/, /SYSTEM|NT AUTHORITY/, /Read by the administrator helper/i], macos: [/root/, /_[a-z]+/, /Read by the administrator helper/i], linux: [/\bAccount\b[\s\S]*\broot\b/, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'traffic-by-program', title: 'Per-program network traffic (Group by: Program)', os: ['windows'], page: 'network', groupBy: 'Program',
     expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i], prepare: { windows: 'traffic' },
-    // A program row with a transfer size (not the column header glyph): the control generates traffic first.
-    value: { windows: [/\b[\w.-]+\.exe\b.{0,120}?\d[\d.,]*\s?(?:[KMG]i?B|B)\b/i] } },
+    // The page is open and grouped by Program first, then a sustained transfer (curl.exe, about 40 s at 200 KB/s) runs while the page is polled up to 45 s for the curl.exe row
+    // with a live download rate.
+    prepareAfterOpen: true, pollMs: 45_000,
+    value: { windows: [/\bcurl\.exe\b[\s\S]{0,160}?\d[\d.,]*\s?(?:[KMG]i?B|B)\/s\b/i] } },
   { id: 'wake-requests', title: 'What keeps the computer awake (wake requests)', os: ['windows'], page: 'extras', tab: 'Sleep',
     expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i], prepare: { windows: 'awake-on' },
     // The control holds the computer awake with `dyno awake on`, so the blockers table must list a Dyno request (not only the chip).
@@ -91,15 +93,22 @@ export async function readingStep(reading, os, driver) {
   const checks = [];
   const evidence = [];
   const control = reading.prepare?.[os];
-  if (control && driver.prepare) {
+  const late = Boolean(reading.prepareAfterOpen);
+  if (control && driver.prepare && !late) {
     const c = await driver.prepare(control).catch((e) => ({ ok: false, detail: String(e.message ?? e) }));
     checks.push({ ok: c.ok, kind: 'check', detail: c.ok ? `control "${control}" ran: ${c.detail ?? 'done'}` : `the control "${control}" could not run: ${c.detail ?? ''}` });
     if (!c.ok) return { title, status: 'check-broken', cls: 'check', summary: checks[0].detail, checks, evidence };
-  } else if (control) checks.push({ ok: true, info: true, detail: `no driver for the control "${control}": the row is judged without it` });
+  } else if (control && !driver.prepare) checks.push({ ok: true, info: true, detail: `no driver for the control "${control}": the row is judged without it` });
   try {
     const opened = await driver.openPage(reading.page, reading.tab, reading);
     checks.push({ ok: opened, detail: opened ? `opened ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` : `could not open ${reading.page}${reading.tab ? ` > ${reading.tab}` : ''}` });
     if (!opened) return { title, status: 'fail', summary: checks.at(-1).detail, checks, evidence: driver.why ? [driver.why] : evidence };
+    if (control && driver.prepare && late) {
+      // A control that must run while the page is open (a live transfer): started after the page is ready.
+      const c = await driver.prepare(control).catch((e) => ({ ok: false, detail: String(e.message ?? e) }));
+      checks.push({ ok: c.ok, kind: 'check', detail: c.ok ? `control "${control}" ran with the page open: ${c.detail ?? 'done'}` : `the control "${control}" could not run: ${c.detail ?? ''}` });
+      if (!c.ok) return { title, status: 'check-broken', cls: 'check', summary: checks.at(-1).detail, checks, evidence };
+    }
     const text = (await driver.text(reading)).replace(/\s+/g, ' ');
     evidence.push(`page text: ${text.slice(0, reading.fullText ?? 3000)}`);
     if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
@@ -140,11 +149,17 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
     /** The controls: traffic from the guest, a Dyno keep-awake request. They need the guest shell (`ssh`); without it the row is judged without a control. */
     async prepare(key) {
       if (!ssh) return { ok: false, detail: 'no guest shell for the control' };
-      if (key === 'traffic') { ssh('1..6 | ForEach-Object { curl.exe -s -m 8 -o NUL https://dev.decryptology.net/ }'); return { ok: true, detail: 'six requests to the update host' }; }
+      if (key === 'traffic') {
+        // A sustained transfer (about 40 s at 200 KB/s) in the interactive session (a scheduled task: an SSH session's children end with it). Bounded by curl's own -m 50.
+        const url = process.env.PADDOCK_TRAFFIC_URL ?? 'https://speed.cloudflare.com/__down?bytes=10000000';
+        const r = ssh(`Set-Content C:\\paddock-test\\vmcheck\\traffic.cmd 'curl.exe -s -m 50 --limit-rate 200k -o NUL "${url}"'; schtasks /create /tn DynoTraffic /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c C:\\paddock-test\\vmcheck\\traffic.cmd" | Out-Null; schtasks /run /tn DynoTraffic | Out-Null; Start-Sleep 4; (Get-Process curl -ErrorAction SilentlyContinue | Measure-Object).Count`);
+        const n = Number(String(r).trim().split('\n').at(-1)) || 0;
+        return n > 0 ? { ok: true, detail: `curl.exe is downloading at 200 KB/s for about 40 s (${url})` } : { ok: false, detail: `curl.exe did not start (${String(r).trim().slice(-120)})` };
+      }
       if (key === 'awake-on') { const r = ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" awake on --for 1h 2>&1 | Out-String; "EXIT=$LASTEXITCODE"'); return /EXIT=0\s*$/.test(r) ? { ok: true, detail: 'dyno awake on --for 1h' } : { ok: false, detail: `dyno awake on: ${r.slice(-120)}` }; }
       return { ok: false, detail: `unknown control ${key}` };
     },
-    async cleanup(key) { if (ssh && key === 'awake-on') ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" awake off 2>&1 | Out-Null'); },
+    async cleanup(key) { if (ssh && key === 'awake-on') ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" awake off 2>&1 | Out-Null'); if (ssh && key === 'traffic') ssh('schtasks /end /tn DynoTraffic 2>$null | Out-Null; Get-Process curl -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue'); },
     async openPage(page, tab, reading = {}) {
       if (reading.minWidth) {
         // The table needs width for its Account column: ask the window for at least that many pixels (DevTools Browser.setWindowBounds).
@@ -163,7 +178,8 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
       }
       return true;
     },
-    text: () => main.evaluate(() => document.body.innerText),
+    // Polled every 3 s until the row's expectations show (30 s, or the row's own `pollMs`): a page fills a few seconds after it opens.
+    text: (reading = {}) => pollText(() => main.evaluate(() => document.body.innerText), [...(reading.expect?.windows ?? []), ...(reading.value?.windows ?? [])], { sleep: (ms) => new Promise((r) => setTimeout(r, ms)), now: () => Date.now(), limitMs: reading.pollMs ?? 30_000 }),
     async shot(name) {
       if (!shotDir) return null;
       try { const { mkdirSync, writeFileSync } = await import('node:fs'); mkdirSync(shotDir, { recursive: true }); const f = `dom-${name}.png`; writeFileSync(`${shotDir}/${f}`, await main.screenshot()); return f; } catch { return null; }
@@ -176,6 +192,17 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
  * Linux (AT-SPI): `press(re, role)` -> bool, `tree()` -> the window's text, `resize(width)` widens the main window (best effort), `sleep`, `now`. A row with `minWidth` gets the room
  * the Account column needs (sidebar collapsed, window widened, as the macOS and Windows drivers do); the text is polled until every expectation of the row shows, bounded at 30 s.
  */
+/**
+ * Reads `read()` until every regex of `want` matches, every `everyMs` (3 s), for at most `limitMs` (30 s): a condition wait, not a delay. Returns the last text.
+ * @param {{sleep:(ms:number)=>Promise<void>, now:()=>number, everyMs?:number, limitMs?:number}} c
+ */
+export async function pollText(read, want, { sleep, now, everyMs = 3000, limitMs = 30_000 }) {
+  const t0 = now();
+  let t = await read();
+  while (want.length && !want.every((re) => re.test(t)) && now() - t0 < limitMs) { await sleep(everyMs); t = await read(); }
+  return t;
+}
+
 export function linuxDriver({ press, tree, resize = () => {}, sleep, now, labels = LINUX_LABELS }) {
   return {
     async openPage(page, tab, reading = {}) {
@@ -186,11 +213,7 @@ export function linuxDriver({ press, tree, resize = () => {}, sleep, now, labels
       return okp;
     },
     async text(reading = {}) {
-      const want = [...(reading.expect?.linux ?? []), ...(reading.value?.linux ?? [])];
-      const t0 = now();
-      let t = tree();
-      while (want.length && !want.every((re) => re.test(t)) && now() - t0 < 30_000) { await sleep(3000); t = tree(); }
-      return t;
+      return pollText(async () => tree(), [...(reading.expect?.linux ?? []), ...(reading.value?.linux ?? [])], { sleep, now, limitMs: reading.pollMs ?? 30_000 });
     },
   };
 }
