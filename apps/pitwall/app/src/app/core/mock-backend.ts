@@ -2,6 +2,7 @@ import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
   ChatModels,
+  ChatStorage,
   OpenedApp,
   ConnectedApp,
   ModelPreset,
@@ -117,6 +118,7 @@ const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
   'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
+  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -1470,6 +1472,42 @@ export class MockBackend implements PitwallBackend {
       }
       if (this.dyno_.keySaved && !this.dyno_.keyRefused) queueMicrotask(() => this.connectDyno(true));
       return { kind: 'started' } as OpenedApp;
+    });
+  }
+
+  /** The chats as the mock knows them: the default for new chats, which chats are not saved, and a few saved ones. */
+  private chatStorage_: ChatStorage = { saveNew: true, chats: 3, bytes: 48_000, attachmentBytes: 0, unsaved: 0 };
+  /** Chats the user marked "Don't save" (tests read it). */
+  readonly unsavedChats = new Set<string>();
+
+  chatStorage(): Promise<ChatStorage> {
+    return this.reply('chatStorage', () => clone({ ...this.chatStorage_, unsaved: this.unsavedChats.size }));
+  }
+
+  setChatSaveNew(save: boolean): Promise<ChatStorage> {
+    return this.reply('setChatSaveNew', () => {
+      this.chatStorage_ = { ...this.chatStorage_, saveNew: save };
+      return clone({ ...this.chatStorage_, unsaved: this.unsavedChats.size });
+    });
+  }
+
+  chatSaved(conversationId: string): Promise<boolean> {
+    return this.reply('chatSaved', () => !this.unsavedChats.has(conversationId));
+  }
+
+  setChatSaved(conversationId: string, save: boolean): Promise<boolean> {
+    return this.reply('setChatSaved', () => {
+      if (save) this.unsavedChats.delete(conversationId);
+      else this.unsavedChats.add(conversationId);
+      return save;
+    });
+  }
+
+  deleteAllChats(): Promise<ChatStorage> {
+    return this.reply('deleteAllChats', () => {
+      this.unsavedChats.clear();
+      this.chatStorage_ = { ...this.chatStorage_, chats: 0, bytes: 0, attachmentBytes: 0 };
+      return clone({ ...this.chatStorage_, unsaved: 0 });
     });
   }
 

@@ -2,6 +2,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
   ChatModels,
+  ChatStorage,
   OpenedApp,
   ConnectedApp,
   AppInfo,
@@ -428,6 +429,21 @@ export class TauriBackend implements PitwallBackend {
   }
   setChatModel(modelId: string): Promise<ChatModels> {
     return this.run('set_chat_model', { modelId });
+  }
+  chatStorage(): Promise<ChatStorage> {
+    return this.run('chat_storage');
+  }
+  setChatSaveNew(save: boolean): Promise<ChatStorage> {
+    return this.run('set_chat_save_new', { save });
+  }
+  chatSaved(conversationId: string): Promise<boolean> {
+    return this.run('chat_saved', { conversationId });
+  }
+  setChatSaved(conversationId: string, save: boolean): Promise<boolean> {
+    return this.run('set_chat_saved', { conversationId, save });
+  }
+  deleteAllChats(): Promise<ChatStorage> {
+    return this.run('delete_all_chats');
   }
   onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
     let stopped = false;

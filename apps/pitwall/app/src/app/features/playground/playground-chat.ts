@@ -2,12 +2,15 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signa
 import { MatButton } from '@angular/material/button';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatOptgroup, MatOption, MatSelect } from '@angular/material/select';
+import { MatSlideToggle, type MatSlideToggleChange } from '@angular/material/slide-toggle';
+import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
+import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { AssistantBackend, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
 import type { ChatModel, ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
-import { createChatBackend } from './chat-backend';
+import { ChatSaving, createChatBackend } from './chat-backend';
 
 /**
  * The Playground's Chat tab: the family's assistant pane (`<pd-assistant>`: streamed answers, tool cards, approval cards,
@@ -18,8 +21,8 @@ import { createChatBackend } from './chat-backend';
  */
 @Component({
   selector: 'pw-playground-chat',
-  imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatOption, MatOptgroup, MatButton],
-  providers: [{ provide: AssistantBackend, useFactory: createChatBackend }],
+  imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatOption, MatOptgroup, MatButton, MatSlideToggle],
+  providers: [ChatSaving, { provide: AssistantBackend, useFactory: createChatBackend }],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar">
@@ -40,6 +43,8 @@ import { createChatBackend } from './chat-backend';
         </mat-select>
       </mat-form-field>
       <p class="tools" data-testid="chat-apps" role="status">{{ appsLine() }}</p>
+      <!-- ADR 0023 Decision 3: per chat; a new chat starts with Settings > Chats' default. -->
+      <mat-slide-toggle data-testid="chat-dont-save" [checked]="!saved()" [disabled]="moving()" (change)="dontSave($event)">Don't save this chat</mat-slide-toggle>
       <button type="button" matButton data-testid="chat-open-apps" (click)="openApps()">Connected apps…</button>
     </div>
     @if (problem(); as p) {
@@ -55,6 +60,7 @@ import { createChatBackend } from './chat-backend';
       [emptyHint]="emptyHint"
       [failedCause]="failedCause"
       (emptyActionClick)="openApps()"
+      (activeChange)="onActive($event)"
     />
   `,
   styles: `
@@ -88,6 +94,16 @@ import { createChatBackend } from './chat-backend';
 export class PlaygroundChat {
   private readonly backend = inject(BACKEND);
   private readonly openSettings = inject(OPEN_SETTINGS, { optional: true });
+  private readonly dialogs = inject(DialogService);
+  private readonly saving = inject(ChatSaving);
+  /** The chat open in the pane (null: a new one). */
+  private readonly active = signal<string | null>(null);
+  /** Settings > Chats' default for new chats. */
+  private readonly saveNew = signal(true);
+  /** The open chat is saved (for a new chat: whether it will be). */
+  protected readonly saved = signal(true);
+  /** A chat is being moved between saved and not saved. */
+  protected readonly moving = signal(false);
   protected readonly picker = signal<ChatModels | null>(null);
   protected readonly apps = signal<ConnectedApp[] | null>(null);
   protected readonly problem = signal<CommandError | null>(null);
@@ -139,9 +155,11 @@ export class PlaygroundChat {
   async load(): Promise<void> {
     this.problem.set(null);
     try {
-      const [picker, apps] = await Promise.all([this.backend.chatModels(), this.backend.connectedApps()]);
+      const [picker, apps, storage] = await Promise.all([this.backend.chatModels(), this.backend.connectedApps(), this.backend.chatStorage()]);
       this.picker.set(picker);
       this.apps.set(apps);
+      this.saveNew.set(storage.saveNew);
+      if (this.active() === null) this.setNext(storage.saveNew);
     } catch (e) {
       this.problem.set(toCommandError(e));
     }
@@ -152,6 +170,70 @@ export class PlaygroundChat {
       this.picker.set(await this.backend.setChatModel(id));
     } catch (e) {
       this.problem.set(toCommandError(e));
+    }
+  }
+
+  private setNext(save: boolean): void {
+    this.saving.saveNext.set(save);
+    this.saved.set(save);
+  }
+
+  /** The pane opened a chat, or a new one: the switch shows that chat's state (Rust's, asked when this tab did not start it). */
+  protected async onActive(id: string | null): Promise<void> {
+    this.active.set(id);
+    if (id === null) {
+      this.setNext(this.saveNew());
+      // Settings > Chats may have changed the default since (another window).
+      try {
+        const storage = await this.backend.chatStorage();
+        this.saveNew.set(storage.saveNew);
+        if (this.active() === null) this.setNext(storage.saveNew);
+      } catch (e) {
+        this.problem.set(toCommandError(e));
+      }
+      return;
+    }
+    const started = this.saving.started.get(id);
+    if (started !== undefined) return this.saved.set(started);
+    try {
+      const saved = await this.backend.chatSaved(id);
+      if (this.active() === id) this.saved.set(saved);
+    } catch (e) {
+      this.problem.set(toCommandError(e));
+    }
+  }
+
+  /**
+   * "Don't save this chat". A new chat only takes the choice to its first question. A saved chat asks before its saved copy is
+   * deleted (no keeps it saved); turning the switch off saves the chat at once.
+   */
+  protected async dontSave(change: MatSlideToggleChange): Promise<void> {
+    const save = !change.checked;
+    const id = this.active();
+    if (id === null) return this.setNext(save);
+    if (!save) {
+      const outcome = await this.dialogs.open(CONFIRM_DIALOG_ID, {
+        title: 'Playground',
+        inputs: {
+          heading: 'Delete the saved copy of this chat?',
+          message: 'Pitwall deletes this chat from this computer. It stays open here until Pitwall closes, then it is gone.',
+          confirm: { label: 'Delete saved copy', destructive: true },
+        },
+      }).closed;
+      if (outcome.kind !== 'answered') {
+        change.source.checked = false;
+        return;
+      }
+    }
+    this.moving.set(true);
+    try {
+      this.saved.set(await this.backend.setChatSaved(id, save));
+      this.saving.started.set(id, this.saved());
+    } catch (e) {
+      change.source.checked = !this.saved();
+      this.problem.set(toCommandError(e));
+    } finally {
+      this.moving.set(false);
     }
   }
 

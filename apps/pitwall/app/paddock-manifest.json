@@ -123,6 +123,7 @@
   "settingsPages": [
     "pd.appearance",
     "pd.logging",
+    "pw.chats",
     "pw.connected-apps",
     "pw.general",
     "pw.tray"
@@ -328,6 +329,7 @@
     "pw.release-memory": "Release memory",
     "pw.resume-serving": "Resume serving",
     "pw.service-consent.title": "Run in the background",
+    "pw.settings.chats": "Chats",
     "pw.settings.connected-apps": "Connected apps",
     "pw.settings.general": "Pitwall",
     "pw.settings.tray": "Tray popup",
