@@ -3,8 +3,8 @@
 
 use crate::approval::{ApprovalChoice, ApprovalPolicy, DefaultPolicy};
 use crate::conversation::{
-    ContextItem, Conversation, ConversationStore, ConversationSummary, MAX_CONTEXT_CHARS,
-    MAX_CONTEXT_ITEMS, SaveError, StoredError, StoredMessage,
+    ContextItem, Conversation, ConversationStore, ConversationSummary, Conversations,
+    MAX_CONTEXT_CHARS, MAX_CONTEXT_ITEMS, SaveError, StoredError, StoredMessage,
 };
 use crate::event::{AssistantEvent, EndReason, Envelope, ErrorKind, EventSink};
 use crate::provider::{LlmProvider, ProviderError};
@@ -148,7 +148,7 @@ struct Run {
 pub struct Assistant {
     provider: Arc<dyn LlmProvider>,
     tools: Mutex<Arc<Tools>>,
-    store: Arc<ConversationStore>,
+    store: Arc<dyn Conversations>,
     clock: Arc<dyn Clock>,
     cfg: AssistantConfig,
     runs: Mutex<HashMap<String, Arc<Run>>>,
@@ -176,6 +176,17 @@ impl Assistant {
         clock: Arc<dyn Clock>,
         cfg: AssistantConfig,
     ) -> Arc<Assistant> {
+        Self::with_conversations(provider, tools, store, clock, cfg)
+    }
+
+    /// An assistant keeping its conversations behind any [`Conversations`] port (an app's own store, or one in memory).
+    pub fn with_conversations(
+        provider: Arc<dyn LlmProvider>,
+        tools: Tools,
+        store: Arc<dyn Conversations>,
+        clock: Arc<dyn Clock>,
+        cfg: AssistantConfig,
+    ) -> Arc<Assistant> {
         Arc::new(Assistant {
             provider,
             tools: Mutex::new(Arc::new(tools)),
@@ -187,7 +198,7 @@ impl Assistant {
     }
 
     /// The conversation store.
-    pub fn store(&self) -> &Arc<ConversationStore> {
+    pub fn store(&self) -> &Arc<dyn Conversations> {
         &self.store
     }
 

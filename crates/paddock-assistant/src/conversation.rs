@@ -456,9 +456,56 @@ struct State {
     counter: u64,
 }
 
-/// The assistant's conversations in one file.
+/// Where the assistant keeps its conversations (ADR 0023 WP-2b): the port the service reads and writes. [`ConversationStore`]
+/// is the family's implementation (one file, or memory only); an app may keep its conversations otherwise (one file per
+/// conversation). Implementations keep their own bounds and never panic.
+pub trait Conversations: Send + Sync {
+    /// The conversations, most recently changed first.
+    fn summaries(&self) -> Vec<ConversationSummary>;
+    /// One conversation.
+    fn get(&self, id: &str) -> Option<Conversation>;
+    /// Starts a conversation whose first message is `first`: its id, its title, and whether it was kept.
+    fn create(&self, first: StoredMessage) -> (String, String, Result<(), SaveError>);
+    /// Adds messages to a conversation (`None`: it does not exist).
+    fn append(&self, id: &str, messages: Vec<StoredMessage>) -> Option<Result<(), SaveError>>;
+    /// Deletes a conversation; `Ok(false)` when there is none.
+    fn delete(&self, id: &str) -> Result<bool, SaveError>;
+    /// What the model reads of a conversation, within `history_chars`.
+    fn history(&self, id: &str, history_chars: usize) -> Vec<ChatMessage>;
+    /// Why the saved conversations were not used as they were, once (a damaged file); `None` by default.
+    fn take_problem(&self) -> Option<String> {
+        None
+    }
+}
+
+impl Conversations for ConversationStore {
+    fn summaries(&self) -> Vec<ConversationSummary> {
+        ConversationStore::summaries(self)
+    }
+    fn get(&self, id: &str) -> Option<Conversation> {
+        ConversationStore::get(self, id)
+    }
+    fn create(&self, first: StoredMessage) -> (String, String, Result<(), SaveError>) {
+        ConversationStore::create(self, first)
+    }
+    fn append(&self, id: &str, messages: Vec<StoredMessage>) -> Option<Result<(), SaveError>> {
+        ConversationStore::append(self, id, messages)
+    }
+    fn delete(&self, id: &str) -> Result<bool, SaveError> {
+        ConversationStore::delete(self, id)
+    }
+    fn history(&self, id: &str, history_chars: usize) -> Vec<ChatMessage> {
+        ConversationStore::history(self, id, history_chars)
+    }
+    fn take_problem(&self) -> Option<String> {
+        ConversationStore::take_problem(self)
+    }
+}
+
+/// The assistant's conversations in one file, or in memory only.
 pub struct ConversationStore {
-    file: VersionedFile<Data>,
+    /// `None`: memory only, nothing is ever written.
+    file: Option<VersionedFile<Data>>,
     state: Mutex<State>,
     clock: Arc<dyn Clock>,
     limits: StoreLimits,
@@ -489,7 +536,7 @@ impl ConversationStore {
         data.conversations.retain(|c| !c.messages.is_empty());
         bound_data(&mut data, "", limits);
         ConversationStore {
-            file,
+            file: Some(file),
             state: Mutex::new(State {
                 data,
                 problem: loaded
@@ -500,6 +547,31 @@ impl ConversationStore {
             clock,
             limits,
         }
+    }
+
+    /// A store that keeps its conversations in memory only (ADR 0023 D3: a chat the user does not save leaves no file, even
+    /// after a crash). Bounded like the file.
+    pub fn in_memory(clock: Arc<dyn Clock>) -> ConversationStore {
+        Self::in_memory_with(clock, StoreLimits::default())
+    }
+
+    /// [`in_memory`](Self::in_memory) with other bounds than the defaults.
+    pub fn in_memory_with(clock: Arc<dyn Clock>, limits: StoreLimits) -> ConversationStore {
+        ConversationStore {
+            file: None,
+            state: Mutex::new(State {
+                data: Data::default(),
+                problem: None,
+                counter: 0,
+            }),
+            clock,
+            limits,
+        }
+    }
+
+    /// Whether this store writes a file (`false`: memory only).
+    pub fn is_saved(&self) -> bool {
+        self.file.is_some()
     }
 
     /// The bounds this store keeps.
@@ -635,8 +707,9 @@ impl ConversationStore {
 
     fn persist(&self, state: &mut State, keep: &str) -> Result<(), SaveError> {
         bound_data(&mut state.data, keep, self.limits);
-        self.file
-            .save(&state.data)
-            .map_err(|e| SaveError(e.to_string()))
+        match &self.file {
+            Some(file) => file.save(&state.data).map_err(|e| SaveError(e.to_string())),
+            None => Ok(()),
+        }
     }
 }

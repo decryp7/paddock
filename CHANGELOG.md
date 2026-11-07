@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-assistant`: the conversation store is a port, with a store in memory (ADR 0023 WP-2b)
+- New `Conversations` trait (summaries, get, create, append, delete, history, `take_problem` defaulting to none); `ConversationStore` implements it. `Assistant::with_conversations` takes any implementation; `Assistant::new` is unchanged.
+- `ConversationStore::in_memory` and `in_memory_with`: the same bounds, nothing ever written (a chat the user does not save leaves no file, even after a crash); `is_saved` tells the two apart.
+- `Assistant::store()` now returns `&Arc<dyn Conversations>` (it returned the concrete store; nothing in the family called it for more than `take_problem`, which the trait keeps).
+
 ### `paddock-assistant` and `workbench/assistant`: phases, Always allow and how each call ran (ADR 0023 WP-4a)
 - New `ProviderPhase` (`queued`, `loading` with `elapsedMs`, `generating`) and `LlmProvider::chat_phased` (default: no phases, calls `chat`); the loop forwards a provider's phases as `AssistantEvent::Phase`. Additive.
 - The pane shows "Waiting for the model…" and "Loading the model… 12 s" until the words arrive, instead of "Thinking…".

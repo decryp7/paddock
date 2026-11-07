@@ -3,6 +3,7 @@
 //! stays a binary of its own: it needs the `tauri` feature.
 
 mod call_ids;
+mod memory_store;
 mod never_panics;
 mod phases;
 mod pitwall;

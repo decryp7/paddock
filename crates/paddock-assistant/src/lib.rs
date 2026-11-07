@@ -40,10 +40,10 @@ pub mod types;
 
 pub use approval::{Approval, ApprovalChoice, ApprovalPolicy, CallInfo, DefaultPolicy, Verdict};
 pub use conversation::{
-    ContextItem, Conversation, ConversationStore, ConversationSummary, MAX_CITATIONS,
-    MAX_CONTEXT_CHARS, MAX_CONTEXT_ITEMS, MAX_CONVERSATIONS, MAX_DATA_BYTES, MAX_FILE_BYTES,
-    MAX_MESSAGE_CHARS, MAX_MESSAGES, MAX_NOTE_CHARS, MAX_TITLE_CHARS, SaveError, StoreLimits,
-    StoredError, StoredMessage, ToolOutcome,
+    ContextItem, Conversation, ConversationStore, ConversationSummary, Conversations,
+    MAX_CITATIONS, MAX_CONTEXT_CHARS, MAX_CONTEXT_ITEMS, MAX_CONVERSATIONS, MAX_DATA_BYTES,
+    MAX_FILE_BYTES, MAX_MESSAGE_CHARS, MAX_MESSAGES, MAX_NOTE_CHARS, MAX_TITLE_CHARS, SaveError,
+    StoreLimits, StoredError, StoredMessage, ToolOutcome,
 };
 pub use event::{AssistantEvent, EVENT, EndReason, Envelope, ErrorKind, EventSink};
 pub use pitwall::PitwallProvider;
