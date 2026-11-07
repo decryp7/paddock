@@ -1,6 +1,6 @@
 /** Pure view model of a chat: turns built from stored messages and from the events of a running turn (Debrief's `chat-model`). */
 import type { AiState } from '@decryp7/paddock-ui/shell/pitwall';
-import type { AssistantEvent, Conversation, ContextItem, EndReason, Usage } from '../generated/assistant';
+import type { Approval, AssistantEvent, Conversation, ContextItem, EndReason, ProviderPhase, Usage } from '../generated/assistant';
 import { citationsOf, type AssistantCitation } from './wire';
 
 /** What a tool call looked like, and how it ended. */
@@ -24,6 +24,10 @@ export interface ToolCard {
   readonly declined?: boolean;
   /** The user stopped the turn while this call ran or waited: a choice, not a failure (the card is neutral). */
   readonly stopped?: boolean;
+  /** The engine's approval card offers "Always allow" (the policy remembers this tool's answer). */
+  readonly remember?: boolean;
+  /** How the call was approved, once it ran (the engine's word: not asked, once, always, remembered). */
+  readonly approval?: Approval;
 }
 
 /** The text of a context chip, in the composer and in the sent question alike: "Current file: src/main.rs". */
@@ -60,10 +64,17 @@ export interface TurnView {
   readonly message: string | null;
   readonly running: boolean;
   readonly usage: Usage | null;
+  /** The last phase the engine reported (queued, loading the model, generating); `null` once words or a tool call came. */
+  readonly phase: ProviderPhase | null;
 }
 
 export function startTurn(user: string, context: readonly ContextItem[] = []): TurnView {
-  return { user, context, parts: [], citations: [], notes: [], error: null, end: null, message: null, running: true, usage: null };
+  return { user, context, parts: [], citations: [], notes: [], error: null, end: null, message: null, running: true, usage: null, phase: null };
+}
+
+/** The phase to show while a turn waits for its words (queued or loading the model); `null` when there is none to show. */
+export function waitingPhase(t: TurnView): ProviderPhase | null {
+  return t.running && t.phase && t.phase.kind !== 'generating' ? t.phase : null;
 }
 
 /** The text of an answer: its text parts joined. */
@@ -80,6 +91,7 @@ function ended(t: TurnView, byUser = false): TurnView {
   return {
     ...t,
     running: false,
+    phase: null,
     parts: t.parts.map((p) =>
       p.kind === 'tool' && (p.card.state === 'running' || p.card.state === 'awaiting')
         ? { kind: 'tool', card: { ...p.card, state: 'failed', result: p.card.result ?? null, ...(byUser ? { stopped: true } : {}) } }
@@ -93,17 +105,19 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
   switch (e.type) {
     case 'started':
       return t;
+    case 'phase':
+      return { ...t, phase: e.phase };
     case 'delta': {
       const last = t.parts.at(-1);
-      if (last?.kind === 'text') return { ...t, parts: [...t.parts.slice(0, -1), { kind: 'text', text: last.text + e.text }] };
-      return { ...t, parts: [...t.parts, { kind: 'text', text: e.text }] };
+      if (last?.kind === 'text') return { ...t, phase: null, parts: [...t.parts.slice(0, -1), { kind: 'text', text: last.text + e.text }] };
+      return { ...t, phase: null, parts: [...t.parts, { kind: 'text', text: e.text }] };
     }
     case 'toolStarted': {
       const card: ToolCard = { callId: e.callId, name: e.name, summary: e.summary, write: e.write, destructive: e.destructive, state: 'running', result: null, data: undefined };
-      return { ...t, parts: [...t.parts, { kind: 'tool', card }] };
+      return { ...t, phase: null, parts: [...t.parts, { kind: 'tool', card }] };
     }
     case 'approvalNeeded':
-      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input, destructive: e.destructive }));
+      return setCard(t, e.callId, (c) => ({ ...c, state: 'awaiting', input: e.input, destructive: e.destructive, ...(e.remember ? { remember: true } : {}) }));
     case 'toolFinished': {
       const cites = citationsOf(e.data);
       const next = setCard(t, e.callId, (c) => ({
@@ -113,6 +127,7 @@ export function reduceTurn(t: TurnView, e: AssistantEvent): TurnView {
         data: e.data,
         ...(e.outcome === 'declined' ? { declined: true } : {}),
         ...(e.outcome === 'stopped' ? { stopped: true } : {}),
+        ...(e.approval ? { approval: e.approval } : {}),
       }));
       return cites.length ? { ...next, citations: [...next.citations, ...cites.filter((c) => !next.citations.some((k) => k.text === c.text && k.target === c.target))] } : next;
     }
@@ -177,6 +192,7 @@ export function turnsOf(c: Conversation): TurnView[] {
         ...(write ? { input: inputs.get(card.callId) } : {}),
         ...(m.outcome === 'declined' ? { declined: true } : {}),
         ...(m.outcome === 'stopped' ? { stopped: true } : {}),
+        ...(m.approval ? { approval: m.approval } : {}),
       }));
       put(withCitations(done, citationsOf(m.data)));
     }

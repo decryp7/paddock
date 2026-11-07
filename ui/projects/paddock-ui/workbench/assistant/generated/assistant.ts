@@ -232,11 +232,21 @@ export type SendAck = {
  */
 conversationId: string, };
 
+export type ProviderPhase = { "kind": "queued" } | { "kind": "loading", 
+/**
+ * Since the load started.
+ */
+elapsedMs: number, } | { "kind": "generating" };
+
 export type AssistantEvent = { "type": "started", 
 /**
  * The conversation's title.
  */
-title: string, } | { "type": "delta", 
+title: string, } | { "type": "phase", 
+/**
+ * Queued, loading the model (with the time so far) or generating.
+ */
+phase: ProviderPhase, } | { "type": "delta", 
 /**
  * The text.
  */
@@ -358,7 +368,11 @@ seq: number, } & ({ "type": "started",
 /**
  * The conversation's title.
  */
-title: string, } | { "type": "delta", 
+title: string, } | { "type": "phase", 
+/**
+ * Queued, loading the model (with the time so far) or generating.
+ */
+phase: ProviderPhase, } | { "type": "delta", 
 /**
  * The text.
  */

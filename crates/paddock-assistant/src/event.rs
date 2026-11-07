@@ -3,6 +3,7 @@
 
 use crate::approval::Approval;
 use crate::conversation::ToolOutcome;
+use crate::provider::ProviderPhase;
 use crate::types::Usage;
 use paddock_pitwall::AiState;
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,11 @@ pub enum AssistantEvent {
     Started {
         /// The conversation's title.
         title: String,
+    },
+    /// Where the answer is before its words arrive (reported by providers that know it): the pane's live label.
+    Phase {
+        /// Queued, loading the model (with the time so far) or generating.
+        phase: ProviderPhase,
     },
     /// A piece of the answer, as text (never HTML).
     Delta {

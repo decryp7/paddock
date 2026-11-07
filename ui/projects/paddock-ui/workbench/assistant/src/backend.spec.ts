@@ -145,6 +145,40 @@ describe('MemoryAssistantBackend', () => {
     expect(plain.events.some((e) => e.type === 'approvalNeeded')).toBe(false);
   });
 
+  it('asks a read-only call first with Always allow, remembers it, and reports a cold start (ADR 0023 WP-4a)', async () => {
+    const b = new MemoryAssistantBackend();
+    const denied = await ask(b, '/look');
+    await settle(5);
+    expect(denied.events.find((e) => e.type === 'approvalNeeded')).toMatchObject({ remember: true, callId: 'call_1' });
+    await b.approve(denied.ack.conversationId, 'call_1', 'deny');
+    await settle();
+    expect(denied.events.find((e) => e.type === 'toolFinished')).toMatchObject({ ok: false, outcome: 'declined' });
+    const once = await ask(b, '/look');
+    await settle(5);
+    await b.approve(once.ack.conversationId, 'call_1', 'allowOnce');
+    await settle();
+    expect(once.events.find((e) => e.type === 'toolFinished')).toMatchObject({ ok: true, approval: 'once' });
+    const always = await ask(b, '/look');
+    await settle(5);
+    await b.approve(always.ack.conversationId, 'call_1', 'alwaysAllow');
+    await settle();
+    expect(always.events.find((e) => e.type === 'toolFinished')).toMatchObject({ approval: 'always' });
+    const later = await ask(b, '/look');
+    await settle();
+    expect(later.events.some((e) => e.type === 'approvalNeeded')).toBe(false);
+    expect(later.events.find((e) => e.type === 'toolFinished')).toMatchObject({ approval: 'remembered' });
+    expect((await b.load(later.ack.conversationId)).messages.find((m) => m.role === 'tool')?.approval).toBe('remembered');
+    const cold = await ask(b, '/cold');
+    await settle(300);
+    expect(cold.events.filter((e) => e.type === 'phase').map((e) => (e.type === 'phase' ? e.phase : null))).toEqual([
+      { kind: 'queued' },
+      { kind: 'loading', elapsedMs: 0 },
+      { kind: 'loading', elapsedMs: 12_000 },
+      { kind: 'generating' },
+    ]);
+    expect(cold.events.at(-1)).toMatchObject({ type: 'done', end: 'answered' });
+  });
+
   it('can be held and stopped, and refuses a question on request', async () => {
     const b = new MemoryAssistantBackend({ reply: () => 'one two three' });
     b.hold();

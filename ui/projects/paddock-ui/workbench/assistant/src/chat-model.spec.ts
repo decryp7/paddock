@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AssistantEvent, Conversation } from '../generated/assistant';
 import { FIXTURE_CONVERSATION, FIXTURE_EVENTS } from '../generated/assistant-fixtures';
-import { answerText, chipText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
+import { answerText, chipText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, waitingPhase, type TurnView } from './chat-model';
 
 const run = (events: readonly AssistantEvent[], from: TurnView = startTurn('q')): TurnView => events.reduce(reduceTurn, from);
 const usage = { inputTokens: 1, outputTokens: 2 };
@@ -53,6 +53,47 @@ describe('reduceTurn', () => {
     expect(failed.parts[0]).toMatchObject({ card: { state: 'failed' } });
     const needs = reduceTurn(startTurn('q'), { type: 'error', kind: 'needsAi', message: 'm', needsAi: { kind: 'notRunning' } });
     expect(needs.error?.needsAi).toEqual({ kind: 'notRunning' });
+  });
+});
+
+describe('phases and approvals (ADR 0023 WP-4a)', () => {
+  it('keeps the phase the engine reported until the words or a tool call arrive', () => {
+    let t = run([{ type: 'phase', phase: { kind: 'queued' } }]);
+    expect(waitingPhase(t)).toEqual({ kind: 'queued' });
+    t = reduceTurn(t, { type: 'phase', phase: { kind: 'loading', elapsedMs: 1500 } });
+    expect(waitingPhase(t)).toEqual({ kind: 'loading', elapsedMs: 1500 });
+    expect(waitingPhase(reduceTurn(t, { type: 'phase', phase: { kind: 'generating' } }))).toBeNull();
+    expect(waitingPhase(reduceTurn(t, { type: 'delta', text: 'a' }))).toBeNull();
+    expect(waitingPhase(reduceTurn(t, { type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false }))).toBeNull();
+    expect(waitingPhase(reduceTurn(t, { type: 'done', text: '', usage, end: 'cancelled' }))).toBeNull();
+    expect(waitingPhase(startTurn('q'))).toBeNull();
+  });
+
+  it('says on each card how its call was approved, live and when reopened', () => {
+    const t = run([
+      { type: 'toolStarted', callId: 'c1', name: 'find', summary: 'x', write: false, destructive: false },
+      { type: 'approvalNeeded', destructive: false, remember: true, callId: 'c1', name: 'find', summary: 'x', input: {} },
+      { type: 'toolFinished', callId: 'c1', name: 'find', ok: true, summary: 'ok', approval: 'always' },
+      { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'y', write: false, destructive: false },
+      { type: 'toolFinished', callId: 'c2', name: 'find', ok: true, summary: 'ok', approval: 'remembered' },
+    ]);
+    expect(t.parts.map((p) => (p.kind === 'tool' ? [p.card.approval, p.card.remember] : null))).toEqual([
+      ['always', true],
+      ['remembered', undefined],
+    ]);
+    const c: Conversation = {
+      id: 'x',
+      title: 't',
+      createdMs: 1,
+      updatedMs: 2,
+      messages: [
+        { role: 'user', text: 'q', atMs: 1 },
+        { role: 'assistant', text: '', toolCalls: [{ id: 'c1', name: 'find', input: {} }], atMs: 2 },
+        { role: 'tool', text: 'r', toolCallId: 'c1', toolName: 'find', ok: true, summary: 'ok', approval: 'once', atMs: 3 },
+      ],
+    };
+    const [reopened] = turnsOf(c);
+    expect(reopened?.parts[0]).toMatchObject({ kind: 'tool', card: { approval: 'once' } });
   });
 });
 

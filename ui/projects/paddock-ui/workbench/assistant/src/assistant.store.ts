@@ -8,6 +8,12 @@ import { AssistantBackend, type Unlisten } from './backend';
 import { answerText, chipText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
 import { assistantMessage } from './wire';
 
+/**
+ * How a host gates the tools that write: `tick`, the user ticks "Allow actions" per message (each call still asks);
+ * `per-call`, they are always offered and the engine's policy asks on every call (Pitwall: Dyno's own allow is the other gate).
+ */
+export type ActionsGate = 'tick' | 'per-call';
+
 /** Where the conversation is: nothing going on, a question on its way to the engine, answering, or being stopped. */
 export type AssistantRun = 'idle' | 'sending' | 'running' | 'stopping';
 
@@ -32,6 +38,10 @@ export interface PendingApproval {
   readonly input: unknown;
   /** What it would change cannot be undone. */
   readonly destructive: boolean;
+  /** It changes things (an action): asked every call, its arguments shown at once. */
+  readonly write: boolean;
+  /** The engine offers "Always allow" for it. */
+  readonly remember: boolean;
 }
 
 interface AssistantState {
@@ -46,6 +56,7 @@ interface AssistantState {
   /** Chips the user switched on (those off by default). */
   on: readonly string[];
   allowWrite: boolean;
+  actionsGate: ActionsGate;
   run: AssistantRun;
   /** The last command that failed, in the engine's words. */
   failure: string | null;
@@ -65,6 +76,7 @@ const initialState: AssistantState = {
   off: [],
   on: [],
   allowWrite: false,
+  actionsGate: 'tick',
   run: 'idle',
   failure: null,
   listOpen: false,
@@ -138,7 +150,9 @@ export const AssistantStore = signalStore(
       approval: computed<PendingApproval | null>(() => {
         const t = turn();
         if (!t?.running) return null;
-        for (const p of t.parts) if (p.kind === 'tool' && p.card.state === 'awaiting') return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input, destructive: p.card.destructive };
+        for (const p of t.parts)
+          if (p.kind === 'tool' && p.card.state === 'awaiting')
+            return { callId: p.card.callId, name: p.card.name, summary: p.card.summary, input: p.card.input, destructive: p.card.destructive, write: p.card.write, remember: p.card.remember === true };
         return null;
       }),
       canSend: computed(() => store.run() === 'idle' && store.draft().trim().length > 0),
@@ -195,7 +209,7 @@ export const AssistantStore = signalStore(
     };
     /** Starts a turn with this question and context. */
     const submit = async (text: string, context: readonly ContextItem[]): Promise<void> => {
-      const allowWrite = store.allowWrite() && store.hasWriteTools();
+      const allowWrite = (store.actionsGate() === 'per-call' || store.allowWrite()) && store.hasWriteTools();
       const conversationId = store.activeId();
       patchState(store, {
         run: 'sending',
@@ -255,6 +269,10 @@ export const AssistantStore = signalStore(
       },
       setAllowWrite(allowWrite: boolean): void {
         patchState(store, { allowWrite });
+      },
+      /** The host's gate for tools that write (the pane's `actionsGate` input). */
+      setActionsGate(actionsGate: ActionsGate): void {
+        patchState(store, { actionsGate });
       },
       toggleListOpen(): void {
         patchState(store, { listOpen: !store.listOpen() });

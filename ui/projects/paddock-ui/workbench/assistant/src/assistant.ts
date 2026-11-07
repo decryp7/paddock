@@ -2,8 +2,9 @@ import { NgComponentOutlet } from '@angular/common';
 import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
 import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
-import { AssistantStore } from './assistant.store';
-import { chipText, conversationTitle, type TurnPart, type TurnView } from './chat-model';
+import { AssistantStore, type ActionsGate } from './assistant.store';
+import { chipText, conversationTitle, waitingPhase, type TurnPart, type TurnView } from './chat-model';
+import type { ProviderPhase } from '../generated/assistant';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
 
@@ -71,7 +72,7 @@ const SCROLL_STICK_PX = 24;
           <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-retry" (click)="store.load()">{{ t.retry }}</button>
         </div>
       } @else if (!store.turns().length && store.isLoaded()) {
-        <p class="hint" data-testid="assistant-empty">{{ t.empty }}</p>
+        <p class="hint" data-testid="assistant-empty">{{ emptyHint() ?? t.empty }}</p>
       }
       @for (turn of store.turns(); track $index; let last = $last) {
         <article class="turn" data-testid="assistant-turn">
@@ -98,7 +99,9 @@ const SCROLL_STICK_PX = 24;
             @if (turn.running && turn.parts.at(-1)?.kind === 'text') {
               <span class="pulse" aria-hidden="true" data-testid="assistant-streaming"><i></i><i></i><i></i></span>
             }
-            @if (turn.running && !turn.parts.length) {
+            @if (phaseOf(turn); as phase) {
+              <p class="hint" role="status" data-testid="assistant-phase">{{ phaseText(phase) }}</p>
+            } @else if (turn.running && !turn.parts.length) {
               <p class="hint" data-testid="assistant-thinking">{{ t.thinking }}</p>
             }
             @for (note of turn.notes; track $index) {
@@ -115,7 +118,7 @@ const SCROLL_STICK_PX = 24;
                 <pd-status-glyph class="fail-icon" status="error" [size]="16" />
                 <div class="fail-body">
                   <p class="fail-title">{{ t.failedTitle }}</p>
-                  <p class="fail-cause" data-testid="assistant-error-cause">{{ t.failedCause }}</p>
+                  <p class="fail-cause" data-testid="assistant-error-cause">{{ failedCause() ?? t.failedCause }}</p>
                   @if (details() === $index) {
                     <p class="fail-details" data-testid="assistant-error-details">{{ err.message }}</p>
                   }
@@ -148,7 +151,7 @@ const SCROLL_STICK_PX = 24;
         @if (ask.destructive) {
           <p class="final" id="pd-assistant-approval-final" data-testid="assistant-approval-final"><pd-status-glyph status="warning" [size]="14" /> {{ t.cannotUndo }}</p>
         }
-        <details class="details" data-testid="assistant-approval-details">
+        <details class="details" data-testid="assistant-approval-details" [open]="ask.write">
           <summary><pd-glyph class="chev" name="chevron-right" [size]="14" /> {{ t.details }}</summary>
           <dl>
             <dt>{{ t.tool }}</dt>
@@ -164,7 +167,10 @@ const SCROLL_STICK_PX = 24;
           </dl>
         </details>
         <div class="actions">
-          <button type="button" class="pd-btn" [class.pd-btn--danger]="ask.destructive" data-testid="assistant-allow" (click)="store.approve(ask.callId, 'allowOnce')">{{ allowLabel(ask.name) }}</button>
+          <button type="button" class="pd-btn" [class.pd-btn--danger]="ask.destructive" data-testid="assistant-allow" (click)="store.approve(ask.callId, 'allowOnce')">{{ ask.remember ? t.allowOnce : allowLabel(ask.name) }}</button>
+          @if (ask.remember) {
+            <button type="button" class="pd-btn" data-testid="assistant-always" [attr.title]="t.alwaysHint" (click)="store.approve(ask.callId, 'alwaysAllow')">{{ t.always }}</button>
+          }
           <button #declineButton type="button" class="pd-btn" [class.pd-btn--ghost]="!ask.destructive" data-testid="assistant-decline" (click)="store.approve(ask.callId, 'deny')">{{ t.decline }}</button>
         </div>
       </section>
@@ -203,7 +209,7 @@ const SCROLL_STICK_PX = 24;
         (keydown)="key($event)"
       ></textarea>
       <div class="send-row">
-        @if (store.hasWriteTools()) {
+        @if (store.hasWriteTools() && store.actionsGate() === 'tick') {
           <label class="allow" [attr.title]="t.allowHint">
             <input type="checkbox" data-testid="assistant-allow-actions" [checked]="store.allowWrite()" [disabled]="store.busy() || blocked()" (change)="store.setAllowWrite($any($event.target).checked)" />
             <span>{{ t.allowActions }}</span>
@@ -308,6 +314,13 @@ export class PdAssistant {
 
   /** Offer "Open AI settings" in the needs-AI state (the app's AI page). */
   readonly settingsLink = input(false);
+  /** How tools that write are gated: the per-message "Allow actions" tick (default), or the engine asking on every call. */
+  readonly actionsGate = input<ActionsGate>('tick');
+  /** The empty conversation's hint in the host app's words (default: the workbench's "tools of this app"). */
+  readonly emptyHint = input<string | null>(null);
+  /** The likely cause under a failed answer in the host app's words (default: check that Pitwall is running; an app that
+   *  is the engine itself says something else). */
+  readonly failedCause = input<string | null>(null);
   /** A step only the app can run (open or install Pitwall, update, change permissions), from the needs-AI state. */
   readonly step = output<NextStep>();
   /** The user chose "Open AI settings". */
@@ -329,6 +342,11 @@ export class PdAssistant {
     stopped: $localize`:@@pd.wb.assistant.stopped:Stopped.`,
     wantsTo: $localize`:@@pd.wb.assistant.wants-to:The assistant wants to:`,
     allow: $localize`:@@pd.wb.assistant.approve.allow:Allow`,
+    allowOnce: $localize`:@@pd.wb.assistant.approve.once:Allow once`,
+    always: $localize`:@@pd.wb.assistant.approve.always:Always allow`,
+    alwaysHint: $localize`:@@pd.wb.assistant.approve.always-hint:Run this tool from now on without asking. Every call still shows in the chat.`,
+    queued: $localize`:@@pd.wb.assistant.phase.queued:Waiting for the model…`,
+    loadingModel: $localize`:@@pd.wb.assistant.phase.loading:Loading the model…`,
     decline: $localize`:@@pd.wb.assistant.approve.decline:Decline`,
     dismiss: $localize`:@@pd.wb.assistant.dismiss:Dismiss`,
     context: $localize`:@@pd.wb.assistant.context:Context for this question`,
@@ -373,6 +391,8 @@ export class PdAssistant {
   });
 
   constructor() {
+    // The host's gate reaches the store, which sends it with each question (an input, not derived state of the store).
+    effect(() => this.store.setActionsGate(this.actionsGate()));
     // Keeps the newest text in view while an answer streams in, but only for a user who is at the bottom (DOM only).
     // effect-state: `unseen` records the scroll decision of this effect; the user's position is not a signal, so it cannot be derived.
     effect(() => {
@@ -427,6 +447,18 @@ export class PdAssistant {
   /** The error of a turn that failed for its own reasons (a missing Pitwall is shown by the shared needs-AI state instead). */
   protected failedOf(turn: TurnView): { readonly message: string } | null {
     return turn.error && !turn.error.needsAi ? turn.error : null;
+  }
+
+  /** The phase a running turn waits in (the engine's report), shown instead of "Thinking…". */
+  protected phaseOf(turn: TurnView): ProviderPhase | null {
+    return waitingPhase(turn);
+  }
+
+  /** The words of a phase: the load says the time so far in whole seconds once there is one (a growing count, ER-18). */
+  protected phaseText(phase: ProviderPhase): string {
+    if (phase.kind === 'queued') return this.t.queued;
+    const seconds = phase.kind === 'loading' ? Math.floor(phase.elapsedMs / 1000) : 0;
+    return seconds > 0 ? $localize`:@@pd.wb.assistant.phase.loading-for:Loading the model… ${seconds}:seconds: s` : this.t.loadingModel;
   }
 
   protected allowLabel(tool: string): string {
