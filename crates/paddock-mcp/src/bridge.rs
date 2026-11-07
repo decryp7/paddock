@@ -3,10 +3,11 @@
 //! checks that the process it names is the one that started when the file says (rule 53: the file is only a hint, and a key is
 //! never sent to a port nobody proved), connects to the loopback listener with the key, and carries lines both ways.
 
+use crate::jsonrpc::{Id, Incoming, parse};
 use crate::listener::Discovery;
+use crate::server::Limits;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
-use serde_json::Value;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::path::Path;
@@ -41,12 +42,12 @@ fn not_open(app: &str) -> BridgeError {
 /// The requests the bridge carried that the app has not answered yet, and whether the host's input has ended.
 #[derive(Default)]
 struct Pending {
-    ids: Vec<Value>,
+    ids: Vec<Id>,
     input_ended: bool,
 }
 
 impl Pending {
-    fn forget(&mut self, id: &Value) {
+    fn forget(&mut self, id: &Id) {
         if let Some(at) = self.ids.iter().position(|x| x == id) {
             self.ids.remove(at);
         }
@@ -57,39 +58,43 @@ fn pending_lock(p: &Mutex<Pending>) -> std::sync::MutexGuard<'_, Pending> {
     p.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-/// The two fields that tell a request (`method` and an `id`) from a notification (no `id`) and from a reply (no `method`).
-#[derive(Deserialize)]
-struct Probe {
-    id: Option<Value>,
-    method: Option<IgnoredAny>,
-}
-
-fn probe(line: &str) -> Option<Probe> {
-    serde_json::from_str::<Probe>(line).ok()
-}
-
-/// The id of `line` when it is a request that expects an answer.
-fn request_id(line: &str) -> Option<Value> {
-    probe(line)
-        .filter(|p| p.method.is_some())
-        .and_then(|p| p.id)
+/// The id the server will answer `line` with, read by the server's own parser, so only an id the server accepts is waited
+/// for: a line it cannot parse, an id it rejects (1.5, true, an object) or a line over its default size limit is answered
+/// with id null, and a notification not at all.
+fn request_id(line: &str) -> Option<Id> {
+    if line.len() > Limits::default().max_line_bytes {
+        return None;
+    }
+    match parse(line) {
+        Ok(Incoming::Request { id, .. }) | Err((Some(id), _)) => Some(id),
+        _ => None,
+    }
 }
 
 /// The id of the request `line` cancels when it is `notifications/cancelled`.
-fn cancelled_id(line: &str) -> Option<Value> {
-    match crate::jsonrpc::parse(line) {
-        Ok(crate::jsonrpc::Incoming::Notification { method, mut params })
-            if method == "notifications/cancelled" =>
-        {
-            params.remove("requestId")
+fn cancelled_id(line: &str) -> Option<Id> {
+    match parse(line) {
+        Ok(Incoming::Notification { method, params }) if method == "notifications/cancelled" => {
+            params
+                .get("requestId")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
         }
         _ => None,
     }
 }
 
-/// The id of `line` when it is a reply (a result or an error).
-fn reply_id(line: &str) -> Option<Value> {
-    probe(line)
+/// The two fields that tell a reply (no `method`) from a request the app sends. Only these are read, so a long result is
+/// not built into a value.
+#[derive(Deserialize)]
+struct Probe {
+    id: Option<Id>,
+    method: Option<IgnoredAny>,
+}
+
+/// The id of `line` when it is a reply (a result or an error) with an id.
+fn reply_id(line: &str) -> Option<Id> {
+    serde_json::from_str::<Probe>(line)
+        .ok()
         .filter(|p| p.method.is_none())
         .and_then(|p| p.id)
 }

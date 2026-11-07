@@ -673,3 +673,32 @@ fn a_call_the_host_cancelled_is_not_reported_unanswered() {
         "only the initialize answer: {text:?}"
     );
 }
+
+/// Requests whose id the server cannot accept (1.5, true, an object) are answered by the server with id null; the bridge
+/// must not wait for them as well and answer them a second time with -32603 (review of 31f2bb60b, P2).
+#[test]
+fn requests_with_ids_the_server_rejects_are_answered_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let (l, keys, _r) = rig_listener(dir.path());
+    let (_, key) = keys.issue("host", 1).unwrap();
+    l.reconcile(true);
+    let input = [
+        client::initialize(1, "host", "1"),
+        json!({"jsonrpc": "2.0", "id": 1.5, "method": "ping"}).to_string(),
+        json!({"jsonrpc": "2.0", "id": true, "method": "ping"}).to_string(),
+        json!({"jsonrpc": "2.0", "id": {"a": 1}, "method": "ping"}).to_string(),
+    ]
+    .join("\n")
+        + "\n";
+    let mut out = Vec::new();
+    let result = bridge::run(
+        &discovery_path(dir.path()),
+        &key,
+        Cursor::new(input.into_bytes()),
+        &mut out,
+    );
+    let text = String::from_utf8(out).unwrap();
+    assert!(result.is_ok(), "{result:?}, output {text:?}");
+    assert_eq!(text.lines().count(), 4, "one answer each: {text:?}");
+    assert!(!text.contains("-32603"), "{text}");
+}
