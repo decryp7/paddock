@@ -111,6 +111,32 @@ fn bounded<T>(
     result
 }
 
+/// Where the user id of the other end of a connection comes from (IP1 item 5): the OS for a [`Stream`], a fake in tests.
+pub trait PeerCredentials {
+    /// The user id of the process on the other end where the OS tells (Unix); `None` otherwise.
+    fn peer_uid(&self) -> Option<u32>;
+}
+
+impl PeerCredentials for Stream {
+    fn peer_uid(&self) -> Option<u32> {
+        Stream::peer_uid(self)
+    }
+}
+
+/// This process's own user id (Unix); `None` elsewhere, where the endpoint's access list decides who may connect.
+fn own_uid() -> Option<u32> {
+    #[cfg(unix)]
+    {
+        // SAFETY: `geteuid` has no arguments and cannot fail.
+        #[allow(unsafe_code)]
+        Some(unsafe { libc::geteuid() })
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
 /// What a host checks in a `Hello`: cheap to clone, so each client is authenticated on its own thread.
 #[derive(Clone)]
 pub struct Authenticator {
@@ -120,6 +146,8 @@ pub struct Authenticator {
     name: String,
     clock: Arc<dyn Clock>,
     timeout: Duration,
+    /// Refuse a client that runs as another user (Unix); off for a service that other accounts connect to.
+    same_account: bool,
 }
 
 impl std::fmt::Debug for Authenticator {
@@ -142,14 +170,44 @@ impl Authenticator {
     /// handshake limit on its clock; with `pid`, only that process.
     pub fn authenticate(
         &self,
-        mut stream: Stream,
+        stream: Stream,
         os_pid: Option<u32>,
         pid: Option<u32>,
     ) -> Result<Connection, IpcError> {
+        let uid = Stream::peer_uid(&stream);
+        self.authenticate_with_uid(stream, os_pid, pid, uid)
+    }
+
+    /// [`Authenticator::authenticate`] with the user id taken from `credentials` (a fake in tests).
+    pub fn authenticate_as(
+        &self,
+        stream: Stream,
+        os_pid: Option<u32>,
+        pid: Option<u32>,
+        credentials: &dyn PeerCredentials,
+    ) -> Result<Connection, IpcError> {
+        self.authenticate_with_uid(stream, os_pid, pid, credentials.peer_uid())
+    }
+
+    fn authenticate_with_uid(
+        &self,
+        mut stream: Stream,
+        os_pid: Option<u32>,
+        pid: Option<u32>,
+        peer_uid: Option<u32>,
+    ) -> Result<Connection, IpcError> {
+        // Before anything is read: a client of another account never gets to present a token.
+        if let Err(e) = self.check_account(peer_uid) {
+            self.refuse(
+                &mut stream,
+                codes::AUTH,
+                "this host serves its own account only",
+            );
+            return Err(e);
+        }
         let (protocol, claimed) = bounded(&mut stream, &self.clock, self.timeout, |s| {
             self.check_hello(s, os_pid, pid)
         })?;
-        let peer_uid = stream.peer_uid();
         Ok(Connection {
             stream,
             limit: self.limit,
@@ -157,6 +215,21 @@ impl Authenticator {
             peer_uid,
             protocol,
         })
+    }
+
+    fn check_account(&self, peer: Option<u32>) -> Result<(), IpcError> {
+        let Some(me) = own_uid().filter(|_| self.same_account) else {
+            return Ok(());
+        };
+        match peer {
+            Some(uid) if uid == me => Ok(()),
+            Some(uid) => Err(IpcError::Auth(format!(
+                "the client runs as another user (uid {uid}; this side runs as {me})"
+            ))),
+            None => Err(IpcError::Auth(
+                "the user id of the client could not be read".into(),
+            )),
+        }
     }
 
     fn refuse(&self, stream: &mut Stream, code: &str, message: &str) {
@@ -280,6 +353,7 @@ impl Host {
                 name: "app".into(),
                 clock: Arc::new(SystemClock),
                 timeout: HANDSHAKE_TIMEOUT,
+                same_account: false,
             },
         })
     }
@@ -287,6 +361,13 @@ impl Host {
     /// Names this side in version refusals ("this Debrief speaks 2.0"); "app" by default.
     pub fn named(mut self, name: impl Into<String>) -> Host {
         self.auth.name = name.into();
+        self
+    }
+
+    /// Refuses a client that does not run as the account of this process (Unix; IP1 item 5). For a host whose clients
+    /// are its own children or the user's own helpers; a service that other accounts connect to leaves it off.
+    pub fn same_account_only(mut self) -> Host {
+        self.auth.same_account = true;
         self
     }
 

@@ -366,9 +366,78 @@ jobs:
           path: .nightly-installers
           key: nightly-installers-${{ github.sha }}-${{ hashFiles('ci-image/**', 'rust-toolchain*', '.nvmrc') }}
 
+  # IP1 item 6 (plan 1.2): every shared crate's fuzz targets run for a bounded time each, so a decoder that panics on
+  # hostile bytes is found by the night and not by a plugin. Each crate's fuzz folder is its own workspace
+  # (`crates/<crate>/fuzz`); a crash fails its shard and its reproducer is uploaded.
+  shared-fuzz:
+    name: fuzz (${{ matrix.crate }})
+    needs: [gate]
+    if: ${{ needs.gate.outputs.run == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crate: paddock-ipc
+            targets: frame plugin_request
+          - crate: paddock-plugin-package
+            targets: manifest package
+          - crate: paddock-view
+            targets: decode
+          - crate: paddock-archive
+            targets: archive
+          - crate: paddock-testplan
+            targets: formats
+    env:
+      FUZZ_SECONDS: "120"
+      FUZZ_TOOLCHAIN: nightly-2026-10-01
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.gitea/actions/build-jobs
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-fuzz
+            crates/${{ matrix.crate }}/fuzz/target
+          key: shared-fuzz-${{ matrix.crate }}-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-${{ hashFiles(format('crates/{0}/fuzz/Cargo.toml', matrix.crate)) }}
+          restore-keys: shared-fuzz-${{ matrix.crate }}-${{ runner.os }}-${{ env.FUZZ_TOOLCHAIN }}-
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
+      - name: Fuzz ${{ matrix.targets }}
+        working-directory: crates/${{ matrix.crate }}
+        shell: bash
+        run: |
+          failed=()
+          for target in ${{ matrix.targets }}; do
+            echo "::group::${{ matrix.crate }} $target"
+            mkdir -p "fuzz/work/$target" "fuzz/corpus/$target"
+            if ! cargo fuzz run "$target" "fuzz/work/$target" "fuzz/corpus/$target" -- -max_total_time=$FUZZ_SECONDS -rss_limit_mb=2048 -max_len=131072 -timeout=20; then
+              failed+=("$target")
+            fi
+            echo "::endgroup::"
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            echo "::error::${{ matrix.crate }}: crashed or timed out: ${failed[*]}. Reproducers: the crashes-${{ matrix.crate }} artifact; replay with cargo fuzz run <target> <file> in crates/${{ matrix.crate }}."
+            exit 1
+          fi
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashes-${{ matrix.crate }}
+          path: crates/${{ matrix.crate }}/fuzz/artifacts/
+          if-no-files-found: ignore
+
   mark:
     name: mark the green nightly
-    needs: [ci, dialog-commands]
+    needs: [ci, dialog-commands, shared-fuzz]
     if: ${{ github.event_name == 'schedule' && success() }}
     runs-on: ubuntu-latest
     container:

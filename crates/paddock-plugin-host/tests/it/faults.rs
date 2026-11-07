@@ -237,7 +237,7 @@ fn a_manifest_for_protocol_one_is_refused_before_anything_starts() {
     };
     assert_eq!(
         why,
-        "plugin net.example.fixture was built for an older contract (protocol 1.1; this TestApp speaks 2.0); update it"
+        "plugin net.example.fixture was built for protocol 1.1, which is no longer supported (this TestApp speaks 2.0); update it"
     );
     assert!(matches!(echo(&s), Err(HostError::Unavailable(m)) if m == why));
     // And a package for it cannot be installed.
@@ -252,7 +252,7 @@ fn a_manifest_for_protocol_one_is_refused_before_anything_starts() {
         .unwrap();
     let blocked = inspection.installable().unwrap_err();
     assert!(
-        blocked.to_string().contains("built for an older contract"),
+        blocked.to_string().contains("no longer supported"),
         "{blocked}"
     );
 }
@@ -592,7 +592,7 @@ fn a_plugin_that_cannot_be_served_stays_refused_when_it_is_switched_off_and_on()
     s.set_enabled(false);
     assert_eq!(s.status(), Status::Disabled);
     s.set_enabled(true);
-    assert!(matches!(s.status(), Status::Refused(m) if m.contains("older contract")));
+    assert!(matches!(s.status(), Status::Refused(m) if m.contains("no longer supported")));
     // Releasing something that is not held changes nothing, and a disabled plugin stays disabled when released.
     s.release();
     assert!(matches!(s.status(), Status::Refused(_)));

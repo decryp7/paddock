@@ -16,9 +16,9 @@
 //!
 //! # Legacy plugins (ADR 0003 phase 3)
 //!
-//! A plugin built for protocol 1 (Debrief's own, before the platform) is refused with a message that says to update it
-//! ([`paddock_plugin_api::Refusal::Legacy`], status [`Status::Refused`]). The compatibility shim that would serve it
-//! (decoding the old enum as `debrief.legacy` calls) is the app's, not the platform's.
+//! A plugin built for protocol 1 (Debrief's own, before the platform) is no longer supported: there is no shim (ADR 0003).
+//! It is refused with a message that says to update it ([`paddock_plugin_api::Refusal::Legacy`], status
+//! [`Status::Refused`]).
 
 #![deny(missing_docs)]
 

@@ -451,7 +451,7 @@ fn a_reply_over_the_limit_fails_that_call_and_the_link_stays() {
         },
     );
     match pending.join().unwrap() {
-        Err(IpcError::TooLarge { len, max }) => assert!(len > 4000 && max == MIN_FRAME),
+        Err(IpcError::ReplyTooLarge { len, max }) => assert!(len > 4000 && max == MIN_FRAME),
         other => panic!("{other:?}"),
     }
     // The next call works.
@@ -478,7 +478,7 @@ fn a_reply_over_the_limit_fails_that_call_and_the_link_stays() {
             body: vec![2; 4000],
         },
     );
-    assert!(matches!(s.next(T), Err(IpcError::TooLarge { .. })));
+    assert!(matches!(s.next(T), Err(IpcError::ReplyTooLarge { .. })));
     assert_eq!(read_frame_raw(&mut io), Frame::Cancel { id });
     // A push over the limit is dropped and counted; a frame for no known call is ignored.
     write_frame_raw(
@@ -894,4 +894,177 @@ fn a_call_cancelled_while_it_waits_is_answered_as_cancelled_and_never_runs_and_q
     assert_eq!(answers, vec![(1, true), (2, false)]);
     // Only the first call ran; 2 was answered as cancelled without running.
     assert_eq!(*ran.lock().unwrap(), vec![vec![b'x']]);
+}
+
+/// IP1 item 1: a reply over THIS side's limit is the other side's doing. It must not look like our own request being too
+/// large (`IpcError::TooLarge`, which callers word as "the request is N bytes").
+#[test]
+fn an_oversized_reply_is_reported_as_the_other_sides_not_as_our_request() {
+    let (p, mut io) = raw(
+        Arc::new(NoCalls),
+        PeerOptions::new("the plugin"),
+        FrameLimit::new(MIN_FRAME),
+    );
+    let p2 = p.clone();
+    let pending = std::thread::spawn(move || p2.call(Vec::new(), T));
+    let Frame::Call { id, .. } = read_frame_raw(&mut io) else {
+        panic!("a call was expected");
+    };
+    let big = frame::encode(
+        &Frame::Reply {
+            id,
+            body: vec![0; MIN_FRAME + 4096],
+        },
+        FrameLimit::default(),
+    )
+    .unwrap();
+    write_raw(&mut io, &big);
+    let err = pending.join().unwrap().unwrap_err();
+    assert!(
+        matches!(err, IpcError::ReplyTooLarge { len, max } if len > max && max == MIN_FRAME),
+        "an oversized reply came back as {err:?}"
+    );
+    assert!(!err.is_process_failure());
+    assert!(err.to_string().starts_with("its answer of"), "{err}");
+    assert!(
+        !p.is_closed(),
+        "one oversized reply fails one call, not the link"
+    );
+}
+
+/// IP1 item 2: a peer that stops reading makes this side's sends block and then fail at the bound; memory does not grow.
+#[test]
+fn a_peer_that_stops_reading_makes_sends_block_and_then_fail_at_the_bound() {
+    let clock = Arc::new(paddock_jobs::time::FakeClock::new());
+    let mut opts = PeerOptions::new("the plugin");
+    opts.write_queue = 2;
+    opts.write_queue_bytes = 8 << 20;
+    opts.write_stall = Duration::from_secs(30);
+    opts.clock = clock.clone();
+    let (p, io) = raw(Arc::new(NoCalls), opts, FrameLimit::default());
+    // `io` is never read: the writer blocks once the socket buffer is full, then the queue fills (2 frames).
+    let sender = {
+        let p = p.clone();
+        std::thread::spawn(move || {
+            let mut sent = 0usize;
+            loop {
+                match p.push(vec![0u8; 1 << 20]) {
+                    Ok(()) => sent += 1,
+                    Err(e) => return (sent, e),
+                }
+            }
+        })
+    };
+    assert!(clock.wait_for_waiters(1, GUARD), "the sender never blocked");
+    assert!(
+        !sender.is_finished(),
+        "a full queue blocks, it does not fail at once"
+    );
+    clock.advance(Duration::from_secs(30));
+    let (sent, err) = sender.join().unwrap();
+    assert!(matches!(err, IpcError::Timeout), "{err:?}");
+    // At most the socket buffer's worth, the frame in the writer's hands and the two queued ones went out.
+    assert!(sent < 64, "sent {sent} MiB before the bound");
+    // Memory stays bounded: the link is still up, and a closed connection releases nothing it never held.
+    assert!(!p.is_closed());
+    drop(io);
+}
+
+/// IP1 item 3: a call id that is still in progress, sent again, is a protocol error that closes the connection.
+#[test]
+fn a_repeated_call_id_closes_the_connection() {
+    let gate = Gate::default();
+    let (started_tx, started_rx) = mpsc::channel();
+    let started_tx = Mutex::new(started_tx);
+    let waiting = gate.clone();
+    let handler: Arc<dyn Handler> = Arc::new(
+        move |_: &CallCtx, _: &[u8]| -> Result<Vec<u8>, RemoteError> {
+            let _ = started_tx.lock().unwrap().send(());
+            waiting.wait();
+            Ok(Vec::new())
+        },
+    );
+    let (p, mut io) = raw(
+        handler,
+        PeerOptions::new("the plugin"),
+        FrameLimit::default(),
+    );
+    let call = |id| {
+        frame::encode(
+            &Frame::Call {
+                id,
+                credit: 0,
+                body: Vec::new(),
+            },
+            FrameLimit::default(),
+        )
+        .unwrap()
+    };
+    write_raw(&mut io, &call(7));
+    started_rx
+        .recv_timeout(GUARD)
+        .expect("the first call never started");
+    write_raw(&mut io, &call(7));
+    assert!(p.wait_closed(Some(GUARD)));
+    match p.closed() {
+        Some(IpcError::Protocol(m)) => assert!(m.contains("call 7"), "{m}"),
+        other => panic!("{other:?}"),
+    }
+    gate.open();
+}
+
+/// A different id while the first call runs is fine, and an id may be used again once its call has ended.
+#[test]
+fn distinct_ids_and_reuse_after_the_call_ended_are_not_errors() {
+    let (p, mut io) = raw(
+        echo(),
+        PeerOptions::new("the plugin"),
+        FrameLimit::default(),
+    );
+    let call = |id: u64, body: &[u8]| {
+        frame::encode(
+            &Frame::Call {
+                id,
+                credit: 0,
+                body: body.to_vec(),
+            },
+            FrameLimit::default(),
+        )
+        .unwrap()
+    };
+    for (id, body) in [(1, b"a"), (2, b"b")] {
+        write_raw(&mut io, &call(id, body));
+        assert_eq!(
+            read_frame_raw(&mut io),
+            Frame::Reply {
+                id,
+                body: body.to_vec()
+            }
+        );
+    }
+    write_raw(&mut io, &call(1, b"c"));
+    assert_eq!(
+        read_frame_raw(&mut io),
+        Frame::Reply {
+            id: 1,
+            body: b"c".to_vec()
+        }
+    );
+    assert!(!p.is_closed());
+}
+
+/// IP1 item 2: when the writer dies (a write fails), nothing more is queued for it: later sends fail at once with the
+/// reason the connection closed, and do not wait for the stall.
+#[test]
+fn sends_after_the_writer_died_fail_at_once_with_the_close_reason() {
+    let (p, io) = raw(
+        Arc::new(NoCalls),
+        PeerOptions::new("the plugin"),
+        FrameLimit::default(),
+    );
+    drop(io);
+    assert!(p.wait_closed(Some(GUARD)));
+    let reason = p.closed().expect("closed");
+    assert_eq!(p.push(b"late".to_vec()).unwrap_err(), reason);
+    assert_eq!(p.call(b"late".to_vec(), T).unwrap_err(), reason);
 }
