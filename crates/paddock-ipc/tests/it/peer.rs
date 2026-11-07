@@ -942,6 +942,11 @@ fn a_peer_that_stops_reading_makes_sends_block_and_then_fail_at_the_bound() {
     opts.write_stall = Duration::from_secs(30);
     opts.clock = clock.clone();
     let (p, io) = raw(Arc::new(NoCalls), opts, FrameLimit::default());
+    // A call is waiting for its answer (no timeout of its own) when the other side stops reading.
+    let waiting = {
+        let p = p.clone();
+        std::thread::spawn(move || p.call(b"waiting".to_vec(), None))
+    };
     // `io` is never read: the writer blocks once the socket buffer is full, then the queue fills (2 frames).
     let sender = {
         let p = p.clone();
@@ -965,9 +970,70 @@ fn a_peer_that_stops_reading_makes_sends_block_and_then_fail_at_the_bound() {
     assert!(matches!(err, IpcError::Timeout), "{err:?}");
     // At most the socket buffer's worth, the frame in the writer's hands and the two queued ones went out.
     assert!(sent < 64, "sent {sent} MiB before the bound");
-    // Memory stays bounded: the link is still up, and a closed connection releases nothing it never held.
-    assert!(!p.is_closed());
+    // A stalled send drops its frame, so the connection cannot go on: it is closed with the reason, and the call that waited
+    // for an answer fails with it instead of waiting for ever.
+    assert!(p.is_closed(), "a stalled send must close the connection");
+    let reason = p.closed().unwrap().to_string();
+    assert!(
+        reason.contains("the plugin stopped reading for 30 s"),
+        "{reason}"
+    );
+    let released = waiting.join().unwrap().unwrap_err();
+    assert!(
+        released.to_string().contains("stopped reading"),
+        "{released:?}"
+    );
     drop(io);
+}
+
+/// IP1 review P1-1: a reply that stalls is a frame dropped. The connection closes, and a call the other side was waiting
+/// on is released by the close (here the test is the other side and sees the stream end).
+#[test]
+fn a_served_calls_stalled_reply_closes_the_connection_and_releases_the_caller() {
+    let clock = Arc::new(paddock_jobs::time::FakeClock::new());
+    let mut opts = PeerOptions::new("the plugin");
+    opts.write_queue = 1;
+    opts.write_queue_bytes = 8 << 20;
+    opts.write_stall = Duration::from_secs(30);
+    opts.clock = clock.clone();
+    let big: Arc<dyn Handler> = Arc::new(|_: &CallCtx, _: &[u8]| -> Result<Vec<u8>, RemoteError> {
+        Ok(vec![7u8; 1 << 20])
+    });
+    let (p, mut io) = raw(big, opts, FrameLimit::default());
+    // Calls whose 1 MiB replies the test never reads: the socket buffer fills, the writer blocks, the one-frame queue fills,
+    // and the next reply stalls on its call thread.
+    for id in 1..=40u64 {
+        write_frame_raw(
+            &mut io,
+            &Frame::Call {
+                id,
+                credit: 0,
+                body: Vec::new(),
+            },
+        );
+        if clock.waiters() >= 1 {
+            break;
+        }
+    }
+    assert!(clock.wait_for_waiters(1, GUARD), "no reply ever stalled");
+    clock.advance(Duration::from_secs(30));
+    assert!(
+        p.wait_closed(Some(GUARD)),
+        "a stalled reply left the connection open"
+    );
+    assert!(p.closed().unwrap().to_string().contains("stopped reading"));
+    // The other side sees the stream end after what was already written: it is released, not left waiting.
+    let mut ended = false;
+    for _ in 0..80 {
+        match frame::read_frame(&mut io, FrameLimit::default()) {
+            Ok(_) => {}
+            Err(_) => {
+                ended = true;
+                break;
+            }
+        }
+    }
+    assert!(ended, "the stream never ended");
 }
 
 /// IP1 item 3: a call id that is still in progress, sent again, is a protocol error that closes the connection.
@@ -1067,4 +1133,93 @@ fn sends_after_the_writer_died_fail_at_once_with_the_close_reason() {
     let reason = p.closed().expect("closed");
     assert_eq!(p.push(b"late".to_vec()).unwrap_err(), reason);
     assert_eq!(p.call(b"late".to_vec(), T).unwrap_err(), reason);
+}
+
+/// IP1 review P2: an answer that is too large reaches the other side as `tooLarge`, whichever direction was too large.
+#[test]
+fn both_directions_of_an_oversized_frame_answer_too_large() {
+    assert_eq!(
+        IpcError::TooLarge { len: 9, max: 5 }.to_remote().code,
+        codes::TOO_LARGE
+    );
+    assert_eq!(
+        IpcError::ReplyTooLarge { len: 9, max: 5 }.to_remote().code,
+        codes::TOO_LARGE
+    );
+    assert_eq!(IpcError::Timeout.to_remote().code, codes::INTERNAL);
+}
+
+/// IP1 review P2: a call's own timeout is honoured while it waits for room in the queue: the call fails with Timeout, the
+/// connection stays (the other side has not been silent for the whole stall), and nothing grew.
+#[test]
+fn a_calls_own_timeout_ends_its_wait_for_room_without_closing_the_connection() {
+    let clock = Arc::new(paddock_jobs::time::FakeClock::new());
+    let mut opts = PeerOptions::new("the plugin");
+    opts.write_queue = 1;
+    opts.write_queue_bytes = 8 << 20;
+    opts.write_stall = Duration::from_secs(30);
+    opts.clock = clock.clone();
+    let (p, io) = raw(Arc::new(NoCalls), opts, FrameLimit::default());
+    // Fill the socket buffer, the writer's hand and the one-frame queue with pushes from a thread that is left waiting.
+    let filler = {
+        let p = p.clone();
+        std::thread::spawn(move || while p.push(vec![0u8; 1 << 20]).is_ok() {})
+    };
+    assert!(clock.wait_for_waiters(1, GUARD), "the queue never filled");
+    let caller = {
+        let p = p.clone();
+        std::thread::spawn(move || p.call(b"x".to_vec(), Some(Duration::from_secs(2))))
+    };
+    assert!(
+        clock.wait_for_waiters(2, GUARD),
+        "the call never waited for room"
+    );
+    clock.advance(Duration::from_secs(2));
+    let err = caller.join().unwrap().unwrap_err();
+    assert!(matches!(err, IpcError::Timeout), "{err:?}");
+    assert!(
+        !p.is_closed(),
+        "one call running out of time is not the other side's silence"
+    );
+    // The stall itself, later, closes the connection and ends the filler.
+    clock.advance(Duration::from_secs(30));
+    filler.join().unwrap();
+    assert!(p.is_closed());
+    drop(io);
+}
+
+/// IP1 review P1: the thread that reads the connection never waits for the writer. A call it must refuse (here: no room to run
+/// it) needs a reply queued; with the queue full that means the other side stopped reading, so the connection closes at once
+/// (the fake clock never moves: waiting for the stall would hang).
+#[test]
+fn the_reader_thread_closes_instead_of_waiting_when_it_cannot_queue_a_refusal() {
+    let clock = Arc::new(paddock_jobs::time::FakeClock::new());
+    let mut opts = PeerOptions::new("the plugin");
+    opts.write_queue = 1;
+    opts.write_queue_bytes = 8 << 20;
+    opts.max_concurrent_calls = 0;
+    opts.call_queue = 0;
+    opts.clock = clock.clone();
+    let (p, mut io) = raw(Arc::new(NoCalls), opts, FrameLimit::default());
+    let filler = {
+        let p = p.clone();
+        std::thread::spawn(move || while p.push(vec![0u8; 1 << 20]).is_ok() {})
+    };
+    assert!(clock.wait_for_waiters(1, GUARD), "the queue never filled");
+    write_frame_raw(
+        &mut io,
+        &Frame::Call {
+            id: 1,
+            credit: 0,
+            body: Vec::new(),
+        },
+    );
+    assert!(
+        p.wait_closed(Some(GUARD)),
+        "the reader thread waited for the writer"
+    );
+    let reason = p.closed().unwrap().to_string();
+    assert!(reason.contains("the plugin stopped reading"), "{reason}");
+    // The sender that waited for room is released by the close.
+    filler.join().unwrap();
 }
