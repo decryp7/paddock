@@ -38,6 +38,8 @@ test.describe('saved chats', () => {
     await toggle.click();
     let confirm = page.getByRole('alertdialog', { name: /Delete the saved copy of this chat/ });
     await expect(confirm).toBeVisible();
+    // The switch moves only once the user answers (round-5 review P2).
+    await expect(toggle).not.toBeChecked();
     await confirm.getByRole('button', { name: 'Cancel' }).click();
     await expect(confirm).toHaveCount(0);
     await expect(toggle).not.toBeChecked();

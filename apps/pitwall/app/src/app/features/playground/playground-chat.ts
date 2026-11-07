@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signa
 import { MatButton } from '@angular/material/button';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatOptgroup, MatOption, MatSelect } from '@angular/material/select';
-import { MatSlideToggle, type MatSlideToggleChange } from '@angular/material/slide-toggle';
+import { MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, MatSlideToggle } from '@angular/material/slide-toggle';
 import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
@@ -22,7 +22,12 @@ import { ChatSaving, createChatBackend } from './chat-backend';
 @Component({
   selector: 'pw-playground-chat',
   imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatOption, MatOptgroup, MatButton, MatSlideToggle],
-  providers: [ChatSaving, { provide: AssistantBackend, useFactory: createChatBackend }],
+  providers: [
+    ChatSaving,
+    { provide: AssistantBackend, useFactory: createChatBackend },
+    // The switch moves only when the chat's state does (after "Delete the saved copy?" is answered), never on the click.
+    { provide: MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, useValue: { disableToggleValue: true } },
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="bar">
@@ -44,7 +49,7 @@ import { ChatSaving, createChatBackend } from './chat-backend';
       </mat-form-field>
       <p class="tools" data-testid="chat-apps" role="status">{{ appsLine() }}</p>
       <!-- ADR 0023 Decision 3: per chat; a new chat starts with Settings > Chats' default. -->
-      <mat-slide-toggle data-testid="chat-dont-save" [checked]="!saved()" [disabled]="moving()" (change)="dontSave($event)">Don't save this chat</mat-slide-toggle>
+      <mat-slide-toggle data-testid="chat-dont-save" [checked]="!saved()" [disabled]="moving()" (toggleChange)="dontSave()">Don't save this chat</mat-slide-toggle>
       <button type="button" matButton data-testid="chat-open-apps" (click)="openApps()">Connected apps…</button>
     </div>
     @if (problem(); as p) {
@@ -207,8 +212,8 @@ export class PlaygroundChat {
    * "Don't save this chat". A new chat only takes the choice to its first question. A saved chat asks before its saved copy is
    * deleted (no keeps it saved); turning the switch off saves the chat at once.
    */
-  protected async dontSave(change: MatSlideToggleChange): Promise<void> {
-    const save = !change.checked;
+  protected async dontSave(): Promise<void> {
+    const save = !this.saved();
     const id = this.active();
     if (id === null) return this.setNext(save);
     if (!save) {
@@ -220,17 +225,13 @@ export class PlaygroundChat {
           confirm: { label: 'Delete saved copy', destructive: true },
         },
       }).closed;
-      if (outcome.kind !== 'answered') {
-        change.source.checked = false;
-        return;
-      }
+      if (outcome.kind !== 'answered') return;
     }
     this.moving.set(true);
     try {
       this.saved.set(await this.backend.setChatSaved(id, save));
       this.saving.started.set(id, this.saved());
     } catch (e) {
-      change.source.checked = !this.saved();
       this.problem.set(toCommandError(e));
     } finally {
       this.moving.set(false);
