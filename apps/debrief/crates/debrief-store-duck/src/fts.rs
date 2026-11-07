@@ -865,6 +865,9 @@ pub struct FtsShared {
     /// Tests: the next writes through [`FtsService`] fail after their operations are queued.
     #[cfg(test)]
     pub(crate) fail_writes: AtomicBool,
+    /// Tests: how many writers [`drop_writer`] has waited for (a writer dropped without the wait is not counted).
+    #[cfg(test)]
+    pub(crate) merge_waits: AtomicU64,
 }
 
 /// The indexing thread of a store; stopped and joined on drop.
@@ -909,6 +912,8 @@ impl FtsService {
             gate: Gate::new(generation),
             #[cfg(test)]
             fail_writes: AtomicBool::new(false),
+            #[cfg(test)]
+            merge_waits: AtomicU64::new(0),
         });
         crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
@@ -1013,6 +1018,9 @@ impl Drop for FtsService {
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
+        // After the join, whatever the thread ended with (it may have panicked mid-step), and a writer a store thread
+        // opened since (`with_writer`): the index is quiet when the service is gone.
+        drop_writer(&self.shared);
     }
 }
 
@@ -1203,12 +1211,24 @@ const LOWER_INDEXING_THREAD: bool = !cfg!(windows);
 /// Lets the background merges finish (they hold memory and allocate until they do), drops the index writer and gives its
 /// heaps and its threads' pages back to the OS. The slot stays locked until the writer is gone: a clear or a source
 /// removal in that window would find the slot empty, try to open a second writer and fail on the index's lock.
+///
+/// Limit: Tantivy's `wait_merging_threads` returns early when an indexing worker failed (index_writer.rs, the
+/// `wait_merging_threads` start), so after such a failure merges may still outlive the writer. The wait, its duration
+/// and its outcome are logged (debug; info from one second), so a slow close shows in a diagnostic bundle.
 fn drop_writer(s: &FtsShared) {
     let mut slot = crate::lock(&s.writer);
     if let Some(w) = slot.take() {
-        if let Err(e) = w.wait_merging_threads() {
-            log::warn!("full-text index merges failed: {e}");
+        let started = std::time::Instant::now();
+        log::debug!("full-text index: waiting for the writer's merges");
+        let outcome = w.wait_merging_threads();
+        let took = started.elapsed();
+        match &outcome {
+            Err(e) => log::warn!("full-text index merges failed after {took:?}: {e}"),
+            Ok(()) if took >= std::time::Duration::from_secs(1) => log::info!("full-text index merges finished in {took:?}"),
+            Ok(()) => log::debug!("full-text index merges finished in {took:?}"),
         }
+        #[cfg(test)]
+        s.merge_waits.fetch_add(1, Ordering::SeqCst);
         debrief_alloc::release();
     }
 }
@@ -1230,7 +1250,7 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
             Err(e) => {
                 log::warn!("full-text indexing failed: {e:#}");
                 *crate::lock(&s.failure) = Some(format!("{e:#}"));
-                *crate::lock(&s.writer) = None;
+                drop_writer(s);
                 Turn::Blocked
             }
         };
@@ -1252,6 +1272,9 @@ fn run(s: &FtsShared, dir: &Path, conn: &Connection, write_lock: &Mutex<()>, epo
         }
         *woken = false;
     }
+    // Stopped (the store is closing): wait for the writer's merges and give it back before the thread ends, so no index
+    // file is created or deleted after the store has been dropped (its folder can then be removed or moved at once).
+    drop_writer(s);
 }
 
 #[cfg(test)]
@@ -1311,6 +1334,7 @@ mod tests {
             bulk_import: Arc::new(AtomicBool::new(false)),
             gate: Gate::new(Arc::new(AtomicU64::new(0))),
             fail_writes: AtomicBool::new(false),
+            merge_waits: AtomicU64::new(0),
         };
         let write_lock = Mutex::new(());
         let held = write_lock.lock().unwrap();
@@ -1357,6 +1381,7 @@ mod tests {
             bulk_import: Arc::new(AtomicBool::new(false)),
             gate: Gate::new(Arc::new(AtomicU64::new(0))),
             fail_writes: AtomicBool::new(false),
+            merge_waits: AtomicU64::new(0),
         };
         let write_lock = Mutex::new(());
         let seg_dir = dir.join(SEGMENTS_DIR);
@@ -1374,6 +1399,121 @@ mod tests {
             ran.first()
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Search-flake: the indexing thread left its loop on a stop request without giving the writer back, so the writer's
+    /// merge threads were still creating and deleting index files after `drop(store)` returned (a test removing the
+    /// index folder right after failed with "Directory not empty").
+    #[test]
+    fn a_stopped_indexer_has_given_the_writer_back_when_it_returns() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(&crate::schema::ddl(&debrief_core::batch::EventSchema::plain()))
+            .unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 16 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let s = FtsShared {
+            writer: Mutex::new(Some(fts.writer().unwrap())),
+            pool: read_pool(1),
+            step_time: AtomicU64::new(STEP_TIME.as_micros() as u64),
+            fts,
+            stop: AtomicBool::new(true),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(0),
+            failure: Mutex::new(None),
+            bulk_import: Arc::new(AtomicBool::new(false)),
+            gate: Gate::new(Arc::new(AtomicU64::new(0))),
+            fail_writes: AtomicBool::new(false),
+            merge_waits: AtomicU64::new(0),
+        };
+        run(&s, &dir, &conn, &Mutex::new(()), 1);
+        assert!(
+            crate::lock(&s.writer).is_none(),
+            "the indexing thread returned with the index writer (and its merge threads) still alive"
+        );
+        assert_eq!(
+            s.merge_waits.load(Ordering::SeqCst),
+            1,
+            "the writer was dropped without waiting for its merges"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A step that fails gives the writer back through the same wait (a bare `= None` left the merges running).
+    #[test]
+    fn a_failed_step_waits_for_the_writers_merges_too() {
+        let dir = std::env::temp_dir().join(format!("debrief-fts-failstep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        // No `segments` table: `todo` fails, which is a failed step.
+        let conn = Connection::open_in_memory().unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 16 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
+        let s = FtsShared {
+            writer: Mutex::new(Some(fts.writer().unwrap())),
+            pool: read_pool(1),
+            step_time: AtomicU64::new(STEP_TIME.as_micros() as u64),
+            fts,
+            stop: AtomicBool::new(false),
+            wake: (Mutex::new(false), Condvar::new()),
+            pending: AtomicU64::new(0),
+            failure: Mutex::new(None),
+            bulk_import: Arc::new(AtomicBool::new(false)),
+            gate: Gate::new(Arc::new(AtomicU64::new(0))),
+            fail_writes: AtomicBool::new(false),
+            merge_waits: AtomicU64::new(0),
+        };
+        let write_lock = Mutex::new(());
+        std::thread::scope(|scope| {
+            let (s, dir, write_lock) = (&s, &dir, &write_lock);
+            // The connection is not `Sync`: it moves into the thread, like the indexing thread's own.
+            let runner = scope.spawn(move || run(s, dir, &conn, write_lock, 1));
+            let deadline = std::time::Instant::now() + Duration::from_secs(60);
+            while crate::lock(&s.failure).is_none() || crate::lock(&s.writer).is_some() {
+                assert!(std::time::Instant::now() < deadline, "the failed step was not reported");
+                std::thread::yield_now();
+            }
+            s.stop.store(true, Ordering::SeqCst);
+            s.wake.1.notify_all();
+            runner.join().unwrap();
+        });
+        assert_eq!(
+            s.merge_waits.load(Ordering::SeqCst),
+            1,
+            "the failed step dropped the writer without the wait"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A writer a store thread opened after the indexing thread ended is waited for when the service is dropped.
+    #[test]
+    fn dropping_the_service_waits_for_a_writer_opened_after_the_thread_ended() {
+        let t = Indexed::new("dropwait");
+        let shared = t.fts().shared.clone();
+        let before = shared.merge_waits.load(Ordering::SeqCst);
+        t.fts().clear().unwrap();
+        assert!(crate::lock(&shared.writer).is_some(), "with_writer reopened a writer");
+        drop(t);
+        assert_eq!(
+            shared.merge_waits.load(Ordering::SeqCst),
+            before + 1,
+            "the service dropped the writer without the wait"
+        );
+        assert!(crate::lock(&shared.writer).is_none());
     }
 
     #[test]
@@ -1741,18 +1881,8 @@ mod tests {
             "each of the six row groups is cut into several slices: {}",
             bounded.slices
         );
-        assert!(bounded.peak_bytes > 0 && bounded.peak_built_bytes > 0);
-        assert!(
-            bounded.peak_built_bytes <= memory + memory / OVERSHOOT_DIVISOR,
-            "{} MB of documents were built at once against a budget of {} MB",
-            bounded.peak_built_bytes >> 20,
-            memory >> 20
-        );
-        assert!(
-            bounded.peak_bytes <= memory + memory / OVERSHOOT_DIVISOR,
-            "the budget held {} bytes",
-            bounded.peak_bytes
-        );
+        let excess = max_excess(&fts, &seg_dir, &files, memory, feed_window(&pool), &ready);
+        assert_feed_within_budget(&bounded, memory, feed_window(&pool), excess);
         // The probe can see a breach: with a budget of 1 GB the same files put far more than 4 MB in flight.
         let unbounded = run(1 << 30);
         assert!(
@@ -1763,9 +1893,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// The share of the budget a built slice may exceed it by: slices are admitted by a per-row average of the group, and the
-    /// row lengths differ (here the ids grow by a digit), so a slice can run a few percent over its estimate.
-    const OVERSHOOT_DIVISOR: usize = 8;
+    /// The most any slice of `files` (cut for a feed of `memory` bytes and `window` slices) builds beyond its footer estimate:
+    /// the excess the feed has to charge after the fact.
+    fn max_excess(fts: &Fts, seg_dir: &Path, files: &[String], memory: usize, window: usize, ready: &HashSet<u32>) -> usize {
+        let ts_field = fts.index.schema().get_field("ts").unwrap();
+        let committed = AtomicUsize::new(0);
+        let mut units = SegmentUnits::new(seg_dir, files, None, &committed, (memory / window.max(1)).max(1));
+        let mut most = 0;
+        while let Some(unit) = units.next_unit() {
+            let (_, built) = fts.documents(&unit, segment_key(&files[unit.file]), ts_field, ready).unwrap();
+            most = most.max(built.saturating_sub(unit.bytes));
+        }
+        most
+    }
+
+    /// The feed's two exact invariants. (i) At every instant the documents built and not yet added are within the budget's
+    /// bytes (an estimate is held from the admission of a slice until it is added, its excess is charged before the
+    /// documents count as built, and they stop counting before the bytes are released), so the peaks compare the same way.
+    /// (ii) The bytes the budget held never exceeded `memory` plus the excess of the slices in flight: a slice is admitted
+    /// only if its estimate fits, and each of the at most `window + 2` slices in flight (queued, being added, being
+    /// admitted) can be charged at most the largest excess.
+    fn assert_feed_within_budget(fed: &Fed, memory: usize, window: usize, max_excess: usize) {
+        assert!(fed.peak_built_bytes > 0 && fed.peak_bytes > 0, "the feed built nothing: {fed:?}");
+        assert!(
+            fed.peak_built_bytes <= fed.peak_bytes,
+            "{} bytes built at once, more than the {} the budget held",
+            fed.peak_built_bytes,
+            fed.peak_bytes
+        );
+        let allowed = memory + (window + 2) * max_excess;
+        assert!(
+            fed.peak_bytes <= allowed,
+            "the budget held {} bytes: {memory} of budget and {} slices of at most {max_excess} bytes of excess allow {allowed}",
+            fed.peak_bytes,
+            window + 2
+        );
+    }
 
     /// Whether every column chunk of the file has an offset index (the page locations a slice skips by) and the reader loaded
     /// it. This parquet version has no `ParquetMetaData::offset_index()`; the footer says it in the column chunk metadata
@@ -2126,35 +2289,38 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let ready: HashSet<u32> = [1].into_iter().collect();
         let memory = 2 << 20;
-        let mut w = fts.writer().unwrap();
-        let fed = fts
-            .index_files(
-                &mut w,
-                Feed {
-                    seg_dir: &seg_dir,
-                    files: &files,
-                    ready: &ready,
-                    deadline: None,
-                    memory,
-                    down: crate::shutdown::down,
-                },
-                &stages(&pool, &cancel),
-                feed_window(&pool),
-                |_| {},
-            )
-            .unwrap();
-        w.rollback().unwrap();
+        let run = |memory: usize| {
+            let mut w = fts.writer().unwrap();
+            let fed = fts
+                .index_files(
+                    &mut w,
+                    Feed {
+                        seg_dir: &seg_dir,
+                        files: &files,
+                        ready: &ready,
+                        deadline: None,
+                        memory,
+                        down: crate::shutdown::down,
+                    },
+                    &stages(&pool, &cancel),
+                    feed_window(&pool),
+                    |_| {},
+                )
+                .unwrap();
+            w.rollback().unwrap();
+            fed
+        };
+        let fed = run(memory);
         assert_eq!(fed.docs, rows as u64);
+        let excess = max_excess(&fts, &seg_dir, &files, memory, feed_window(&pool), &ready);
+        assert_feed_within_budget(&fed, memory, feed_window(&pool), excess);
+        // The probe can see a breach: with a budget of 1 GB the same files (about 8 MB of documents) put far more than the
+        // 2 MB in flight.
+        let unbounded = run(1 << 30);
         assert!(
-            fed.peak_built_bytes <= memory + memory / OVERSHOOT_DIVISOR,
-            "{} MB built at once against {} MB",
-            fed.peak_built_bytes >> 20,
-            memory >> 20
-        );
-        assert!(
-            fed.peak_built_bytes > 100_000,
-            "slices were built: {} bytes",
-            fed.peak_built_bytes
+            unbounded.peak_built_bytes > 2 * memory,
+            "the unbounded feed built {} bytes at once; the test would not notice a breach",
+            unbounded.peak_built_bytes
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2330,7 +2496,8 @@ mod tests {
             Arc::new(StringArray::from(vec![Some(exception); n])),
             Arc::new(StringArray::from(vec![Some("tpl {}"); n])),
         ];
-        let mut w = parquet::arrow::ArrowWriter::try_new(std::fs::File::create(dir.join(name)).unwrap(), schema.clone(), Some(props)).unwrap();
+        let mut w =
+            parquet::arrow::ArrowWriter::try_new(std::fs::File::create(dir.join(name)).unwrap(), schema.clone(), Some(props)).unwrap();
         w.write(&RecordBatch::try_new(schema, cols).unwrap()).unwrap();
         w.close().unwrap();
     }
@@ -2351,7 +2518,15 @@ mod tests {
             .build();
         write_messages(&seg_dir, "skew.parquet", &messages, "boom", props);
         let files = vec!["skew.parquet".to_string()];
-        let (fts, _) = Fts::open_or_create(&dir.join(INDEX_DIR), 1, WriterBudget { heap: 32 << 20, threads: 1 }).unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &dir.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 32 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
         let pool = read_pool(4);
         let cancel = AtomicBool::new(false);
         let ready: HashSet<u32> = [1].into_iter().collect();
@@ -2377,7 +2552,11 @@ mod tests {
         assert_eq!(fed.docs, messages.len() as u64);
         // A slice of the big events was admitted at the average size, so what was built exceeds the budget, and the budget's
         // peak (which holds the charged excess) is at least what was built: without the charge it would stay below.
-        assert!(fed.peak_built_bytes > memory, "the big events were not misestimated: {} bytes built", fed.peak_built_bytes);
+        assert!(
+            fed.peak_built_bytes > memory,
+            "the big events were not misestimated: {} bytes built",
+            fed.peak_built_bytes
+        );
         assert!(
             fed.peak_bytes >= fed.peak_built_bytes,
             "the budget held {} bytes while {} were built: the excess was not charged",
@@ -2429,7 +2608,15 @@ mod tests {
             std::fs::create_dir_all(d).unwrap();
             write_long_segments(d, 2, 1, 10, 50);
         }
-        let (fts, _) = Fts::open_or_create(&base.join(INDEX_DIR), 1, WriterBudget { heap: 32 << 20, threads: 1 }).unwrap();
+        let (fts, _) = Fts::open_or_create(
+            &base.join(INDEX_DIR),
+            1,
+            WriterBudget {
+                heap: 32 << 20,
+                threads: 1,
+            },
+        )
+        .unwrap();
         let ts_field = fts.index.schema().get_field("ts").unwrap();
         let ready: HashSet<u32> = [1].into_iter().collect();
         let committed = AtomicUsize::new(0);

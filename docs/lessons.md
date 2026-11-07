@@ -1245,3 +1245,26 @@ peer. **Lesson (class: a check that cannot fail):** before calling a cause confi
 precondition (the menu bar exists, the helper runs, at least one step ran), give the probe a positive control (show it sees
 a thing known to be there), and compare with a known-good peer. Otherwise the result is `not measured` or `check broken`
 and the release does not pass (rule 71, ER-33).
+
+## A test failed ten times in eight minutes and never again: a build from a tree that was being edited (2026-11-07, Debrief search index)
+`windowed_cancel_while_the_input_waits_for_the_budget_is_a_stop` failed twice as the baseline of a mutation run and in 8 of 60
+runs of a loop between 07:14 and 07:22, then not once in the next 600 runs (loops, under 14 busy processes, with a
+changed assertion message). A reviewer traced the code and found no interleaving that could return "finished": one atomic
+is read twice by the same thread. The commit made in answer (`34cde5397`, the cancel is looked at after the committer is
+done) therefore fixes no observed failure. The cause was not proved; the likely one is a binary built from a tree in the
+middle of an edit or an in-place mutation run, with the shared target folder keeping it for the later runs. What was not
+kept makes it unprovable: the commit and tree state of each build, the binary's hash, the assertion text. **Lesson (class:
+a cause called without the evidence kept, ER-28):** a flaky run keeps, next to its result, the commit and `git status` of
+the tree it was built from, the hash of the test binary and the target folder; a mutation or red-check run (`--in-place`,
+a temporary edit) never shares its working tree or target folder with a loop that is being measured; and a change made
+for a failure nobody reproduced says so in its commit message instead of calling itself a fix.
+
+## The indexing thread kept its writer after a stop, and a test took the index lock (2026-11-07, Debrief search index)
+`a_step_out_of_time_stops_after_the_segment_it_is_in` failed once in 10 plain `cargo test` runs of the whole lib (message never
+seen). The likely cause, traced by a reviewer and not reproduced on the unfixed code: after a step that worked, the indexing
+thread's loop checked the stop flag and ended without giving back its Tantivy writer, so a test that took `fts.writer()`
+right after the thread was joined could meet the index lock. After the merge below the test passed 50 of 50 runs. The same bug was found and fixed on
+`fix/debrief-search-index-flake` (the thread gives the writer back after its loop, in the failed-step arm and when the
+service is dropped, with tests); that branch is merged into the search branch (a merge commit, not a rebase). **Lesson (class: a background thread that
+owns an exclusive resource releases it on every exit path):** a loop that owns a lock-holding object drops it after the
+loop, not only on the idle path.
