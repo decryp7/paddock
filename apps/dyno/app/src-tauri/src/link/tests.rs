@@ -244,6 +244,7 @@ struct Recorder {
     statuses: Sender<AgentStatus>,
     stalls: Mutex<Vec<Option<Stall>>>,
     lost: Mutex<Vec<dyno_core::protocol::LostEvents>>,
+    updated: Mutex<Vec<bool>>,
 }
 
 impl Recorder {
@@ -253,6 +254,7 @@ impl Recorder {
             statuses,
             stalls: Mutex::new(Vec::new()),
             lost: Mutex::new(Vec::new()),
+            updated: Mutex::new(Vec::new()),
         })
     }
 
@@ -276,6 +278,9 @@ impl Sink for Recorder {
     }
     fn stalled(&self, stall: Option<Stall>) {
         lock(&self.stalls).push(stall);
+    }
+    fn app_updated(&self, updated: bool) {
+        lock(&self.updated).push(updated);
     }
 }
 
@@ -1482,4 +1487,64 @@ fn an_agent_of_another_build_of_the_same_version_is_asked_to_exit_and_the_new_on
     assert!(r.link.quit());
     handle.join().unwrap();
     process.join().unwrap();
+}
+
+#[test]
+fn the_wanted_key_follows_a_replaced_agent_file_and_keeps_the_last_answer_when_it_cannot_be_read() {
+    use dyno_agent::build_id::build_key;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dyno-agent");
+    std::fs::write(&path, b"build one").unwrap();
+    let there = std::sync::Arc::new(AtomicBool::new(true));
+    let (p, ok) = (path.clone(), there.clone());
+    let source = super::ports::wanted_key_source("1.1.0", move || {
+        if ok.load(Ordering::SeqCst) {
+            Ok(p.clone())
+        } else {
+            Err("gone".into())
+        }
+    });
+    let one = source();
+    assert_eq!(one, build_key("1.1.0", &dyno_agent::build_id::file_build_id(&path).unwrap()));
+    assert_eq!(source(), one, "an unchanged file keeps its answer");
+    let next = dir.path().join("dyno-agent.new");
+    std::fs::write(&next, b"build two!").unwrap();
+    std::fs::rename(&next, &path).unwrap();
+    let two = source();
+    assert_ne!(two, one, "a replaced file is hashed again");
+    there.store(false, Ordering::SeqCst);
+    assert_eq!(source(), two, "an unreadable program keeps the last answer");
+    let never = super::ports::wanted_key_source("1.1.0", || Err("no program".into()));
+    assert_eq!(never(), "1.1.0", "with no answer yet the version alone decides");
+}
+
+#[test]
+fn an_app_updated_while_it_runs_uses_the_agent_of_the_new_build_and_says_to_restart() {
+    use dyno_agent::build_id::{build_key, own_build_id};
+    // The app started from build A. The files on disk are build B now, and so is the only agent the launcher can start (the
+    // in-process agent's build is this test program's). Before the fix the link asked every such agent to exit, forever.
+    let r = rig_keyed(false, patient(), env!("CARGO_PKG_VERSION"));
+    let key = std::sync::Arc::new(Mutex::new(build_key(env!("CARGO_PKG_VERSION"), "aaaaaaaaaaaaaaaa")));
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    assert_eq!(
+        r.link.wanted_key(),
+        build_key(env!("CARGO_PKG_VERSION"), "aaaaaaaaaaaaaaaa"),
+        "the first read is the build the app started from"
+    );
+    assert!(!r.link.app_updated());
+    *lock(&key) = build_key(env!("CARGO_PKG_VERSION"), &own_build_id());
+    let handle = r.link.spawn().unwrap();
+    running(&r.link, &r.statuses);
+    wait_state(&r.link, "the new build is in use", |s| s.started_by_this_app());
+    assert_eq!(
+        r.launcher.launches.load(Ordering::SeqCst),
+        1,
+        "the agent of the new build was started once and never evicted"
+    );
+    assert!(matches!(r.launcher.child(), Child::Running { .. }));
+    assert!(r.link.app_updated());
+    assert_eq!(*lock(&r.sink.updated), [true], "the chip is told once to restart Dyno");
+    assert!(r.link.quit());
+    handle.join().unwrap();
 }

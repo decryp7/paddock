@@ -952,6 +952,10 @@ impl<R: Runtime> Sink for ShellOf<R> {
         self.hub.report_stall(stall);
     }
 
+    fn app_updated(&self, updated: bool) {
+        self.hub.report_updated(updated);
+    }
+
     fn widget_layout_changed(&self, surface: DynoSurface) {
         self.layout_changed(surface);
     }

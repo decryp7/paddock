@@ -243,6 +243,41 @@ pub fn agent_exe(app_exe: &std::path::Path, env_override: Option<&std::ffi::OsSt
     }
 }
 
+/// The build key the app wants, read from the agent program `program` names: its version and the file's build id. The id is
+/// hashed again only when the file's stamp changed (a `stat` per call), so the answer follows a replaced file. A file that cannot
+/// be read keeps the last answer (a replacement in progress must not turn the key into a different one), and with no answer yet it
+/// is the version alone, which accepts any build of that version.
+pub fn wanted_key_source<P>(version: &str, program: P) -> super::WantedKey
+where
+    P: Fn() -> Result<std::path::PathBuf, String> + Send + Sync + 'static,
+{
+    use dyno_agent::build_id::{build_key, file_build_id, FileStamp};
+    let version = version.to_string();
+    let last: std::sync::Mutex<Option<(FileStamp, String)>> = std::sync::Mutex::new(None);
+    std::sync::Arc::new(move || {
+        let mut last = last.lock().unwrap_or_else(|e| e.into_inner());
+        let Ok(path) = program() else {
+            return last.as_ref().map_or_else(|| version.clone(), |(_, k)| k.clone());
+        };
+        let Some(stamp) = FileStamp::of(&path) else {
+            return last.as_ref().map_or_else(|| version.clone(), |(_, k)| k.clone());
+        };
+        if let Some((seen, key)) = last.as_ref() {
+            if *seen == stamp {
+                return key.clone();
+            }
+        }
+        let began = std::time::Instant::now();
+        let Some(id) = file_build_id(&path) else {
+            return last.as_ref().map_or_else(|| version.clone(), |(_, k)| k.clone());
+        };
+        let key = build_key(&version, &id);
+        log::info!(Build = id.as_str(), HashMs = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "Agent program hashed");
+        *last = Some((stamp, key.clone()));
+        key
+    })
+}
+
 /// Now, in milliseconds since the epoch (what an agent writes as `started`).
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()

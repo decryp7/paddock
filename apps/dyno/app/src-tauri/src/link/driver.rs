@@ -150,11 +150,12 @@ impl Executor {
                 let gate = self.look_gate.clone();
                 spawn("dyno-look", move || {
                     let began = std::time::Instant::now();
+                    let wanted = link.wanted_key();
                     let probe = if service { link.probe() } else { None };
                     let (look, found, service_ms) = ports::look(
                         seq,
                         &link.dirs,
-                        &link.app_version,
+                        &wanted,
                         link.launcher.as_ref(),
                         held,
                         ports::Ask {
@@ -226,7 +227,8 @@ impl Executor {
                     };
                     // A file of another build is never used, and one of this build is never asked to exit: the decision was
                     // taken from a file that may have been replaced.
-                    if ports::hint_of(&d, &link.app_version).same_build != (purpose == Purpose::Use) {
+                    let wanted = link.wanted_key();
+                    if ports::hint_of(&d, &wanted).same_build != (purpose == Purpose::Use) {
                         failed("the discovery file changed");
                         deliver(
                             &events,
@@ -248,7 +250,7 @@ impl Executor {
                                 AgentPid = d.pid,
                                 AgentVersion = d.version.as_str(),
                                 AgentBuild = d.build.as_str(),
-                                AppBuildKey = link.app_version.as_str();
+                                AppBuildKey = wanted.as_str();
                                 "{}",
                                 ports::describe_connect(purpose, u64::try_from(handshake.elapsed().as_millis()).unwrap_or(u64::MAX))
                             );
