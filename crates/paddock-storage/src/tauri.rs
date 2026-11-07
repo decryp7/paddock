@@ -204,7 +204,9 @@ fn run_work(ctx: &JobContext, state: &StorageState, work: Work) -> StorageEvent 
         (Some(event), _) => event,
         (None, Err(JobError::Cancelled(_))) => StorageEvent::Cancelled,
         (None, Err(JobError::Failed(message))) => StorageEvent::Failed { message },
-        (None, Err(e @ JobError::Limit(_))) => StorageEvent::Failed { message: e.to_string() },
+        (None, Err(e @ JobError::Limit(_))) => StorageEvent::Failed {
+            message: e.to_string(),
+        },
         (None, Err(JobError::Panicked(_)) | Ok(())) => StorageEvent::Failed {
             message: "Storage could not be read because of an internal error.".into(),
         },

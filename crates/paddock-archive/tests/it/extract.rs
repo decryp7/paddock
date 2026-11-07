@@ -401,7 +401,10 @@ fn an_expansion_bomb_is_stopped_by_the_ratio_in_every_format() {
             ),
             "{name}: {e:?}"
         );
-        assert!(e.to_string().contains("archive.ratio") && e.to_string().contains("50:1"), "{e}");
+        assert!(
+            e.to_string().contains("archive.ratio") && e.to_string().contains("50:1"),
+            "{e}"
+        );
     }
     assert!(!d.path().join("o").exists());
     // The xz reader stops while expanding (it is stored here: the test encoder does not compress), and removes the expanded tar.

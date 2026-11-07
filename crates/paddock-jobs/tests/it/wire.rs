@@ -2,10 +2,10 @@
 //! converts to the UI's shape and back without loss.
 
 use paddock_jobs::wire::{WirePhase, WireSnapshot, WireState};
-use paddock_limits::{LimitExceeded, LimitId, Quantity, Scope};
 use paddock_jobs::{
     CancelReason, JobId, JobKind, JobSnapshot, JobState, Phase, PhaseProgress, Unit,
 };
+use paddock_limits::{LimitExceeded, LimitId, Quantity, Scope};
 
 fn snapshot(state: JobState) -> JobSnapshot {
     JobSnapshot {
@@ -46,9 +46,13 @@ fn every_state() -> Vec<JobState> {
         JobState::Failed {
             message: "too big".into(),
             limit: Some(
-                LimitExceeded::new(LimitId::new("archive.entries"), Quantity::Count(5), Scope::File)
-                    .reaching(Quantity::Count(9))
-                    .unwrap(),
+                LimitExceeded::new(
+                    LimitId::new("archive.entries"),
+                    Quantity::Count(5),
+                    Scope::File,
+                )
+                .reaching(Quantity::Count(9))
+                .unwrap(),
             ),
         },
         JobState::Cancelled {
@@ -98,15 +102,24 @@ fn only_an_ended_job_is_terminal() {
 fn a_limit_is_json_in_the_ui_shape_and_absent_when_there_is_none() {
     let with = JobState::Failed {
         message: "m".into(),
-        limit: Some(LimitExceeded::new(LimitId::new("archive.entries"), Quantity::Count(5), Scope::File)),
+        limit: Some(LimitExceeded::new(
+            LimitId::new("archive.entries"),
+            Quantity::Count(5),
+            Scope::File,
+        )),
     };
     let json = serde_json::to_value(&with).unwrap();
     assert_eq!(json["state"], "failed");
     assert_eq!(json["limit"]["id"], "archive.entries");
     assert_eq!(serde_json::from_value::<JobState>(json).unwrap(), with);
-    let without = serde_json::to_value(JobState::Failed { message: "m".into(), limit: None }).unwrap();
+    let without = serde_json::to_value(JobState::Failed {
+        message: "m".into(),
+        limit: None,
+    })
+    .unwrap();
     assert!(without.get("limit").is_none(), "{without}");
     // An older sender that never wrote `limit` still reads.
-    let old: JobState = serde_json::from_value(serde_json::json!({"state": "failed", "message": "m"})).unwrap();
+    let old: JobState =
+        serde_json::from_value(serde_json::json!({"state": "failed", "message": "m"})).unwrap();
     assert!(matches!(old, JobState::Failed { limit: None, .. }));
 }

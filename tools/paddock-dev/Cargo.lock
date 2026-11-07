@@ -1094,9 +1094,19 @@ dependencies = [
  "croner",
  "jiff",
  "paddock-env",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "sha2",
+]
+
+[[package]]
+name = "paddock-limits"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
 ]
 
 [[package]]
@@ -1132,6 +1142,7 @@ name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "socket2",
  "tempfile",

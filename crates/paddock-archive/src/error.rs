@@ -55,7 +55,11 @@ impl fmt::Display for ArchiveError {
             ArchiveError::Unsafe { entry, reason } => {
                 write!(f, "the archive is refused: {entry:?} {reason}.")
             }
-            ArchiveError::Limit(l) => write!(f, "the archive is refused. {}", l.message(&crate::limits::REGISTRY)),
+            ArchiveError::Limit(l) => write!(
+                f,
+                "the archive is refused. {}",
+                l.message(&crate::limits::REGISTRY)
+            ),
             ArchiveError::Duplicate(name) => {
                 write!(f, "the archive is refused: {name:?} appears twice.")
             }

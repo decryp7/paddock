@@ -1,8 +1,8 @@
 //! The format readers: each walks its archive and hands every entry to the [`Writer`].
 
 use crate::control::Control;
-use crate::limits;
 use crate::error::{ArchiveError, Result, io};
+use crate::limits;
 use crate::options::Options;
 use crate::writer::{Cap, Kind, Report, Writer};
 use std::cell::Cell;

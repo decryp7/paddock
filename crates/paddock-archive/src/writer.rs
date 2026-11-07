@@ -1,8 +1,8 @@
 //! The one place files are written: every entry from every reader goes through [`Writer::entry`].
 
 use crate::control::Control;
-use crate::limits;
 use crate::error::{ArchiveError, Result, io};
+use crate::limits;
 use crate::name;
 use crate::options::{Links, Modes, Options};
 use std::collections::{BTreeMap, HashSet};

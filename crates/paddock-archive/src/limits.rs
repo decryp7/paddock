@@ -29,17 +29,47 @@ const fn row(id: &'static str, unit: Unit, default: Quantity, max: Quantity) -> 
 }
 
 /// Entries in one archive.
-pub const ENTRIES: LimitRow = row("archive.entries", Unit::Count, Quantity::Count(10_000), Quantity::Count(u64::MAX));
+pub const ENTRIES: LimitRow = row(
+    "archive.entries",
+    Unit::Count,
+    Quantity::Count(10_000),
+    Quantity::Count(u64::MAX),
+);
 /// Bytes of one file.
-pub const FILE_BYTES: LimitRow = row("archive.file_bytes", Unit::Bytes, Quantity::Bytes(4 << 30), Quantity::Bytes(u64::MAX));
+pub const FILE_BYTES: LimitRow = row(
+    "archive.file_bytes",
+    Unit::Bytes,
+    Quantity::Bytes(4 << 30),
+    Quantity::Bytes(u64::MAX),
+);
 /// Bytes of everything unpacked.
-pub const TOTAL_BYTES: LimitRow = row("archive.total_bytes", Unit::Bytes, Quantity::Bytes(8 << 30), Quantity::Bytes(u64::MAX));
+pub const TOTAL_BYTES: LimitRow = row(
+    "archive.total_bytes",
+    Unit::Bytes,
+    Quantity::Bytes(8 << 30),
+    Quantity::Bytes(u64::MAX),
+);
 /// How much larger the output may be than the archive.
-pub const RATIO: LimitRow = row("archive.ratio", Unit::Ratio, Quantity::Ratio(200), Quantity::Ratio(u32::MAX));
+pub const RATIO: LimitRow = row(
+    "archive.ratio",
+    Unit::Ratio,
+    Quantity::Ratio(200),
+    Quantity::Ratio(u32::MAX),
+);
 /// Folders deep.
-pub const DEPTH: LimitRow = row("archive.depth", Unit::Count, Quantity::Count(32), Quantity::Count(u64::MAX));
+pub const DEPTH: LimitRow = row(
+    "archive.depth",
+    Unit::Count,
+    Quantity::Count(32),
+    Quantity::Count(u64::MAX),
+);
 /// Characters of a whole path.
-pub const PATH_LENGTH: LimitRow = row("archive.path_length", Unit::Count, Quantity::Count(1024), Quantity::Count(u64::MAX));
+pub const PATH_LENGTH: LimitRow = row(
+    "archive.path_length",
+    Unit::Count,
+    Quantity::Count(1024),
+    Quantity::Count(u64::MAX),
+);
 
 static ROWS: [LimitRow; 6] = [ENTRIES, FILE_BYTES, TOTAL_BYTES, RATIO, DEPTH, PATH_LENGTH];
 
@@ -63,7 +93,10 @@ pub(crate) fn total_bytes(limit: u64) -> ArchiveError {
 }
 
 pub(crate) fn ratio(limit: u64) -> ArchiveError {
-    exceeded(&RATIO, Quantity::Ratio(u32::try_from(limit).unwrap_or(u32::MAX)))
+    exceeded(
+        &RATIO,
+        Quantity::Ratio(u32::try_from(limit).unwrap_or(u32::MAX)),
+    )
 }
 
 pub(crate) fn depth(limit: u64) -> ArchiveError {

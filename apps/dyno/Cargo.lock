@@ -3622,10 +3622,20 @@ dependencies = [
  "jiff",
  "paddock-commands",
  "paddock-env",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "sha2",
  "tauri",
+]
+
+[[package]]
+name = "paddock-limits"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
 ]
 
 [[package]]

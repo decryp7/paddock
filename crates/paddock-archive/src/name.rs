@@ -1,7 +1,7 @@
 //! Entry names: parsed once into safe components, or refused.
 
-use crate::limits;
 use crate::error::{ArchiveError, Result};
+use crate::limits;
 use crate::options::{Layout, Limits};
 
 fn unsafe_entry(entry: &str, reason: &str) -> ArchiveError {
