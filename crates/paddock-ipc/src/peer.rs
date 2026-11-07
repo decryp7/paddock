@@ -17,7 +17,7 @@ use crate::frame::{self, Frame, FrameError, FrameHead, FrameKind, FrameLimit};
 use crate::handshake::Connection;
 use crate::writeq::{Out, Push, WriteQueue};
 use paddock_jobs::CancelToken;
-use paddock_jobs::time::{Clock, SystemClock};
+use paddock_jobs::time::{Clock, Deadline, SystemClock};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
@@ -89,7 +89,9 @@ pub struct PeerOptions {
     /// The most request bytes that wait in the call queue at once; a call that would exceed it is refused with
     /// [`codes::BUSY`] (default 16 MiB, the default frame limit, so one connection cannot park an unbounded amount).
     pub call_queue_bytes: usize,
-    /// Frames this side has queued for its writer thread; a full queue blocks the sender (IP1 item 2). Default 256.
+    /// Frames this side has queued for its writer thread; a full queue blocks the sender (IP1 item 2). Default 256. The
+    /// reader thread's control frames (refusals, cancels) get a reserve beyond it of `max_concurrent_calls + call_queue + 16`
+    /// frames, so a queue that is merely full does not close the link.
     pub write_queue: usize,
     /// The bytes of those frames; one frame larger than this goes in when the queue is empty. Default 32 MiB, twice the
     /// default frame limit, so a connection whose peer stops reading holds a bounded amount of memory.
@@ -213,6 +215,10 @@ struct Gate {
 
 static NEXT_PEER: AtomicU64 = AtomicU64::new(1);
 /// Why a call ended when its connection went without saying why (not expected: every close posts its reason).
+/// Frames the reader thread's control frames may use beyond the write queue's bound, on top of one per call the peer runs or
+/// queues (see [`PeerOptions::write_queue`]).
+const CONTROL_RESERVE: usize = 16;
+
 const GONE: &str = "the connection is gone";
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -270,6 +276,9 @@ impl Peer {
         let out = WriteQueue::new(
             opts.write_queue,
             opts.write_queue_bytes,
+            opts.max_concurrent_calls
+                .saturating_add(opts.call_queue)
+                .saturating_add(CONTROL_RESERVE),
             opts.write_stall,
             opts.clock.clone(),
         );
@@ -403,7 +412,8 @@ impl Peer {
     ///
     /// A stalled send is a frame dropped, and a connection that dropped a frame cannot go on (a lost reply leaves a caller
     /// waiting, a lost credit stalls a stream, a lost cancel keeps a callee running): it is closed with the reason, which
-    /// fails every pending call, and the owner reconnects. Only a call's own limit running out fails just that call.
+    /// fails every pending call, and the owner reconnects. Only a call's own limit running out fails just that call (the one exception, a timed-out call's cancel, closes the
+    /// link in [`Peer::cancel`] too: the callee would run on unheard).
     fn send_within(&self, f: &Frame, limit: Option<Duration>) -> Result<(), IpcError> {
         let bytes = frame::encode(f, self.inner.limit).map_err(IpcError::from)?;
         match self.inner.out.push(bytes, limit) {
@@ -425,7 +435,15 @@ impl Peer {
         match self.inner.out.try_push(bytes) {
             Push::Queued => Ok(()),
             Push::Closed => Err(self.closed_reason()),
-            _ => Err(self.stalled()),
+            _ => {
+                // Not time (nothing waited): even the reserve for control frames is used up.
+                let (frames, _) = self.inner.out.queued();
+                self.fail(IpcError::Closed(format!(
+                    "{} had {frames} frames unread when a reply was due",
+                    self.label()
+                )));
+                Err(IpcError::Timeout)
+            }
         }
     }
 
@@ -473,8 +491,18 @@ impl Peer {
     }
 
     fn cancel(&self, id: u64) {
-        // Waits for room no longer than the callee's grace: a cancel that cannot be queued then is moot, the call times out.
-        let _ = self.send_within(&Frame::Cancel { id }, Some(self.inner.opts.cancel_grace));
+        // Waits for room no longer than the callee's grace. A cancel that cannot be queued then is a frame dropped: the callee
+        // would run on while the link looks healthy, so the connection closes like for any other dropped frame.
+        let grace = self.inner.opts.cancel_grace;
+        if self.send_within(&Frame::Cancel { id }, Some(grace)) == Err(IpcError::Timeout)
+            && !self.is_closed()
+        {
+            self.fail(IpcError::Closed(format!(
+                "{} could not take the cancel of call {id} within {} s",
+                self.label(),
+                grace.as_secs()
+            )));
+        }
     }
 
     /// The next event of call `id`, waiting at most `timeout` on the peer's clock (`None`: as long as the connection
@@ -509,8 +537,11 @@ impl Peer {
     /// that ends it with a cancellation, makes this [`IpcError::Timeout`]. A request over the frame limit fails at once
     /// with [`IpcError::TooLarge`] and nothing is sent.
     pub fn call(&self, body: Vec<u8>, timeout: Option<Duration>) -> Result<Vec<u8>, IpcError> {
+        // One timeout for the whole call: the wait for room in `begin` counts against the wait for the answer.
+        let deadline = timeout.map(|t| Deadline::after(self.inner.opts.clock.clone(), t));
         let (id, rx) = self.begin(body, 0, timeout)?;
-        let event = match self.wait_event(id, &rx, timeout)? {
+        let left = deadline.as_ref().and_then(Deadline::remaining);
+        let event = match self.wait_event(id, &rx, left)? {
             Some(e) => e,
             None => {
                 self.cancel(id);

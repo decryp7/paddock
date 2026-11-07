@@ -53,9 +53,14 @@ pub(crate) struct WriteQueue {
     ready: Condvar,
     max_frames: usize,
     max_bytes: usize,
+    /// Frames beyond `max_frames` that [`WriteQueue::try_push`] may use (control frames of the reader thread).
+    reserve: usize,
     stall: Duration,
     clock: Arc<dyn Clock>,
 }
+
+/// The bytes one reserve frame may add beyond `max_bytes`: control frames (a refusal, a cancel) are small.
+const RESERVE_FRAME_BYTES: usize = 4096;
 
 fn lock(m: &Mutex<State>) -> MutexGuard<'_, State> {
     // The state stays consistent if a holder panicked (every update is a few field writes).
@@ -66,6 +71,7 @@ impl WriteQueue {
     pub(crate) fn new(
         max_frames: usize,
         max_bytes: usize,
+        reserve: usize,
         stall: Duration,
         clock: Arc<dyn Clock>,
     ) -> Self {
@@ -74,6 +80,7 @@ impl WriteQueue {
             ready: Condvar::new(),
             max_frames: max_frames.max(1),
             max_bytes,
+            reserve,
             stall,
             clock,
         }
@@ -83,6 +90,15 @@ impl WriteQueue {
     fn fits(&self, s: &State, len: usize) -> bool {
         s.frames < self.max_frames
             && (s.frames == 0 || s.bytes.saturating_add(len) <= self.max_bytes)
+    }
+
+    /// Whether a control frame of `len` bytes fits in the reserve.
+    fn fits_reserve(&self, s: &State, len: usize) -> bool {
+        s.frames < self.max_frames.saturating_add(self.reserve)
+            && s.bytes.saturating_add(len)
+                <= self
+                    .max_bytes
+                    .saturating_add(self.reserve.saturating_mul(RESERVE_FRAME_BYTES))
     }
 
     fn queue(&self, mut s: MutexGuard<'_, State>, bytes: Vec<u8>) -> Push {
@@ -136,13 +152,15 @@ impl WriteQueue {
         }
     }
 
-    /// Queues a frame if there is room now; [`Push::Full`] otherwise. For the thread that reads the connection, which must
-    /// never wait for the writer: a reply it cannot queue means the other side stopped reading, and it closes.
+    /// Queues a frame if there is room now, in the bounds or in the reserve beyond them; [`Push::Full`] otherwise. For the
+    /// thread that reads the connection, which must never wait for the writer. A queue that is merely full is
+    /// back-pressure and no sign of silence, so its small control frames (refusals, cancels) get `reserve` frames of
+    /// their own; only when even those are used up has the other side sent more than it reads.
     pub(crate) fn try_push(&self, bytes: Vec<u8>) -> Push {
         let s = lock(&self.state);
         if s.closed {
             Push::Closed
-        } else if self.fits(&s, bytes.len()) {
+        } else if self.fits(&s, bytes.len()) || self.fits_reserve(&s, bytes.len()) {
             self.queue(s, bytes)
         } else {
             Push::Full
@@ -193,7 +211,6 @@ impl WriteQueue {
     }
 
     /// Frames and bytes waiting now.
-    #[cfg(test)]
     pub(crate) fn queued(&self) -> (usize, usize) {
         let s = lock(&self.state);
         (s.frames, s.bytes)
@@ -213,6 +230,7 @@ mod tests {
         Arc::new(WriteQueue::new(
             frames,
             bytes,
+            2,
             Duration::from_secs(30),
             clock.clone(),
         ))
@@ -336,9 +354,27 @@ mod tests {
         let clock = Arc::new(FakeClock::new());
         let q = queue(1, 1 << 20, &clock);
         assert_eq!(q.try_push(vec![1; 1]), Push::Queued);
-        assert_eq!(q.try_push(vec![2; 1]), Push::Full);
-        assert_eq!(q.queued(), (1, 1));
+        assert_eq!(q.try_push(vec![2; 1]), Push::Queued);
+        assert_eq!(q.try_push(vec![3; 1]), Push::Queued);
+        assert_eq!(q.try_push(vec![4; 1]), Push::Full);
+        assert_eq!(q.queued(), (3, 3));
         assert_eq!(clock.waiters(), 0);
+    }
+
+    #[test]
+    fn try_push_uses_the_reserve_beyond_the_bounds_and_no_more() {
+        let clock = Arc::new(FakeClock::new());
+        let q = queue(1, 100, &clock);
+        assert_eq!(q.try_push(vec![1; 1]), Push::Queued);
+        // The reserve is 2 frames: two more fit though the queue is full, the third does not.
+        assert_eq!(q.try_push(vec![2; 1]), Push::Queued);
+        assert_eq!(q.try_push(vec![3; 1]), Push::Queued);
+        assert_eq!(q.try_push(vec![4; 1]), Push::Full);
+        // The reserve is for small control frames: a big one does not use it.
+        assert!(matches!(q.pop(), Out::Frame(_)));
+        assert_eq!(q.try_push(vec![5; 100_000]), Push::Full);
+        // A caller that blocks (push) never gets the reserve.
+        assert_eq!(q.push(vec![6; 1], Some(Duration::ZERO)), Push::Expired);
     }
 
     #[test]

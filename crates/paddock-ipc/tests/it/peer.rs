@@ -1188,24 +1188,44 @@ fn a_calls_own_timeout_ends_its_wait_for_room_without_closing_the_connection() {
     drop(io);
 }
 
-/// IP1 review P1: the thread that reads the connection never waits for the writer. A call it must refuse (here: no room to run
-/// it) needs a reply queued; with the queue full that means the other side stopped reading, so the connection closes at once
-/// (the fake clock never moves: waiting for the stall would hang).
-#[test]
-fn the_reader_thread_closes_instead_of_waiting_when_it_cannot_queue_a_refusal() {
+/// A peer whose write queue (one frame) is full because the other side (the test) has not read for a while: a filler thread
+/// pushes 1 MiB frames until it blocks on the fake clock. `stop` ends the filler after its current push.
+fn full_queue_peer(
+    reader_refuses: bool,
+) -> (
+    Peer,
+    Stream,
+    Arc<paddock_jobs::time::FakeClock>,
+    Arc<std::sync::atomic::AtomicBool>,
+    std::thread::JoinHandle<()>,
+) {
     let clock = Arc::new(paddock_jobs::time::FakeClock::new());
     let mut opts = PeerOptions::new("the plugin");
     opts.write_queue = 1;
     opts.write_queue_bytes = 8 << 20;
-    opts.max_concurrent_calls = 0;
-    opts.call_queue = 0;
+    if reader_refuses {
+        opts.max_concurrent_calls = 0;
+        opts.call_queue = 0;
+    }
     opts.clock = clock.clone();
-    let (p, mut io) = raw(Arc::new(NoCalls), opts, FrameLimit::default());
+    let (p, io) = raw(Arc::new(NoCalls), opts, FrameLimit::default());
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let filler = {
-        let p = p.clone();
-        std::thread::spawn(move || while p.push(vec![0u8; 1 << 20]).is_ok() {})
+        let (p, stop) = (p.clone(), stop.clone());
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) && p.push(vec![0u8; 1 << 20]).is_ok() {}
+        })
     };
     assert!(clock.wait_for_waiters(1, GUARD), "the queue never filled");
+    (p, io, clock, stop, filler)
+}
+
+/// Review of IP1 (follow-up 1): a write queue that is merely full is back-pressure, not silence. A refusal the reader thread
+/// must send then goes into the small reserve beyond the bounds, and the connection stays up (no time has passed, so
+/// nothing says the other side stopped reading).
+#[test]
+fn a_refusal_on_the_reader_thread_fits_the_reserve_when_the_queue_is_merely_full() {
+    let (p, mut io, _clock, stop, filler) = full_queue_peer(true);
     write_frame_raw(
         &mut io,
         &Frame::Call {
@@ -1214,12 +1234,134 @@ fn the_reader_thread_closes_instead_of_waiting_when_it_cannot_queue_a_refusal() 
             body: Vec::new(),
         },
     );
+    // The test starts reading again: the refusal arrives, in order, after what was queued.
+    stop.store(true, Ordering::SeqCst);
+    let refusal = loop {
+        match frame::read_frame(&mut io, FrameLimit::new(HARD_MAX_FRAME)) {
+            Ok(Frame::Fail { id: 1, error }) => break error,
+            Ok(_) => {}
+            Err(e) => panic!(
+                "the link closed before the refusal arrived: {e:?} / {:?}",
+                p.closed()
+            ),
+        }
+    };
+    assert_eq!(refusal.code, codes::BUSY);
+    assert!(
+        !p.is_closed(),
+        "back-pressure alone closed the link: {:?}",
+        p.closed()
+    );
+    filler.join().unwrap();
+}
+
+/// Review of IP1 (follow-up 1): the reserve is bounded. When even it is used up (the other side sends calls and reads
+/// nothing), the connection closes, and the reason says what happened instead of naming a time that did not pass.
+#[test]
+fn a_used_up_reserve_closes_the_link_with_an_accurate_reason() {
+    let (p, mut io, _clock, _stop, filler) = full_queue_peer(true);
+    // One queued filler frame plus the 16-frame reserve of a peer that runs no calls; the 17th refusal does not fit.
+    for id in 1..=17u64 {
+        write_frame_raw(
+            &mut io,
+            &Frame::Call {
+                id,
+                credit: 0,
+                body: Vec::new(),
+            },
+        );
+    }
     assert!(
         p.wait_closed(Some(GUARD)),
-        "the reader thread waited for the writer"
+        "an exhausted reserve left the link open"
     );
     let reason = p.closed().unwrap().to_string();
-    assert!(reason.contains("the plugin stopped reading"), "{reason}");
-    // The sender that waited for room is released by the close.
+    assert!(
+        reason.contains("the plugin had 17 frames unread when a reply was due"),
+        "{reason}"
+    );
+    assert!(!reason.contains("stopped reading for"), "{reason}");
     filler.join().unwrap();
+}
+
+/// Review of IP1 (follow-up 2): a cancel that cannot be queued within the grace is a frame dropped, and a callee that never
+/// hears it keeps running while the link looks healthy. The link closes, like every other dropped frame.
+#[test]
+fn a_cancel_that_cannot_be_queued_closes_the_link() {
+    let clock = Arc::new(paddock_jobs::time::FakeClock::new());
+    let mut opts = PeerOptions::new("the plugin");
+    opts.write_queue = 1;
+    opts.write_queue_bytes = 8 << 20;
+    opts.clock = clock.clone();
+    let (p, io) = raw(Arc::new(NoCalls), opts, FrameLimit::default());
+    let caller = {
+        let p = p.clone();
+        std::thread::spawn(move || p.call(b"x".to_vec(), Some(Duration::from_secs(2))))
+    };
+    assert!(clock.wait_for_waiters(1, GUARD), "the call was never sent");
+    let filler = {
+        let p = p.clone();
+        std::thread::spawn(move || while p.push(vec![0u8; 1 << 20]).is_ok() {})
+    };
+    assert!(clock.wait_for_waiters(2, GUARD), "the queue never filled");
+    let started = clock.waits_started();
+    clock.advance(Duration::from_secs(2));
+    // The call timed out and its cancel now waits for room.
+    assert!(
+        clock.wait_for_started(started + 1, GUARD),
+        "no cancel waited for room"
+    );
+    clock.advance(CANCEL_GRACE);
+    assert!(
+        p.wait_closed(Some(GUARD)),
+        "a cancel that was dropped left the link open"
+    );
+    let reason = p.closed().unwrap().to_string();
+    assert!(reason.contains("cancel"), "{reason}");
+    assert!(caller.join().unwrap().is_err());
+    filler.join().unwrap();
+    drop(io);
+}
+
+/// Review of IP1 (follow-up 3): a call's timeout covers the wait for room and the wait for the answer together. A call
+/// that spent 6 s of 10 s waiting for room times out 4 s after it was sent, not 10 s.
+#[test]
+fn a_calls_timeout_is_shared_by_the_wait_for_room_and_the_wait_for_the_answer() {
+    let (p, mut io, clock, stop, filler) = full_queue_peer(false);
+    let (tx, rx) = mpsc::channel();
+    {
+        let p = p.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(p.call(b"x".to_vec(), Some(Duration::from_secs(10))));
+        });
+    }
+    assert!(
+        clock.wait_for_waiters(2, GUARD),
+        "the call never waited for room"
+    );
+    clock.advance(Duration::from_secs(6));
+    // Room appears: the test reads until the call itself came through.
+    stop.store(true, Ordering::SeqCst);
+    loop {
+        if let Frame::Call { .. } = read_frame_raw(&mut io) {
+            break;
+        }
+    }
+    filler.join().unwrap();
+    assert!(
+        clock.wait_for_waiters(1, GUARD),
+        "the call never waited for its answer"
+    );
+    let started = clock.waits_started();
+    clock.advance(Duration::from_secs(4));
+    assert!(
+        clock.wait_for_started(started + 1, GUARD),
+        "10 s are not over, but the call still waited for its answer after the remaining 4 s"
+    );
+    clock.advance(CANCEL_GRACE);
+    let err = rx
+        .recv_timeout(GUARD)
+        .expect("the call never ended")
+        .unwrap_err();
+    assert!(matches!(err, IpcError::Timeout), "{err:?}");
 }
