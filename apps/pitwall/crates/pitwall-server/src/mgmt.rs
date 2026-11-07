@@ -954,22 +954,72 @@ async fn live(State(st): S, h: HeaderMap) -> Response {
         .unwrap_or_default()
 }
 
-async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
-    if let Err(r) = admin(&st, &h) {
-        return *r;
-    }
-    let req: PlaygroundRequest = match serde_json::from_slice(&body) {
-        Ok(r) => r,
-        Err(e) => return command_response(&err(mgmt::ErrorCode::BadRequest, e.to_string())),
-    };
-    let chat = ChatRequest {
+/// The neutral chat request for a playground request: text messages (with the tool calls and results of a tool loop), the
+/// tools the caller offers and its tool choice.
+fn playground_chat_request(req: &PlaygroundRequest) -> ChatRequest {
+    use pitwall_core::chat::{Part, Role, Tool, ToolCall, ToolChoice};
+    use pitwall_core::mgmt::PlaygroundToolChoice;
+    ChatRequest {
         model: ModelRef::Named(req.model_id.clone()),
-        messages: req.messages.iter().map(|m| Message::text(m.role, m.content.clone())).collect(),
+        messages: req
+            .messages
+            .iter()
+            .map(|m| Message {
+                role: m.role,
+                parts: if m.content.is_empty() && m.role == Role::Assistant && !m.tool_calls.is_empty() {
+                    vec![]
+                } else {
+                    vec![Part::Text(m.content.clone())]
+                },
+                tool_calls: m
+                    .tool_calls
+                    .iter()
+                    .map(|c| ToolCall {
+                        id: c.id.clone(),
+                        name: c.name.clone(),
+                        arguments: c.arguments.clone(),
+                    })
+                    .collect(),
+                tool_call_id: m.tool_call_id.clone(),
+            })
+            .collect(),
+        tools: req
+            .tools
+            .iter()
+            .map(|t| Tool {
+                name: t.name.clone(),
+                description: t.description.clone(),
+                parameters: t.parameters.clone(),
+            })
+            .collect(),
+        tool_choice: match &req.tool_choice {
+            PlaygroundToolChoice::Auto => ToolChoice::Auto,
+            PlaygroundToolChoice::None => ToolChoice::None,
+            PlaygroundToolChoice::Required => ToolChoice::Required,
+            PlaygroundToolChoice::Named { name } => ToolChoice::Named(name.clone()),
+        },
         temperature: Some(req.temperature),
         max_tokens: Some(req.max_tokens),
         stream: true,
         ..Default::default()
-    };
+    }
+}
+
+fn playground_frame(e: &PlaygroundEvent) -> Bytes {
+    Bytes::from(pitwall_core::sse::data(&serde_json::to_string(e).unwrap_or_default()))
+}
+
+/// How often the loading phase repeats while the model loads or the request waits for a slot.
+const LOADING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Runs one playground chat and sends its frames: the response has already started, so the wait for a cold model load is a
+/// labelled phase (ER-18) and not a silent one. Ends when the answer ends or when the client goes away (`tx` closed), which drops
+/// the run and cancels the work.
+async fn drive_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: tokio::sync::mpsc::Sender<Bytes>) {
+    use pitwall_core::chat::Finish;
+    use pitwall_core::mgmt::{PlaygroundFinish, PlaygroundPhase};
+    let started = std::time::Instant::now();
+    let elapsed_ms = || u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     let meta = Meta {
         family: ApiFamily::Extended,
         endpoint: "/mgmt/chat".into(),
@@ -978,9 +1028,33 @@ async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         kind: JobKind::Chat,
         no_cache: true,
     };
-    let ev = |e: &PlaygroundEvent| pitwall_core::sse::data(&serde_json::to_string(e).unwrap_or_default());
-    let run = st.start_chat(&Principal::Admin, meta, chat).await;
-    let run = match run {
+    let send = |e: PlaygroundEvent| {
+        let tx = tx.clone();
+        async move { tx.send(playground_frame(&e)).await.is_ok() }
+    };
+    if !send(PlaygroundEvent::Phase {
+        phase: PlaygroundPhase::Loading { elapsed_ms: 0 },
+    })
+    .await
+    {
+        return;
+    }
+    let start = st.start_chat(&Principal::Admin, meta, playground_chat_request(&req));
+    tokio::pin!(start);
+    let mut tick = tokio::time::interval(LOADING_TICK);
+    tick.tick().await;
+    let run = loop {
+        tokio::select! {
+            r = &mut start => break r,
+            _ = tick.tick() => {
+                if !send(PlaygroundEvent::Phase { phase: PlaygroundPhase::Loading { elapsed_ms: elapsed_ms() } }).await {
+                    return;
+                }
+            }
+            () = tx.closed() => return,
+        }
+    };
+    let mut run = match run {
         Ok(r) => r,
         Err(e) => {
             let code = if e.kind == ErrorKind::InsufficientMemory {
@@ -988,56 +1062,94 @@ async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
             } else {
                 mgmt::ErrorCode::NotAvailable
             };
-            let body = ev(&PlaygroundEvent::Error {
+            send(PlaygroundEvent::Error {
                 error: err(code, e.message),
-            });
-            return Response::builder()
-                .header(header::CONTENT_TYPE, "text/event-stream")
-                .body(Body::from(body))
-                .unwrap_or_default();
+            })
+            .await;
+            return;
         }
     };
     let cold = run.cold_start_ms;
-    let started = std::time::Instant::now();
-    let stream = futures_util::stream::unfold((run, false), move |(mut r, ended)| async move {
-        if ended {
-            return None;
-        }
-        let item = r.rx.recv().await;
-        let (frame, end) = match item {
-            None => return None,
+    if !send(PlaygroundEvent::Phase {
+        phase: PlaygroundPhase::Generating,
+    })
+    .await
+    {
+        return;
+    }
+    let mut ttft: Option<u64> = None;
+    loop {
+        let item = tokio::select! {
+            item = run.rx.recv() => item,
+            () = tx.closed() => return,
+        };
+        let event = match item {
+            None => return,
             Some(Err(e)) => {
-                r.rec.finish(Default::default(), None, Some(e.0.clone()));
-                (
-                    ev(&PlaygroundEvent::Error {
-                        error: err(mgmt::ErrorCode::Internal, e.0),
-                    }),
-                    true,
-                )
+                run.rec.finish(Default::default(), None, Some(e.0.clone()));
+                send(PlaygroundEvent::Error {
+                    error: err(mgmt::ErrorCode::Internal, e.0),
+                })
+                .await;
+                return;
             }
-            Some(Ok(e)) => {
-                r.rec.event(&e);
-                match e {
-                    ChatEvent::Delta(t) => (ev(&PlaygroundEvent::Delta { text: t }), false),
-                    ChatEvent::Done { usage, timings, .. } => {
-                        r.rec.finish(usage, timings, None);
-                        let total = started.elapsed().as_millis() as u64;
-                        (
-                            ev(&PlaygroundEvent::Done {
-                                prompt_tokens: usage.prompt_tokens,
-                                completion_tokens: usage.completion_tokens,
-                                ttft_ms: total.min(timings.map_or(total, |_| total)),
-                                gen_tps: timings.map_or(0.0, |t| t.gen_tps),
-                                cold_start_ms: cold,
-                            }),
-                            true,
-                        )
-                    }
-                    _ => (String::new(), false),
-                }
+            Some(Ok(e)) => e,
+        };
+        run.rec.event(&event);
+        let out = match event {
+            ChatEvent::Delta(text) => PlaygroundEvent::Delta { text },
+            ChatEvent::Reasoning(text) => PlaygroundEvent::Reasoning { text },
+            ChatEvent::ToolCall {
+                index,
+                id,
+                name,
+                arguments,
+            } => PlaygroundEvent::ToolCall {
+                index,
+                id,
+                name,
+                arguments,
+            },
+            ChatEvent::Done { finish, usage, timings } => {
+                run.rec.finish(usage, timings, None);
+                let done = PlaygroundEvent::Done {
+                    finish: match finish {
+                        Finish::Stop => PlaygroundFinish::Stop,
+                        Finish::Length => PlaygroundFinish::Length,
+                        Finish::ToolCalls => PlaygroundFinish::ToolCalls,
+                        Finish::Cancelled => PlaygroundFinish::Cancelled,
+                    },
+                    prompt_tokens: usage.prompt_tokens,
+                    completion_tokens: usage.completion_tokens,
+                    ttft_ms: ttft.unwrap_or_else(elapsed_ms),
+                    gen_tps: timings.map_or(0.0, |t| t.gen_tps),
+                    cold_start_ms: cold,
+                };
+                send(done).await;
+                return;
             }
         };
-        Some((Ok::<_, std::convert::Infallible>(Bytes::from(frame)), (r, end)))
+        if ttft.is_none() {
+            ttft = Some(elapsed_ms());
+        }
+        if !send(out).await {
+            return;
+        }
+    }
+}
+
+async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
+    if let Err(r) = admin(&st, &h) {
+        return *r;
+    }
+    let req: PlaygroundRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => return command_response(&err(mgmt::ErrorCode::BadRequest, e.to_string())),
+    };
+    let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(64);
+    tokio::spawn(drive_playground_chat(st.clone(), req, tx));
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|b| (Ok::<_, std::convert::Infallible>(b), rx))
     });
     Response::builder()
         .header(header::CONTENT_TYPE, "text/event-stream")

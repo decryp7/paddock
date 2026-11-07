@@ -55,6 +55,16 @@ pub struct FakeEngine {
     pub embeds: Arc<std::sync::Mutex<Vec<Vec<String>>>>,
     /// `POST /slots/{n}?action=...` calls: `"{n}:{action}:{body}"`.
     pub slot_calls: Arc<std::sync::Mutex<Vec<String>>>,
+    /// While true, a model load (`start`) waits: a cold load that the test releases when it has seen what it came for.
+    pub start_hold: Arc<std::sync::atomic::AtomicBool>,
+    /// While true, the chat answer is one tool call instead of text.
+    pub tool_call: Arc<std::sync::atomic::AtomicBool>,
+    /// Milliseconds between the first text chunk and the rest of the answer (0: all at once).
+    pub tail_delay_ms: Arc<AtomicU64>,
+}
+
+fn sse_tool_call() -> String {
+    "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"cpu_memory\",\"arguments\":\"\"}}]},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"top\\\":3}\"}}]},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2}}\n\ndata: [DONE]\n\n".to_string()
 }
 
 fn sse(cache_n: u64) -> String {
@@ -73,6 +83,9 @@ impl Engine for FakeEngine {
     fn start<'a>(&'a self, l: &'a Launch) -> BoxFuture<'a, Result<Running, EngineError>> {
         Box::pin(async move {
             self.attempts.fetch_add(1, Ordering::SeqCst);
+            while self.start_hold.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
             let taken = loop {
                 let n = self.port_taken.load(Ordering::SeqCst);
                 if n == 0 {
@@ -98,6 +111,7 @@ impl Engine for FakeEngine {
                 return Err(EngineError::Start("the fake engine refuses to start".into()));
             }
             let erases = self.erases.clone();
+            let (tool_call, tail_delay) = (self.tool_call.clone(), self.tail_delay_ms.clone());
             let (cache_n, embeds, slot_calls) = (self.cache_n.clone(), self.embeds.clone(), self.slot_calls.clone());
             let app = Router::new()
                 .route(
@@ -135,6 +149,7 @@ impl Engine for FakeEngine {
                     post(move |body: axum::body::Bytes| {
                         let bodies = bodies.clone();
                         let (delay, live, peak, cache_n) = (delay.clone(), live.clone(), peak.clone(), cache_n.clone());
+                        let (tool_call, tail_delay) = (tool_call.clone(), tail_delay.clone());
                         async move {
                             let now = live.fetch_add(1, Ordering::SeqCst) + 1;
                             peak.fetch_max(now, Ordering::SeqCst);
@@ -143,7 +158,31 @@ impl Engine for FakeEngine {
                             if let Ok(v) = serde_json::from_slice::<Value>(&body) {
                                 bodies.lock().unwrap().push(v);
                             }
-                            ([("content-type", "text/event-stream")], sse(cache_n.load(Ordering::SeqCst))).into_response()
+                            if tool_call.load(Ordering::SeqCst) {
+                                return ([("content-type", "text/event-stream")], sse_tool_call()).into_response();
+                            }
+                            let all = sse(cache_n.load(Ordering::SeqCst));
+                            let tail = tail_delay.load(Ordering::SeqCst);
+                            if tail == 0 {
+                                return ([("content-type", "text/event-stream")], all).into_response();
+                            }
+                            // The first chunk now, the rest after `tail` ms: a first token long before the end.
+                            let (head, rest) = all.split_at(all.find("\n\n").map_or(0, |i| i + 2));
+                            let (head, rest) = (head.to_string(), rest.to_string());
+                            let body = futures_util::stream::unfold(0u8, move |step| {
+                                let (head, rest) = (head.clone(), rest.clone());
+                                async move {
+                                    match step {
+                                        0 => Some((Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(head)), 1)),
+                                        1 => {
+                                            tokio::time::sleep(Duration::from_millis(tail)).await;
+                                            Some((Ok(axum::body::Bytes::from(rest)), 2))
+                                        }
+                                        _ => None,
+                                    }
+                                }
+                            });
+                            ([("content-type", "text/event-stream")], axum::body::Body::from_stream(body)).into_response()
                         }
                     }),
                 )
@@ -231,6 +270,9 @@ pub struct Harness {
     pub cache_n: Arc<AtomicU64>,
     pub embeds: Arc<std::sync::Mutex<Vec<Vec<String>>>>,
     pub slot_calls: Arc<std::sync::Mutex<Vec<String>>>,
+    pub start_hold: Arc<std::sync::atomic::AtomicBool>,
+    pub tool_call: Arc<std::sync::atomic::AtomicBool>,
+    pub tail_delay_ms: Arc<AtomicU64>,
     pub dir: tempfile::TempDir,
 }
 
@@ -277,6 +319,9 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
     let cache_n = Arc::new(AtomicU64::new(0));
     let embeds = Arc::new(std::sync::Mutex::new(vec![]));
     let slot_calls = Arc::new(std::sync::Mutex::new(vec![]));
+    let start_hold = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tool_call = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tail_delay_ms = Arc::new(AtomicU64::new(0));
     let engine: Arc<dyn Engine> = other.unwrap_or_else(|| {
         Arc::new(FakeEngine {
             starts: starts.clone(),
@@ -294,6 +339,9 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
             cache_n: cache_n.clone(),
             embeds: embeds.clone(),
             slot_calls: slot_calls.clone(),
+            start_hold: start_hold.clone(),
+            tool_call: tool_call.clone(),
+            tail_delay_ms: tail_delay_ms.clone(),
         })
     });
     let st = AppState::open(dirs.clone(), Some(engine)).await;
@@ -328,6 +376,9 @@ pub async fn harness_with(dir: tempfile::TempDir, fail: bool, other: Option<Arc<
         cache_n,
         embeds,
         slot_calls,
+        start_hold,
+        tool_call,
+        tail_delay_ms,
         dir,
     }
 }
@@ -418,6 +469,9 @@ pub async fn real_harness(dir: tempfile::TempDir) -> Harness {
         cache_n: Arc::new(AtomicU64::new(0)),
         embeds: Arc::new(std::sync::Mutex::new(vec![])),
         slot_calls: Arc::new(std::sync::Mutex::new(vec![])),
+        start_hold: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        tool_call: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        tail_delay_ms: Arc::new(AtomicU64::new(0)),
         dir,
     }
 }
