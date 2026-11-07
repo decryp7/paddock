@@ -29,6 +29,7 @@ import { mcpStep } from './mcp-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, btmEnabled, keychainOtherBuildStep, judgeLifecycleLog, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
+import { loginSwitchStep, parseBtm } from './login-start-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -356,7 +357,14 @@ async function main(argv) {
             rowStep(ROW_TITLES.macLifecycleLog, judgeLifecycleLog({ code: m ? Number(m[1]) : null, out: lg.stdout.replace(/EXIT=\d+\s*$/, '') }), 'a standard user reads the lifecycle log'),
             hung];
         };
-        const rowFns = o.suite === 'power' ? [macRows, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
+        // Launch at login switch (release row): the SMAppService login item (sfltool dumpbtm), the switch pressed and SAVED (Save changes), off then on.
+        const macLoginSwitch = async () => {
+          const d = macLoginJobsDriver(gui);
+          const readEntry = async () => { const b = parseBtm((await exec('sudo sfltool dumpbtm 2>&1 | head -600')).stdout); return { present: b.present, count: b.count }; };
+          return loginSwitchStep({ sleep: sleepMs, readSwitch: () => d.readSwitch(), pressSwitch: () => d.pressSwitch(), apply: () => d.apply(), readEntry,
+            witness: async () => (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -i -E "login item|start at login|SMAppService" | tail -n 12')).stdout.split('\n') });
+        };
+        const rowFns = o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
           async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) }),
           async () => discoveryStep(unixDiscoveryPrims({ exec: (c) => guest.exec(c), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), file: '$HOME/Library/Application Support/Dyno/agent.json', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }))] : [];
         const suite = await runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
