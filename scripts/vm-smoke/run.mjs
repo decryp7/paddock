@@ -299,6 +299,7 @@ async function main(argv) {
             killAgent: async () => { await exec('p=$(pgrep -x dyno-agent | head -1); echo "$p" > /tmp/dyno-killed.pid; [ -n "$p" ] && kill -9 $p; for n in 1 2 3 4 5 6; do kill -0 $p 2>/dev/null || break; sleep 0.5; done; true'); }, // by pid only: the login job stays loaded (the product's own state); launchd may start a new agent within seconds, so "dead" means the killed pid
             restoreAgent: async () => {},
             agentAlive: async () => (await exec('p=$(cat /tmp/dyno-killed.pid 2>/dev/null); [ -n "$p" ] && kill -0 $p 2>/dev/null')).code === 0,
+            agentRestarted: async () => (await exec('p=$(cat /tmp/dyno-killed.pid 2>/dev/null); n=$(pgrep -x dyno-agent | head -1); [ -n "$n" ] && [ "$n" != "$p" ]')).code === 0,
             quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; true`); await sleepMs(4000); },
             pidAlive: async (pid) => (await exec(`kill -0 ${pid} 2>/dev/null`)).code === 0,
           });

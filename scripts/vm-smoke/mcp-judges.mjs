@@ -61,7 +61,9 @@ export function judgeSystemSummary(resp) {
 }
 
 /** After the agent was killed the call must be an error that says so, never the earlier numbers. */
-export function judgeAfterAgentKill(resp, { agentDead }) {
+export function judgeAfterAgentKill(resp, { agentDead, restarted = false }) {
+  // launchd/systemd restart a killed agent within seconds (measured: a new pid after every plain kill -9, also after `launchctl disable`): a reading from a NEW agent is not old numbers, but then the error path was not seen.
+  if (agentDead && restarted && resp && callPayload(resp)) return [chk(false, 'the supervisor had already started a new agent when the call was made, so the error path with the agent gone was not tested', 'check')];
   if (!agentDead) return [chk(false, 'the agent was still running when the second call was made, so "no old numbers" was not tested', 'check')];
   if (!resp) return [chk(false, 'no answer at all after the agent was killed (a hang is not an error message)')];
   const stale = callPayload(resp);
@@ -114,7 +116,7 @@ export async function mcpStep(g) {
   checks.push(...judgeToolsList(r1.get(2)), ...judgeSystemSummary(r1.get(3)));
   await g.killAgent();
   const second = parseResponses((await g.mcp(key, mcpInput())).out);
-  checks.push(...judgeAfterAgentKill(second.get(3), { agentDead: await g.agentDead() }));
+  checks.push(...judgeAfterAgentKill(second.get(3), { agentDead: await g.agentDead(), restarted: await g.agentRestarted?.() }));
   await g.quitApp();
   const third = await g.mcp(key, mcpInput());
   checks.push(...judgeAfterQuit({ code: third.code, out: third.out, discovery: await g.discovery() }));
