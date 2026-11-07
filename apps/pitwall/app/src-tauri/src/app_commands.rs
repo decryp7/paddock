@@ -711,12 +711,10 @@ mod tests {
         let (at_step, mut at_step_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         let (finish_tx, finish_rx) = std::sync::mpsc::channel::<()>();
         let (sink, events) = collector();
-        let client: SharedClient = Arc::new(CancelAware::new());
         let (shared, read) = (step.clone(), step);
         jobs::start(&jobs, spec("repair-service", "t", "p"), sink, move |ctx| {
             repair_job(
                 ctx,
-                client,
                 Box::new(move |_: &AtomicBool| {
                     // Held until the job has polled the step once, so the poll comes first.
                     go_rx.recv().unwrap();
@@ -729,6 +727,8 @@ mod tests {
                     let _ = polled_tx.send(());
                     read.lock().unwrap().clone()
                 }),
+                // The end state is the test's own (ER-14), as in `start_repair`.
+                || async { Ok(serde_json::json!({ "installed": true })) },
             )
         });
         polled_rx.recv().await.unwrap();
@@ -738,7 +738,9 @@ mod tests {
         // next poll of the step does not come by itself: advance the clock by one poll interval instead of waiting for it.
         tokio::time::advance(STEP_POLL).await;
         events
-            .until("the step shows as a phase", |e| phases(e).contains(&"Removing the old registration"))
+            .until("the step shows as a phase", |e| {
+                phases(e).contains(&"Removing the old registration")
+            })
             .await;
         finish_tx.send(()).unwrap();
         events.until_terminal().await;

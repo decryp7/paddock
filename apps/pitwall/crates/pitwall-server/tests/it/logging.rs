@@ -1,8 +1,7 @@
 //! The server's own log (ER-27, plan B4a): its lines go to a dated paddock-log file in the log folder, and a playground chat
 //! leaves its `pitwall_chat` lines there (start, end, the cause of a failure), with names, counts and times and no content.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::harness;
 use serde_json::json;
 use std::time::Duration;

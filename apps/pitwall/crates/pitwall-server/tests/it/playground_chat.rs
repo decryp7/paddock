@@ -1,8 +1,7 @@
 //! The Playground stream (`POST /mgmt/v1/chat`, ADR 0023 WP-1): the response starts before a cold model load and labels it, tools
 //! reach the engine, tool calls and reasoning reach the client, and the time to first token is the first token's, not the end's.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::{harness, Harness};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
