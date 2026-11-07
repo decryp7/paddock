@@ -166,7 +166,9 @@
       "width": 720,
       "height": 560,
       "commands": [
-        "dyno"
+        "dyno",
+        "job_cancel",
+        "jobs_snapshot"
       ]
     },
     "dy.lockers": {
@@ -259,6 +261,8 @@
         "dialog_open",
         "dyno",
         "edit_widget_layout",
+        "job_cancel",
+        "jobs_snapshot",
         "mcp_audit",
         "mcp_audit_clear",
         "mcp_get",

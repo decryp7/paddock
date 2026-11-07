@@ -13,6 +13,7 @@ use paddock_shell::dialog_commands as shell;
 paddock_dialogs::dialogs! {
     /// Dyno's dialogs, and the commands every one of its dialog windows may call (the start-up handshake).
     pub static DIALOGS, base &[shell::startup::window_pong, shell::startup::window_ready, shell::diag::log_from_webview];
+    // The jobs list and Cancel (the Start-at-login job, the helper card) are named too: its jobs store calls them.
     // The settings commands, and the engine for Dyno's page of the window (its settings, the tray items, the plugins).
     // Dyno's page also edits the popup and menu-bar widget layouts (their editors read the layouts, the engine's choices and the
     // popup preview): those commands are open to dialogs in `COMMANDS` and must be named here too, or the window may not call them.
@@ -27,6 +28,8 @@ paddock_dialogs::dialogs! {
             shell::mcp::mcp_revoke_key,
             shell::mcp::mcp_audit,
             shell::mcp::mcp_audit_clear,
+            shell::jobs::jobs_snapshot,
+            shell::jobs::job_cancel,
             app::dyno,
             app::widget_layout,
             app::edit_widget_layout,
@@ -55,6 +58,6 @@ paddock_dialogs::dialogs! {
     // "Search this file's hash on VirusTotal": the hash streams in, then the browser opens on the click.
     "dy.file-hash" => Viewer {
         width: Some(Wide),
-        commands: &[app::dyno],
+        commands: &[shell::jobs::jobs_snapshot, shell::jobs::job_cancel, app::dyno],
     },
 }

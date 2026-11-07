@@ -14,7 +14,7 @@ import { jobsBackend, settingsBackend } from './engines';
 import { tauriBridge } from './ipc';
 
 /** The dialogs that start a job: only their windows get the shell's jobs store (it asks the agent for the job list through `dyno`, which these two contracts name: the file hash, and the Settings window for the helper card). */
-const JOB_DIALOGS: readonly string[] = ['dy.file-hash', 'pd.settings'];
+export const JOB_DIALOGS: readonly string[] = ['dy.file-hash', 'pd.settings'];
 
 /** The shell's jobs for the dialog window `id`, when that dialog follows a job. */
 export function dialogJobsProviders(id: string): EnvironmentProviders[] {
