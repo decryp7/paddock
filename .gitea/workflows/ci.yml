@@ -494,7 +494,7 @@ jobs:
       - name: Diag - runner CPU, priority, power throttling (Windows)
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         continue-on-error: true
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -NoProfile -command ". '{0}'"
         working-directory: .
         run: |
           $ErrorActionPreference = 'Continue'
@@ -553,7 +553,7 @@ jobs:
       - name: Diag - probe tests at inherited priority, then Normal (Windows)
         if: ${{ !cancelled() && runner.os == 'Windows' }}
         continue-on-error: true
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -NoProfile -command ". '{0}'"
         working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
         run: |
           $ErrorActionPreference = 'Continue'
