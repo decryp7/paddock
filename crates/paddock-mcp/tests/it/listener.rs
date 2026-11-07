@@ -255,3 +255,223 @@ fn an_unwritable_discovery_file_is_reported_and_leaves_nothing_listening() {
     l.reconcile(false);
     assert_eq!(l.view(), ListenerView::Off);
 }
+
+/// What the fake app does with a bridge's connection after the key line.
+#[derive(Clone, Copy)]
+enum PeerGoes {
+    /// Closes without answering the key (the app went away mid-handshake).
+    BeforeTheKeyAnswer,
+    /// Answers the key, reads every request the host sent and closes without answering any (the field case: `dyno mcp`
+    /// printed nothing and exited 0 while the agent restarted).
+    AfterReadingTheRequests,
+    /// Answers the key line with this refusal line and closes.
+    Refusing(&'static str),
+}
+
+/// A fake app: a discovery file naming this test process (so the bridge trusts it) and a loopback port whose one connection
+/// ends as `goes` says. Real sockets and a temp folder only (ER-14).
+fn peer_that_goes(
+    dir: &std::path::Path,
+    goes: PeerGoes,
+    requests: usize,
+) -> std::thread::JoinHandle<()> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let me = paddock_proc::ProcessId::of(std::process::id()).unwrap();
+    let hint = Discovery {
+        pid: me.pid(),
+        started_us: me.started().as_micros(),
+        port: listener.local_addr().unwrap().port(),
+        app: "Demo".into(),
+        version: "1".into(),
+    };
+    std::fs::write(discovery_path(dir), serde_json::to_string(&hint).unwrap()).unwrap();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        assert!(
+            line.contains("\"key\""),
+            "the bridge sends its key first: {line}"
+        );
+        if let PeerGoes::Refusing(answer) = goes {
+            (&stream)
+                .write_all(format!("{answer}\n").as_bytes())
+                .unwrap();
+        }
+        if let PeerGoes::AfterReadingTheRequests = goes {
+            (&stream)
+                .write_all(b"{\"ok\":true,\"client\":\"host\"}\n")
+                .unwrap();
+            let mut seen = 0;
+            while seen < requests {
+                line.clear();
+                if reader.read_line(&mut line).unwrap() == 0 {
+                    break;
+                }
+                if line.contains("\"id\"") {
+                    seen += 1;
+                }
+            }
+        }
+        // Dropping both handles closes the connection with nothing left unread.
+    })
+}
+
+fn four_lines() -> String {
+    [
+        client::initialize(1, "host", "1"),
+        client::initialized(),
+        client::list_tools(2, None),
+        client::call_tool(3, "system_summary", json!({})),
+    ]
+    .join("\n")
+        + "\n"
+}
+
+/// The field case of 2026-11-07 (Linux VM, RC 2e66322a4): the app's side of the connection ended after the handshake without
+/// an answer, and `dyno mcp` printed nothing and exited 0. The bridge must answer every request it carried with a JSON-RPC
+/// error and end with an error that says what happened.
+#[test]
+fn the_bridge_answers_every_request_when_the_app_ends_the_connection_before_answering() {
+    let dir = tempfile::tempdir().unwrap();
+    let peer = peer_that_goes(dir.path(), PeerGoes::AfterReadingTheRequests, 3);
+    let mut out = Vec::new();
+    let result = bridge::run(
+        &discovery_path(dir.path()),
+        "pmk_x",
+        Cursor::new(four_lines().into_bytes()),
+        &mut out,
+    );
+    peer.join().unwrap();
+    let text = String::from_utf8(out).unwrap();
+    let replies: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let mut ids: Vec<i64> = replies.iter().filter_map(|r| r["id"].as_i64()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        [1, 2, 3],
+        "every request gets an answer, got: {text:?}"
+    );
+    for r in &replies {
+        assert_eq!(r["jsonrpc"], "2.0", "{r}");
+        let message = r["error"]["message"].as_str().unwrap_or_default();
+        assert!(message.contains("ended the connection"), "{r}");
+    }
+    let err = result
+        .expect_err("an app that ends the connection unasked is not a clean end (exit 1, not 0)");
+    assert!(
+        err.to_string().contains("Demo ended the connection"),
+        "{err}"
+    );
+}
+
+/// The app went away between the key line and its answer (it restarted mid-handshake): a clear error, never "refused the key".
+#[test]
+fn the_bridge_says_the_app_went_away_when_the_handshake_has_no_answer() {
+    let dir = tempfile::tempdir().unwrap();
+    let peer = peer_that_goes(dir.path(), PeerGoes::BeforeTheKeyAnswer, 0);
+    let err = bridge::run(
+        &discovery_path(dir.path()),
+        "pmk_x",
+        Cursor::new(four_lines().into_bytes()),
+        &mut Vec::new(),
+    )
+    .unwrap_err()
+    .to_string();
+    peer.join().unwrap();
+    assert!(
+        err.contains("closed the connection before answering the key"),
+        "{err}"
+    );
+    assert!(!err.contains("refused the key"), "{err}");
+}
+
+/// Field case C: the app could not read the key line (a signal interrupted the read) and turned the connection down, and the
+/// bridge said "Dyno refused the key", which sends users to issue a new key for nothing. Only a key refusal may say so.
+#[test]
+fn the_bridge_says_refused_the_key_only_when_the_key_was_refused() {
+    let turned_down = |answer: &'static str| {
+        let dir = tempfile::tempdir().unwrap();
+        let peer = peer_that_goes(dir.path(), PeerGoes::Refusing(answer), 0);
+        let err = bridge::run(
+            &discovery_path(dir.path()),
+            "pmk_x",
+            Cursor::new(vec![]),
+            &mut Vec::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        peer.join().unwrap();
+        err
+    };
+    // What the listener now sends when the key line could not be read.
+    let err = turned_down(
+        r#"{"ok":false,"code":"handshake","error":"the app could not read the key line; try again"}"#,
+    );
+    assert!(
+        !err.contains("refused the key"),
+        "a key that was never read is not a refused key: {err}"
+    );
+    assert!(
+        err.contains("Demo turned the connection down: the app could not read the key line"),
+        "{err}"
+    );
+    // What RC 2e66322a4 sent in the field (no code): not reported as a key refusal either.
+    let err = turned_down(r#"{"ok":false,"error":"send {\"key\": \"...\"} as the first line"}"#);
+    assert!(!err.contains("refused the key"), "{err}");
+
+    // The real listener: a wrong key is still reported as refused.
+    let dir = tempfile::tempdir().unwrap();
+    let r = rig();
+    let keys = Arc::new(KeyStore::new());
+    keys.issue("Claude Desktop", 1).unwrap();
+    let l = Listener::new(
+        r.server.clone(),
+        keys.clone(),
+        discovery_path(dir.path()),
+        1,
+    );
+    l.reconcile(true);
+    let err = bridge::run(
+        &discovery_path(dir.path()),
+        "pmk_wrong",
+        Cursor::new(vec![]),
+        &mut Vec::new(),
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("demo refused the key: the key is missing, wrong or revoked"),
+        "{err}"
+    );
+}
+
+/// A host that has gone (its output fails) ends the bridge without an error: nobody is left to read one.
+#[test]
+fn the_bridge_ends_quietly_when_the_host_stops_reading() {
+    struct Gone;
+    impl Write for Gone {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let (l, keys, _r) = rig_listener(dir.path());
+    let (_, key) = keys.issue("host", 1).unwrap();
+    l.reconcile(true);
+    let input = client::initialize(1, "host", "1") + "\n";
+    bridge::run(
+        &discovery_path(dir.path()),
+        &key,
+        Cursor::new(input.into_bytes()),
+        &mut Gone,
+    )
+    .unwrap();
+}
