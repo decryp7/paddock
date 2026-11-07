@@ -356,6 +356,28 @@ fn level_named(value: &str) -> Option<Level> {
     Level::ALL.iter().copied().find(|l| l.as_str().eq_ignore_ascii_case(value))
 }
 
+/// The bounds of a time range as plain comparisons on `e.ts` (NULL for an untimed event), or `None` when unbounded.
+fn time_range_sql(from: Option<i64>, to: Option<i64>) -> Option<String> {
+    let mut parts = Vec::new();
+    if let Some(f) = from {
+        parts.push(format!("e.ts >= {f}"));
+    }
+    if let Some(t) = to {
+        parts.push(format!("e.ts <= {t}"));
+    }
+    (!parts.is_empty()).then(|| parts.join(" AND "))
+}
+
+/// The SQL of a conjunct of the `WHERE` (see [`expr_sql`]; NULL counts as false there). A time range stays plain
+/// comparisons: wrapped in `coalesce` DuckDB cannot use the segments' min/max statistics, and a 45 s window of a 56M-event
+/// store then reads every segment's `ts` column (384 MB instead of 8 MB; WP-1 in performance.md).
+fn conjunct_sql(e: &Expr, schema: &dyn FieldSource, group_by: &[String]) -> Option<String> {
+    match e {
+        Expr::Time { from, to } => Some(time_range_sql(*from, *to).unwrap_or_else(|| "TRUE".into())),
+        _ => expr_sql(e, schema, group_by),
+    }
+}
+
 /// The SQL of `e` (never NULL), or `None` when SQL cannot express it exactly. `group_by` is the
 /// query's instance key (for [`Expr::Group`]).
 pub fn expr_sql(e: &Expr, schema: &dyn FieldSource, group_by: &[String]) -> Option<String> {
@@ -472,20 +494,11 @@ pub fn expr_sql(e: &Expr, schema: &dyn FieldSource, group_by: &[String]) -> Opti
                 format!("e.source IN ({})", ids.join(", "))
             }
         }
-        Expr::Time { from, to } => {
-            let mut parts = Vec::new();
-            if let Some(f) = from {
-                parts.push(format!("e.ts >= {f}"));
-            }
-            if let Some(t) = to {
-                parts.push(format!("e.ts <= {t}"));
-            }
-            if parts.is_empty() {
-                "TRUE".into()
-            } else {
-                format!("coalesce({}, FALSE)", parts.join(" AND "))
-            }
-        }
+        // Inside `NOT` or `OR` an untimed event (NULL `ts`) must count as outside the range, hence the `coalesce`.
+        Expr::Time { from, to } => match time_range_sql(*from, *to) {
+            Some(range) => format!("coalesce({range}, FALSE)"),
+            None => "TRUE".into(),
+        },
         Expr::Group { set, scopes, .. } => {
             if set.is_empty() {
                 return Some("FALSE".into());
@@ -542,7 +555,7 @@ pub fn compile_query(cq: &CompiledQuery, schema: &dyn FieldSource) -> SqlFilter 
         exprs
             .iter()
             .filter_map(|e| {
-                let sql = expr_sql(e, schema, &cq.group_by);
+                let sql = conjunct_sql(e, schema, &cq.group_by);
                 exact &= sql.is_some();
                 sql.or_else(|| search_superset(e))
             })
@@ -667,10 +680,7 @@ mod tests {
         };
         let (f, _) = compile(&q, &[], &["stop".into(), "start".into()], &plain()).unwrap();
         assert!(f.exact);
-        assert_eq!(
-            f.structural_sql(),
-            "(e.source IN (1, 2)) AND (coalesce(e.ts >= 10 AND e.ts <= 20, FALSE))"
-        );
+        assert_eq!(f.structural_sql(), "(e.source IN (1, 2)) AND (e.ts >= 10 AND e.ts <= 20)");
         let content = f.content_sql();
         assert!(content.contains("e.level IN (3, 4)"), "{content}");
         assert!(content.contains("e.message ILIKE '%it''s%' ESCAPE '\\'"), "{content}");
