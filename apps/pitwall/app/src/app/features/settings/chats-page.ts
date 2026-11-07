@@ -8,6 +8,7 @@ import type { ChatStorage, CommandError } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { Panel } from '../../shared/ui/panel';
+import { SettingsHead } from '../../shared/ui/settings-head';
 
 /**
  * Settings > Chats (ADR 0023 Decision 3): whether new Playground chats are saved, where and how they are kept, and Delete all
@@ -16,16 +17,11 @@ import { Panel } from '../../shared/ui/panel';
  */
 @Component({
   selector: 'pw-chats-page',
-  imports: [MatButton, MatSlideToggle, Panel],
+  imports: [MatButton, MatSlideToggle, Panel, SettingsHead],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
-      <header class="page-head">
-        <h2 class="pd-title">Chats</h2>
-        <p class="help" data-testid="chats-privacy">
-          Chats are kept on this computer in your account's folder. They are not encrypted; anything that can read your files can read them.
-        </p>
-      </header>
+      <pw-settings-head heading="Chats" [help]="privacy" />
       <pw-panel [loading]="loading()" [ready]="storage() !== null" [error]="error()" (retry)="load()">
         @if (storage(); as s) {
           <section class="section" aria-label="Chats">
@@ -44,8 +40,6 @@ import { Panel } from '../../shared/ui/panel';
   `,
   styles: `
     .page { display: grid; gap: var(--pd-space-3); max-width: 1120px; }
-    .pd-title { margin: 0; font-size: var(--pd-text-subtitle); font-weight: var(--pd-weight-semibold); }
-    .help { margin: var(--pd-space-1) 0 0; color: var(--pd-text-muted); }
     .section { display: grid; gap: var(--pd-space-2); }
     .note, .usage { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .actions { display: flex; gap: var(--pd-space-2); }
@@ -58,6 +52,9 @@ export class ChatsPage {
   protected readonly loading = signal(false);
   protected readonly busy = signal(false);
   protected readonly error = signal<CommandError | null>(null);
+  /** ADR 0023 Decision 3: where chats are kept and what protects them, in so many words. */
+  protected readonly privacy =
+    "Chats are kept on this computer in your account's folder. They are not encrypted; anything that can read your files can read them.";
 
   /** What the saved chats take, in words. */
   protected readonly usage = computed(() => {

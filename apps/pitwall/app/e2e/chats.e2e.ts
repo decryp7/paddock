@@ -64,7 +64,7 @@ test.describe('saved chats', () => {
     const settings = settingsDialog(page);
     await settings.getByText('Chats', { exact: true }).first().click();
     await expect(settings.getByRole('heading', { name: 'Chats' })).toBeVisible();
-    await expect(settings.getByTestId('chats-privacy')).toHaveText(
+    await expect(settings.getByTestId('settings-head-help')).toHaveText(
       "Chats are kept on this computer in your account's folder. They are not encrypted; anything that can read your files can read them.",
     );
     await expect(settings.getByTestId('chats-usage')).toHaveText('3 saved chats (47 KB).');

@@ -4,6 +4,7 @@ import { PdWidgetArea, PdWidgetChooser } from '@decryp7/paddock-ui/widgets';
 import type { PopoverWidget } from '../../core/generated/widgets';
 import type { PopoverEdit } from '../../core/widgets.types';
 import { Panel } from '../../shared/ui/panel';
+import { SettingsHead } from '../../shared/ui/settings-head';
 import { StatusPill } from '../tray/status-pill';
 import { TrayWidgetsStore } from '../tray/tray-widgets.store';
 import { WidgetSet } from '../tray/widget-set';
@@ -15,14 +16,11 @@ import { WidgetSet } from '../tray/widget-set';
  */
 @Component({
   selector: 'pw-tray-widgets-page',
-  imports: [PdWidgetChooser, PdWidgetArea, SuTrayPopover, Panel, WidgetSet, StatusPill],
+  imports: [PdWidgetChooser, PdWidgetArea, SuTrayPopover, Panel, SettingsHead, WidgetSet, StatusPill],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
-      <header class="page-head">
-        <h2 class="pd-title" id="pw-tray-title">Tray popup</h2>
-        <p class="help">Choose what the popup shows when you click Pitwall's tray icon, and in which order.</p>
-      </header>
+      <pw-settings-head heading="Tray popup" titleId="pw-tray-title" help="Choose what the popup shows when you click Pitwall's tray icon, and in which order." />
       <pw-panel [loading]="store.loading()" [error]="store.view() ? null : store.error()" [ready]="!!store.view()" (retry)="store.load()">
         @if (store.view(); as view) {
           @if (store.error(); as err) {
@@ -46,18 +44,6 @@ import { WidgetSet } from '../tray/widget-set';
       display: grid;
       gap: var(--pd-space-3);
       max-width: 1120px;
-    }
-    .page-head {
-      display: block;
-    }
-    .pd-title {
-      margin: 0;
-      font-size: var(--pd-text-subtitle);
-      font-weight: var(--pd-weight-semibold);
-    }
-    .help {
-      margin: var(--pd-space-1) 0 0;
-      color: var(--pd-text-muted);
     }
     .problem {
       margin: 0 0 var(--pd-space-3);

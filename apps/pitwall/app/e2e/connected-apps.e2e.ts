@@ -58,7 +58,7 @@ test.describe('connected apps and the chat model', () => {
 
     // One tool is always allowed: Ask again forgets just that one.
     await dyno.getByRole('button', { name: 'Ask again before System summary' }).click();
-    await expect(dyno.getByText('Always', { exact: true })).toHaveCount(0);
+    await expect(dyno.getByText('Always allowed', { exact: true })).toHaveCount(0);
     await expect(dyno.getByText('No tool is always allowed yet.')).toBeVisible();
 
     // The Chat tab is another window: it hears the connect and says so without being opened again.
@@ -109,26 +109,61 @@ test.describe('connected apps and the chat model', () => {
     await expect(page.getByRole('menu')).toHaveCount(0);
   });
 
-  // Round-4 review P2: a tool's name is never cut for its status, and every tool row is as tall as the others.
-  test('tool rows keep the name whole and share one height', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
+  // Round-5 review P1-1: the tools are a one-column table (name | access | action); at 1440 and 1100 px no cell's text runs
+  // past its cell, every row stays inside the card, and the names and words are whole ("Always allowed").
+  for (const width of [1440, 1100]) {
+    test(`the tool table keeps every cell inside its row and the card at ${width} px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await openApp(page, '/playground');
+      await page.locator('pw-playground-chat').getByTestId('chat-open-apps').click();
+      const dyno = settingsDialog(page).getByTestId('connected-app');
+      await dyno.getByRole('button', { name: 'Connect…' }).click();
+      const form = page.getByRole('dialog', { name: 'Connect Dyno' });
+      await form.locator('#pw-mcp-key').fill('pmk_good');
+      await form.getByTestId('dialog-action-connect').click();
+      await expect(dyno.getByTestId('connected-app-state')).toHaveText('Connected: 6 tools');
+      const table = dyno.getByRole('table', { name: 'Dyno tools' });
+      await expect(table.getByRole('row')).toHaveCount(7);
+      await expect(table.getByRole('cell', { name: 'Always allowed', exact: true })).toHaveCount(1);
+      await expect(table.getByRole('button', { name: 'Ask again before System summary' })).toBeVisible();
+      const boxes = await dyno.evaluate((card) => {
+        const c = card.getBoundingClientRect();
+        return [...card.querySelectorAll('tr')].map((tr) => {
+          const r = tr.getBoundingClientRect();
+          return {
+            row: tr.textContent?.trim().slice(0, 30),
+            inCard: r.left >= c.left - 0.5 && r.right <= c.right + 0.5,
+            cells: [...tr.querySelectorAll('td, th')].map((td) => {
+              const b = td.getBoundingClientRect();
+              const text = td as HTMLElement;
+              return { inRow: b.left >= r.left - 0.5 && b.right <= r.right + 0.5, overflows: text.scrollWidth > text.clientWidth + 1 };
+            }),
+          };
+        });
+      });
+      for (const b of boxes) {
+        expect(b.inCard, `${b.row} stays inside the card`).toBe(true);
+        for (const cell of b.cells) {
+          expect(cell.inRow, `${b.row}: a cell stays inside its row`).toBe(true);
+          expect(cell.overflows, `${b.row}: no text runs past its cell`).toBe(false);
+        }
+      }
+    });
+  }
+
+  // Round-5 review P1-2: the Settings pages of the chat share one header: the title above its help line, aligned.
+  test('Connected apps, Chats and Tray popup have the title above the help line', async ({ page }) => {
     await openApp(page, '/playground');
     await page.locator('pw-playground-chat').getByTestId('chat-open-apps').click();
-    const dyno = settingsDialog(page).getByTestId('connected-app');
-    await dyno.getByRole('button', { name: 'Connect…' }).click();
-    const form = page.getByRole('dialog', { name: 'Connect Dyno' });
-    await form.locator('#pw-mcp-key').fill('pmk_good');
-    await form.getByTestId('dialog-action-connect').click();
-    await expect(dyno.getByTestId('connected-app-state')).toHaveText('Connected: 6 tools');
-    await expect(dyno.getByRole('button', { name: 'Ask again before System summary' })).toBeVisible();
-    const rows = await dyno.locator('.tools li').evaluateAll((lis) =>
-      lis.map((li) => {
-        const name = li.querySelector('.tool') as HTMLElement;
-        return { height: Math.round(li.getBoundingClientRect().height), cut: name.scrollWidth > name.clientWidth, name: name.textContent };
-      }),
-    );
-    expect(rows.filter((r) => r.cut), 'no name is cut').toEqual([]);
-    expect(new Set(rows.map((r) => r.height)).size, JSON.stringify(rows)).toBe(1);
+    const settings = settingsDialog(page);
+    for (const name of ['Connected apps', 'Chats', 'Tray popup']) {
+      await settings.getByText(name, { exact: true }).first().click();
+      const head = settings.locator('pw-settings-head');
+      await expect(head.getByRole('heading', { name })).toBeVisible();
+      const [title, help] = await Promise.all([head.getByRole('heading').boundingBox(), head.getByTestId('settings-head-help').boundingBox()]);
+      expect(help!.y, `${name}: the help line is under the title`).toBeGreaterThanOrEqual(title!.y + title!.height - 1);
+      expect(Math.abs(help!.x - title!.x), `${name}: aligned on the left`).toBeLessThanOrEqual(1);
+    }
   });
 
   for (const theme of ['light', 'dark'] as const) {

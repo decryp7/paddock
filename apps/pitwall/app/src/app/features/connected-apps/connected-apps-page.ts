@@ -1,13 +1,15 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
+import { MatTableModule } from '@angular/material/table';
 import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
-import type { CommandError, ConnectedApp } from '../../core/api.types';
+import type { AppTool, CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { ItemsMenu, MoreButton, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
+import { SettingsHead } from '../../shared/ui/settings-head';
 import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
 
 /**
@@ -18,14 +20,11 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
  */
 @Component({
   selector: 'pw-connected-apps-page',
-  imports: [MatButton, MatIconModule, Panel, ItemsMenu, MoreButton],
+  imports: [MatButton, MatIconModule, MatTableModule, Panel, SettingsHead, ItemsMenu, MoreButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
-      <header class="page-head">
-        <h2 class="pd-title">Connected apps</h2>
-        <p class="help">Apps that lend their tools to the Playground chat. Each tool asks before its first use; actions ask every time.</p>
-      </header>
+      <pw-settings-head heading="Connected apps" help="Apps that lend their tools to the Playground chat. Each tool asks before its first use; actions ask every time." />
       <pw-panel [loading]="loading()" [ready]="apps() !== null" [error]="error()" (retry)="load()">
         @for (app of apps() ?? []; track app.id) {
           <section class="app" [attr.aria-labelledby]="'pw-app-' + app.id" data-testid="connected-app">
@@ -50,19 +49,27 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
               <p class="opening" role="status" data-testid="connected-app-opening"><span class="pulse" aria-hidden="true"><i></i><i></i><i></i></span>{{ note }}</p>
             }
             @if (app.connected) {
-              <ul class="tools" [attr.aria-label]="app.title + ' tools'">
-                @for (t of app.tools; track t.name) {
-                  <li>
-                    <span class="tool" [attr.title]="t.title + ' (' + t.name + ')'">{{ t.title }}</span>
+              <!-- One column of tools, name | access | action (UI review pattern 5: tables, not a grid of cards). -->
+              <table mat-table class="tools" [dataSource]="app.tools" [trackBy]="byName" [fixedLayout]="true" [attr.aria-label]="app.title + ' tools'">
+                <ng-container matColumnDef="name">
+                  <th mat-header-cell *matHeaderCellDef>Tool</th>
+                  <td mat-cell *matCellDef="let t" class="name" [attr.title]="t.title + ' (' + t.name + ')'">{{ t.title }}</td>
+                </ng-container>
+                <ng-container matColumnDef="access">
+                  <th mat-header-cell *matHeaderCellDef>Access</th>
+                  <td mat-cell *matCellDef="let t" class="kind" [attr.title]="accessOf(t)">{{ accessOf(t) }}</td>
+                </ng-container>
+                <ng-container matColumnDef="action">
+                  <th mat-header-cell *matHeaderCellDef><span class="sr-only">Action</span></th>
+                  <td mat-cell *matCellDef="let t" class="action">
                     @if (t.remembered) {
-                      <span class="kind" title="Always allowed">Always</span>
                       <button type="button" matButton class="again" [disabled]="busy()" [attr.aria-label]="'Ask again before ' + t.title" (click)="askAgain(app, t.name)">Ask again</button>
-                    } @else {
-                      <span class="kind">{{ t.readOnly ? 'Reads: asks the first time' : 'Action: asks every time' }}</span>
                     }
-                  </li>
-                }
-              </ul>
+                  </td>
+                </ng-container>
+                <tr mat-header-row *matHeaderRowDef="toolColumns"></tr>
+                <tr mat-row *matRowDef="let t; columns: toolColumns"></tr>
+              </table>
               <p class="note">{{ app.remembered === 0 ? 'No tool is always allowed yet.' : app.remembered + (app.remembered === 1 ? ' tool is' : ' tools are') + ' always allowed.' }}</p>
             }
           </section>
@@ -73,9 +80,6 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
   `,
   styles: `
     .page { display: grid; gap: var(--pd-space-3); max-width: 1120px; }
-    .page-head { display: block; }
-    .pd-title { margin: 0; font-size: var(--pd-text-subtitle); font-weight: var(--pd-weight-semibold); }
-    .help { margin: var(--pd-space-1) 0 0; color: var(--pd-text-muted); }
     .app { display: grid; gap: var(--pd-space-2); }
     .row { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; }
     .name { margin: 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
@@ -85,13 +89,13 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
     .state[data-state='problem'] mat-icon { color: var(--pd-warning); }
     .spacer { flex: 1; }
     .problem { margin: 0; color: var(--pd-text); overflow-wrap: anywhere; }
-    .tools { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--pd-space-1) var(--pd-space-4); }
-    /* Every row is as tall as one with "Ask again" (a compact button), so the grid lines up. */
-    .tools li { display: flex; align-items: center; gap: var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); padding: var(--pd-space-1) 0; min-height: 41px; box-sizing: border-box; }
-    /* The name comes first: about 18 characters before it is ever cut, the status gives way. */
-    .tools .tool { flex: 1 0 auto; min-width: min(18ch, 100%); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Name and access share the width; a long one ends in an ellipsis with its full words in a tooltip, never over the next cell. */
+    .tools { width: 100%; }
+    .tools .mat-column-name { width: 40%; }
+    .tools .mat-column-action { width: 120px; text-align: end; }
+    .tools td.name, .tools td.kind { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tools td.kind { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .tools .again { --mat-button-text-container-height: 32px; }
-    .tools .kind { white-space: nowrap; }
     .opening { margin: 0; display: flex; align-items: center; gap: var(--pd-space-2); color: var(--pd-text-muted); }
     .pulse { display: inline-flex; gap: 3px; }
     .pulse i { width: 5px; height: 5px; border-radius: 50%; background: var(--pd-text-muted); animation: pw-pulse 1.2s ease-in-out infinite; }
@@ -99,7 +103,6 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
     .pulse i:nth-child(3) { animation-delay: 0.4s; }
     @keyframes pw-pulse { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .pulse i { animation: none; opacity: 0.6; } }
-    .tool { font-size: var(--pd-text-body); }
     .kind { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .note { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
   `,
@@ -197,6 +200,16 @@ export class ConnectedAppsPage {
     if (!app.keyRefused && !app.reconnecting) items.push({ label: 'Refresh tools', run: () => void this.refresh(app), disabled: this.busy() });
     items.push({ label: `Forget ${app.title}…`, run: () => void this.forget(app), danger: true, divider: items.length > 0, disabled: this.busy() });
     return items;
+  }
+
+  /** The tool table's columns. */
+  protected readonly toolColumns = ['name', 'access', 'action'];
+  protected readonly byName = (_: number, t: AppTool): string => t.name;
+
+  /** How a tool is asked, in words. */
+  protected accessOf(t: AppTool): string {
+    if (t.remembered) return 'Always allowed';
+    return t.readOnly ? 'Reads: asks the first time' : 'Action: asks every time';
   }
 
   /** Asks again before one tool (its Always allow is forgotten). */
