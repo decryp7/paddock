@@ -4,6 +4,17 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-limits` (new): limits that explain themselves and replies that report what they left out
+
+- A new shared crate (ADR 0019, Debrief ADR 0065; plan 1.4 and B1), a leaf (serde; ts-rs behind `ts`): `LimitId`, `Quantity` with units, `Scope`,
+  `SettingPath`, the registry type (`LimitRow`, `Registry::check`, `LimitId::register`), `LimitExceeded` with its message generated from the type
+  (`message`, and `message_with` over `SettingLabels`), `Bounded<T>` / `Cut` / `Total` / `Selection` / `FieldPath` / `CutRow<S>` with checked
+  constructors and wire (JSON or another self-describing format; not postcard), and the request-side `Limit`, `Page`, `Buckets`.
+  A page over a stale total never panics and never hides missing rows: the total is unknown.
+- `paddock-testkit::limits`: `limit_cases!` (one `#[test]` per limit, stop and cut forms, and a test that the cases and the registry's rows are the same
+  set), `limit_case!`, `assert_cases_match`.
+- Nothing adopts it yet (package 1.4b).
+
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
 - `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.
