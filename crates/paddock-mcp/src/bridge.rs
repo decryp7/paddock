@@ -39,11 +39,12 @@ fn not_open(app: &str) -> BridgeError {
     ))
 }
 
-/// The requests the bridge carried that the app has not answered yet, and whether the host's input has ended.
+/// The requests the bridge carried that the app has not answered yet, and whether the host closed its input (not set when
+/// only the bridge's write to the app failed: the host is then still connected).
 #[derive(Default)]
 struct Pending {
     ids: Vec<Id>,
-    input_ended: bool,
+    host_closed: bool,
 }
 
 impl Pending {
@@ -159,7 +160,10 @@ pub fn run(
             loop {
                 line.clear();
                 match input.read_line(&mut line) {
-                    Ok(0) | Err(_) => break,
+                    Ok(0) | Err(_) => {
+                        pending_lock(&pending).host_closed = true;
+                        break;
+                    }
                     Ok(_) => {
                         let text = line.trim_end_matches(['\r', '\n']);
                         // Noted before it is sent, so an answer can never arrive before its request is known.
@@ -179,8 +183,7 @@ pub fn run(
                     }
                 }
             }
-            pending_lock(&pending).input_ended = true;
-            // The host closed its side: let the app answer what is pending, then it ends the connection.
+            // The host closed its side (or the app's is gone): let the app answer what is pending, then it ends the connection.
             let _ = writer.shutdown(Shutdown::Write);
         });
     }
@@ -207,11 +210,11 @@ pub fn run(
         }
     };
     let _ = stream.shutdown(Shutdown::Both);
-    let (unanswered, input_ended) = {
+    let (unanswered, host_closed) = {
         let mut p = pending_lock(&pending);
-        (std::mem::take(&mut p.ids), p.input_ended)
+        (std::mem::take(&mut p.ids), p.host_closed)
     };
-    if unanswered.is_empty() && input_ended {
+    if unanswered.is_empty() && host_closed {
         // The host closed its side and every request was answered: the normal end.
         return Ok(());
     }
@@ -229,8 +232,10 @@ pub fn run(
             break;
         }
     }
-    Err(BridgeError(format!(
-        "{app} ended the connection{cause} with {} request(s) unanswered. {AGAIN}",
-        unanswered.len()
-    )))
+    Err(BridgeError(match unanswered.len() {
+        0 => {
+            format!("{app} ended the connection{cause} while the host was still connected. {AGAIN}")
+        }
+        n => format!("{app} ended the connection{cause} with {n} request(s) unanswered. {AGAIN}"),
+    }))
 }

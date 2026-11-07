@@ -273,6 +273,8 @@ enum PeerGoes {
     /// Answers the key, then reads until the host's side ends and answers only the requests with these ids, as the server
     /// does with a call the host cancelled (it never answers it).
     AnsweringOnly(&'static [i64]),
+    /// Answers the key and this many requests, then closes while the host is still connected.
+    AnsweringThenClosing(usize),
 }
 
 /// Makes closing `s` reset the connection (SO_LINGER 0).
@@ -369,6 +371,30 @@ fn peer_that_goes(
                                 .as_bytes(),
                         )
                         .unwrap();
+                }
+            }
+        }
+        if let PeerGoes::AnsweringThenClosing(n) = goes {
+            (&stream)
+                .write_all(b"{\"ok\":true,\"client\":\"host\"}\n")
+                .unwrap();
+            let mut answered = 0;
+            while answered < n {
+                line.clear();
+                assert_ne!(
+                    reader.read_line(&mut line).unwrap(),
+                    0,
+                    "the host stays connected"
+                );
+                let v: Value = serde_json::from_str(&line).unwrap();
+                if let Some(id) = v["id"].as_i64() {
+                    (&stream)
+                        .write_all(
+                            format!("{}\n", json!({"jsonrpc": "2.0", "id": id, "result": {}}))
+                                .as_bytes(),
+                        )
+                        .unwrap();
+                    answered += 1;
                 }
             }
         }
@@ -701,4 +727,54 @@ fn requests_with_ids_the_server_rejects_are_answered_once() {
     assert!(result.is_ok(), "{result:?}, output {text:?}");
     assert_eq!(text.lines().count(), 4, "one answer each: {text:?}");
     assert!(!text.contains("-32603"), "{text}");
+}
+
+/// A host input that stays open until the test drops its sender, as a host that keeps stdin open does.
+struct HeldOpen {
+    lines: std::sync::mpsc::Receiver<Vec<u8>>,
+    rest: Vec<u8>,
+}
+
+impl std::io::Read for HeldOpen {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.rest.is_empty() {
+            match self.lines.recv() {
+                Ok(bytes) => self.rest = bytes,
+                Err(_) => return Ok(0),
+            }
+        }
+        let n = buf.len().min(self.rest.len());
+        buf[..n].copy_from_slice(&self.rest[..n]);
+        self.rest.drain(..n);
+        Ok(n)
+    }
+}
+
+/// The app ended the connection while the host was still connected, with every request answered: that is not a clean end
+/// (the host would wait for answers that cannot come), and the message does not speak of "0 request(s)" (review of
+/// 31f2bb60b, P2).
+#[test]
+fn the_app_ending_while_the_host_is_still_connected_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let peer = peer_that_goes(dir.path(), PeerGoes::AnsweringThenClosing(2), 0);
+    let (send, lines) = std::sync::mpsc::channel();
+    send.send((client::initialize(1, "host", "1") + "\n").into_bytes())
+        .unwrap();
+    send.send((client::list_tools(2, None) + "\n").into_bytes())
+        .unwrap();
+    let input = BufReader::new(HeldOpen {
+        lines,
+        rest: Vec::new(),
+    });
+    let mut out = Vec::new();
+    let result = bridge::run(&discovery_path(dir.path()), "pmk_x", input, &mut out);
+    peer.join().unwrap();
+    drop(send);
+    let text = String::from_utf8(out).unwrap();
+    assert_eq!(text.lines().count(), 2, "the two answers only: {text:?}");
+    let err = result
+        .expect_err("the app went away while the host was still connected")
+        .to_string();
+    assert!(err.contains("Demo ended the connection"), "{err}");
+    assert!(!err.contains("0 request(s)"), "{err}");
 }
