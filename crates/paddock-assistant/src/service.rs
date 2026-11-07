@@ -1,18 +1,19 @@
 //! The assistant service: conversations, one run per conversation on a worker thread, Stop, approvals. Commands return at
 //! once (rule 10) and a run reports through [`EventSink`].
 
+use crate::approval::{ApprovalChoice, ApprovalPolicy, DefaultPolicy};
 use crate::conversation::{
     ContextItem, Conversation, ConversationStore, ConversationSummary, MAX_CONTEXT_CHARS,
     MAX_CONTEXT_ITEMS, SaveError, StoredError, StoredMessage,
 };
 use crate::event::{AssistantEvent, EndReason, Envelope, ErrorKind, EventSink};
 use crate::provider::{LlmProvider, ProviderError};
-use crate::run::{Budgets, Gate, Hooks, Turn, run_turn};
+use crate::run::{Budgets, Gate, Hooks, Refused, Turn, run_turn};
 use crate::tool::{ToolInfo, Tools};
 use crate::types::{Cancel, Role};
 use paddock_health::Clock;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
 use std::time::UNIX_EPOCH;
@@ -23,7 +24,7 @@ pub const MAX_USER_CHARS: usize = 8000;
 pub const MAX_RUNS: usize = 4;
 
 /// What the app tells the assistant about itself.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AssistantConfig {
     /// The app's display name (in the needs-AI sentences).
     pub app: String,
@@ -33,6 +34,19 @@ pub struct AssistantConfig {
     pub budgets: Budgets,
     /// How much of the conversation the model reads, in characters.
     pub history_chars: usize,
+    /// Which tool calls wait for the user's choice; [`DefaultPolicy`] unless the app sets its own.
+    pub policy: Arc<dyn ApprovalPolicy>,
+}
+
+impl std::fmt::Debug for AssistantConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AssistantConfig")
+            .field("app", &self.app)
+            .field("system", &self.system)
+            .field("budgets", &self.budgets)
+            .field("history_chars", &self.history_chars)
+            .finish_non_exhaustive()
+    }
 }
 
 impl AssistantConfig {
@@ -43,6 +57,7 @@ impl AssistantConfig {
             system: system.into(),
             budgets: Budgets::default(),
             history_chars: 12_000,
+            policy: Arc::new(DefaultPolicy),
         }
     }
 }
@@ -99,6 +114,8 @@ pub enum AssistantError {
     Busy,
     /// No such tool call waits for a decision.
     NotWaiting,
+    /// "Always allow" for a call whose card did not offer it (an action asks every call).
+    NotOffered,
     /// The worker thread could not start, or a file could not be changed.
     Failed(String),
 }
@@ -112,6 +129,9 @@ impl std::fmt::Display for AssistantError {
                 f.write_str("The assistant is answering already. Wait for it or press Stop.")
             }
             AssistantError::NotWaiting => f.write_str("No action waits for a decision."),
+            AssistantError::NotOffered => {
+                f.write_str("This tool asks every time it is used, so it cannot be always allowed.")
+            }
         }
     }
 }
@@ -127,7 +147,7 @@ struct Run {
 /// The assistant of one app.
 pub struct Assistant {
     provider: Arc<dyn LlmProvider>,
-    tools: Tools,
+    tools: Mutex<Arc<Tools>>,
     store: Arc<ConversationStore>,
     clock: Arc<dyn Clock>,
     cfg: AssistantConfig,
@@ -158,7 +178,7 @@ impl Assistant {
     ) -> Arc<Assistant> {
         Arc::new(Assistant {
             provider,
-            tools,
+            tools: Mutex::new(Arc::new(tools)),
             store,
             clock,
             cfg,
@@ -178,12 +198,23 @@ impl Assistant {
             .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
     }
 
+    /// Replaces the tools from the next turn on (an MCP connection came or went, a tool list was refreshed). A turn that is
+    /// running keeps the set it started with.
+    pub fn set_tools(&self, tools: Tools) {
+        *lock(&self.tools) = Arc::new(tools);
+    }
+
+    fn tools(&self) -> Arc<Tools> {
+        lock(&self.tools).clone()
+    }
+
     /// The provider's name and the tools.
     pub fn info(&self) -> AssistantInfo {
+        let tools = self.tools();
         AssistantInfo {
             provider: self.provider.display_name(),
-            tools: self.tools.infos(),
-            has_write: self.tools.has_write(),
+            tools: tools.infos(),
+            has_write: tools.has_write(),
         }
     }
 
@@ -217,17 +248,21 @@ impl Assistant {
         })
     }
 
-    /// Answers the write waiting in the conversation's run.
-    pub fn approve(&self, id: &str, call_id: &str, approved: bool) -> Result<(), AssistantError> {
+    /// Answers the call waiting in the conversation's run with the user's choice.
+    pub fn approve(
+        &self,
+        id: &str,
+        call_id: &str,
+        choice: ApprovalChoice,
+    ) -> Result<(), AssistantError> {
         let run = lock(&self.runs)
             .get(id)
             .cloned()
             .ok_or(AssistantError::NotWaiting)?;
-        if run.gate.decide(call_id, approved) {
-            Ok(())
-        } else {
-            Err(AssistantError::NotWaiting)
-        }
+        run.gate.decide(call_id, choice).map_err(|r| match r {
+            Refused::NotWaiting => AssistantError::NotWaiting,
+            Refused::NotOffered => AssistantError::NotOffered,
+        })
     }
 
     /// Stops every run and waits for the threads (the app is closing, or a test ends).
@@ -305,6 +340,7 @@ impl Assistant {
         let me = self.clone();
         let (thread_run, thread_id) = (run.clone(), id.clone());
         let allow_write = req.allow_write;
+        let tools = self.tools();
         let handle = std::thread::Builder::new()
             .name("paddock-assistant".into())
             .spawn(move || {
@@ -312,7 +348,10 @@ impl Assistant {
                     &thread_id,
                     &title,
                     saved,
-                    allow_write,
+                    Offer {
+                        tools: &tools,
+                        allow_write,
+                    },
                     &thread_run,
                     sink.as_ref(),
                 )
@@ -330,7 +369,7 @@ impl Assistant {
         id: &str,
         title: &str,
         saved: Result<(), SaveError>,
-        allow_write: bool,
+        offer: Offer<'_>,
         run: &Run,
         sink: &dyn EventSink,
     ) {
@@ -354,14 +393,27 @@ impl Assistant {
             });
         }
         let history = self.store.history(id, self.cfg.history_chars);
+        // Every id the conversation holds, not only those in the model's window: cards and results are keyed by them.
+        let taken_ids: HashSet<String> = self
+            .store
+            .get(id)
+            .map(|c| {
+                c.messages
+                    .iter()
+                    .flat_map(|m| m.tool_calls.iter().map(|t| t.id.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let turn = Turn {
             provider: self.provider.as_ref(),
-            tools: &self.tools,
+            tools: offer.tools,
+            policy: self.cfg.policy.as_ref(),
+            taken_ids,
             clock: self.clock.as_ref(),
             budgets: self.cfg.budgets,
             system: &self.cfg.system,
             history,
-            allow_write,
+            allow_write: offer.allow_write,
             cancel: &run.cancel,
             gate: &run.gate,
         };
@@ -428,6 +480,13 @@ impl Assistant {
             }),
         }
     }
+}
+
+/// What a turn may offer the model: the tool set it started with and whether the user allowed tools that write.
+#[derive(Clone, Copy)]
+struct Offer<'a> {
+    tools: &'a Tools,
+    allow_write: bool,
 }
 
 /// Makes the turn's last stored message say how the turn ended: the end reason, the failure and the budget message, so a

@@ -81,6 +81,30 @@ pub struct ToolCall {
 }
 
 impl ToolCall {
+    /// A call as an engine's native tool calling reports it: the arguments are a JSON text, parsed strictly (an engine that
+    /// constrains its output to JSON gives no reason for the prompted protocol's repairs). Blank arguments are an empty
+    /// object; text that is not one JSON value, or longer than [`MAX_CALL_LEN`](crate::protocol::MAX_CALL_LEN), becomes
+    /// the marker of a failed parse (`{"_invalid_json": "<raw, at most 500 characters>"}`), so the loop tells the model and
+    /// never runs it. An empty id is fine: the loop gives the call one.
+    pub fn native(id: impl Into<String>, name: impl Into<String>, arguments: &str) -> ToolCall {
+        let raw = arguments.trim();
+        let parsed = if raw.is_empty() {
+            Some(Value::Object(serde_json::Map::new()))
+        } else if raw.len() > crate::protocol::MAX_CALL_LEN {
+            None
+        } else {
+            serde_json::from_str::<Value>(raw).ok()
+        };
+        let input = parsed.unwrap_or_else(|| {
+            serde_json::json!({"_invalid_json": arguments.chars().take(500).collect::<String>()})
+        });
+        ToolCall {
+            id: id.into(),
+            name: name.into(),
+            input,
+        }
+    }
+
     /// Whether the call could not be read (no name, or the arguments are the marker of a failed parse).
     pub fn is_malformed(&self) -> bool {
         self.name.is_empty() || self.input.get("_invalid_json").is_some()

@@ -4,9 +4,12 @@
 //!   family's adapter over `paddock-pitwall`; an app with an engine of its own registers another one (decision D5).
 //! - [`protocol`]: the prompted tool protocol (Hermes `<tool_call>`, think-block and tag filters, JSON-schema mode).
 //! - [`AssistantTool`] and [`Tools`]: what the assistant can look at or do. Tools that write are offered only after a user
-//!   click and each call waits for the user's approval.
-//! - [`run`]: the tool loop with budgets (rounds, tool calls, tokens, wall time on an injected clock), Stop and malformed
-//!   calls reported to the model and never run.
+//!   click. The app may replace its set between turns ([`Assistant::set_tools`]: connections come and go).
+//! - [`ApprovalPolicy`]: which calls wait for the user's choice (Allow once, Always allow, Deny). [`DefaultPolicy`] asks
+//!   for every call of a tool that writes and for nothing else; an app sets its own in [`AssistantConfig::policy`].
+//! - [`run`]: the tool loop with budgets (rounds, tool calls, tokens, and optional wall limits on an injected clock), Stop
+//!   and malformed calls reported to the model and never run. Calls come from the prompted protocol or from an engine's
+//!   native tool calls ([`ToolCall::native`]).
 //! - [`ConversationStore`]: bounded, versioned persistence through `paddock-env` (damaged: defaults and one problem; newer:
 //!   left untouched).
 //! - [`Assistant`]: the service. Commands return at once; a run works on its own thread and reports through [`EventSink`]
@@ -20,6 +23,7 @@
 //! paddock_assistant::tauri::manage(app.handle(), assistant);
 //! ```
 
+pub mod approval;
 pub mod conversation;
 pub mod event;
 #[cfg(test)]
@@ -34,6 +38,7 @@ pub mod tauri;
 pub mod tool;
 pub mod types;
 
+pub use approval::{Approval, ApprovalChoice, ApprovalPolicy, CallInfo, DefaultPolicy, Verdict};
 pub use conversation::{
     ContextItem, Conversation, ConversationStore, ConversationSummary, MAX_CITATIONS,
     MAX_CONTEXT_CHARS, MAX_CONTEXT_ITEMS, MAX_CONVERSATIONS, MAX_DATA_BYTES, MAX_FILE_BYTES,
@@ -43,7 +48,7 @@ pub use conversation::{
 pub use event::{AssistantEvent, EVENT, EndReason, Envelope, ErrorKind, EventSink};
 pub use pitwall::PitwallProvider;
 pub use provider::{LlmProvider, ProviderError};
-pub use run::{Budgets, Decision, Gate};
+pub use run::{Budgets, Decision, Gate, Refused};
 pub use service::{
     Assistant, AssistantConfig, AssistantError, AssistantInfo, MAX_RUNS, MAX_USER_CHARS, SendAck,
     SendRequest,
