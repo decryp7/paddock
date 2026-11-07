@@ -356,6 +356,7 @@ pub fn ask(text: &str) -> SendRequest {
         text: text.into(),
         context: vec![],
         allow_write: false,
+        attachments: vec![],
     }
 }
 

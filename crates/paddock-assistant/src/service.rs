@@ -10,7 +10,7 @@ use crate::event::{AssistantEvent, EndReason, Envelope, ErrorKind, EventSink};
 use crate::provider::{LlmProvider, ProviderError};
 use crate::run::{Budgets, Gate, Hooks, Refused, Turn, run_turn};
 use crate::tool::{ToolInfo, Tools};
-use crate::types::{Cancel, Role};
+use crate::types::{Attachment, Cancel, MAX_ATTACHMENTS, Role};
 use paddock_health::Clock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -79,6 +79,10 @@ pub struct SendRequest {
     /// The user ticked "Allow actions": tools that write are offered (each call still needs approval).
     #[serde(default)]
     pub allow_write: bool,
+    /// What the question carries besides its text, by reference (ADR 0023 WP-2b; at most [`MAX_ATTACHMENTS`]).
+    #[serde(default)]
+    #[cfg_attr(test, ts(as = "Option<Vec<Attachment>>", optional))]
+    pub attachments: Vec<Attachment>,
 }
 
 /// The answer to a send: the turn runs on and reports through events.
@@ -305,6 +309,14 @@ impl Assistant {
                 "At most {MAX_CONTEXT_ITEMS} context items can be attached."
             )));
         }
+        if req.attachments.len() > MAX_ATTACHMENTS {
+            return Err(AssistantError::Invalid(format!(
+                "A question can carry at most {MAX_ATTACHMENTS} attachments."
+            )));
+        }
+        if let Some(problem) = req.attachments.iter().find_map(Attachment::problem) {
+            return Err(AssistantError::Invalid(problem));
+        }
         let mut context = req.context.clone();
         for c in &mut context {
             if c.id.trim().is_empty() || c.label.trim().is_empty() {
@@ -324,7 +336,8 @@ impl Assistant {
         sink: Arc<dyn EventSink>,
     ) -> Result<SendAck, AssistantError> {
         let (text, context) = Self::check(&req)?;
-        let user = StoredMessage::user(text, context, self.now_ms());
+        let user = StoredMessage::user(text, context, self.now_ms())
+            .with_attachments(req.attachments.clone());
         let mut runs = lock(&self.runs);
         if runs.len() >= MAX_RUNS {
             return Err(AssistantError::Busy);

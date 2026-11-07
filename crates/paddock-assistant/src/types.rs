@@ -111,6 +111,87 @@ impl ToolCall {
     }
 }
 
+/// Most attachments one question carries (the engine's own limit is 16 images per request).
+pub const MAX_ATTACHMENTS: usize = 16;
+/// Longest attachment file name.
+pub const MAX_ATTACHMENT_NAME: usize = 255;
+
+/// A part of a question besides its text (ADR 0023 WP-2b): a reference to a file the app keeps by its SHA-256. The bytes
+/// never pass through the assistant; the app's provider reads them when it builds the model's request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum Attachment {
+    /// An image (PNG, JPEG, WebP or GIF), as prepared by the app.
+    Image {
+        /// SHA-256 of the prepared file, lowercase hex.
+        sha256: String,
+        /// Its type.
+        mime: String,
+        /// Its size in pixels.
+        width: u32,
+        /// Its size in pixels.
+        height: u32,
+    },
+    /// An audio clip.
+    Audio {
+        /// SHA-256 of the clip, lowercase hex.
+        sha256: String,
+        /// Its length.
+        seconds: u32,
+    },
+    /// A text file, attached as text.
+    File {
+        /// SHA-256 of the file, lowercase hex.
+        sha256: String,
+        /// Its name as the user knows it.
+        name: String,
+    },
+}
+
+const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+impl Attachment {
+    /// The reference's file key.
+    pub fn sha256(&self) -> &str {
+        match self {
+            Attachment::Image { sha256, .. }
+            | Attachment::Audio { sha256, .. }
+            | Attachment::File { sha256, .. } => sha256,
+        }
+    }
+
+    /// What is wrong with it, in words for the user; `None` when it is sound.
+    pub fn problem(&self) -> Option<String> {
+        let sha = self.sha256();
+        if sha.len() != 64
+            || !sha
+                .chars()
+                .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+        {
+            return Some("An attachment is not a file the app keeps. Attach it again.".into());
+        }
+        match self {
+            Attachment::Image { mime, .. } if !IMAGE_TYPES.contains(&mime.as_str()) => {
+                Some("An image must be PNG, JPEG, WebP or GIF.".into())
+            }
+            Attachment::File { name, .. }
+                if name.trim().is_empty()
+                    || name.chars().count() > MAX_ATTACHMENT_NAME
+                    || name.contains(['/', '\\'])
+                    || name.chars().any(char::is_control) =>
+            {
+                Some("An attachment's file name is not usable. Attach it again.".into())
+            }
+            _ => None,
+        }
+    }
+}
+
 /// One message of the conversation as the model sees it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ChatMessage {
@@ -122,9 +203,18 @@ pub struct ChatMessage {
     pub tool_calls: Vec<ToolCall>,
     /// For [`Role::Tool`]: the call this answers.
     pub tool_call_id: Option<String>,
+    /// For a user message: what was attached, by reference.
+    pub attachments: Vec<Attachment>,
 }
 
 impl ChatMessage {
+    /// A user message with its attachments.
+    #[must_use]
+    pub fn with_attachments(mut self, attachments: Vec<Attachment>) -> ChatMessage {
+        self.attachments = attachments;
+        self
+    }
+
     /// A user message.
     pub fn user(content: impl Into<String>) -> ChatMessage {
         ChatMessage {
@@ -132,6 +222,7 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: vec![],
             tool_call_id: None,
+            attachments: vec![],
         }
     }
 
@@ -142,6 +233,7 @@ impl ChatMessage {
             content: content.into(),
             tool_calls,
             tool_call_id: None,
+            attachments: vec![],
         }
     }
 
@@ -152,6 +244,7 @@ impl ChatMessage {
             content: content.into(),
             tool_calls: vec![],
             tool_call_id: Some(call_id.into()),
+            attachments: vec![],
         }
     }
 }

@@ -4,7 +4,7 @@
 
 use crate::approval::Approval;
 use crate::event::EndReason;
-use crate::types::{ChatMessage, Role, ToolCall};
+use crate::types::{Attachment, ChatMessage, Role, ToolCall};
 use paddock_env::VersionedFile;
 use paddock_health::Clock;
 use serde::{Deserialize, Serialize};
@@ -136,6 +136,9 @@ pub struct StoredMessage {
     /// For a user message: what was attached.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub context: Vec<ContextItem>,
+    /// For a user message: its attachments, by reference (ADR 0023 WP-2b).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<Attachment>,
     /// For the last assistant message of a turn: how the turn ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
@@ -164,6 +167,7 @@ impl StoredMessage {
             error: None,
             end_message: None,
             context: vec![],
+            attachments: vec![],
             end: None,
             at_ms,
         }
@@ -234,6 +238,13 @@ impl StoredMessage {
         self
     }
 
+    /// A user message with its attachments.
+    #[must_use]
+    pub fn with_attachments(mut self, attachments: Vec<Attachment>) -> StoredMessage {
+        self.attachments = attachments;
+        self
+    }
+
     /// The last assistant message of a turn that failed, or ended on a budget: with the reason shown to the user.
     #[must_use]
     pub fn with_ending(
@@ -249,7 +260,8 @@ impl StoredMessage {
     /// The message as the model reads it: a user message carries its context first, as data.
     pub fn to_chat(&self) -> ChatMessage {
         match self.role {
-            Role::User => ChatMessage::user(with_context(&self.context, &self.text)),
+            Role::User => ChatMessage::user(with_context(&self.context, &self.text))
+                .with_attachments(self.attachments.clone()),
             Role::Assistant => ChatMessage::assistant(self.text.clone(), self.tool_calls.clone()),
             Role::Tool => ChatMessage::tool_result(
                 self.tool_call_id.clone().unwrap_or_default(),

@@ -46,6 +46,7 @@ fn types() -> String {
         ConversationSummary::decl(),
         ToolInfo::decl(),
         AssistantInfo::decl(),
+        crate::types::Attachment::decl(),
         SendRequest::decl(),
         SendAck::decl(),
         crate::provider::ProviderPhase::decl(),

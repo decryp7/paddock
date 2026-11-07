@@ -128,6 +128,10 @@ endMessage?: string,
  */
 context?: Array<ContextItem>, 
 /**
+ * For a user message: its attachments, by reference (ADR 0023 WP-2b).
+ */
+attachments?: Array<Attachment>, 
+/**
  * For the last assistant message of a turn: how the turn ended.
  */
 end?: EndReason, 
@@ -212,6 +216,40 @@ tools: Array<ToolInfo>,
  */
 hasWrite: boolean, };
 
+export type Attachment = { "kind": "image", 
+/**
+ * SHA-256 of the prepared file, lowercase hex.
+ */
+sha256: string, 
+/**
+ * Its type.
+ */
+mime: string, 
+/**
+ * Its size in pixels.
+ */
+width: number, 
+/**
+ * Its size in pixels.
+ */
+height: number, } | { "kind": "audio", 
+/**
+ * SHA-256 of the clip, lowercase hex.
+ */
+sha256: string, 
+/**
+ * Its length.
+ */
+seconds: number, } | { "kind": "file", 
+/**
+ * SHA-256 of the file, lowercase hex.
+ */
+sha256: string, 
+/**
+ * Its name as the user knows it.
+ */
+name: string, };
+
 export type SendRequest = { 
 /**
  * The conversation to continue; none starts a new one.
@@ -228,7 +266,11 @@ context: Array<ContextItem>,
 /**
  * The user ticked "Allow actions": tools that write are offered (each call still needs approval).
  */
-allowWrite: boolean, };
+allowWrite: boolean, 
+/**
+ * What the question carries besides its text, by reference (ADR 0023 WP-2b; at most [`MAX_ATTACHMENTS`]).
+ */
+attachments?: Array<Attachment>, };
 
 export type SendAck = { 
 /**

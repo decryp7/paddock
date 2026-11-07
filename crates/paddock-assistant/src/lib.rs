@@ -55,5 +55,6 @@ pub use service::{
 };
 pub use tool::{Access, AssistantTool, ToolBudget, ToolInfo, ToolOutput, Tools, ToolsError};
 pub use types::{
-    Cancel, ChatMessage, ChatRequest, ChatResponse, Role, StopReason, ToolCall, ToolSpec, Usage,
+    Attachment, Cancel, ChatMessage, ChatRequest, ChatResponse, MAX_ATTACHMENT_NAME,
+    MAX_ATTACHMENTS, Role, StopReason, ToolCall, ToolSpec, Usage,
 };

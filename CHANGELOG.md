@@ -7,6 +7,7 @@ Conventional Commits; one semver tag for the whole repo.
 ### `paddock-assistant`: the conversation store is a port, with a store in memory (ADR 0023 WP-2b)
 - New `Conversations` trait (summaries, get, create, append, delete, history, `take_problem` defaulting to none); `ConversationStore` implements it. `Assistant::with_conversations` takes any implementation; `Assistant::new` is unchanged.
 - `ConversationStore::in_memory` and `in_memory_with`: the same bounds, nothing ever written (a chat the user does not save leaves no file, even after a crash); `is_saved` tells the two apart.
+- Message parts: `Attachment` (`image` with SHA-256, type and size; `audio` with its length; `file` with its name), by reference, never bytes. `SendRequest.attachments` (optional, at most `MAX_ATTACHMENTS` = 16, each checked: a 64-hex SHA-256, PNG/JPEG/WebP/GIF images, a plain file name), kept on the user's `StoredMessage` and given to the provider on `ChatMessage.attachments` (`with_attachments`). Additive; the TypeScript is regenerated.
 - `Assistant::store()` now returns `&Arc<dyn Conversations>` (it returned the concrete store; nothing in the family called it for more than `take_problem`, which the trait keeps).
 
 ### `paddock-assistant` and `workbench/assistant`: phases, Always allow and how each call ran (ADR 0023 WP-4a)

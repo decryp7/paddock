@@ -5,6 +5,7 @@
 mod call_ids;
 mod memory_store;
 mod never_panics;
+mod parts;
 mod phases;
 mod pitwall;
 mod store;

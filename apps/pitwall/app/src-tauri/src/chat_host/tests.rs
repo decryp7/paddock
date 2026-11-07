@@ -178,6 +178,7 @@ fn ask(text: &str, conversation: Option<String>) -> SendRequest {
         text: text.into(),
         context: vec![],
         allow_write: true,
+        attachments: vec![],
     }
 }
 
