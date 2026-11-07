@@ -341,6 +341,8 @@ impl IntelCentre {
     /// month, or not published yet, is not an error.
     pub fn update_geo(&self, ctx: &JobContext) -> Result<(), JobError> {
         let fetcher = self.real_geo().map_err(|e| JobError::Failed(e.to_string()))?;
+        // The country database is the one the map needs; the ASN database only adds a network name. A failure of the optional ASN
+        // database is logged and shown on the databases' own status line (naming it), and does not fail the job.
         let mut failure = None;
         for source in [COUNTRY, ASN] {
             let mut state = self.state_of(source.id);
@@ -354,7 +356,10 @@ impl IntelCentre {
                 Ok(_) | Err(GeoError::NotPublished) => {}
                 Err(GeoError::Fetch(FetchError::Cancelled)) => return Err(JobError::Cancelled(paddock_jobs::CancelReason::User)),
                 Err(GeoError::Fetch(FetchError::TooSoon { .. })) => {}
-                Err(e) => failure = Some(e.to_string()),
+                Err(e) if source.id == ASN.id => {
+                    log::warn!(target: "dyno::geo", "optional database failed, job continues: id={} kind={}", source.id, e.kind())
+                }
+                Err(e) => failure = Some(format!("{}: {e}", source.name)),
             }
         }
         let now_secs = u64::try_from(self.clock.wall_ms() / 1000).unwrap_or(0);
@@ -770,6 +775,22 @@ mod tests {
         r.clock.advance(Duration::from_secs(7200));
         assert!(!r.centre.wants_geo(), "both switches off: nothing goes online");
         assert!(r.centre.due().is_empty());
+    }
+
+    #[test]
+    fn an_asn_database_that_fails_does_not_fail_the_job_but_names_itself_on_its_status_line() {
+        let built = u64::try_from(NOW_MS / 1000).unwrap() - 3600;
+        let r = rig(vec![Reply::ok(&gz(&sample_country(built))), Reply::ok(&gz(&sample_country(built)))]);
+        r.centre.update_geo(&ctx()).expect("country is fine");
+        let st = r.centre.status();
+        assert!(st.geo.database_on);
+        assert!(st.geo.country.error.is_none());
+        let msg = st.geo.asn.error.expect("the ASN failure is shown");
+        assert!(msg.starts_with("IP to ASN database:"), "{msg}");
+        // The country database failing is the job's failure, and says which one.
+        let r = rig(vec![Reply::ok(&gz(&sample_asn(built))), Reply::ok(&gz(&sample_asn(built)))]);
+        let e = r.centre.update_geo(&ctx()).unwrap_err().to_string();
+        assert!(e.starts_with("IP to Country database:"), "{e}");
     }
 
     #[test]
