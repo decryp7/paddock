@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { SuEmptyState, SuErrorState, SuSkeleton } from '@decryp7/paddock-ui';
-import { formatBytes, formatDateTime } from '@decryp7/paddock-ui/format';
+import { formatDateTime, formatStorage } from '@decryp7/paddock-ui/format';
 import type { ActivityEntry } from './activity-wire';
 import { ActivityStore } from './activity.store';
 
@@ -109,7 +109,7 @@ export class PdActivityPage {
   }
 
   protected size(e: ActivityEntry): string {
-    return e.bytes === null ? '' : formatBytes(e.bytes);
+    return e.bytes === null ? '' : formatStorage(e.bytes);
   }
 
   protected undoLabel(e: ActivityEntry): string {

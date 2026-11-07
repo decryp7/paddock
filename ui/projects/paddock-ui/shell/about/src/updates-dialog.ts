@@ -7,7 +7,7 @@ import type { SuJobPhase } from '@decryp7/paddock-ui';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import { UpdatesStore } from './updates.store';
 import { ABOUT_STYLES } from './styles';
-import { formatBytes } from './format';
+import { formatStorage } from './format';
 
 /**
  * Updates (a form: modeless, medium, fitted to its content, kept open beside the work). Every step is the engine's: Check, Download (a job: the download
@@ -179,7 +179,7 @@ export class PdUpdatesDialog implements DialogContent {
     const version = this.version();
     const size = this.store.info()?.size;
     return size
-      ? $localize`:@@pd.updates.available.sized:Version ${version}:version: is available (${formatBytes(size)}:size:).`
+      ? $localize`:@@pd.updates.available.sized:Version ${version}:version: is available (${formatStorage(size)}:size:).`
       : $localize`:@@pd.updates.available:Version ${version}:version: is available.`;
   });
 
@@ -209,10 +209,10 @@ export class PdUpdatesDialog implements DialogContent {
     const phase: SuJobPhase | null | undefined = job?.state === 'running' ? job.phase : null;
     if (!phase) return null;
     const fraction = phase.total ? Math.min(1, phase.done / phase.total) : null;
-    const amount = phase.unit === 'bytes' ? formatBytes(phase.done) : String(phase.done);
+    const amount = phase.unit === 'bytes' ? formatStorage(phase.done) : String(phase.done);
     const label =
       phase.total && phase.unit === 'bytes'
-        ? $localize`:@@pd.updates.progress.of:${phase.label}:phase:: ${amount}:done: of ${formatBytes(phase.total)}:total:`
+        ? $localize`:@@pd.updates.progress.of:${phase.label}:phase:: ${amount}:done: of ${formatStorage(phase.total)}:total:`
         : $localize`:@@pd.updates.progress:${phase.label}:phase:: ${amount}:done:`;
     return { label, fraction };
   });

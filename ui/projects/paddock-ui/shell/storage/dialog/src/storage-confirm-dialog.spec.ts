@@ -9,7 +9,7 @@ describe('the storage confirm dialog', () => {
   it('names what goes and how much; Keep has the focus, Delete logs is the destructive action for the user’s data', async () => {
     const d = await open({ what: 'Logs', bytes: 5_000_000, data: true });
     // The title says what; the body gives the facts and does not say it again.
-    expect(text(d.q('storage-confirm-text')!)).toBe('Up to 4.8 MB is removed.');
+    expect(text(d.q('storage-confirm-text')!)).toBe('Up to 5 MB is removed.');
     expect(d.heading()).toBe('Delete logs?');
     expect(text(d.q('storage-confirm-data')!)).toContain('your own data');
     expect(d.action('clear')!.textContent!.trim()).toBe('Delete logs');

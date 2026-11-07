@@ -4,7 +4,7 @@ import { MatProgressBar } from '@angular/material/progress-bar';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 import type { Saved } from '../generated/diagnostics';
 import { DiagnosticsStore } from './diagnostics.store';
-import { formatBytes, truncateMiddle } from './format';
+import { formatStorage, truncateMiddle } from './format';
 import { DIAGNOSTICS_STYLES } from './styles';
 
 /**
@@ -159,7 +159,7 @@ export class PdReportProblemDialog implements DialogContent<Saved> {
 
   protected readonly total = computed(() => {
     const files = this.store.files().length;
-    const bytes = formatBytes(this.store.totalBytes());
+    const bytes = formatStorage(this.store.totalBytes());
     return $localize`:@@pd.diag.total:${files}:files: files, ${bytes}:bytes: before compression`;
   });
   protected readonly removedText = computed(() => {
@@ -178,7 +178,7 @@ export class PdReportProblemDialog implements DialogContent<Saved> {
     const s = this.savedResult();
     if (!s) return '';
     const files = s.files;
-    const size = formatBytes(s.bytes);
+    const size = formatStorage(s.bytes);
     return $localize`:@@pd.diag.saved-detail:${files}:files: files, ${size}:size:`;
   });
   protected readonly saveError = computed(() => {
@@ -187,7 +187,7 @@ export class PdReportProblemDialog implements DialogContent<Saved> {
   });
 
   protected size(bytes: number): string {
-    return formatBytes(bytes);
+    return formatStorage(bytes);
   }
 
   protected shortName(name: string): string {

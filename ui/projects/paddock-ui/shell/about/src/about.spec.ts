@@ -17,7 +17,7 @@ import {
 } from './backend';
 import { ABOUT_DIALOG_COMMANDS, ABOUT_DIALOG_IDS, aboutContributions, defineAboutDialogs } from './about.contributions';
 import { PdAboutDialog } from './about-dialog';
-import { formatBytes, systemText } from './format';
+import { formatStorage, systemText } from './format';
 import { ABOUT_STYLES } from './styles';
 import { provideShellAbout } from './provide-about';
 import { PdUpdatesDialog } from './updates-dialog';
@@ -115,10 +115,10 @@ describe('the wire', () => {
     expect(toUpdateError(new Error('boom')).message).toBe('boom');
     expect(toUpdateError('plain').message).toBe('plain');
     expect(toUpdateError(undefined)).toMatchObject({ kind: 'unreachable', message: 'The updater did not answer.' });
-    expect(formatBytes(12)).toBe('12 bytes');
-    expect(formatBytes(1_500)).toBe('1.5 KB');
-    expect(formatBytes(41_000_000)).toBe('39 MB');
-    expect(formatBytes(2_000_000_000)).toBe('1.9 GB');
+    expect(formatStorage(12)).toBe('12 bytes');
+    expect(formatStorage(1_500)).toBe('1.5 KB');
+    expect(formatStorage(41_000_000)).toBe('41 MB');
+    expect(formatStorage(2_000_000_000)).toBe('2 GB');
   });
 
   it('the Tauri backends call the generated commands and parse at the edge', async () => {
@@ -500,7 +500,7 @@ describe('the dialogs', () => {
     button(el, 'Check now').click();
     await settle();
     await fixture.whenStable();
-    expect(text(el)).toContain('Version 1.5.0 is available (39 MB).');
+    expect(text(el)).toContain('Version 1.5.0 is available (41 MB).');
     expect(text(el)).toContain('Faster.');
     // Hold the download in its job to see the progress.
     const hold: (() => void)[] = [];
@@ -512,11 +512,11 @@ describe('the dialogs', () => {
     jobs.emit({ id: id ?? -1, kind: 'update-download', title: 'Downloading the update', subject: '1.5.0', seq: 1, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: 41_000_000, done: 20_500_000 } });
     await settle();
     await fixture.whenStable();
-    expect(text(el)).toContain('Downloading: 20 MB of 39 MB');
+    expect(text(el)).toContain('Downloading: 21 MB of 41 MB');
     const bar = el.querySelector('mat-progress-bar')!;
     expect(bar.getAttribute('role')).toBe('progressbar');
     expect(bar.getAttribute('aria-valuenow')).toBe('50');
-    expect(bar.getAttribute('aria-label')).toBe('Downloading: 20 MB of 39 MB');
+    expect(bar.getAttribute('aria-label')).toBe('Downloading: 21 MB of 41 MB');
     expect(el.querySelector('progress')).toBeNull();
     // A phase without a total is an indeterminate bar, not a static 0 (rule 18).
     jobs.emit({ id: id ?? -1, kind: 'update-download', title: 'Downloading the update', subject: '1.5.0', seq: 2, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: null, done: 1000 } });
