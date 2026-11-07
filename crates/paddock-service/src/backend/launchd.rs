@@ -12,8 +12,8 @@
 
 use super::{
     Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
-    Registration, StartFacts, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError, as_written,
-    with_failure,
+    Registration, StartFacts, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError,
+    as_written, with_failure,
 };
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};

@@ -335,7 +335,11 @@ impl System for FakeSystem {
     }
 
     fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
-        self.lock().run_states.get(&pid).copied().unwrap_or(paddock_proc::RunState::Unknown)
+        self.lock()
+            .run_states
+            .get(&pid)
+            .copied()
+            .unwrap_or(paddock_proc::RunState::Unknown)
     }
 }
 

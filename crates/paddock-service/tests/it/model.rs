@@ -18,12 +18,12 @@
 
 use paddock_service::backend::{
     Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
-    Registration, UnregisterError,
+    Registration, StartFacts, UnregisterError,
 };
 use paddock_service::plan::{Hold, MAX_ATTEMPTS, Plan};
 use paddock_service::port::{AppServiceStatus, RegisterError};
 use paddock_service::record::{Memory, Phase, RecordFile, Recorded, State};
-use paddock_service::{Manager, RepairOutcome, ServiceError, Started, Timings};
+use paddock_service::{Manager, RepairOutcome, ServiceError, StartWait, Started, Timings};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::panic::{AssertUnwindSafe, catch_unwind, panic_any};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -101,6 +101,14 @@ enum Resp {
     Never,
     /// Refused whatever is registered.
     RefusedAlways,
+    /// The manager judges the wait with a [`StartWait`] (ADR 0056, amendment "the wait is judged"): the job comes up 300 s after
+    /// it is registered, which is past the fixed 120 s wait; the judge waits for it.
+    WatchedLate,
+    /// Judged: the job never comes up and shows nothing but "not running" (launchd's spawn scheduled), which spends no patience,
+    /// so only the judge's ceiling of polls ends the wait.
+    WatchedNever,
+    /// Judged: the job exits with code 3 and the OS restarts it in a loop, so the judge ends the wait early with the observation.
+    Looping,
 }
 
 impl Resp {
@@ -108,9 +116,14 @@ impl Resp {
         match self {
             Resp::Fast => Some(2),
             Resp::Slow => Some(50),
-            Resp::Late => Some(300),
-            Resp::Never | Resp::RefusedAlways => None,
+            Resp::Late | Resp::WatchedLate => Some(300),
+            Resp::Never | Resp::RefusedAlways | Resp::WatchedNever | Resp::Looping => None,
         }
+    }
+
+    /// Whether the manager under test has a start watch (and the backend can say what it sees of the starting job).
+    fn watched(self) -> bool {
+        matches!(self, Resp::WatchedLate | Resp::WatchedNever | Resp::Looping)
     }
 }
 
@@ -435,6 +448,8 @@ struct Sim {
     counted: u32,
     prompts: u32,
     reg_while_off: u32,
+    /// How often the manager has looked at the starting job in this run (what the OS's run count and the CPU time follow).
+    looks: u32,
     /// Set when the run is to hand out the edges of the crashes at its mutating calls without panicking (see [`Capture`]).
     capture: Option<Arc<Mutex<Capture>>>,
 }
@@ -724,6 +739,34 @@ impl Backend for SimBackend {
         lk(&self.s).w.job == Job::Absent
     }
 
+    /// What launchd shows of the starting job, for a watched configuration (the others cannot be observed, like systemd).
+    fn observe_start(&mut self) -> Option<StartFacts> {
+        let mut s = lk(&self.s);
+        if !s.w.resp.watched() {
+            return None;
+        }
+        s.looks += 1;
+        let looks = s.looks;
+        let w = &s.w;
+        let running = w.job == Job::Running;
+        Some(StartFacts {
+            job: w.job,
+            pid: running.then(|| 1000 + w.job_ver as u32),
+            runs: Some(if w.resp == Resp::Looping {
+                1 + looks
+            } else {
+                1
+            }),
+            last_exit: (w.resp == Resp::Looping && !running).then_some(3),
+            cpu: running.then(|| Duration::from_secs(u64::from(looks))),
+            run_state: if running {
+                paddock_proc::RunState::Running
+            } else {
+                paddock_proc::RunState::Unknown
+            },
+        })
+    }
+
     /// The process of the job the OS runs: the old build's job that outlived a removal has its own, older identity, so the
     /// settle check can tell it from the job this registration started (ADR 0056 P1-4).
     fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
@@ -811,6 +854,11 @@ fn build(sim: &Arc<Mutex<Sim>>, rec: RecordFile, timings: Option<Timings>) -> Ma
     if let Some(t) = timings {
         m = m.with_timings(t);
     }
+    if lk(sim).w.resp.watched() {
+        m = m.with_start_watch(Box::new(StartWait::with_poll(
+            timings.unwrap_or_default().start_poll,
+        )));
+    }
     m
 }
 
@@ -837,6 +885,7 @@ fn new_sim(w: &World, fault: Fault, intr: Intr, rec: &RecordFile) -> Arc<Mutex<S
         counted: 0,
         prompts: 0,
         reg_while_off: 0,
+        looks: 0,
         capture: None,
     }))
 }
@@ -1163,7 +1212,12 @@ fn conclude(
     }
     normalize(&mut after);
     // The registers of this version across starts that no answer has settled (a free finish and a light resume are not attempts).
-    if unattended(ev) && !after.rare_used && matches!(entry.resp, Resp::Never | Resp::RefusedAlways)
+    if unattended(ev)
+        && !after.rare_used
+        && matches!(
+            entry.resp,
+            Resp::Never | Resp::RefusedAlways | Resp::WatchedNever | Resp::Looping
+        )
     {
         let registers = s.counted;
         let free = free_finish(entry) + u32::from(ev == Ev::Resume);
@@ -1993,7 +2047,7 @@ fn explore_inner(caps: Caps, resp: Resp) -> Explored {
     ex
 }
 
-const CONFIGS: [(Caps, Resp); 8] = [
+const CONFIGS: [(Caps, Resp); 11] = [
     (Caps::Mac, Resp::Fast),
     (Caps::Mac, Resp::Never),
     (Caps::Mac, Resp::RefusedAlways),
@@ -2003,6 +2057,11 @@ const CONFIGS: [(Caps, Resp); 8] = [
     (Caps::Mac, Resp::Slow),
     (Caps::Mac, Resp::Late),
     (Caps::Linux, Resp::Fast),
+    // The judged wait (ADR 0056 amendment): a late start is waited for, one that never comes ends at the judge's ceiling, a job
+    // that restarts in a loop ends the wait early.
+    (Caps::Mac, Resp::WatchedLate),
+    (Caps::Mac, Resp::WatchedNever),
+    (Caps::Mac, Resp::Looping),
 ];
 
 /// The configurations of the default run (the first five) or the long one (all). A named one (`MODEL_CONFIG=Mac/Slow`) is
@@ -2105,6 +2164,55 @@ fn a_named_configuration_of_the_long_run_runs_alone_with_the_default_bounds() {
     assert!(configs_for(false, Some("Mac/Nonsense")).is_empty());
 }
 
+/// The positive control of the judged configurations: the watch really decides how the repair ends there (the exploration
+/// alone would also pass if the judge were never asked). A fresh install over each OS behaviour.
+#[test]
+fn a_judged_wait_ends_as_the_judge_says_in_each_watched_configuration() {
+    silence_crashes();
+    let install = |resp: Resp| {
+        let mut w = seeds(Caps::Mac, resp)
+            .into_iter()
+            .find(|(n, _)| *n == "Fresh")
+            .expect("a fresh seed")
+            .1;
+        normalize(&mut w);
+        let rec = RecordFile::memory();
+        let sim = new_sim(&w, Fault::None, Intr::None, &rec);
+        let mut m = build(&sim, rec, None);
+        let out = m.install(&AtomicBool::new(false));
+        let looks = lk(&sim).looks;
+        (out, looks)
+    };
+    // 300 s is past the fixed 120 s wait: the judge waits for the job and the service answers.
+    let (late, looks) = install(Resp::WatchedLate);
+    assert!(matches!(late, Ok(RepairOutcome::Recovered)), "{late:?}");
+    assert!(looks > 40, "waited by looking, {looks} looks");
+    // A job that restarts in a loop fails the wait early with what was seen.
+    let (looping, looks) = install(Resp::Looping);
+    let Err(ServiceError::Failed(why)) = looping else {
+        panic!("{looping:?}")
+    };
+    assert!(
+        why.contains("keeps exiting") && why.contains("last exit code 3"),
+        "{why}"
+    );
+    assert!(looks < 40, "failed early, after {looks} looks");
+    // A job that only shows "not running" spends no patience: the judge's ceiling of polls ends the wait.
+    let (never, looks) = install(Resp::WatchedNever);
+    let Err(ServiceError::Failed(why)) = never else {
+        panic!("{never:?}")
+    };
+    assert!(why.contains("did not answer after"), "{why}");
+    assert!(looks > 150, "ended at the ceiling, after {looks} looks");
+    // Without a watch the same OS (a job that never comes) is the old fixed wait: registered, not failed.
+    let (unjudged, looks) = install(Resp::Never);
+    assert!(
+        matches!(unjudged, Ok(RepairOutcome::Registered)),
+        "{unjudged:?}"
+    );
+    assert_eq!(looks, 0, "no watch: the job is not observed");
+}
+
 /// Bugs the model found in the code under test. Each entry fails the test when it is **not** found any more (it was fixed:
 /// delete the line), and anything not listed fails the test when found. The text says where it points.
 const KNOWN_FAILING: &[(&str, &str)] = &[];
@@ -2187,6 +2295,17 @@ model_test!(
     Fast,
     19_000,
     450_000
+);
+
+// The judged wait (ADR 0056 amendment): a job that restarts in a loop, judged by a StartWait, so the repair ends `Failed` early.
+// Measured 2026-11-08: 73296 states and 2.02 M edges. (Mac/WatchedLate and Mac/WatchedNever are in the long run: their judge
+// allocates more per edge than the budget of the default run.)
+model_test!(
+    the_crash_model_mac_looping_reaches_a_fixed_point_and_the_invariants_hold_in_every_state,
+    Mac,
+    Looping,
+    51_000,
+    1_400_000
 );
 
 /// The long run (`MODEL_DEEP=1 MODEL_CONFIG=Mac/Slow`): the named configuration of any of the eight, with the long bounds and no

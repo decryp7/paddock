@@ -122,7 +122,8 @@ impl System for RealSystem {
     }
 
     fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
-        paddock_proc::ProcessId::of(pid).map_or(paddock_proc::RunState::Unknown, paddock_proc::run_state)
+        paddock_proc::ProcessId::of(pid)
+            .map_or(paddock_proc::RunState::Unknown, paddock_proc::run_state)
     }
 }
 
@@ -201,6 +202,20 @@ mod tests {
             .unwrap();
         // It finished (no timeout) and the output is kept up to the cap.
         assert_eq!((o.code, o.stdout.len()), (Some(0), MAX_HELPER_OUTPUT));
+    }
+
+    #[test]
+    fn the_cpu_time_and_run_state_of_a_process_are_read_by_identity_and_a_missing_one_is_not_known()
+    {
+        let mut sys = RealSystem::new();
+        // Only this test process is looked at (read-only).
+        assert!(sys.cpu_time(std::process::id()).is_some());
+        assert_eq!(sys.cpu_time(u32::MAX), None);
+        assert_eq!(
+            sys.run_state(std::process::id()),
+            paddock_proc::RunState::Running
+        );
+        assert_eq!(sys.run_state(u32::MAX), paddock_proc::RunState::Unknown);
     }
 
     #[test]

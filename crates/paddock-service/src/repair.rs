@@ -471,6 +471,8 @@ impl Stepper {
                         vec![Step::Note("The OS now refuses the registration.".into())],
                     );
                 }
+                // A caller that must return at once ([`Timings::without_start_wait`]) is not made to wait by a judge.
+                let verdict = verdict.filter(|_| !self.t.start_wait.is_zero());
                 let mut say = vec![];
                 let judged = verdict.is_some();
                 match verdict {
@@ -491,7 +493,8 @@ impl Stepper {
                         let why = format!(
                             "The service was registered but did not start: {why}. {NEXT_STEPS}"
                         );
-                        return self.done(vec![Step::Note(why.clone())], RepairOutcome::Failed(why));
+                        return self
+                            .done(vec![Step::Note(why.clone())], RepairOutcome::Failed(why));
                     }
                 }
                 // The longer of the polls' sum (the fake clock) and the real time (a slow OS call counts too). A judged wait
@@ -569,6 +572,9 @@ pub struct Bounds<'a> {
 }
 
 /// [`replace`] within `bounds`: the executor of a [`Stepper`], which performs each action and feeds back what the OS answered.
+/// `watch` judges the wait for the service (ADR 0056 amendment); `before_wait` and `after_wait` are the lock hooks of the wait.
+// The three hooks are separate closures of different callers; bundling them in a struct would only rename the arguments.
+#[allow(clippy::too_many_arguments)]
 pub fn replace_bounded<'w>(
     b: &mut dyn Backend,
     answers: &mut dyn FnMut() -> bool,
@@ -691,7 +697,7 @@ pub fn replace_bounded<'w>(
                 };
                 let process = if answered { b.job_process() } else { None };
                 // The watch judges what the backend sees of the job (a backend that cannot observe it is not judged).
-                let verdict = match watch.as_deref_mut() {
+                let verdict = match watch.as_deref_mut().filter(|_| !t.start_wait.is_zero()) {
                     Some(w) => b.observe_start().map(|facts| {
                         let verdict = w.poll(&StartObservation {
                             answers: false,
@@ -984,6 +990,9 @@ mod tests {
         failed_last: bool,
         /// The process the job runs, as `job_process` names it.
         process: Option<ProcessId>,
+        /// What `observe_start` shows, one per look (the last one repeats); `None`: the backend cannot observe.
+        facts: Option<Vec<crate::backend::StartFacts>>,
+        looks: usize,
     }
 
     impl Backend for Script {
@@ -1046,6 +1055,13 @@ mod tests {
         }
         fn job_process(&mut self) -> Option<ProcessId> {
             self.process
+        }
+        fn observe_start(&mut self) -> Option<crate::backend::StartFacts> {
+            self.calls.push("observe");
+            let facts = self.facts.as_ref()?;
+            let at = self.looks.min(facts.len() - 1);
+            self.looks += 1;
+            Some(facts[at])
         }
 
         fn job_gone(&mut self) -> bool {
@@ -1620,5 +1636,348 @@ mod tests {
             matches!(waiting().next(look(0, false)).action, Action::Pause(_)),
             "neither: keep waiting"
         );
+    }
+
+    // ---- the judged wait (ADR 0056 amendment: the wait for the service is judged, not clocked)
+
+    fn looked_judged(job: Job, secs: u64, verdict: Option<StartVerdict>) -> OsResult {
+        OsResult::Looked {
+            answers: false,
+            job,
+            elapsed: Duration::from_secs(secs),
+            cancelled: false,
+            process: None,
+            verdict,
+        }
+    }
+
+    fn waiting_stepper() -> Stepper {
+        let mut s = Stepper::new(&Timings::default(), 4);
+        s.start_register_only();
+        s.next(OsResult::RegisterOk);
+        s.next(settled(Job::NotRunning, false));
+        s
+    }
+
+    #[test]
+    fn a_judged_wait_goes_on_past_start_wait_and_only_the_judge_ends_it() {
+        let t = Timings::default();
+        let mut s = waiting_stepper();
+        // Far past the fixed limit, the judge says waiting: the wait goes on (without a verdict it would have ended).
+        for secs in [t.start_wait.as_secs(), 5 * t.start_wait.as_secs()] {
+            let n = s.next(looked_judged(
+                Job::Running,
+                secs,
+                Some(StartVerdict::Waiting),
+            ));
+            assert_eq!(n.action, Action::Pause(t.start_poll), "at {secs} s");
+            assert!(n.say.is_empty());
+            assert_eq!(s.next(OsResult::Paused).action, Action::Look);
+        }
+        let note = s.next(looked_judged(
+            Job::Running,
+            600,
+            Some(StartVerdict::StillWorking("still working".into())),
+        ));
+        assert_eq!(note.action, Action::Pause(t.start_poll));
+        assert_eq!(note.say, [Step::Note("still working".into())]);
+        // A cancel still ends it, with the registration in place.
+        let cancelled = s.next(OsResult::Looked {
+            answers: false,
+            job: Job::Running,
+            elapsed: Duration::ZERO,
+            cancelled: true,
+            process: None,
+            verdict: Some(StartVerdict::Waiting),
+        });
+        assert_eq!(cancelled.action, Action::Done(RepairOutcome::Registered));
+        // An unjudged look (no watch, or a backend that cannot observe) keeps the fixed bound.
+        let mut s = waiting_stepper();
+        let late = s.next(looked_judged(Job::Running, t.start_wait.as_secs(), None));
+        assert_eq!(late.action, Action::Done(RepairOutcome::Registered));
+    }
+
+    #[test]
+    fn a_failed_verdict_ends_the_repair_with_what_was_seen_and_what_to_do() {
+        let mut s = waiting_stepper();
+        let n = s.next(looked_judged(
+            Job::NotRunning,
+            9,
+            Some(StartVerdict::Failed(
+                "the job keeps exiting (observed: x)".into(),
+            )),
+        ));
+        let Action::Done(RepairOutcome::Failed(why)) = &n.action else {
+            panic!("{n:?}")
+        };
+        assert!(
+            why.contains("did not start")
+                && why.contains("observed: x")
+                && why.contains("Repair again"),
+            "{why}"
+        );
+        assert_eq!(n.say, [Step::Note(why.clone())]);
+        assert!(!RepairOutcome::Failed(why.clone()).registered());
+    }
+
+    #[test]
+    fn a_refused_verdict_is_another_cycle_and_the_cycles_stay_bounded() {
+        let mut s = waiting_stepper();
+        let n = s.next(looked_judged(
+            Job::NotRunning,
+            9,
+            Some(StartVerdict::Refused("refused by the OS".into())),
+        ));
+        assert_eq!(n.action, Action::Unregister);
+        assert!(
+            matches!(&n.say[0], Step::Note(t) if t.contains("refuses the registration") && t.contains("refused by the OS")),
+            "{:?}",
+            n.say
+        );
+        assert!(n.say.contains(&Step::Cycle(1)));
+        // Refused on every cycle ends in the bounded failure, not a loop.
+        let mut s = Stepper::new(&Timings::default(), 2);
+        s.start_register_only();
+        s.next(OsResult::RegisterOk);
+        s.next(settled(Job::NotRunning, false));
+        let refused = || looked_judged(Job::NotRunning, 9, Some(StartVerdict::Refused("x".into())));
+        assert_eq!(s.next(refused()).action, Action::Unregister);
+        through_removal(&mut s);
+        s.next(OsResult::Gone { timed_out: false });
+        s.next(OsResult::Paused);
+        s.next(OsResult::RegisterOk);
+        s.next(settled(Job::NotRunning, false));
+        let end = s.next(refused());
+        assert!(
+            matches!(&end.action, Action::Done(RepairOutcome::Failed(w)) if w.contains("still refuses")),
+            "{end:?}"
+        );
+    }
+
+    #[test]
+    fn a_caller_that_must_return_at_once_is_not_made_to_wait_by_a_judge() {
+        let t = Timings::default().without_start_wait();
+        let mut s = Stepper::new(&t, 4);
+        s.start_register_only();
+        s.next(OsResult::RegisterOk);
+        s.next(settled(Job::NotRunning, false));
+        let n = s.next(looked_judged(Job::Running, 0, Some(StartVerdict::Waiting)));
+        assert_eq!(n.action, Action::Done(RepairOutcome::Registered));
+        // The executor does not even look at the job then.
+        let mut b = Script {
+            facts: Some(up()),
+            ..Script::default()
+        };
+        let mut w = ScriptedWatch::default();
+        let abort = AtomicBool::new(false);
+        let cancel = AtomicBool::new(false);
+        let bounds = Bounds {
+            cancel: &cancel,
+            abort: &abort,
+            allowed: 4,
+            register_only: false,
+            clock: &paddock_health::SystemClock,
+        };
+        let out = replace_bounded(
+            &mut b,
+            &mut || false,
+            &bounds,
+            &t,
+            Some(&mut w),
+            &mut || {},
+            &mut || true,
+            &mut |_| {},
+        );
+        assert_eq!(out, RepairOutcome::Registered);
+        assert!(w.polled.is_empty() && !b.calls.contains(&"observe"));
+    }
+
+    #[test]
+    fn an_up_verdict_from_a_watch_never_settles_the_service() {
+        let mut s = waiting_stepper();
+        let n = s.next(looked_judged(Job::Running, 3, Some(StartVerdict::Up)));
+        assert_eq!(n.action, Action::Pause(Timings::default().start_poll));
+    }
+
+    /// A watch that follows a script and records what it was asked.
+    #[derive(Default)]
+    struct ScriptedWatch {
+        verdicts: Vec<StartVerdict>,
+        polled: Vec<StartObservation>,
+        resets: u32,
+    }
+
+    impl StartWatch for ScriptedWatch {
+        fn reset(&mut self) {
+            self.resets += 1;
+        }
+        fn poll(&mut self, obs: &StartObservation) -> StartVerdict {
+            self.polled.push(*obs);
+            if self.verdicts.is_empty() {
+                StartVerdict::Waiting
+            } else {
+                self.verdicts.remove(0)
+            }
+        }
+    }
+
+    fn up() -> Vec<crate::backend::StartFacts> {
+        vec![crate::backend::StartFacts {
+            job: Job::Running,
+            pid: Some(7),
+            runs: Some(1),
+            ..crate::backend::StartFacts::unknown()
+        }]
+    }
+
+    fn run_watched(
+        s: &mut Script,
+        w: &mut ScriptedWatch,
+        answers_after: Option<u32>,
+        cancel: &AtomicBool,
+    ) -> (RepairOutcome, Vec<String>) {
+        let mut asked = 0;
+        let mut answers = || {
+            asked += 1;
+            answers_after.is_some_and(|n| asked > n)
+        };
+        let mut said = Vec::new();
+        let abort = AtomicBool::new(false);
+        let bounds = Bounds {
+            cancel,
+            abort: &abort,
+            allowed: 4,
+            register_only: false,
+            clock: &paddock_health::SystemClock,
+        };
+        let out = replace_bounded(
+            s,
+            &mut answers,
+            &bounds,
+            &Timings::default(),
+            Some(w),
+            &mut || {},
+            &mut || true,
+            &mut |st| said.push(st.to_string()),
+        );
+        (out, said)
+    }
+
+    #[test]
+    fn without_a_watch_the_fixed_wait_stays_even_for_a_backend_that_can_observe() {
+        let t = Timings::default();
+        let mut s = Script {
+            facts: Some(up()),
+            ..Script::default()
+        };
+        let (out, said) = run(&mut s, None);
+        assert_eq!(out, RepairOutcome::Registered);
+        assert!(said.iter().any(|m| m.contains("within 120 seconds")));
+        assert!(
+            !s.calls.contains(&"observe"),
+            "no watch: the job is not observed"
+        );
+        assert_eq!(s.paused, t.settle + t.start_wait);
+    }
+
+    #[test]
+    fn a_watch_on_a_backend_that_cannot_observe_keeps_the_fixed_wait() {
+        let mut s = Script::default();
+        let mut w = ScriptedWatch::default();
+        let (out, said) = run_watched(&mut s, &mut w, None, &AtomicBool::new(false));
+        assert_eq!(out, RepairOutcome::Registered);
+        assert!(said.iter().any(|m| m.contains("within 120 seconds")));
+        assert!(
+            w.polled.is_empty(),
+            "nothing to judge: the watch is not asked"
+        );
+        assert_eq!(w.resets, 1);
+    }
+
+    #[test]
+    fn a_watch_decides_how_long_the_wait_lasts_past_the_old_fixed_limit() {
+        let t = Timings::default();
+        let mut s = Script {
+            facts: Some(up()),
+            ..Script::default()
+        };
+        let mut w = ScriptedWatch::default();
+        // The service answers on the 60th ask: three minutes, far past the fixed 120 seconds.
+        let (out, said) = run_watched(&mut s, &mut w, Some(59), &AtomicBool::new(false));
+        assert_eq!(out, RepairOutcome::Recovered);
+        assert_eq!(
+            w.polled.len(),
+            60,
+            "each look is judged, the one the service answers at included"
+        );
+        assert!(s.paused > t.start_wait, "{:?}", s.paused);
+        assert!(
+            w.polled
+                .iter()
+                .all(|o| !o.answers && o.facts.pid == Some(7))
+        );
+        assert!(said.iter().any(|m| m.contains("answers again")));
+    }
+
+    #[test]
+    fn a_watch_says_it_is_still_working_and_a_failed_verdict_ends_the_wait() {
+        let mut s = Script {
+            facts: Some(up()),
+            ..Script::default()
+        };
+        let mut w = ScriptedWatch {
+            verdicts: vec![
+                StartVerdict::StillWorking("still working: slow disk".into()),
+                StartVerdict::Failed("the job keeps exiting (observed: x)".into()),
+            ],
+            ..ScriptedWatch::default()
+        };
+        let (out, said) = run_watched(&mut s, &mut w, None, &AtomicBool::new(false));
+        let RepairOutcome::Failed(why) = out else {
+            panic!("{out:?}")
+        };
+        assert!(
+            why.contains("did not start") && why.contains("Repair again"),
+            "{why}"
+        );
+        assert!(said.iter().any(|m| m == "still working: slow disk"));
+        assert!(said.contains(&why));
+    }
+
+    #[test]
+    fn a_job_the_watch_finds_refused_returns_to_the_repair_cycle_and_each_registration_resets_the_watch()
+     {
+        let mut s = Script {
+            facts: Some(up()),
+            ..Script::default()
+        };
+        let mut w = ScriptedWatch {
+            verdicts: vec![StartVerdict::Refused("refused by the OS".into())],
+            ..ScriptedWatch::default()
+        };
+        let (out, said) = run_watched(&mut s, &mut w, Some(3), &AtomicBool::new(false));
+        assert_eq!(out, RepairOutcome::Recovered);
+        assert_eq!(
+            s.calls.iter().filter(|c| **c == "register").count(),
+            2,
+            "a second cycle registered again"
+        );
+        assert!(said.iter().any(|m| m.contains("retry 1")));
+        assert!(said.iter().any(|m| m.contains("refuses the registration")));
+        assert_eq!(w.resets, 2, "each registration is a new wait");
+    }
+
+    #[test]
+    fn a_cancel_stops_a_watched_wait_and_the_registration_stays() {
+        let mut s = Script {
+            facts: Some(up()),
+            ..Script::default()
+        };
+        let mut w = ScriptedWatch::default();
+        let cancel = AtomicBool::new(true);
+        // Cancelled before anything: nothing is registered.
+        let (out, _) = run_watched(&mut s, &mut w, None, &cancel);
+        assert_eq!(out, RepairOutcome::Cancelled);
+        assert!(w.polled.is_empty());
     }
 }

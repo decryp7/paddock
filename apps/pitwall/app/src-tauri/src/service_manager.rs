@@ -7,7 +7,7 @@ use crate::app_state;
 use crate::commands::{forward, SharedClient};
 use paddock_service::backend::Side;
 use paddock_service::render::{launchd_plist, LaunchdProgram};
-use paddock_service::{Manager, ProcessType, RepairTracker, ServiceError, ServiceSpec, Timings};
+use paddock_service::{Manager, ProcessType, RepairTracker, ServiceError, ServiceSpec, StartWait, Timings};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use std::sync::{Arc, OnceLock};
 
@@ -67,6 +67,10 @@ pub fn manager(client: &SharedClient, timings: Timings) -> Result<Manager, Comma
     Ok(Manager::new(APP_NAME, backend, &data, LABEL, env!("CARGO_PKG_VERSION"), answers)
         .with_program(&program.to_string_lossy())
         .with_tracker(tracker())
+        // The wait for the service after a registration is judged on what launchd shows of the job (a slow start is waited
+        // for, a vanished, crash-looping or stuck one fails early with what was seen) and not a fixed 120 s (ADR 0056
+        // amendment, ADR 0031). Backends that cannot observe the job (systemd, Windows) keep the fixed wait.
+        .with_start_watch(Box::new(StartWait::with_poll(timings.start_poll)))
         .with_timings(timings))
 }
 

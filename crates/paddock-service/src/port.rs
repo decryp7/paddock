@@ -383,6 +383,34 @@ mod tests {
     }
 
     #[test]
+    fn a_system_that_cannot_read_cpu_times_or_run_states_does_not_know_them() {
+        struct Bare;
+        impl System for Bare {
+            fn run(&mut self, _: &str, _: &[&str]) -> Result<Output, RunError> {
+                Ok(Output::default())
+            }
+            fn spawn(&mut self, _: &Path, _: &[String]) -> Result<(), String> {
+                Ok(())
+            }
+            fn read(&mut self, _: &Path) -> std::io::Result<String> {
+                Ok(String::new())
+            }
+            fn write(&mut self, _: &Path, _: &str) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn remove(&mut self, _: &Path) -> std::io::Result<()> {
+                Ok(())
+            }
+            fn is_program(&mut self, _: &Path) -> bool {
+                false
+            }
+            fn pause(&mut self, _: Duration) {}
+        }
+        assert_eq!(Bare.cpu_time(std::process::id()), None);
+        assert_eq!(Bare.run_state(std::process::id()), RunState::Unknown);
+    }
+
+    #[test]
     fn only_other_register_errors_are_retried() {
         assert!(RegisterError::Other("busy".into()).retryable());
         for e in [
