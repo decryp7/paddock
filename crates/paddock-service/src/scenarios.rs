@@ -14,6 +14,7 @@ use crate::repair::{RepairOutcome, Timings};
 use crate::spec::{Kind, ServiceSpec};
 use crate::status::Condition;
 use crate::testing::{Call, FakeAppService, FakeElevator, FakeSystem};
+use paddock_health::Clock;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -252,8 +253,37 @@ fn r03_an_update_replaces_the_stale_registration_exactly_once_and_recovers() {
     assert_eq!(m.on_start(&no_cancel()), Started::Left(Hold::Healthy));
     assert!(changes(&sys).is_empty());
     assert_eq!(m.status().condition, Condition::Running);
-    let notice = m.tracker().current(std::time::Instant::now()).unwrap();
+    let notice = m
+        .tracker()
+        .current(paddock_health::SystemClock.monotonic())
+        .unwrap();
     assert_eq!(notice.state, crate::tracker::RepairState::Succeeded);
+}
+
+#[test]
+fn a_manager_reads_the_clock_it_is_given_for_the_register_stamp_and_the_notice() {
+    // The same repair as r03, on a clock that only moves when the test moves it: the success notice fades when the clock (not the machine's) passes `SUCCESS_SHOWN`.
+    use crate::tracker::SUCCESS_SHOWN;
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, Some(1));
+    sim.lock().unwrap().linger = Duration::from_secs(4);
+    let sys = FakeSystem::new();
+    let clock = paddock_health::FakeClock::at_wall_ms(1_700_000_000_000);
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_clock(Arc::new(clock.clone()));
+    crate::record::RecordFile::new(d.path(), LABEL)
+        .save("1.0.3", None)
+        .unwrap();
+    assert_eq!(
+        m.on_start(&no_cancel()),
+        Started::Repaired(Reason::Refused, RepairOutcome::Recovered)
+    );
+    assert!(m.status().repair.is_some(), "the success is shown at once");
+    clock.advance(SUCCESS_SHOWN + Duration::from_secs(1));
+    assert_eq!(
+        m.status().repair,
+        None,
+        "and fades on the clock's time, not the machine's"
+    );
 }
 
 #[test]
@@ -1664,10 +1694,13 @@ fn manager_contract_details() {
     assert_eq!(m.check(), crate::plan::Plan::Replace(Reason::Refused));
     // A repair that already works (in another thread of this app) makes the next one wait.
     let t = m.tracker();
-    assert!(t.start(std::time::Instant::now()));
+    assert!(t.start(paddock_health::SystemClock.monotonic()));
     assert_eq!(m.on_start(&no_cancel()), Started::Busy);
     assert!(matches!(m.uninstall(), Err(ServiceError::Busy)));
-    t.finish(&RepairOutcome::Cancelled, std::time::Instant::now());
+    t.finish(
+        &RepairOutcome::Cancelled,
+        paddock_health::SystemClock.monotonic(),
+    );
     // The state file was written by a newer app: the repair works, the version is not overwritten (and says so in the log).
     std::fs::write(
         d.path().join(format!("service-{LABEL}.json")),

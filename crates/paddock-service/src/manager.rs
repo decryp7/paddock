@@ -12,10 +12,11 @@ use crate::record::{Phase, RecordFile, Recorded, State};
 use crate::repair::{Bounds, RepairOutcome, Step, Timings, replace_bounded};
 use crate::status::{Seen, ServiceStatus, compose};
 use crate::tracker::RepairTracker;
+use paddock_health::{Clock, SystemClock};
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// What [`Manager::on_start`] did.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,6 +63,9 @@ pub struct Manager {
     location_ok: Box<dyn FnMut() -> bool + Send>,
     /// The process the last look at a running job named (rule R2: a job settles the service only when two looks name the same one).
     seen_job: Option<paddock_proc::ProcessId>,
+    /// The time source of the waits, the repair's notice and the register stamp (the real one unless a test or a model passes
+    /// another: a clock read is a system call, and on some Windows hosts a slow one).
+    clock: Arc<dyn Clock>,
     /// What the last fresh look concluded for rule R2.
     job_confirmed: bool,
 }
@@ -93,6 +97,7 @@ impl Manager {
             first_run_done: Box::new(|| false),
             location_ok: Box::new(|| true),
             seen_job: None,
+            clock: Arc::new(SystemClock),
             job_confirmed: true,
         }
     }
@@ -126,6 +131,14 @@ impl Manager {
         self.app_state = true;
         self.first_run_done = Box::new(first_run_done);
         self.location_ok = Box::new(location_ok);
+        self
+    }
+
+    /// Another time source (a test's fake clock, or the crash model's, which never reads the system's). The repair tracker
+    /// reads the same one through the times this manager gives it.
+    #[must_use]
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
         self
     }
 
@@ -246,7 +259,7 @@ impl Manager {
             inspection: &inspection,
             answers,
             plan: &p,
-            repair: self.tracker.current(Instant::now()),
+            repair: self.tracker.current(self.clock.monotonic()),
             app: &self.app,
         })
     }
@@ -394,11 +407,13 @@ impl Manager {
         {
             return Ran::Unrecorded(e.to_string());
         }
-        if !self.tracker.start(Instant::now()) {
+        if !self.tracker.start(self.clock.monotonic()) {
             return Ran::Busy;
         }
         log::info!(reason = reason.describe(), mechanism:? = self.backend.mechanism(), attempts = attempts0, allowed = allowed; "replacing the background service's registration");
         let tracker = self.tracker.clone();
+        let clock = self.clock.clone();
+        let wall = || crate::repair::start_time_of(clock.wall());
         let record = &self.record;
         let version = self.version.clone();
         let answers = &mut self.answers;
@@ -411,7 +426,8 @@ impl Manager {
             abort: &abort,
             allowed,
             register_only: nothing_to_remove || register_only_once,
-            now: &crate::repair::wall_clock,
+            now: &wall,
+            clock: clock.as_ref(),
         };
         // The wait for the service can take 120 s: the lock is let go for it, so a user's event (a removal, a repair) never waits.
         // A later cycle takes it back before it changes anything, and only when the record still shows this wait.
@@ -454,9 +470,7 @@ impl Manager {
                         Some(removing)
                     }
                     Step::Registering => {
-                        if let Err(e) =
-                            record.set_registered_at(Some(crate::repair::wall_clock().as_micros()))
-                        {
+                        if let Err(e) = record.set_registered_at(Some(wall().as_micros())) {
                             log::warn!(error:% = e; "the time of the register call could not be recorded");
                         }
                         if free_register {
@@ -486,7 +500,7 @@ impl Manager {
                 }
             },
         );
-        self.tracker.finish(&outcome, Instant::now());
+        self.tracker.finish(&outcome, self.clock.monotonic());
         log::info!(outcome:? = outcome; "service repair finished");
         // After a wait without the lock, what the record says now may be somebody else's: only a record that still shows this
         // wait is settled here.
@@ -722,7 +736,8 @@ impl Manager {
         if self.tracker.working() {
             return Err(ServiceError::Busy);
         }
-        let began = Instant::now();
+        let began = self.clock.monotonic();
+        let since = |clock: &dyn Clock| clock.monotonic().saturating_sub(began);
         log::info!("{}", removal_began(self.backend.mechanism()));
         let before = self.record.load().state;
         // No OS call without a durable write, for the user's own removal too.
@@ -736,7 +751,9 @@ impl Manager {
             log::info!(error:% = e; "removing the service's job did not succeed");
         }
         let mut polled = Duration::ZERO;
-        while !self.backend.job_gone() && polled.max(began.elapsed()) < self.timings.gone_wait {
+        while !self.backend.job_gone()
+            && polled.max(since(self.clock.as_ref())) < self.timings.gone_wait
+        {
             self.backend.pause(self.timings.gone_poll);
             polled += self.timings.gone_poll;
         }
@@ -755,7 +772,7 @@ impl Manager {
         log::info!(
             "{}",
             removal_done(
-                u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX),
+                u64::try_from(since(self.clock.as_ref()).as_millis()).unwrap_or(u64::MAX),
                 forgotten.is_ok()
             )
         );
@@ -777,7 +794,7 @@ impl Manager {
     /// up (the service answers or the OS runs the job), removing nothing and holding no lock. `true`: it did. `false`: it
     /// did not in time, the OS now refuses the job, or the wait was cancelled, so the plan is made again.
     pub(super) fn await_start(&mut self, cancel: &AtomicBool) -> bool {
-        let began = Instant::now();
+        let began = self.clock.monotonic();
         let mut polled = Duration::ZERO;
         // The decision's look is not this wait's first: a job that runs is named by two looks of the wait, a poll apart (rule R2).
         self.seen_job = None;
@@ -801,13 +818,13 @@ impl Manager {
             if cancel.load(Ordering::Relaxed) {
                 break (false, "the wait was cancelled");
             }
-            if polled.max(began.elapsed()) >= self.timings.start_wait {
+            if polled.max(self.clock.monotonic().saturating_sub(began)) >= self.timings.start_wait {
                 break (false, "the time a start takes ran out");
             }
             self.backend.pause(self.timings.start_poll);
             polled += self.timings.start_poll;
         };
-        log::info!(up = up, why = why, waited_ms = u64::try_from(polled.max(began.elapsed()).as_millis()).unwrap_or(u64::MAX); "waited for a registration this version made");
+        log::info!(up = up, why = why, waited_ms = u64::try_from(polled.max(self.clock.monotonic().saturating_sub(began)).as_millis()).unwrap_or(u64::MAX); "waited for a registration this version made");
         up
     }
 }

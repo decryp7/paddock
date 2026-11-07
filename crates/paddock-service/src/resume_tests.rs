@@ -1229,7 +1229,7 @@ fn a_request_that_cannot_record_or_finds_the_tracker_busy_changes_nothing() {
     assert!(calls(&sim).is_empty() && no_changes(&sys));
     let dir = tempfile::tempdir().unwrap();
     let (_sim, _sys, mut m) = unanswered(dir.path(), "1.1.0");
-    assert!(m.tracker().start(std::time::Instant::now()));
+    assert!(m.tracker().start(std::time::Duration::ZERO));
     assert!(matches!(m.repair(&never()), Err(ServiceError::Busy)));
     assert!(matches!(
         m.install_unattended(&never()),

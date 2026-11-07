@@ -779,6 +779,16 @@ fn normalize(w: &mut World) {
     }
 }
 
+/// The clock every manager of the model reads: fixed, at a calendar time after the process start times the simulated jobs
+/// report, never moving. The real one is a system call per reading, five to seven an edge, and on a QEMU Windows runner each
+/// was 13 to 25 microseconds (CI run 7646's diagnostic), most of the 20 to 35 microseconds an edge cost there.
+fn model_clock() -> Arc<dyn paddock_health::Clock> {
+    static CLOCK: std::sync::OnceLock<Arc<dyn paddock_health::Clock>> = std::sync::OnceLock::new();
+    CLOCK
+        .get_or_init(|| Arc::new(paddock_health::FakeClock::at_wall_ms(1_700_000_000_000)))
+        .clone()
+}
+
 fn build(sim: &Arc<Mutex<Sim>>, rec: RecordFile, timings: Option<Timings>) -> Manager {
     let version = lk(sim).w.cur.s();
     let (a, b, c, d) = (sim.clone(), sim.clone(), sim.clone(), sim.clone());
@@ -792,6 +802,7 @@ fn build(sim: &Arc<Mutex<Sim>>, rec: RecordFile, timings: Option<Timings>) -> Ma
         move || lk(&a).w.job == Job::Running,
     )
     .with_record(rec)
+    .with_clock(model_clock())
     .with_app_state(
         move || lk(&b).w.wanted,
         move || lk(&c).w.first_run_done,

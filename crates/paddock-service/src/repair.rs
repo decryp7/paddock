@@ -6,6 +6,7 @@
 
 use crate::backend::{Backend, Job};
 use crate::port::RegisterError;
+use paddock_health::Clock;
 use paddock_proc::{ProcessId, StartTime};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -505,15 +506,19 @@ pub fn replace(
         allowed: t.max_cycles + 1,
         register_only: false,
         now: &wall_clock,
+        clock: &paddock_health::SystemClock,
     };
     replace_bounded(b, answers, &bounds, t, &mut || {}, &mut || true, say)
 }
 
 /// The wall clock as a process start time (microseconds since the Unix epoch).
 pub fn wall_clock() -> StartTime {
-    let t = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
+    start_time_of(std::time::SystemTime::now())
+}
+
+/// A calendar time as a process start time (microseconds since the Unix epoch).
+pub fn start_time_of(t: std::time::SystemTime) -> StartTime {
+    let t = t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
     StartTime::from_micros(u64::try_from(t.as_micros()).unwrap_or(u64::MAX))
 }
 
@@ -531,6 +536,9 @@ pub struct Bounds<'a> {
     pub register_only: bool,
     /// The clock for `registered_at`, in the same units as a process start time.
     pub now: &'a dyn Fn() -> StartTime,
+    /// The monotonic clock of the waits (how long the OS has been given); a model passes one that stands still, so no
+    /// clock is read in its hot loop.
+    pub clock: &'a dyn Clock,
 }
 
 /// [`replace`] within `bounds`: the executor of a [`Stepper`], which performs each action and feeds back what the OS answered.
@@ -564,7 +572,7 @@ pub fn replace_bounded(
     } else {
         stepper.start()
     };
-    let mut waiting_since: Option<std::time::Instant> = None;
+    let mut waiting_since: Option<Duration> = None;
     // The caller let go of what it holds for the wait (`before_wait`) and has not taken it back since.
     let mut let_go = false;
     loop {
@@ -584,7 +592,7 @@ pub fn replace_bounded(
         }
         for step in next.say.drain(..) {
             if step == Step::WaitingForStart {
-                waiting_since = Some(std::time::Instant::now());
+                waiting_since = Some(bounds.clock.monotonic());
                 // The wait is long and changes nothing: the caller lets go of what it holds for it.
                 before_wait();
                 let_go = true;
@@ -609,11 +617,11 @@ pub fn replace_bounded(
             }
             Action::Evict => OsResult::Evicted(b.evict()),
             Action::WaitGone => {
-                let began = std::time::Instant::now();
+                let began = bounds.clock.monotonic();
                 let mut polled = Duration::ZERO;
                 let mut timed_out = false;
                 while !b.job_gone() {
-                    if polled.max(began.elapsed()) >= t.gone_wait {
+                    if polled.max(bounds.clock.monotonic().saturating_sub(began)) >= t.gone_wait {
                         timed_out = true;
                         break;
                     }
@@ -655,7 +663,9 @@ pub fn replace_bounded(
                     answers: answered,
                     process,
                     job,
-                    elapsed: waiting_since.map_or(Duration::ZERO, |s| s.elapsed()),
+                    elapsed: waiting_since.map_or(Duration::ZERO, |s| {
+                        bounds.clock.monotonic().saturating_sub(s)
+                    }),
                     cancelled: cancel.load(Ordering::Relaxed),
                 }
             }
@@ -1351,6 +1361,7 @@ mod tests {
             allowed: 4,
             register_only: false,
             now: &|| StartTime::from_micros(REGISTERED),
+            clock: &paddock_health::SystemClock,
         };
         let out = replace_bounded(
             &mut s,
@@ -1378,6 +1389,7 @@ mod tests {
             allowed: 4,
             register_only: false,
             now: &|| StartTime::from_micros(REGISTERED),
+            clock: &paddock_health::SystemClock,
         };
         let out = replace_bounded(
             &mut s,
@@ -1407,6 +1419,7 @@ mod tests {
             allowed: 4,
             register_only: false,
             now: &|| StartTime::from_micros(1),
+            clock: &paddock_health::SystemClock,
         };
         let mut asked = 0;
         let out = replace_bounded(
@@ -1458,6 +1471,7 @@ mod tests {
             allowed: 4,
             register_only: false,
             now: &|| StartTime::from_micros(1),
+            clock: &paddock_health::SystemClock,
         };
         let mut said = Vec::new();
         let out = replace_bounded(
