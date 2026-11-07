@@ -1095,18 +1095,24 @@ impl Supervisor {
 
     /// What to do from a look when no child is held and no agent answers yet.
     fn decide(&mut self, look: Look, usable_hint: bool, out: &mut Vec<Command>) {
+        // One look that misses the file (it is read while the agent rewrites it) does not end the update wait, whether the agent is our
+        // own child (running) or the login service's. A free lock with no file means the agent is gone: decided afresh below.
+        let child_running = self
+            .child
+            .as_ref()
+            .is_none_or(|held| matches!(look.child, Some((g, Child::Running { .. })) if g == held.generation));
+        if look.hint.is_none()
+            && look.lock != Some(LockSeen::Free)
+            && child_running
+            && matches!(self.phase, Phase::WaitingForHolder)
+            && matches!(self.stall, Some((_, Stall::AppUpdated | Stall::AgentMismatch)))
+        {
+            return;
+        }
         if let Some(held) = self.child.clone() {
             let running = matches!(look.child, Some((g, Child::Running { .. })) if g == held.generation);
             if let (Some(h), true) = (look.hint.as_ref().filter(|h| !h.same_build && h.of_disk_file), running) {
                 self.wait_for_restart(h, look.app_updated, out); // our own agent is the new file: kept, not ended, not connected to
-                return;
-            }
-            // One look that misses the file (it is read while the agent rewrites it) does not end that wait.
-            if look.hint.is_none()
-                && running
-                && matches!(self.phase, Phase::WaitingForHolder)
-                && matches!(self.stall, Some((_, Stall::AppUpdated | Stall::AgentMismatch)))
-            {
                 return;
             }
             // A child is held (the connection to it dropped): it is starting again until a look says it is gone.

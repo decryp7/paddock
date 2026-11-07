@@ -1667,3 +1667,40 @@ fn a_first_read_without_a_build_id_does_not_make_a_later_hashed_read_an_update()
     r.link.wanted_key();
     assert!(r.link.app_updated(), "the hashed build changed: updated");
 }
+
+/// The wiring from the link's `wanted_key` latch through the driver's look to the machine: an agent that holds the folder, is the
+/// installed file (its build is the wanted one) and speaks another protocol is left alone, and the chip's cause depends on whether this
+/// app really was updated while it ran.
+fn installed_agent_of_another_protocol(updated: bool) -> Option<Stall> {
+    use dyno_agent::build_id::build_key;
+    let r = stub_rig(Child::Exited {
+        code: Some(dyno_agent::cli::EXIT_ALREADY_RUNNING),
+    });
+    let holder = other_agent(&r.link.dirs);
+    let mut file = holder.discovery.clone();
+    file.protocol = dyno_core::protocol::PROTOCOL_VERSION + 1;
+    file.build = "aaaaaaaaaaaaaaaa".into();
+    file.write(&r.link.dirs.discovery()).unwrap();
+    let key = Arc::new(Mutex::new(build_key(
+        env!("CARGO_PKG_VERSION"),
+        if updated { "bbbbbbbbbbbbbbbb" } else { "aaaaaaaaaaaaaaaa" },
+    )));
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    r.link.wanted_key(); // the build this app started from
+    *lock(&key) = build_key(env!("CARGO_PKG_VERSION"), "aaaaaaaaaaaaaaaa"); // the files on disk now
+    let handle = r.link.spawn().unwrap();
+    let s = wait_state(&r.link, "a stall for the installed agent of another protocol", |s| {
+        matches!(s.stall.map(|(_, k)| k), Some(Stall::AppUpdated | Stall::AgentMismatch))
+    });
+    assert_eq!(r.launcher.launches(), 0, "nothing is started beside it");
+    r.link.quit();
+    handle.join().unwrap();
+    s.stall.map(|(_, k)| k)
+}
+
+#[test]
+fn the_installed_agent_of_another_protocol_is_an_update_only_when_the_link_saw_the_files_change() {
+    assert_eq!(installed_agent_of_another_protocol(true), Some(Stall::AppUpdated));
+    assert_eq!(installed_agent_of_another_protocol(false), Some(Stall::AgentMismatch));
+}

@@ -78,9 +78,22 @@ enum Marks {
     Reviewed,
 }
 
-/// An app's Rust sources that can emit a health cause code: ui's cause-codes.spec.ts scans `apps/**` against the chip's table, so a
-/// change here marks ui too (the app keeps its own halves). Same as `CAUSE_CODE_SOURCES` in scripts/affected.mjs.
-static CAUSE_CODE_SOURCES: LazyLock<Regex> = LazyLock::new(|| re(r"^apps/[^/]+/app/src-tauri/src/.*\.rs$"));
+/// The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts reads every `.rs` file under `crates/` and `apps/`
+/// against the chip's table, skipping folders named target, node_modules, tests and benches and files named tests.rs. A change to one
+/// marks ui too (the owner keeps its own halves). Same as `isCauseCodeSource` in scripts/affected.mjs.
+fn is_cause_code_source(f: &str) -> bool {
+    let parts: Vec<&str> = f.split('/').collect();
+    let (Some(last), Some(first)) = (parts.last(), parts.first()) else {
+        return false;
+    };
+    (*first == "crates" || *first == "apps")
+        && parts.len() > 1
+        && last.ends_with(".rs")
+        && *last != "tests.rs"
+        && !parts[1..parts.len() - 1]
+            .iter()
+            .any(|d| matches!(*d, "target" | "node_modules" | "tests" | "benches"))
+}
 
 /// Markdown that code or tests read, a declared contract.
 static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
@@ -341,7 +354,7 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         for p in &own {
             st.kind(Some(p), half);
         }
-        if CAUSE_CODE_SOURCES.is_match(f) {
+        if is_cause_code_source(f) {
             st.mark(Some("ui".to_string()), format!("ui cause-codes.spec.ts scans {f}")); // ui's own tests, not its dependents
         }
         if c.is_none() && own.iter().any(|p| p == "crates") {
@@ -664,6 +677,22 @@ mod tests {
         assert_eq!(src["ui"], true, "ui's cause-codes spec scans the apps' Rust sources");
         assert!(src["kinds"]["dyno"].as_array().unwrap().contains(&json!("rust")));
         assert_ne!(plan(&["apps/dyno/app/src-tauri/Cargo.toml"])["ui"], true);
+        // Exactly what the spec scans: every .rs under crates/ and apps/, but not tests.rs or tests/, benches/, target/ folders.
+        for f in [
+            "crates/paddock-health/src/lib.rs",
+            "apps/shell-demo/src-tauri/src/main.rs",
+            "apps/dyno/crates/dyno-agent/src/server.rs",
+        ] {
+            assert_eq!(plan(&[f])["ui"], true, "{f}");
+        }
+        for f in [
+            "crates/paddock-health/src/tests.rs",
+            "crates/paddock-health/tests/it.rs",
+            "apps/dyno/crates/dyno-agent/benches/b.rs",
+            "tools/paddock-dev/src/plan.rs",
+        ] {
+            assert_ne!(plan(&[f])["ui"], true, "{f}");
+        }
         assert_eq!(plan(&["Mystery"])["all"], true);
     }
 

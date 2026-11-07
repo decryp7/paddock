@@ -35,7 +35,8 @@ const LEGS = APPS.filter((a) => !graph.apps.get(a).workflow && graph.apps.get(a)
 describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
-    assert.ok(r.crates && !r.ui);
+    assert.ok(r.crates);
+    assert.ok(r.ui, 'ui cause-codes.spec.ts scans the shared crates for health cause codes'); // only its own tests, not the UI half of any app
     // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
     // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path.
     assert.deepEqual(r.apps, ['debrief', 'dyno', 'shell-demo', 'spotter', 'workbench-demo']);
@@ -55,7 +56,7 @@ describe('the graph of this tree', () => {
 
   test('an app crate marks only its app, with its reverse dependencies as packages', () => {
     const r = run('apps/shell-demo/src-tauri/agent/src/main.rs');
-    assert.deepEqual([r.apps, r.crates, r.ui], [['shell-demo'], false, false]);
+    assert.deepEqual([r.apps, r.crates, r.ui], [['shell-demo'], false, true]); // ui: the cause-codes spec scans every app's Rust
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
@@ -143,6 +144,13 @@ describe('the graph of this tree', () => {
     assert.ok(r.ui, 'ui cause-codes.spec.ts reads apps/**/*.rs');
     assert.ok(r.apps.includes('dyno') && r.kinds.dyno.includes('rust'), JSON.stringify(r.kinds));
     assert.ok(!run('apps/dyno/app/src-tauri/Cargo.toml').ui, 'only the Rust sources are scanned');
+    // Exactly what the spec scans: every .rs under crates/ and apps/, but not tests.rs or tests/, benches/, target/ folders.
+    for (const f of ['crates/paddock-health/src/lib.rs', 'apps/shell-demo/src-tauri/src/main.rs', 'apps/dyno/crates/dyno-agent/src/server.rs']) {
+      assert.ok(run(f).ui, f);
+    }
+    for (const f of ['crates/paddock-health/src/tests.rs', 'crates/paddock-health/tests/it.rs', 'apps/dyno/crates/dyno-agent/benches/b.rs', 'tools/paddock-dev/src/plan.rs']) {
+      assert.ok(!run(f).ui, f);
+    }
   });
 
   test('global inputs mark everything; an app release workflow marks one app', () => {

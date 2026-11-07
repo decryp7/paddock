@@ -269,10 +269,21 @@ export const DOC_INPUTS = [
 ];
 
 /**
- * An app's Rust sources that can emit a health cause code: ui's cause-codes.spec.ts scans `apps/**` for `Cause::code(...)` and checks
- * them against the chip's table (service-status-text.ts), so a change here marks ui too (the app keeps its own halves).
+ * The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts (`rustSources`) reads every `.rs` file under `crates/`
+ * and `apps/` against the chip's table (service-status-text.ts), skipping folders named target, node_modules, tests and benches and
+ * files named tests.rs. A change to one marks ui too (the owner keeps its own halves). Same as `is_cause_code_source` in plan.rs.
  */
-export const CAUSE_CODE_SOURCES = /^apps\/[^/]+\/app\/src-tauri\/src\/.*\.rs$/;
+export function isCauseCodeSource(f) {
+  const parts = f.split('/');
+  const last = parts.at(-1) ?? '';
+  return (
+    (parts[0] === 'crates' || parts[0] === 'apps') &&
+    parts.length > 1 &&
+    last.endsWith('.rs') &&
+    last !== 'tests.rs' &&
+    !parts.slice(1, -1).some((d) => ['target', 'node_modules', 'tests', 'benches'].includes(d))
+  );
+}
 
 /** Top-level folders and the projects that own them (apps/<name>/ is app:<name>). */
 const OWNERS = [
@@ -650,7 +661,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       const owners_ = crateDirsNaming(f, cargo);
       for (const d of owners_.length ? owners_ : [...cargo].filter(([, x]) => x.workspace === 'crates').map(([d]) => d)) changedCrates.add(d);
     }
-    if (CAUSE_CODE_SOURCES.test(f)) {
+    if (isCauseCodeSource(f)) {
       mark('ui', `ui cause-codes.spec.ts scans ${f}`); // ui's own tests; not its dependents (the spec reads sources, not ui output)
     }
     // ui/ is one Angular workspace: a change anywhere in it can change every output built from it.

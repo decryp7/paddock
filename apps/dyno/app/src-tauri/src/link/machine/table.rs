@@ -1670,22 +1670,46 @@ fn repeated_replacements_of_agents_that_come_back_give_up_within_a_bound() {
     assert!(asks <= 3, "asked {asks} agents to exit in a row; it never gave up");
 }
 
-fn lines_with(needle: &str) -> usize {
-    crate::logging::testlog::lines().iter().filter(|l| l.contains(needle)).count()
+/// The lines logged so far: a test counts only what comes after this mark (the capture is process-wide and never cleared).
+fn log_mark() -> usize {
+    crate::logging::testlog::lines().len()
+}
+
+/// How many lines logged after `mark` contain `needle`. Use a pid of the test's own in `needle`: tests run in parallel.
+fn lines_since(mark: usize, needle: &str) -> usize {
+    crate::logging::testlog::lines()
+        .iter()
+        .skip(mark)
+        .filter(|l| l.contains(needle))
+        .count()
+}
+
+/// [`starting`] for an agent with the pid `pid` (a test that counts log lines names its own).
+fn starting_as(pid: u32) -> Supervisor {
+    let (mut s, _) = first(|l| l);
+    s.step(Event::Launched {
+        child: 1,
+        result: Ok(Launch {
+            at_ms: 1_000,
+            pid: Some(pid),
+        }),
+    });
+    s
 }
 
 #[test]
 fn an_own_agent_of_the_file_on_disk_with_another_protocol_is_waited_for_not_connected_to() {
     // No login service: the app's old agent exited and the app launched the new file, which this app cannot speak to.
-    let _ = crate::logging::testlog::lines();
-    let mut s = starting();
+    let pid = 880_010;
+    let mark = log_mark();
+    let mut s = starting_as(pid);
     let cmds = run_ticks(&mut s, NOTE_AFTER * 4, |seq, _| Look {
         hint: Some(HintSeen {
             of_disk_file: true,
-            ..hint(PID, 1_500, false)
+            ..hint(pid, 1_500, false)
         }),
         lock: Some(LockSeen::Held),
-        child: Some((1, Child::Running { pid: PID })),
+        child: Some((1, Child::Running { pid })),
         app_updated: true,
         ..look(seq)
     });
@@ -1703,7 +1727,7 @@ fn an_own_agent_of_the_file_on_disk_with_another_protocol_is_waited_for_not_conn
     );
     assert_eq!(cmds.iter().filter(|c| matches!(c, Command::Stall { .. })).count(), 1, "one note");
     assert_eq!(
-        lines_with(&format!("pid {PID} is the installed build")),
+        lines_since(mark, &format!("pid {pid} is the installed build")),
         1,
         "logged on entering the state only"
     );
@@ -1711,7 +1735,7 @@ fn an_own_agent_of_the_file_on_disk_with_another_protocol_is_waited_for_not_conn
 
 #[test]
 fn the_update_wait_shows_the_update_state_at_once_and_logs_once() {
-    let _ = crate::logging::testlog::lines();
+    let mark = log_mark();
     let (s, cmds) = first(|l| Look {
         hint: Some(HintSeen {
             of_disk_file: true,
@@ -1737,12 +1761,12 @@ fn the_update_wait_shows_the_update_state_at_once_and_logs_once() {
         Some(Stall::AppUpdated),
         "never the holder's note"
     );
-    assert_eq!(lines_with("pid 880001 is the installed build"), 1);
+    assert_eq!(lines_since(mark, "pid 880001 is the installed build"), 1);
 }
 
 #[test]
 fn giving_up_on_replacing_agents_says_so_with_its_own_stall_and_logs_once() {
-    let _ = crate::logging::testlog::lines();
+    let mark = log_mark();
     let mut s = Supervisor::new();
     let mut seq = look_seq(&s.step(Event::Begin));
     let mut gave_up = None;
@@ -1776,7 +1800,11 @@ fn giving_up_on_replacing_agents_says_so_with_its_own_stall_and_logs_once() {
         ..look(seq)
     });
     assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
-    assert_eq!(lines_with("pid 880002 keep coming back"), 1, "logged once, not on every look");
+    assert_eq!(
+        lines_since(mark, "pid 880002 keep coming back"),
+        1,
+        "logged once, not on every look"
+    );
 }
 
 fn disk_hint(pid: u32) -> Option<HintSeen> {
@@ -1788,13 +1816,13 @@ fn disk_hint(pid: u32) -> Option<HintSeen> {
 
 #[test]
 fn a_look_without_a_file_does_not_end_the_update_wait_of_a_running_own_agent() {
-    let _ = crate::logging::testlog::lines();
-    let mut s = starting();
+    let pid = 880_011;
+    let mut s = starting_as(pid);
     let cmds = run_ticks(&mut s, 60, |seq, _| Look {
         // Every third look misses the discovery file (it is read while the agent rewrites it).
-        hint: if seq % 3 == 0 { None } else { disk_hint(PID) },
+        hint: if seq % 3 == 0 { None } else { disk_hint(pid) },
         lock: Some(LockSeen::Held),
-        child: Some((1, Child::Running { pid: PID })),
+        child: Some((1, Child::Running { pid })),
         app_updated: true,
         ..look(seq)
     });
@@ -1847,4 +1875,45 @@ fn a_later_stall_of_another_kind_replaces_the_one_shown() {
         "the old note was not cleared first: {cmds:?}"
     );
     assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
+}
+
+#[test]
+fn a_look_without_a_file_does_not_end_the_update_wait_when_the_login_service_supervises() {
+    let (mut s, cmds) = first(|l| Look {
+        hint: disk_hint(880_012),
+        lock: Some(LockSeen::Held),
+        service: Some(SUPERVISING),
+        app_updated: true,
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated));
+    let cmds = run_ticks(&mut s, 60, |seq, _| Look {
+        hint: if seq % 3 == 0 { None } else { disk_hint(880_012) },
+        lock: Some(LockSeen::Held),
+        service: Some(SUPERVISING),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert!(
+        !cmds.iter().any(|c| matches!(c, Command::ClearStall | Command::Stall { .. })),
+        "the note was cleared or shown again: {cmds:?}"
+    );
+    assert_eq!(*s.phase(), Phase::WaitingForHolder);
+}
+
+#[test]
+fn the_update_wait_ends_when_the_agent_is_gone_and_the_lock_is_free() {
+    let (mut s, _) = first(|l| Look {
+        hint: disk_hint(880_013),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..l
+    });
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        hint: None,
+        lock: Some(LockSeen::Free),
+        ..look(seq)
+    }));
+    assert_eq!(launches(&cmds), 1, "an agent that is gone is started again: {cmds:?}");
 }
