@@ -711,24 +711,23 @@ mod tests {
         let (at_step, mut at_step_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         let (finish_tx, finish_rx) = std::sync::mpsc::channel::<()>();
         let (sink, events) = collector();
-        let client: SharedClient = Arc::new(CancelAware::new());
         let (shared, read) = (step.clone(), step);
         jobs::start(&jobs, spec("repair-service", "t", "p"), sink, move |ctx| {
             repair_job(
                 ctx,
-                client,
-                Box::new(move |_: &AtomicBool| {
+                move |_: &AtomicBool| {
                     // Held until the job has polled the step once, so the poll comes first.
                     go_rx.recv().unwrap();
                     *shared.lock().unwrap() = Some("Removing the old registration".to_string());
                     at_step.send(()).unwrap();
                     finish_rx.recv().unwrap();
                     Ok(RepairOutcome::Recovered)
-                }),
+                },
                 Arc::new(move || {
                     let _ = polled_tx.send(());
                     read.lock().unwrap().clone()
                 }),
+                || async { Ok(serde_json::json!({ "installed": true })) },
             )
         });
         polled_rx.recv().await.unwrap();
