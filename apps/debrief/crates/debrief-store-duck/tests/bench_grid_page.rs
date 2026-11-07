@@ -87,7 +87,7 @@ impl log::Log for Stderr {
     fn flush(&self) {}
 }
 
-fn open(dir: &PathBuf) -> DuckStore {
+fn open(dir: &std::path::Path) -> DuckStore {
     let _ = log::set_logger(&Stderr).map(|()| log::set_max_level(log::LevelFilter::Debug));
     DuckStore::open(dir, Profile::default_profile(), PluginRegistry::new()).unwrap()
 }
@@ -206,7 +206,11 @@ fn explain() {
                 let n = st.query_map([], |_| Ok(())).unwrap().count();
                 vec![format!("{n} rows")]
             };
-            println!("grid: sql run={i} ms={:.1} threads={threads} limit={limit} :: {}", t.elapsed().as_secs_f64() * 1000.0, &stmt[..stmt.len().min(90)].replace('\n', " "));
+            println!(
+                "grid: sql run={i} ms={:.1} threads={threads} limit={limit} :: {}",
+                t.elapsed().as_secs_f64() * 1000.0,
+                stmt[..stmt.len().min(90)].replace('\n', " ")
+            );
             if i == 4 {
                 println!("{}", rows.join("\n"));
             }

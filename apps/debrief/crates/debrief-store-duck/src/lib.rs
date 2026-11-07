@@ -1451,6 +1451,8 @@ impl Search for DuckStore {
 
 #[cfg(test)]
 mod maintain_tests;
+#[cfg(test)]
+mod page_tests;
 
 #[cfg(test)]
 mod tests {
