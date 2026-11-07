@@ -237,6 +237,9 @@ pub fn run_elevated(
         Os::Linux => {
             pkexec_command(program, args).and_then(|c| classify_pkexec(&run_command(sys, &c)?))
         }
+        // ELEVATION_TIMEOUT is the elevator's backstop ceiling, not a judge: a program still running then (or a wait that broke)
+        // comes back as an error that says it was not stopped and may still finish, and is reported as Unavailable with
+        // those words, never as Failed (ER-19; before the elevated wait was ported it read as exit code 1, Failed).
         Os::Windows => match elevator.run_elevated(program, args, ELEVATION_TIMEOUT) {
             Ok(0) => Ok(()),
             Ok(code) => Err(ElevationError::Failed {
@@ -432,6 +435,22 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, crate::testing::Call::Os(s) if s.starts_with("elevated ")))
         );
+        // The elevated program still runs at the ceiling: not stopped, not failed, said as such.
+        let program = Path::new("C:\\p\\dyno-helper.exe");
+        elevator.results([crate::port::elevated_result(
+            program,
+            crate::port::ElevatedEnd::StillRunning(ELEVATION_TIMEOUT),
+        )]);
+        match go(&mut sys, &mut elevator) {
+            Err(ElevationError::Unavailable(why)) => {
+                assert!(
+                    why.contains("still running after 10 minutes")
+                        && why.contains("not been stopped"),
+                    "{why}"
+                );
+            }
+            other => panic!("a run still going at the ceiling is not a failure: {other:?}"),
+        }
         // A prompt program that is missing or hangs.
         let mut sys = FakeSystem::new();
         sys.on("pkexec", |_, _| {
