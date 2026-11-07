@@ -6,6 +6,7 @@ pub mod activity;
 pub mod background;
 pub mod details;
 pub mod facts;
+pub mod iokit_disk;
 pub mod libproc;
 pub mod locks;
 pub mod pcblist;

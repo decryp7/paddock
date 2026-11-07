@@ -456,3 +456,12 @@ Per sampling tick the sampler thread therefore pays about 1 ms at the largest al
 every 5 s on a machine like this one, 0.5 to 1 % of one core. **Not measured:** the Windows and Linux VMs (the VM rows of the
 plan), a machine with several thousand processes, and the wire time of a 1,024-entry page (the IPC rig measures the encoding, not
 the pipe). The period is a constant, not yet a Setting with an "Auto" default (the settings schema is not this package's file).
+
+## macOS disk busy reader: IOKit in process against `ioreg` (2026-11-07)
+
+- **Commit:** `fix/dyno-disk-busy-iokit` (the commit that adds this block)
+- **Machine:** Mac mini M4 Pro, macOS 27.2, 1-minute load 8 to 15 from other agents (indications only); debug test build
+- **`measure_disk_reader_cpu`** (`cargo nextest run -p dyno-platform --run-ignored only measure_disk_reader_cpu --no-capture`): 30
+  readings in 60 s at the 2 s cadence, CPU of the process plus its waited-for children (`getrusage`).
+  `ioreg` child: 529,051 us in total, 17,635 us per reading (about 0.9 % of one core). IOKit in process: 5,991 us in total, 199 us
+  per reading (about 0.01 % of one core), 88 times cheaper.

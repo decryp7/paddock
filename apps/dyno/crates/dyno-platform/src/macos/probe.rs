@@ -25,6 +25,8 @@ pub struct MacProbe {
     mem_total: u64,
     kinds: Option<(usize, usize)>,
     disk: Option<(Instant, Vec<DiskCounters>)>,
+    /// IOKit failed once: the disk statistics come from `ioreg` from then on.
+    iokit_failed: bool,
     busy: Reading<f32>,
 }
 
@@ -38,6 +40,7 @@ impl MacProbe {
             mem_total: 0,
             kinds: None,
             disk: None,
+            iokit_failed: false,
             busy: Reading::unavailable("Measuring (needs two readings)"),
         }
     }
@@ -54,19 +57,35 @@ impl MacProbe {
         dyno_core::metrics::kinds_from_counts(total, e, p, true)
     }
 
-    /// The busiest disk's busy percentage from IOKit's block-storage statistics (read through `ioreg`, bounded by a timeout):
-    /// the growth of the disks' read and write service time over the wall time between two readings.
-    fn read_disk_busy(&mut self) -> Reading<f32> {
+    /// The disks' cumulative counters: IOKit in process (no child process every reading); `ioreg` only when IOKit has failed,
+    /// which is logged once.
+    fn disk_counters(&mut self) -> Result<Vec<DiskCounters>, String> {
+        if !self.iokit_failed {
+            match super::iokit_disk::read_disk_counters() {
+                Ok(c) => return Ok(c),
+                Err(e) => {
+                    log::warn!("disk statistics: IOKit failed ({e}); falling back to ioreg for the rest of this run");
+                    self.iokit_failed = true;
+                }
+            }
+        }
         let mut cmd = crate::process::command("/usr/sbin/ioreg");
         cmd.args(["-r", "-d", "1", "-w0", "-c", "IOBlockStorageDriver"]);
-        let out = match crate::process::output_text(cmd, Duration::from_secs(2)) {
-            Ok(t) => t,
+        crate::process::output_text(cmd, Duration::from_secs(2))
+            .map(|t| parse_disk_counters(&t))
+            .map_err(|e| e.to_string())
+    }
+
+    /// The busiest disk's busy percentage from the block-storage statistics: the growth of the disks' read and write service
+    /// time over the wall time between two readings.
+    fn read_disk_busy(&mut self) -> Reading<f32> {
+        let now = match self.disk_counters() {
+            Ok(n) => n,
             Err(e) => {
                 self.disk = None;
                 return Reading::unavailable(format!("Disk statistics could not be read: {e}"));
             }
         };
-        let now = parse_disk_counters(&out);
         if now.is_empty() {
             self.disk = None;
             return Reading::unavailable("This Mac reports no disk statistics");
@@ -229,8 +248,9 @@ mod tests {
         p.enrich(&mut sample);
         assert!(
             p.disk.as_ref().is_some_and(|(_, d)| !d.is_empty()),
-            "ioreg lists a block-storage driver"
+            "a block-storage driver is listed"
         );
+        assert!(!p.iokit_failed, "IOKit read the statistics, no ioreg fallback");
         std::thread::sleep(Duration::from_millis(300));
         p.ticks = 0;
         p.enrich(&mut sample);
