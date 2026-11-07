@@ -1016,6 +1016,56 @@ const LOADING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
 /// labelled phase (ER-18) and not a silent one. Ends when the answer ends or when the client goes away (`tx` closed), which drops
 /// the run and cancels the work.
 async fn drive_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: tokio::sync::mpsc::Sender<Bytes>) {
+    let started = std::time::Instant::now();
+    log::info!(
+        target: "pitwall_chat",
+        "chat started: model {}, {} messages, {} tools",
+        req.model_id,
+        req.messages.len(),
+        req.tools.len()
+    );
+    let model = req.model_id.clone();
+    let mut outcome = ChatOutcome::ClientGone;
+    run_playground_chat(st, req, tx, &mut outcome).await;
+    let ms = started.elapsed().as_millis();
+    match outcome {
+        ChatOutcome::Ended {
+            finish,
+            prompt_tokens,
+            completion_tokens,
+            ttft_ms,
+            cold_start_ms,
+        } => log::info!(
+            target: "pitwall_chat",
+            "chat ended: model {model}, finish {finish:?}, {prompt_tokens} tokens in, {completion_tokens} out, ttft {ttft_ms} ms, cold start {cold_start_ms:?} ms, {ms} ms"
+        ),
+        ChatOutcome::Failed { code, cause } => {
+            log::warn!(target: "pitwall_chat", "chat failed: model {model}, {code:?}, {ms} ms, cause: {cause}")
+        }
+        ChatOutcome::ClientGone => {
+            log::info!(target: "pitwall_chat", "chat stopped: model {model}, the client went away, {ms} ms")
+        }
+    }
+}
+
+/// How a playground chat ended, for its log line (names, counts and times only; never the text).
+enum ChatOutcome {
+    Ended {
+        finish: pitwall_core::mgmt::PlaygroundFinish,
+        prompt_tokens: u32,
+        completion_tokens: u32,
+        ttft_ms: u64,
+        cold_start_ms: Option<u64>,
+    },
+    Failed {
+        code: mgmt::ErrorCode,
+        cause: String,
+    },
+    /// The client closed the stream before the answer ended.
+    ClientGone,
+}
+
+async fn run_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: tokio::sync::mpsc::Sender<Bytes>, outcome: &mut ChatOutcome) {
     use pitwall_core::chat::Finish;
     use pitwall_core::mgmt::{PlaygroundFinish, PlaygroundPhase};
     let started = std::time::Instant::now();
@@ -1062,6 +1112,10 @@ async fn drive_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: to
             } else {
                 mgmt::ErrorCode::NotAvailable
             };
+            *outcome = ChatOutcome::Failed {
+                code,
+                cause: e.message.clone(),
+            };
             send(PlaygroundEvent::Error {
                 error: err(code, e.message),
             })
@@ -1087,6 +1141,10 @@ async fn drive_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: to
             None => return,
             Some(Err(e)) => {
                 run.rec.finish(Default::default(), None, Some(e.0.clone()));
+                *outcome = ChatOutcome::Failed {
+                    code: mgmt::ErrorCode::Internal,
+                    cause: e.0.clone(),
+                };
                 send(PlaygroundEvent::Error {
                     error: err(mgmt::ErrorCode::Internal, e.0),
                 })
@@ -1125,6 +1183,23 @@ async fn drive_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: to
                     gen_tps: timings.map_or(0.0, |t| t.gen_tps),
                     cold_start_ms: cold,
                 };
+                if let PlaygroundEvent::Done {
+                    finish,
+                    prompt_tokens,
+                    completion_tokens,
+                    ttft_ms,
+                    cold_start_ms,
+                    ..
+                } = &done
+                {
+                    *outcome = ChatOutcome::Ended {
+                        finish: *finish,
+                        prompt_tokens: *prompt_tokens,
+                        completion_tokens: *completion_tokens,
+                        ttft_ms: *ttft_ms,
+                        cold_start_ms: *cold_start_ms,
+                    };
+                }
                 send(done).await;
                 return;
             }

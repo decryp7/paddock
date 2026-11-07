@@ -11,5 +11,6 @@ pub mod args;
 pub mod discover;
 pub mod exit;
 pub mod format;
+pub mod logging;
 pub mod run;
 pub mod sse;
