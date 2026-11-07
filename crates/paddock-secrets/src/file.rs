@@ -15,9 +15,10 @@ mod windows;
 ///   created 0700 and made 0700 when it is loose and ours; a file with any group or other permission bit is refused on read
 ///   ([`SecretsError::InsecureFile`]), and so is a file or folder owned by another user, a symbolic link and anything that is
 ///   not a regular file.
-/// - Windows: each file gets a protected DACL that grants only its owner (set on the empty temporary file, before the value
-///   is written); a file whose DACL grants anyone but its owner, SYSTEM or Administrators is refused on read, and so is a
-///   reparse point (a symbolic link or junction).
+/// - Windows: each file is created with a protected DACL that grants only the user running the app, and opened unshared
+///   until it is renamed into place; a folder where others may create or change files is refused. On read, the owner and
+///   DACL of the open handle are checked: an owner other than the user, SYSTEM or Administrators, or an entry for anyone
+///   else, is refused, and so is a reparse point (a symbolic link or junction).
 #[derive(Debug, Clone)]
 pub struct FileSecrets {
     dir: PathBuf,
@@ -95,12 +96,25 @@ fn current_user() -> u32 {
     paddock_proc::effective_uid()
 }
 
-/// The owner problem of the file `meta` in `dir` for the user `me`, as a refusal with the next step.
+/// The owner problem of the file at `path` (owned by `file_owner`, in a folder owned by `folder_owner`) for the user `me`,
+/// as a refusal with the next step. A folder whose owner cannot be read is refused too: nothing is assumed.
 #[cfg(unix)]
-fn owner_refusal(path: &Path, dir: &Path, meta: &fs::Metadata, me: u32) -> Option<SecretsError> {
-    use std::os::unix::fs::MetadataExt;
-    let folder_owner = fs::metadata(dir).map(|m| m.uid()).unwrap_or(meta.uid());
-    foreign_owner(meta.uid(), folder_owner, me).map(|why| {
+fn owner_refusal(
+    path: &Path,
+    file_owner: u32,
+    folder_owner: std::io::Result<u32>,
+    me: u32,
+) -> Option<SecretsError> {
+    let folder_owner = match folder_owner {
+        Ok(uid) => uid,
+        Err(e) => {
+            return Some(SecretsError::Failed(format!(
+                "the owner of the folder of {} could not be checked ({e}), so the secret is not trusted",
+                path.display()
+            )));
+        }
+    };
+    foreign_owner(file_owner, folder_owner, me).map(|why| {
         SecretsError::Failed(format!(
             "{} {why}, so it is not trusted; remove it and store the secret again, or fix the owner (chown) and try again",
             path.display()
@@ -108,8 +122,12 @@ fn owner_refusal(path: &Path, dir: &Path, meta: &fs::Metadata, me: u32) -> Optio
     })
 }
 
-/// Creates the folder 0700 whatever the umask, and makes it 0700 when this user owns it and group or others have any
-/// access to it without a sticky bit. A folder someone else owns is refused.
+/// Creates the folder 0700 whatever the umask, and makes it 0700 (logged) when this user owns it and group or others have
+/// any access to it without a sticky bit. A folder someone else owns is refused. On Windows a folder whose owner is not
+/// the user, SYSTEM or Administrators, or where anyone else may create, delete or change entries, is refused.
+///
+/// Only the immediate folder is checked, not its parents: a parent that another user can write could still swap the whole
+/// folder. The apps' data folders sit in the user's own profile, whose parents are the system's.
 fn secure_folder(dir: &Path) -> Result<(), SecretsError> {
     #[cfg(unix)]
     {
@@ -130,12 +148,58 @@ fn secure_folder(dir: &Path) -> Result<(), SecretsError> {
         if mode & 0o077 != 0 && mode & 0o1000 == 0 {
             fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
                 .map_err(|e| io("the secret folder could not be made private", e))?;
+            log::info!(
+                target: "paddock_secrets",
+                "made {} private (mode 0700, it was {:o}): it holds an owner-only secret",
+                dir.display(),
+                mode & 0o7777
+            );
         }
         Ok(())
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        fs::create_dir_all(dir).map_err(|e| io("the secret folder could not be created", e))?;
+        let (owner, aces) = windows::folder_security(dir)
+            .map_err(|e| io("the secret folder's access list could not be read", e))?;
+        match crate::acl::folder_refusal(owner, &aces) {
+            Some(r) => Err(SecretsError::Failed(format!(
+                "{} {}",
+                dir.display(),
+                r.why()
+            ))),
+            None => Ok(()),
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         fs::create_dir_all(dir).map_err(|e| io("the secret folder could not be created", e))
+    }
+}
+
+/// Creates the temporary file of a write. Unix: new, 0600, no link followed. Windows: new, with an owner-only security
+/// descriptor from the start and no sharing while it is open, so no other principal can open it at any point.
+fn create_temp(tmp: &Path) -> std::io::Result<fs::File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(tmp)
+    }
+    #[cfg(windows)]
+    {
+        windows::create_owner_only(tmp)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(tmp)
     }
 }
 
@@ -186,42 +250,49 @@ fn check_open(path: &Path, file: &fs::File, me: u32) -> Result<(), SecretsError>
     }
     #[cfg(unix)]
     {
+        use std::os::unix::fs::MetadataExt;
         if insecure(&meta) {
             return Err(SecretsError::InsecureFile(path.display().to_string()));
+        }
+        if meta.nlink() != 1 {
+            return Err(SecretsError::Failed(format!(
+                "{} has more than one name (a hard link), so it is not trusted; remove the other names or the file and store the secret again",
+                path.display()
+            )));
         }
         let dir = path
             .parent()
             .filter(|d| !d.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
-        if let Some(e) = owner_refusal(path, dir, &meta, me) {
+        if let Some(e) = owner_refusal(path, meta.uid(), fs::metadata(dir).map(|m| m.uid()), me) {
             return Err(e);
         }
     }
     #[cfg(not(unix))]
     let _ = me;
     #[cfg(windows)]
-    if windows::shared_with_others(path)
-        .map_err(|e| io("the secret file's access list could not be read", e))?
     {
-        return Err(SecretsError::InsecureFile(path.display().to_string()));
+        // Owner and DACL of the open handle, not of the path, which could be swapped in between.
+        let (owner, aces) = windows::file_security(file)
+            .map_err(|e| io("the secret file's access list could not be read", e))?;
+        match crate::acl::file_refusal(owner, &aces) {
+            Some(crate::acl::Refusal::Shared) => {
+                return Err(SecretsError::InsecureFile(path.display().to_string()));
+            }
+            Some(r) => {
+                return Err(SecretsError::Failed(format!(
+                    "{} {}",
+                    path.display(),
+                    r.why()
+                )));
+            }
+            None => {}
+        }
     }
     if meta.len() as usize > crate::MAX_SECRET_LEN + 2 {
         return Err(SecretsError::Failed("the secret file is damaged".into()));
     }
     Ok(())
-}
-
-/// The step on the empty temporary file: an owner-only DACL on Windows; nothing on Unix, where the file is created 0600.
-fn owner_only(tmp: &Path) -> std::io::Result<()> {
-    #[cfg(windows)]
-    {
-        windows::restrict_to_owner(tmp)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = tmp;
-        Ok(())
-    }
 }
 
 impl SecretFile {
@@ -264,13 +335,8 @@ impl SecretFile {
             .filter(|d| !d.as_os_str().is_empty())
             .unwrap_or(Path::new("."));
         secure_folder(dir)?;
-        paddock_env::write_atomic_prepared(
-            &self.path,
-            value.expose().as_bytes(),
-            true,
-            &mut owner_only,
-        )
-        .map_err(|e| SecretsError::Failed(format!("the secret could not be stored: {e}")))
+        paddock_env::write_atomic_created(&self.path, value.expose().as_bytes(), &mut create_temp)
+            .map_err(|e| SecretsError::Failed(format!("the secret could not be stored: {e}")))
     }
 
     /// Removes the secret; no error when there is none.
@@ -570,12 +636,9 @@ mod tests {
         let f = FileSecrets::new(d.path());
         f.set(&n("token"), &s("v")).unwrap();
         let p = f.path(&n("token"));
-        let meta = fs::metadata(&p).unwrap();
         let me = current_user();
-        assert!(owner_refusal(&p, d.path(), &meta, me).is_none());
-        let e = owner_refusal(&p, d.path(), &meta, me + 1)
-            .unwrap()
-            .to_string();
+        assert!(owner_refusal(&p, me, Ok(me), me).is_none());
+        let e = owner_refusal(&p, me, Ok(me), me + 1).unwrap().to_string();
         assert!(
             e.contains("owned by another user") && e.contains("chown"),
             "{e}"
@@ -589,6 +652,60 @@ mod tests {
         let e = check_open(&p, &open, me + 1).unwrap_err().to_string();
         assert!(e.contains("owned by another user"), "{e}");
         assert!(check_open(&p, &open, me).is_ok());
+    }
+
+    /// Review P2-1: a file of ours in a folder of another user, or in a folder whose owner cannot be read, is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_in_a_foreign_or_unreadable_folder_is_refused() {
+        let p = Path::new("/x/admin.key");
+        let me = 501;
+        let e = owner_refusal(p, me, Ok(me + 1), me).unwrap().to_string();
+        assert!(e.contains("folder owned by another user"), "{e}");
+        let e = owner_refusal(p, me, Err(std::io::Error::other("gone")), me)
+            .unwrap()
+            .to_string();
+        assert!(
+            e.contains("could not be checked") && e.contains("gone"),
+            "{e}"
+        );
+        assert!(owner_refusal(p, me, Ok(me), me).is_none());
+    }
+
+    /// Review P2-1: every group or other bit is refused, read, write or execute.
+    #[cfg(unix)]
+    #[test]
+    fn every_group_or_other_bit_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let f = SecretFile::new(d.path().join("admin.key"));
+        f.write(&s("pw_x")).unwrap();
+        for loose in [0o640, 0o604, 0o660, 0o620, 0o602, 0o610, 0o601] {
+            fs::set_permissions(f.path(), fs::Permissions::from_mode(loose)).unwrap();
+            assert!(
+                matches!(f.read(), Err(SecretsError::InsecureFile(_))),
+                "{loose:o}"
+            );
+        }
+        for private in [0o600, 0o400] {
+            fs::set_permissions(f.path(), fs::Permissions::from_mode(private)).unwrap();
+            assert_eq!(f.read().unwrap(), Some(s("pw_x")), "{private:o}");
+        }
+    }
+
+    /// Review P2-2: a second name for the secret (a hard link someone kept) is refused.
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_linked_secret_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let f = SecretFile::new(d.path().join("admin.key"));
+        f.write(&s("pw_x")).unwrap();
+        let other = d.path().join("kept");
+        fs::hard_link(f.path(), &other).unwrap();
+        let e = f.read().unwrap_err().to_string();
+        assert!(e.contains("more than one name"), "{e}");
+        fs::remove_file(&other).unwrap();
+        assert_eq!(f.read().unwrap(), Some(s("pw_x")));
     }
 
     #[cfg(unix)]

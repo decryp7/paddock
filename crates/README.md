@@ -840,10 +840,12 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   is replaced, never followed); the folder is created 0700 and made 0700 when it is ours and group or others have any
   access (a sticky folder is left alone; a folder of another user is refused). On read the file is opened with
   `O_NOFOLLOW | O_NONBLOCK` and checked on the open handle: a link, a pipe or anything not a regular file, a group or other
-  bit (`InsecureFile`) or another owner is refused, with the next step and never the value. Windows: the empty temporary
-  file gets a protected DACL that grants only the user running the process (`paddock_env::write_atomic_prepared`), before
-  the value is written; on read a reparse point is refused, and so is a DACL that grants anyone besides the owner, that
-  user, SYSTEM and Administrators (`InsecureFile`). The value is plain text at rest (ADR 0057 §5): any program running as
+  bit (`InsecureFile`) or another owner is refused, with the next step and never the value. Windows: the temporary file is
+  created with a protected DACL that grants only the user running the process and with no sharing
+  (`paddock_env::write_atomic_created`); a folder where others may create or change files is refused; on read the owner
+  and DACL of the open handle are checked (owner: the user, SYSTEM or Administrators; entries for nobody else, else
+  `InsecureFile`) and a reparse point is refused. Only the immediate folder is checked, not its parents. Unix also refuses
+  a hard-linked file and a folder whose owner cannot be read. The value is plain text at rest (ADR 0057 §5): any program running as
   the same user can read it, like `~/.netrc`; other users cannot.
 - Fallback: `WithFileFallback::new(primary, FileSecrets::new(dir))` uses the files only when the primary is *unavailable*
   (no Secret Service, locked keychain) or has no value.

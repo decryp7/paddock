@@ -10,6 +10,7 @@
 //!
 //! Tests never reach the real credential store (rule 7): the native layer refuses unless `PADDOCK_SECRETS_REAL=1`.
 
+mod acl;
 mod error;
 mod fallback;
 mod file;
