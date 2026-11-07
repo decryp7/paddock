@@ -114,6 +114,7 @@ pub(crate) struct Interner {
     known: HashSet<&'static str>,
     unknown: HashSet<&'static str>,
     cap: usize,
+    reported: bool,
 }
 
 impl Interner {
@@ -122,6 +123,7 @@ impl Interner {
             known: HashSet::new(),
             unknown: HashSet::new(),
             cap,
+            reported: false,
         }
     }
 
@@ -130,6 +132,14 @@ impl Interner {
             return Ok(found);
         }
         if self.unknown.len() >= self.cap {
+            // Once: a flood is one problem, not one line per key. A registered key is unaffected.
+            if !self.reported {
+                self.reported = true;
+                log::error!(
+                    "paddock-limits: {} unknown limit ids are known; later unknown ids are refused (register the registries with LimitId::register at start-up)",
+                    self.cap
+                );
+            }
             return Err(BadKey::Full);
         }
         let leaked: &'static str = Box::leak(key.to_owned().into_boxed_str());
@@ -370,31 +380,77 @@ impl Quantity {
     }
 }
 
-/// What `Quantity` reads from the wire; [`Quantity`]'s own `Deserialize` refuses a percentage over 100.
-#[derive(Deserialize)]
-#[serde(tag = "kind", content = "n", rename_all = "camelCase")]
-enum QuantityRepr {
-    Bytes(u64),
-    Count(u64),
-    Ratio(u32),
-    Millis(u64),
-    Percent(u8),
-}
-
 impl<'de> Deserialize<'de> for Quantity {
+    /// Reads `{"kind": "bytes", "n": 5}` from JSON and the same two fields in order from a compact format (postcard,
+    /// which cannot buffer an adjacently tagged enum); a percentage over 100 is refused.
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        Ok(match QuantityRepr::deserialize(d)? {
-            QuantityRepr::Bytes(n) => Self::Bytes(n),
-            QuantityRepr::Count(n) => Self::Count(n),
-            QuantityRepr::Ratio(n) => Self::Ratio(n),
-            QuantityRepr::Millis(n) => Self::Millis(n),
-            QuantityRepr::Percent(n) if n <= 100 => Self::Percent(n),
-            QuantityRepr::Percent(n) => {
-                return Err(serde::de::Error::custom(format!(
-                    "a percentage is 0 to 100, not {n}"
-                )));
+        use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
+
+        /// The variants in declaration order: a compact format writes the index instead of the name.
+        const KINDS: [&str; 5] = ["bytes", "count", "ratio", "millis", "percent"];
+
+        fn build<E: Error>(kind: &str, n: u64) -> Result<Quantity, E> {
+            match kind {
+                "bytes" => Ok(Quantity::Bytes(n)),
+                "count" => Ok(Quantity::Count(n)),
+                "millis" => Ok(Quantity::Millis(n)),
+                "ratio" => u32::try_from(n)
+                    .map(Quantity::Ratio)
+                    .map_err(|_| E::custom("a ratio does not fit 32 bits")),
+                "percent" if n <= 100 => Ok(Quantity::Percent(n as u8)),
+                "percent" => Err(E::custom(format!("a percentage is 0 to 100, not {n}"))),
+                other => Err(E::unknown_variant(
+                    other,
+                    &["bytes", "count", "ratio", "millis", "percent"],
+                )),
             }
-        })
+        }
+
+        struct V {
+            human: bool,
+        }
+        impl<'de> Visitor<'de> for V {
+            type Value = Quantity;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a quantity: a kind and a number")
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Quantity, A::Error> {
+                let kind: String = if self.human {
+                    seq.next_element()?
+                        .ok_or_else(|| Error::invalid_length(0, &self))?
+                } else {
+                    let index: u32 = seq
+                        .next_element()?
+                        .ok_or_else(|| Error::invalid_length(0, &self))?;
+                    KINDS
+                        .get(index as usize)
+                        .map(|k| (*k).to_owned())
+                        .ok_or_else(|| Error::custom("an unknown quantity kind"))?
+                };
+                let n: u64 = seq
+                    .next_element()?
+                    .ok_or_else(|| Error::invalid_length(1, &self))?;
+                build(&kind, n)
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Quantity, A::Error> {
+                let (mut kind, mut n): (Option<String>, Option<u64>) = (None, None);
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "kind" => kind = Some(map.next_value()?),
+                        "n" => n = Some(map.next_value()?),
+                        _ => {
+                            map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                build(
+                    &kind.ok_or_else(|| Error::missing_field("kind"))?,
+                    n.ok_or_else(|| Error::missing_field("n"))?,
+                )
+            }
+        }
+        let human = d.is_human_readable();
+        d.deserialize_struct("Quantity", &["kind", "n"], V { human })
     }
 }
 
@@ -536,6 +592,7 @@ mod tests {
         assert_eq!(t.parse("junk.k0"), Ok("junk.k0"));
         assert_eq!(t.parse("junk.new"), Err(BadKey::Full));
         assert!(BadKey::Full.to_string().contains("too many"));
+        assert!(t.reported, "the flood is logged once");
     }
 
     #[test]

@@ -47,6 +47,10 @@ const fn valid_path(b: &[u8]) -> bool {
             i += 1;
             let start = i;
             let mut value: u64 = 0;
+            // No leading zero: `[03]` would order like `[3]` and not be equal to it.
+            if i + 1 < n && b[i] == b'0' && b[i + 1].is_ascii_digit() {
+                return false;
+            }
             while i < n && b[i].is_ascii_digit() {
                 value = value * 10 + (b[i] - b'0') as u64;
                 if value > u32::MAX as u64 {

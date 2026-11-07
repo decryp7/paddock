@@ -63,7 +63,9 @@ pub enum Total {
         #[cfg_attr(feature = "ts", ts(type = "number"))]
         n: u64,
     },
-    /// Something may have been left out, and nobody knows how much. Only [`Cut::maybe`] makes it.
+    /// Something may have been left out, and nobody knows how much: [`Cut::maybe`] makes it, and so do the window
+    /// constructors when the total they were given disagrees with what they read (a stale offset after a filter, rows that
+    /// arrived between the count and the read). The words say "some may be missing", not a number.
     Unknown,
 }
 
@@ -101,6 +103,21 @@ impl Selection {
             Self::Last => SelectionKind::Last,
             Self::TopBy { .. } => SelectionKind::TopBy,
             Self::Sample => SelectionKind::Sample,
+        }
+    }
+
+    /// The same selection with a start that `shown` items after it still fit in u64.
+    fn clamped_for(self, shown: u64) -> Self {
+        let room = u64::MAX - shown;
+        match self {
+            Self::First { from } => Self::First {
+                from: from.min(room),
+            },
+            Self::TopBy { key, from } => Self::TopBy {
+                key,
+                from: from.min(room),
+            },
+            other => other,
         }
     }
 
@@ -343,15 +360,13 @@ pub struct Cut {
 /// What a cut can show on its own: something was left out and the numbers fit. `AtLeast` exists only for the first items
 /// from 0 (a lower bound of what a scan looked at); every other window has an exact total or none.
 fn check(shown: u64, total: Total, selection: &Selection) -> Result<(), BoundedError> {
+    // `from + shown` must fit u64 whatever the total says (descriptions and windows add them).
+    let Some(end) = selection.from().checked_add(shown) else {
+        return Err(BoundedError::Arithmetic);
+    };
     let fits = match total {
         Total::Unknown => true,
-        Total::Exact { n } => {
-            shown < n
-                && selection
-                    .from()
-                    .checked_add(shown)
-                    .is_some_and(|end| end <= n)
-        }
+        Total::Exact { n } => shown < n && end <= n,
         Total::AtLeast { n } => matches!(selection, Selection::First { from: 0 }) && shown < n,
     };
     if fits {
@@ -397,7 +412,7 @@ impl From<Cut> for CutWire {
 fn window(shown: u64, total: u64, from: u64) -> Option<Total> {
     if from == 0 && shown >= total {
         None
-    } else if from.saturating_add(shown) <= total {
+    } else if from.checked_add(shown).is_some_and(|end| end <= total) {
         Some(Total::Exact { n: total })
     } else {
         Some(Total::Unknown)
@@ -415,6 +430,8 @@ impl Cut {
     ) -> Self {
         // `window` and the callers give numbers `check` accepts; if one ever did not, the total is "unknown" rather than a
         // value the wire would refuse.
+        // A window cannot start where it would end past u64; a start that far out is as far as it can say.
+        let selection = selection.clamped_for(shown);
         let total = if check(shown, total, &selection).is_ok() {
             total
         } else {
@@ -579,10 +596,14 @@ impl Cut {
         let showing = match &self.selection {
             Selection::First { from: 0 } => format!("the first {shown}"),
             Selection::First { from } if self.shown == 0 => {
-                format!("none from {}", grouped(from + 1))
+                format!("none from {}", grouped(from.saturating_add(1)))
             }
             Selection::First { from } => {
-                format!("{} to {}", grouped(from + 1), grouped(from + self.shown))
+                format!(
+                    "{} to {}",
+                    grouped(from.saturating_add(1)),
+                    grouped(from.saturating_add(self.shown))
+                )
             }
             Selection::Last => format!("the last {shown}"),
             Selection::TopBy { key, from } => {
@@ -592,7 +613,7 @@ impl Cut {
                     "ascending"
                 };
                 let skipped = if *from > 0 {
-                    format!(", from rank {}", grouped(from + 1))
+                    format!(", from rank {}", grouped(from.saturating_add(1)))
                 } else {
                     String::new()
                 };
@@ -606,6 +627,24 @@ impl Cut {
             self.of.as_str()
         };
         format!("{of}: showing {showing} of {total} ({})", self.limit)
+    }
+
+    /// The key of the UI's words for this cut: the selection and how the total is known, such as `first.exact`,
+    /// `first.atLeast`, `first.unknown` (a page whose total is unknown), `topBy.exact`, `last.exact`, `sample.exact`. The
+    /// i18n check requires a message for each key a registry row can produce (ADR 0065 section 4).
+    #[must_use]
+    pub const fn words_key(&self) -> &'static str {
+        match (&self.selection, self.total) {
+            (Selection::First { .. }, Total::Exact { .. }) => "first.exact",
+            (Selection::First { .. }, Total::AtLeast { .. }) => "first.atLeast",
+            (Selection::First { .. }, Total::Unknown) => "first.unknown",
+            (Selection::Last, Total::Unknown) => "last.unknown",
+            (Selection::Last, _) => "last.exact",
+            (Selection::TopBy { .. }, Total::Unknown) => "topBy.unknown",
+            (Selection::TopBy { .. }, _) => "topBy.exact",
+            (Selection::Sample, Total::Unknown) => "sample.unknown",
+            (Selection::Sample, _) => "sample.exact",
+        }
     }
 
     fn same_list(&self, other: &Self) -> bool {
@@ -728,7 +767,8 @@ impl<T> Bounded<T> {
     /// in the structural order of their lists (a list before the lists inside it, siblings by name, entries by index), so
     /// the result does not depend on the order they were added in. Past 32 cuts the 31 first in that order stay and one
     /// aggregate on the `bounded.cuts` row says how many there were; `.and` on a value that has an aggregate
-    /// re-aggregates, and the aggregate stays last.
+    /// re-aggregates, and the aggregate stays last. A list the aggregate already counted, added again, is counted again:
+    /// the dropped lists are not remembered (the count is a bound on how many lists were cut, not an exact figure).
     #[must_use]
     pub fn and(mut self, cut: Option<Cut>) -> Self {
         let Some(cut) = cut else { return self };

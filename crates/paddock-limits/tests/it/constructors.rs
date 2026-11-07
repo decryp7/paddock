@@ -388,3 +388,74 @@ fn selections_know_their_kind_and_wire_forms_convert_both_ways() {
     let wire = BoundedWire::from(b.clone());
     assert_eq!(Bounded::try_from(wire).unwrap(), b);
 }
+
+/// Review 2, P1: `describe()` adds to `from`; a `from` at the edge of u64 must not overflow, whether the cut came from a
+/// constructor or from the wire.
+#[test]
+fn a_window_at_the_edge_of_u64_describes_without_overflow() {
+    let page = Bounded::page(vec![0u8; 1], u64::MAX, 5, &F5, ROWS);
+    let text = only_cut(&page).describe();
+    assert!(text.starts_with("rows: showing "), "{text}");
+    let top = Cut::counted_top(&TOP, ROWS, 2, 3, key(), u64::MAX).unwrap();
+    assert!(top.describe().contains("from rank"), "{}", top.describe());
+    let none = Bounded::page(Vec::<u8>::new(), u64::MAX, 5, &F5, ROWS);
+    assert!(only_cut(&none).describe().contains("none from"));
+    // The wire refuses what the constructors cannot make: from + shown past u64, even with an unknown total.
+    let json = serde_json::json!({"limit": "test.first", "of": "rows", "shown": 1, "total": {"kind": "unknown"},
+        "selection": {"kind": "first", "from": u64::MAX}, "next": "page"});
+    assert!(serde_json::from_value::<Cut>(json).is_err());
+    let ok = serde_json::json!({"limit": "test.first", "of": "rows", "shown": 1, "total": {"kind": "unknown"},
+        "selection": {"kind": "first", "from": u64::MAX - 1}, "next": "page"});
+    let cut = serde_json::from_value::<Cut>(ok).unwrap();
+    assert!(
+        cut.describe().contains("18,446,744,073,709,551,615"),
+        "{}",
+        cut.describe()
+    );
+}
+
+/// Review 2, P2: an index with a leading zero is not a path (`groups[03]` ordered equal to `groups[3]` but was not `==`).
+#[test]
+fn an_index_with_a_leading_zero_is_not_a_field_path() {
+    assert!(FieldPath::parse("groups[03]").is_err());
+    assert!(FieldPath::parse("groups[00]").is_err());
+    assert!(FieldPath::parse("groups[0]").is_ok());
+    assert!(FieldPath::parse("groups[30]").is_ok());
+}
+
+#[test]
+fn every_cut_has_a_key_for_the_words_of_the_ui() {
+    let first = Bounded::first(0..99, &F5, ROWS);
+    assert_eq!(only_cut(&first).words_key(), "first.atLeast");
+    assert_eq!(
+        only_cut(&Bounded::page(vec![0u8; 3], 3, 10, &F5, ROWS)).words_key(),
+        "first.exact"
+    );
+    assert_eq!(
+        only_cut(&Bounded::page(Vec::<u8>::new(), 50, 10, &F5, ROWS)).words_key(),
+        "first.unknown"
+    );
+    assert_eq!(
+        only_cut(&Bounded::ranked((0..9).collect(), &TOP, ROWS, key())).words_key(),
+        "topBy.exact"
+    );
+    assert_eq!(
+        only_cut(&Bounded::last(vec![1], 5, &LAST, ROWS)).words_key(),
+        "last.exact"
+    );
+    assert_eq!(
+        only_cut(&Bounded::sampled(vec![1], 5, &SAMPLE, ROWS)).words_key(),
+        "sample.exact"
+    );
+    let maybe = |selection| Cut::maybe(&MAYBE_ROW, ROWS, 1, selection).words_key();
+    assert_eq!(maybe(Selection::Last), "last.unknown");
+    assert_eq!(maybe(Selection::Sample), "sample.unknown");
+    assert_eq!(
+        maybe(Selection::TopBy {
+            key: key(),
+            from: 0
+        }),
+        "topBy.unknown"
+    );
+    assert_eq!(maybe(Selection::First { from: 0 }), "first.unknown");
+}

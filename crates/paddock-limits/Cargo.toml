@@ -13,6 +13,7 @@ ts = ["dep:ts-rs"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+log = "0.4"
 ts-rs = { version = "11.1", optional = true }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 

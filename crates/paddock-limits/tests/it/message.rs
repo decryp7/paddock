@@ -163,3 +163,19 @@ fn measured_values_are_rounded_and_limits_stay_exact() {
         "1,210,123,456 B"
     );
 }
+
+#[test]
+fn a_message_for_a_person_shows_the_value_not_the_id() {
+    let e = LimitExceeded::new(
+        LimitId::new("plugin.memory"),
+        Quantity::Bytes(1024 << 20),
+        Scope::Plugin,
+    );
+    let for_logs = e.message(&reg());
+    let for_people = e.message_with(&reg(), &Labels);
+    assert!(for_logs.contains("(plugin.memory)"), "{for_logs}");
+    assert!(
+        for_people.contains("the limit is 1 GiB.") && !for_people.contains("plugin.memory"),
+        "{for_people}"
+    );
+}
