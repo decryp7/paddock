@@ -180,6 +180,47 @@ pub(crate) fn for_each_batch(
     Ok(())
 }
 
+/// Phase timer of one page query (ER-27): at drop it logs the path taken and each phase's milliseconds at debug level, so a
+/// diagnostic bundle shows where a slow page spent its time.
+struct PageTrace {
+    path: &'static str,
+    started: std::time::Instant,
+    last: std::time::Instant,
+    phases: Vec<(&'static str, f64)>,
+}
+
+impl PageTrace {
+    fn new() -> PageTrace {
+        let now = std::time::Instant::now();
+        PageTrace {
+            path: "?",
+            started: now,
+            last: now,
+            phases: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, phase: &'static str) {
+        let now = std::time::Instant::now();
+        self.phases.push((phase, now.duration_since(self.last).as_secs_f64() * 1000.0));
+        self.last = now;
+    }
+}
+
+impl Drop for PageTrace {
+    fn drop(&mut self) {
+        if log::log_enabled!(log::Level::Debug) {
+            let phases: Vec<String> = self.phases.iter().map(|(p, ms)| format!("{p}={ms:.1}ms")).collect();
+            log::debug!(
+                "page path={} total={:.1}ms {}",
+                self.path,
+                self.started.elapsed().as_secs_f64() * 1000.0,
+                phases.join(" ")
+            );
+        }
+    }
+}
+
 pub(crate) fn count(conn: &Connection, sql: &str) -> StoreResult<usize> {
     conn.query_row(sql, [], |r| r.get::<_, u64>(0)).map(|n| n as usize).map_err(engine)
 }
@@ -551,16 +592,21 @@ impl Inner {
     }
 
     fn page(&self, req: &PageQuery) -> StoreResult<PageReply> {
+        let mut trace = PageTrace::new();
         let conn = self.conn()?;
+        trace.mark("conn");
         let ctx = self.ctx(&conn)?;
+        trace.mark("ctx");
         let (f, cq) = self.compile(&ctx, &req.query)?;
         // Trial 2, pruned: only the segments whose minutes overlap the query's time range.
         let from_sql = crate::trial_lake::pruned_from(&conn, &self.dir, req.query.from, req.query.to)
             .unwrap_or_else(|| FROM.to_string());
+        trace.mark("compile");
         let limit = req.rows();
         let display = |pos: usize, total: usize| if req.descending { total - 1 - pos } else { pos };
         // No criteria: the time-order positions give the page directly (no sort).
         if f.exact && f.structural.is_empty() && f.content.is_empty() && !self.is_importing() {
+            trace.path = "positions";
             let total = count(&conn, "SELECT count(*) FROM ord")?;
             let mut offset = req.offset;
             let mut anchor_index = None;
@@ -601,8 +647,10 @@ impl Inner {
             });
         }
         if f.exact {
+            trace.path = "sql";
             let w = f.all_sql();
             let total = count(&conn, &format!("SELECT count(*) FROM {from_sql} WHERE {w}"))?;
+            trace.mark("count");
             let mut offset = req.offset;
             let mut anchor_index = None;
             if let Some(a) = req.anchor {
@@ -637,7 +685,9 @@ impl Inner {
                 .map_err(engine)?
                 .collect::<Result<Vec<u64>, _>>()
                 .map_err(engine)?;
+            trace.mark("ids");
             let rows = self.rows_by_id(&conn, &ctx, &wanted, &cq)?;
+            trace.mark("rows");
             return Ok(PageReply {
                 total,
                 offset,
@@ -645,7 +695,9 @@ impl Inner {
                 anchor_index,
             });
         }
+        trace.path = "scan";
         let ids = self.matching_ids(&conn, &ctx, &f, &cq)?;
+        trace.mark("scan");
         let total = ids.len();
         let mut offset = req.offset;
         let mut anchor_index = None;
@@ -660,6 +712,7 @@ impl Inner {
         let end = (offset + limit).min(total);
         let wanted: Vec<u64> = (offset..end).map(|i| ids[display(i, total)]).collect();
         let rows = self.rows_by_id(&conn, &ctx, &wanted, &cq)?;
+        trace.mark("rows");
         Ok(PageReply {
             total,
             offset,
