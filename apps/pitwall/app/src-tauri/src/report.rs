@@ -564,6 +564,48 @@ mod tests {
         assert!(String::from_utf8_lossy(&service.data).contains("cannot be asked here"));
     }
 
+    /// ADR 0023 Decision 3: the chats the saved store really writes (a conversation file, its backup, an attachment) are left
+    /// out of a report. The marker is planted through the store itself, and checked on disk first, so the test sees the files
+    /// a used Pitwall has, not names it guessed.
+    #[test]
+    fn a_report_leaves_out_saved_chats_and_their_attachments() {
+        use crate::chat_host::chats::ChatStores;
+        use paddock_assistant::{Attachment, Conversations, EndReason, StoredMessage};
+        let root = tempfile::tempdir().unwrap();
+        let d = dirs(root.path());
+        let chats = ChatStores::new(d.data(), Arc::new(paddock_health::FakeClock::at_wall_ms(1_762_596_000_000)));
+        let sha = chats.put_attachment(true, format!("attached {MARKER}").as_bytes()).unwrap();
+        let first = StoredMessage::user(format!("question {MARKER}"), vec![], 1).with_attachments(vec![Attachment::File {
+            sha256: sha.clone(),
+            name: "notes.txt".into(),
+        }]);
+        let (id, _, saved) = chats.create(first);
+        assert_eq!(saved, Ok(()));
+        let answer = StoredMessage::assistant(format!("answer {MARKER}"), vec![], Some(EndReason::Answered), 2);
+        assert_eq!(chats.append(&id, vec![answer]), Some(Ok(())));
+        // The probe can see the thing (ER-33): the files exist where the store keeps them and hold the marker.
+        let chat_dir = d.data().join(crate::chat_host::saved::CHATS_DIR);
+        for path in [
+            chat_dir.join(format!("{id}.json")),
+            chat_dir.join(format!("{id}.json.bak")),
+            chat_dir.join("attachments").join(&sha),
+        ] {
+            let text = std::fs::read_to_string(&path).unwrap_or_default();
+            assert!(text.contains(MARKER), "{} holds the planted marker", path.display());
+        }
+        let c = collect(&d);
+        assert!(!c.files().is_empty());
+        for f in c.files() {
+            let text = String::from_utf8_lossy(&f.data);
+            assert!(!text.contains(MARKER), "{} holds a saved chat or an attachment", f.name);
+            assert!(
+                !text.contains(&id) && !text.contains(&sha),
+                "{} names a chat or an attachment",
+                f.name
+            );
+        }
+    }
+
     fn file_text(c: &Collected, name: &str) -> String {
         String::from_utf8_lossy(
             &c.files()

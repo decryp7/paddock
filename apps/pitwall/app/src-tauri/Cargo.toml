@@ -48,6 +48,8 @@ paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 # section drives.
 paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
 paddock-env = { path = "../../../../crates/paddock-env" }
+# The saved chats' attachments are kept by SHA-256 (ADR 0023 Decision 3).
+sha2.workspace = true
 paddock-log = { path = "../../../../crates/paddock-log" }
 getrandom.workspace = true
 serde.workspace = true
