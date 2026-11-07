@@ -45,7 +45,7 @@ function readCollapsed(): Set<string> {
   imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, TreeActions, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="page">
+    <div class="page wide fill">
       <header class="page-head">
         <div class="titles">
           <h1 tabindex="-1" #heading>Network</h1>
@@ -106,7 +106,7 @@ function readCollapsed(): Set<string> {
               [filterable]="false"
               [countLabel]="noCount"
               [rowHeight]="36"
-              height="window"
+              height="fill"
               [rowActions]="actions"
               [emptyText]="emptyText()"
               [(selectedKey)]="selectedKey"
@@ -192,10 +192,13 @@ function readCollapsed(): Set<string> {
     </div>
   `,
   styles: `
-    :host { display: block; }
+    :host { display: block; height: 100%; }
     .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
-    .page { display: grid; gap: var(--sp-3); align-content: start; }
-    dy-async { display: grid; gap: var(--sp-3); }
+    /* The page fills the page area and only the table scrolls (pd-table height="fill"): page > dy-async > .layout > table each take what is left. */
+    .page { display: flex; flex-direction: column; gap: var(--sp-3); height: 100%; min-height: 0; padding-bottom: var(--sp-4); }
+    .page > * { flex: none; }
+    .page > dy-async { flex: 1 1 0; }
+    dy-async { display: flex; flex-direction: column; min-height: 0; gap: var(--sp-3); }
     .summary { margin: 0; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
     .summary b { color: var(--text-1); font-weight: var(--fw-semibold); }
     .summary .this-pc { margin-left: auto; color: var(--text-3); }
@@ -206,7 +209,7 @@ function readCollapsed(): Set<string> {
     .reach[data-tone='warn'] { color: var(--warn); }
     .chk { display: inline-flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); color: var(--text-2); }
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); font-size: var(--fs-sm); }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: var(--sp-3); align-items: stretch; flex: 1 1 0; min-height: 0; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
     .muted { color: var(--text-2); }
     .truncate { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -226,7 +229,7 @@ function readCollapsed(): Set<string> {
     .ib:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
     .ib:disabled { opacity: 0.35; cursor: default; }
     .ib dy-icon { --icon-size: 15px; }
-    .detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
+    .detail { align-self: start; max-height: 100%; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
     .dhead { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
     dl { margin: 0; display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px var(--sp-3); font-size: var(--fs-sm); }
     dt { color: var(--text-3); }
