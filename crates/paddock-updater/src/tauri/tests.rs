@@ -335,6 +335,45 @@ fn check_download_and_install_on_quit_run_as_jobs_and_report_by_events() {
     assert_eq!(installer.0.lock().unwrap().as_slice(), [false]);
 }
 
+/// The reply of a command that starts a job is the state it started, even when the job finishes before the reply is built.
+#[test]
+fn start_check_and_start_download_reply_with_the_state_they_started_when_the_job_already_finished()
+{
+    let app = app(None);
+    let dir = tempfile::tempdir().unwrap();
+    let b = builder(dir.path())
+        .channel("stable", "Stable", MANIFEST)
+        .public_key(Some(&fixture("key.pub")))
+        .installer(Arc::new(FakeInstaller::default()))
+        .installer_kind("app")
+        .max_download_bytes(1 << 20);
+    let updates = install(app.handle(), b).unwrap();
+    let rx = Arc::new(Mutex::new(statuses(&app)));
+    let finish_before_reply = |kind: &'static str| {
+        let rx = rx.clone();
+        *updates.after_spawn.lock().unwrap() = Some(Arc::new(move || {
+            wait_for(&rx.lock().unwrap(), kind);
+        }));
+    };
+    finish_before_reply("available");
+    let checking = updates.start_check().unwrap();
+    assert!(
+        matches!(checking.phase, UpdatePhase::Checking { job: Some(_) }),
+        "the reply is the started state, listed as a job: {:?}",
+        checking.phase
+    );
+    finish_before_reply("ready");
+    let downloading = updates.start_download().unwrap();
+    assert!(
+        matches!(
+            downloading.phase,
+            UpdatePhase::Downloading { job: Some(_), .. }
+        ),
+        "the reply is the started state: {:?}",
+        downloading.phase
+    );
+}
+
 #[test]
 fn cancel_preferences_and_restart_go_through_the_commands() {
     let app = app(None);
