@@ -200,7 +200,8 @@ async fn models_for(chat: &ChatState, wanted: Option<String>) -> Result<ChatMode
         )
     })?;
     let wanted = wanted.or_else(|| Some(chat.provider.model()).filter(|m| !m.is_empty()));
-    let picker = chat_models(locals.iter().map(Facts::from), wanted.as_deref());
+    let catalog = pitwall_core::packs::Packs::builtin().models;
+    let picker = chat_models(locals.iter().map(Facts::from), &catalog, wanted.as_deref());
     chat.provider.set_model(picker.selected.clone().unwrap_or_default());
     if let Some(m) = locals.iter().find(|m| Some(&m.id) == picker.selected.as_ref()) {
         chat.provider

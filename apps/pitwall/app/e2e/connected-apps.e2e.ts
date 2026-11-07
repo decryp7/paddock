@@ -71,7 +71,8 @@ test.describe('connected apps and the chat model', () => {
     const gemma = page.getByRole('option', { name: /Gemma 4 12B/ });
     await expect(gemma).toHaveAttribute('aria-disabled', 'true');
     await expect(gemma).toContainText("Can't use tools");
-    await expect(page.getByTestId('chat-model-note')).toContainText('chat template has no tool calls');
+    await expect(page.getByTestId('chat-model-note').filter({ hasText: 'chat template has no tool calls' })).toHaveCount(1);
+    await expect(page.getByRole('option', { name: /Qwen3.8 27B/ })).toHaveAttribute('aria-disabled', 'true');
     // Disabled but readable: the reason is the muted text colour at full opacity, at least 4.5:1 on the panel.
     const measure = () => gemma.locator('.why').evaluate((el) => {
       const rgb = (c: string) => (c.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);

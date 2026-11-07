@@ -40,7 +40,13 @@ describe('PlaygroundChat', () => {
     expect(gemma.getAttribute('aria-disabled')).toBe('true');
     expect(gemma.textContent).toContain(" · Can't use tools");
     // The reason in full sits once inside the open list, as the group's label, never under the field.
-    expect(document.querySelector('[data-testid=chat-model-note]')?.textContent).toContain('chat template has no tool calls');
+    const notes = Array.from(document.querySelectorAll('[data-testid=chat-model-note]')).map((g) => g.textContent ?? '');
+    expect(notes.some((n) => n.includes('chat template has no tool calls'))).toBe(true);
+    // The starter catalog's tool models not downloaded yet: listed, disabled, with how to get one.
+    const starter = options.find((o) => o.textContent?.includes('Qwen3.8 27B'))!;
+    expect(starter.getAttribute('aria-disabled')).toBe('true');
+    expect(starter.textContent).toContain(' · Not downloaded');
+    expect(notes.some((n) => n.includes('download one in Models'))).toBe(true);
     expect(el.querySelector('mat-hint')).toBeNull();
     options.find((o) => o.textContent?.includes('Qwen3.5 9B'))!.click();
     await settle(fixture);

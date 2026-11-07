@@ -4,7 +4,7 @@ import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatOptgroup, MatOption, MatSelect } from '@angular/material/select';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { AssistantBackend, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
-import type { ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
+import type { ChatModel, ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 import { createChatBackend } from './chat-backend';
@@ -29,10 +29,10 @@ import { createChatBackend } from './chat-backend';
           @for (m of usable(); track m.id) {
             <mat-option [value]="m.id">{{ m.name }}</mat-option>
           }
-          @if (unusable().length) {
-            <!-- Why these can't be chosen is said once, inside the open list (not under the field, where it moved the bar). -->
-            <mat-optgroup [label]="picker()?.note ?? ''" data-testid="chat-model-note">
-              @for (m of unusable(); track m.id) {
+          <!-- Why these can't be chosen is said once per reason, inside the open list (not under the field, where it moved the bar). -->
+          @for (g of groups(); track g.reason) {
+            <mat-optgroup [label]="g.note" data-testid="chat-model-note">
+              @for (m of g.models; track m.id) {
                 <mat-option [value]="m.id" disabled>{{ m.name }}<span class="why"> · {{ m.disabled }}</span></mat-option>
               }
             </mat-optgroup>
@@ -88,8 +88,18 @@ export class PlaygroundChat {
 
   /** Models the chat can use (Rust's order). */
   protected readonly usable = computed(() => (this.picker()?.models ?? []).filter((m) => m.disabled === null));
-  /** Models listed but not choosable, with Rust's reason. */
-  protected readonly unusable = computed(() => (this.picker()?.models ?? []).filter((m) => m.disabled !== null));
+  /** Models listed but not choosable, grouped by Rust's reason (in Rust's order), each group labelled by its note. */
+  protected readonly groups = computed(() => {
+    const p = this.picker();
+    const out: { reason: string; note: string; models: ChatModel[] }[] = [];
+    for (const m of p?.models ?? []) {
+      if (m.disabled === null) continue;
+      let g = out.find((x) => x.reason === m.disabled);
+      if (!g) out.push((g = { reason: m.disabled, note: p?.notes[m.disabled] ?? m.disabled, models: [] }));
+      g.models.push(m);
+    }
+    return out;
+  });
   /** Some app lends its tools now (the empty chat then needs no "Connected apps…"). */
   protected readonly anyConnected = computed(() => (this.apps() ?? []).some((a) => a.connected));
 

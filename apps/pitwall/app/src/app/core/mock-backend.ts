@@ -1519,11 +1519,14 @@ export class MockBackend implements PitwallBackend {
     const models = chat
       .map((m) => ({ id: m.id, name: m.name, loaded: m.loaded, disabled: m.capabilities.includes('tools') ? null : "Can't use tools" }))
       .sort((a, b) => Number(a.disabled !== null) - Number(b.disabled !== null) || Number(!a.loaded) - Number(!b.loaded) || a.name.localeCompare(b.name));
+    // The starter catalog's tool models not downloaded yet (as Rust lists them).
+    models.push({ id: 'qwen3.8-27b', name: 'Qwen3.8 27B', loaded: false, disabled: 'Not downloaded' });
     const usable = (id: string | null) => models.some((m) => m.id === id && m.disabled === null);
     const selected = usable(wanted) ? wanted : (models.find((m) => m.disabled === null)?.id ?? null);
     this.chatModel_ = selected;
-    const note = models.some((m) => m.disabled) ? '"Can\'t use tools": the model\'s chat template has no tool calls, so it can\'t use a connected app\'s tools.' : null;
-    return { models, selected, note };
+    const notes: Record<string, string> = { 'Not downloaded': 'Starter models that can use tools: download one in Models, then choose it here.' };
+    if (models.some((m) => m.disabled === "Can't use tools")) notes["Can't use tools"] = '"Can\'t use tools": the model\'s chat template has no tool calls, so it can\'t use a connected app\'s tools.';
+    return { models, selected, notes };
   }
 
   takeQuitAsk(): Promise<boolean> {

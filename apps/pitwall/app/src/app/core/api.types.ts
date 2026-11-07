@@ -1118,8 +1118,8 @@ export interface ChatModel {
 export interface ChatModels {
   models: ChatModel[];
   selected: string | null;
-  /** Why some models can't be chosen, in full (the picker's hint). */
-  note: string | null;
+  /** For each reason a model can't be chosen ("Can't use tools", "Not downloaded"), its full note. */
+  notes: Record<string, string>;
 }
 
 /** What "Open <app>" came to (`chat_host::apps::Opened`): starting, or the words saying why not. */
