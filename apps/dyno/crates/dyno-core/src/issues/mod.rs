@@ -53,11 +53,14 @@ pub enum IssueKind {
     UpdateFailure,
     /// A driver failed or had to be reset.
     DriverFailure,
+    /// A program was ended by a signal sent from outside (SIGTERM, SIGKILL, ...), with no sign that it failed itself: a user,
+    /// an installer or the system stopped it. Not a crash, costs no stability points. Appended.
+    StoppedFromOutside,
 }
 
 impl IssueKind {
     /// Every kind, in the order the page lists them.
-    pub const ALL: [IssueKind; 10] = [
+    pub const ALL: [IssueKind; 11] = [
         IssueKind::AppCrash,
         IssueKind::AppHang,
         IssueKind::BadShutdown,
@@ -68,6 +71,7 @@ impl IssueKind {
         IssueKind::MemoryExhaustion,
         IssueKind::UpdateFailure,
         IssueKind::DriverFailure,
+        IssueKind::StoppedFromOutside,
     ];
 
     /// The user-facing name.
@@ -83,6 +87,7 @@ impl IssueKind {
             IssueKind::MemoryExhaustion => "Out of memory",
             IssueKind::UpdateFailure => "Update failure",
             IssueKind::DriverFailure => "Driver failure",
+            IssueKind::StoppedFromOutside => "Stopped from outside",
         }
     }
 
@@ -91,7 +96,7 @@ impl IssueKind {
         match self {
             IssueKind::BadShutdown | IssueKind::DiskError | IssueKind::MemoryError | IssueKind::Overheating => Severity::Critical,
             IssueKind::AppCrash | IssueKind::AppHang | IssueKind::MemoryExhaustion | IssueKind::DriverFailure => Severity::Warning,
-            IssueKind::ServiceFailure | IssueKind::UpdateFailure => Severity::Info,
+            IssueKind::ServiceFailure | IssueKind::UpdateFailure | IssueKind::StoppedFromOutside => Severity::Info,
         }
     }
 
@@ -104,7 +109,26 @@ impl IssueKind {
             IssueKind::AppCrash | IssueKind::DriverFailure => 8,
             IssueKind::AppHang | IssueKind::ServiceFailure => 5,
             IssueKind::UpdateFailure => 3,
+            IssueKind::StoppedFromOutside => 0,
         }
+    }
+}
+
+/// Whether the signal (`SIGKILL`, `kill`, `15`, `signal 9`) is one that others send to end a program, so that receiving it says
+/// nothing about the program itself: SIGHUP, SIGINT, SIGKILL and SIGTERM. Anything else (SIGSEGV, SIGABRT, ...) is the program's own failure.
+pub fn is_outside_signal(signal: &str) -> bool {
+    let t = signal.trim().to_ascii_uppercase();
+    let t = t.strip_prefix("SIGNAL ").unwrap_or(&t);
+    let t = t.strip_prefix("SIG").unwrap_or(t);
+    matches!(t, "HUP" | "INT" | "KILL" | "TERM" | "1" | "2" | "9" | "15")
+}
+
+/// The kind of a program that ended by `signal`: [`IssueKind::StoppedFromOutside`] for a signal others send, else
+/// [`IssueKind::AppCrash`]. Callers pass `None` when no signal is known (that stays a crash).
+pub fn kind_for_signal(signal: Option<&str>) -> IssueKind {
+    match signal {
+        Some(s) if is_outside_signal(s) => IssueKind::StoppedFromOutside,
+        _ => IssueKind::AppCrash,
     }
 }
 
@@ -442,6 +466,39 @@ pub fn days_from_civil(y: i64, m: u32, d: u32) -> i64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn signals_others_send_are_not_crashes_and_the_programs_own_failures_are() {
+        // (signal as a reader reports it, expected kind)
+        let table = [
+            (Some("SIGKILL"), IssueKind::StoppedFromOutside),
+            (Some("SIGTERM"), IssueKind::StoppedFromOutside),
+            (Some("SIGHUP"), IssueKind::StoppedFromOutside),
+            (Some("SIGINT"), IssueKind::StoppedFromOutside),
+            (Some("sigterm"), IssueKind::StoppedFromOutside),
+            (Some("TERM"), IssueKind::StoppedFromOutside),
+            (Some("9"), IssueKind::StoppedFromOutside),
+            (Some("15"), IssueKind::StoppedFromOutside),
+            (Some("signal 9"), IssueKind::StoppedFromOutside),
+            (Some("SIGABRT"), IssueKind::AppCrash),
+            (Some("SIGSEGV"), IssueKind::AppCrash),
+            (Some("SIGBUS"), IssueKind::AppCrash),
+            (Some("SIGILL"), IssueKind::AppCrash),
+            (Some("6"), IssueKind::AppCrash),
+            (Some("11"), IssueKind::AppCrash),
+            (Some(""), IssueKind::AppCrash),
+            (None, IssueKind::AppCrash),
+        ];
+        for (signal, want) in table {
+            assert_eq!(kind_for_signal(signal), want, "{signal:?}");
+        }
+    }
+
+    #[test]
+    fn being_stopped_from_outside_costs_no_stability_and_is_not_a_warning() {
+        assert_eq!(IssueKind::StoppedFromOutside.weight(), 0);
+        assert_eq!(IssueKind::StoppedFromOutside.severity(), Severity::Info);
+        assert_eq!(day_score(&[(IssueKind::StoppedFromOutside, 5)]), 100);
+    }
     use super::*;
 
     fn issue(at: i64, kind: IssueKind, app: &str) -> Issue {
@@ -484,11 +541,11 @@ mod tests {
     fn every_kind_has_a_label_severity_and_weight() {
         for k in IssueKind::ALL {
             assert!(!k.label().is_empty());
-            assert!(k.weight() > 0 && k.weight() <= 20);
+            assert!(k.weight() <= 20 && (k.weight() > 0 || k == IssueKind::StoppedFromOutside), "{k:?}");
             let i = Issue::new(IssueSourceId::Journal, Timestamp(0), k, "a", "t", "e", "k");
             assert_eq!(i.severity, k.severity());
         }
-        assert_eq!(IssueKind::ALL.len(), 10);
+        assert_eq!(IssueKind::ALL.len(), 11);
         assert_eq!(IssueKind::BadShutdown.severity(), Severity::Critical);
         assert_eq!(IssueKind::UpdateFailure.severity(), Severity::Info);
         assert_eq!(IssueKind::AppCrash.severity(), Severity::Warning);

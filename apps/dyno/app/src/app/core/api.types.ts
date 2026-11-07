@@ -1712,7 +1712,8 @@ export type IssueKind =
   | 'serviceFailure'
   | 'memoryExhaustion'
   | 'updateFailure'
-  | 'driverFailure';
+  | 'driverFailure'
+  | 'stoppedFromOutside';
 
 export type IssueSourceId = 'macReports' | 'macLog' | 'windowsEvents' | 'journal' | 'coredumps';
 
