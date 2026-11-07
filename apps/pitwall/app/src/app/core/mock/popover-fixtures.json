@@ -749,7 +749,9 @@
     }
   ],
   "view": {
+    "arrangements": [],
     "builtinPresets": [],
+    "canRedo": false,
     "canUndo": false,
     "catalogue": {
       "kinds": [
@@ -758,10 +760,14 @@
           "kind": "server",
           "maxInstances": 1,
           "refresh": "live",
-          "spans": [
-            1,
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                1,
+                2
+              ]
+            }
+          },
           "summary": "Whether the server is serving, and its engines are healthy",
           "title": "Server"
         },
@@ -770,10 +776,14 @@
           "kind": "activity",
           "maxInstances": 1,
           "refresh": "live",
-          "spans": [
-            1,
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                1,
+                2
+              ]
+            }
+          },
           "summary": "Chats running now, the queue and tokens per second",
           "title": "Activity"
         },
@@ -782,9 +792,13 @@
           "kind": "memory",
           "maxInstances": 1,
           "refresh": "live",
-          "spans": [
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                2
+              ]
+            }
+          },
           "summary": "RAM and video memory in use, and the pressure",
           "title": "Memory"
         },
@@ -793,9 +807,13 @@
           "kind": "loadedModels",
           "maxInstances": 1,
           "refresh": "live",
-          "spans": [
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                2
+              ]
+            }
+          },
           "summary": "The models in memory and what each one holds",
           "title": "Loaded models"
         },
@@ -804,9 +822,13 @@
           "kind": "downloads",
           "maxInstances": 1,
           "refresh": "live",
-          "spans": [
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                2
+              ]
+            }
+          },
           "summary": "Model and engine downloads in progress",
           "title": "Downloads"
         },
@@ -815,10 +837,14 @@
           "kind": "updates",
           "maxInstances": 1,
           "refresh": "onChange",
-          "spans": [
-            1,
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                1,
+                2
+              ]
+            }
+          },
           "summary": "Newer versions of the models you downloaded",
           "title": "Updates"
         },
@@ -827,9 +853,13 @@
           "kind": "recentErrors",
           "maxInstances": 1,
           "refresh": "onChange",
-          "spans": [
-            2
-          ],
+          "size": {
+            "spans": {
+              "spans": [
+                2
+              ]
+            }
+          },
           "summary": "What failed in the last day",
           "title": "Recent errors"
         }
@@ -870,6 +900,9 @@
       "presets": [],
       "version": 1
     },
-    "notes": []
+    "moves": [],
+    "notes": [],
+    "outcome": null,
+    "revision": 1
   }
 }

@@ -224,16 +224,17 @@ describe('the tray popup', () => {
     });
 
     it('reports the popup\'s measured height to the shell, and survives a shell that refuses it', async () => {
-      let notify = () => undefined as void;
+      // Every observer is kept with what it watches: other components in the popup observe their own elements too, so the
+      // spec calls the observers of the popup itself, whatever order they were made in.
+      const watched: { target: Element; cb: () => void }[] = [];
       globalThis.ResizeObserver = class {
-        constructor(cb: () => void) {
-          notify = cb;
-        }
-        observe = vi.fn();
+        constructor(private readonly cb: () => void) {}
+        observe = (target: Element) => void watched.push({ target, cb: this.cb });
         disconnect = vi.fn();
       } as unknown as typeof ResizeObserver;
       const m = await mount();
       const popup = m.el.querySelector('pd-tray-popover')!;
+      const notify = () => watched.filter((w) => w.target === popup).forEach((w) => w.cb());
       vi.spyOn(popup, 'getBoundingClientRect').mockReturnValue({ height: 311.4 } as DOMRect);
       notify();
       expect(m.fitTray).toHaveBeenCalledWith(312);

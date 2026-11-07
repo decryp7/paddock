@@ -81,7 +81,7 @@ export function limitsShort(l: AppLimits): string {
         </ng-container>
         <ng-container matColumnDef="trend">
           <th mat-header-cell *matHeaderCellDef scope="col"><span class="sr-only">Trend</span></th>
-          <td mat-cell *matCellDef="let a" class="trend"><pd-sparkline [values]="trend(a)" [min]="0" [height]="22" [label]="'Requests of ' + a.name" [style.color]="color(a)" /></td>
+          <td mat-cell *matCellDef="let a" class="trend"><pd-sparkline [values]="trend(a)" scale="zero" [height]="22" [label]="'Requests of ' + a.name" [style.color]="color(a)" /></td>
         </ng-container>
         <tr mat-header-row *matHeaderRowDef="columns(); sticky: true"></tr>
         <tr mat-row *matRowDef="let a; columns: columns()"></tr>

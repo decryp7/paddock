@@ -1,8 +1,8 @@
-import type { Edit, LayoutView, SurfaceValues, WidgetState } from '@decryp7/paddock-ui/widgets';
+import type { Edit, LayoutView, Span, SurfaceValues, WidgetState } from '@decryp7/paddock-ui/widgets';
 import type { PitwallSurface, PopoverHeader, PopoverValue, PopoverWidget, WidgetActionId } from './generated/widgets';
 
 /** The tray popup's layout as the chooser draws it (the generic types are the shared package's, ADR 0035). */
-export type PopoverView = LayoutView<PitwallSurface, PopoverWidget, PopoverWidget>;
+export type PopoverView = LayoutView<PitwallSurface, PopoverWidget, Span, PopoverWidget>;
 /** One edit of the popup's layout. */
 export type PopoverEdit = Edit<PopoverWidget>;
 /** What the popup's widgets show now, computed by the engine. */

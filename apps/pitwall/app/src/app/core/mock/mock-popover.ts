@@ -27,6 +27,8 @@ interface Fixture {
 const FIXTURE = fixtures as unknown as Fixture;
 const KINDS: KindInfo<PopoverWidget>[] = FIXTURE.view.catalogue.kinds as KindInfo<PopoverWidget>[];
 const MAX = FIXTURE.view.catalogue.surface.maxPlacements;
+/** The spans a kind allows (the popup is a flow surface, so every kind declares spans). */
+const spansOf = (info: KindInfo<PopoverWidget> | undefined): readonly number[] => (info && 'spans' in info.size ? info.size.spans.spans : []);
 /** The popup a fresh install shows, as the engine's defaults say. */
 export const DEFAULTS: [number, PopoverWidget][] = FIXTURE.view.layout.placements.map((p) => [p.span, p.widget]);
 /** The kinds of [`DEFAULTS`], in order: specs read the default popup from here, never a hand-written list. */
@@ -53,15 +55,22 @@ const place = (widget: PopoverWidget, span: number): Placement<PopoverWidget> =>
 export class MockPopover {
   /** `shown`: the kinds to start with (a spec that needs particular widgets names them); the default is the fresh-install popup. */
   constructor(shown: readonly PopoverWidget[] = DEFAULT_KINDS) {
-    this.placements = shown.map((kind) => place(kind, DEFAULTS.find(([, k]) => k === kind)?.[0] ?? KINDS.find((i) => i.kind === kind)?.spans[0] ?? 2));
+    this.placements = shown.map((kind) => place(kind, DEFAULTS.find(([, k]) => k === kind)?.[0] ?? spansOf(KINDS.find((i) => i.kind === kind))[0] ?? 2));
   }
 
   private placements: Placement<PopoverWidget>[];
   private previous: Placement<PopoverWidget>[] | null = null;
+  /** Counts up with every applied edit, as the engine's revision does. */
+  private revision = FIXTURE.view.revision;
 
   view(): PopoverView {
     return {
       layout: { version: 1, placements: this.placements.map((p) => ({ ...p })), presets: [] },
+      revision: this.revision,
+      arrangements: [],
+      moves: [],
+      canRedo: false,
+      outcome: null,
       catalogue: { surface: { id: 'popover', noun: 'popup', columns: 2, maxPlacements: MAX, minPlacements: 0, maxUserPresets: 0 }, kinds: KINDS },
       builtinPresets: [],
       notes: [],
@@ -79,12 +88,15 @@ export class MockPopover {
     } else if (edit === 'resetToDefaults') {
       this.previous = list;
       this.placements = DEFAULTS.map(([span, w]) => place(w, span));
+    } else if (edit === 'redo') {
+      // The popup keeps one undo step and no redo (canRedo is always false).
+      throw refused('There is nothing to redo.');
     } else if ('add' in edit) {
       const info = KINDS.find((k) => k.kind === edit.add.widget);
       if (!info) throw refused('That widget does not exist.');
       if (list.some((p) => p.widget === edit.add.widget)) throw refused(`${info.title} is already shown.`);
       if (list.length >= MAX) throw refused(`At most ${MAX} widgets fit in the popup; remove one first.`);
-      list.splice(Math.min(edit.add.at ?? list.length, list.length), 0, place(edit.add.widget, edit.add.span ?? info.spans[0] ?? 2));
+      list.splice(Math.min(edit.add.at ?? list.length, list.length), 0, place(edit.add.widget, edit.add.span ?? spansOf(info)[0] ?? 2));
       this.placements = list;
       this.previous = null;
     } else if ('remove' in edit) {
@@ -103,13 +115,14 @@ export class MockPopover {
     } else if ('resize' in edit) {
       const i = list.findIndex((p) => p.id === edit.resize.id);
       const p = list[i];
-      if (!p || !KINDS.find((k) => k.kind === p.widget)?.spans.includes(edit.resize.span)) throw refused('That width is not available for this widget.');
+      if (!p || !spansOf(KINDS.find((k) => k.kind === p.widget)).includes(edit.resize.span)) throw refused('That width is not available for this widget.');
       list[i] = { ...p, span: edit.resize.span };
       this.placements = list;
       this.previous = null;
     } else {
       throw refused('The mock does not do that edit.');
     }
+    this.revision += 1;
     return this.view();
   }
 
