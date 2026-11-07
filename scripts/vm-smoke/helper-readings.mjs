@@ -19,7 +19,9 @@ export const LIFESPAN_VALUE = /Have \d+ of \d+ days|\b\d+(?:\.\d+)? (?:years?|mo
 /** page: a route name of Dyno's router (#/<page>), `tab`: a tab or radio label to press first. `all` must all match, `none` must not match. */
 export const READINGS = [
   { id: 'processes-all-accounts', title: 'Processes of every account', os: ['windows', 'macos', 'linux'], page: 'processes', showAll: true, fullText: 4000, shot: 'processes', minWidth: 1100,
-    expect: { windows: [/Account/, /SYSTEM|NT AUTHORITY/, /Read by the administrator helper/i], macos: [/root/, /_[a-z]+/, /Read by the administrator helper/i], linux: [/root/, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
+    // `column`: root (and _accounts) show only in the Account column, which pd-table drops when the table is narrow: without it the probe cannot see the reading (check-broken).
+    column: /\bAccount\b/,
+    expect: { windows: [/Account/, /SYSTEM|NT AUTHORITY/, /Read by the administrator helper/i], macos: [/root/, /_[a-z]+/, /Read by the administrator helper/i], linux: [/\bAccount\b[\s\S]*\broot\b/, /Read by the administrator helper/i] }, none: [/needs the helper/i] },
   { id: 'traffic-by-program', title: 'Per-program network traffic (Group by: Program)', os: ['windows'], page: 'network', groupBy: 'Program',
     expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i], prepare: { windows: 'traffic' },
     // A program row with a transfer size (not the column header glyph): the control generates traffic first.
@@ -101,6 +103,10 @@ export async function readingStep(reading, os, driver) {
     const text = (await driver.text(reading)).replace(/\s+/g, ' ');
     evidence.push(`page text: ${text.slice(0, reading.fullText ?? 3000)}`);
     if (reading.shot && driver.shot) { const f = await driver.shot(`page-${reading.shot}`); if (f) evidence.push(`screenshot: ${f}`); }
+    if (reading.column && !reading.column.test(text)) {
+      const detail = `Account column not shown at this width: the page has no ${reading.column} header, so the reading cannot be seen (not a product verdict)`;
+      return { title, status: 'check-broken', cls: 'check', summary: detail, checks: [...checks, { ok: false, kind: 'check', detail }], evidence };
+    }
     const nm = reading.notMeasured?.[os];
     if (nm && fires(nm, text)) {
       const detail = `not measured: ${nm.why}${nm.when instanceof RegExp ? ` (the page says ${nm.when})` : ''}`;
@@ -166,6 +172,30 @@ export function windowsDriver(main, { shotDir = process.env.PADDOCK_WIN_SHOTS ??
 }
 
 /** macOS: the driver over a MacGui (sidebar links by label; tabs are radio buttons). */
+/**
+ * Linux (AT-SPI): `press(re, role)` -> bool, `tree()` -> the window's text, `resize(width)` widens the main window (best effort), `sleep`, `now`. A row with `minWidth` gets the room
+ * the Account column needs (sidebar collapsed, window widened, as the macOS and Windows drivers do); the text is polled until every expectation of the row shows, bounded at 30 s.
+ */
+export function linuxDriver({ press, tree, resize = () => {}, sleep, now, labels = LINUX_LABELS }) {
+  return {
+    async openPage(page, tab, reading = {}) {
+      if (reading.minWidth) { press('^Collapse sidebar', 'push button|toggle button'); resize(reading.minWidth + 100); await sleep(800); }
+      const okp = press(`^${labels[page]}$`, 'link');
+      if (okp && reading.showAll) { await sleep(1500); press('^All$', 'radio button|page tab|push button|toggle button'); await sleep(1500); }
+      if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); }
+      return okp;
+    },
+    async text(reading = {}) {
+      const want = [...(reading.expect?.linux ?? []), ...(reading.value?.linux ?? [])];
+      const t0 = now();
+      let t = tree();
+      while (want.length && !want.every((re) => re.test(t)) && now() - t0 < 30_000) { await sleep(3000); t = tree(); }
+      return t;
+    },
+  };
+}
+export const LINUX_LABELS = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
+
 export function macDriver(gui) {
   let loadedPf = false;
   const label = { dashboard: 'Dashboard', processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', health: 'Health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };

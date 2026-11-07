@@ -16,7 +16,8 @@ import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } fr
 import { swapNotDriven, upgradeSwapStep } from './upgrade-swap-row.mjs';
 import { linuxSwapPrimitives } from './upgrade-swap-prims.mjs';
 import { loginJobsRow, linuxLoginJobsDriver } from './login-jobs-drivers.mjs';
-import { readingSteps } from './helper-readings.mjs';
+import { linuxDriver, readingSteps } from './helper-readings.mjs';
+import { loginSwitchStep } from './login-start-rows.mjs';
 import { trayHostChecks } from './linux-tray-host.mjs';
 import { judgeCard, judgeLoginSwitch, parseSwitchState } from './linux-judges.mjs';
 import { makeResult } from './verdict.mjs';
@@ -158,6 +159,20 @@ async function main(argv) {
     checks.push({ ok: !/^0$/m.test(w.split('\n').at(-1)), detail: 'a standard user cannot create files in the helper data folder' });
     push(result('Admin helper Turn on (polkit) and its folders', checks, stat.split('\n'), 'polkit answered, service active, folders root-only'));
 
+    // Launch at login (release row): the first-run default (~/.config/autostart/Dyno.desktop, Exec "dyno-app --hidden"), then the Settings switch through AT-SPI (the same
+    // name and roles as row 5a's driver): off removes the file, on restores it once. Read before anything else touches the switch.
+    {
+      press('^Dyno$'); await sleep(1500);
+      const lj = linuxLoginJobsDriver(atspi, parseSwitchState);
+      const readEntry = async () => {
+        const out = g('d="$HOME/.config/autostart"; n=$(ls "$d" 2>/dev/null | grep -ci "^dyno.*\\.desktop$"); echo "count=$n"; [ -f "$d/Dyno.desktop" ] && grep -E "^Exec=" "$d/Dyno.desktop" | head -1').stdout;
+        const count = Number(/count=(\d+)/.exec(out)?.[1] ?? 0);
+        const exec = /^Exec=(.*)$/m.exec(out)?.[1]?.replace(/"/g, '');
+        return { present: count > 0 && exec !== undefined, count, ...(exec !== undefined ? { command: exec } : {}) };
+      };
+      push(await loginSwitchStep({ sleep, readSwitch: async () => { const s = await lj.readSwitch(); return s === 'on' || s === 'off' ? s : 'unknown'; }, pressSwitch: () => lj.pressSwitch(), readEntry }));
+    }
+
     if (o.reboot) {
       // The restart check (user's real PC): helper on + Launch at login on, record start-at-boot, reboot the guest, log in, and without Repair
       // record the helper, the card, whether Dyno started itself (XDG autostart) and how long after login, the tray, and one reading.
@@ -213,8 +228,11 @@ async function main(argv) {
       void t0;
     }
     // 5. One step per helper reading (WP-VMH), read through AT-SPI.
-    const labels = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
-    const driver = { openPage: async (page, tab, reading) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && reading?.showAll) { await sleep(1500); press('^All$', 'radio button|page tab|push button|toggle button'); await sleep(1500); } if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); },
+    // The reading driver (helper-readings.mjs linuxDriver): room for wide tables (minWidth: sidebar collapsed, window widened with xdotool when the session allows it) and
+    // a text polled until the row's expectations show (bounded 30 s), never a fixed delay.
+    const treeText = () => atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' ');
+    const resize = (w) => { const r = ses(`command -v xdotool >/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xdotool >/dev/null 2>&1; for id in $(xdotool search --onlyvisible --class dyno 2>/dev/null); do xdotool windowsize $id ${w} 900 2>&1; done; echo resized`, 180_000); log(`resize the Dyno window to ${w} px: ${r.stdout.trim().split('\n').at(-1)}`); };
+    const driver = { ...linuxDriver({ press, tree: treeText, resize, sleep, now: () => Date.now() }),
       // Controls: `nft-rule` loads one known rule (tcp dport 59999) into a table of its own, so the firewall page has something to show; cleanup removes the table.
       async prepare(key) {
         if (key !== 'nft-rule') return { ok: false, detail: `unknown control ${key}` };

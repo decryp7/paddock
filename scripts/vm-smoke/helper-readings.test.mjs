@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { READINGS, readingStep, readingSteps } from './helper-readings.mjs';
+import { READINGS, linuxDriver, readingStep, readingSteps } from './helper-readings.mjs';
 
 const driver = (text, opens = true) => ({ openPage: async () => opens, text: async () => text });
 const by = (id) => READINGS.find((r) => r.id === id);
@@ -139,4 +139,33 @@ test('the removed Backup health reading is reported as not applicable (removed i
   assert.equal(steps[0].status, 'not-applicable');
   assert.match(steps[0].summary, /removed in 1\.1\.0/);
   assert.ok(!READINGS.some((r) => /backup/i.test(r.id)));
+});
+
+// Linux "Processes of every account" (2026-11-08): root shows only in the Account column, which pd-table drops below about 750 px. A page without the column is a
+// broken check (the probe could not see the thing, ER-33), never a product fail; the Linux driver makes room (minWidth) and polls instead of a fixed delay.
+test('processes: no Account column is check-broken; Account then root passes on Linux', async () => {
+  const narrow = await readingStep(by('processes-all-accounts'), 'linux', driver('Processes 212 processes Name CPU Memory dyno-agent Read by the administrator helper'));
+  assert.equal(narrow.status, 'check-broken');
+  assert.match(narrow.summary, /Account column not shown at this width/);
+  assert.equal((await readingStep(by('processes-all-accounts'), 'linux', driver('Processes Name Account CPU systemd root 0.1 % Read by the administrator helper'))).status, 'pass');
+  // "root" elsewhere on the page (a path) before the column header is not the reading
+  assert.equal((await readingStep(by('processes-all-accounts'), 'linux', driver('/root/x Processes Name Account CPU systemd admin Read by the administrator helper'))).status, 'fail');
+});
+test('linux driver: honours minWidth (collapses the sidebar, resizes) and polls until the expectations show, bounded', async () => {
+  const pressed = [];
+  let reads = 0;
+  let t = 0;
+  const texts = ['Processes Loading', 'Processes Name Account', 'Processes Name Account systemd root Read by the administrator helper'];
+  const d = linuxDriver({ press: (re) => { pressed.push(re); return true; }, tree: () => texts[Math.min(reads++, texts.length - 1)], resize: (w) => pressed.push(`resize ${w}`), sleep: async (ms) => { t += ms; }, now: () => t });
+  assert.equal(await d.openPage('processes', null, by('processes-all-accounts')), true);
+  assert.ok(pressed.includes('^Collapse sidebar'), pressed.join(','));
+  assert.ok(pressed.some((p) => /^resize 1[12]\d\d$/.test(p)), pressed.join(','));
+  const text = await d.text(by('processes-all-accounts'));
+  assert.match(text, /root/);
+  assert.equal(reads, 3);
+  // never longer than 30 s when the text never comes
+  t = 0; reads = 0;
+  const d2 = linuxDriver({ press: () => true, tree: () => 'Processes', resize: () => {}, sleep: async (ms) => { t += ms; }, now: () => t });
+  await d2.text(by('processes-all-accounts'));
+  assert.ok(t <= 33_000 && t >= 30_000, `waited ${t}`);
 });
