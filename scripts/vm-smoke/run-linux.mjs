@@ -202,9 +202,12 @@ async function main(argv) {
       // The card lives in the Settings window, which the reboot closed: open it the way a user does (File > Settings…), as at the first step.
       await sleep(3000);
       press('^File$', 'menu item'); await sleep(1000); press('^Settings…$', 'menu item'); await sleep(4000);
-      const cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim();
-      press('^Processes$', 'link'); await sleep(4000);
-      const procPage = atspi('tree dyno 80').stdout;
+      // Both reads wait for their text (the page and the card appear a little after the window under Rosetta).
+      let cardTxt = '';
+      for (let i = 0; i < 4 && !cardTxt; i++) { cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim(); if (!cardTxt) { press('^File$', 'menu item'); await sleep(1000); press('^Settings…$', 'menu item'); await sleep(5000); } }
+      press('^Processes$', 'link');
+      let procPage = '';
+      for (let i = 0; i < 10 && !/Processes\s+\d+ processes/.test(procPage); i++) { await sleep(3000); procPage = atspi('tree dyno 80').stdout; }
       steps.push(result('Restart check: card and a helper reading after the reboot', [judgeCard(cardTxt), { ok: /Read by the administrator helper/i.test(procPage), detail: /Read by the administrator helper/i.test(procPage) ? 'Processes shows "Read by the administrator helper"' : 'Processes does not show the helper chip after the reboot' }], [cardTxt], 'card On and a reading works'));
       void t0;
     }

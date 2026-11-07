@@ -39,7 +39,7 @@ export function macSwapPrimitives({ guest, gui, check, share, bundle, beforeDmg 
       const r = await exec(`hdiutil detach /tmp/vmsmoke-swap >/dev/null 2>&1; mkdir -p /tmp/vmsmoke-swap; hdiutil attach -nobrowse -readonly -mountpoint /tmp/vmsmoke-swap ${sq(`${share}/${afterDmg}`)} >/dev/null 2>&1; defaults read /tmp/vmsmoke-swap/*.app/Contents/Info CFBundleShortVersionString; hdiutil detach /tmp/vmsmoke-swap >/dev/null 2>&1`);
       return versionOf(r.stdout);
     },
-    async buildId() { return (await exec(`shasum -a 256 ${sq(bin('dyno-agent'))} | cut -c1-64`)).stdout.trim() || null; },
+    async buildId() { return (await exec(`shasum -a 256 ${sq(bin('dyno-agent'))} ${sq(bin('dyno-app'))} | shasum -a 256 | cut -c1-64`)).stdout.trim() || null; },
     async installNew() { await install(afterDmg); return guestNowMs(exec); }, // over the RUNNING older build: no quit first
     async openApp() { await exec(`open -a ${sq(bundle)}`); },
     async agentVersion() { return versionOf((await exec(`${sq(bin('dyno-agent'))} status 2>&1`)).stdout); },
@@ -60,7 +60,8 @@ export function linuxSwapPrimitives({ exec, sleep, now, oldDeb, newDeb, startApp
       for (let i = 0; i < 20 && !active; i++) { active = (await exec('systemctl is-active dyno-helper.service')).stdout.trim() === 'active'; if (!active) await sleep(3000); }
       return { oldVersion: versionOf((await exec(`dpkg-query -W -f='\${Version}\\n' dyno`)).stdout), helperWasOn: active };
     },
-    async buildId() { return (await exec('sha256sum /usr/bin/dyno-agent | cut -c1-64')).stdout.trim() || null; },
+    // One id for the three binaries (a build can change the app or the helper and leave the agent file alone).
+    async buildId() { return (await exec('sha256sum /usr/bin/dyno-agent /usr/bin/dyno-app /usr/bin/dyno-helper | sha256sum | cut -c1-64')).stdout.trim() || null; },
     async newVersion() { return versionOf((await exec(`dpkg-deb -f ${sq(newDeb)} Version`)).stdout); },
     async installNew() { const r = await exec(`sudo DEBIAN_FRONTEND=noninteractive dpkg -i ${sq(newDeb)} 2>&1 | tail -3`); if (r.code !== 0) throw new Error(`dpkg -i of the new .deb failed: ${r.stdout.trim().slice(-120)}`); return guestNowMs(exec); },
     async openApp() { await startApp(); },

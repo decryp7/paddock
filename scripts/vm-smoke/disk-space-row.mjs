@@ -74,6 +74,7 @@ export async function diskSpaceStep({ exec, sleep, now, adapter }) {
     const disks = await read();
     if (!disks) throw new Error('dyno status --json gave no disk list (is Dyno running?)');
     // The system volume: a preferred name when Dyno lists it, else the largest volume it lists.
+    if (!volumeName && adapter.resolveVolume) volumeName = await adapter.resolveVolume(exec, disks).catch(() => undefined);
     if (!volumeName) volumeName = disks.find((x) => (adapter.preferNames ?? []).includes(x.name))?.name ?? [...disks].sort((a, b) => b.totalBytes - a.totalBytes)[0]?.name;
     const statusText = (await exec(adapter.statusTextCmd)).stdout;
     const os = await adapter.osFree(exec);
@@ -110,6 +111,8 @@ export function unixAdapter({ os, dyno, volumeName = undefined, tmp = '/var/tmp/
       }
       return { bytes: num((await exec(`df -B1 --output=avail / | tail -1`)).stdout), source: 'df -B1 (Files app)' };
     },
+    // Linux: Dyno names a volume by its device (/dev/vda1); the system volume is the source of / (the largest one can be a host share such as `rosetta`).
+    async resolveVolume(exec, disks) { if (os !== 'linux') return undefined; const src = (await exec('findmnt -no SOURCE /')).stdout.trim().split('\n').at(0); return disks.find((d) => d.name === src)?.name; },
     async osAlt(exec) { return os === 'macos' ? { bytes: num((await exec(`df -k / | tail -1 | awk '{print $4*1024}'`)).stdout), source: 'df' } : { bytes: num((await exec(`stat -f -c '%a*%S' / | bc`)).stdout), source: 'stat -f' }; },
   };
 }
