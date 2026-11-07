@@ -1,5 +1,5 @@
 //! How this process was started and where the app may register itself to start again: the pure parts of "start at login"
-//! that every app with a login item shares (moved from Dyno's `login_item.rs`). The macOS Apple Event itself is read by
+//! that every app with a login item shares (first written in Dyno's start-at-login code, now removed from it). The macOS Apple Event itself is read by
 //! [`crate::apple_event`]; nothing here touches the OS, so every OS runs these tests.
 
 use std::path::Path;

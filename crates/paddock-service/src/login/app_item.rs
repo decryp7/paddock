@@ -91,25 +91,35 @@ impl AppItem<'_> {
     /// The item this OS uses, for the program `exe` (the app passes `std::env::current_exe()`), reading the environment
     /// through `env` (the app passes `std::env::var_os`) and writing through `sys`. An item that cannot be made is an
     /// [`UnavailableItem`] that says why at the first change.
-    #[cfg_attr(
-        any(target_os = "macos", windows),
-        allow(unused_variables, reason = "each OS uses only some of the inputs")
-    )]
     pub fn for_this_os(
         &self,
         exe: std::io::Result<PathBuf>,
         env: &dyn Fn(&str) -> Option<OsString>,
         sys: Box<dyn System>,
     ) -> Box<dyn Autostart> {
+        self.pick(exe, env, sys).into_autostart()
+    }
+
+    /// [`Self::for_this_os`] before it is boxed, so a test can tell which item was picked without touching the OS.
+    #[cfg_attr(
+        any(target_os = "macos", windows),
+        allow(unused_variables, reason = "each OS uses only some of the inputs")
+    )]
+    fn pick(
+        &self,
+        exe: std::io::Result<PathBuf>,
+        env: &dyn Fn(&str) -> Option<OsString>,
+        sys: Box<dyn System>,
+    ) -> Picked {
         #[cfg(target_os = "macos")]
         {
-            Box::new(super::MainAppItem::new())
+            Picked::MainApp(super::MainAppItem::new())
         }
         #[cfg(windows)]
         {
             match self.windows_run(exe, sys, Box::new(super::ProcessElevation)) {
-                Ok(item) => Box::new(item),
-                Err(why) => Box::new(UnavailableItem(why)),
+                Ok(item) => Picked::Run(item),
+                Err(why) => Picked::Unavailable(UnavailableItem(why)),
             }
         }
         #[cfg(not(any(target_os = "macos", windows)))]
@@ -119,9 +129,38 @@ impl AppItem<'_> {
                 exe,
                 sys,
             ) {
-                Ok(item) => Box::new(item),
-                Err(why) => Box::new(UnavailableItem(why)),
+                Ok(item) => Picked::Xdg(item),
+                Err(why) => Picked::Unavailable(UnavailableItem(why)),
             }
+        }
+    }
+}
+
+/// The item [`AppItem::pick`] chose on this OS.
+enum Picked {
+    #[cfg(target_os = "macos")]
+    MainApp(super::MainAppItem),
+    #[cfg(windows)]
+    Run(UserRunEntry),
+    #[cfg(not(any(target_os = "macos", windows)))]
+    Xdg(XdgAutostart),
+    #[cfg_attr(
+        target_os = "macos",
+        allow(dead_code, reason = "macOS always has its main-app item")
+    )]
+    Unavailable(UnavailableItem),
+}
+
+impl Picked {
+    fn into_autostart(self) -> Box<dyn Autostart> {
+        match self {
+            #[cfg(target_os = "macos")]
+            Self::MainApp(item) => Box::new(item),
+            #[cfg(windows)]
+            Self::Run(item) => Box::new(item),
+            #[cfg(not(any(target_os = "macos", windows)))]
+            Self::Xdg(item) => Box::new(item),
+            Self::Unavailable(item) => Box::new(item),
         }
     }
 }
@@ -273,6 +312,31 @@ mod tests {
             none.set(true),
             Err("the home folder or the app's folder cannot be found".to_string())
         );
+    }
+
+    /// macOS picks `SMAppService.mainApp` whatever it is given (a missing program, no environment); nothing is registered.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_picks_the_main_app_item() {
+        let picked = DEMO.pick(missing(), &|_| None, Box::new(FakeSystem::new()));
+        assert!(matches!(picked, Picked::MainApp(_)));
+        // Boxing keeps it (the trait object is what the app holds); set() is never called here (ER-14).
+        drop(picked.into_autostart());
+    }
+
+    #[cfg(not(any(target_os = "macos", windows)))]
+    #[test]
+    fn elsewhere_the_pick_is_the_autostart_file_or_the_reason() {
+        let env = |k: &str| (k == "HOME").then(|| OsString::from("/home/u"));
+        let sys = || Box::new(FakeSystem::new());
+        assert!(matches!(
+            DEMO.pick(Ok("/opt/demo/demo-app".into()), &env, sys()),
+            Picked::Xdg(_)
+        ));
+        assert!(matches!(
+            DEMO.pick(missing(), &env, sys()),
+            Picked::Unavailable(_)
+        ));
     }
 
     #[cfg(windows)]
