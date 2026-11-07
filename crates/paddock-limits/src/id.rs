@@ -97,6 +97,13 @@ impl LimitId {
         with_table(|t| t.parse(key)).map(Self)
     }
 
+    /// Whether `key` is the id of a registered row (see [`LimitId::register`]): such an id always decodes, and is not
+    /// counted against the bound on unknown ones.
+    #[must_use]
+    pub fn is_registered(key: &str) -> bool {
+        with_table(|t| t.known.contains(key))
+    }
+
     /// Makes the ids of `registry` known to [`LimitId::parse`] (idempotent). An app or crate calls it once at start-up, before
     /// it decodes anything; the built-in `bounded.cuts` row is always known.
     pub fn register(registry: &crate::Registry) {

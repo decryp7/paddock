@@ -143,3 +143,12 @@ fn scope_words() {
         ["file", "source", "import", "plugin", "query", "process"]
     );
 }
+
+#[test]
+fn a_registered_id_is_known_and_an_unknown_one_is_not() {
+    assert!(LimitId::is_registered("bounded.cuts"));
+    assert!(!LimitId::is_registered("never.registered.anywhere"));
+    // Parsing an unknown id interns it but does not register it.
+    LimitId::parse("only.interned").unwrap();
+    assert!(!LimitId::is_registered("only.interned"));
+}
