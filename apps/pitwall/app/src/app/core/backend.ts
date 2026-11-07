@@ -197,6 +197,8 @@ export interface PitwallBackend {
   quitApp(stopServing: boolean, remember: boolean): Promise<void>;
   /** A quit asked for while no window was open is waiting for the dialog: true once. */
   takeQuitAsk(): Promise<boolean>;
+  /** Whether this build has the Playground's chat (Rust decides: the `chat` feature, until ADR 0049's switches). */
+  chatEnabled(): Promise<boolean>;
   /** The app asks the open window to show the "When you quit" dialog. */
   onQuitAsk(handler: () => void): Unsubscribe;
   autostart(): Promise<boolean>;

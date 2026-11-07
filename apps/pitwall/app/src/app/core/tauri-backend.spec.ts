@@ -85,6 +85,7 @@ const TABLE: [string, (b: PitwallBackend) => Promise<unknown>, string, Record<st
   ['packs without a tag', (b) => b.packs(), 'packs', { tag: null }],
   ['quitApp', (b) => b.quitApp(true, false), 'quit_app', { stopServing: true, rememberChoice: false }],
   ['takeQuitAsk', (b) => b.takeQuitAsk(), 'take_quit_ask', undefined],
+  ['chatEnabled', (b) => b.chatEnabled(), 'chat_enabled', undefined],
   ['removeLeftover', (b) => b.removeLeftover('pack-llamafile'), 'remove_leftover', { id: 'pack-llamafile' }],
   ['retryEngineSetup', (b) => b.retryEngineSetup(), 'retry_engine_setup', undefined],
   ['installBuild', (b) => b.installBuild('cuda-13'), 'install_build', { buildId: 'cuda-13' }],

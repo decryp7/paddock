@@ -112,7 +112,7 @@ const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
 /** The calls the desktop app answers itself, without the server (they keep working when the server is down). */
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
-  'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk',
+  'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -153,6 +153,8 @@ export interface MockOptions {
   noLeftovers?: boolean;
   /** The app asked to quit with "Ask each time" set (the question dialog opens). */
   quitAsk?: boolean;
+  /** This build has the Playground's chat (default: yes; `?mock-nochat` plays a build without it). */
+  chat?: boolean;
   /** What the tray popup's widgets show: the engine's recorded output for a scenario (default: `demo`, or `empty` / `down` with those flags). */
   popover?: PopoverScenario;
 }
@@ -208,6 +210,7 @@ export class MockBackend implements PitwallBackend {
   private updateHidden_ = new Set<string>();
   private cache_: { responses: number; embeddings: number } = { responses: 184, embeddings: 3412 };
   private updateChecked_: { at: number; message: string } | null = null;
+  private readonly chat_: boolean;
 
   constructor(options: MockOptions = {}) {
     this.now = options.now ?? (() => Date.now());
@@ -219,6 +222,7 @@ export class MockBackend implements PitwallBackend {
     this.popoverScenario = options.popover ?? (options.serverDown ? 'down' : options.empty ? 'empty' : 'demo');
     if (options.modelUpdates) this.updateNotices_ = demoUpdateNotices(this.now());
     if (options.quitAsk) this.quitAskPending = true;
+    this.chat_ = options.chat ?? true;
     if (options.installing) {
       // The catalog's suggested build (cuda-13 at its pinned release, its download size, named as the server names it): the first
       // start installs exactly that.
@@ -1395,6 +1399,10 @@ export class MockBackend implements PitwallBackend {
         this.emit({ kind: 'server', server: clone(this.server) });
       }
     });
+  }
+
+  chatEnabled(): Promise<boolean> {
+    return this.reply('chatEnabled', () => this.chat_);
   }
 
   takeQuitAsk(): Promise<boolean> {

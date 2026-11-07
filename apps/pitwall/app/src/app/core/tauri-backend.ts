@@ -399,6 +399,9 @@ export class TauriBackend implements PitwallBackend {
   takeQuitAsk(): Promise<boolean> {
     return this.run('take_quit_ask');
   }
+  chatEnabled(): Promise<boolean> {
+    return this.run('chat_enabled');
+  }
   onQuitAsk(handler: () => void): Unsubscribe {
     let stopped = false;
     let unlisten: (() => void) | null = null;

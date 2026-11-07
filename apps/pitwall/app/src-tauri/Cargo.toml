@@ -61,6 +61,11 @@ tauri-plugin-updater = { version = "2.14", default-features = false, features = 
 # admin key; admin.key is the fallback.
 keyring = "4.2"
 
+[features]
+# The Playground's chat (ADR 0023), temporary until ADR 0049's switches: on for the internal proof-of-concept build
+# (`cargo tauri build --features chat`), off by default, so the release workflow builds without it.
+chat = []
+
 [target.'cfg(windows)'.dependencies]
 # Asking the Service Control Manager whether the service is installed and running (no rights needed).
 windows-service = "0.8"

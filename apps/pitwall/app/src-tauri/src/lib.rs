@@ -11,6 +11,7 @@
 
 pub mod app_commands;
 pub mod app_state;
+pub mod chat_switch;
 pub mod commands;
 pub mod credentials;
 pub mod dialogs;
@@ -121,6 +122,7 @@ paddock_commands::command_table! {
     Query [WINDOW] => commands::request_content,
     Mutation [WINDOW] limit 9 * paddock_commands::MIB => commands::chat,
     Mutation [WINDOW] => commands::chat_cancel,
+    Query [WINDOW] => chat_switch::chat_enabled,
     Query [WINDOW] => commands::benchmarks,
     Query [WINDOW] => commands::settings,
     Mutation [WINDOW] => commands::save_settings,

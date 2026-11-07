@@ -15,6 +15,7 @@ export const APP_COMMANDS = {
   cancel_job: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   chat: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 9437184 },
   chat_cancel: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+  chat_enabled: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   clear_cache: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   create_app: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   create_key: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
