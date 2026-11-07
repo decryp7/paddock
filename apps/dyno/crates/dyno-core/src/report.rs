@@ -699,7 +699,7 @@ mod tests {
         assert!(md.contains("Health score 80 (+10 against a week ago)."));
         assert!(md.contains("Recorded scores, oldest first: 70, 80."));
         assert!(md.contains("| <b>Evil\\|App</b> | 12.5% | 2.0 GB |"));
-        assert!(md.contains("- C:: 21.5 GB free of 536.9 GB, full in about 12 days"));
+        assert!(md.contains("- C:: 21 GB free of 537 GB, full in about 12 days"));
         assert!(md.contains("not filling up") && md.contains("not enough history for a forecast"));
         assert!(md.contains("1970-01-01 05:00 Warning: Issue 5 (detail)"));
     }

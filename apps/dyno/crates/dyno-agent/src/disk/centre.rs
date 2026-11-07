@@ -432,6 +432,31 @@ pub struct DiskCentre {
     saved_on: std::sync::atomic::AtomicBool,
 }
 
+/// A listing or reading slower than this is worth an info line even when nothing changed.
+const SLOW_LOG_MS: u128 = 500;
+
+/// Info when something changed or the call was slow, debug otherwise (the ticker runs every minute for the life of the agent).
+fn log_level(changed: bool, ms: u128) -> log::Level {
+    if changed || ms > SLOW_LOG_MS {
+        log::Level::Info
+    } else {
+        log::Level::Debug
+    }
+}
+
+/// What a log may say about a volume: its kind and a short hash of its id, never the id, the name or the share.
+fn fingerprint(v: &Volume) -> String {
+    use std::hash::{Hash, Hasher};
+    let kind = match v.location {
+        VolumeLocation::Internal => "internal",
+        VolumeLocation::External { .. } => "external",
+        VolumeLocation::Network { .. } => "network",
+    };
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.id.hash(&mut h);
+    format!("{kind}#{:04x}", h.finish() & 0xffff)
+}
+
 /// Whether the free space of a volume moved by more than 1% of its capacity between two readings.
 fn moved(old: &Volume, new: &Volume) -> bool {
     match (old.free, new.free, new.capacity.or(old.capacity)) {
@@ -556,11 +581,14 @@ impl DiskCentre {
     /// since they were last read; every [`RELIST_EVERY`]th time the mounts are listed again instead. Never on a request path.
     pub fn tick(self: &Arc<Self>) {
         let interval_ms = self.space_secs.load(Ordering::Relaxed) * 1000;
-        if self.age_ms().is_some_and(|age| age < interval_ms) {
+        // Until the first listing has finished there is nothing to read, and the start listing must be the only one.
+        let Some(age) = self.age_ms() else { return };
+        if age < interval_ms {
             return;
         }
         if self.space_ticks.fetch_add(1, Ordering::SeqCst) % RELIST_EVERY == RELIST_EVERY - 1 {
-            self.refresh_as("timer");
+            // On a thread of its own and inside the single-flight guard, like every other listing.
+            self.refresh_in_background_for("timer");
         } else {
             self.read_space("timer");
         }
@@ -634,14 +662,20 @@ impl DiskCentre {
             (changed, known.iter().map(|l| self.stamped(l.volume.clone())).collect::<Vec<_>>())
         };
         *lock(&self.space_at) = Some(now);
-        log::info!(
-            "disk space read: trigger={trigger} volumes={} ms={} ticket={ticket} changed={changed}",
-            volumes.len(),
-            began.elapsed().as_millis()
+        let ms = began.elapsed().as_millis();
+        log::log!(
+            log_level(changed, ms),
+            "disk space read: trigger={trigger} volumes={} ms={ms} ticket={ticket} changed={changed}",
+            volumes.len()
         );
         for (id, read) in &reads {
             if read.is_none() {
-                log::warn!("disk space not answered: volume={id} trigger={trigger}");
+                // The fingerprint, never the name or the share: a label can be a person's.
+                let who = listed
+                    .iter()
+                    .find(|l| &l.volume.id == id)
+                    .map_or_else(|| "unknown".to_string(), |l| fingerprint(&l.volume));
+                log::warn!("disk space not answered: volume={who} trigger={trigger}");
             }
         }
         if changed {
@@ -714,10 +748,11 @@ impl DiskCentre {
             *lock(&self.space_at) = Some(now);
             changed
         };
-        log::info!(
-            "disk volumes listed: trigger={trigger} count={} ms={} ticket={ticket} changed={changed}",
-            listed.len(),
-            began.elapsed().as_millis()
+        let ms = began.elapsed().as_millis();
+        log::log!(
+            log_level(changed, ms),
+            "disk volumes listed: trigger={trigger} count={} ms={ms} ticket={ticket} changed={changed}",
+            listed.len()
         );
         if changed {
             self.sink
@@ -1670,6 +1705,24 @@ mod tests {
         assert_eq!(at(301_000), Freshness::Fresh, "the interval is the Setting's");
     }
 
+    #[test]
+    fn routine_readings_log_at_debug_and_changes_or_slow_ones_at_info() {
+        assert_eq!(log_level(false, 3), log::Level::Debug);
+        assert_eq!(log_level(true, 3), log::Level::Info);
+        assert_eq!(log_level(false, SLOW_LOG_MS + 1), log::Level::Info);
+    }
+
+    #[test]
+    fn a_volume_is_logged_by_kind_and_fingerprint_never_by_its_id_or_name() {
+        let fs = Arc::new(FakeFs::new());
+        let mut v = vol("/Volumes/Alex's Backup", &fs.root(), net("nas.alex.local")).volume;
+        v.name = "Alex's Backup".into();
+        let who = fingerprint(&v);
+        assert!(who.starts_with("network#") && who.len() == "network#".len() + 4, "{who}");
+        assert!(!who.contains("Alex") && !who.contains("nas"));
+        assert_eq!(who, fingerprint(&v), "stable, so lines about one volume can be followed");
+    }
+
     /// The ticker reads the figures at the interval, with nobody asking.
     #[test]
     fn space_is_read_again_once_the_interval_has_passed() {
@@ -1707,8 +1760,67 @@ mod tests {
         lock(&r.lister.0).push(vol("W", &fs.root(), VolumeLocation::External { bus: None }));
         r.clock.0.store(5 * 60_000, Ordering::SeqCst);
         r.centre.tick();
-        assert_eq!(listings(), 2, "the fifth tick lists");
+        wait_listings(&r, 2);
+        assert_eq!(listings(), 2, "the fifth tick lists, on a thread of its own");
         assert_eq!(r.centre.cached_volumes().unwrap().len(), 2);
+    }
+
+    /// Before the first listing has finished the ticker has nothing to read and starts nothing: the start listing is the only one.
+    #[test]
+    fn a_tick_before_the_first_listing_has_finished_does_nothing() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        for i in 1..=6u64 {
+            r.clock.0.store(i * 60_000, Ordering::SeqCst);
+            r.centre.tick();
+        }
+        assert_eq!(
+            (r.lister.1.load(Ordering::SeqCst), r.lister.3.load(Ordering::SeqCst)),
+            (0, 0),
+            "no listing, no reading"
+        );
+        assert!(!r.centre.refreshing.load(Ordering::SeqCst));
+    }
+
+    /// While the start listing is still running (held), five ticks do not run a second listing alongside it.
+    #[test]
+    fn ticks_do_not_list_beside_a_start_listing_that_is_still_running() {
+        let fs = Arc::new(FakeFs::new());
+        let (tx, asked) = std::sync::mpsc::channel();
+        let hold = Gate::new();
+        let lister = Arc::new(Overlapping {
+            calls: AtomicUsize::new(0),
+            hold: hold.clone(),
+            first_asked: Mutex::new(tx),
+            old: vec![vol("OLD", &fs.root(), VolumeLocation::Internal)],
+            new: vec![vol("NEW", &fs.root(), VolumeLocation::Internal)],
+        });
+        let clock = Arc::new(Manual::default());
+        let centre = Arc::new(DiskCentre::new(
+            fs.clone(),
+            lister.clone(),
+            Arc::new(Events::default()),
+            clock.clone(),
+            Arc::new(Access::default()),
+            8,
+            ScanLimits::default(),
+        ));
+        centre.refresh_in_background();
+        asked.recv().unwrap();
+        for i in 1..=6u64 {
+            clock.0.store(i * 60_000, Ordering::SeqCst);
+            centre.tick();
+        }
+        assert_eq!(lister.calls.load(Ordering::SeqCst), 1, "only the start listing asked the system");
+        hold.open();
+        let began = std::time::Instant::now();
+        while centre.refreshing.load(Ordering::SeqCst) {
+            assert!(
+                began.elapsed() < std::time::Duration::from_secs(60),
+                "the start listing never ended"
+            );
+            std::thread::yield_now();
+        }
     }
 
     /// A share that stops answering keeps its last figures and time, marked not answering.

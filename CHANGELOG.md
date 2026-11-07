@@ -4,6 +4,11 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: storage sizes (files and disks) are decimal; `formatStorage`
+- New `formatStorage` in `@decryp7/paddock-ui/format`: sizes of disks, volumes and files in decimal steps (1000), as Finder shows them ("995 GB", "4 TB", "12 bytes"). `formatBytes` stays binary (1024) for memory and transfer. Its case table (`format/src/storage-cases.json`) is read by Dyno's engine tests too.
+- Breaking (before v1): `formatBytes` is removed from `@decryp7/paddock-ui/shell/about` and `@decryp7/paddock-ui/shell/diagnostics`; both export `formatStorage` instead (diagnostics' private decimal copy is gone). `floorBytes` of `shell/storage` counts in decimal.
+- Sizes now decimal in the shared shell: the update download size (about), the problem-report bundle size (diagnostics), the Storage page and its confirm dialog, the Activity page (undo), and a job's byte counters (`formatBytes` of `SuJob`'s job view). Apps with their own private size formatters (Debrief, Pitcrew, Spotter) are unchanged until the family switch.
+
 ### `paddock-service`: the manager reads an injected clock
 - New `Manager::with_clock(Arc<dyn Clock>)` and `Manager::clock()` (`paddock_health::Clock`, the real `SystemClock` by default): the waits, the repair notice and the register stamp read it, so a test or a model never touches the system's clocks (a clock read costs 13 to 25 microseconds on some virtual machines).
 - Breaking (before v1): `RepairTracker::start`, `finish` and `current` take a `Duration`, a reading of the caller's monotonic clock, instead of an `Instant`; `repair::Bounds` loses `now` and gains `clock` (the stamp is `repair::start_time_of(clock.wall())`); new `repair::start_time_of(SystemTime) -> StartTime`.

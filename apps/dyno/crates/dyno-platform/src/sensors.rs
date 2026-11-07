@@ -65,6 +65,11 @@ pub struct SysinfoSensors {
     temperatures: Reading<Vec<Temperature>>,
 }
 
+/// Keeps only the mounts in `listed` in the space map.
+fn prune_space(space: &mut std::collections::HashMap<String, (u64, u64)>, listed: &[String]) {
+    space.retain(|mount, _| listed.contains(mount));
+}
+
 /// The reason given when no temperature sensor is visible.
 pub const NO_TEMPERATURES: &str = "This computer reports no temperature sensors";
 /// The reason given for fans (sysinfo reads none).
@@ -184,6 +189,8 @@ impl SysinfoSensors {
                 removable: d.is_removable(),
             });
         }
+        // A volume that is no longer listed (an unplugged drive) does not stay in the map for the life of the agent.
+        prune_space(&mut self.space, &seen);
         let io = DiskIo {
             read_bps: rate(read, secs),
             write_bps: rate(written, secs),
@@ -309,6 +316,13 @@ fn volume_name(mount: &str, label: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_space_map_forgets_volumes_that_are_no_longer_listed() {
+        let mut space = std::collections::HashMap::from([("/".to_string(), (10, 5)), ("/Volumes/usb".to_string(), (20, 9))]);
+        prune_space(&mut space, &["/".to_string()]);
+        assert_eq!(space.keys().collect::<Vec<_>>(), ["/"]);
+    }
 
     #[test]
     fn helpers() {
