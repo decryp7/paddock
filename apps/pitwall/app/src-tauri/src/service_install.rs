@@ -1,7 +1,7 @@
 //! Registering the Pitwall server with the OS from the app. Elevation and approval are always the OS's own: UAC on
 //! Windows (the installer does this once; the app can repeat it), the Login Items approval on macOS (`SMAppService`
-//! with the launch agent inside the app bundle); on Linux nothing is elevated (a systemd user unit written by
-//! `pitwall-server install`). Pitwall never asks for or handles a password. Adapted from Pitcrew's service_install.
+//! with the launch agent inside the app bundle); on Linux nothing is elevated (a systemd user unit). All three go through
+//! the shared manager. Pitwall never asks for or handles a password.
 
 use crate::commands::SharedClient;
 use paddock_service::{RepairOutcome, ServiceStatus, Started};
@@ -166,120 +166,16 @@ pub fn os_state_of(s: &ServiceStatus) -> OsState {
     }
 }
 
-#[cfg(windows)]
 mod imp {
-    //! SCM queries are safe wrappers; elevation is `ShellExecuteExW` with the "runas" verb, the one unsafe call.
-    #![allow(unsafe_code)]
-
-    use super::*;
-    use windows::core::HSTRING;
-    use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-    use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
-    use windows::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW};
-    use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
-    use windows_service::service::{ServiceAccess, ServiceState};
-    use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
-
-    /// The service's name in the Service Control Manager (`pitwall_server::service::spec::WINDOWS_SERVICE_NAME`).
-    const SERVICE_NAME: &str = "Pitwall";
-
-    /// Whether the service is registered.
-    pub fn os_state(_client: &SharedClient) -> OsState {
-        let Ok(manager) = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT) else {
-            return OsState {
-                installed: false,
-                message: Some("the Service Control Manager cannot be asked".into()),
-                ..OsState::default()
-            };
-        };
-        match manager.open_service(SERVICE_NAME, ServiceAccess::QUERY_STATUS) {
-            Ok(s) => {
-                let running = s
-                    .query_status()
-                    .map(|st| st.current_state == ServiceState::Running)
-                    .unwrap_or(false);
-                OsState {
-                    installed: true,
-                    message: (!running).then(|| "installed but not running; Windows restarts it, or start it from Services".to_string()),
-                    ..OsState::default()
-                }
-            }
-            Err(_) => OsState::default(),
-        }
-    }
-
-    /// Runs `pitwall-server <verb>` with Windows' elevation prompt and waits for it (two minutes at most).
-    fn elevated(verb: &str) -> Result<(), CommandError> {
-        const ERROR_CANCELLED: i32 = 1223;
-        let exe = server_exe()?;
-        let op = HSTRING::from("runas");
-        let file = HSTRING::from(exe.as_os_str());
-        let params = HSTRING::from(verb);
-        let mut info = SHELLEXECUTEINFOW {
-            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-            fMask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC,
-            lpVerb: windows::core::PCWSTR(op.as_ptr()),
-            lpFile: windows::core::PCWSTR(file.as_ptr()),
-            lpParameters: windows::core::PCWSTR(params.as_ptr()),
-            nShow: SW_HIDE.0,
-            ..Default::default()
-        };
-        // SAFETY: every pointer in `info` refers to an HSTRING that outlives the call.
-        match unsafe { ShellExecuteExW(&mut info) } {
-            Ok(()) => {}
-            Err(e) if e.code().0 & 0xFFFF == ERROR_CANCELLED => {
-                return Err(CommandError::new(ErrorCode::Forbidden, "Windows' permission prompt was declined"));
-            }
-            Err(e) => {
-                return Err(CommandError::new(
-                    ErrorCode::Internal,
-                    format!("the server program could not be started: {e}"),
-                ))
-            }
-        }
-        if info.hProcess.is_invalid() {
-            return Ok(());
-        }
-        // SAFETY: a valid process handle we own; waited on and closed once.
-        let code = unsafe {
-            let waited = WaitForSingleObject(info.hProcess, 120_000);
-            let mut code = 1u32;
-            if waited == WAIT_OBJECT_0 {
-                let _ = GetExitCodeProcess(info.hProcess, &mut code);
-            }
-            let _ = CloseHandle(info.hProcess);
-            code
-        };
-        if code == 0 {
-            Ok(())
-        } else {
-            Err(CommandError::new(
-                ErrorCode::Internal,
-                format!("pitwall-server {verb} failed (exit code {code}); the service log in %ProgramData%\\Pitwall\\logs has details"),
-            ))
-        }
-    }
-
-    /// Registers and starts the service (the OS asks the user).
-    pub fn install(_client: &SharedClient) -> Result<(), CommandError> {
-        elevated("install")
-    }
-
-    /// Stops and removes the service.
-    pub fn uninstall(_client: &SharedClient) -> Result<(), CommandError> {
-        elevated("uninstall")
-    }
-}
-
-#[cfg(target_os = "macos")]
-mod imp {
-    //! The launch agent inside the app bundle (`SMAppService`), looked after by the shared manager
-    //! ([`crate::service_manager`]): status, install, repair, removal and the check at every start.
+    //! Every OS goes through the shared manager ([`crate::service_manager`], ADR 0056): the launch agent inside the app bundle
+    //! (`SMAppService`) on macOS, a systemd user unit on Linux and the Windows service, changed through Windows' own prompt
+    //! (the elevated child is `pitwall-server install` or `uninstall`, UAC, never a password), on Windows. Status, install,
+    //! repair, removal and the check at every start are the manager's on all three.
     use super::*;
     use crate::service_manager::{command_error, manager};
     use paddock_service::Timings;
 
-    /// What the OS says about the registration, with the repair's progress and the Login Items switch.
+    /// What the OS says about the registration, with the repair's progress and (macOS) the Login Items switch.
     pub fn os_state(client: &SharedClient) -> OsState {
         match manager(client, Timings::default()) {
             Ok(mut m) => os_state_of(&m.status()),
@@ -291,9 +187,16 @@ mod imp {
     }
 
     /// Opens System Settings > General > Login Items. The user switches the item; Pitwall never does it for them.
+    #[cfg(target_os = "macos")]
     pub fn open_login_items(client: &SharedClient) -> Result<(), CommandError> {
         manager(client, Timings::default())?.open_login_items();
         Ok(())
+    }
+
+    /// Login Items exist on macOS only.
+    #[cfg(not(target_os = "macos"))]
+    pub fn open_login_items(_client: &SharedClient) -> Result<(), CommandError> {
+        Err(CommandError::new(ErrorCode::NotAvailable, "Login Items exist on macOS only"))
     }
 
     /// Registers the service (replacing what is there) and waits for it to answer; the OS asks the user where it must.
@@ -317,101 +220,14 @@ mod imp {
     }
 
     /// The check at every start (rule 24): replaces a stale registration while the service is down and once after every
-    /// version change; never installs unasked, never touches what the user switched off.
+    /// version change; never installs unasked, never touches what the user switched off, and never opens a prompt (a
+    /// mechanism that is not automatic, the Windows service, only offers).
     pub fn on_start(client: &SharedClient, cancel: &AtomicBool) -> Result<Option<Started>, CommandError> {
         Ok(Some(manager(client, Timings::default())?.on_start(cancel)))
     }
 }
 
-#[cfg(not(any(windows, target_os = "macos")))]
-mod imp {
-    //! A systemd **user** service: the app runs `pitwall-server install` / `uninstall` (as the user, no elevation),
-    //! which writes `~/.config/systemd/user/pitwall.service` and runs `systemctl --user`. The server program has the
-    //! timeouts; this side only bounds the wait for it.
-    use super::*;
-    use std::time::Duration;
-
-    const UNIT: &str = "pitwall.service";
-
-    fn unit_file() -> Option<PathBuf> {
-        let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
-        env("XDG_CONFIG_HOME")
-            .filter(|p| p.is_absolute())
-            .or_else(|| env("HOME").map(|h| h.join(".config")))
-            .map(|c| c.join("systemd").join("user").join(UNIT))
-    }
-
-    /// Whether the unit file exists.
-    pub fn os_state(_client: &SharedClient) -> OsState {
-        OsState {
-            installed: unit_file().is_some_and(|p| p.exists()),
-            message: None,
-            ..OsState::default()
-        }
-    }
-
-    /// Runs `pitwall-server <verb>`, waiting at most 90 s; its standard error becomes the message. The wait, the timeout and
-    /// ending the program's whole tree are `paddock_proc`'s (rule 53), not a poll loop here.
-    fn run_verb(verb: &str) -> Result<(), CommandError> {
-        let exe = server_exe()?;
-        let mut cmd = paddock_proc::command(&exe);
-        cmd.arg(verb);
-        let out = paddock_proc::run_bounded(cmd, paddock_proc::Limits::new(Duration::from_secs(90)).max_output(2048))
-            .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the server program could not be run: {e}")))?;
-        match out.outcome {
-            paddock_proc::Outcome::TimedOut => Err(CommandError::new(
-                ErrorCode::Internal,
-                format!("pitwall-server {verb} took too long and was stopped"),
-            )),
-            _ if out.success() => Ok(()),
-            _ => {
-                let message = out.stderr_text();
-                let reason = message.trim();
-                Err(CommandError::new(
-                    ErrorCode::Internal,
-                    if reason.is_empty() {
-                        format!("pitwall-server {verb} failed")
-                    } else {
-                        reason.to_string()
-                    },
-                ))
-            }
-        }
-    }
-
-    /// Registers and starts the service (as the user).
-    pub fn install(_client: &SharedClient) -> Result<(), CommandError> {
-        run_verb("install")
-    }
-
-    /// Stops and removes the service.
-    pub fn uninstall(_client: &SharedClient) -> Result<(), CommandError> {
-        run_verb("uninstall")
-    }
-}
-
-pub use imp::{install, os_state, uninstall};
-
-#[cfg(target_os = "macos")]
-pub use imp::{on_start, open_login_items, repair_blocking};
-
-/// Opens System Settings > General > Login Items, where the user switches the background item on. Only macOS has one.
-#[cfg(not(target_os = "macos"))]
-pub fn open_login_items(_client: &SharedClient) -> Result<(), CommandError> {
-    Err(CommandError::new(ErrorCode::NotAvailable, "Login Items exist on macOS only"))
-}
-
-/// Repair exists on macOS only; elsewhere the service is installed or removed from the app.
-#[cfg(not(target_os = "macos"))]
-pub fn repair_blocking(_client: &SharedClient, _cancel: &AtomicBool) -> Result<RepairOutcome, CommandError> {
-    Err(CommandError::new(ErrorCode::NotAvailable, "Repair exists on macOS only"))
-}
-
-/// The check at every start exists on macOS only (the other systems keep their registration right themselves).
-#[cfg(not(target_os = "macos"))]
-pub fn on_start(_client: &SharedClient, _cancel: &AtomicBool) -> Result<Option<Started>, CommandError> {
-    Ok(None)
-}
+pub use imp::{install, on_start, open_login_items, os_state, repair_blocking, uninstall};
 
 pub use crate::service_manager::repair_step;
 
@@ -419,11 +235,6 @@ pub use crate::service_manager::repair_step;
 mod tests {
     use super::*;
     use paddock_service::{Condition, Mechanism};
-
-    #[cfg(not(target_os = "macos"))]
-    fn client() -> SharedClient {
-        std::sync::Arc::new(crate::server_client::fake::FakeServer::new())
-    }
 
     fn status(condition: Condition, running: bool, can_repair: bool) -> ServiceStatus {
         ServiceStatus {
@@ -504,21 +315,6 @@ mod tests {
             (json["startFailed"].clone(), json["notInLoginItems"].clone()),
             (false.into(), false.into())
         );
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn repair_exists_on_macos_only() {
-        assert_eq!(
-            repair_blocking(&client(), &AtomicBool::new(false)).unwrap_err().code,
-            ErrorCode::NotAvailable
-        );
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    #[test]
-    fn login_items_exist_on_macos_only() {
-        assert_eq!(open_login_items(&client()).unwrap_err().code, ErrorCode::NotAvailable);
     }
 
     #[test]

@@ -7,31 +7,14 @@ use crate::app_state;
 use crate::commands::{forward, SharedClient};
 use paddock_service::backend::Side;
 use paddock_service::render::{launchd_plist, LaunchdProgram};
-use paddock_service::{Manager, ProcessType, RepairTracker, ServiceError, ServiceSpec, StartWait, Timings};
+use paddock_service::{Manager, RepairTracker, ServiceError, StartWait, Timings};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use std::sync::{Arc, OnceLock};
 
-/// The launchd label; the bundled agent's plist is `<label>.plist` (`bundle.macOS.files` in `tauri.macos.conf.json`).
-pub const LABEL: &str = "net.decryptology.pitwall.service";
-
-/// The variable that tells the server it is supervised (it adds the login shell's PATH and watches for updates).
-pub const SUPERVISED_ENV: &str = "PITWALL_SERVICE";
+pub use pitwall_service::{spec, LABEL, SUPERVISED_ENV};
 
 /// What the app is called in messages.
-const APP_NAME: &str = "Pitwall";
-
-/// Pitwall's service; the bundled plist and every other OS file are rendered from it.
-pub fn spec() -> ServiceSpec {
-    ServiceSpec::builder(LABEL, APP_NAME, "pitwall-server")
-        .unit("pitwall")
-        .bundle_id("net.decryptology.pitwall")
-        .display_name("Pitwall server")
-        .description("The Pitwall server: answers the app, the command line and the OpenAI-compatible API on this computer.")
-        .supervised_env(SUPERVISED_ENV)
-        .process_type(ProcessType::Interactive)
-        .build()
-        .unwrap_or_else(|e| unreachable!("Pitwall's own spec is valid: {e}"))
-}
+const APP_NAME: &str = pitwall_service::NAME;
 
 /// The bundled launch agent the app ships (`macos/net.decryptology.pitwall.service.plist`, checked by the app's tests).
 pub fn bundled_plist() -> String {

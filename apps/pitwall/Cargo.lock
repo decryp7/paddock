@@ -3816,6 +3816,7 @@ dependencies = [
  "paddock-window",
  "pitwall-core",
  "pitwall-loopback",
+ "pitwall-service",
  "serde",
  "serde_json",
  "socket2",
@@ -3827,8 +3828,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "webview2-com",
- "windows 0.62.2",
- "windows-service",
  "winreg",
 ]
 
@@ -3906,6 +3905,13 @@ dependencies = [
  "windows 0.62.2",
  "windows-service",
  "zip",
+]
+
+[[package]]
+name = "pitwall-service"
+version = "1.1.0"
+dependencies = [
+ "paddock-service",
 ]
 
 [[package]]

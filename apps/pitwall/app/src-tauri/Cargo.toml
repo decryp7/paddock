@@ -28,6 +28,8 @@ pitwall-loopback = { path = "../../crates/pitwall-loopback" }
 # The shared executor of long operations (ADR 0020, ADR 0024 rule 3): job registry, phases, progress, cancel tokens.
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 paddock-service = { path = "../../../../crates/paddock-service" }
+# What Pitwall's service is (the one ServiceSpec the app and the server both build from).
+pitwall-service = { path = "../../crates/pitwall-service" }
 # Running the server program's install and uninstall verbs bounded (timeout, the tree ended with it): rule 53.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Widget layouts (family ADR 0035): the popup's layout is stored and edited here; its catalogue and values are pitwall-core's.
@@ -62,13 +64,9 @@ tauri-plugin-updater = { version = "2.14", default-features = false, features = 
 keyring = "4.2"
 
 [target.'cfg(windows)'.dependencies]
-# Asking the Service Control Manager whether the service is installed and running (no rights needed).
-windows-service = "0.8"
 # The taskbar's light/dark setting (for the tray icon), read only.
 winreg = "0.56"
 webview2-com = "0.39"
-# Starting `pitwall-server install` with Windows' own elevation prompt (ShellExecuteExW "runas").
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Registering the bundled launch agent with SMAppService (macOS 13+).
