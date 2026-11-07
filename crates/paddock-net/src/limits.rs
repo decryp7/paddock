@@ -1,6 +1,6 @@
 //! The limits of an outgoing request as registry rows (ADR 0019 row 56), and the typed view of the errors they cause.
 
-use crate::{MAX_REDIRECTS, NetError};
+use crate::{DEFAULT_REDIRECTS, MAX_REDIRECTS, NetError};
 use paddock_limits::{LimitExceeded, LimitRow, Quantity, Registry, Remedy, RowValue, Scope};
 
 /// The most body bytes read from an answer (8 MiB unless the policy says otherwise).
@@ -12,10 +12,10 @@ pub const BODY: LimitRow = LimitRow::stop(
     RowValue::ByRequest,
     Remedy::Narrow,
 );
-/// The most redirects followed.
+/// The most redirects followed (5 unless the policy says otherwise, at most 10).
 pub const REDIRECTS: LimitRow = LimitRow::stop(
     "net.redirects",
-    Quantity::Count(MAX_REDIRECTS as u64),
+    Quantity::Count(DEFAULT_REDIRECTS as u64),
     Quantity::Count(0),
     Quantity::Count(MAX_REDIRECTS as u64),
     RowValue::ByRequest,
@@ -37,9 +37,9 @@ impl NetError {
                 Quantity::Bytes(*limit),
                 Scope::Query,
             )),
-            NetError::TooManyRedirects => Some(LimitExceeded::new(
+            NetError::TooManyRedirects(allowed) => Some(LimitExceeded::new(
                 REDIRECTS.id,
-                Quantity::Count(u64::from(MAX_REDIRECTS)),
+                Quantity::Count(u64::from(*allowed)),
                 Scope::Query,
             )),
             _ => None,
@@ -54,7 +54,20 @@ mod tests {
 
     limit_cases! { REGISTRY;
         body_over_the_limit: "net.body_bytes" => stop(got = NetError::TooLarge(8 << 20).limit().unwrap(), limit = Quantity::Bytes(8 << 20), setting = None),
-        too_many_redirects: "net.redirects" => stop(got = NetError::TooManyRedirects.limit().unwrap(), limit = Quantity::Count(10), setting = None),
+        too_many_redirects: "net.redirects" => stop(got = NetError::TooManyRedirects(DEFAULT_REDIRECTS).limit().unwrap(), limit = Quantity::Count(5), setting = None),
+    }
+
+    #[test]
+    fn a_lowered_policy_names_its_own_number_and_the_row_is_the_default() {
+        assert_eq!(
+            NetError::TooManyRedirects(3).limit().unwrap().limit,
+            Quantity::Count(3)
+        );
+        assert_eq!(
+            REDIRECTS.default,
+            Quantity::Count(u64::from(crate::Policy::default().max_redirects))
+        );
+        assert_eq!(REDIRECTS.max, Quantity::Count(u64::from(MAX_REDIRECTS)));
     }
 
     #[test]
