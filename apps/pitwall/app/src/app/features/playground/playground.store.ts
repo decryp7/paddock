@@ -69,7 +69,9 @@ export function applyEvent(pane: Pane, e: PlaygroundEvent): Pane {
   else if (e.kind === 'done') {
     const { kind: _kind, ...stats } = e;
     turns[turns.length - 1] = { ...last, streaming: false, stats };
-  } else turns[turns.length - 1] = { ...last, streaming: false, error: e.error };
+  } else if (e.kind === 'error') turns[turns.length - 1] = { ...last, streaming: false, error: e.error };
+  // Phases, reasoning and tool calls belong to the Chat tab (ADR 0023); Compare is text only and shows none of them.
+  else return pane;
   return { ...pane, turns };
 }
 

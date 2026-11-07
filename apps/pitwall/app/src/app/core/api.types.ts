@@ -760,21 +760,54 @@ export interface RequestContent {
 // ---------------------------------------------------------------------------------------------------------------
 // Playground and benchmarks
 
-export interface PlaygroundMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
+export interface PlaygroundToolCall {
+  id: string;
+  name: string;
+  /** The arguments as JSON text. */
+  arguments: string;
 }
+
+export interface PlaygroundMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  /** The tool calls of an assistant message. */
+  toolCalls?: PlaygroundToolCall[];
+  /** The call a `tool` message answers. */
+  toolCallId?: string;
+}
+
+export interface PlaygroundTool {
+  name: string;
+  description: string;
+  /** A JSON schema object for the arguments. */
+  parameters: Record<string, unknown>;
+}
+
+export type PlaygroundToolChoice = { kind: 'auto' } | { kind: 'none' } | { kind: 'required' } | { kind: 'named'; name: string };
 
 export interface PlaygroundRequest {
   modelId: string;
   messages: PlaygroundMessage[];
   temperature: number;
   maxTokens: number;
+  /** The tools the model may call; none is a plain chat. */
+  tools?: PlaygroundTool[];
+  /** Defaults to `{ kind: 'auto' }`. */
+  toolChoice?: PlaygroundToolChoice;
 }
 
+/** What happens before the first token: waiting for a slot and loading (repeated about once a second), then generating. */
+export type PlaygroundPhase = { kind: 'loading'; elapsedMs: number } | { kind: 'generating' };
+
+export type PlaygroundFinish = 'stop' | 'length' | 'toolCalls' | 'cancelled';
+
 export type PlaygroundEvent =
+  | { kind: 'phase'; phase: PlaygroundPhase }
   | { kind: 'delta'; text: string }
-  | { kind: 'done'; promptTokens: number; completionTokens: number; ttftMs: number; genTps: number; coldStartMs: number | null }
+  | { kind: 'reasoning'; text: string }
+  /** A piece of a tool call; the pieces with one `index` make one call. */
+  | { kind: 'toolCall'; index: number; id: string | null; name: string | null; arguments: string }
+  | { kind: 'done'; finish: PlaygroundFinish; promptTokens: number; completionTokens: number; ttftMs: number; genTps: number; coldStartMs: number | null }
   | { kind: 'error'; error: CommandError };
 
 export interface BenchmarkResult {
