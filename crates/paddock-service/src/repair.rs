@@ -147,6 +147,8 @@ fn stop_for(e: RegisterError) -> Option<RepairOutcome> {
         RegisterError::NeedsElevation => Some(RepairOutcome::NeedsElevation),
         RegisterError::Declined => Some(RepairOutcome::Declined),
         RegisterError::Unavailable(why) => Some(RepairOutcome::Unavailable(why)),
+        // The elevated step may still finish: no second prompt, and the words say it was not stopped.
+        RegisterError::StillRunning(why) => Some(RepairOutcome::Unavailable(why)),
         RegisterError::Other(_) | RegisterError::NotAsWritten(_) => None,
     }
 }

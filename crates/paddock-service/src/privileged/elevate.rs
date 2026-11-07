@@ -45,6 +45,9 @@ pub enum ElevationError {
     NotAuthorized(String),
     /// The prompt's program is missing or cannot run here.
     Unavailable(String),
+    /// The prompt ran and the elevated program had not ended at the ceiling, or the wait on it broke: it was not stopped and
+    /// may still finish. The text says what was seen.
+    StillRunning(String),
     /// A part of the command cannot be passed safely (a control character).
     Invalid(String),
     /// The elevated program ran and failed; the text is its own words.
@@ -69,6 +72,10 @@ impl std::fmt::Display for ElevationError {
             ElevationError::Unavailable(why) => {
                 write!(f, "The system's permission prompt cannot run here: {why}")
             }
+            ElevationError::StillRunning(why) => write!(
+                f,
+                "The install is still running and was not stopped; it may still finish. Look at the helper in Settings again in a few minutes. ({why})"
+            ),
             ElevationError::Invalid(why) => {
                 write!(f, "The install command is not safe to pass on: {why}")
             }
@@ -238,8 +245,8 @@ pub fn run_elevated(
             pkexec_command(program, args).and_then(|c| classify_pkexec(&run_command(sys, &c)?))
         }
         // ELEVATION_TIMEOUT is the elevator's backstop ceiling, not a judge: a program still running then (or a wait that broke)
-        // comes back as an error that says it was not stopped and may still finish, and is reported as Unavailable with
-        // those words, never as Failed (ER-19; before the elevated wait was ported it read as exit code 1, Failed).
+        // comes back as RegisterError::StillRunning and is reported as ElevationError::StillRunning: not a missing prompt and
+        // never Failed (ER-19; before the elevated wait was ported it read as exit code 1, Failed).
         Os::Windows => match elevator.run_elevated(program, args, ELEVATION_TIMEOUT) {
             Ok(0) => Ok(()),
             Ok(code) => Err(ElevationError::Failed {
@@ -247,6 +254,7 @@ pub fn run_elevated(
                 reason: "the elevated program reported an error".into(),
             }),
             Err(RegisterError::Declined) => Err(ElevationError::Declined),
+            Err(RegisterError::StillRunning(why)) => Err(ElevationError::StillRunning(why)),
             Err(RegisterError::NeedsElevation) => Err(ElevationError::NotAuthorized(
                 "Windows refused to elevate".into(),
             )),
@@ -435,22 +443,34 @@ mod tests {
                 .iter()
                 .any(|c| matches!(c, crate::testing::Call::Os(s) if s.starts_with("elevated ")))
         );
-        // The elevated program still runs at the ceiling: not stopped, not failed, said as such.
+        // The elevated program still runs at the ceiling, or the wait on it broke: the prompt did run, so this is neither a
+        // missing prompt nor a failure, and the words say what to do next.
         let program = Path::new("C:\\p\\dyno-helper.exe");
-        elevator.results([crate::port::elevated_result(
-            program,
+        for end in [
             crate::port::ElevatedEnd::StillRunning(ELEVATION_TIMEOUT),
-        )]);
-        match go(&mut sys, &mut elevator) {
-            Err(ElevationError::Unavailable(why)) => {
-                assert!(
-                    why.contains("still running after 10 minutes")
-                        && why.contains("not been stopped"),
-                    "{why}"
-                );
-            }
-            other => panic!("a run still going at the ceiling is not a failure: {other:?}"),
+            crate::port::ElevatedEnd::WaitFailed(6),
+        ] {
+            elevator.results([crate::port::elevated_result(program, end)]);
+            let e = go(&mut sys, &mut elevator).unwrap_err();
+            assert!(
+                matches!(e, ElevationError::StillRunning(_)),
+                "{end:?}: {e:?}"
+            );
+            let shown = e.to_string();
+            assert!(
+                shown.starts_with(
+                    "The install is still running and was not stopped; it may still finish."
+                ) && shown.contains("Look at the helper in Settings again in a few minutes")
+                    && !shown.contains("cannot run here"),
+                "{shown}"
+            );
         }
+        // A prompt program that cannot run stays apart from it.
+        elevator.results([Err(RegisterError::Other("no shell".into()))]);
+        assert!(matches!(
+            go(&mut sys, &mut elevator),
+            Err(ElevationError::Unavailable(_))
+        ));
         // A prompt program that is missing or hangs.
         let mut sys = FakeSystem::new();
         sys.on("pkexec", |_, _| {

@@ -130,6 +130,9 @@ pub enum RegisterError {
     Unavailable(String),
     /// Anything else, in words; worth another try.
     Other(String),
+    /// The elevated step did not end: it still ran at the backstop ceiling, or the wait on it broke. It was not stopped and
+    /// may still finish, so it is neither a failure nor worth another try now (another try would ask the user again).
+    StillRunning(String),
     /// The write reported success, but reading the registration back shows something else (ADR 0054 section 1.1). It
     /// carries what the OS holds; it is never `Ok`.
     NotAsWritten(crate::backend::Inspection),
@@ -151,7 +154,9 @@ impl std::fmt::Display for RegisterError {
             RegisterError::NeedsApproval => f.write_str("macOS needs approval in Login Items"),
             RegisterError::NeedsElevation => f.write_str("administrator rights are needed"),
             RegisterError::Declined => f.write_str("the permission prompt was declined"),
-            RegisterError::Unavailable(why) | RegisterError::Other(why) => f.write_str(why),
+            RegisterError::Unavailable(why)
+            | RegisterError::Other(why)
+            | RegisterError::StillRunning(why) => f.write_str(why),
             RegisterError::NotAsWritten(look) => write!(
                 f,
                 "the registration was written, but reading it back shows registration {:?}, job {:?}{}",
@@ -230,11 +235,11 @@ pub fn wait_in_slices(
 pub fn elevated_result(program: &Path, end: ElevatedEnd) -> Result<i32, RegisterError> {
     match end {
         ElevatedEnd::Exited(code) => Ok(i32::try_from(code).unwrap_or(1)),
-        ElevatedEnd::WaitFailed(code) => Err(RegisterError::Other(format!(
+        ElevatedEnd::WaitFailed(code) => Err(RegisterError::StillRunning(format!(
             "waiting for {} failed (Windows error {code}); it may still be running and was not stopped",
             program.display()
         ))),
-        ElevatedEnd::StillRunning(waited) => Err(RegisterError::Other(format!(
+        ElevatedEnd::StillRunning(waited) => Err(RegisterError::StillRunning(format!(
             "{} was still running after {} minutes and has not been stopped; it may still finish",
             program.display(),
             waited.as_secs() / 60
@@ -378,6 +383,8 @@ mod tests {
             RegisterError::NeedsElevation,
             RegisterError::Declined,
             RegisterError::Unavailable("x".into()),
+            // A run that has not ended is not tried again: that would ask the user a second time.
+            RegisterError::StillRunning("x".into()),
         ] {
             assert!(!e.retryable());
             assert!(!e.to_string().is_empty());
