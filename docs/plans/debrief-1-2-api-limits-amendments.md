@@ -44,6 +44,7 @@ package, **1.4b**, after IP1, on its own branch:
 | I6 | "fuzz target for plugin request bodies" | `paddock-ipc/fuzz` target `plugin_request` (depends on `paddock-plugin-api`), and the nightly job `shared-fuzz` | `nightly.yml` is a shared integration point, so the job is in its own commit |
 | I7 | Re-export `codes` and `cancelled_error` | `paddock_plugin_api::codes`, `ExtCtx::cancelled_error()`. "An example plugin builds with `paddock-plugin-api` as its only platform dependency" is not proven by a separate example crate | Not built in this package |
 | I8 | README: "no app links `paddock-ipc` on `main` yet" | Dyno links it on `main` (by path); the row says so | The plan statement is wrong for Dyno |
+| I9 | (not in the design) | `IpcError` gained a variant, so Dyno's exhaustive match in `apps/dyno/crates/dyno-plugin-host/src/host.rs` changed in the same change (rule 39): `ReplyTooLarge` maps like `TooLarge` to a protocol failure of the plugin. Dyno's agent, cli, plugin-host and plugin-api tests: 458 passed | A shared enum change updates every consumer in the commit that makes it |
 
 ## Review 1 of `479dcff3f`: what changed
 
