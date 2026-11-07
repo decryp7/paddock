@@ -74,7 +74,7 @@ impl std::fmt::Display for ElevationError {
             }
             ElevationError::StillRunning(why) => write!(
                 f,
-                "The install is still running and was not stopped; it may still finish. Look at the helper in Settings again in a few minutes. ({why})"
+                "The elevated step is still running and was not stopped; it may still finish. ({why})"
             ),
             ElevationError::Invalid(why) => {
                 write!(f, "The install command is not safe to pass on: {why}")
@@ -457,10 +457,12 @@ mod tests {
                 "{end:?}: {e:?}"
             );
             let shown = e.to_string();
+            // Neutral words (each app adds its own next step), said once.
             assert!(
                 shown.starts_with(
-                    "The install is still running and was not stopped; it may still finish."
-                ) && shown.contains("Look at the helper in Settings again in a few minutes")
+                    "The elevated step is still running and was not stopped; it may still finish."
+                ) && shown.matches("may still finish").count() == 1
+                    && !shown.contains("Settings")
                     && !shown.contains("cannot run here"),
                 "{shown}"
             );

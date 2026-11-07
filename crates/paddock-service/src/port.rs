@@ -247,11 +247,11 @@ pub fn elevated_result(program: &Path, end: ElevatedEnd) -> Result<i32, Register
     match end {
         ElevatedEnd::Exited(code) => Ok(i32::try_from(code).unwrap_or(1)),
         ElevatedEnd::WaitFailed(code) => Err(RegisterError::StillRunning(format!(
-            "waiting for {} failed (Windows error {code}); it may still be running and was not stopped",
+            "waiting for {} failed (Windows error {code})",
             program.display()
         ))),
         ElevatedEnd::StillRunning(waited) => Err(RegisterError::StillRunning(format!(
-            "{} was still running after {} minutes and has not been stopped; it may still finish",
+            "{} was still running after {} minutes",
             program.display(),
             waited.as_secs() / 60
         ))),
@@ -285,8 +285,9 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
+            // What was seen only: the caller's words say it was not stopped and may still finish, once.
             why.contains("still running after 15 minutes")
-                && why.contains("not been stopped")
+                && !why.contains("may still finish")
                 && !why.contains("failed"),
             "{why}"
         );

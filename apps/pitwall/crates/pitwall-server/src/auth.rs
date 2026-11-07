@@ -168,6 +168,21 @@ impl Auth {
         Err(AuthError::Unauthorized)
     }
 
+    /// Who a request is from, for the request log: the app's id, `pitwall` for the app's own window, `no key` or `unknown
+    /// key`. A read-only look-up (unlike [`Auth::authenticate`], it marks nothing as seen); never the key itself.
+    pub fn caller_label(&self, credential: Option<&str>) -> String {
+        let Some(c) = credential else {
+            return "no key".into();
+        };
+        if keys::constant_time_eq(c, &self.admin) {
+            return "pitwall".into();
+        }
+        lock(&self.apps)
+            .iter()
+            .find(|a| a.keys.iter().any(|k| keys::matches(c, k)))
+            .map_or_else(|| "unknown key".into(), |a| a.id.to_string())
+    }
+
     /// Apply the app's request-rate limit (the window is per app).
     pub fn admit(&self, id: &AppId, per_min: Option<u32>, now: u64) -> Result<(), pitwall_core::limits::Denied> {
         lock(&self.rates).entry(id.clone()).or_default().admit(now, per_min)
@@ -432,6 +447,22 @@ mod tests {
         let admin = std::fs::read_to_string(d.path().join("admin.key")).unwrap();
         assert_eq!(b.authenticate(Some(admin.trim()), false, 1), Ok(Principal::Admin));
         assert!(b.admin_matches(admin.trim()));
+    }
+
+    /// The request log names the caller by a read-only look-up: nothing is marked as seen (ER-27, B4 review P2-5).
+    #[test]
+    fn the_caller_is_named_for_the_log_without_marking_anything() {
+        let (_d, a) = auth();
+        let k = a.create_app("Continue (VS Code)", AppPermissions::default(), 5).unwrap();
+        assert_eq!(a.caller_label(Some(&k.secret)), "continue-vs-code");
+        assert_eq!(a.caller_label(None), "no key");
+        assert_eq!(a.caller_label(Some("pw_nope")), "unknown key");
+        let admin = a.admin.clone();
+        assert_eq!(a.caller_label(Some(&admin)), "pitwall");
+        assert!(
+            lock(&a.apps).iter().all(|app| app.last_seen_at.is_none()),
+            "a log look-up marks nothing as seen"
+        );
     }
 
     #[test]

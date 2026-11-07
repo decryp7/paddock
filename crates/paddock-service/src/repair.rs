@@ -155,7 +155,9 @@ fn stop_for(e: RegisterError) -> Option<RepairOutcome> {
         RegisterError::Declined => Some(RepairOutcome::Declined),
         RegisterError::Unavailable(why) => Some(RepairOutcome::Unavailable(why)),
         // The elevated step may still finish: no second prompt, and the words say it was not stopped.
-        RegisterError::StillRunning(why) => Some(RepairOutcome::Unavailable(why)),
+        RegisterError::StillRunning(why) => Some(RepairOutcome::Unavailable(format!(
+            "The elevated step is still running and was not stopped; it may still finish ({why})."
+        ))),
         RegisterError::Other(_) | RegisterError::NotAsWritten(_) => None,
     }
 }
@@ -1269,6 +1271,15 @@ mod tests {
             (
                 RegisterError::Unavailable("no bus".into()),
                 RepairOutcome::Unavailable("no bus".into()),
+            ),
+            // An elevated step that has not ended stops the repair with its words: another try would ask the user again.
+            (
+                RegisterError::StillRunning(
+                    "the program was still running after 15 minutes".into(),
+                ),
+                RepairOutcome::Unavailable(
+                    "The elevated step is still running and was not stopped; it may still finish (the program was still running after 15 minutes).".into(),
+                ),
             ),
         ] {
             let mut s = Script {

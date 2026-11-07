@@ -30,7 +30,7 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 # The family's log (ER-27, ER-22): one dated CLEF file per process in the app's log folder, redaction, panic hook, crash marker.
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "matched-path"] }
 bytes = "1"
 flate2 = "1"
 futures-util = "0.3"

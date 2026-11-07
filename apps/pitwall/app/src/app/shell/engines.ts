@@ -118,7 +118,7 @@ export function diagnosticsBackend(): DiagnosticsBackend {
       { name: 'logs/pitwall.2026-11-08.log', kind: 'log', bytes: 96_400, summary: '640 log lines, the recent part of pitwall.2026-11-08.log; file contents are never logged' },
       { name: 'logs/pitwall-server.2026-11-08.log', kind: 'log', bytes: 182_400, summary: '1,204 log lines, the recent part of pitwall-server.2026-11-08.log; file contents are never logged' },
       { name: 'logs/pitwall-cli.2026-11-08.log', kind: 'log', bytes: 2_100, summary: '14 log lines, all of pitwall-cli.2026-11-08.log; file contents are never logged' },
-      { name: 'pitwall/settings.toml', kind: 'app', bytes: 640, summary: "The server's settings; passwords, tokens and keys are replaced by ***" },
+      { name: 'pitwall/settings.toml', kind: 'app', bytes: 640, summary: "The server's settings; passwords, tokens and keys are removed" },
       { name: 'pitwall/inventory.json', kind: 'app', bytes: 1_800, summary: 'The engines and model files installed, by name and size (their contents are not in the report)' },
       { name: 'pitwall/server.json', kind: 'app', bytes: 2_400, summary: 'What the Pitwall server says about itself now' },
       { name: 'pitwall/service.json', kind: 'app', bytes: 300, summary: 'How the background service is registered and whether it answers' },

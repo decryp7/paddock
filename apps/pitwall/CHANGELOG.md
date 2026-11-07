@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.1.0] - 2026-10-30
+## [1.1.0] - unreleased
 
 ### Upgrading from 1.0.x
 
@@ -25,13 +25,12 @@ arrive in the app as usual.
   nothing is sent. It holds the system facts, your settings, the recent logs of the app, the server and the command line,
   the server's settings, which engines and model files are installed (names and sizes), and what the server and the
   background service say about themselves. Chats, attachments, presets, keys and the model files themselves are never in
-  it, and keys that reach a log (`pw_…`, `pmk_…`) are replaced by `***`. The Logging settings page sets how much the app
+  it, and keys that reach a log (`pw_…`, `pmk_…`) are removed from it (replaced by `[redacted]`). The Logging settings page sets how much the app
   logs.
 - Long operations are jobs: loading a model, a benchmark, the model update check, installing and removing the background
   service, Repair and the app update run in the background with phase-labelled progress (a growing count when the total is
   unknown), Cancel in every phase, "Stop waiting" when Cancel did not take effect, and no time limit in the window: a job
   that is still running is still working.
-- Offline mode now stops the app update check and install as well as the model update check.
 - The memory footprint of the app and the engines is read through the shared process crate.
 
 ### Fixed
@@ -44,3 +43,9 @@ arrive in the app as usual.
 ### Changed
 
 - The old blocking commands for these operations are gone; the window uses the jobs only.
+
+### Removed
+
+- Offline mode is removed (the family's "no Offline mode", 2026-11-03): Pitwall's AI runs locally, downloads happen only
+  when you ask, and the model update check stays off until you turn it on (ADR 0017). A 1.0 settings file with
+  `network.offline` still loads; the key is dropped on the next save.

@@ -52,7 +52,9 @@ fn patterns() -> &'static Patterns {
         keyed_short: compile(r#"(?i)(\b(?:pass|pw|sig|signature)["']?\s*[:=]\s*["']?)[^\s"',;&]+"#),
         password_line: compile(r#"(?i)(\b(?:password|passwd)\s*:\s*\[redacted\])[ \t]+[^\r\n"']+"#),
         pem: compile(r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"),
-        prefixed: compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|(?:pw|pmk)_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{16,})"),
+        // Pitwall's and the MCP keys have no word boundary before them: they come URL-encoded (`key%3Dpw_...`) or glued to a
+        // name (`app_pw_...`), and their prefix is distinctive enough to match anywhere.
+        prefixed: compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|sk-[A-Za-z0-9_-]{16,})|(?:pw|pmk)_[A-Za-z0-9_-]{8,}"),
     })
 }
 
@@ -167,6 +169,26 @@ mod tests {
         for (input, want) in cases {
             assert_eq!(redact_secrets(&input).0, want, "{input}");
         }
+    }
+
+    /// Regression (Pitwall B4 review): a Pitwall or MCP key right after a word character (URL-encoded in a query, glued to
+    /// a name) kept its value, because the rule began at a word boundary.
+    #[test]
+    fn pitwall_and_mcp_keys_are_removed_wherever_they_start() {
+        for (input, want) in [
+            (
+                "GET /x?key%3Dpw_Zk9Qx2LmZk9Qx2Lm HTTP/1.1",
+                "GET /x?key%3D[redacted] HTTP/1.1",
+            ),
+            ("app_pw_Zk9Qx2LmZk9Qx2Lm", "app_[redacted]"),
+            ("first line\npw_Zk9Qx2LmZk9Qx2Lm", "first line\n[redacted]"),
+            ("mcp=pmk_Q2xpZW50S2V5Rm9y;", "mcp=[redacted];"),
+            ("xpmk_Q2xpZW50S2V5Rm9y", "x[redacted]"),
+        ] {
+            assert_eq!(redact_secrets(input).0, want, "{input}");
+        }
+        // Too short to be a key: left as it is.
+        assert_eq!(redact_secrets("a pw_short b").0, "a pw_short b");
     }
 
     #[test]
