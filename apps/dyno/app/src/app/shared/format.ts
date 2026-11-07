@@ -3,6 +3,8 @@
  * rules here (thresholds, scores and diagnoses come from the engine); only how numbers read.
  */
 
+import { formatStorage as sharedStorage } from '@decryp7/paddock-ui/format';
+
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const;
 
 /** Rounds to a precision that reads well: 3 significant digits below 100, none above (`1.23`, `12.3`, `123`). */
@@ -38,24 +40,15 @@ export function formatBytes(bytes: number | null | undefined): string {
 }
 
 /**
- * Storage sizes (disks, volumes, files), decimal multiples like Finder and the disk makers: `994_662_584_320` → `995 GB`, a "1 TB"
- * disk → `1 TB`. The twin of the shared `formatStorage` for this app's conventions (`B`, sign, `compact`); keep the steps in step.
+ * Storage sizes (disks, volumes, files), decimal multiples like Finder and the disk makers: `994_662_584_320` → `995 GB`. The
+ * numbers come from the family's one formatter (`formatStorage` of `@decryp7/paddock-ui/format`); this adds only the app's
+ * conventions: a dash for nothing, a real minus sign, and `B` for bytes.
  */
 export function formatStorage(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
   const sign = bytes < 0 ? '−' : '';
-  let value = Math.abs(bytes);
-  let unit = 0;
-  while (value >= 1000 && unit < BYTE_UNITS.length - 1) {
-    value /= 1000;
-    unit++;
-  }
-  // 999.9 KB would print "1000 KB": promote it so it reads "1 MB".
-  if (unit > 0 && unit < BYTE_UNITS.length - 1 && compact(value) === '1000') {
-    value /= 1000;
-    unit++;
-  }
-  return `${sign}${unit === 0 ? Math.round(value) : compact(value)} ${BYTE_UNITS[unit]}`;
+  const value = Math.abs(bytes);
+  return `${sign}${value < 1000 ? `${Math.round(value)} B` : sharedStorage(value)}`;
 }
 
 /** A byte delta with an explicit sign: `+12 MB`, `−3.4 GB`, `0 B`. */

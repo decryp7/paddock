@@ -38,7 +38,7 @@ describe('formatStorage', () => {
   });
   it('differs from the binary kind used for memory', () => {
     expect(formatBytes(16 * 1024 ** 3)).toBe('16 GB');
-    expect(formatStorage(16 * 1024 ** 3)).toBe('17.2 GB');
+    expect(formatStorage(16 * 1024 ** 3)).toBe('17 GB');
   });
 });
 

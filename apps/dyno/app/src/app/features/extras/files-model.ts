@@ -1,17 +1,17 @@
 import type { FinderMode, FinderResult, FoundFile } from '../../core/api.types';
 import { formatStorage, plural } from '../../shared/format';
 
-const MIB = 1024 * 1024;
+const MB = 1_000_000;
 
-/** The size filters offered, in MiB (the engine refuses anything under 1 MiB). */
-export const MIN_SIZES: readonly { mib: number; label: string }[] = [
-  { mib: 50, label: '50 MB' },
-  { mib: 100, label: '100 MB' },
-  { mib: 500, label: '500 MB' },
-  { mib: 1024, label: '1 GB' },
+/** The size filters offered, in decimal megabytes like the sizes the page shows ("100 MB" is 100,000,000 bytes). */
+export const MIN_SIZES: readonly { mb: number; label: string }[] = [
+  { mb: 50, label: '50 MB' },
+  { mb: 100, label: '100 MB' },
+  { mb: 500, label: '500 MB' },
+  { mb: 1000, label: '1 GB' },
 ];
 
-export const DEFAULT_MIN_MIB = 100;
+export const DEFAULT_MIN_MB = 100;
 
 export const MODES: readonly { mode: FinderMode; label: string }[] = [
   { mode: 'both', label: 'Both' },
@@ -19,7 +19,7 @@ export const MODES: readonly { mode: FinderMode; label: string }[] = [
   { mode: 'duplicates', label: 'Duplicates' },
 ];
 
-export const mibToBytes = (mib: number): number => Math.round(mib * MIB);
+export const mbToBytes = (mb: number): number => Math.round(mb * MB);
 
 /** A row of the results table: a group heading or a file. */
 export type FileRow =

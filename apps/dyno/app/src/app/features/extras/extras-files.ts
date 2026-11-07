@@ -6,7 +6,7 @@ import { formatStorage, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { JobProgressCard } from '../../shared/job-progress';
 import { ExtrasStore } from '../../state/extras.store';
-import { MIN_SIZES, MODES, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
+import { MIN_SIZES, MODES, mbToBytes, baseName, dirName, fileRows, middleEllipsis, scanSentence } from './files-model';
 import { EXTRAS_STYLES } from './extras-styles';
 import { MatButton } from '@angular/material/button';
 import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
@@ -36,7 +36,7 @@ interface FileLine {
       }
       <span class="grow"></span>
       <pd-segmented-control label="Look for" [options]="modeSegs" [value]="store.mode()" (valueChange)="pickMode($event)" />
-      <pd-segmented-control label="At least this big" [options]="sizeSegs" [value]="store.minMib() + ''" (valueChange)="store.setMinMib(+$event)" />
+      <pd-segmented-control label="At least this big" [options]="sizeSegs" [value]="store.minMb() + ''" (valueChange)="store.setMinMb(+$event)" />
     </div>
 
     @if (!store.folder() && !store.finder().error) {
@@ -91,7 +91,7 @@ export class ExtrasFiles {
   protected readonly modes = MODES;
   protected readonly sizes = MIN_SIZES;
   protected readonly modeSegs: SuSegment[] = MODES.map((m) => ({ value: m.mode, label: m.label }));
-  protected readonly sizeSegs: SuSegment[] = MIN_SIZES.map((s) => ({ value: String(s.mib), label: s.label }));
+  protected readonly sizeSegs: SuSegment[] = MIN_SIZES.map((s) => ({ value: String(s.mb), label: s.label }));
   protected pickMode(value: string): void {
     const m = MODES.find((x) => x.mode === value);
     if (m) void this.store.setMode(m.mode);
@@ -118,7 +118,7 @@ export class ExtrasFiles {
     { key: 'size', header: 'Size', value: (f) => f.file.bytes, text: (f) => formatStorage(f.file.bytes), align: 'end', sortable: false, width: '230px' },
     { key: 'modified', header: 'Modified', value: (f) => f.file.modified, text: (f) => formatDate(f.file.modified, Date.now()), align: 'end', sortable: false, width: '110px', hideBelow: 560 },
   ];
-  protected readonly minLabel = computed(() => MIN_SIZES.find((s) => s.mib === this.store.minMib())?.label ?? formatStorage(this.store.minMib() * 1024 * 1024));
+  protected readonly minLabel = computed(() => MIN_SIZES.find((s) => s.mb === this.store.minMb())?.label ?? formatStorage(mbToBytes(this.store.minMb())));
   protected readonly scanned = computed(() => {
     const r = this.result();
     return r ? scanSentence(r) : '';
