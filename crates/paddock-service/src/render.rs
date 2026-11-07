@@ -134,7 +134,7 @@ pub fn launchd_plist(spec: &ServiceSpec, program: LaunchdProgram<'_>) -> String 
         }
         Kind::SystemService => {
             key(&mut o, "ExitTimeOut");
-            o.push_str("    <integer>60</integer>\n");
+            let _ = writeln!(o, "    <integer>{}</integer>", spec.stop_timeout_secs());
         }
     }
     if let LaunchdProgram::File { log: Some(log), .. } = program {
@@ -208,7 +208,7 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
         }
     );
     let _ = writeln!(o, "RestartSec={}", spec.throttle_secs());
-    o.push_str("TimeoutStopSec=60\n");
+    let _ = writeln!(o, "TimeoutStopSec={}", spec.stop_timeout_secs());
     if let Some(mode) = spec.kill_mode() {
         let _ = writeln!(o, "KillMode={}", mode.systemd());
     }
@@ -693,6 +693,45 @@ mod tests {
             assert_eq!(u.matches("KillMode").count(), 1);
             assert_eq!(mode.systemd(), text);
         }
+    }
+
+    #[test]
+    fn stop_timeout_is_rendered_and_user_units_never_mention_the_network() {
+        let default = ServiceSpec::builder("net.decryptology.dyno.agent", "Dyno", "dyno-agent")
+            .build()
+            .unwrap();
+        assert_eq!(default.stop_timeout_secs(), 60);
+        let u = systemd_unit(&default, "/p", None);
+        assert!(
+            u.contains("\nTimeoutStopSec=60\n") && !u.contains("network-online"),
+            "{u}"
+        );
+        let set = ServiceSpec::builder("net.decryptology.dyno.agent", "Dyno", "dyno-agent")
+            .stop_timeout_secs(300)
+            .build()
+            .unwrap();
+        let u = systemd_unit(&set, "/p", None);
+        assert!(
+            u.contains("\nTimeoutStopSec=300\n") && !u.contains("network-online"),
+            "{u}"
+        );
+        // A system unit waits for the network, once per line.
+        let sys = ServiceSpec::builder("net.decryptology.dyno.agent", "Dyno", "dyno-agent")
+            .kind(Kind::SystemService)
+            .stop_timeout_secs(120)
+            .build()
+            .unwrap();
+        let u = systemd_unit(&sys, "/p", None);
+        assert!(
+            u.contains("After=network-online.target\nWants=network-online.target\n")
+                && u.matches("network-online.target").count() == 2,
+            "{u}"
+        );
+        let p = launchd_plist(&sys, LaunchdProgram::Bundled);
+        assert!(
+            p.contains("<key>ExitTimeOut</key>\n    <integer>120</integer>"),
+            "{p}"
+        );
     }
 
     #[test]

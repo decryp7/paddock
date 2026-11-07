@@ -105,6 +105,7 @@ pub struct ServiceSpec {
     hardening: Option<Hardening>,
     windows_start: WindowsStart,
     kill_mode: Option<KillMode>,
+    stop_timeout_secs: u32,
 }
 
 impl ServiceSpec {
@@ -133,6 +134,7 @@ impl ServiceSpec {
                 hardening: None,
                 windows_start: WindowsStart::Delayed,
                 kill_mode: None,
+                stop_timeout_secs: 60,
             },
         }
     }
@@ -214,6 +216,11 @@ impl ServiceSpec {
     pub fn docs_url(&self) -> Option<&str> {
         self.docs_url.as_deref()
     }
+    /// How long the OS waits for the process to exit when stopping it, in seconds (systemd `TimeoutStopSec=`, launchd
+    /// `ExitTimeOut` of a daemon; a launchd user agent and a Windows service ignore it; default 60).
+    pub fn stop_timeout_secs(&self) -> u32 {
+        self.stop_timeout_secs
+    }
     /// What systemd ends when it stops the unit; `None`: systemd's own default, no `KillMode=` line.
     pub fn kill_mode(&self) -> Option<KillMode> {
         self.kill_mode
@@ -249,6 +256,10 @@ impl WindowsStart {
 }
 
 /// Builds a [`ServiceSpec`]; [`SpecBuilder::build`] checks every part.
+///
+/// There is no option to wait for the network: a system unit already orders after `network-online.target`, and a user
+/// service cannot (that target belongs to the system manager, which a `systemd --user` instance cannot order after), so a
+/// user service retries its own network use.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct SpecBuilder {
@@ -320,6 +331,13 @@ impl SpecBuilder {
         self.spec.memory_high_mb = Some(mb);
         self
     }
+    /// How long the OS waits for the process to exit when stopping it (default 60 s; 1 to 3600): a service that must finish
+    /// a running job needs longer. Only systemd (`TimeoutStopSec=`) and a launchd daemon (`ExitTimeOut`) honour it; a launchd
+    /// user agent and a Windows service ignore it (the SCM uses its own stop timeout).
+    pub fn stop_timeout_secs(mut self, secs: u32) -> Self {
+        self.spec.stop_timeout_secs = secs;
+        self
+    }
     /// What systemd ends when it stops the unit (`KillMode=`; default: not written, systemd's own default applies).
     pub fn kill_mode(mut self, mode: KillMode) -> Self {
         self.spec.kill_mode = Some(mode);
@@ -379,6 +397,9 @@ impl SpecBuilder {
         }
         if !(1..=3600).contains(&s.throttle_secs) {
             return Err(SpecError::new("throttle", "must be 1 to 3600 seconds"));
+        }
+        if !(1..=3600).contains(&s.stop_timeout_secs) {
+            return Err(SpecError::new("stop timeout", "must be 1 to 3600 seconds"));
         }
         if let Some(v) = &s.supervised_env {
             let ok = !v.is_empty()
@@ -567,6 +588,16 @@ mod tests {
         assert!(bad(base().supervised_env("1X")).contains("supervised"));
         assert!(bad(base().supervised_env("")).contains("supervised"));
         assert!(bad(base().memory_high_mb(1)).contains("memory"));
+        for secs in [0, 3601, u32::MAX] {
+            assert!(
+                bad(base().stop_timeout_secs(secs)).contains("stop timeout"),
+                "{secs}"
+            );
+        }
+        assert!(
+            base().stop_timeout_secs(1).build().is_ok()
+                && base().stop_timeout_secs(3600).build().is_ok()
+        );
         assert!(bad(base().docs_url("http://x")).contains("docs"));
         assert!(bad(base().docs_url("https://x y")).contains("docs"));
     }
