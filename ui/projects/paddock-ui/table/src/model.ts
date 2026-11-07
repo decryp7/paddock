@@ -269,7 +269,8 @@ export function fitColumns<T>(shown: readonly PdColumn<T>[], width: number, acti
     const cols = out.length + (actions ? 1 : 0);
     // A required column's floor is the track's: 128 px, or 40 % of a phone-width table (columnTrack).
     const floor = Math.min(PD_PRIMARY_MIN_PX, 0.4 * width);
-    const fixed = out.reduce((a, c) => a + (c.required ? floor : minPx(c)), 0);
+    // ...or the column's own px minimum when that is larger (`minmax(180px, 320px)`): the track keeps it, so the count must too.
+    const fixed = out.reduce((a, c) => a + (c.required ? Math.max(floor, minPx(c)) : minPx(c)), 0);
     return fixed + actions + gap * Math.max(0, cols - 1) + padding;
   };
   while (need() > width) {
