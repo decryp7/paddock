@@ -5,6 +5,7 @@ pub mod engine;
 pub mod folder;
 pub mod fs;
 pub mod keep;
+pub mod mounts;
 pub mod names;
 #[cfg(test)]
 pub(crate) mod testing;

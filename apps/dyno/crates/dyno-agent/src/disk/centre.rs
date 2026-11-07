@@ -409,6 +409,8 @@ pub struct DiskCentre {
     starting: Mutex<HashSet<String>>,
     kept_nodes: AtomicUsize,
     refreshing: std::sync::atomic::AtomicBool,
+    /// An OS event arrived while a listing ran: list once more when it ends.
+    relist_again: std::sync::atomic::AtomicBool,
     listing_ticket: AtomicU64,
     listing_applied: AtomicU64,
     /// When the volumes' figures were last read (listing or space reading), on the clock.
@@ -467,6 +469,7 @@ impl DiskCentre {
             starting: Mutex::new(HashSet::new()),
             kept_nodes: AtomicUsize::new(MAX_KEPT_NODES),
             refreshing: std::sync::atomic::AtomicBool::new(false),
+            relist_again: std::sync::atomic::AtomicBool::new(false),
             listing_ticket: AtomicU64::new(0),
             listing_applied: AtomicU64::new(0),
             space_at: Mutex::new(None),
@@ -642,14 +645,31 @@ impl DiskCentre {
     /// Asks the system for the volumes on a thread of its own and remembers the answer; does nothing while such a call is
     /// already running. Never blocks the caller (the system can take seconds when a share has gone away).
     pub fn refresh_in_background(self: &Arc<Self>) {
+        self.refresh_in_background_for("start");
+    }
+
+    /// The OS said the mounts changed (a volume came or went, or the computer woke): lists them again at once on a thread of its
+    /// own. An event that arrives while a listing runs makes that listing run once more, so the last change is never missed.
+    pub fn on_system_event(self: &Arc<Self>, trigger: &'static str) {
+        log::info!("disk volumes: system event trigger={trigger}");
+        self.refresh_in_background_for(trigger);
+    }
+
+    fn refresh_in_background_for(self: &Arc<Self>, trigger: &'static str) {
         if self.refreshing.swap(true, Ordering::SeqCst) {
+            self.relist_again.store(true, Ordering::SeqCst);
             return;
         }
         let me = self.clone();
         let spawned = std::thread::Builder::new().name("dyno-volumes".into()).spawn(move || {
             // The Disk map's volume list fills from it: live work (rule 52).
             dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
-            me.refresh_as("start");
+            loop {
+                me.refresh_as(trigger);
+                if !me.relist_again.swap(false, Ordering::SeqCst) {
+                    break;
+                }
+            }
             me.refreshing.store(false, Ordering::SeqCst);
         });
         if spawned.is_err() {
@@ -2475,6 +2495,85 @@ mod tests {
         lock(&r.lister.0)[1].volume.reachable = false;
         r.centre.refresh();
         assert_eq!(lock(&r.events.1).len(), 2, "a volume that stopped answering is a change");
+    }
+
+    fn wait_listings(r: &Rig, listings: usize) {
+        let began = std::time::Instant::now();
+        while r.lister.1.load(Ordering::SeqCst) < listings || r.centre.refreshing.load(Ordering::SeqCst) {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the listing never ran");
+            std::thread::yield_now();
+        }
+    }
+
+    /// A mount event from the OS lists the mounts again at once, without waiting for the ticker.
+    #[test]
+    fn a_mount_event_lists_the_mounts_again_at_once() {
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        lock(&r.lister.0).push(vol("USB", &fs.root(), VolumeLocation::External { bus: None }));
+        r.centre.on_system_event("mount");
+        wait_listings(&r, 2);
+        assert_eq!(
+            r.centre.cached_volumes().unwrap().len(),
+            2,
+            "the new volume is known without a tick"
+        );
+        assert_eq!(lock(&r.events.1).len(), 1, "and announced");
+    }
+
+    /// The fake source of the agent's mount-event thread drives the centre the way the OS adapters do.
+    #[test]
+    fn the_mount_event_thread_passes_each_trigger_to_the_centre() {
+        struct Fake(Vec<&'static str>);
+        impl crate::disk::mounts::MountEvents for Fake {
+            fn watch(&self, _stopped: &(dyn Fn() -> bool + Sync), on_event: &(dyn Fn(&'static str) + Sync)) {
+                for t in &self.0 {
+                    on_event(t);
+                }
+            }
+        }
+        let fs = Arc::new(FakeFs::new());
+        let r = rig(fs.clone(), vec![vol("V", &fs.root(), VolumeLocation::Internal)]);
+        r.centre.refresh();
+        crate::disk::mounts::run(&r.centre, &Fake(vec!["mount"]), &|| false);
+        wait_listings(&r, 2);
+        assert!(r.lister.1.load(Ordering::SeqCst) >= 2);
+    }
+
+    /// A listing that is running when another event arrives runs once more, so a change in between is not lost.
+    #[test]
+    fn an_event_during_a_listing_makes_it_run_again() {
+        let fs = Arc::new(FakeFs::new());
+        let (tx, asked) = std::sync::mpsc::channel();
+        let hold = Gate::new();
+        let lister = Arc::new(Overlapping {
+            calls: AtomicUsize::new(0),
+            hold: hold.clone(),
+            first_asked: Mutex::new(tx),
+            old: vec![vol("OLD", &fs.root(), VolumeLocation::Internal)],
+            new: vec![vol("NEW", &fs.root(), VolumeLocation::Internal)],
+        });
+        let centre = Arc::new(DiskCentre::new(
+            fs.clone(),
+            lister.clone(),
+            Arc::new(Events::default()),
+            Arc::new(Manual::default()),
+            Arc::new(Access::default()),
+            8,
+            ScanLimits::default(),
+        ));
+        centre.on_system_event("mount");
+        asked.recv().unwrap();
+        centre.on_system_event("mount");
+        hold.open();
+        let began = std::time::Instant::now();
+        while lister.calls.load(Ordering::SeqCst) < 2 || centre.refreshing.load(Ordering::SeqCst) {
+            assert!(began.elapsed() < std::time::Duration::from_secs(60), "the second listing never ran");
+            std::thread::yield_now();
+        }
+        let names: Vec<String> = lock(&centre.known).clone().unwrap().iter().map(|l| l.volume.id.clone()).collect();
+        assert_eq!(names, ["NEW"]);
     }
 
     /// A lister whose first answer is held (an older question that comes back last).

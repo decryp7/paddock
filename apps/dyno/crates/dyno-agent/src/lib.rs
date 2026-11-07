@@ -258,6 +258,18 @@ impl Running {
         // The volumes' free space is read again at the Setting's interval whether or not any window is open (the popup and the
         // Disk map answer from the cache and never touch the disk themselves). OS mount hooks do not exist yet: every fifth
         // reading lists the mounts again.
+        // A volume that comes or goes is listed at once (macOS DiskArbitration, Windows WM_DEVICECHANGE, Linux mountinfo); waking
+        // from sleep comes through the power thread. The fifth-reading relist stays as the fallback.
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-mounts".into())
+                .spawn(move || {
+                    dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+                    disk::mounts::run(&s.disk, &disk::mounts::OsMountEvents, &|| s.stopped());
+                })
+                .map_err(|e| format!("could not start the mount watcher: {e}"))?,
+        );
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()
