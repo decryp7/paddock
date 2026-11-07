@@ -11,6 +11,15 @@ pub mod menu_bar;
 pub mod pixel;
 pub mod text;
 
+/// Which way a network item counts: an item shows its own direction only ("Network up" is the upload rate and nothing else).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetDir {
+    /// Bytes per second sent.
+    Up,
+    /// Bytes per second received.
+    Down,
+}
+
 /// A metric an icon can draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconMetric {

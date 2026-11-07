@@ -553,8 +553,8 @@ pub enum Kind {
         /// The letter.
         letter: char,
     },
-    /// Upload over download.
-    Network,
+    /// One direction's rate.
+    Network(super::NetDir),
     /// Degrees and a meter from 20 to 110.
     Temperature,
 }
@@ -789,8 +789,12 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                 cv.glyph(&g, gx, gy, ink);
             }
         }
-        Kind::Network => {
-            // 16 and 20: two log meters with arrows; 22 and up: two lines of small numerals with a unit letter.
+        Kind::Network(dir) => {
+            let (bps, up) = match dir {
+                super::NetDir::Up => (r.up, true),
+                super::NetDir::Down => (r.down, false),
+            };
+            // 16 and 20: a log meter with an arrow; 22 and up: a line of small numerals with a unit letter.
             let arrow = |cv: &mut Canvas, x: f32, y: f32, w: f32, up: bool| {
                 let h = (w / 2.0).ceil();
                 if up {
@@ -803,8 +807,8 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             if l.size <= 20 {
                 let aw: f32 = if s <= 16 { 5.0 } else { 6.0 };
                 let mh = if s <= 16 { 3 } else { 4 };
-                for (row, bps, up) in [(0, r.up, true), (1, r.down, false)] {
-                    let y = if row == 0 { s / 4 - mh / 2 } else { s * 3 / 4 - mh / 2 };
+                {
+                    let y = s / 2 - mh / 2;
                     let ah = (aw / 2.0).ceil();
                     arrow(&mut cv, 0.0, y as f32 + (mh as f32 - ah) / 2.0, aw, up);
                     let v = if state == State::Unavailable { None } else { Some(level(bps)) };
@@ -812,8 +816,8 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                 }
             } else {
                 let n = l.small;
-                for (row, bps, up) in [(0, r.up, true), (1, r.down, false)] {
-                    let y = if row == 0 { (s / 2 - n.h) / 2 } else { s / 2 + (s / 2 - n.h) / 2 };
+                {
+                    let y = (s - n.h) / 2;
                     let aw = (n.w + 1) as f32;
                     arrow(&mut cv, 0.0, y as f32 + (n.h as f32 - aw / 2.0) / 2.0, aw, up);
                     let (text, unit) = if state == State::Unavailable {
@@ -1192,6 +1196,40 @@ mod tests {
                 let ni = extent(&n, t.ink(), l.digits_y as u32 - 1).unwrap();
                 assert_eq!((ni.0, ni.1), (ink.0, ink.1), "normal {v} at {size}");
             }
+        }
+    }
+
+    #[test]
+    fn a_network_item_draws_only_its_own_direction() {
+        use super::super::NetDir;
+        let at = |up: f64, down: f64| Reading {
+            value: Some(1.0),
+            up,
+            down,
+            ..Reading::default()
+        };
+        for size in [16, 20, 22, 24, 32] {
+            let draw = |d: NetDir, r: &Reading| render(&Kind::Network(d), r, State::Normal, size, Theme { dark: true }).rgba;
+            assert_eq!(
+                draw(NetDir::Up, &at(5e3, 1.0)),
+                draw(NetDir::Up, &at(5e3, 7e7)),
+                "up ignores down at {size}"
+            );
+            assert_eq!(
+                draw(NetDir::Down, &at(1.0, 5e3)),
+                draw(NetDir::Down, &at(7e7, 5e3)),
+                "down ignores up at {size}"
+            );
+            assert_ne!(
+                draw(NetDir::Up, &at(5e3, 0.0)),
+                draw(NetDir::Up, &at(7e7, 0.0)),
+                "up shows up at {size}"
+            );
+            assert_ne!(
+                draw(NetDir::Down, &at(0.0, 5e3)),
+                draw(NetDir::Down, &at(0.0, 7e7)),
+                "down shows down at {size}"
+            );
         }
     }
 }

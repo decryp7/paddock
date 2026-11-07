@@ -5,6 +5,7 @@
 
 use crate::tray_model::{Glyph, ItemSpec, Picture};
 use dyno_core::tray::text::TextRaster;
+use dyno_core::tray::NetDir;
 use dyno_core::tray::{menu_bar as mb, pixel as px};
 use dyno_core::widgets::Metric;
 
@@ -60,14 +61,19 @@ pub fn short_label(spec: &ItemSpec) -> String {
     }
 }
 
-fn is_network(m: &Metric) -> bool {
-    matches!(m, Metric::NetworkUp | Metric::NetworkDown)
+/// The direction a network metric counts; `None` for every other metric.
+fn net_dir(m: &Metric) -> Option<NetDir> {
+    match m {
+        Metric::NetworkUp => Some(NetDir::Up),
+        Metric::NetworkDown => Some(NetDir::Down),
+        _ => None,
+    }
 }
 
 /// The macOS format of an item (`Ring` is the meter there; `Number` is the stacked number, the default).
 pub fn mac_kind(spec: &ItemSpec, cores: usize) -> mb::Kind {
-    if is_network(&spec.metric) {
-        return mb::Kind::Network;
+    if let Some(dir) = net_dir(&spec.metric) {
+        return mb::Kind::Network(dir);
     }
     if spec.metric == Metric::Temperature {
         return mb::Kind::Temperature;
@@ -87,8 +93,8 @@ pub fn mac_kind(spec: &ItemSpec, cores: usize) -> mb::Kind {
 
 /// The Windows / Linux format of an item.
 pub fn px_kind(spec: &ItemSpec) -> px::Kind {
-    if is_network(&spec.metric) {
-        return px::Kind::Network;
+    if let Some(dir) = net_dir(&spec.metric) {
+        return px::Kind::Network(dir);
     }
     if spec.metric == Metric::Temperature {
         return px::Kind::Temperature;
@@ -305,8 +311,22 @@ mod tests {
             mac_kind(&spec(Metric::CpuPerCore, Glyph::CoreBars), 10),
             mb::Kind::Cores { cores: 10 }
         ));
-        assert!(matches!(mac_kind(&spec(Metric::NetworkDown, Glyph::Number), 8), mb::Kind::Network));
-        assert!(matches!(mac_kind(&spec(Metric::NetworkUp, Glyph::Graph), 8), mb::Kind::Network));
+        assert!(matches!(
+            mac_kind(&spec(Metric::NetworkDown, Glyph::Number), 8),
+            mb::Kind::Network(NetDir::Down)
+        ));
+        assert!(matches!(
+            mac_kind(&spec(Metric::NetworkUp, Glyph::Graph), 8),
+            mb::Kind::Network(NetDir::Up)
+        ));
+        assert!(matches!(
+            px_kind(&spec(Metric::NetworkUp, Glyph::Number)),
+            px::Kind::Network(NetDir::Up)
+        ));
+        assert!(matches!(
+            px_kind(&spec(Metric::NetworkDown, Glyph::Graph)),
+            px::Kind::Network(NetDir::Down)
+        ));
         assert!(matches!(
             mac_kind(&spec(Metric::Temperature, Glyph::Ring), 8),
             mb::Kind::Temperature
@@ -432,7 +452,8 @@ mod tests {
                 unit: mb::Unit::Percent,
             },
             mb::Kind::Meter { label: "GPU".into() },
-            mb::Kind::Network,
+            mb::Kind::Network(NetDir::Up),
+            mb::Kind::Network(NetDir::Down),
             mb::Kind::Temperature,
             mb::Kind::Cores { cores: 8 },
             mb::Kind::Graph { label: "DSK".into() },

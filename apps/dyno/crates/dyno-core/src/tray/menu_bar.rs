@@ -88,8 +88,8 @@ pub enum Kind {
         /// The unit.
         unit: Unit,
     },
-    /// Upload over download, with arrows and units.
-    Network,
+    /// One direction's rate with its arrow and unit.
+    Network(super::NetDir),
     /// A thermometer and the degrees.
     Temperature,
 }
@@ -238,7 +238,7 @@ pub fn width(kind: &Kind, t: &dyn TextRaster) -> f32 {
         Kind::Cores { cores } => (*cores).clamp(1, 64) as f32 * 3.0 - 1.0,
         Kind::Graph { label } => label_width(t, label) + GAP + 30.0,
         Kind::GraphValue { label, unit } => 24.0 + GAP + stack_width(t, label, *unit),
-        Kind::Network => net_layout(t).total,
+        Kind::Network(_) => net_layout(t).total,
         Kind::Temperature => 6.0 + 3.0 + field(t, &VALUE) + t.advance("°", &VALUE),
     };
     w.ceil()
@@ -552,11 +552,15 @@ pub fn render(kind: &Kind, r: &Reading, state: State, text: &dyn TextRaster, sca
             c.graph(0.0, 2.0, 24.0, 14.0, hist);
             c.stack(label, *unit, value, w, alert);
         }
-        Kind::Network => {
+        Kind::Network(dir) => {
             let l = net_layout(text);
             let cap = text.cap_height(&PAIR);
-            for (row, bps, up) in [(0, r.up, true), (1, r.down, false)] {
-                let b = snap(if row == 0 { 7.5 } else { 16.5 }, s);
+            let (bps, up) = match dir {
+                super::NetDir::Up => (r.up, true),
+                super::NetDir::Down => (r.down, false),
+            };
+            {
+                let b = snap(12.0, s);
                 let mid = b - cap / 2.0;
                 let (a0, a1) = (0.0, l.arrow);
                 if up {
@@ -632,7 +636,8 @@ mod tests {
                 label: "cpu".into(),
                 unit: Unit::Percent,
             },
-            Kind::Network,
+            Kind::Network(crate::tray::NetDir::Up),
+            Kind::Network(crate::tray::NetDir::Down),
             Kind::Temperature,
         ]
     }
@@ -735,5 +740,33 @@ mod tests {
         assert_eq!(format_rate(24_300_000.0), ("24".into(), "MB/s"));
         assert_eq!(format_rate(f64::NAN), ("0".into(), "B/s"));
         assert_eq!(format_rate(5e15).1, "GB/s");
+    }
+
+    #[test]
+    fn a_network_item_draws_only_its_own_direction() {
+        use super::super::NetDir;
+        let at = |up: f64, down: f64| Reading {
+            value: Some(1.0),
+            up,
+            down,
+            ..Reading::default()
+        };
+        for scale in [1, 2] {
+            let draw = |d: NetDir, r: &Reading| render(&Kind::Network(d), r, State::Normal, &BoxText, scale).alpha;
+            // Changing the other direction's rate leaves the item unchanged.
+            assert_eq!(
+                draw(NetDir::Up, &at(5e3, 1.0)),
+                draw(NetDir::Up, &at(5e3, 7e7)),
+                "up ignores down at {scale}x"
+            );
+            assert_eq!(
+                draw(NetDir::Down, &at(1.0, 5e3)),
+                draw(NetDir::Down, &at(7e7, 5e3)),
+                "down ignores up at {scale}x"
+            );
+            // Its own rate and its arrow do show.
+            assert_ne!(draw(NetDir::Up, &at(5e3, 0.0)), draw(NetDir::Up, &at(7e7, 0.0)));
+            assert_ne!(draw(NetDir::Up, &at(5e3, 5e3)), draw(NetDir::Down, &at(5e3, 5e3)));
+        }
     }
 }
