@@ -1,18 +1,15 @@
 //! Finding the server and the admin key. The decisions are pure (given the environment and a way to read files);
-//! the real sources are the process environment, the file system and the OS credential store.
+//! the real sources are the process environment and the file system.
 //!
-//! The admin key is looked up in this order: `--key-file`, `PITWALL_ADMIN_KEY` (headless boxes), the OS credential
-//! store (the entry the Pitwall window keeps), then the server's own `admin.key` in the data folder. It is never
-//! printed and never part of an error message.
+//! The admin key is looked up in this order: `--key-file`, `PITWALL_ADMIN_KEY` (headless boxes), then the server's own
+//! `admin.key` in the data folder, its only store (ADR 0057 WP-4: no OS credential store, which an ad-hoc signed update
+//! cannot read on macOS without a password dialog). `admin.key` is read as an owner-only secret file through
+//! `paddock-secrets`. The key is never printed and never part of an error message.
 
 use pitwall_core::config::DEFAULT_PORT;
 use pitwall_core::discovery::{self, Discovery};
 use std::path::{Path, PathBuf};
 
-/// The credential-store service name (the same entry the Pitwall window uses).
-pub const KEYRING_SERVICE: &str = "Pitwall";
-/// The credential-store account name.
-pub const KEYRING_ACCOUNT: &str = "admin key";
 /// Longest key accepted.
 pub const MAX_KEY_LEN: usize = 256;
 
@@ -113,8 +110,9 @@ pub fn parse_key(raw: &str) -> Option<String> {
 pub trait Sources {
     /// A small text file (`None`: missing or unreadable).
     fn read_file(&self, path: &Path) -> Option<String>;
-    /// The OS credential store's admin key.
-    fn os_store(&self) -> Option<String>;
+    /// An owner-only secret file (the server's `admin.key`): `Ok(None)` when missing, `Err` with the reason (never the
+    /// value) when it is not trusted (others can read it, a link, another user's file) or cannot be read.
+    fn read_secret(&self, path: &Path) -> Result<Option<String>, String>;
 }
 
 /// Why no admin key was found.
@@ -123,10 +121,13 @@ pub enum KeyError {
     /// `--key-file` does not hold a key.
     #[error("{0} does not hold a usable key. It should contain the admin key on one line.")]
     BadKeyFile(String),
+    /// The server's `admin.key` exists but is not trusted or cannot be read.
+    #[error("{0}. Restart Pitwall's server (it writes a new admin key), or set PITWALL_ADMIN_KEY or pass --key-file <path>.")]
+    Untrusted(String),
     /// Nothing found anywhere.
     #[error(
-        "no admin key found. On the machine where Pitwall runs it is stored by the Pitwall app; on a headless machine copy \
-         the server's admin.key from the Pitwall data folder and either set PITWALL_ADMIN_KEY or pass --key-file <path>."
+        "no admin key found. On the machine where Pitwall runs the server keeps it in admin.key in the Pitwall data folder; on \
+         a headless machine copy that file and either set PITWALL_ADMIN_KEY or pass --key-file <path>."
     )]
     Missing,
 }
@@ -139,11 +140,12 @@ pub fn admin_key(key_file: Option<&Path>, env: &Env, dir: &Path, src: &dyn Sourc
             .and_then(|t| parse_key(&t))
             .ok_or_else(|| KeyError::BadKeyFile(f.display().to_string()));
     }
-    env.admin_key
-        .as_deref()
-        .and_then(parse_key)
-        .or_else(|| src.os_store().and_then(|k| parse_key(&k)))
-        .or_else(|| src.read_file(&dir.join("admin.key")).and_then(|t| parse_key(&t)))
+    if let Some(k) = env.admin_key.as_deref().and_then(parse_key) {
+        return Ok(k);
+    }
+    src.read_secret(&dir.join("admin.key"))
+        .map_err(KeyError::Untrusted)?
+        .and_then(|t| parse_key(&t))
         .ok_or(KeyError::Missing)
 }
 
@@ -159,8 +161,11 @@ impl Sources for RealSources {
         std::fs::read_to_string(path).ok()
     }
 
-    fn os_store(&self) -> Option<String> {
-        keyring::Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT).ok()?.get_password().ok()
+    fn read_secret(&self, path: &Path) -> Result<Option<String>, String> {
+        paddock_secrets::SecretFile::new(path)
+            .read()
+            .map(|s| s.map(|s| s.expose().to_string()))
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -171,20 +176,24 @@ mod tests {
 
     struct Fake {
         files: HashMap<PathBuf, String>,
-        store: Option<String>,
+        /// Secret files that are refused, with the reason.
+        refused: HashMap<PathBuf, String>,
     }
     impl Sources for Fake {
         fn read_file(&self, p: &Path) -> Option<String> {
             self.files.get(p).cloned()
         }
-        fn os_store(&self) -> Option<String> {
-            self.store.clone()
+        fn read_secret(&self, p: &Path) -> Result<Option<String>, String> {
+            match self.refused.get(p) {
+                Some(why) => Err(why.clone()),
+                None => Ok(self.files.get(p).cloned()),
+            }
         }
     }
-    fn fake(files: &[(&str, &str)], store: Option<&str>) -> Fake {
+    fn fake(files: &[(&str, &str)]) -> Fake {
         Fake {
             files: files.iter().map(|(p, t)| (PathBuf::from(p), (*t).to_string())).collect(),
-            store: store.map(String::from),
+            refused: HashMap::new(),
         }
     }
 
@@ -244,30 +253,48 @@ mod tests {
             admin_key: Some("fromenv".into()),
             ..Env::default()
         };
-        let src = fake(&[("/k", "fromfile\n"), ("/d/admin.key", "datafile")], Some("fromstore"));
+        let src = fake(&[("/k", "fromfile\n"), ("/d/admin.key", "datafile")]);
         assert_eq!(admin_key(Some(Path::new("/k")), &env, dir, &src).unwrap(), "fromfile");
         assert_eq!(admin_key(None, &env, dir, &src).unwrap(), "fromenv");
-        assert_eq!(admin_key(None, &Env::default(), dir, &src).unwrap(), "fromstore");
-        assert_eq!(
-            admin_key(None, &Env::default(), dir, &fake(&[("/d/admin.key", "datafile")], None)).unwrap(),
-            "datafile"
-        );
+        // No OS credential store (ADR 0057 WP-4): the server's admin.key comes next.
+        assert_eq!(admin_key(None, &Env::default(), dir, &src).unwrap(), "datafile");
         // a bad env value falls through to the next source
         let bad = Env {
             admin_key: Some("has space".into()),
             ..Env::default()
         };
-        assert_eq!(admin_key(None, &bad, dir, &src).unwrap(), "fromstore");
+        assert_eq!(admin_key(None, &bad, dir, &src).unwrap(), "datafile");
+    }
+
+    /// The server's admin.key is read as an owner-only secret file: a refusal says why and what to do, never the key.
+    #[test]
+    fn an_untrusted_admin_key_file_is_reported_with_its_reason() {
+        let mut src = fake(&[("/d/admin.key", "pw_secret")]);
+        src.refused.insert(
+            PathBuf::from("/d/admin.key"),
+            "/d/admin.key can be read by other users; set its mode to 0600".into(),
+        );
+        let e = admin_key(None, &Env::default(), Path::new("/d"), &src).unwrap_err();
+        assert!(matches!(e, KeyError::Untrusted(_)), "{e:?}");
+        let text = e.to_string();
+        assert!(text.contains("0600") && text.contains("PITWALL_ADMIN_KEY"), "{text}");
+        assert!(!text.contains("pw_secret"));
+        // The environment still wins over the file.
+        let env = Env {
+            admin_key: Some("fromenv".into()),
+            ..Env::default()
+        };
+        assert_eq!(admin_key(None, &env, Path::new("/d"), &src).unwrap(), "fromenv");
     }
 
     #[test]
     fn key_errors_never_contain_the_key() {
-        let src = fake(&[("/k", "has a space")], None);
+        let src = fake(&[("/k", "has a space")]);
         let e = admin_key(Some(Path::new("/k")), &Env::default(), Path::new("/d"), &src).unwrap_err();
         assert!(matches!(e, KeyError::BadKeyFile(_)) && !e.to_string().contains("has a space"));
         let e = admin_key(Some(Path::new("/missing")), &Env::default(), Path::new("/d"), &src).unwrap_err();
         assert!(e.to_string().contains("/missing"));
-        let e = admin_key(None, &Env::default(), Path::new("/d"), &fake(&[], None)).unwrap_err();
+        let e = admin_key(None, &Env::default(), Path::new("/d"), &fake(&[])).unwrap_err();
         assert_eq!(e, KeyError::Missing);
         assert!(e.to_string().contains("PITWALL_ADMIN_KEY"));
     }

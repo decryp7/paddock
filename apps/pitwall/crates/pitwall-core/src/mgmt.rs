@@ -648,6 +648,10 @@ pub struct PairingRequest {
     pub requested_at: Millis,
     /// What it asks for.
     pub permissions: AppPermissions,
+    /// A re-pair (ADR 0057 §4): approving it revokes the app's older keys. Only an app that lost its key on purpose sends
+    /// it (Debrief's "re-pair after the update"); a second machine pairing under the same name does not.
+    #[serde(default)]
+    pub re_pair: bool,
 }
 
 /// An engine tile (`EngineStatusTile`).

@@ -901,10 +901,16 @@ async fn x_pair(State(st): S, h: HeaderMap, body: Bytes) -> Response {
     let go = || -> Result<Response, ApiError> {
         let v = json_body(&body)?;
         let name = v.get("name").and_then(Value::as_str).unwrap_or_default();
+        // ADR 0057 §4: `"rePair": true` replaces the app's keys on approval; anything but a boolean is refused.
+        let re_pair = match v.get("rePair") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(b)) => *b,
+            Some(_) => return Err(ApiError::invalid("rePair must be true or false")),
+        };
         let b = crate::paths::random32();
         let r = st
             .auth
-            .request_pairing(name, u32::from_le_bytes([b[0], b[1], b[2], b[3]]), now_ms())
+            .request_pairing(name, u32::from_le_bytes([b[0], b[1], b[2], b[3]]), re_pair, now_ms())
             .map_err(|e| match e {
                 AuthError::Invalid(m) => ApiError::invalid(m),
                 AuthError::Unauthorized => ApiError::new(ErrorKind::Authentication, e.to_string()),
@@ -912,7 +918,11 @@ async fn x_pair(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         st.event(
             EventKind::Pairing,
             Severity::Info,
-            format!("{} asks to connect (code {})", r.app_name, r.code),
+            if r.re_pair {
+                format!("{} asks to connect again, replacing its keys (code {})", r.app_name, r.code)
+            } else {
+                format!("{} asks to connect (code {})", r.app_name, r.code)
+            },
         );
         st.push(&pitwall_core::mgmt::LiveUpdate::Pairing {
             pairings: st.auth.pairings(now_ms()),

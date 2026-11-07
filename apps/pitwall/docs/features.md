@@ -218,7 +218,7 @@ Everything cached stays on this computer.
   app polls and receives its key **once**. Requests expire after 5 minutes and at most 8 wait at once. Works.
 - **Keys** are `pw_` plus 32 random bytes. Pitwall stores only the SHA-256 and the first characters (to tell keys apart),
   compares in constant time and writes `apps.json` atomically with a backup. A key can be created in the UI (shown once),
-  added to an app, or revoked at any time. The app keeps its copy in the OS credential store. Works.
+  added to an app, or revoked at any time. A re-pair (`"rePair": true`, ADR 0057 §4) revokes the app's older keys on approval. Works.
 - **Permissions and limits per app**: which models, the most urgent priority it may use, tools, the extended APIs, requests
   per minute, requests per UTC day, tokens per UTC day and per month, concurrent requests, and a share of the machine's RAM
   a request's model may occupy. A refusal says what to change; 80 % of a budget raises a warning event. Works.
@@ -227,7 +227,9 @@ Everything cached stays on this computer.
   with progress, latest requests) and a Dashboard usage-by-app chart. Works.
 - **Keyless local access** (for Ollama-style tools that send no key) is a setting, **off** by default, and applies only to
   requests with no `Origin` header. Works.
-- **The admin key** (`admin.key`, owner-only) is what Pitwall's own window uses for the management API; apps never see it. Works.
+- **The admin key** (`admin.key`, owner-only: 0600 in a 0700 folder, an owner-only DACL on Windows) is what Pitwall's own window and the
+  command line use for the management API; apps never see it. It is the key's only store, on every OS (ADR 0057, rule 72), plain text
+  that any program running as the user can read. Works.
 
 ## Command line
 

@@ -149,8 +149,11 @@ Apps need a key. The easiest way for a suite app (Debrief, Pitcrew, Spotter, Dyn
 1. The app calls `POST /x/v1/pair` with its name and shows a six-digit code.
 2. In Pitwall, **Apps & keys** (and the dashboard) shows a pairing request with the same code. Check the codes match, choose
    the permissions and click **Approve** (or **Deny**).
-3. The app polls and receives its key **once**, then keeps it in the OS credential store (Windows Credential Manager, macOS
-   Keychain, Secret Service on Linux). A request expires after 5 minutes.
+3. The app polls and receives its key **once** and keeps it (where depends on the app). A request expires after 5 minutes.
+
+An app that lost its key (Debrief 1.2 after its update) pairs again with `"rePair": true`. Pitwall shows that the request
+replaces the app's keys, and approving it revokes the app's older keys. A pairing without it, such as a second computer
+under the same app name, keeps the older keys working until you revoke them in **Apps & keys**.
 
 You can do the same by hand to try it:
 
@@ -329,8 +332,8 @@ pitwall bench qwen3.5-2b-q4_k_m
 answers, the tool exits with code 3 and says to start the Pitwall app or service.
 
 **Keys.** Management commands need the admin key. The tool looks for it, in this order, in `--key-file <path>`, the
-environment variable `PITWALL_ADMIN_KEY` (for headless machines: copy `admin.key` from the server's data folder), the OS
-credential store (the entry the Pitwall window keeps) and the server's `admin.key`. `chat` uses a per-app key from
+environment variable `PITWALL_ADMIN_KEY` (for headless machines: copy `admin.key` from the server's data folder), then the
+server's `admin.key`, the key's only store (a copy others can read is refused, with what to do). `chat` uses a per-app key from
 `PITWALL_API_KEY` instead, so a script holds a key with an app's limits, never the admin key. A key is never a command-line
 argument (it would show in process lists and shell history; `--key` is refused), is never printed in output or errors, and
 `keys create` prints the new key once, alone on standard output (progress and notes go to standard error), so
@@ -605,11 +608,19 @@ recommended, and models that will not fit this machine are left out. Up to 500 m
 | `engine-pins.json` (+ backup) | Engine build pins and the builds used before (for roll back) |
 | `cache.sqlite` | The disk store of the response and embeddings caches (see [Caching](#caching)); deleting it only empties the caches |
 | `slots/` | Saved model state for presets with Keep warm |
-| `admin.key` | The secret Pitwall's own window uses; owner-only. Do not share it |
+| `admin.key` | The secret Pitwall's own window and the `pitwall` command use; owner-only. Do not share it |
 | `discovery.json` | Written while the server runs: pid, port, base URL |
 | `models/<owner>/<repo>/` | Downloaded models |
 | `engines/` | Installed engine builds (one folder per build id) |
 | `partial/` | Unfinished downloads (resumed later) |
+
+**The admin key is plain text in `admin.key`.** Pitwall keeps no other copy and does not use the macOS Keychain, Windows
+Credential Manager or the Secret Service for it (the Keychain cannot be read silently by an app that is not signed by an
+Apple developer, so every update would ask for your password). The file is owner-only: mode 0600 in a folder only you can
+open on macOS and Linux, an access list that grants only you on Windows. Other users of the computer cannot read it. Any
+program that runs as you can read it without asking, the same as `~/.netrc` or `~/.docker/config.json`; a backup or a
+copy of your home folder contains it in plain text, and FileVault or BitLocker protects it only while the disk is
+encrypted. If you think the key was read, delete `admin.key` and restart Pitwall: the server writes a new one.
 | `packs/` | Your model catalog packs |
 | `logs/` | Service logs (no prompts or responses) |
 

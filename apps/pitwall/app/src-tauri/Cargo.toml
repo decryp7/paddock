@@ -37,6 +37,9 @@ paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
 paddock-env = { path = "../../../../crates/paddock-env" }
 paddock-log = { path = "../../../../crates/paddock-log" }
+# The server's admin.key, read as an owner-only secret file: its only store (ADR 0057 WP-4, rule 72: no Keychain).
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
+log = "0.4"
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -62,9 +65,6 @@ tauri-plugin-single-instance = "2"
 # updater artifacts (the installers themselves). "rustls-tls" with the platform verifier trusts the OS certificate
 # store. The updater is the only outbound HTTP in the shell, and only when the user asks for an update check.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
-# The OS credential store (Windows Credential Manager, macOS Keychain, Secret Service) for the app's copy of the
-# admin key; admin.key is the fallback.
-keyring = "4.2"
 
 [target.'cfg(windows)'.dependencies]
 # Asking the Service Control Manager whether the service is installed and running (no rights needed).

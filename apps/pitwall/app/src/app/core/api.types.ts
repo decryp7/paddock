@@ -409,6 +409,8 @@ export interface PairingRequest {
   code: string;
   requestedAt: number;
   permissions: AppPermissions;
+  /** A re-pair (ADR 0057 §4): approving it revokes the keys the app had before. */
+  rePair: boolean;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

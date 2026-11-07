@@ -95,7 +95,7 @@ Rules the core keeps: no `unwrap`/`expect` on user data, `unsafe` denied, `missi
 | `exit.rs` | Pure: the exit codes (0 to 4), `CliError`, and the mapping from the management `ErrorCode` and loopback failures, each with a next step |
 | `format.rs` | Pure: tables, decimal sizes, durations, UTC timestamps, the text of every command's output |
 | `sse.rs` | Pure, bounded parser for the streamed chat completion |
-| `discover.rs` | The decisions about the port (flag, discovery file, 11435), the data folder per OS and the admin key order (`--key-file`, `PITWALL_ADMIN_KEY`, OS credential store, `admin.key`), over a `Sources` trait |
+| `discover.rs` | The decisions about the port (flag, discovery file, 11435), the data folder per OS and the admin key order (`--key-file`, `PITWALL_ADMIN_KEY`, `admin.key` as an owner-only secret file), over a `Sources` trait |
 | `api.rs` | The thin edge: `POST /mgmt/v1/rpc/{method}` and the streamed `/v1/chat/completions`, only through `pitwall_loopback::Client` |
 | `run.rs`, `main.rs` | One function per command (progress polling for `pull`, key creation, chat streaming) and the process entry point |
 
@@ -121,7 +121,7 @@ server only through a `ServerClient` trait (loopback HTTP to the management API 
 | Module | Responsibility |
 | --- | --- |
 | `server_client.rs`, `live.rs` | The management client and the live feed that is forwarded to the UI and the tray |
-| `credentials.rs` | The app's copy of the admin key in the OS credential store (Windows Credential Manager, macOS Keychain, Secret Service), falling back to `admin.key` when the store is unavailable |
+| `credentials.rs` | The admin key read from the server's `admin.key` through `paddock_secrets::SecretFile` (owner-only, no link followed), cached until an `Unauthorized` answer; no OS credential store (ADR 0057) |
 | `service_install.rs` | Registering the server with the OS: `SMAppService` and the launch agent inside the bundle on macOS, the NSIS installer's service on Windows, a systemd user unit written by `pitwall-server install` on Linux. Elevation and approval are always the OS's own |
 | `lib.rs`, `tray.rs`, `tray_model.rs` | Pitwall on the Paddock shell (`paddock-shell`, ADR 0029): the shell opens the tray and the main window after every plugin is set up, owns the window lifecycle (closing destroys the window, tray Open and Dock reopen rebuild it, only Quit exits, no tray means closing quits), the exit and its watchdog, and guards Pitwall's commands (`COMMANDS`); `tray.rs` draws Pitwall's tray model on the shell's tray |
 | `update_hooks.rs` | Pitwall on the shell's updater (`paddock-updater`: About, Updates, What's new): the service hooks that repair the macOS registration after a version change. Inert in builds without the signing key |

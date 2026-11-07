@@ -3,6 +3,7 @@
 //! secret in an owner-only file next to the data; apps never see it.
 
 use crate::paths::{self, Dirs};
+use paddock_secrets::{Secret, SecretFile};
 use pitwall_core::ids::AppId;
 use pitwall_core::keys::{self, StoredKey};
 use pitwall_core::limits::{AppPermissions, RateWindow};
@@ -16,6 +17,30 @@ const MAX_PENDING: usize = 8;
 const PAIRING_TTL_MS: u64 = 5 * 60 * 1000;
 const FILE_VERSION: u32 = 1;
 const MAX_FILE: usize = 1024 * 1024;
+
+/// The admin key from its owner-only file (ADR 0057 WP-4: `admin.key` is its only store, on every OS), or a new one written
+/// there when there is none or the file is not trusted (others could read it, a link, another user's file, damaged): such a
+/// key may have been read, so it is replaced, never repaired. The key itself is never logged.
+fn admin_key(file: &SecretFile) -> String {
+    let why = match file.read() {
+        Ok(Some(k)) if k.expose().starts_with(keys::KEY_PREFIX) => return k.expose().to_string(),
+        Ok(Some(_)) => "it does not hold a Pitwall key".to_string(),
+        Ok(None) => "there is none yet".to_string(),
+        Err(e) => e.to_string(),
+    };
+    let k = keys::generate(paths::random32(), paths::now_ms()).secret;
+    let written = Secret::new(&k).and_then(|s| file.write(&s));
+    match written {
+        Ok(()) => log::info!(target: "pitwall_server", "admin key: a new one in {} ({why})", file.path().display()),
+        Err(e) => log::warn!(
+            target: "pitwall_server",
+            "admin key: a new one for this run only ({why}); it could not be stored: {e}. Pitwall's window cannot connect until \
+             {} can be written: check the data folder's owner and permissions",
+            file.path().display()
+        ),
+    }
+    k
+}
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -107,17 +132,7 @@ impl Auth {
                 .filter(|f| f.version == FILE_VERSION)
         };
         let apps = parse(primary).or_else(|| parse(backup)).map(|f| f.apps).unwrap_or_default();
-        let admin = std::fs::read_to_string(dirs.admin_key())
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| s.starts_with(keys::KEY_PREFIX))
-            .unwrap_or_else(|| {
-                let k = keys::generate(paths::random32(), paths::now_ms()).secret;
-                if paths::write_atomic(&dirs.admin_key(), k.as_bytes()).is_ok() {
-                    paths::restrict(&dirs.admin_key());
-                }
-                k
-            });
+        let admin = admin_key(&SecretFile::new(dirs.admin_key()));
         Auth {
             dirs,
             apps: Mutex::new(apps),
@@ -255,9 +270,7 @@ impl Auth {
         let Some(a) = apps.iter_mut().find(|a| a.id.as_str() == app) else {
             return false;
         };
-        let before = a.keys.len();
-        a.keys.retain(|k| k.id != key_id);
-        let changed = a.keys.len() != before;
+        let changed = revoke_where(a, |k| k.id == key_id) > 0;
         if changed {
             self.save(&apps);
         }
@@ -305,7 +318,8 @@ impl Auth {
     }
 
     /// An app asks to pair (ADR 0009). The code is shown to the user in Pitwall and by the app.
-    pub fn request_pairing(&self, name: &str, code_random: u32, now: u64) -> Result<PairingRequest, AuthError> {
+    /// `re_pair`: the app asks to replace its keys (ADR 0057 §4); approving it revokes the app's older keys.
+    pub fn request_pairing(&self, name: &str, code_random: u32, re_pair: bool, now: u64) -> Result<PairingRequest, AuthError> {
         let name = name.trim();
         if name.is_empty() || name.chars().count() > 60 || name.chars().any(char::is_control) {
             return Err(AuthError::Invalid("send a name of 1 to 60 characters".into()));
@@ -330,6 +344,7 @@ impl Auth {
             code: keys::pairing_code(code_random),
             requested_at: now,
             permissions: AppPermissions::default(),
+            re_pair,
         };
         p.push(Pending {
             req: req.clone(),
@@ -361,6 +376,19 @@ impl Auth {
                 let secret = key.secret.clone();
                 match apps.iter_mut().find(|a| a.id.as_str() == x.req.app_id) {
                     Some(a) => {
+                        // A re-pair revokes the keys made before this approval, with the one revoke rule.
+                        let revoked = if x.req.re_pair {
+                            revoke_where(a, |k| k.created_at <= now)
+                        } else {
+                            0
+                        };
+                        log::info!(
+                            target: "pitwall_server",
+                            "pairing approved for {}: {} (re-pair {}, {revoked} older keys revoked)",
+                            a.id,
+                            if x.req.re_pair { "replaces its keys" } else { "a key beside the others" },
+                            x.req.re_pair
+                        );
                         a.keys.push(key.stored);
                         a.permissions = perms;
                     }
@@ -396,6 +424,13 @@ impl Auth {
             Outcome::Denied => PairStatus::Denied,
         }
     }
+}
+
+/// Removes the keys of `a` that match; how many went. The one revoke rule for a single key and for a re-pair.
+fn revoke_where(a: &mut AppRecord, revoke: impl Fn(&StoredKey) -> bool) -> usize {
+    let before = a.keys.len();
+    a.keys.retain(|k| !revoke(k));
+    before - a.keys.len()
 }
 
 fn key_info(k: &StoredKey) -> ApiKeyInfo {
@@ -447,6 +482,50 @@ mod tests {
         let admin = std::fs::read_to_string(d.path().join("admin.key")).unwrap();
         assert_eq!(b.authenticate(Some(admin.trim()), false, 1), Ok(Principal::Admin));
         assert!(b.admin_matches(admin.trim()));
+    }
+
+    /// ADR 0057 WP-4: `admin.key` is the only copy of the admin key, so the server writes it owner-only from the first byte
+    /// and never trusts a loose one, a link or another user's file: such a key may have been read, so a new one replaces it.
+    #[cfg(unix)]
+    #[test]
+    fn the_admin_key_file_is_owner_only_and_a_loose_or_linked_one_is_replaced() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("data");
+        let key_file = root.join("admin.key");
+        let a = Auth::open(Dirs::at(&root));
+        assert_eq!(mode(&key_file), 0o600);
+        assert_eq!(mode(&root), 0o700, "the data folder is private too");
+        assert_eq!(
+            std::fs::read_to_string(&key_file).unwrap(),
+            a.admin,
+            "the file holds the key and nothing else"
+        );
+        // A restart reads the same key.
+        assert_eq!(Auth::open(Dirs::at(&root)).admin, a.admin);
+        // Others could read it: replaced, owner-only again.
+        std::fs::set_permissions(&key_file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let b = Auth::open(Dirs::at(&root));
+        assert_ne!(b.admin, a.admin, "a key others could read is not kept");
+        assert_eq!(mode(&key_file), 0o600);
+        assert_eq!(std::fs::read_to_string(&key_file).unwrap(), b.admin);
+        // A link to a file elsewhere: never followed, never written through.
+        let outside = d.path().join("outside");
+        std::fs::write(&outside, "pw_planted").unwrap();
+        std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::remove_file(&key_file).unwrap();
+        std::os::unix::fs::symlink(&outside, &key_file).unwrap();
+        let c = Auth::open(Dirs::at(&root));
+        assert_ne!(c.admin, "pw_planted");
+        assert_eq!(
+            std::fs::read_to_string(&outside).unwrap(),
+            "pw_planted",
+            "the link's target is untouched"
+        );
+        assert!(!std::fs::symlink_metadata(&key_file).unwrap().file_type().is_symlink());
+        assert_eq!(c.authenticate(Some("pw_planted"), false, 1), Err(AuthError::Unauthorized));
+        assert!(!root.join("admin.key.bak").exists(), "no backup copy of the key");
     }
 
     /// The request log names the caller by a read-only look-up: nothing is marked as seen (ER-27, B4 review P2-5).
@@ -505,7 +584,7 @@ mod tests {
     #[test]
     fn pairing_hands_the_key_over_once() {
         let (_d, a) = auth();
-        let r = a.request_pairing("Debrief", 123_456, 1000).unwrap();
+        let r = a.request_pairing("Debrief", 123_456, false, 1000).unwrap();
         assert_eq!(r.code.len(), 6);
         assert_eq!(a.poll_pairing(&r.id, 1001), PairStatus::Pending);
         assert_eq!(a.pairings(1001).len(), 1);
@@ -519,20 +598,81 @@ mod tests {
         assert!(a.pairings(1005).is_empty());
     }
 
+    fn approve(a: &Auth, name: &str, re_pair: bool, at: u64) -> String {
+        let r = a.request_pairing(name, 7, re_pair, at).unwrap();
+        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), at + 1));
+        let PairStatus::Approved(Some(secret)) = a.poll_pairing(&r.id, at + 2) else {
+            panic!("approved")
+        };
+        secret
+    }
+
+    fn works(a: &Auth, key: &str) -> bool {
+        a.authenticate(Some(key), false, 1).is_ok()
+    }
+
+    /// ADR 0057 §4: an app that re-pairs after its update (Debrief 1.2) sends the flag; approving it revokes that app's
+    /// older keys, so the key it can no longer read does not stay valid.
+    #[test]
+    fn approving_a_re_pair_revokes_the_older_keys_of_that_app() {
+        let (_d, a) = auth();
+        let first = approve(&a, "Debrief", false, 1000);
+        let extra = a.add_key("debrief", 2000).unwrap().secret;
+        let other = approve(&a, "Pitcrew", false, 2500);
+        let r = a.request_pairing("Debrief", 9, true, 3000).unwrap();
+        assert!(r.re_pair, "the request says it replaces the app's keys");
+        assert!(a.pairings(3000)[0].re_pair, "so the approval can say so");
+        assert!(
+            works(&a, &first) && works(&a, &extra),
+            "nothing is revoked before the user approves"
+        );
+        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), 3001));
+        let PairStatus::Approved(Some(new)) = a.poll_pairing(&r.id, 3002) else {
+            panic!("approved")
+        };
+        assert!(works(&a, &new), "the new key works");
+        assert!(!works(&a, &first) && !works(&a, &extra), "the older keys of the app are revoked");
+        assert!(works(&a, &other), "another app's keys are untouched");
+        let apps = a.list(|_| UsageCounters::default(), 4000);
+        let debrief = apps.iter().find(|x| x.id == "debrief").unwrap();
+        assert_eq!(debrief.keys.len(), 1, "only the new key is listed");
+        // It survives a restart: the revocation was saved.
+        let b = Auth::open(Dirs::at(_d.path()));
+        assert!(b.authenticate(Some(&first), false, 1).is_err());
+        assert!(b.authenticate(Some(&new), false, 1).is_ok());
+    }
+
+    /// A pairing without the flag (a second machine under the same app id) keeps every older key, and so does a denied
+    /// re-pair.
+    #[test]
+    fn a_pairing_without_the_flag_or_a_denied_re_pair_revokes_nothing() {
+        let (_d, a) = auth();
+        let first = approve(&a, "Debrief", false, 1000);
+        let second = approve(&a, "Debrief", false, 2000);
+        assert!(works(&a, &first) && works(&a, &second));
+        assert!(!a.request_pairing("Debrief", 1, false, 2500).unwrap().re_pair);
+        let r = a.request_pairing("Debrief", 9, true, 3000).unwrap();
+        assert!(a.decide_pairing(&r.id, None, 3001));
+        assert!(works(&a, &first) && works(&a, &second), "a denied re-pair revokes nothing");
+        // A re-pair of an app Pitwall does not know yet just creates it.
+        let fresh = approve(&a, "Spotter", true, 4000);
+        assert!(works(&a, &fresh));
+    }
+
     #[test]
     fn pairing_denial_expiry_and_flood() {
         let (_d, a) = auth();
-        let r = a.request_pairing("X", 1, 0).unwrap();
+        let r = a.request_pairing("X", 1, false, 0).unwrap();
         assert!(a.decide_pairing(&r.id, None, 1));
         assert_eq!(a.poll_pairing(&r.id, 2), PairStatus::Denied);
-        let r = a.request_pairing("Y", 1, 0).unwrap();
+        let r = a.request_pairing("Y", 1, false, 0).unwrap();
         assert_eq!(a.poll_pairing(&r.id, PAIRING_TTL_MS + 1), PairStatus::Denied);
         assert_eq!(a.poll_pairing("nope", 1), PairStatus::Denied);
-        assert!(a.request_pairing("bad\nname", 1, 0).is_err());
+        assert!(a.request_pairing("bad\nname", 1, false, 0).is_err());
         for i in 0..MAX_PENDING {
-            let _ = a.request_pairing(&format!("app{i}"), 1, 10);
+            let _ = a.request_pairing(&format!("app{i}"), 1, false, 10);
         }
-        assert!(a.request_pairing("one-more", 1, 10).is_err());
+        assert!(a.request_pairing("one-more", 1, false, 10).is_err());
     }
 
     #[test]

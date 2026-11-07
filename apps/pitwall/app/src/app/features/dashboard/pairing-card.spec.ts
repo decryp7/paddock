@@ -8,7 +8,7 @@ import { MockBackend } from '../../core/mock-backend';
 import { registerIcons } from '../../shared/icons';
 import { settle } from '../../../testing/render';
 
-import { PairingCard, groupCode, permissionSummary } from './pairing-card';
+import { PairingCard, groupCode, permissionSummary, rePairNote } from './pairing-card';
 
 const NOW = 1_800_000_000_000;
 const perms = (over: Partial<AppPermissions> = {}): AppPermissions => ({
@@ -42,15 +42,22 @@ describe('permissionSummary', () => {
   });
 });
 
-const request: PairingRequest = { id: 'p1', appId: 'x', appName: 'Notes App', code: '123456', requestedAt: NOW - 5 * 60_000, permissions: perms({ tools: true }) };
+const request: PairingRequest = { id: 'p1', appId: 'x', appName: 'Notes App', code: '123456', requestedAt: NOW - 5 * 60_000, permissions: perms({ tools: true }), rePair: false };
 
-async function mount(backend = new MockBackend({ now: () => NOW })) {
+describe('rePairNote', () => {
+  it('says a re-pair replaces the app\'s older keys, and says nothing for a plain pairing', () => {
+    expect(rePairNote({ ...request, rePair: true })).toBe('Approving replaces the keys Notes App had before; they stop working.');
+    expect(rePairNote(request)).toBeNull();
+  });
+});
+
+async function mount(backend = new MockBackend({ now: () => NOW }), req: PairingRequest = request) {
   TestBed.configureTestingModule({ imports: [PairingCard], providers: [{ provide: BACKEND, useValue: backend }] });
   registerIcons(TestBed.inject(MatIconRegistry), TestBed.inject(DomSanitizer));
   const live = TestBed.inject(LiveStore);
   await live.load();
   const fixture = TestBed.createComponent(PairingCard);
-  fixture.componentRef.setInput('request', request);
+  fixture.componentRef.setInput('request', req);
   fixture.componentRef.setInput('now', NOW);
   await settle(fixture);
   return { fixture, el: fixture.nativeElement as HTMLElement, live, backend };
@@ -66,6 +73,12 @@ describe('PairingCard', () => {
     // One muted line, not a row of chips.
     expect(el.querySelector('.perms')!.textContent).toBe('Every model · Up to interactive priority · Tools');
     expect(el.querySelector('.tag')).toBeNull();
+    expect(el.querySelector('.repair')).toBeNull();
+  });
+
+  it('says when approving replaces the app\'s older keys (a re-pair, ADR 0057)', async () => {
+    const { el } = await mount(undefined, { ...request, rePair: true });
+    expect(el.querySelector('.repair')!.textContent).toContain('Approving replaces the keys Notes App had before');
   });
 
   it('approves with exactly the requested permissions and clears the request', async () => {
