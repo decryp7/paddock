@@ -1,9 +1,8 @@
 //! `X-Pitwall-Job-Id` and cancelling by id (ADR 0009): a streamed request that has to queue answers at once with the id of
 //! its job, `DELETE /x/v1/jobs/{id}` cancels it without closing the connection (typed `cancelled` frame), an app may
 //! cancel only its own jobs and the admin any.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::{harness_in, Harness, Reply};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;

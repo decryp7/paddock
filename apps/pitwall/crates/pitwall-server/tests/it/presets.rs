@@ -1,9 +1,8 @@
 //! Model presets and aliases end to end over the fake llama-server (ADR 0014): listing, resolution in the three API
 //! families, defaults and the system prompt, provenance, validation, a removed target model, shadowing, and
 //! persistence that survives damage.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::{harness_in, Harness};
 use serde_json::{json, Value};
 

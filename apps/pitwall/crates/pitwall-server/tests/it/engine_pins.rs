@@ -1,9 +1,8 @@
 //! Engine version pins, rollback and capability gating end to end (ADR 0018) over the fake llama-server and
 //! hand-made installed builds: the gate's typed errors in all three API families, selection order, the busy-model
 //! rule, persistence and damage.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::{harness_in, Harness};
 use pitwall_core::runtimes::BuildId;
 use serde_json::{json, Value};

@@ -1,8 +1,7 @@
 //! End-to-end API tests over a fake llama-server: auth, provenance, the three API families, permissions, pairing,
 //! load on first use, release and refusal paths.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::harness;
 use serde_json::json;
 use std::sync::atomic::Ordering;

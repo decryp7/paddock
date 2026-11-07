@@ -1,7 +1,6 @@
 //! The app's build script must never leave its empty sidecar placeholder (`binaries/<name>-<triple>`) in the build folder:
 //! tauri-build copies every `bundle.externalBin` to `target/<profile>/<name>`, over the `pitwall-server` that cargo links
 //! there (Dyno's signing test then copied a 0-byte program). See docs/lessons.md, "tauri-build copies every sidecar".
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 #[test]
 fn the_build_leaves_no_empty_sidecar_in_the_build_folder() {

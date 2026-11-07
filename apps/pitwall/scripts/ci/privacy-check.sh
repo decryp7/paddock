@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ADR 0001: Pitwall's only outbound HTTP client lives in crates/pitwall-server/src/egress.rs. Fails when `reqwest` is
 # referenced anywhere else in the Rust sources or in a crate manifest other than pitwall-server's (which declares it
-# for egress.rs). The Rust test crates/pitwall-server/tests/privacy.rs checks the same from inside the crate; this
+# for egress.rs). The Rust test crates/pitwall-server/tests/it/privacy.rs checks the same from inside the crate; this
 # grep also covers every other crate and file type.
 set -euo pipefail
 cd "$(dirname "$0")/../.."

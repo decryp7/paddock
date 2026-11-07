@@ -1,8 +1,7 @@
 //! Per-app usage over time and the extended limits, end to end over the fake llama-server: recording, the series and
 //! detail calls, 80% warnings, refusals at the boundary, and persistence that survives damage.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::{harness, harness_in, Harness};
 use serde_json::{json, Value};
 

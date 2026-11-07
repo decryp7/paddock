@@ -84,7 +84,7 @@ node --test conformance/test/*.test.mjs   # (repo root) the shared scripts: comm
 Extra checks that CI runs:
 
 - `scripts/ci/privacy-check.sh`: `reqwest` appears only in `crates/pitwall-server/src/egress.rs` and the server's
-  manifest ([ADR 0001](adr/0001-local-only.md)). The Rust test `crates/pitwall-server/tests/privacy.rs` checks the same
+  manifest ([ADR 0001](adr/0001-local-only.md)). The Rust test `crates/pitwall-server/tests/it/privacy.rs` checks the same
   from inside the crate, plus that handlers cannot reach the network and that engines get a scrubbed environment.
 - `scripts/ci/ui-coverage-guard.mjs`: Angular line coverage of at least 80 %.
 - `conformance/ci/check-index.mjs` (shared): the built `index.html` has no inline elements (the Tauri CSP nonce rule in
@@ -104,7 +104,7 @@ Co-Authored-By or AI attribution lines.
 | --- | --- | --- |
 | Core unit and property tests | `crates/pitwall-core/src/**` (`#[cfg(test)]`) | Every pure decision; API shapes pinned against the official SDKs; "never panics" properties for parsers |
 | Server end-to-end | `crates/pitwall-server/tests/e2e.rs` | The real router and pipeline over a fake engine: keys, provenance, streaming in all three families, permissions and limits, Host/Origin refusal, pairing, engine failures, pause and release, the removed offline key, embeddings, an engine pack driving a real child process |
-| Privacy | `crates/pitwall-server/tests/privacy.rs` | No outbound client outside egress; handlers cannot reach the network; scrubbed engine environment |
+| Privacy | `crates/pitwall-server/tests/it/privacy.rs` | No outbound client outside egress; handlers cannot reach the network; scrubbed engine environment |
 | UI unit and component | `app/src/**/*.spec.ts` (Vitest and TestBed) | Stores, services, pure utilities, components |
 | UI end-to-end | `app/e2e` (Playwright) | Flows against the mock backend |
 | Real engine | planned | A test that downloads the pinned CPU build and a tiny model (`PITWALL_LLAMA_E2E=1` in AGENTS.md); not implemented yet. The real-model smoke test is done by hand: [testing-manual.md](testing-manual.md) |

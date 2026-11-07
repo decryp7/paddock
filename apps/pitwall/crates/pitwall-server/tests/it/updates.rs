@@ -1,9 +1,8 @@
 //! Model update notices end to end (ADR 0017) over a fake Hugging Face: nothing is asked before the user opts in or
 //! a changed file becomes a notice that can be dismissed, notices and dismissals survive a
 //! restart and a damaged state file, "Check now" is rate limited, and a check never downloads anything.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::{harness_in, Harness};
 use futures_util::future::BoxFuture;
 use pitwall_core::hf::{RepoFiles, RepoId, Variant};

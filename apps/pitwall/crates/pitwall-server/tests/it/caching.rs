@@ -1,9 +1,8 @@
 //! Caching end to end over the fake llama-server (ADR 0019): the opt-in response cache (hit, miss, bypass, streaming
 //! replay, determinism rules, invalidation, clearing, persistence across a restart), the embeddings cache, slot
 //! affinity and the prompt-cache numbers.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::{harness, harness_in, Harness, Reply};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;

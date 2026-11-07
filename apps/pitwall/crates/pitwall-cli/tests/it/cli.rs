@@ -1,7 +1,6 @@
 //! Runs the built `pitwall` binary against a tiny fake of Pitwall's local API on an ephemeral 127.0.0.1 port (never the
 //! production port, never the user's data folder or credential store: the data folder is a temp dir and the admin key
 //! comes from the environment).
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use serde_json::{json, Value};
 use std::collections::HashMap;

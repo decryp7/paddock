@@ -1,8 +1,7 @@
 //! The discovery file's `serving` flag (ADR 0009): written true on start, rewritten false (not deleted) on a clean
 //! stop, tolerant of old files, and a stale pid reads as installed-not-running.
-#![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod common;
+use crate::common;
 use common::harness_in;
 use pitwall_core::discovery::{Discovery, Standing};
 
