@@ -114,7 +114,7 @@ runs:
           if "$@" 2>&1 | tee "$log"; then rc=0; else rc=${PIPESTATUS[0]}; fi
           if [ "$rc" -ne 0 ]; then
             status=1
-            names=$(sed $'s/\x1b\\[[0-9;]*m//g' "$log" | sed -nE 's/^ *(FAIL|TIMEOUT|SIGABRT|SIGSEGV|SIGKILL|LEAK-FAIL) +\[[^]]*\] +(\([^)]*\) +)?//p' | sort -u | head -10 | paste -sd ';' - | sed 's/;/; /g')
+            names=$(sed $'s/\x1b\\[[0-9;]*m//g' "$log" | sed -nE 's/^ *(FAIL|TIMEOUT|SIGABRT|SIGSEGV|SIGKILL|LEAK-FAIL) +\[[^]]*\] +(\([^)]*\) +)?//p' | sort -u | sed -n '1,10p' | paste -sd ';' - | sed 's/;/; /g')
             echo "::error::failed (exit $rc): $*${names:+ | failing tests: $names}"
           fi
           rm -f "$log"
