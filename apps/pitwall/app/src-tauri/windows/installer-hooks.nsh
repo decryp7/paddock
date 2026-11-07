@@ -17,9 +17,14 @@
   Pop $0
   Pop $1
   DetailPrint "pitwall-server install: exit code $0: $1"
-  StrCmp $0 "0" +3
-    IfSilent +2
-      MessageBox MB_ICONEXCLAMATION|MB_OK "The Pitwall service could not be registered (code $0).$\r$\n$1"
+  StrCmp $0 "0" pitwall_install_done
+    ; The words for the user come from check-install, which writes nothing but its answer (no OS-log lines in front).
+    nsExec::ExecToStack '"$INSTDIR\pitwall-server.exe" check-install'
+    Pop $0
+    Pop $1
+    IfSilent pitwall_install_done
+      MessageBox MB_ICONEXCLAMATION|MB_OK "The Pitwall service could not be registered.$\r$\n$1"
+  pitwall_install_done:
   Pop $1
 !macroend
 

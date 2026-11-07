@@ -168,14 +168,14 @@ mod tests {
     /// paddock-service's `os_log`, ADR 0054 §2.3): no file and no folder of its own outside the protected install.
     #[test]
     fn the_system_service_writes_no_file_in_a_folder_users_can_make() {
-        let code = include_str!("windows.rs");
-        for banned in [
-            "var_os(\"ProgramData\")",
-            "remove_file",
-            "create_dir_all",
-            "OpenOptions",
-            "service.log",
-        ] {
+        // B6 re-review P2-2: no file system call and no environment read at all, comments aside (Clippy's
+        // disallowed-methods is per crate, and the server uses the file system elsewhere).
+        let code: String = include_str!("windows.rs")
+            .lines()
+            .map(|l| l.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for banned in ["fs::", "File::", "OpenOptions", "var_os(", "env::var(", "service.log"] {
             assert!(!code.contains(banned), "the service code still uses {banned}");
         }
         assert!(code.contains("paddock_service::os_log::open"), "the service writes to the OS log");

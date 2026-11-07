@@ -605,7 +605,7 @@ mod capability_tests {
             "{post}"
         );
         assert!(
-            post.contains("Pop $1") && post.contains("$1"),
+            post.contains("Pop $1") && post.contains("$1") && post.contains("pitwall-server.exe\" check-install'"),
             "the refusal's words are shown: {post}"
         );
     }

@@ -585,7 +585,7 @@ fn install() -> Result<(), String> {
     };
     let service = match manager.create_service(
         &info,
-        ServiceAccess::CHANGE_CONFIG | ServiceAccess::START | ServiceAccess::QUERY_CONFIG,
+        ServiceAccess::CHANGE_CONFIG | ServiceAccess::START | ServiceAccess::QUERY_CONFIG | ServiceAccess::DELETE,
     ) {
         Ok(s) => s,
         Err(e) if raw_code(&e) == Some(ERROR_SERVICE_EXISTS) => {
@@ -598,11 +598,14 @@ fn install() -> Result<(), String> {
         .query_config()
         .ok()
         .and_then(|c| super::placement::program_of_image_path(&c.executable_path.to_string_lossy()));
-    if held.as_deref().map(str::to_ascii_lowercase) != Some(install.program.to_ascii_lowercase()) {
-        log("install: the registration read back does not start the checked program; it is removed");
-        let _ = service.delete();
-        return Err("The Pitwall service was registered with another program than this one, so it was removed again. Uninstall Pitwall, then install it again.".into());
-    }
+    super::placement::read_back(held.as_deref(), &install.program, || {
+        let deleted = service.delete().map_err(|e| e.to_string());
+        log(&format!(
+            "install: the registration read back does not start the checked program; removing it: {}",
+            deleted.as_ref().map_or_else(|e| format!("failed ({e})"), |()| "done".into())
+        ));
+        deleted
+    })?;
     event_source(false);
     service
         .set_description(WINDOWS_DESCRIPTION)

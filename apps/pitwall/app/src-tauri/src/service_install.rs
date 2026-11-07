@@ -157,7 +157,8 @@ pub const PLATFORM: &str = if cfg!(windows) {
 /// The words `pitwall-server check-install` refused with (its standard error), as the UI shows them: trimmed, at most 600
 /// characters, and a plain sentence when it said nothing.
 pub fn refusal_words(stderr: &str) -> String {
-    let t = stderr.trim();
+    // The refusal is the last line; anything before it is not for the user (the OS-log fallback's lines).
+    let t = stderr.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("");
     if t.is_empty() {
         return "Pitwall's service cannot be registered for this copy of Pitwall. Uninstall Pitwall, then install it again into Program Files.".into();
     }
@@ -448,6 +449,11 @@ mod tests {
         let words = "The Pitwall service runs as the system, so Pitwall must be installed in C:\\Program Files; it is in D:\\x.";
         assert_eq!(refusal_words(&format!("  {words}\r\n")), words);
         assert!(refusal_words("").contains("Uninstall Pitwall, then install it again"));
+        // B6 re-review P2-3: lines the OS-log fallback wrote before the refusal are not shown, only the refusal.
+        let with_fallback = format!(
+            "the OS log could not be opened (RegisterEventSourceW failed); lines go to standard error\ninstall refused: x\n{words}\n"
+        );
+        assert_eq!(refusal_words(&with_fallback), words);
         let long = refusal_words(&"y".repeat(700));
         assert_eq!(long.chars().count(), 601);
         assert!(long.ends_with('…'));

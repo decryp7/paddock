@@ -199,8 +199,26 @@ fn odd_path(path: &str) -> bool {
     path.starts_with("\\\\?\\") || path.starts_with("\\\\.\\") || path.split(['\\', '/']).any(|c| c == "." || c == "..")
 }
 
+/// What the read-back of a new registration means (ADR 0054 §1.1): `held` is the program the service manager now holds for
+/// it (`None`: it could not be read). When it is not `program`, `remove` deletes the registration, and the words say whether
+/// that worked.
+///
+/// # Errors
+/// What happened, in words for the user.
+pub fn read_back(held: Option<&str>, program: &str, remove: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+    if held.is_some_and(|h| same_path(h, program)) {
+        return Ok(());
+    }
+    Err(match remove() {
+        Ok(()) => "The Pitwall service was not registered for this program as asked, so it was removed again. Uninstall Pitwall, then install it again.".into(),
+        Err(why) => format!(
+            "The Pitwall service was not registered for this program as asked, and it could not be removed ({why}). Remove the service named Pitwall in an administrator prompt (sc.exe delete Pitwall), then install Pitwall again."
+        ),
+    })
+}
+
 /// Whether two Windows paths name the same file (compared without case).
-fn same_path(a: &str, b: &str) -> bool {
+pub fn same_path(a: &str, b: &str) -> bool {
     trust::is_within(a, b, Style::Windows) && trust::is_within(b, a, Style::Windows)
 }
 
@@ -570,5 +588,21 @@ mod tests {
         }
         .log_line()
         .contains("Pitwall Old"));
+    }
+
+    /// B6 re-review P2-1: the read-back compares paths as Windows does, and the words say what the clean-up really did.
+    #[test]
+    fn a_registration_read_back_wrong_says_whether_it_was_removed() {
+        assert_eq!(
+            read_back(Some(&EXE.to_uppercase()), EXE, || unreachable!("nothing to remove")),
+            Ok(())
+        );
+        let removed = read_back(Some(OTHER), EXE, || Ok(())).unwrap_err();
+        assert!(removed.contains("so it was removed again"), "{removed}");
+        let kept = read_back(None, EXE, || Err("access denied".into())).unwrap_err();
+        assert!(
+            kept.contains("could not be removed (access denied)") && !kept.contains("removed again"),
+            "{kept}"
+        );
     }
 }
