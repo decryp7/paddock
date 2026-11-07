@@ -54,7 +54,8 @@ export function parseBootTime(text) {
 
 /** The guest's boot time as ISO "s" text, or null when it could not be read (the source is kept in \`lastBootSource\`). */
 export function bootTime() {
-  const p = parseBootTime(ssh(BOOT_TIME_PS.replace(/\n/g, ' ')));
+  // The standard user is refused by CIM, WMI and the counter API on this guest (Access denied): the administrator key reads the boot time.
+  const p = parseBootTime(ssh(BOOT_TIME_PS.replace(/\n/g, ' '), { admin: true }));
   bootTime.lastSource = p?.source ?? null;
   return p ? p.time : null;
 }

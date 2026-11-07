@@ -83,7 +83,7 @@ export const foundFromGrep = (code) => (code === 0 ? true : code === 1 ? false :
 export const foundFromPs = (text) => (/^True$/m.test(text) ? true : /^False$/m.test(text) ? false : null);
 
 /** The PowerShell that prints True or False for "this file contains the build commit" (the 12 digits `option_env!` embeds in the binary). */
-export const psHasCommit = (path, sha) => `try { [Text.Encoding]::Latin1.GetString([IO.File]::ReadAllBytes('${path}')).Contains('${sha}') } catch { 'unreadable' }`;
+export const psHasCommit = (path, sha) => `try { [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes('${path}')).Contains('${sha}') } catch { 'unreadable' }`;
 
 /** Inserts the build-binding step right after the install step (or first), so the header and the steps read in run order. */
 export function withBuildStep(steps, step) {

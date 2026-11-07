@@ -126,8 +126,8 @@ export function windowsAdapter({ ssh, dyno = 'C:\\Program Files\\Dyno\\dyno.exe'
     statusJsonCmd: `& '${dyno}' status --json 2>$null`, statusTextCmd: `& '${dyno}' status 2>$null`,
     writeCmd: `$f=[IO.File]::Create('${tmp}'); $b=New-Object byte[] 1000000; for($i=0;$i -lt 1000;$i++){$f.Write($b,0,$b.Length)}; $f.Flush($true); $f.Close(); 'WROTE'`,
     deleteCmd: `Remove-Item '${tmp}' -Force -ErrorAction SilentlyContinue`,
-    // Explorer's figure is the volume's free bytes (GetDiskFreeSpaceEx); Get-Volume and Get-PSDrive read the same.
-    async osFree(exec) { return { bytes: num((await exec(`(Get-Volume -DriveLetter C).SizeRemaining`)).stdout), source: 'Explorer (Get-Volume C:)' }; },
-    async osAlt(exec) { return { bytes: num((await exec(`(Get-PSDrive C).Free`)).stdout), source: 'Get-PSDrive C' }; },
+    // Explorer's figure is the volume's free bytes (GetDiskFreeSpaceEx = DriveInfo). CIM, Get-Volume and Get-PSDrive answer a standard user with Access denied or nothing on this guest.
+    async osFree(exec) { return { bytes: num((await exec(`([IO.DriveInfo]'C').AvailableFreeSpace`)).stdout), source: 'Explorer (GetDiskFreeSpaceEx C:)' }; },
+    async osAlt(exec) { return { bytes: num((await exec(`([IO.DriveInfo]'C').TotalFreeSpace`)).stdout), source: 'DriveInfo.TotalFreeSpace C:' }; },
   };
 }
