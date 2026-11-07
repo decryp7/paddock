@@ -118,6 +118,7 @@ export function demoPairings(now: number): PairingRequest[] {
       requestedAt: now - 40_000,
       permissions: { models: null, maxPriority: 'interactive', tools: false, extendedApis: false, cacheResponses: false, limits: { requestsPerMin: 60, tokensPerDay: null, maxConcurrent: 1, requestsPerDay: null, tokensPerMonth: null, maxMemoryPercent: null } },
       rePair: false,
+      replaces: null,
     },
   ];
 }

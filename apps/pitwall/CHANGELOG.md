@@ -44,8 +44,9 @@ optional: nothing reads it.
   user's file is not trusted: the server replaces the key and logs why. The key is plain text in that file: other users
   cannot read it, but any program running as you can, as with `~/.netrc` (see the user guide, "Your data").
 - An app that pairs again after losing its key can send `"rePair": true`; approving such a request revokes that app's
-  older keys, so the key it lost does not stay valid. The request says so in Pitwall. A pairing without the flag (a
-  second machine under the same name) keeps the older keys.
+  keys, so the key it lost does not stay valid. Pitwall shows the app it has under that name and how many keys go
+  ("Approving revokes all 3 keys of Debrief (debrief)"). A pairing without the flag (a second machine under the same
+  name) keeps the other keys. An approval that cannot be saved now says so instead of looking done.
 
 ### Fixed
 

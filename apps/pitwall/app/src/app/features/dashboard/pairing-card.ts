@@ -20,9 +20,15 @@ export function permissionSummary(p: AppPermissions): string[] {
   return out;
 }
 
-/** What approving a re-pair does (ADR 0057 §4), or null for a plain pairing, which keeps the app's other keys. */
+/**
+ * What approving a re-pair does (ADR 0057 §4), named by the app Pitwall has (its stored name and id, not the requester's
+ * words), or null for a plain pairing, which keeps the app's other keys.
+ */
 export function rePairNote(r: PairingRequest): string | null {
-  return r.rePair ? `Approving replaces the keys ${r.appName} had before; they stop working.` : null;
+  if (!r.rePair) return null;
+  const old = r.replaces;
+  if (!old) return `Pitwall has no app "${r.appId}" yet: approving only adds it.`;
+  return old.keys === 1 ? `Approving revokes the 1 key of ${old.appName} (${old.appId}).` : `Approving revokes all ${old.keys} keys of ${old.appName} (${old.appId}).`;
 }
 
 /** A pending pairing request: the code to match, what it asks for, and Approve / Deny. */

@@ -42,11 +42,17 @@ describe('permissionSummary', () => {
   });
 });
 
-const request: PairingRequest = { id: 'p1', appId: 'x', appName: 'Notes App', code: '123456', requestedAt: NOW - 5 * 60_000, permissions: perms({ tools: true }), rePair: false };
+const request: PairingRequest = { id: 'p1', appId: 'x', appName: 'Notes App', code: '123456', requestedAt: NOW - 5 * 60_000, permissions: perms({ tools: true }), rePair: false, replaces: null };
 
 describe('rePairNote', () => {
-  it('says a re-pair replaces the app\'s older keys, and says nothing for a plain pairing', () => {
-    expect(rePairNote({ ...request, rePair: true })).toBe('Approving replaces the keys Notes App had before; they stop working.');
+  // Review P2-3: the note names the app Pitwall has (its stored name and id) and how many keys go, not the requester's words.
+  it('names the stored app and how many of its keys an approval revokes', () => {
+    const replaces = { appId: 'debrief', appName: 'Debrief', keys: 3 };
+    expect(rePairNote({ ...request, appName: 'Debrief (new)', rePair: true, replaces })).toBe('Approving revokes all 3 keys of Debrief (debrief).');
+    expect(rePairNote({ ...request, rePair: true, replaces: { ...replaces, keys: 1 } })).toBe('Approving revokes the 1 key of Debrief (debrief).');
+  });
+  it('says when a re-pair has nothing to replace, and says nothing for a plain pairing', () => {
+    expect(rePairNote({ ...request, rePair: true })).toBe('Pitwall has no app "x" yet: approving only adds it.');
     expect(rePairNote(request)).toBeNull();
   });
 });
@@ -77,8 +83,8 @@ describe('PairingCard', () => {
   });
 
   it('says when approving replaces the app\'s older keys (a re-pair, ADR 0057)', async () => {
-    const { el } = await mount(undefined, { ...request, rePair: true });
-    expect(el.querySelector('.repair')!.textContent).toContain('Approving replaces the keys Notes App had before');
+    const { el } = await mount(undefined, { ...request, rePair: true, replaces: { appId: 'notes-app', appName: 'Notes App', keys: 2 } });
+    expect(el.querySelector('.repair')!.textContent).toContain('Approving revokes all 2 keys of Notes App (notes-app).');
   });
 
   it('approves with exactly the requested permissions and clears the request', async () => {

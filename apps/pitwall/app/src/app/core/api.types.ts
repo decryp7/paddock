@@ -411,6 +411,16 @@ export interface PairingRequest {
   permissions: AppPermissions;
   /** A re-pair (ADR 0057 §4): approving it revokes the keys the app had before. */
   rePair: boolean;
+  /** For a re-pair of an app Pitwall has: that app as stored and how many keys approving revokes. */
+  replaces: ReplacedApp | null;
+}
+
+/** The app a re-pair replaces the keys of. */
+export interface ReplacedApp {
+  appId: string;
+  /** Its name as Pitwall stored it, not the requester's. */
+  appName: string;
+  keys: number;
 }
 
 // ---------------------------------------------------------------------------------------------------------------

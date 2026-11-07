@@ -7,7 +7,7 @@ use paddock_secrets::{Secret, SecretFile};
 use pitwall_core::ids::AppId;
 use pitwall_core::keys::{self, StoredKey};
 use pitwall_core::limits::{AppPermissions, RateWindow};
-use pitwall_core::mgmt::{ApiKeyInfo, AppInfo, CreatedKey, PairingRequest, UsageCounters};
+use pitwall_core::mgmt::{ApiKeyInfo, AppInfo, CreatedKey, PairingRequest, ReplacedApp, UsageCounters};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
@@ -143,14 +143,29 @@ impl Auth {
         }
     }
 
-    fn save(&self, apps: &[AppRecord]) {
+    /// Writes `apps.json`. A failure is logged with the path and the cause (ER-27) and returned: the change is in memory
+    /// only and is lost when the server restarts (a revoked key would work again).
+    fn save(&self, apps: &[AppRecord]) -> Result<(), String> {
         let f = File {
             version: FILE_VERSION,
             apps: apps.to_vec(),
         };
-        if let Ok(b) = serde_json::to_vec_pretty(&f) {
-            if paths::write_atomic(&self.dirs.apps(), &b).is_ok() {
-                paths::restrict(&self.dirs.apps());
+        let path = self.dirs.apps();
+        let written = serde_json::to_vec_pretty(&f)
+            .map_err(|e| e.to_string())
+            .and_then(|b| paths::write_atomic(&path, &b).map_err(|e| e.to_string()));
+        match written {
+            Ok(()) => {
+                paths::restrict(&path);
+                Ok(())
+            }
+            Err(e) => {
+                log::error!(
+                    target: "pitwall_server",
+                    "the apps and keys could not be saved to {}: {e}. The change holds until the server restarts; check the data folder's space and permissions",
+                    path.display()
+                );
+                Err(format!("the change could not be saved to {}: {e}", path.display()))
             }
         }
     }
@@ -234,7 +249,7 @@ impl Auth {
             permissions,
             last_seen_at: None,
         });
-        self.save(&apps);
+        self.save(&apps).ok();
         Ok(CreatedKey {
             app_id: id.to_string(),
             key: info,
@@ -256,7 +271,7 @@ impl Auth {
         let info = key_info(&key.stored);
         a.keys.push(key.stored);
         let id = a.id.to_string();
-        self.save(&apps);
+        self.save(&apps).ok();
         Ok(CreatedKey {
             app_id: id,
             key: info,
@@ -272,7 +287,7 @@ impl Auth {
         };
         let changed = revoke_where(a, |k| k.id == key_id) > 0;
         if changed {
-            self.save(&apps);
+            self.save(&apps).ok();
         }
         changed
     }
@@ -284,7 +299,7 @@ impl Auth {
         apps.retain(|a| a.id.as_str() != app);
         let changed = apps.len() != before;
         if changed {
-            self.save(&apps);
+            self.save(&apps).ok();
         }
         changed
     }
@@ -296,7 +311,7 @@ impl Auth {
             return false;
         };
         a.permissions = p;
-        self.save(&apps);
+        self.save(&apps).ok();
         true
     }
 
@@ -345,28 +360,48 @@ impl Auth {
             requested_at: now,
             permissions: AppPermissions::default(),
             re_pair,
+            replaces: None,
         };
         p.push(Pending {
             req: req.clone(),
             outcome: Outcome::Waiting,
         });
-        Ok(req)
+        drop(p);
+        Ok(self.with_replaces(req))
+    }
+
+    /// For a re-pair, the app Pitwall has under that id (its stored name, not the requester's) and how many keys an
+    /// approval revokes; read now, so the count is what the approval would do.
+    fn with_replaces(&self, mut req: PairingRequest) -> PairingRequest {
+        req.replaces = req
+            .re_pair
+            .then(|| {
+                lock(&self.apps).iter().find(|a| a.id.as_str() == req.app_id).map(|a| ReplacedApp {
+                    app_id: a.id.to_string(),
+                    app_name: a.name.clone(),
+                    keys: u32::try_from(a.keys.len()).unwrap_or(u32::MAX),
+                })
+            })
+            .flatten();
+        req
     }
 
     /// Pairing requests waiting for the user.
     pub fn pairings(&self, now: u64) -> Vec<PairingRequest> {
-        lock(&self.pending)
+        let waiting: Vec<PairingRequest> = lock(&self.pending)
             .iter()
             .filter(|x| matches!(x.outcome, Outcome::Waiting) && now.saturating_sub(x.req.requested_at) < PAIRING_TTL_MS)
             .map(|x| x.req.clone())
-            .collect()
+            .collect();
+        waiting.into_iter().map(|r| self.with_replaces(r)).collect()
     }
 
-    /// The user approves (with the permissions to grant) or denies.
-    pub fn decide_pairing(&self, id: &str, approve: Option<AppPermissions>, now: u64) -> bool {
+    /// The user approves (with the permissions to grant) or denies. `Ok(false)`: no such waiting request. An approval that
+    /// cannot be saved is an error: the key is handed over and works until the server restarts, but the change is lost then.
+    pub fn decide_pairing(&self, id: &str, approve: Option<AppPermissions>, now: u64) -> Result<bool, AuthError> {
         let mut p = lock(&self.pending);
         let Some(x) = p.iter_mut().find(|x| x.req.id == id && matches!(x.outcome, Outcome::Waiting)) else {
-            return false;
+            return Ok(false);
         };
         match approve {
             None => x.outcome = Outcome::Denied,
@@ -376,12 +411,9 @@ impl Auth {
                 let secret = key.secret.clone();
                 match apps.iter_mut().find(|a| a.id.as_str() == x.req.app_id) {
                     Some(a) => {
-                        // A re-pair revokes the keys made before this approval, with the one revoke rule.
-                        let revoked = if x.req.re_pair {
-                            revoke_where(a, |k| k.created_at <= now)
-                        } else {
-                            0
-                        };
+                        // A re-pair revokes every key the app has, with the one revoke rule (not by time: a clock moved
+                        // back must not keep an old key alive).
+                        let revoked = if x.req.re_pair { revoke_where(a, |_| true) } else { 0 };
                         log::info!(
                             target: "pitwall_server",
                             "pairing approved for {}: {} (re-pair {}, {revoked} older keys revoked)",
@@ -393,7 +425,7 @@ impl Auth {
                         a.permissions = perms;
                     }
                     None => {
-                        let Ok(aid) = AppId::parse(&x.req.app_id) else { return false };
+                        let Ok(aid) = AppId::parse(&x.req.app_id) else { return Ok(false) };
                         apps.push(AppRecord {
                             id: aid,
                             name: x.req.app_name.clone(),
@@ -404,11 +436,12 @@ impl Auth {
                         });
                     }
                 }
-                self.save(&apps);
+                let saved = self.save(&apps);
                 x.outcome = Outcome::Approved(Some(secret));
+                saved.map_err(|e| AuthError::Invalid(format!("the app was approved, but {e}; it is lost when Pitwall restarts")))?;
             }
         }
-        true
+        Ok(true)
     }
 
     /// The poll: the key is handed over once.
@@ -588,8 +621,8 @@ mod tests {
         assert_eq!(r.code.len(), 6);
         assert_eq!(a.poll_pairing(&r.id, 1001), PairStatus::Pending);
         assert_eq!(a.pairings(1001).len(), 1);
-        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), 1002));
-        assert!(!a.decide_pairing(&r.id, None, 1002));
+        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), 1002).unwrap());
+        assert!(!a.decide_pairing(&r.id, None, 1002).unwrap());
         let PairStatus::Approved(Some(secret)) = a.poll_pairing(&r.id, 1003) else {
             panic!("approved")
         };
@@ -600,7 +633,7 @@ mod tests {
 
     fn approve(a: &Auth, name: &str, re_pair: bool, at: u64) -> String {
         let r = a.request_pairing(name, 7, re_pair, at).unwrap();
-        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), at + 1));
+        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), at + 1).unwrap());
         let PairStatus::Approved(Some(secret)) = a.poll_pairing(&r.id, at + 2) else {
             panic!("approved")
         };
@@ -619,19 +652,30 @@ mod tests {
         let first = approve(&a, "Debrief", false, 1000);
         let extra = a.add_key("debrief", 2000).unwrap().secret;
         let other = approve(&a, "Pitcrew", false, 2500);
+        // A key made "later" than the approval (the clock was moved back) is the app's too, and goes with the others.
+        let future = a.add_key("debrief", 9_000).unwrap().secret;
         let r = a.request_pairing("Debrief", 9, true, 3000).unwrap();
         assert!(r.re_pair, "the request says it replaces the app's keys");
-        assert!(a.pairings(3000)[0].re_pair, "so the approval can say so");
+        // Review P2-3: the approval shows the app Pitwall has, by its stored name and id, and how many keys go.
+        let shown = &a.pairings(3000)[0];
+        let replaces = shown.replaces.as_ref().expect("the app exists");
+        assert_eq!(
+            (replaces.app_id.as_str(), replaces.app_name.as_str(), replaces.keys),
+            ("debrief", "Debrief", 3)
+        );
         assert!(
             works(&a, &first) && works(&a, &extra),
             "nothing is revoked before the user approves"
         );
-        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), 3001));
+        assert!(a.decide_pairing(&r.id, Some(AppPermissions::default()), 3001).unwrap());
         let PairStatus::Approved(Some(new)) = a.poll_pairing(&r.id, 3002) else {
             panic!("approved")
         };
         assert!(works(&a, &new), "the new key works");
-        assert!(!works(&a, &first) && !works(&a, &extra), "the older keys of the app are revoked");
+        assert!(
+            !works(&a, &first) && !works(&a, &extra) && !works(&a, &future),
+            "every key the app had is revoked"
+        );
         assert!(works(&a, &other), "another app's keys are untouched");
         let apps = a.list(|_| UsageCounters::default(), 4000);
         let debrief = apps.iter().find(|x| x.id == "debrief").unwrap();
@@ -640,6 +684,21 @@ mod tests {
         let b = Auth::open(Dirs::at(_d.path()));
         assert!(b.authenticate(Some(&first), false, 1).is_err());
         assert!(b.authenticate(Some(&new), false, 1).is_ok());
+    }
+
+    /// Review P2-4: an approval that cannot be saved says so, instead of looking done (and a restart bringing back revoked
+    /// keys without a word).
+    #[test]
+    fn an_approval_that_cannot_be_saved_is_an_error() {
+        let (d, a) = auth();
+        let r = a.request_pairing("Debrief", 9, false, 1000).unwrap();
+        std::fs::create_dir(d.path().join("apps.json")).unwrap();
+        std::fs::create_dir(d.path().join("apps.tmp")).unwrap();
+        let e = a.decide_pairing(&r.id, Some(AppPermissions::default()), 1001).unwrap_err();
+        assert!(e.to_string().contains("could not be saved"), "{e}");
+        // A re-pair request for an app Pitwall does not know names nothing to replace.
+        let fresh = a.request_pairing("Spotter", 9, true, 1002).unwrap();
+        assert!(fresh.re_pair && fresh.replaces.is_none());
     }
 
     /// A pairing without the flag (a second machine under the same app id) keeps every older key, and so does a denied
@@ -652,7 +711,7 @@ mod tests {
         assert!(works(&a, &first) && works(&a, &second));
         assert!(!a.request_pairing("Debrief", 1, false, 2500).unwrap().re_pair);
         let r = a.request_pairing("Debrief", 9, true, 3000).unwrap();
-        assert!(a.decide_pairing(&r.id, None, 3001));
+        assert!(a.decide_pairing(&r.id, None, 3001).unwrap());
         assert!(works(&a, &first) && works(&a, &second), "a denied re-pair revokes nothing");
         // A re-pair of an app Pitwall does not know yet just creates it.
         let fresh = approve(&a, "Spotter", true, 4000);
@@ -663,7 +722,7 @@ mod tests {
     fn pairing_denial_expiry_and_flood() {
         let (_d, a) = auth();
         let r = a.request_pairing("X", 1, false, 0).unwrap();
-        assert!(a.decide_pairing(&r.id, None, 1));
+        assert!(a.decide_pairing(&r.id, None, 1).unwrap());
         assert_eq!(a.poll_pairing(&r.id, 2), PairStatus::Denied);
         let r = a.request_pairing("Y", 1, false, 0).unwrap();
         assert_eq!(a.poll_pairing(&r.id, PAIRING_TTL_MS + 1), PairStatus::Denied);

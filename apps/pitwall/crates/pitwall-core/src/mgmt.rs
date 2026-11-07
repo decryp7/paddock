@@ -652,6 +652,22 @@ pub struct PairingRequest {
     /// it (Debrief's "re-pair after the update"); a second machine pairing under the same name does not.
     #[serde(default)]
     pub re_pair: bool,
+    /// For a re-pair of an app Pitwall has: that app as stored (not the requester's name) and how many keys approving
+    /// revokes. `None` for a plain pairing, or a re-pair of an app Pitwall does not know.
+    #[serde(default)]
+    pub replaces: Option<ReplacedApp>,
+}
+
+/// The app a re-pair replaces the keys of (`ReplacedApp`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplacedApp {
+    /// Its id.
+    pub app_id: String,
+    /// Its name as Pitwall stored it.
+    pub app_name: String,
+    /// How many keys an approval revokes.
+    pub keys: u32,
 }
 
 /// An engine tile (`EngineStatusTile`).

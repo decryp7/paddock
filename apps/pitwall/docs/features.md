@@ -218,7 +218,7 @@ Everything cached stays on this computer.
   app polls and receives its key **once**. Requests expire after 5 minutes and at most 8 wait at once. Works.
 - **Keys** are `pw_` plus 32 random bytes. Pitwall stores only the SHA-256 and the first characters (to tell keys apart),
   compares in constant time and writes `apps.json` atomically with a backup. A key can be created in the UI (shown once),
-  added to an app, or revoked at any time. A re-pair (`"rePair": true`, ADR 0057 §4) revokes the app's older keys on approval. Works.
+  added to an app, or revoked at any time. A re-pair (`"rePair": true`, ADR 0057 §4) revokes all of that app's keys on approval; the request shows the stored app and its key count. Works.
 - **Permissions and limits per app**: which models, the most urgent priority it may use, tools, the extended APIs, requests
   per minute, requests per UTC day, tokens per UTC day and per month, concurrent requests, and a share of the machine's RAM
   a request's model may occupy. A refusal says what to change; 80 % of a budget raises a warning event. Works.

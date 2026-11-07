@@ -507,20 +507,22 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
             let id: String = arg(a, "id")?;
             let p: mgmt::AppPermissions = arg(a, "permissions")?;
             p.limits.validate().map_err(|m| err(mgmt::ErrorCode::BadRequest, m))?;
-            if !st.auth.decide_pairing(&id, Some(p), now) {
+            let decided = st.auth.decide_pairing(&id, Some(p), now);
+            st.push(&LiveUpdate::Pairing {
+                pairings: st.auth.pairings(now),
+            });
+            if !decided.map_err(|e| err(mgmt::ErrorCode::Internal, e.to_string()))? {
                 return Err(err(
                     mgmt::ErrorCode::NotFound,
                     "that pairing request expired or was already answered",
                 ));
             }
-            st.push(&LiveUpdate::Pairing {
-                pairings: st.auth.pairings(now),
-            });
             ok(())
         }
         "deny_pairing" => {
             let id: String = arg(a, "id")?;
-            st.auth.decide_pairing(&id, None, now);
+            // A denial changes nothing on disk, so it cannot fail to save.
+            let _ = st.auth.decide_pairing(&id, None, now);
             st.push(&LiveUpdate::Pairing {
                 pairings: st.auth.pairings(now),
             });

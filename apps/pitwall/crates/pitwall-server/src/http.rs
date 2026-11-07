@@ -918,8 +918,16 @@ async fn x_pair(State(st): S, h: HeaderMap, body: Bytes) -> Response {
         st.event(
             EventKind::Pairing,
             Severity::Info,
-            if r.re_pair {
-                format!("{} asks to connect again, replacing its keys (code {})", r.app_name, r.code)
+            if let Some(old) = &r.replaces {
+                format!(
+                    "{} asks to connect again, replacing the {} keys of {} ({}) (code {})",
+                    r.app_name, old.keys, old.app_name, old.app_id, r.code
+                )
+            } else if r.re_pair {
+                format!(
+                    "{} asks to connect again, but Pitwall has no app {} yet (code {})",
+                    r.app_name, r.app_id, r.code
+                )
             } else {
                 format!("{} asks to connect (code {})", r.app_name, r.code)
             },

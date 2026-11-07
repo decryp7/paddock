@@ -152,8 +152,9 @@ Apps need a key. The easiest way for a suite app (Debrief, Pitcrew, Spotter, Dyn
 3. The app polls and receives its key **once** and keeps it (where depends on the app). A request expires after 5 minutes.
 
 An app that lost its key (Debrief 1.2 after its update) pairs again with `"rePair": true`. Pitwall shows that the request
-replaces the app's keys, and approving it revokes the app's older keys. A pairing without it, such as a second computer
-under the same app name, keeps the older keys working until you revoke them in **Apps & keys**.
+replaces the keys of the app Pitwall has under that name (it shows that app's name, id and how many keys), and approving
+it revokes all of them. A pairing without it, such as a second computer under the same app name, keeps the other keys
+working until you revoke them in **Apps & keys**.
 
 You can do the same by hand to try it:
 
