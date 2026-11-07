@@ -64,14 +64,26 @@ pub fn manager(client: &SharedClient, timings: Timings) -> Result<Manager, Comma
     let client = client.clone();
     // Asked from a blocking thread, so blocking on the async client here does not stall the runtime.
     let answers = move || tauri::async_runtime::block_on(forward(client.as_ref(), "overview", serde_json::Value::Null)).is_ok();
-    Ok(Manager::new(APP_NAME, backend, &data, LABEL, env!("CARGO_PKG_VERSION"), answers)
+    Ok(manager_over(backend, &data, &program, timings, answers))
+}
+
+/// Pitwall's manager over `backend`: the one place that says how the app watches the service start (the real `manager` and the
+/// test build it through here).
+fn manager_over(
+    backend: Box<dyn paddock_service::Backend>,
+    data: &std::path::Path,
+    program: &std::path::Path,
+    timings: Timings,
+    answers: impl FnMut() -> bool + Send + 'static,
+) -> Manager {
+    Manager::new(APP_NAME, backend, data, LABEL, env!("CARGO_PKG_VERSION"), answers)
         .with_program(&program.to_string_lossy())
         .with_tracker(tracker())
         // The wait for the service after a registration is judged on what launchd shows of the job (a slow start is waited
         // for, a vanished, crash-looping or stuck one fails early with what was seen) and not a fixed 120 s (ADR 0056
         // amendment, ADR 0031). Backends that cannot observe the job (systemd, Windows) keep the fixed wait.
         .with_start_watch(Box::new(StartWait::with_poll(timings.start_poll)))
-        .with_timings(timings))
+        .with_timings(timings)
 }
 
 /// The step the running repair is at (`None` when none works), for the job's phase label.
@@ -80,4 +92,33 @@ pub fn repair_step() -> Option<String> {
     tracker()
         .current(paddock_jobs::time::Clock::monotonic(&paddock_jobs::time::SystemClock))
         .and_then(|n| n.step)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use paddock_service::backend::{Systemd, Target};
+    use paddock_service::testing::FakeSystem;
+
+    #[test]
+    fn pitwalls_manager_judges_the_wait_for_the_service() {
+        // Over a fake systemd: nothing of the machine is touched (ER-14). The manager is the one the app builds.
+        let dir = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let backend = Systemd::new(
+            spec(),
+            dir.path().join("pitwall.service"),
+            Target::exe("/opt/pitwall/pitwall-server"),
+            Box::new(sys.clone()),
+        );
+        let m = manager_over(
+            Box::new(backend),
+            dir.path(),
+            std::path::Path::new("/opt/pitwall/pitwall-server"),
+            Timings::default(),
+            || false,
+        );
+        assert!(m.watches_start(), "the wait for the service is judged");
+        assert!(sys.calls().is_empty(), "building the manager asks the machine nothing");
+    }
 }

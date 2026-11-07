@@ -108,6 +108,7 @@ fn quick() -> Timings {
         gone_poll: Duration::from_millis(1),
         start_wait: Duration::from_millis(50),
         start_poll: Duration::from_millis(1),
+        judged_ceiling_polls: 5,
         backoff: Duration::ZERO,
     }
 }

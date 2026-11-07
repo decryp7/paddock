@@ -352,8 +352,9 @@ pub struct StartFacts {
     /// The job. A job that is not running is `NotRunning` here, also when it stopped with an error: how it ended is
     /// `last_exit`.
     pub job: Job,
-    /// The job's process while it runs.
-    pub pid: Option<u32>,
+    /// The job's process while it runs, by identity (pid and start time, rule 53) so a restarted job is told from the last
+    /// one even when the pid is handed on; `None` when it does not run or the OS did not name it.
+    pub pid: Option<paddock_proc::ProcessId>,
     /// How often the OS has started the job.
     pub runs: Option<u32>,
     /// The exit code the job last ended with (`None`: never, a signal ended it, or not known).
