@@ -26,7 +26,7 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }
 log = { version = "0.4", features = ["kv"] }
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "matched-path"] }
 bytes = "1"
 flate2 = "1"
 futures-util = "0.3"

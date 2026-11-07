@@ -56,9 +56,46 @@ pub fn router(st: Arc<AppState>) -> Router {
         .route("/x/v1/tokens/truncate", post(x_tokens_truncate))
         .route("/x/v1/jobs", get(x_jobs))
         .route("/x/v1/jobs/{id}", delete(x_cancel))
+        // One log line per app request (the management API the app polls is left out: it would drown them).
+        .route_layer(axum::middleware::from_fn_with_state(st.clone(), request_log))
         .merge(crate::mgmt::routes())
         .layer(DefaultBodyLimit::max(max))
         .with_state(st)
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Edge: the request log (ER-27)
+
+/// Logs each app request when it is answered: method, route pattern, status, duration and the caller. No body, no query, no
+/// header value: names, codes and times only (Pitwall's local-only rule, AGENTS.md).
+async fn request_log(State(st): State<Arc<AppState>>, req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let started = std::time::Instant::now();
+    let method = req.method().to_string();
+    let route = route_of(
+        req.extensions()
+            .get::<axum::extract::MatchedPath>()
+            .map(axum::extract::MatchedPath::as_str),
+        req.uri().path(),
+    );
+    let headers = req.headers();
+    let header_text = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+    let caller = st.auth.caller_label(pitwall_core::keys::credential(
+        header_text("authorization"),
+        header_text("x-api-key"),
+    ));
+    let response = next.run(req).await;
+    log::info!(target: "pitwall_server", "{}", request_line(&method, &route, response.status().as_u16(), started.elapsed(), &caller));
+    response
+}
+
+/// The route's pattern (`/v1/models/{id}`), never the path itself (a model name or an id in it stays out of the log).
+fn route_of(matched: Option<&str>, _path: &str) -> String {
+    matched.map_or_else(|| "(no route)".to_string(), str::to_string)
+}
+
+/// The request log line.
+fn request_line(method: &str, route: &str, status: u16, took: Duration, caller: &str) -> String {
+    format!("request {method} {route} -> {status} in {} ms by {caller}", took.as_millis())
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -1022,4 +1059,19 @@ async fn x_tokens_truncate(State(st): S, h: HeaderMap, body: Bytes) -> Response 
         Ok(axum::Json(json!({"text": t, "truncated": cut})).into_response())
     };
     go().unwrap_or_else(|e| fail(&e, ApiFamily::Extended))
+}
+
+#[cfg(test)]
+mod request_log_tests {
+    use super::*;
+
+    /// One line per app request (ER-27, B4 review P2-5): method, route, status, duration and the caller, never the content.
+    #[test]
+    fn a_request_line_names_the_route_status_time_and_caller_only() {
+        let line = request_line("POST", "/v1/chat/completions", 200, Duration::from_millis(1234), "continue-vs-code");
+        assert_eq!(line, "request POST /v1/chat/completions -> 200 in 1234 ms by continue-vs-code");
+        // The route is the pattern, so ids in the path (a model name) never reach the log.
+        assert_eq!(route_of(Some("/v1/models/{id}"), "/v1/models/secret-model"), "/v1/models/{id}");
+        assert_eq!(route_of(None, "/v1/models/secret-model"), "(no route)");
+    }
 }

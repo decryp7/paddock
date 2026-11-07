@@ -270,14 +270,6 @@ adr = "0012"
   delete_by = "debrief-v1.2.0"
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/lib.rs"]
-  symbols = ["text:tauri_plugin_single_instance::init(|"]
-  kind = "wiring"
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Pitwall 1.1 uses paddock_window::tauri::second_instance."
-
-  [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/lib.rs"]
   symbols = ["text:tauri_plugin_single_instance::init(|"]
   kind = "wiring"
@@ -298,12 +290,6 @@ adr = "0012"
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
   note = "The canonical manager.rs was ported from these files without Debrief's per-window workspaces; the workspace state in windows.rs stays Debrief's."
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/window.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "close.rs was ported from this file. Pitwall 1.1 deletes it."
 
 [[mechanism]]
 id = "run-lifecycle"
@@ -347,13 +333,6 @@ adr = "0012"
   owner = "debrief"
   delete_by = "debrief-v1.2.0"
   note = "The canonical tray.rs was ported from this file. Debrief's menu content (windows, recent projects, tasks) stays Debrief's."
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/tray.rs"]
-  symbols = ["item:build_menu", "item:create", "item:update"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Builds the tray by hand with TrayIconBuilder; Pitwall 1.1 builds it through paddock-window and drops these items."
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/tray_model.rs"]
@@ -548,12 +527,6 @@ adr = "0012"
   delete_by = "debrief-v1.2.0"
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/updater.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Pitwall 1.1 deletes it."
-
-  [[mechanism.copy]]
   paths = ["apps/spotter/app/src-tauri/src/updater.rs"]
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
@@ -738,12 +711,6 @@ status = "built"
   delete_by = "pitcrew-v1.1.0"
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src/app/core/native-feel.ts"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Pitwall 1.1 deletes it."
-
-  [[mechanism.copy]]
   paths = ["apps/spotter/app/src/app/core/native-feel.ts"]
   owner = "spotter"
   delete_by = "spotter-v1.0.0"
@@ -779,12 +746,6 @@ status = "built"
   paths = ["apps/pitcrew/app/src/app/shared/ui/sparkline.ts"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
-
-  [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src/app/shared/ui/sparkline.ts"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.1.0"
-  note = "Pitwall 1.1 deletes it."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/src/app/share/dashboard/dashboard-tile.ts"]

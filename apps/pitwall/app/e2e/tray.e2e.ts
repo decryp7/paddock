@@ -32,6 +32,22 @@ async function textOutOfWidgets(popup: Locator): Promise<string[]> {
         const out: string[] = [];
         if (r.width > 0 && r.right > frame.right - pad + 1) out.push('past the frame padding');
         if (cs.textOverflow !== 'ellipsis' && cs.display !== 'contents' && e.scrollWidth > e.clientWidth + 1 && e.clientWidth > 0) out.push('scrolls sideways');
+        // An inline text clipped by a text-less cell around it: the text's own box (a Range over its text nodes) against the
+        // nearest ancestor that clips sideways, inside the widget. A text truncated on purpose (ellipsis) is left alone.
+        if (cs.textOverflow !== 'ellipsis') {
+          for (const n of Array.from(e.childNodes).filter((c) => c.nodeType === Node.TEXT_NODE && c.textContent!.trim() !== '')) {
+            const range = document.createRange();
+            range.selectNodeContents(n);
+            const t = range.getBoundingClientRect();
+            for (let a = e.parentElement; a && a !== s.parentElement; a = a.parentElement) {
+              const acs = getComputedStyle(a);
+              if (acs.overflowX === 'visible' || acs.textOverflow === 'ellipsis') continue;
+              const box = a.getBoundingClientRect();
+              if (t.width > 0 && (t.right > box.right + 1 || t.left < box.left - 1)) out.push(`clipped by ${a.className || a.tagName}`);
+              break;
+            }
+          }
+        }
         return out.map((w) => `${title}: ${e.className || e.tagName} ${w}`);
       });
     }),
@@ -79,6 +95,15 @@ test.describe('the tray popup', () => {
     const bad = await textOutOfWidgets(popup);
     expect(bad.some((b) => b.endsWith('past the frame padding')), bad.join('\n')).toBe(true);
     expect(bad.some((b) => b.endsWith('scrolls sideways')), bad.join('\n')).toBe(true);
+  });
+
+  // A short inline text in a text-less cell that clips it (no ellipsis) is reported too: the cell holds no text itself, so only
+  // the text's own box shows it (review of B4/tray).
+  test('the text check reports an inline text clipped by a text-less cell', async ({ page }) => {
+    const popup = await openTray(page, 'demo');
+    await page.addStyleTag({ content: 'section.pd-w .pd-w-content { width: 24px; overflow: hidden; }' });
+    const bad = await textOutOfWidgets(popup);
+    expect(bad.some((b) => b.includes('clipped by pd-w-content')), bad.join('\n')).toBe(true);
   });
 
   // The loading twin is the ready widget: same rows (the engine's shape), so the popup does not jump when the values arrive.

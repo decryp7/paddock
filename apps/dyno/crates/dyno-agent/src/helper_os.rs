@@ -134,6 +134,17 @@ fn elevator() -> Box<dyn Elevator> {
     Box::new(Unused)
 }
 
+/// What a helper step that did not work says: paddock-service's words, and for a step that has not ended (turning the helper
+/// on or off) where to look next.
+fn helper_error_text(e: paddock_service::privileged::ElevationError) -> String {
+    match e {
+        paddock_service::privileged::ElevationError::StillRunning(_) => {
+            format!("{e} Look at the helper in Settings again in a few minutes.")
+        }
+        other => other.to_string(),
+    }
+}
+
 /// The real install and removal through the OS's one prompt.
 struct OsInstaller {
     host: HelperHost,
@@ -154,12 +165,12 @@ impl HelperInstaller for OsInstaller {
             elevator().as_mut(),
             prompt,
         )
-        .map_err(|e| e.to_string())
+        .map_err(helper_error_text)
     }
 
     fn uninstall(&mut self) -> Result<(), String> {
         let program = uninstall_program(self.host, &self.bundled, &self.installed);
-        dyno_helper_service::turn_off(os_of(self.host), program, &mut RealSystem::new(), elevator().as_mut()).map_err(|e| e.to_string())
+        dyno_helper_service::turn_off(os_of(self.host), program, &mut RealSystem::new(), elevator().as_mut()).map_err(helper_error_text)
     }
 }
 
@@ -263,6 +274,23 @@ pub fn centre() -> HelperCentre<Box<dyn HelperTransport>> {
 mod tests {
     use super::*;
     use dyno_platform::runner::{Tool, ToolOutput};
+
+    /// An elevated step that has not ended keeps paddock-service's neutral words and gets Dyno's next step, for turning the
+    /// helper on and off alike (review of the Pitwall 1.1 merge).
+    #[test]
+    fn a_helper_step_still_running_says_where_to_look_next() {
+        let shown = helper_error_text(paddock_service::privileged::ElevationError::StillRunning(
+            "C:\\x\\dyno-helper.exe was still running after 10 minutes".into(),
+        ));
+        assert!(
+            shown.starts_with("The elevated step is still running and was not stopped; it may still finish.")
+                && shown.ends_with("Look at the helper in Settings again in a few minutes.")
+                && shown.matches("may still finish").count() == 1,
+            "{shown}"
+        );
+        let declined = helper_error_text(paddock_service::privileged::ElevationError::Declined);
+        assert_eq!(declined, paddock_service::privileged::ElevationError::Declined.to_string());
+    }
 
     #[test]
     fn the_owner_is_read_from_whoami_and_id() {
