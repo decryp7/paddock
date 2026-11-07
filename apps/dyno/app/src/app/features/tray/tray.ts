@@ -16,6 +16,7 @@ import { popoverMeta } from './widgets/popover-meta';
 import { shortcutLabel } from './popover-shortcuts';
 import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
+import { QUIT_STOP, QuitStore } from '../../state/quit.store';
 import { MatButton, MatIconButton } from '@angular/material/button';
 
 /**
@@ -56,7 +57,8 @@ import { MatButton, MatIconButton } from '@angular/material/button';
           <button mat-menu-item type="button" (click)="run('customizeWidgets')"><dy-icon name="sliders" />Customize widgets…</button>
           <button mat-menu-item type="button" (click)="run('openSettings')"><dy-icon name="settings" />Settings…@if (settingsKey; as k) {<kbd aria-hidden="true">{{ k }}</kbd>}</button>
           <hr class="sep" />
-          <button mat-menu-item type="button" (click)="quit()"><dy-icon name="power" />Quit Dyno@if (quitKey; as k) {<kbd aria-hidden="true">{{ k }}</kbd>}</button>
+          <button mat-menu-item type="button" (click)="quit()"><dy-icon name="power" />{{ quitText.title() }}@if (quitKey; as k) {<kbd aria-hidden="true">{{ k }}</kbd>}</button>
+          <button mat-menu-item type="button" (click)="quitAndStop()"><dy-icon name="power" />{{ quitStopText }}</button>
         </mat-menu>
       </div>
     </pd-tray-popover>
@@ -89,6 +91,8 @@ export class Tray implements OnInit {
   protected readonly layout = inject(WidgetLayouts);
   protected readonly values = inject(PopoverValues);
   private readonly backend = inject(BACKEND);
+  protected readonly quitText = inject(QuitStore);
+  protected readonly quitStopText = QUIT_STOP;
   private readonly host = inject(ElementRef<HTMLElement>);
   private readonly destroy = inject(DestroyRef);
   private readonly platformService = inject(PlatformService);
@@ -116,6 +120,7 @@ export class Tray implements OnInit {
   ngOnInit(): void {
     // A score the engine does not provide yet is simply left out (the pill only renders with a report).
     void this.health.loadReport();
+    void this.quitText.refresh();
     void this.layout.use('popover');
     void this.values.start();
   }
@@ -134,5 +139,9 @@ export class Tray implements OnInit {
 
   protected quit(): void {
     void this.backend.quitApp().catch(() => undefined);
+  }
+
+  protected quitAndStop(): void {
+    void this.backend.quitAndStopAgent().catch(() => undefined);
   }
 }

@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { adoptsPerMachine, affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 /**
  * A paddock.ci.json process pattern as host-cleanup runs it: {tmp}, {build} and {slot} filled in by the real
@@ -27,7 +27,7 @@ const scopedAll = (app, pats) => pats.flatMap((p) => [scoped(p, app), scoped(p, 
 
 const tracked = trackedFiles();
 const graph = { cargo: cargoGraph(tracked), npm: npmGraph(tracked), apps: readApps(tracked) };
-const run = (...files) => affected(files, graph);
+const run = (...files) => affected(files, graph, { perMachine: (f) => adoptsPerMachine(ROOT, f) });
 const APPS = [...graph.apps.keys()].sort();
 /** The apps that are legs of ci.yml (not those with a workflow of their own, such as Debrief). */
 const LEGS = APPS.filter((a) => !graph.apps.get(a).workflow && graph.apps.get(a).cargo);
@@ -35,7 +35,8 @@ const LEGS = APPS.filter((a) => !graph.apps.get(a).workflow && graph.apps.get(a)
 describe('the graph of this tree', () => {
   test('a shared crate marks crates and every app whose Cargo graph reaches it, Rust half only', () => {
     const r = run('crates/paddock-jobs/src/lib.rs');
-    assert.ok(r.crates && !r.ui);
+    assert.ok(r.crates);
+    assert.ok(r.ui, 'ui cause-codes.spec.ts scans the shared crates for health cause codes'); // only its own tests, not the UI half of any app
     // Debrief's store worker and Spotter's renderer depend on paddock-proc by path (the memory figure and the supervised child),
     // so the shared crates reach Debrief and Spotter too; Dyno takes the shell crates by path.
     // Pitwall's app depends on paddock-jobs by path (its long operations run on the shared job registry, ADR 0024).
@@ -56,7 +57,7 @@ describe('the graph of this tree', () => {
 
   test('an app crate marks only its app, with its reverse dependencies as packages', () => {
     const r = run('apps/shell-demo/src-tauri/agent/src/main.rs');
-    assert.deepEqual([r.apps, r.crates, r.ui], [['shell-demo'], false, false]);
+    assert.deepEqual([r.apps, r.crates, r.ui], [['shell-demo'], false, true]); // ui: the cause-codes spec scans every app's Rust
     assert.deepEqual(r.packages['apps/shell-demo/src-tauri'], ['paddock-shell-demo', 'shell-demo-agent']);
   });
 
@@ -101,6 +102,31 @@ describe('the graph of this tree', () => {
     assert.ok(!run('apps/shell-demo/README.md').conformance);
   });
 
+  test("a per-machine app's Tauri config, per-machine.json and installer files run C91 and the shared crates' sync test", () => {
+    for (const f of [
+      'apps/dyno/app/src-tauri/tauri.conf.json',
+      'apps/dyno/app/src-tauri/tauri.windows.conf.json',
+      'apps/dyno/app/src-tauri/windows/per-machine.json',
+      'apps/dyno/app/src-tauri/windows/installer-hooks.nsh',
+      'apps/dyno/app/src-tauri/windows/paddock-per-machine.generated.nsh',
+    ]) {
+      const r = run(f);
+      assert.ok(r.conformance, `${f} runs C91`);
+      assert.ok(r.crates, `${f} runs paddock-service's per_machine sync test`);
+      assert.deepEqual(r.apps, ['dyno'], f);
+    }
+    // The shared include itself is read by the same check and test, and every adopting app is marked.
+    const inc = run('crates/paddock-setup/nsis/paddock-per-machine.nsh');
+    assert.ok(inc.conformance && inc.crates);
+    // An app that does not adopt the include runs C91 (its config may become perMachine) but not the shared crates' sync test.
+    const non = run('apps/debrief/app/src-tauri/tauri.conf.json');
+    assert.ok(non.conformance && !non.crates, 'a per-user app marks conformance only');
+    // Other app files do not.
+    const other = run('apps/dyno/app/src-tauri/src/lib.rs');
+    assert.ok(!other.conformance);
+    assert.ok(!run('apps/dyno/app/src-tauri/icons/icon.ico').conformance);
+  });
+
   test("ui's ESLint config reaches ../eslint, so a preset change runs ui's lint", () => {
     const r = run('eslint/src/preset.cjs');
     assert.ok(r.eslint && r.ui);
@@ -113,6 +139,26 @@ describe('the graph of this tree', () => {
     assert.deepEqual([c.apps, c.kinds['shell-demo']], [['shell-demo'], ['rust', 'ui']]);
     const rules = run('docs/rules.md');
     assert.deepEqual([rules.conformance, rules.tools, rules.docs, rules.apps], [true, true, false, []]);
+  });
+
+  test("an app's Rust source can emit a health cause code the UI's chip table checks, so it marks ui, the app keeps its halves", () => {
+    const r = run('apps/dyno/app/src-tauri/src/health.rs');
+    assert.ok(r.ui, 'ui cause-codes.spec.ts reads apps/**/*.rs');
+    assert.ok(r.apps.includes('dyno') && r.kinds.dyno.includes('rust'), JSON.stringify(r.kinds));
+    assert.ok(!run('apps/dyno/app/src-tauri/Cargo.toml').ui, 'only the Rust sources are scanned');
+    // Exactly what the spec scans: every .rs under crates/ and apps/, but not tests.rs or tests/, benches/, target/ folders.
+    for (const f of ['crates/paddock-health/src/lib.rs', 'apps/shell-demo/src-tauri/src/main.rs', 'apps/dyno/crates/dyno-agent/src/server.rs']) {
+      assert.ok(run(f).ui, f);
+    }
+    for (const f of ['crates/paddock-health/src/tests.rs', 'crates/paddock-health/tests/it.rs', 'apps/dyno/crates/dyno-agent/benches/b.rs', 'tools/paddock-dev/src/plan.rs']) {
+      assert.ok(!run(f).ui, f);
+    }
+  });
+
+  test("the UI's storage cases are read by Dyno's Rust test, so a change marks Dyno's Rust half too", () => {
+    const r = run('ui/projects/paddock-ui/format/src/storage-cases.json');
+    assert.ok(r.apps.includes('dyno') && r.ui, JSON.stringify(r.apps));
+    assert.ok(r.kinds.dyno.includes('rust'), JSON.stringify(r.kinds));
   });
 
   test('global inputs mark everything; an app release workflow marks one app', () => {
@@ -647,14 +693,14 @@ describe('matrix legs', () => {
     const t = JOB.tmp;
     const other = '/Users/x/gitea-runner/work/fedcba9876543210/tmp';
     const ours = {
-      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-ipc-test-child echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-test-plugin echo', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
       pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s1/debug/pitwall-server --die-after-ms 500 --port 4455 --fake-engine'],
       pitcrew: [`${t}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\pitcrew-it-stop-7\\runner\\bin\\gitea-runner.exe daemon', '/Users/x/.paddock-ci/target-pitcrew-app-s1/debug/examples/fake_runner --exit-after 5'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s1/chrome-mac/Google Chrome for Testing --headless', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s1\\chrome-win64\\chrome.exe --headless'],
     };
     // Another job on the same host: the next slot's kept folders, another runner folder's temp.
     const otherJob = {
-      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-ipc-test-child echo', `${other}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
+      dyno: ['/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-test-plugin echo', `${other}/dyno-it-plugins-Xk3a9Q/p1/plugin`],
       pitwall: ['/Users/x/.paddock-ci/target-pitwall-app-s2/debug/pitwall-server --fake-engine'],
       pitcrew: [`${other}/pitcrew-it-stop-4242/runner/bin/gitea-runner daemon`, '/Users/x/.paddock-ci/target-pitcrew-app-s2/debug/examples/fake_runner'],
       spotter: ['/Users/x/.paddock-ci/test-browser-spotter-s2/chrome-mac/Google Chrome for Testing', '/Users/x/.paddock-ci/test-browser-spotter-s12/chrome-mac/Google Chrome for Testing', 'C:\\Users\\x\\.paddock-ci\\test-browser-spotter-s2\\chrome.exe'],
@@ -835,7 +881,7 @@ describe('contracts', () => {
   test("Dyno's process pattern ends only test programs of its own build folder: never the installed app, its agent, another job's folder or the user's tools", () => {
     const dyno = graph.apps.get('dyno');
     const t = JOB.tmp;
-    const ours = ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-ipc-test-child echo', '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
+    const ours = ['/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-test-plugin echo', '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-bench cpu --millis 20', 'C:\\Users\\x\\.paddock-ci\\target-dyno-app-s1\\debug\\dyno-test-plugin.exe', `${t}/dyno-it-plugins-Xk3a9Q/p1/plugin`, 'C:\\Users\\x\\gitea-runner\\work\\0123456789abcdef\\tmp\\dyno-it-plugins-Xk3a9Q\\p1\\plugin.exe'];
     const near = [
       '/Users/x/Library/Application Support/Dyno/plugins/p1/plugin',
       `${t}/other-it-plugins-Xk3a9Q/p1/plugin`,
@@ -845,12 +891,12 @@ describe('contracts', () => {
       '/Applications/Dyno.app/Contents/MacOS/dyno-agent run',
       '/Applications/Dyno.app/Contents/MacOS/dyno-helper',
       '/Applications/Dyno.app/Contents/MacOS/dyno-bench',
-      '/Users/x/.paddock-ci/target-dyno-bundle-s1/debug/dyno-ipc-test-child echo',
-      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/dyno-ipc-test-child echo',
+      '/Users/x/.paddock-ci/target-dyno-bundle-s1/debug/dyno-test-plugin echo',
+      '/Users/x/.paddock-ci/target-spotter-app-s1/debug/dyno-test-plugin echo',
       '/Users/x/.paddock-ci/target-dyno-app-s1/debug/dyno-agent run',
       '/Users/x/.paddock-ci/target-dyno-app-s2/debug/dyno-bench cpu',
       '/Users/x/.paddock-ci/target-dyno-app2/debug/dyno-bench cpu',
-      '/Users/x/dev/dyno/target/debug/dyno-ipc-test-child echo',
+      '/Users/x/dev/dyno/target/debug/dyno-test-plugin echo',
       'C:\\Program Files\\Dyno\\dyno-agent.exe',
     ];
     const res = scopedAll('dyno', dyno.processPatterns);

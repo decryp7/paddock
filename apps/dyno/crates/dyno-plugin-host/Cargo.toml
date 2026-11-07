@@ -16,7 +16,8 @@ test = false
 doc = false
 
 [dependencies]
-dyno-ipc.workspace = true
+paddock-ipc.workspace = true
+log = { version = "0.4", features = ["kv"] }
 dyno-plugin-api.workspace = true
 serde.workspace = true
 toml.workspace = true

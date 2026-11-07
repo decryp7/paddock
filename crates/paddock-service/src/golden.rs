@@ -82,6 +82,32 @@ fn debrief_agent() -> ServiceSpec {
     .unwrap()
 }
 
+/// Dyno's privileged helper (ADR 0027): the same spec `dyno-helper-service` builds, written out so the goldens fail when
+/// the hardening of the real helper drifts.
+fn dyno_helper() -> ServiceSpec {
+    use crate::hardening::{Hardening, Sandbox};
+    ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+        .unit("dyno-helper")
+        .display_name("Dyno helper")
+        .description("Answers Dyno's read-only questions that need administrator rights. It changes nothing on this computer.")
+        .args(["serve"])
+        .kind(Kind::SystemService)
+        .restart(Restart::OnFailure)
+        .docs_url("https://dev.decryptology.net/decryp7/dyno")
+        .hardening(
+            Hardening::new().windows_privileges(["SeChangeNotifyPrivilege"]).users_may_start().sandbox(
+                Sandbox::new()
+                    .capabilities(["CAP_SYS_PTRACE", "CAP_DAC_READ_SEARCH", "CAP_SYS_RAWIO", "CAP_SYS_ADMIN", "CAP_NET_ADMIN"])
+                    .address_families(["AF_UNIX", "AF_NETLINK"])
+                    .state_dir("dyno-helper")
+                    .runtime_dir("dyno-helper")
+                    .logs_dir("dyno-helper"),
+            ),
+        )
+        .build()
+        .unwrap()
+}
+
 fn check(name: &str, text: &str) {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/golden")
@@ -152,6 +178,32 @@ fn golden_systemd_units() {
     check(
         "debrief-agent.service",
         &systemd_unit(&debrief_agent(), "/usr/bin/debrief-agent", None),
+    );
+}
+
+#[test]
+fn golden_the_privileged_helper() {
+    let helper = dyno_helper();
+    let plist = launchd_plist(
+        &helper,
+        LaunchdProgram::File {
+            exe: "/Library/PrivilegedHelperTools/net.decryptology.dyno.helper",
+            working_dir: None,
+            log: Some("/Library/Application Support/Dyno/Helper/launchd.log"),
+        },
+    );
+    plist::Value::from_reader_xml(plist.as_bytes()).unwrap();
+    check("dyno-helper.daemon.plist", &plist);
+    check(
+        "dyno-helper.service",
+        &systemd_unit(&helper, "/usr/bin/dyno-helper", None),
+    );
+    check(
+        "dyno-helper.sc.cmd",
+        &sc_script(&scm_config(
+            &helper,
+            "C:\\Program Files\\Dyno Helper\\dyno-helper.exe",
+        )),
     );
 }
 

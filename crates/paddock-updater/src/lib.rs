@@ -37,6 +37,7 @@
 
 pub mod about;
 pub mod error;
+pub mod install;
 pub mod manifest;
 pub mod notes;
 pub mod record;
@@ -46,15 +47,19 @@ pub mod updater;
 
 pub use about::{About, AboutError, AboutInfo, LegalDocInfo};
 pub use error::{DEFAULT_MAX_DOWNLOAD_BYTES, UpdateError, UpdateErrorDto, UpdateErrorKind};
+pub use install::{
+    ADMINISTRATOR_NOTICE, DECLINED, ElevatedHandoff, ElevatedOutcome, Elevator, InstallInfo,
+    InstallScope, InstallerLock, SetupContract,
+};
 pub use manifest::{Manifest, Platform, Target};
 pub use notes::{NotesGroup, ReleaseNotes, WhatsNew, WhatsNewDecision};
-pub use record::{Record, RecordStore};
+pub use record::{Handoff, Record, RecordStore};
 pub use signature::UpdateKey;
 pub use state::{Event, UpdateInfo, UpdatePhase};
 pub use updater::{
-    CHECK_PHASE, CancelOutcome, Channel, ChannelInfo, ExitAction, Installer, PreferenceStore,
-    Preferences, SIGNATURE_PHASE, STATUS_EVENT, ServiceHooks, ServicesOutcome, Ticket,
-    UpdateStatus, Updater, UpdaterConfig,
+    CHECK_PHASE, CancelOutcome, Channel, ChannelInfo, ExitAction, INSTALLER_WAIT_BOUND,
+    INSTALLER_WAIT_SLICE, Installer, Package, PreferenceStore, Preferences, SIGNATURE_PHASE,
+    STATUS_EVENT, ServiceHooks, ServicesOutcome, Ticket, UpdateStatus, Updater, UpdaterConfig,
 };
 
 paddock_commands::command_table! {

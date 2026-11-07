@@ -141,7 +141,7 @@ test('a dialog window takes its input from the plugin and answers through it', a
     replies: {
       dialog_take_input: { dialogId: 'sd.rename', title: 'Rename', kind: 'form', modality: 'modal', requiredChoice: false, input: { current: 'Greeting' } },
       dialog_close: null,
-      dialog_ready: null, dialog_fit: null,
+      dialog_ready: null, dialog_measure: null,
     },
   });
   await app.dialogs.openWindow('sd.rename', { current: 'Greeting' });
@@ -165,7 +165,7 @@ test('Settings > Language restarts the whole app through the shell plugin (plan 
       dialog_take_input: { dialogId: 'pd.settings', title: 'Settings', kind: 'tool', modality: 'modeless', requiredChoice: false, input: { page: 'pd.language' } },
       settings_overview: SETTINGS_OVERVIEW_FIXTURE,
       dialog_close: null,
-      dialog_ready: null, dialog_fit: null,
+      dialog_ready: null, dialog_measure: null,
       app_relaunch: null,
     },
   });

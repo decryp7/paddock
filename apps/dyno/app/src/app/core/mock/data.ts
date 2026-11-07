@@ -23,6 +23,7 @@ export function healthReasons(): HealthReason[] {
       detail: '210 GB free of 953 GB, and build output fills about 5 GB a day: full in about 41 days. 63 GB can be freed safely.',
       impact: 8,
       severity: 'warning',
+      since: null,
     },
     {
       id: 'uptime',
@@ -30,6 +31,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'macOS installed an update that finishes on restart, and long uptimes let memory fragment.',
       impact: 6,
       severity: 'warning',
+      since: null,
     },
     {
       id: 'startup-apps',
@@ -37,6 +39,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'Teams, VirtualBox and Spotify have high impact: the desktop takes 48 s to settle after sign-in.',
       impact: 4,
       severity: 'info',
+      since: null,
     },
     {
       id: 'battery-wear',
@@ -44,6 +47,7 @@ export function healthReasons(): HealthReason[] {
       detail: 'Full charge holds 87% of the design capacity after 412 cycles. Normal for a two-year-old laptop.',
       impact: 2,
       severity: 'info',
+      since: null,
     },
   ];
 }
@@ -167,6 +171,24 @@ export function demoActivity(now: number): ActivityEntry[] {
   ];
 }
 
+/** How many extra rows `?lists=long` adds to each list (more than any widget shows without scrolling). */
+export const LONG_LIST_ROWS = 60;
+
+/** `?lists=long`: a long activity log, so the Recent events widget has to scroll. */
+export function longActivity(now: number, n = LONG_LIST_ROWS): ActivityEntry[] {
+  return Array.from({ length: n }, (_, i) => ({ id: `act-long-${i}`, at: now - (i + 1) * 7 * MIN, kind: 'system' as const, title: `Dyno note ${i + 1}`, detail: `Invented note number ${i + 1} for a long list.` }));
+}
+
+/** `?lists=long`: a long alert log. */
+export function longAlerts(now: number, n = LONG_LIST_ROWS): Alert[] {
+  return Array.from({ length: n }, (_, i) => ({ id: `al-long-${i}`, at: now - (i + 1) * 11 * MIN, kind: 'longHighCpu' as const, severity: 'info' as const, title: `Invented process ${i + 1} used over 50% CPU`, detail: 'It stayed busy for a while.' }));
+}
+
+/** `?lists=long`: many unusual things found, so the Issues widget has to scroll. */
+export function longAnomalies(now: number, n = 50): Anomaly[] {
+  return Array.from({ length: n }, (_, i) => ({ id: `long-${i}`, kind: 'memoryGrowth' as const, app: `Invented app ${i + 1}`, since: now - (i + 1) * HOUR, title: `Invented app ${i + 1} memory keeps growing`, explanation: 'Its memory grew without dropping back.', evidence: [] }));
+}
+
 export function demoPlugins(): PluginInfo[] {
   return [
     { id: 'dyno-plugin-example', name: 'Example plugin', version: '0.1.0', state: 'running', error: null, contributes: ['Sensor: uptime'] },
@@ -178,18 +200,18 @@ export function demoSettings(): Settings {
   return {
     version: 1,
     launchAtLogin: true,
-    sampling: { intervalMs: 1000, processIntervalMs: 2000 },
+    sampling: { intervalMs: 1000, processIntervalMs: 2000, helperSweepMs: null },
     retention: { rawHours: 24, minuteDays: 14, quarterHourDays: 90, hourDays: 730 },
-    alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10 },
+    alerts: { enabled: true, lowDiskPercent: 10, overheatCelsius: 95, longHighCpuMinutes: 10, trayAlertPercent: 90 },
     // What the engine's DiskSettings::default() gives (crates/dyno-core/src/disk/settings.rs).
-    disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64 },
+    disk: { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' }, spaceRefreshSecs: 0 },
     jobs: { workers: 'auto' },
     webApi: { enabled: false, port: 7878, lan: false },
     ipLookup: { ipTemplate: 'https://ipinfo.io/{ip}', asnTemplate: '' },
     alarms: { quiet: { enabled: false, startMinute: 22 * 60, endMinute: 7 * 60, criticalBypass: true }, chatterTransitions: 6, chatterWindowMinutes: 30, maxAlarms: 500, keepClearedDays: 14 },
     flightRecorder: true,
     customAlerts: [{ id: 'gpu-load', name: 'GPU load', metric: 'gpuLoad', op: 'above', limit: 90, forSecs: 120, severity: 'warning', enabled: true }],
-    networkAlerts: { newExposedListener: false, newRemoteHost: false },
+    networkAlerts: { newExposedListener: true, newRemoteHost: false },
     notifications: true,
     baselines: { enabled: true, learningDays: 7, alarms: false },
     hardwareAlarms: { throttling: true, lifespan: true },
@@ -201,7 +223,7 @@ export function demoSettings(): Settings {
         { days: ['sat', 'sun'], startMinute: 23 * 60, endMinute: 5 * 60 },
       ],
     },
-    backup: { alertWhenStale: true, staleAfterHours: 48, overrides: [] },
+    power: { keepAwake: { enabled: true, display: false, graceSecs: 120, cpuPct: 50, netBytesPerS: 512_000, diskBytesPerS: 5_242_880, trayItem: false }, energy: { enabled: true, wattsOn: null, wattsSleep: null, tariffPerKwh: null, currency: null, co2GPerKwh: null }, idle: { enabled: false, action: 'sleep', afterSecs: 1800, countdownSecs: 60, acOnly: true, exceptions: { audio: true, fullScreen: true, otherStayAwake: true, cpuPct: 50, diskBytesPerS: 5_242_880, netBytesPerS: 512_000, programs: [] } }, timed: { enabled: false, entries: [] }, wol: { enabled: true, discovery: true, directedBroadcast: true, testTimeoutSecs: 120 }, wake: { enabled: false } },
   };
 }
 

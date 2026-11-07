@@ -49,6 +49,7 @@ impl FileLocks for LsofLocks {
                 },
                 name: super::libproc::name(pid).unwrap_or_default(),
                 kind: Some("Application".into()),
+                via: Default::default(),
             });
         }
         Ok(out)

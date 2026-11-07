@@ -14,6 +14,11 @@ paddock_dialogs::dialogs! {
     "sd.inspector" => Form(Modeless) { commands: &[demo::demo_status] },
     "sd.choose-style" => Decision { required_choice: true },
     "sd.unsaved" => Decision,
+    // One per kind for the size-to-content checks (ADR 0043 check 4): content that arrives after the first measure.
+    "sd.fixture-decision" => Decision,
+    "sd.fixture-form" => Form(Modeless),
+    "sd.fixture-viewer" => Viewer,
+    "sd.fixture-tool" => Tool,
     // The settings commands, the Background service page's, the set-up page's, the packs page's, the Notification
     // channels page's (the secret is set in the secret dialog's window), Storage's, the AI access page's (the key is
     // issued in the key dialog's window), `dialog_open` (a page opens a dialog of its own) and the Language page's

@@ -1,0 +1,56 @@
+#! recorded 2026-11-04 on a Tart clone of vmgui-base-tahoe (macOS 26.6.2 build 25G83, Darwin 25.6.0), as root through tart exec
+#! command: sudo launchctl print system/<label>
+#! state: the daemon after launchctl kill SIGTERM (sleep does not catch it)
+system/fix.term = {
+	active count = 0
+	path = /Library/LaunchDaemons/fix.term.plist
+	type = LaunchDaemon
+	state = not running
+
+	program = /tmp/fixjob.sh
+	arguments = {
+		/tmp/fixjob.sh
+		sleep
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		XPC_SERVICE_NAME => fix.term
+	}
+
+	domain = system
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	last terminating signal = Terminated: 15
+
+	resource coalition = {
+		ID = 790
+		type = resource
+		state = active
+		active count = 1
+		name = fix.term
+	}
+
+	jetsam coalition = {
+		ID = 791
+		type = jetsam
+		state = active
+		active count = 1
+		name = fix.term
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = runatload | inferred program | system service | tle system
+}

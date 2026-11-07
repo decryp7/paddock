@@ -1,6 +1,14 @@
 //! A program built for the Windows GUI subsystem (no console window when a Run entry, a service or the app starts it)
 //! that must still print when a user runs it from a terminal (`dyno-agent --version`): it attaches to the parent's
 //! console and points any missing standard handle at it.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 /// Whether a standard handle value (as `GetStdHandle` returns it) is unusable and must be pointed at the console: none

@@ -24,7 +24,7 @@ import { PdDayPicker } from '@decryp7/paddock-ui/schedule';
 import { TimeField } from '../../shared/time-field';
 
 /**
- * Maintenance windows: when Dyno's own heavier background work (scans, backup checks, report building) may run. Clicks
+ * Maintenance windows: when Dyno's own heavier background work (scans, report building) may run. Clicks
  * always run at once. Saved through the settings; the engine validates the windows and its sentence is shown when it refuses.
  */
 @Component({

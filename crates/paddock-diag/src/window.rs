@@ -13,45 +13,65 @@ pub const MAX_LOG_FILES: usize = 4;
 /// The last `max` bytes of `path`, cut forward to the next line start when the read began inside a line; `None` when the
 /// file cannot be read. Returns the bytes and whether the file was longer.
 pub fn tail_of(path: &Path, max: u64) -> Option<(Vec<u8>, bool)> {
-    let file = File::open(path).ok()?;
-    let len = file.metadata().ok()?.len();
+    try_tail(path, max).ok()
+}
+
+/// [`tail_of`] with the reason a file could not be read.
+pub fn try_tail(path: &Path, max: u64) -> std::io::Result<(Vec<u8>, bool)> {
+    let file = File::open(path)?;
+    let len = file.metadata()?.len();
     tail_of_reader(file, len, max)
 }
 
 /// [`tail_of`] over any seekable source `len` bytes long: one seek, then at most `max` bytes read.
-fn tail_of_reader(mut source: impl Read + Seek, len: u64, max: u64) -> Option<(Vec<u8>, bool)> {
+fn tail_of_reader(
+    mut source: impl Read + Seek,
+    len: u64,
+    max: u64,
+) -> std::io::Result<(Vec<u8>, bool)> {
     let start = len.saturating_sub(max);
-    source.seek(SeekFrom::Start(start)).ok()?;
+    source.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::with_capacity((len - start).min(max) as usize);
-    source.take(max).read_to_end(&mut bytes).ok()?;
+    source.take(max).read_to_end(&mut bytes)?;
     if start > 0 {
-        // Began inside a line (or a character): drop up to the first newline.
-        match bytes.iter().position(|b| *b == b'\n') {
-            Some(i) => {
-                bytes.drain(..=i);
-            }
-            None => bytes.clear(),
+        // Began inside a line (or a character): drop up to the first newline. With no newline in the window the window is the
+        // tail of one long line (a log whose last line has no newline yet): it is kept, never dropped.
+        if let Some(i) = bytes.iter().position(|b| *b == b'\n') {
+            bytes.drain(..=i);
         }
     }
-    Some((bytes, start > 0))
+    Ok((bytes, start > 0))
 }
 
 /// The files of `dir` named `<prefix>...` with the extension `.log`, newest first (by modified time, then name).
 pub fn log_files(dir: &Path, prefix: &str) -> Vec<PathBuf> {
-    let mut found: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|e| {
-                    let name = e.file_name().to_string_lossy().into_owned();
-                    name.starts_with(prefix) && name.ends_with(".log") && e.path().is_file()
-                })
-                .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
-                .collect()
+    try_log_files(dir, prefix).unwrap_or_default()
+}
+
+/// [`log_files`] with the reason the folder could not be listed (a missing folder is an error too: the caller tells the two
+/// apart by [`std::io::ErrorKind::NotFound`]).
+pub fn try_log_files(dir: &Path, prefix: &str) -> std::io::Result<Vec<PathBuf>> {
+    let mut found: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(dir)?
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            name.starts_with(prefix) && name.ends_with(".log") && e.path().is_file()
         })
-        .unwrap_or_default();
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .collect();
     found.sort_by(|(ta, pa), (tb, pb)| tb.cmp(ta).then_with(|| pb.cmp(pa)));
-    found.into_iter().map(|(_, p)| p).collect()
+    Ok(found.into_iter().map(|(_, p)| p).collect())
+}
+
+/// What [`log_window_report`] found.
+#[derive(Debug, Default)]
+pub struct LogWindow {
+    /// `(file name, bytes, cut)`, as [`log_window`] returns.
+    pub files: Vec<(String, Vec<u8>, bool)>,
+    /// Files that exist but could not be read: `(name, why)`.
+    pub skipped: Vec<(String, String)>,
+    /// Why the folder could not be listed, when it could not and exists (a missing folder is just "no logs yet").
+    pub folder_error: Option<String>,
 }
 
 /// A window over the newest log files: `(file name, bytes, cut)`, each process's files newest first. At most [`MAX_LOG_FILES`]
@@ -59,9 +79,23 @@ pub fn log_files(dir: &Path, prefix: &str) -> Vec<PathBuf> {
 /// for the others): each gets an equal share, and what a small one does not use goes to the larger ones, so a chatty process
 /// cannot push another's log out of the report. A file that cannot be read is skipped.
 pub fn log_window(dir: &Path, prefix: &str, budget: u64) -> Vec<(String, Vec<u8>, bool)> {
+    log_window_report(dir, prefix, budget).files
+}
+
+/// [`log_window`] that also says what it could not read, so a report can tell "no logs yet" from "logs I could not open".
+pub fn log_window_report(dir: &Path, prefix: &str, budget: u64) -> LogWindow {
+    let mut report = LogWindow::default();
+    let listed = match try_log_files(dir, prefix) {
+        Ok(files) => files,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(e) => {
+            report.folder_error = Some(format!("{:?}", e.kind()));
+            Vec::new()
+        }
+    };
     // The files by process, in the order each process's newest file appears.
     let mut groups: Vec<(String, Vec<PathBuf>)> = Vec::new();
-    for path in log_files(dir, prefix) {
+    for path in listed {
         let name = path
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
@@ -95,18 +129,23 @@ pub fn log_window(dir: &Path, prefix: &str, budget: u64) -> Vec<(String, Vec<u8>
             if room == 0 {
                 break;
             }
-            if let Some((bytes, cut)) = tail_of(path, room).filter(|(b, _)| !b.is_empty()) {
-                room = room.saturating_sub(bytes.len() as u64);
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                taken[*i].push((name, bytes, cut));
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match try_tail(path, room) {
+                Ok((bytes, cut)) if !bytes.is_empty() => {
+                    room = room.saturating_sub(bytes.len() as u64);
+                    taken[*i].push((name, bytes, cut));
+                }
+                Ok(_) => {}
+                Err(e) => report.skipped.push((name, format!("{:?}", e.kind()))),
             }
         }
         left -= share - room;
     }
-    taken.into_iter().flatten().collect()
+    report.files = taken.into_iter().flatten().collect();
+    report
 }
 
 #[cfg(test)]
@@ -125,9 +164,12 @@ mod tests {
         );
         // 8 bytes: "o\nthree\n" begins inside "two"; the partial line is dropped.
         assert_eq!(tail_of(&p, 8).unwrap(), (b"three\n".to_vec(), true));
-        // A single huge line with no newline inside the window leaves nothing (never a half line).
+        // A tail with no newline in it is the end of one long line: kept, marked cut (a log's unfinished last line is evidence).
         std::fs::write(&p, "x".repeat(50)).unwrap();
-        assert_eq!(tail_of(&p, 10).unwrap(), (Vec::new(), true));
+        assert_eq!(
+            tail_of(&p, 10).unwrap(),
+            ("x".repeat(10).into_bytes(), true)
+        );
         assert!(tail_of(&dir.path().join("missing.log"), 10).is_none());
     }
 
@@ -259,6 +301,33 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_folder_or_file_is_reported_not_called_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        // A missing folder is "no logs yet": no error.
+        let none = log_window_report(&dir.path().join("nope"), "app", 100);
+        assert!(none.files.is_empty() && none.skipped.is_empty() && none.folder_error.is_none());
+        // A path that is a file, not a folder, cannot be listed: that is an error, not an empty folder.
+        let f = dir.path().join("plain");
+        std::fs::write(&f, "x").unwrap();
+        assert!(log_window_report(&f, "app", 100).folder_error.is_some());
+        // A log that cannot be opened is named with its reason (a directory named like a log is not a log: use a locked file on Unix).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let p = dir.path().join("app.2026-10-24.log");
+            std::fs::write(&p, "a\n").unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let is_root = File::open(&p).is_ok();
+            let w = log_window_report(dir.path(), "app", 100);
+            if !is_root {
+                assert_eq!(w.skipped.len(), 1, "{w:?}");
+                assert_eq!(w.skipped[0].0, "app.2026-10-24.log");
+                assert!(w.files.is_empty());
+            }
+        }
+    }
+
+    #[test]
     fn the_window_takes_the_newest_files_within_the_budget() {
         let dir = tempfile::tempdir().unwrap();
         for (i, name) in [
@@ -306,5 +375,26 @@ mod tests {
         assert!(w.iter().map(|(_, b, _)| b.len()).sum::<usize>() <= 30);
         assert!(log_window(dir.path(), "app", 0).is_empty());
         assert!(log_window(&dir.path().join("nope"), "app", 100).is_empty());
+    }
+
+    #[test]
+    fn log_files_lists_matching_logs_and_an_unreadable_folder_is_an_empty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("app.2026-10-24.log"), "a").unwrap();
+        std::fs::write(dir.path().join("app.notes.txt"), "b").unwrap();
+        std::fs::write(dir.path().join("other.log"), "c").unwrap();
+        std::fs::create_dir(dir.path().join("app.dir.log")).unwrap();
+        let names: Vec<String> = log_files(dir.path(), "app")
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["app.2026-10-24.log"], "only files named app*.log");
+        // A missing folder is told apart by try_log_files and is simply empty here.
+        let missing = dir.path().join("gone");
+        assert!(log_files(&missing, "app").is_empty());
+        assert_eq!(
+            try_log_files(&missing, "app").unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
     }
 }

@@ -1,4 +1,4 @@
-import { isLocaleTag, LANGUAGE_CHOICES, type LanguageChoice } from './locale';
+import { isLocaleTag, LANGUAGE_CHOICES, type LanguageChoice } from '@decryp7/paddock-ui/locale';
 
 /**
  * Where the language choice is kept. Apart from the other settings so `main.ts` can read it before bootstrap without

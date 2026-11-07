@@ -115,7 +115,9 @@ fn a_plugin_that_exits_at_once_fails_to_start_and_is_quarantined() {
         "the exit is noticed before the start timeout"
     );
     assert_eq!((e.plugin.as_str(), e.kind), ("exit", ErrorKind::Crashed));
-    assert!(e.message.contains("before it connected"), "{}", e.message);
+    // The child may exit before the bootstrap is written (a closed pipe) or after it: one outcome either way, with the OS
+    // error in the message when there is one. The outcome is the kind above and the quarantine below, not the exact wording.
+    assert!(e.message.contains("exited before it"), "{}", e.message);
     assert_eq!(host.start_all()[0].kind, ErrorKind::Crashed);
     assert_eq!(host.start_all()[0].kind, ErrorKind::Quarantined);
     assert_eq!(state(&host, "exit"), PluginState::Quarantined);

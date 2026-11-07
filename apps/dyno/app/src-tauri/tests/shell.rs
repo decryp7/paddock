@@ -62,7 +62,7 @@ fn the_manifest_repeats_each_dialogs_contract_exactly() {
 /// Dyno's services are the ones the UI registers, in the status bar's order.
 #[test]
 fn the_services_are_the_ones_the_ui_lists() {
-    assert_eq!(builder().service_ids(), vec!["dy.agent"]);
+    assert_eq!(builder().service_ids(), vec!["dy.agent", "dy.tray", "dy.setup", "dy.update"]);
 }
 
 /// Dyno's table never shadows a shell command.
@@ -320,6 +320,46 @@ fn a_hidden_start_stays_in_the_tray() {
     );
 }
 
+/// A desktop that shows no tray icons (Linux without a StatusNotifier host): Dyno's tray backend reports that, as
+/// `DynoTray::create` does when `tray_host::start` finds no host.
+struct NoHostTray;
+
+impl paddock_window::tauri::TrayBackend<tauri::test::MockRuntime> for NoHostTray {
+    fn create(&self, _: &tauri::AppHandle<tauri::test::MockRuntime>, _: &paddock_window::tray::TrayView) -> Result<(), String> {
+        Err("the desktop shows no tray icons (no StatusNotifier host)".to_string())
+    }
+    fn update(&self, _: &tauri::AppHandle<tauri::test::MockRuntime>, _: &paddock_window::tray::TrayView) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+/// Started at log-in (`--hidden`) on a desktop that shows no tray icons: nothing could bring a hidden Dyno back, so the window
+/// opens (and Settings > Menu bar tells the person what to turn on).
+#[test]
+fn a_hidden_start_without_a_tray_host_opens_the_window() {
+    use paddock_shell::testing::{start, Started};
+    let launch = paddock_window::launch::LaunchArgs {
+        hidden: true,
+        ..Default::default()
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().to_path_buf();
+    assert_eq!(
+        start(move || {
+            let shell = shell(
+                Place::Test { dir: data.clone() },
+                &Hub::default(),
+                std::sync::Arc::new(dyno_app_lib::shell::NoPixels),
+            );
+            dyno_app_lib::app(tauri::test::mock_builder(), shell, launch, NoHostTray)
+        }),
+        Ok(Started {
+            main_window: true,
+            tray: false
+        })
+    );
+}
+
 /// Dyno as `run` composes it, the agent link included (its files in `dir`, no agent process, no tray icons), without the
 /// OS plugins.
 fn composed(dir: &std::path::Path, launch: paddock_window::launch::LaunchArgs) -> tauri::Builder<tauri::test::MockRuntime> {
@@ -425,7 +465,13 @@ mod widget_wiring {
     }
 
     fn shell(app: &tauri::App<MockRuntime>) -> Arc<ShellOf<MockRuntime>> {
-        ShellOf::new(app.handle().clone(), Hub::default(), Arc::new(NoPixels))
+        ShellOf::new(
+            app.handle().clone(),
+            Hub::default(),
+            Arc::new(NoPixels),
+            dyno_app_lib::shell::initial_items(&dyno_core::settings::Settings::default().menu_bar.layout().placements),
+            Arc::new(paddock_jobs::SystemClock),
+        )
     }
 
     fn update(cpu: f32) -> LiveUpdate {
@@ -440,7 +486,38 @@ mod widget_wiring {
             processes: None,
             groups: None,
             other_users: None,
+            via: Default::default(),
         }
+    }
+
+    /// Records the menu bar's live-detail wishes instead of asking an agent.
+    #[derive(Default)]
+    struct Votes(std::sync::Mutex<Vec<(String, Option<dyno_core::protocol::LiveDetail>)>>);
+
+    impl dyno_app_lib::link::LiveVotes for Votes {
+        fn set_vote(&self, voter: &str, detail: Option<dyno_core::protocol::LiveDetail>) -> Result<(), dyno_app_lib::dto::CommandError> {
+            self.0.lock().unwrap().push((voter.to_string(), detail));
+            Ok(())
+        }
+    }
+
+    /// With no window open the link asks for the tray level; a menu bar item that shows one app needs the top lists at the
+    /// user's pace, so the menu bar votes for the summary while it has such an item, and withdraws the vote after.
+    #[test]
+    fn a_menu_bar_item_that_shows_one_app_votes_for_the_summary() {
+        use dyno_app_lib::tray_model::{Glyph, ItemSpec};
+        use dyno_core::protocol::LiveDetail;
+        let app = app();
+        let shell = shell(&app);
+        let votes = Arc::new(Votes::default());
+        shell.use_votes(votes.clone());
+        shell.set_items(vec![ItemSpec::new("p", Metric::Process("chrome".into()), Glyph::Number)]);
+        shell.set_items(vec![ItemSpec::new("c", Metric::CpuTotal, Glyph::Number)]);
+        let voter = dyno_app_lib::shell::MENU_BAR_VOTER.to_string();
+        assert_eq!(
+            *votes.0.lock().unwrap(),
+            vec![(voter.clone(), Some(LiveDetail::Summary)), (voter, None)]
+        );
     }
 
     /// The popup's values reach the webview only while the popup is visible.

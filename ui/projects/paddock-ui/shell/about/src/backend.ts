@@ -1,6 +1,7 @@
 import type {
   AboutInfo,
   ChannelInfo,
+  InstallInfo,
   Preferences,
   UpdateErrorDto,
   UpdateInfo,
@@ -204,6 +205,8 @@ export interface MemoryUpdatesOptions {
   readonly releasesPage?: string;
   /** Whether the build installs what it downloads (default true; false plays a build declared `no_install`). */
   readonly canInstall?: boolean;
+  /** How the app is installed (default: per user, with Install when the app quits). */
+  readonly install?: InstallInfo;
   /** Runs each simulated step of the engine's work (default: the next microtask). */
   readonly schedule?: (step: () => void) => void;
   /** `status()` answers only once this settles: a spec or an e2e that needs the status to arrive late, after a window's first measure. */
@@ -260,6 +263,7 @@ export class MemoryUpdatesBackend extends UpdatesBackend {
       endpointHost: unavailable ? null : (options.host ?? 'updates.example'),
       releasesPage: options.releasesPage ?? 'https://updates.example/releases',
       canInstall: options.canInstall ?? true,
+      install: options.install ?? { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null },
     };
   }
 

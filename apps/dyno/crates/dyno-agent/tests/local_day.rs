@@ -2,23 +2,19 @@
 
 //! Local days end to end: the agent runs in a zone eight hours from UTC (the fake platform's zone port), and today's
 //! issue score, the history's crash days, quiet hours, "until tomorrow", maintenance windows, learned baselines and a
-//! backup's local time all follow that zone, never the UTC date. Each test fails when the agent reads UTC.
+//! the local time all follow that zone, never the UTC date. Each test fails when the agent reads UTC.
 
-use dyno_agent::cli::{ask, connect, run_job};
+use dyno_agent::cli::{ask, connect};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
 use dyno_core::alarms::{ChangeKind, Shelf, ShelveFor};
-use dyno_core::backup::BackupTool;
 use dyno_core::extras::maintenance::{Weekday, Window};
 use dyno_core::history::{HistoryPoint, HistoryRange, Tier};
-use dyno_core::issues::{civil_from_days, IssuesQuery};
-use dyno_core::jobs::{JobOutput, JobSpec};
-use dyno_core::ports::PlatformError;
+use dyno_core::issues::IssuesQuery;
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
-use dyno_core::time::{day_start, local_minute, next_day_start, to_local, FixedZone, Timestamp, DAY, HOUR, MINUTE, SECOND};
-use dyno_ipc::Peer;
+use dyno_core::time::{day_start, local_minute, next_day_start, to_local, FixedZone, Timestamp, DAY, HOUR, MINUTE};
 use dyno_platform::fake::{process, quiet_sample, Fake};
-use dyno_platform::issues::ToolRunner;
+use paddock_ipc::BodyPeer;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -56,7 +52,7 @@ impl Harness {
         }
     }
 
-    fn client(&self) -> Peer<Message> {
+    fn client(&self) -> BodyPeer<Message> {
         connect(&self.dirs).unwrap().0
     }
 
@@ -82,14 +78,14 @@ fn either(before: Timestamp, after: Timestamp, f: impl Fn(Timestamp) -> Timestam
     [f(before), f(after)]
 }
 
-fn settings(peer: &Peer<Message>) -> dyno_core::settings::Settings {
+fn settings(peer: &BodyPeer<Message>) -> dyno_core::settings::Settings {
     let Reply::Settings(s) = ask(peer, Request::Settings).unwrap() else {
         panic!("settings")
     };
     *s
 }
 
-fn save(peer: &Peer<Message>, s: dyno_core::settings::Settings) {
+fn save(peer: &BodyPeer<Message>, s: dyno_core::settings::Settings) {
     ask(peer, Request::SaveSettings { settings: Box::new(s) }).unwrap();
 }
 
@@ -284,113 +280,29 @@ fn baselines_learn_and_judge_by_the_local_hour() {
     assert!([words(t), words(after)].contains(&cpu.judgement.phrase), "{cpu:?}");
 }
 
-/// Answers `tmutil` with a destination and the given latest backup.
-struct TimeMachine(String);
-
-impl ToolRunner for TimeMachine {
-    fn run(&self, _program: &str, args: &[String], _timeout: Duration) -> Result<String, PlatformError> {
-        match args.first().map(String::as_str) {
-            Some("destinationinfo") => Ok("Name : Disk\n".into()),
-            Some("latestbackup") => Ok(self.0.clone()),
-            _ => Err(PlatformError::Unsupported("not scripted".into())),
-        }
-    }
-}
-
 #[test]
-fn a_time_machine_folder_name_is_read_as_local_time() {
+fn the_agents_report_files_name_the_zone_in_use() {
     let h = Harness::start(None);
-    let s = h.shared();
-    s.extras.use_os("macos");
-    // The folder of a backup 30 hours ago, named in local time as Time Machine names it.
-    let at = Timestamp((now().millis() - 30 * HOUR) / SECOND * SECOND);
-    let local = to_local(at, &ZONE);
-    let (y, m, d) = civil_from_days(local.div_euclid(DAY));
-    let secs = local.rem_euclid(DAY) / SECOND;
-    let name = format!(
-        "/Volumes/.timemachine/X/{y:04}-{m:02}-{d:02}-{:02}{:02}{:02}.backup\n",
-        secs / 3_600,
-        secs / 60 % 60,
-        secs % 60
-    );
-    s.extras.use_backup_tools(Arc::new(TimeMachine(name)));
-    let JobOutput::Backup(r) = run_job(&h.client(), JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
-        panic!("backup")
-    };
-    let tm = r.statuses.iter().find(|x| x.tool == BackupTool::TimeMachine).expect("Time Machine");
-    assert_eq!(tm.last_backup, Some(at), "{tm:?}");
-}
-
-#[test]
-fn the_diagnostics_bundle_names_the_zone_in_use() {
-    let h = Harness::start(None);
-    let bundle = dyno_agent::diagnostics::collect(&h.shared()).unwrap();
+    let bundle = dyno_agent::diagnostics::collect(&h.shared());
     let zone = bundle
         .files
         .iter()
-        .find(|f| f.path == "system/time-zone.json")
+        .find(|f| f.name == "system/time-zone.json")
         .expect("the time zone file");
     assert!(zone.text.contains("UTC+08:00"), "{}", zone.text);
 }
 
+/// The logs of both processes are the report's own `Logs` section (read from the app's log folder, redacted with the rest); the
+/// agent's files hold none, so a harness can never copy a machine's real logs into a report (ER-14).
 #[test]
-fn the_diagnostics_bundle_holds_the_recent_logs_of_both_processes() {
+fn the_agents_report_files_hold_no_logs() {
     let h = Harness::start(None);
-    let logs = tempfile::tempdir().unwrap();
-    std::fs::write(logs.path().join("dyno.2026-10-31.log"), "app line\n").unwrap();
-    std::fs::write(logs.path().join("dyno-agent.2026-10-31.log"), "agent line\n").unwrap();
-    let bundle = dyno_agent::diagnostics::collect_with_logs(&h.shared(), logs.path()).unwrap();
-    for (name, text) in [
-        ("logs/dyno.2026-10-31.log", "app line"),
-        ("logs/dyno-agent.2026-10-31.log", "agent line"),
-    ] {
-        let f = bundle
-            .files
-            .iter()
-            .find(|f| f.path == name)
-            .unwrap_or_else(|| panic!("{name} in the bundle"));
-        assert!(f.text.contains(text), "{}", f.text);
-    }
-}
-
-/// ER-14: a harness on a temporary folder never copies the machine's real Dyno logs into a bundle. A fake HOME holds a planted log
-/// in the place an install reads; the bundle of a harness holds its own folder's logs only.
-#[test]
-fn the_diagnostics_bundle_never_reads_logs_outside_the_given_folders() {
-    let h = Harness::start(None);
-    let home = tempfile::tempdir().unwrap();
-    let old = (
-        std::env::var_os("HOME"),
-        std::env::var_os("XDG_STATE_HOME"),
-        std::env::var_os("XDG_DATA_HOME"),
-    );
-    std::env::set_var("HOME", home.path());
-    std::env::remove_var("XDG_STATE_HOME");
-    std::env::remove_var("XDG_DATA_HOME");
-    let real = paddock_env::AppId::new(dyno_agent::logging::APP_ID, dyno_agent::logging::APP_NAME)
-        .ok()
-        .and_then(|a| paddock_env::AppDirs::for_app(&a).ok())
-        .map(|d| d.logs().to_path_buf())
-        .expect("the install's log folder");
-    std::fs::create_dir_all(&real).unwrap();
-    std::fs::write(real.join("dyno.2026-10-31.log"), "REAL-MACHINE-LOG\n").unwrap();
     let own = h.shared().dirs.logs();
     std::fs::create_dir_all(&own).unwrap();
     std::fs::write(own.join("dyno-agent.2026-10-31.log"), "harness line\n").unwrap();
     let bundle = dyno_agent::diagnostics::collect(&h.shared());
-    for (k, v) in [("HOME", old.0), ("XDG_STATE_HOME", old.1), ("XDG_DATA_HOME", old.2)] {
-        match v {
-            Some(v) => std::env::set_var(k, v),
-            None => std::env::remove_var(k),
-        }
-    }
-    let bundle = bundle.unwrap();
-    let logs: Vec<&str> = bundle
+    assert!(bundle
         .files
         .iter()
-        .filter(|f| f.path.starts_with("logs/"))
-        .map(|f| f.path.as_str())
-        .collect();
-    assert_eq!(logs, ["logs/dyno-agent.2026-10-31.log"], "only the harness folder's logs");
-    assert!(bundle.files.iter().all(|f| !f.text.contains("REAL-MACHINE-LOG")));
+        .all(|f| !f.name.starts_with("logs/") && !f.text.contains("harness line")));
 }

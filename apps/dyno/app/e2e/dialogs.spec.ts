@@ -1,5 +1,5 @@
 import { FIXTURES } from './dialog-fixtures';
-import { dialogContracts, dialogFitProblems, dialogWindowUrl, expect, test } from '@decryp7/paddock-e2e';
+import { dialogContracts, dialogFitProblems, dialogWindowUrl, expect, expectLoopSettles, SIZE_SCALES, test } from '@decryp7/paddock-e2e';
 
 // Dyno's dialogs as windows opened by URL (what Rust loads): the app's own contract (src-tauri/src/dialogs.rs) and the
 // shell's, which Dyno registers (About, What's new, Updates, the shared confirmation). ADR 0026 §6.
@@ -16,6 +16,13 @@ test.describe('Dyno dialogs', () => {
     const problems: string[] = [];
     for (const [id, contract] of Object.entries(CONTRACTS)) problems.push(...(await dialogFitProblems(browser, id, contract, { baseURL: baseURL!, inputs: FIXTURES[id] ?? [{}] })));
     expect(problems).toEqual([]);
+  });
+
+  test('every dialog sizes to its content through one loop: quiet within a few measures at 1, 1.25 and 1.5, a new epoch on reload (ADR 0043)', async ({ browser, baseURL }) => {
+    test.setTimeout(900_000);
+    for (const [id, contract] of Object.entries(CONTRACTS)) {
+      for (const scale of SIZE_SCALES) await expectLoopSettles(browser, baseURL!, id, contract, scale, (FIXTURES[id] ?? [{}])[0]);
+    }
   });
 
   test('Updates fits its content when the engine answers after the first measure (no scrollbar beside one line)', async ({ page }) => {

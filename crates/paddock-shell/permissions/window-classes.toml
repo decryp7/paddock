@@ -162,7 +162,7 @@ permissions = [
   "allow-diagnostics-preview",
   "allow-diagnostics-save",
   "allow-dialog-close",
-  "allow-dialog-fit",
+  "allow-dialog-measure",
   "allow-dialog-open",
   "allow-dialog-ready",
   "allow-dialog-take-input",

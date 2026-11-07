@@ -8,9 +8,10 @@
 //! - `liar`: says it is another plugin
 #![allow(missing_docs, clippy::unwrap_used, clippy::expect_used)]
 
-use dyno_ipc::frame::{read_frame, write_frame};
-use dyno_ipc::{ChildLink, Frame};
+use dyno_plugin_api::protocol::wire;
 use dyno_plugin_api::*;
+use paddock_ipc::frame::{read_frame, write_frame};
+use paddock_ipc::{child, Frame};
 use std::io::Write;
 use std::time::Duration;
 
@@ -54,24 +55,25 @@ impl SensorProvider for Test {
 
 /// Speaks the protocol by hand so it can break it.
 fn garbage(test: Test) {
-    let mut conn = ChildLink::from_stdin().unwrap();
+    let bootstrap = child::read_bootstrap(std::io::stdin().lock()).unwrap();
+    let mut conn = child::connect(&bootstrap, wire()).unwrap();
+    child::lifeline();
     let limit = conn.limit();
     let s = conn.stream_mut();
-    while let Ok(Some(frame)) = read_frame::<Frame<PluginMessage>>(s, limit) {
-        if let Frame::Call {
-            id,
-            body: PluginMessage::Request(req),
-        } = frame
-        {
-            if req == PluginRequest::Describe {
-                let reply = Frame::Reply {
-                    id,
-                    body: PluginMessage::Reply(PluginReply::Manifest(test.manifest())),
-                };
-                write_frame(s, &reply, limit).unwrap();
-            } else {
-                s.write_all(&[3, 0, 0, 0, 0xee, 0xee, 0xee]).unwrap();
-            }
+    while let Ok(frame) = read_frame(s, limit) {
+        let Frame::Call { id, body, .. } = frame else { continue };
+        let Ok(PluginMessage::Request(req)) = paddock_ipc::wire::decode::<PluginMessage>(&body) else {
+            continue;
+        };
+        if req == PluginRequest::Describe {
+            let reply = PluginMessage::Reply(PluginReply::Manifest(test.manifest()));
+            let reply = Frame::Reply {
+                id,
+                body: paddock_ipc::wire::encode(&reply).unwrap(),
+            };
+            write_frame(s, &reply, limit).unwrap();
+        } else {
+            s.write_all(&[3, 0, 0, 0, 0xee, 0xee, 0xee]).unwrap();
         }
     }
 }

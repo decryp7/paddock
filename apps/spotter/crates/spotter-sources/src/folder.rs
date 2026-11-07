@@ -1011,8 +1011,14 @@ mod tests {
     #[tokio::test]
     async fn missing_folders_files_and_shares_explain_themselves() {
         let d = tempfile::tempdir().unwrap();
-        let missing = d.path().join("nope").to_string_lossy().into_owned();
-        assert!(matches!(list(&missing, LIST_TIMEOUT).await, Err(SourceError::NotFound(_))));
+        // A folder that is not there, at a place that is not a mount point: a temp folder can itself sit under `/Volumes` (the CI Mac's job
+        // folder is on an external volume), where a missing folder is by design "not mounted" (`Unreachable`), not `NotFound`.
+        let missing = if cfg!(windows) {
+            r"C:\spotter-test-no-such-folder"
+        } else {
+            "/spotter-test-no-such-folder"
+        };
+        assert!(matches!(list(missing, LIST_TIMEOUT).await, Err(SourceError::NotFound(_))));
         let file = d.path().join("f");
         std::fs::write(&file, b"x").unwrap();
         let e = list(&file.to_string_lossy(), LIST_TIMEOUT).await.unwrap_err();

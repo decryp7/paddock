@@ -113,6 +113,11 @@ const COLUMNS: PdColumn<Plugin>[] = [
       <div class="gal-box gal-pad" data-testid="table-tree">
         <pd-table label="Process tree" order="source" [toolbar]="false" [rows]="treeRows()" [columns]="treeColumns" [rowKey]="nodeKey" [tree]="tree" (rowToggle)="toggleNode($event)" />
       </div>
+      <h3>Height: fill the container</h3>
+      <p>A table with <code>height="fill"</code> takes the height its container gives it (a flex column or a grid cell with <code>min-height: 0</code>) and keeps at least 240 px; <code>height="window"</code> is as tall as its rows up to the scrolling page area.</p>
+      <div class="gal-box gal-pad gal-fillbox" data-testid="table-fill">
+        <pd-table label="Fills its box" [rows]="many" [columns]="columns" [rowKey]="key" [toolbar]="false" height="fill" />
+      </div>
     </section>
 
     <section class="gal-section" data-testid="chart" aria-labelledby="h-pdchart">
@@ -187,6 +192,7 @@ const COLUMNS: PdColumn<Plugin>[] = [
     .gal-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: var(--pd-space-3); }
     .gal-sunburst-main { display: grid; grid-template-columns: minmax(0, 600px) minmax(16rem, 1fr); gap: var(--pd-space-3); align-items: start; margin-bottom: var(--pd-space-3); }
     .gal-narrow { max-width: 300px; }
+    .gal-fillbox { display: flex; flex-direction: column; height: 360px; }
     .gal-sunburst { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr)); gap: var(--pd-space-3); align-items: start; }
     .gal-key { list-style: none; margin: 0 0 var(--pd-space-3); padding: 0; display: grid; gap: var(--pd-space-2); }
     .gal-key li { display: grid; grid-template-columns: 16px 1fr auto; gap: var(--pd-space-2); align-items: center; }

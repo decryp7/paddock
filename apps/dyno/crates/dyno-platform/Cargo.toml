@@ -21,6 +21,17 @@ jiff = "0.2"
 # Child processes the family's way (ER-22): a process group killed as a whole, a kill-on-close job object on Windows, lower priority.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
+# The helper checks a downloaded tool package against its own pinned SHA-256 (ADR 0027 section 7).
+sha2 = "0.10"
+# Keep awake and sleep/wake notifications (ADR 0032, D3); the fakes are what tests use.
+paddock-power = { path = "../../../../crates/paddock-power" }
+# The SecureOn password of a Wake-on-LAN device is never in the database or the logs (ADR 0032, D6): an owner-only file on macOS, the
+# OS credential store elsewhere. The `keyring` feature is enabled for other targets only, so the Keychain adapter does not exist in a
+# macOS build (a Keychain read waits behind a password dialog after every update).
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
 
 [target.'cfg(windows)'.dependencies]
 wmi = { version = "0.18", default-features = false }
@@ -28,6 +39,8 @@ windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dxgi",
     "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_WindowsFirewall",
+    "Win32_NetworkManagement_Ndis",
     "Win32_NetworkManagement_WNet",
     "Win32_Networking_WinSock",
     "Win32_Security",
@@ -37,15 +50,25 @@ windows = { version = "0.62", features = [
     "Win32_Security_WinTrust",
     "Win32_Storage_FileSystem",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Com",
     "Win32_System_JobObjects",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
     "Win32_System_LibraryLoader",
+    "Win32_System_Ole",
+    "Win32_System_Power",
+    "Win32_System_Shutdown",
     "Win32_System_Performance",
     "Win32_System_ProcessStatus",
     "Win32_System_Registry",
     "Win32_System_RestartManager",
     "Win32_System_SystemInformation",
+    "Win32_System_Variant",
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
 ] }
 

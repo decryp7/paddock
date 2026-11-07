@@ -30,7 +30,15 @@ noun: string, } } | { "spanNotAllowed": {
 /**
  * The allowed spans.
  */
-allowed: Array<number>, } } | { "tooFew": { 
+allowed: Array<number>, } } | { "sizeNotAllowed": { 
+/**
+ * Allowed widths.
+ */
+widths: StepsInfo, 
+/**
+ * Allowed heights.
+ */
+heights: StepsInfo, } } | { "blocked": Block } | "stale" | "nothingToRedo" | { "tooFew": { 
 /**
  * The surface's `min_placements`.
  */
@@ -66,21 +74,271 @@ export type Refresh = "live" | { "every": {
  */
 secs: number, } } | "onChange";
 
-export type Placement<W> = { 
+export type Span = { 
+/**
+ * Columns it spans; one of its kind's spans.
+ */
+span: number, };
+
+export type Cells = { 
+/**
+ * Left column, 0-based.
+ */
+x: number, 
+/**
+ * Top row, 0-based.
+ */
+y: number, 
+/**
+ * Width in columns.
+ */
+w: number, 
+/**
+ * Height in rows.
+ */
+h: number, };
+
+export type StepsInfo = { "range": { 
+/**
+ * Smallest.
+ */
+min: number, 
+/**
+ * Largest.
+ */
+max: number, } } | { "only": { 
+/**
+ * The values.
+ */
+values: Array<number>, } };
+
+export type KindSize = { "spans": { 
+/**
+ * The spans.
+ */
+spans: Array<number>, } } | { "cells": { 
+/**
+ * Allowed widths.
+ */
+widths: StepsInfo, 
+/**
+ * Allowed heights.
+ */
+heights: StepsInfo, 
+/**
+ * Default width.
+ */
+defaultW: number, 
+/**
+ * Default height.
+ */
+defaultH: number, } };
+
+export type Block = { "edge": Dir } | "largest" | "smallest" | "unchanged";
+
+export type Placed = { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * Its cells.
+ */
+rect: Rect, };
+
+export type Arrangement = { 
+/**
+ * The least container width, in px, for this arrangement.
+ */
+minWidth: number, 
+/**
+ * Its columns.
+ */
+columns: number, 
+/**
+ * Every placement, in reading order.
+ */
+placements: Array<Placed>, };
+
+export type PlacementMoves = { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * Its moves.
+ */
+moves: Moves, };
+
+export type PreviewRequest = { 
+/**
+ * The surface, as its id serialises ("dashboard").
+ */
+surface: string, 
+/**
+ * The revision the webview's view was computed on.
+ */
+revision: number, 
+/**
+ * The gesture.
+ */
+gesture: GridGesture, 
+/**
+ * The webview's counter; replies older than the latest are dropped there.
+ */
+seq: number, };
+
+export type PreviewReply<V> = { 
+/**
+ * The request's counter.
+ */
+seq: number, 
+/**
+ * The previewed [`crate::LayoutView`].
+ */
+view: V, };
+
+export type Outcome = { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * Its place in reading order, counted from 1.
+ */
+position: number, 
+/**
+ * How many placements there are.
+ */
+of: number, 
+/**
+ * The placement before it in reading order, if any.
+ */
+after: PlacementId | null, 
+/**
+ * The placement after it in reading order, if any.
+ */
+before: PlacementId | null, 
+/**
+ * Its width now, in columns.
+ */
+w: number, 
+/**
+ * Its height now, in rows.
+ */
+h: number, 
+/**
+ * Set when a resize left it at the kind's largest or smallest size in that direction.
+ */
+limit: Block | null, };
+
+export type Rect = { 
+/**
+ * Left column, 0-based.
+ */
+x: number, 
+/**
+ * Top row, 0-based.
+ */
+y: number, 
+/**
+ * Width in columns.
+ */
+w: number, 
+/**
+ * Height in rows.
+ */
+h: number, };
+
+export type Dir = "left" | "right" | "up" | "down";
+
+export type GridGesture = { "place": { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * The target.
+ */
+rect: Rect, } } | { "nudge": { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * The direction.
+ */
+dir: Dir, } } | { "grow": { 
+/**
+ * The placement.
+ */
+id: PlacementId, 
+/**
+ * The direction.
+ */
+dir: Dir, } } | { "toFirst": { 
+/**
+ * The placement.
+ */
+id: PlacementId, } } | { "toLast": { 
+/**
+ * The placement.
+ */
+id: PlacementId, } };
+
+export type Moves = { 
+/**
+ * Move left.
+ */
+left: boolean, 
+/**
+ * Move right.
+ */
+right: boolean, 
+/**
+ * Move up.
+ */
+up: boolean, 
+/**
+ * Move down.
+ */
+down: boolean, 
+/**
+ * Move to first.
+ */
+first: boolean, 
+/**
+ * Move to last.
+ */
+last: boolean, 
+/**
+ * Wider.
+ */
+wider: boolean, 
+/**
+ * Narrower.
+ */
+narrower: boolean, 
+/**
+ * Taller.
+ */
+taller: boolean, 
+/**
+ * Shorter.
+ */
+shorter: boolean, };
+
+export type Placement<W, P = Span> = { 
 /**
  * Unique within its layout.
  */
 id: PlacementId, 
 /**
- * Columns it spans; one of its kind's spans.
- */
-span: number, 
-/**
  * The widget and its options.
  */
-widget: W, };
+widget: W, } & P;
 
-export type Preset<W> = { 
+export type Preset<W, P = Span> = { 
 /**
  * Unique among the built-in and saved presets of a surface.
  */
@@ -96,9 +354,9 @@ builtin: boolean,
 /**
  * Its placements.
  */
-placements: Array<Placement<W>>, };
+placements: Array<Placement<W, P>>, };
 
-export type Layout<W> = { 
+export type Layout<W, P = Span> = { 
 /**
  * The surface's `schema_version` when written.
  */
@@ -106,11 +364,11 @@ version: number,
 /**
  * The placements, in order.
  */
-placements: Array<Placement<W>>, 
+placements: Array<Placement<W, P>>, 
 /**
  * The person's own presets only.
  */
-presets: Array<Preset<W>>, };
+presets: Array<Preset<W, P>>, };
 
 export type Edit<W> = { "add": { 
 /**
@@ -164,7 +422,11 @@ name: string, } } | { "deletePreset": {
 /**
  * The preset.
  */
-id: PresetId, } } | "resetToDefaults" | "undo";
+id: PresetId, } } | "resetToDefaults" | { "arrange": { 
+/**
+ * The gesture.
+ */
+gesture: GridGesture, } } | "undo" | "redo";
 
 export type SurfaceInfo<S> = { 
 /**
@@ -210,9 +472,9 @@ summary: string,
  */
 icon: string, 
 /**
- * Allowed spans, the first is the default.
+ * How it may be sized: spans (flow) or widths and heights (grid).
  */
-spans: Array<number>, 
+size: KindSize, 
 /**
  * How many may be placed.
  */
@@ -232,11 +494,31 @@ surface: SurfaceInfo<S>,
  */
 kinds: Array<KindInfo<K>>, };
 
-export type LayoutView<S, W, K> = { 
+export type LayoutView<S, W, P, K> = { 
 /**
  * The layout.
  */
-layout: Layout<W>, 
+layout: Layout<W, P>, 
+/**
+ * Counts up with every applied edit and every reload; an arrange edit names the revision it was computed on.
+ */
+revision: number, 
+/**
+ * The arrangement for each breakpoint, widest first (grid surfaces; empty on flow surfaces).
+ */
+arrangements: Array<Arrangement>, 
+/**
+ * Which gestures work for each placement (grid surfaces; empty on flow surfaces).
+ */
+moves: Array<PlacementMoves>, 
+/**
+ * True when an undone edit can be redone.
+ */
+canRedo: boolean, 
+/**
+ * What the last arrangement edit did to its placement (also in a previewed view); `None` after any other edit.
+ */
+outcome: Outcome | null, 
 /**
  * The catalogue.
  */
@@ -244,7 +526,7 @@ catalogue: CatalogueInfo<S, K>,
 /**
  * The catalogue's own presets (the person's are in the layout).
  */
-builtinPresets: Array<Preset<W>>, 
+builtinPresets: Array<Preset<W, P>>, 
 /**
  * What was wrong when the layout was read, to show once.
  */
@@ -395,7 +677,7 @@ placements: Array<PlacementState<V, A>>, };
 
 export type DynoSurface = "popover" | "dashboard" | "menuBar";
 
-export type Metric = "cpuTotal" | "cpuPerCore" | "memory" | "memoryPressure" | "swap" | "diskActivity" | "diskFree" | "networkUp" | "networkDown" | "gpuLoad" | "temperature" | "fan" | "battery" | { "process": string } | { "perfCounter": string };
+export type Metric = "cpuTotal" | "cpuPerCore" | "memory" | "memoryPressure" | "swap" | "diskActivity" | "diskFree" | "networkUp" | "networkDown" | "networkBoth" | "gpuLoad" | "temperature" | "fan" | "battery" | { "process": string } | { "perfCounter": string };
 
 export type VolumeChoice = "all" | "system" | { "mount": string };
 
@@ -403,9 +685,9 @@ export type PopoverWidget = "activeAlarms" | { "diskSpace": {
 /**
  * Which volume.
  */
-volume: VolumeChoice, } } | "cpuMemory" | "network" | "backupHealth" | "lastIssue" | "pinnedCounters" | "topApps";
+volume: VolumeChoice, } } | "cpuMemory" | "network" | "lastIssue" | "pinnedCounters" | "topApps";
 
-export type PopoverKind = "activeAlarms" | "diskSpace" | "cpuMemory" | "network" | "backupHealth" | "lastIssue" | "pinnedCounters" | "topApps";
+export type PopoverKind = "activeAlarms" | "diskSpace" | "cpuMemory" | "network" | "lastIssue" | "pinnedCounters" | "topApps";
 
 export type Thresholds = { 
 /**
@@ -483,7 +765,11 @@ unit: string,
 /**
  * A short label before it ("CPU").
  */
-label: string, } } | { "graphAndNumber": { 
+label: string, 
+/**
+ * Stacked (the default) or on one line. Absent in older saved settings: stacked.
+ */
+format: NumberFormat, } } | { "graphAndNumber": { 
 /**
  * What it shows.
  */
@@ -491,17 +777,38 @@ metric: Metric, } };
 
 export type MenuBarKind = "lineGraph" | "verticalBars" | "horizontalMeter" | "ring" | "number" | "graphAndNumber";
 
+export type NumberFormat = "stacked" | "line";
+
+export type NumberSupport = { 
+/**
+ * The formats the tray draws; the others are shown but cannot be chosen.
+ */
+formats: Array<NumberFormat>, 
+/**
+ * Whether the label is drawn in the icon (it is always in the tooltip).
+ */
+labelInIcon: boolean, 
+/**
+ * What the row says when there is no choice of format: the one layout this tray draws, in words ("Value only (label in the
+ * tooltip)"). `None`: the person chooses among `formats`.
+ */
+fixed: string | null, 
+/**
+ * Why a format or the label is missing, in one sentence for the Settings page; `None` when everything is drawn.
+ */
+note: string | null, };
+
 export type ValueTone = "ok" | "warn" | "bad";
 
 export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "count" | "milliseconds" | "seconds" | "number";
 
-export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "backups" | "counters" | "processes";
+export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "counters" | "processes" | "power";
 
 export type SettingsSection = "popupWidgets" | "general";
 
 export type Navigate = { "page": Page } | { "settings": SettingsSection };
 
-export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "setUpBackupChecks" | "startBackupCheck" | "restartAgent" | "customizeWidgets" | "openSettings";
+export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "restartAgent" | "customizeWidgets" | "openSettings";
 
 export type Level = "info" | "warning" | "critical";
 
@@ -555,7 +862,16 @@ tone: ValueTone,
 /**
  * False for a network volume that did not answer ("Not answering").
  */
-reachable: boolean, };
+reachable: boolean, 
+/**
+ * When the figures were read, ms since the epoch; none before the agent stamped them. For "as of 14:05" and
+ * "Not answering since 14:05".
+ */
+measuredAt: number | null, 
+/**
+ * How old the figures are against the refresh interval (the agent decides; the app only words it).
+ */
+freshness: "fresh" | "late" | "stale", };
 
 export type CounterRow = { 
 /**
@@ -592,30 +908,6 @@ name: string,
  * Its CPU, percent of the machine; none when it could not be read.
  */
 cpuPercent: number | null, };
-
-export type BackupVerdict = "healthy" | "stale" | "noBackupYet";
-
-export type BackupValue = { 
-/**
- * The tool's name ("Time Machine").
- */
-name: string, 
-/**
- * Its verdict.
- */
-state: BackupVerdict, 
-/**
- * When the last backup finished.
- */
-lastBackup: number | null, 
-/**
- * One plain sentence.
- */
-summary: string, 
-/**
- * How many tools are set up.
- */
-tools: number, };
 
 export type IssueValue = { 
 /**
@@ -703,7 +995,7 @@ rxMinute: Array<number>,
 /**
  * Upload over the last minute, oldest first.
  */
-txMinute: Array<number>, } } | { "backupHealth": BackupValue } | { "lastIssue": IssueValue } | { "pinnedCounters": { 
+txMinute: Array<number>, } } | { "lastIssue": IssueValue } | { "pinnedCounters": { 
 /**
  * The first rows.
  */
@@ -777,7 +1069,11 @@ menuBar: Array<MenuBarKindChoices>,
 /**
  * Every metric a menu-bar item may show.
  */
-menuBarMetrics: Array<MetricChoice>, };
+menuBarMetrics: Array<MetricChoice>, 
+/**
+ * What this platform's tray draws of a number item (its formats, and whether the label fits in the icon).
+ */
+number: NumberSupport, };
 
 export type MetricReading = { 
 /**
@@ -832,6 +1128,6 @@ notice: SurfaceNotice<WidgetActionId> | null,
  */
 placements: Array<PlacementState<PopoverValue, WidgetActionId>>, };
 
-export type SurfaceView = { "popover": LayoutView<DynoSurface, PopoverWidget, PopoverKind> } | { "dashboard": LayoutView<DynoSurface, DashboardWidget, DashboardKind> } | { "menuBar": LayoutView<DynoSurface, MenuBarItem, MenuBarKind> };
+export type SurfaceView = { "popover": LayoutView<DynoSurface, PopoverWidget, Span, PopoverKind> } | { "dashboard": LayoutView<DynoSurface, DashboardWidget, Cells, DashboardKind> } | { "menuBar": LayoutView<DynoSurface, MenuBarItem, Span, MenuBarKind> };
 
 export type SurfaceEdit = { "popover": Edit<PopoverWidget> } | { "dashboard": Edit<DashboardWidget> } | { "menuBar": Edit<MenuBarItem> };

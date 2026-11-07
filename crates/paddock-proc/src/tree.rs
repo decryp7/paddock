@@ -1,5 +1,13 @@
 //! Ending processes: a whole tree (`kill_tree`), one process politely (`ask`) or at once (`end`), and both with a
 //! grace period (`terminate`). Also liveness and leak checks.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::identity::{Ending, Holder, ProcessId, StartTime, holder, warn_not_ours};
 use crate::usage::{self, Table};
@@ -60,7 +68,7 @@ impl Os for RealOs {
         #[cfg(unix)]
         crate::sys::signal_group(root, crate::sys::SIGKILL);
         #[cfg(not(unix))]
-        let _ = root;
+        let _: u32 = root;
     }
 
     fn kill_pid(&self, pid: u32) -> bool {
@@ -70,7 +78,7 @@ impl Os for RealOs {
         }
         #[cfg(not(unix))]
         {
-            let _ = pid;
+            let _: u32 = pid;
             false
         }
     }

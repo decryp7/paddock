@@ -12,6 +12,7 @@ apps/dyno/.* @decryp7
 apps/pacenotes/.* @decryp7
 apps/pitcrew/.* @decryp7
 apps/pitwall/.* @decryp7
+apps/recce/.* @decryp7
 apps/sighter/.* @decryp7
 apps/spotter/.* @decryp7
 apps/shell-demo/.* @decryp7

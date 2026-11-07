@@ -1,14 +1,15 @@
 import { NgTemplateOutlet } from '@angular/common';
 import { TreeActions } from '../../shared/tree-actions';
 import { PdCell, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent, type PdRowTree } from '@decryp7/paddock-ui/table';
-import { ChangeDetectionStrategy, Component, DestroyRef, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, OnDestroy, OnInit, afterNextRender, computed, inject, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
-import type { ConnectionRow, ListenerRow, NetProto } from '../../core/api.types';
+import type { ConnectionRow, ListenerRow, NetProto, ReadVia } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatRate, formatRelative } from '../../shared/format';
+import { formatBytes, formatRate, formatRelative } from '../../shared/format';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
+import { ReadingSource } from '../../core/reading-source';
 import { NetworkStore } from '../../state/network.store';
 import { Lookups } from '../lookup/lookups';
 import { type GroupBy, allGroupKeys, type TableRow, connectionLine, endpoint, exposureBadge, initial, listenerLine, lookupBlockedReason, middleEllipsis, ownerName, ownerReason, portService, protoText, reachTone, sortListeners, stateView, summarise, tableRows } from './network-model';
@@ -41,13 +42,13 @@ function readCollapsed(): Set<string> {
  */
 @Component({
   selector: 'dy-network-page',
-  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, TreeActions],
+  imports: [AsyncState, FullTextTip, Icon, NgTemplateOutlet, PdTable, PdCell, MatMenuModule, MatCheckbox, MatIconButton, SearchField, MatTooltip, SuSegmentedControl, MatButton, TreeActions, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="page">
+    <div class="page wide fill">
       <header class="page-head">
         <div class="titles">
-          <h1>Network</h1>
+          <h1 tabindex="-1" #heading>Network</h1>
           <p>Which programs listen for connections and who they talk to. Dyno only looks: it never closes a connection or changes a firewall.</p>
         </div>
       </header>
@@ -61,7 +62,11 @@ function readCollapsed(): Set<string> {
           }
           @if (thisPc(); as ip) { <span class="this-pc">This computer {{ ip }}</span> }
         </p>
-        @if (s.trafficNote; as why) { <p class="faint traffic-note">{{ why }}</p> }
+        <dy-reading-source [via]="s.trafficVia" />
+        @if (s.trafficNote; as why) { @if (!sayingWhy(s.trafficVia)) { <p class="faint traffic-note">{{ why }}</p> } }
+        @if (s.trafficOthers; as o) {
+          <p class="faint traffic-others num" data-testid="traffic-others">Other users and ended programs: {{ o.programs }} {{ o.programs === 1 ? 'program' : 'programs' }} · ↓ {{ bytes(o.bytesIn) }} · ↑ {{ bytes(o.bytesOut) }} in total since they started</p>
+        }
       }
 
       <div class="bar" role="group" aria-label="Filters">
@@ -77,8 +82,13 @@ function readCollapsed(): Set<string> {
         }
       </div>
 
-      <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5" (retry)="store.load()">
+      @if (store.query().country; as cc) {
+        <p class="note" data-testid="country-filter"><dy-icon name="globe" /> <span>Showing connections to <b>{{ cc }}</b> only.</span> <button type="button" matButton="outlined" (click)="store.setQuery({ country: null })">Show all countries</button></p>
+      }
+
+      <dy-async [loaded]="!!store.snapshot()" [error]="store.error()" what="network" [rows]="5">
         @if (store.snapshot(); as s) {
+          <dy-reading-source [via]="s.ownersVia" [canRetry]="true" (retry)="store.retryHelper()" />
           @if (s.unknownOwners > 0 && !noteDismissed()) {
             <p class="note"><dy-icon name="info" /> <span>{{ s.unknownOwners }} {{ s.unknownOwners === 1 ? 'socket has' : 'sockets have' }} an owner the OS will not name without administrator rights.</span> <button type="button" matIconButton matTooltip="Dismiss this note" aria-label="Dismiss this note" (click)="noteDismissed.set(true)"><dy-icon name="close" /></button></p>
           }
@@ -96,7 +106,7 @@ function readCollapsed(): Set<string> {
               [filterable]="false"
               [countLabel]="noCount"
               [rowHeight]="36"
-              [maxHeight]="bodyMax()"
+              height="fill"
               [rowActions]="actions"
               [emptyText]="emptyText()"
               [(selectedKey)]="selectedKey"
@@ -116,7 +126,7 @@ function readCollapsed(): Set<string> {
                 @if (r.kind === 'group') {
                   <ng-container *ngTemplateOutlet="groupCell; context: { $implicit: r }" />
                 } @else {
-                  <span class="remote"><span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span></span>
+                  <span class="remote"><span class="truncate" [title]="r.item.remote">{{ short(r.item.remote) }}</span><span class="addr">:{{ r.item.remotePort }}</span>@if (r.item.country) { <span class="cc" [title]="'Registered in ' + r.item.country">{{ r.item.country }}</span> }@if (r.item.flaggedBy.length > 0) { <span class="flagged" [title]="'Flagged by ' + r.item.flaggedBy.join(', ')">⚑ flagged</span> }</span>
                 }
               </ng-template>
               <ng-template pdCell="service" let-r>
@@ -182,10 +192,16 @@ function readCollapsed(): Set<string> {
     </div>
   `,
   styles: `
-    :host { display: block; }
+    :host { display: block; height: 100%; }
     .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
-    .page { display: grid; gap: var(--sp-3); align-content: start; }
-    dy-async { display: grid; gap: var(--sp-3); }
+    /* The page fills the page area and only the table scrolls (pd-table height="fill"): page > dy-async > .layout > table each take what is left. */
+    .page { display: flex; flex-direction: column; gap: var(--sp-3); height: 100%; min-height: 0; padding-bottom: var(--sp-4); }
+    .page > * { flex: none; }
+    dy-reading-source { display: contents; }
+    /* The toolbar holds only the Columns button here (no filter, no count): as tall as the button, not 44 px. */
+    pd-table { --pd-toolbar-height: 28px; }
+    .page > dy-async { flex: 1 1 0; }
+    dy-async { display: flex; flex-direction: column; min-height: 0; gap: var(--sp-3); }
     .summary { margin: 0; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
     .summary b { color: var(--text-1); font-weight: var(--fw-semibold); }
     .summary .this-pc { margin-left: auto; color: var(--text-3); }
@@ -196,11 +212,14 @@ function readCollapsed(): Set<string> {
     .reach[data-tone='warn'] { color: var(--warn); }
     .chk { display: inline-flex; gap: var(--sp-2); align-items: center; font-size: var(--fs-sm); color: var(--text-2); }
     .note { margin: 0; display: flex; gap: var(--sp-2); align-items: flex-start; color: var(--text-2); font-size: var(--fs-sm); }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: var(--sp-3); align-items: stretch; flex: 1 1 0; min-height: 0; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
     .muted { color: var(--text-2); }
-    .truncate { overflow: hidden; text-overflow: ellipsis; }
-    .addr { font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
+    .truncate { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+    h1:focus { outline: none; }
+    .flagged { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: 6px; padding: 0 6px; border: 1px solid var(--warn); border-radius: 4px; color: var(--text-1); font: var(--fw-semibold) var(--fs-xs) / 1.5 var(--font-sans); }
+    .cc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-inline-start: 6px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: 4px; color: var(--text-2); font: var(--fw-regular) var(--fs-xs) / 1.4 var(--font-mono); }
+    .addr { flex: none; white-space: nowrap; font: var(--fw-regular) var(--fs-xs) / 1 var(--font-mono); color: var(--text-3); }
     .gname { display: flex; flex: 1; align-items: center; gap: var(--sp-2); min-width: 0; }
     .meta { flex: none; color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
     .exp { color: var(--warn); }
@@ -213,7 +232,7 @@ function readCollapsed(): Set<string> {
     .ib:hover:not(:disabled) { background: var(--surface-active); color: var(--text-1); }
     .ib:disabled { opacity: 0.35; cursor: default; }
     .ib dy-icon { --icon-size: 15px; }
-    .detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
+    .detail { align-self: start; max-height: 100%; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
     .dhead { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); }
     dl { margin: 0; display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px var(--sp-3); font-size: var(--fs-sm); }
     dt { color: var(--text-3); }
@@ -243,13 +262,16 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly trafficByName = computed(() => new Map((this.store.snapshot()?.traffic ?? []).map((t) => [t.name, t])));
   protected readonly trafficOf = (title: string) => this.trafficByName().get(title) ?? null;
   protected readonly rate = formatRate;
+  protected readonly bytes = formatBytes;
+  /** The reading source already gives the reason (and the button) for these, so the note is not repeated. */
+  protected readonly sayingWhy = (via: ReadVia): boolean => typeof via === 'object';
   protected readonly hostName = (c: ConnectionRow): string | null => this.store.names()[c.remote] ?? null;
   protected readonly noteDismissed = signal(false);
   protected readonly short = (a: string) => middleEllipsis(a);
 
   protected readonly connections = computed<ConnectionRow[]>(() => this.store.snapshot()?.connections ?? []);
   protected readonly listeners = computed<ListenerRow[]>(() => sortListeners(this.store.snapshot()?.listeners ?? []));
-  protected readonly sum = computed(() => summarise(this.connections(), this.listeners()));
+  protected readonly sum = computed(() => summarise(this.connections(), this.listeners(), this.tab()));
   protected readonly rows = computed<Row[]>(() => {
     const by = this.tab() === 'listening' && this.group() === 'host' ? 'none' : this.group();
     return this.tab() === 'connections'
@@ -264,7 +286,7 @@ export class NetworkPage implements OnInit, OnDestroy {
     if (this.tab() === 'connections') {
       return [
         ...prog,
-        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(110px, 2fr)', sortable: false },
+        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(180px, 320px)', sortable: false },
         ...(this.store.resolveNames() ? [{ key: 'host', header: 'Host name', value: (r: Row) => (r.kind === 'item' ? (this.hostName(r.item as ConnectionRow) ?? '') : ''), width: 'minmax(90px, 2fr)', sortable: false }] : []),
         { key: 'service', header: 'Service', value: (r) => this.itemService(r), width: 'minmax(70px, 1fr)', sortable: false },
         { key: 'proto', header: 'Protocol', value: (r) => (r.kind === 'item' ? protoText((r.item as ConnectionRow).proto, (r.item as ConnectionRow).ipv6) : ''), width: '68px', sortable: false },
@@ -284,9 +306,6 @@ export class NetworkPage implements OnInit, OnDestroy {
   private readonly groupedTree: PdRowTree<Row> = { level: (r) => (r.kind === 'group' ? 1 : 2), expanded: (r) => (r.kind === 'group' ? r.open : null), spans: (r) => r.kind === 'group' };
   /** Programs or remote hosts: groups at level 1, their sockets below. Ungrouped, the table is a plain grid. */
   protected readonly tree = computed(() => (this.group() === 'none' || (this.tab() === 'listening' && this.group() === 'host') ? null : this.groupedTree));
-  private readonly viewportHeight = signal(typeof window === 'undefined' ? 900 : window.innerHeight);
-  /** The rows scroll inside the table, which takes what the window leaves under the filters and the summary. */
-  protected readonly bodyMax = computed(() => Math.max(240, this.viewportHeight() - 300));
   protected readonly noCount = (): string => '';
   protected readonly emptyText = computed(() => (this.tab() === 'connections' ? 'No connections with these filters.' : 'Nothing is listening with these filters.'));
   protected readonly rowKey = (r: Row): string => r.key;
@@ -328,10 +347,16 @@ export class NetworkPage implements OnInit, OnDestroy {
   protected readonly asListener = (x: ConnectionRow | ListenerRow) => x as ListenerRow;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
 
+  private readonly heading = viewChild<ElementRef<HTMLElement>>('heading');
+
+  constructor() {
+    // Arriving from the map with a country chosen: focus goes to the heading (no ring), not to the whole pane.
+    afterNextRender(() => {
+      if (this.store.query().country) this.heading()?.nativeElement.focus({ preventScroll: true });
+    });
+  }
+
   ngOnInit(): void {
-    const onResize = () => this.viewportHeight.set(window.innerHeight);
-    window.addEventListener('resize', onResize);
-    this.destroyRef.onDestroy(() => window.removeEventListener('resize', onResize));
     void this.store.start();
   }
 

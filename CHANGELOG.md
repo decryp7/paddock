@@ -4,6 +4,131 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: the status chip has words for Dyno's update and agent-mismatch causes
+- `service-status-text.ts`: `dy.setup.updated` is now `dy.update.restart` ("updated: restart to finish"); new `dy.agent.other-build-returns` ("another build keeps starting") and `dy.agent.mismatch` ("needs a reinstall"). The planner marks ui when an app's `src-tauri/src/**/*.rs` changes, since `cause-codes.spec.ts` scans those sources against the table.
+
+### Dyno: an app updated while it runs no longer restarts its agent in a loop
+- An agent whose build id is the agent file on disk is the one the app would start, whatever version it reports (`matches_key` judges by build when the key has one). When such an agent speaks another protocol, the app leaves it alone and the chip says "Dyno was updated. Restart Dyno to finish." (cause `dy.update.restart`). The link also stops asking agents of another build to exit after three in a row (Retry starts the count again).
+- The update notice has its own chip row, `dy.update` ("Dyno itself"), so it no longer shares the installer program's row. The flag latches once the files have changed. An agent program that cannot be read is logged once per change of reason.
+- The agent of the installed file with another protocol is shown as "Dyno was updated. Restart Dyno to finish." only when the app really was updated while it ran (no Retry); otherwise as `dy.agent.mismatch` (reinstall, with Retry). The note stays put when one look misses the discovery file, and a later note of another kind replaces the one shown.
+- Additive on the wire: no field changed; the app-side `HintSeen` gained `of_disk_file`.
+
+### `@decryp7/paddock-ui`: storage sizes (files and disks) are decimal; `formatStorage`
+- New `formatStorage` in `@decryp7/paddock-ui/format`: sizes of disks, volumes and files in decimal steps (1000), as Finder shows them ("995 GB", "4 TB", "12 bytes"). `formatBytes` stays binary (1024) for memory and transfer. Its case table (`format/src/storage-cases.json`) is read by Dyno's engine tests too.
+- Breaking (before v1): `formatBytes` is removed from `@decryp7/paddock-ui/shell/about` and `@decryp7/paddock-ui/shell/diagnostics`; both export `formatStorage` instead (diagnostics' private decimal copy is gone). `floorBytes` of `shell/storage` counts in decimal.
+- Sizes now decimal in the shared shell: the update download size (about), the problem-report bundle size (diagnostics), the Storage page and its confirm dialog, the Activity page (undo), and a job's byte counters (`formatBytes` of `SuJob`'s job view). Apps with their own private size formatters (Debrief, Pitcrew, Spotter) are unchanged until the family switch.
+
+### `@decryp7/paddock-ui`: new entry `@decryp7/paddock-ui/locale` (pure); `format` no longer depends on `shell/i18n`
+- The locale helpers (`activeLocale`, `groupedNumber`, `plural`, `SOURCE_LOCALE`, ...) moved to their own pure entry; `@decryp7/paddock-ui/shell/i18n` re-exports them, so imports from there keep working. The `format` entry imports only `locale`, so a formatter loads in Node (a Playwright spec, a script) without the language store or Angular's JIT compiler.
+- The built package gets a `main` in each secondary entry's `package.json` (next to `module`), so Node-based loaders resolve `dist/paddock-ui/<entry>`.
+
+### `paddock-service`: the manager reads an injected clock
+- New `Manager::with_clock(Arc<dyn Clock>)` and `Manager::clock()` (`paddock_health::Clock`, the real `SystemClock` by default): the waits, the repair notice and the register stamp read it, so a test or a model never touches the system's clocks (a clock read costs 13 to 25 microseconds on some virtual machines).
+- Breaking (before v1): `RepairTracker::start`, `finish` and `current` take a `Duration`, a reading of the caller's monotonic clock, instead of an `Instant`; `repair::Bounds` loses `now` and gains `clock` (the stamp is `repair::start_time_of(clock.wall())`); new `repair::start_time_of(SystemTime) -> StartTime`.
+
+### `paddock-mcp`: the client key list is an owner-only file, not the credential store
+- Breaking (before v1): `McpControl::new` takes a `KeyListStore` instead of `Arc<dyn Secrets>`; `FileKeys` (a `VersionedFile`, owner-only, `mcp-keys.json` by convention; refuses a list others can write; never restores a damaged file from its backup) and `MemoryKeys` (tests) implement it, and the crate no longer depends on `paddock-secrets`. The entries hold an id, a client name, the SHA-256, a time and a revoked flag, nothing secret. Opening a Keychain item of another ad-hoc signed build blocked Dyno before its first window. No migration: the old `mcp:keys` entry is never read (reading it prompts). A damaged, unreadable or newer file means no key works (logged with the next step); the backup of a damaged file is never used, so a revoked key cannot return. `McpView` gains `keysProblem` (the reason the saved keys are not in use; the page shows it). `paddock_env::VersionedFile::no_restore()` is new. Dyno and the shell demo no longer take `real_secrets`.
+
+### `paddock-jobs`: `JobRegistry::start_ids_at`
+
+- New `start_ids_at(first)`: the next job gets id `first`, so an app whose Jobs view lists another registry's jobs (Dyno's agent and its own) keeps the ids apart.
+
+### `@decryp7/paddock-ui`: `pd-sparkline` second series, capacity, scales, colours, value format (Dyno's copy removed)
+- Breaking (before v1): the `min` input is gone; `scale` replaces it and the fixed-range case. `scale` is `fit` (default: the data's own range; `max` is ignored), `zero` (from 0 to `max`, or to the peak of both series plus 15% headroom; shared by a row of sparklines) or `zoom` (the first series' range inside 0..`max`, 100 when omitted; for levels that barely move). `zero` and `zoom` clamp values into the scale. The gallery's `[min]="0" [max]="100"` is now `scale="zero" [max]="100"`.
+- New optional inputs, off by default: `values2` (a second, dashed line on the same scale), `label2` (its name), `capacity` (a short series is drawn right-aligned, so the line grows in from the right), `pad` (default 3 px; 0 runs edge to edge), `dot` (the end dot, default on), `color`/`color2` and `formatValue` (formats the latest and peak values in the accessible name; default a rounded number, so the name no longer reads raw floats like 53.43750000000001). The name covers both series: "Down: latest 4 MB/s, peak 9 MB/s; Up: latest ...".
+- `sparklineGeometry` takes a seventh argument `{ capacity?, clamp? }`, and one point returns an empty area. Invalid `capacity`, `pad`, `max` and `height` fall back to defaults instead of drawing NaN. The area opacity stays 0.14 (Dyno's own copy used 0.16, so its areas are slightly lighter now).
+- Dyno's own `dy-sparkline` is deleted; its tiles, tray popover, widgets and Reports page use `pd-sparkline` and draw the same lines (a golden test records Dyno's former paths).
+
+### `@decryp7/paddock-ui`: `pd-table` `height` (`fit`, `fill`, `window`)
+- New input `height` on `pd-table`, also exported as the type `PdTableHeight`. `fit` (default, unchanged): the body is as tall as its rows up to `maxHeight`, so no other app's table changes. `fill`: the table takes the height its container gives it (a flex column or a grid cell with `min-height: 0`), never less than 240 px; for the one main table of a page that fills the window. `window`: as tall as its rows up to the height of the nearest scrolling ancestor less the table's own toolbar and header, measured with a ResizeObserver and updated live (the window's height when nothing scrolls, `maxHeight` until measured); for a page that scrolls once and stacks tables; the wheel passes to the ancestor at the end of the rows.
+- `window` needs a scrolling ancestor whose height does not depend on its content (a content-sized one grows with the table and the table with it). Only a `window` table with no scrolling ancestor listens to the window's resize; no other table does.
+- New exports `PD_TABLE_FILL_MIN` (240) and `windowBodyMax`. The host has a `data-height` attribute. The gallery's Data page has a `height="fill"` demo.
+
+### `@decryp7/paddock-ui/shell/notify`: the notification centre selects only in selection mode
+- `pd-notifications-panel` shows no checkboxes, select-all row or "Delete selected (n)" by default. A new "Select" button in its toolbar (`notices-select-toggle`, `aria-pressed`) turns selection mode on and becomes "Done"; Done leaves the mode and clears the selection. Shift-click and Shift+Space ranges, filters and Mark all read are unchanged.
+- In selection mode a click on a message's text toggles its checkbox; outside it nothing changes. The mode ends when the list becomes empty or the panel closes, and the button is hidden with no messages. Focus goes to the first checkbox on entry, back to Select on Done, and after a delete to the next message's checkbox (its Dismiss button outside the mode).
+- New ids `pd.notifications.select-mode` and `pd.notifications.select-mode-done`.
+
+### `paddock-updater`: `InstallScope`, the elevated hand-off, and `Installer::install(&Package, relaunch)` (ADR 0053)
+- Breaking (before v1): `Installer::install` takes a `Package { file, manifest, version, signature, size }` instead of `(file, manifest, relaunch)`; `PluginInstaller` and the test fakes follow. No other app implements `Installer`.
+- New `InstallScope` (`PerUser` by default, `PerMachine`) in `UpdaterConfig` and `UpdatesBuilder::install_scope(scope, install_dir, administrator)`. A per-machine copy refuses `install_on_quit` (`UpdateError::PerMachine`), writes a hand-off record before it installs, and never relaunches itself (the installer does). `UpdateStatus.install` (`InstallInfo`: scope, `install_on_quit_available`, `administrator_notice`) carries the texts for the UI.
+- New `ElevatedHandoff` (`Installer`): runs `$INSTDIR\paddock-setup.exe apply-update` elevated through the Windows prompt, with the signature as base64 text. Ports for the parts the crate cannot own: `Elevator` (`tauri::ShellElevator`, `ShellExecuteExW` with `runas`, feature `install`), `SetupContract` (`check_install_dir`, `check_download`, `sentence`: the app supplies `paddock-setup`'s, because `paddock-setup` depends on this crate) and `InstallerLock`. `ElevatedHandoff::new` returns an error unless the contract accepts the install folder. An exit code that is not one of `apply-update`'s own is an unknown outcome: the record stays, nothing is relaunched, the next start settles it.
+- New errors `UpdateError::{NotInstalled, Declined, PerMachine}` (wire kinds `notInstalled`, `declined`, `perMachine`), the phase `UpdatePhase::InstallerRunning`, `Record.handoff` and `FailedInstall.kind`; `Updater::settle_handoff(bound)`, `installer_running()`, `with_installer_lock`. A recorded failure of a version that is installed by now is not shown. The background thread keeps waiting for a running installer in slices (`INSTALLER_WAIT_SLICE`), logging every `INSTALLER_WAIT_BOUND`.
+- `@decryp7/paddock-ui/shell/about`: the Updates dialog shows Install, the administrator text and the installer-running line for a per-machine copy and offers Install again after a declined or failed hand-off; the Health word for `dy.setup.version`.
+
+### `paddock-setup`: `check-version`
+- New command `check-version --dir <install folder> --expect <version>` (exit 12 on a mismatch, `Exit::VersionMismatch`), `versioncheck`, and `native::fileversion::file_version` (also used by `apply-update`). The include's `PADDOCK_INSTALL_SETUP` runs it after the copy and only reports. `numeric_version` ignores a prerelease or build suffix, so `1.1.0-test.1` no longer gives a version resource of 0.0.0. `native::RealDirs` is public for the app's check of its own install folder.
+
+### Logs that explain: unclean exits, pauses, tool runs, update outcomes
+- New `paddock_startup::run_marker` (`begin`, `RunMarker::end`): for a process without a session to restore (a background agent, a tool), a marker file left by a run that never ended says "Previous run did not end cleanly" at the next start (warn). Dyno's app and agent use it; the helper reads the same fact from its lifecycle file.
+- `Watchdog::due` logs `process.paused` (warn, with the gap) when the app process was not running between two ticks, the case that explains a slow start or a missed ping.
+- `paddock_proc::run_bounded` logs `tool.run` for every run: the program name and argument count (never the arguments), the exit (code, signal, timeout, output cap), the time, and the last 200 characters of its error output when it failed (warn; a success is a debug line).
+- `paddock_updater` logs `update.check` (newer version, up to date, or why it failed) and `update.download` (started, verified, or why it failed). `log` is now a plain dependency of the crate.
+- `paddock_shell::logging` `Starting` also carries the seconds since boot and the names of the launch flags (never their values).
+- The 30-day `paddock-log` default (above) applies to every app that uses the shared log; the total cap keeps the disk use bounded, and an app that wants the old week sets `keep_files`.
+
+### `paddock-log`: a month of history, 100 MB per process in all
+- `LogSettings::default().keep_files` is 30 (was 7) for every app, and `DailyFiles` keeps at most `TOTAL_CAP_BYTES` (100 MB) of a process's daily files: the oldest days go first, today's file is never removed. Debug and Trace lines may use only half of a day's budget, so a Debug session cannot crowd out the Info, Warn and Error lines. The longer default is a plain improvement for all apps because the total cap bounds the disk; an app that wants the old week sets `keep_files`.
+
+### `paddock-diag`, `paddock-shell`: the report lists what the user did; every run starts with a line
+- `builtin::Trail` (added by `tauri::Setup::log`) writes `breadcrumbs.json`: the latest 100 breadcrumbs of the log (lines with an `Operation` property), oldest first.
+- `paddock_shell::logging::install` writes the first line of every run: `Starting <app>` with version, OS, architecture, process id and whether the install is portable.
+
+### `paddock-diag::export`, `paddock-startup`: a report without the window
+- A not-responding question is asked only about a window the user can see, after a longer wait (`Config::ask_timeout`, 60 s after the reload), and each Keep Waiting doubles the next wait (`Config::max_doublings`, up to 8 minutes; the same for the missed-ping count of a page that stopped answering); a window shown after a reload gets a fresh wait. `Config` gains `ask_timeout` and `max_doublings`, and `ConfigError::AskBeforeReload`. While a report is being written from the question it is not asked again.
+- `paddock-service`: `Sandbox::logs_dir` renders `LogsDirectory=` (0755), the one folder `ProtectSystem=strict` leaves a system service to write that everyone can read; Dyno's helper keeps its lifecycle file there.
+- `paddock_proc::run_bounded`'s `tool.run` replaces any word of the error output that looks like a path with `<path>` and warns once per program and exit.
+- New `paddock_diag::export` (`parse`, `resolve`, `write`): `<app> --export-diagnostics [<path.zip>] [--force]` writes the same redacted report as the dialog, with no window; it is the shared form of Debrief's `report/cli.rs` (Debrief migrates later).
+- `paddock_startup::Choice::SaveReport`, `ask::SAVE_REPORT_LABEL`, `Prompt::with_report` and `StartupBuilder::report(hook)`: when an app gives a report hook, the not-responding question offers "Save a problem report…" (a native dialog holds three buttons, so with Safe Mode offered closing the question is Keep Waiting). `Choice` gains a variant: a `match` on it handles `SaveReport`.
+
+### `paddock-diag`: more personal details and secrets are removed; a crash is reported once; a log that cannot be read is said
+- `Redactor::for_machine` also asks the OS for the machine's name (`gethostname`; a GUI app's environment has no `HOSTNAME`); `Redactor::for_machine_named` takes it as an argument (tests). A profile folder is replaced up to the next separator or quote (names with a space), in any case (`C:\USERS\`) and with doubled backslashes; MAC addresses become `<mac>` (counted under `ip_addresses`).
+- Secrets: `pass`, `pw`, `sig` and `signature` keys, `session-key`, URL credentials of any scheme, the rest of a `password:` line, PEM private key blocks, `ghp_...`, `AKIA...`, `pw_...` and `sk-...` tokens. A secret-named property of a CLEF log line is masked whatever its value type, and nested objects and arrays are walked.
+- `window::log_window_report` and `window::try_tail` say which log files could not be read and why; `builtin::Logs` adds a note, and an unreadable log folder no longer says "There are no log files yet". A log tail with no newline in it is kept (it was dropped).
+- `builtin::Crash` reads every `crash-<process>.json`, and the new `Section::reported` hook (called after a report is saved) clears the markers it reported; the old marker stayed for ever. `Section` gains the default method `reported`.
+- The Report a problem dialog says "Issue reports are public. Look through the zip first.", lists what is not in the report and says file names outside the home folder may remain.
+
+### `paddock-service`: registrations are read back; `service_main` is the one service entry point (ADR 0054)
+- `Backend::register` and `replace_in_one_step` return the `Inspection` read back after the write; a read-back that disagrees is `RegisterError::NotAsWritten(Inspection)`, never `Ok`. A `LaunchdBundled` registration that reads back "needs approval" is now `RegisterError::NeedsApproval` at `register` (it was found at the next `inspect`). An implementation of `Backend` returns the inspection; a match on `RegisterError` handles `NotAsWritten`.
+- `Inspection` has `last_exit`, `restarts` and `unit`; `Job` has `Failed(LastExit)`. A stop by SIGHUP, SIGINT, SIGPIPE or SIGTERM, systemd's `Result=success` and a Windows service that has not started since boot (1077) are not failures.
+- New `service_main(spec, Hosting, body)` replaces `native::scm::run_as_service` (the session host is `native::host_program`): the OS log (Windows event log under the service's name, the journal, the unified log) is open from the first line, a body's `ServiceExit` error becomes the exit code (`ServiceSpecific` on Windows) with its cause chain in that log, a panic is `PANIC_EXIT_CODE` and its place is logged. `WindowsService` registers and removes the event source; rendered systemd units send standard output and error to the journal.
+
+### `@decryp7/paddock-ui` tokens: the count ramp `--pd-count-1` to `-5`
+- New CSS custom properties `--pd-count-1` to `--pd-count-5` (fewest to most): a five-step ramp for counts drawn as area fills, defined per accent from `count-dark`/`count-light` in `$accents` (Dyno only so far). `npm run test:tokens` measures it: in normal vision and under protanopia, deuteranopia and tritanopia, neighbours CIEDE2000 >= 10 and 1.3:1 in luminance (the last pair 1.4:1) and every step >= 7 from the warning colour; L* >= 10 per step and the darkest step L* >= 12; step 1 at 3:1 on the page in normal vision; `--pd-text` (the marker colour) >= 15 from every step, its fill or a `--pd-bg` halo 3:1 on every step in every vision (design guide, section 4).
+### `@decryp7/paddock-ui`: `--pd-checkbox-box-size`, and the notification pane's grid layout
+
+- New public CSS custom property `--pd-checkbox-box-size` (18px, in the token sheet; read by the shared checkbox pull in `_material.scss`): the shared rule that pulls a checkbox's box back by half the touch target's overhang reads it instead of a literal 18px. A page never adds its own pull on top (a second shift clipped the AI access page and the notification pane).
+- `@decryp7/paddock-ui/shell/notify`: each notification is a grid `[checkbox][dot][title][time]` with the body and buttons under the title; the box, dot and time stay on the title's first line when it wraps. Select all has its own labelled row in the items' checkbox column. Delete all and Mark all read are text buttons in the muted colour (Delete all is no longer outlined in danger red; the confirmation carries the danger). No class or test id was renamed.
+- `@decryp7/paddock-e2e`: `checkboxLayoutProblems`, `bodyIndentProblems` and `rowPinProblems` check a page's checkbox layout (clipped, covered, off the title line, body not under the title, dot or time off the first line).
+### `@decryp7/paddock-ui`: `pd-select` `panelWidth`; the widget chooser row wraps its controls
+
+- `pd-select` has a `panelWidth` input (`'auto'` by default, the trigger's width; `null` sizes the list to its longest option), so a narrow trigger no longer wraps a longer option.
+- `pd-widget-chooser`: a shown row is two columns, the lead (grip and kind icon; its width is the custom property `--pd-wc-text-inset`, derived from `--pd-wc-grip-size` and `--pd-wc-icon-size`) and a wrapping body of the description, the app's option controls and "more". A wrapped line starts at the body's edge, under the description's column, and "more" ends the last line. Narrow (the list under 35rem wide: the list is the container, so a preview column beside it counts) the description keeps 10rem so the controls wrap under it. `--pd-wc-more-size` (40px) sizes the "more" button and its reserve.
+- Dyno: the engine's `widget_choices` carries `number` (`NumberSupport`: the formats and label the tray draws on this OS, and why not); Settings shows only what it says and one item limit (the engine's).
+
+### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
+
+- `stats::Summary` (now exported as `SampleSummary`) gained `mean` and `std_dev` fields, `cv()` (std_dev / |mean|, `None` at a zero mean) and `range()`. Added for Dyno's benchmark repetitions (ADR 0030); a struct literal of `Summary` needs the two new fields.
+### `paddock-service`: `privileged` (protected install, update and removal of a system service) and `hardening`
+- New `Hardening` on `ServiceSpec` (system services only): the Windows token privileges the SCM keeps (`sc privs`, checked with `sc qprivs` before the service starts), the service DACL that lets interactive users start it (`sc sdset`), and the systemd sandbox keys of ADR 0027. `Systemd::packaged()` enables and disables a unit a package ships without writing or removing it.
+- New `privileged` module: `layout` and `backend_for` per OS, `Installer` (plan, `ProtectedFiles` port, root-owned and not-group-or-world-writable checks, hash of the copy, Windows ACL by SID, bounded confirm, self-removal with the stop last), `run_elevated` (osascript, pkexec, UAC), `assess` (ask only when the protocol or the minimum version changed). `ScmConfig` gains `privileges` and `sddl`. No change for specs without hardening.
+### `paddock-power` (new): keep-awake guard and sleep/wake notifications
+- `KeepAwake` holds at most one OS sleep-prevention object behind the `PowerOs`/`Hold` ports (macOS `IOPMAssertionCreateWithName`, Windows `PowerCreateRequest`
+  with `SystemRequired` and, for `Scope::SystemAndDisplay`, `DisplayRequired`; Linux logind `Inhibit("sleep:idle", ...)` and, for the display, the desktop's
+  `org.freedesktop.ScreenSaver` when it offers one). A new hold is taken before the old one is released; the OS drops a hold with the process.
+  `SleepWakeSource` delivers `PowerEvent::Sleeping`/`Woke` (`IORegisterForSystemPower`, `PowerRegisterSuspendResumeNotification`, logind `PrepareForSleep`).
+  `FakePower` and `FakeEvents` are the doubles; the real adapters (`system_power`, `system_events`) run only in VMs (ER-14). The adapters are in
+  `native.rs`, which the coverage job leaves out (one declared alternative added to the regex in `ci.yml`).
+- Linux: dropping a sleep/wake subscription never waits for D-Bus. It says "stop" first (nothing more reaches the sink), closes the connection (`Connection::close`; `graceful_shutdown` waits for every clone of the connection and the signal iterator on the events thread holds one, so it cannot return), and waits at most 2 s for the events thread, then logs and lets it go. The thread logic is `event_thread::EventThread` with an injectable closer, tested without D-Bus.
+### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: dialogs size to their content (ADR 0043)
+- **Breaking.** One wire for sizing: `dialog_measure { epoch, seq, measure }` replaces `dialog_fit { measure }` and `dialog_ready { measure }` is now `dialog_ready { epoch, seq }` (it carries no size). `DialogIo.fit` and
+  `ready(measure)` become `measure(epoch, seq, measure)` and `ready(epoch, seq)`; `DialogStart.epoch` counts page loads, `Measure.overflow` says the body scrolls, and the events `paddock://dialog-size-mode` and
+  `paddock://dialog-remeasure` are new. `BASE_COMMANDS`, the shell's permissions and `shell-commands.ts` follow. No compatibility shim.
+- `SizeMode` (`Height { shrink }` or `Manual`) replaces `fits_content` and `grows_only` in the kind table (generated `sizeMode`, `shrink`); `fitsContent` is `sizeModeOf`. Only a tool remembers its size (D3).
+- `paddock_dialogs::size::SizeState`: the pure state machine (epoch and seq order, a queue of requested physical sizes, user resize versus echo, scale change, monitor move, show gating); its glue (`tauri/sizing.rs`) runs every
+  transition on the main thread and logs one line each. The Windows, Linux and macOS edges read the DPI, the visible frame and the user-resize signal. `SizeLoop` (one measure function, last-sent baseline, at most two sends per change)
+  replaces the handshake measure and the frame's own watch baseline. `data-fit-seq` and `data-size-mode` are set on `<html>`.
+
 ### `paddock-shell`: `files_*` commands always have their service
 
 An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).
@@ -31,6 +156,64 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
   copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
 - `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
   calls `write`, so other implementations of the port are unchanged.
+### Dyno moves from `dyno-ipc` to `paddock-ipc`; `paddock-ipc` gains `BodyPeer` (Dyno ADR 0027, WP-1b)
+- New `body` module: `BodyPeer<B>`, `BodyOptions<B>`, `BodyHandler<B>` and `body_handler`, a typed view over `Peer` for apps whose wire is one postcard enum
+  (calls, answers and pushes are all `B`). The frames on the wire are the same as any peer's; a body that does not decode is `invalid` (a call) or counted in
+  `undecodable_pushes` (a push), never a closed connection. `BodyPeer::wrap` views a peer that was started elsewhere (a `Child`'s).
+- `Child::exit_status(wait)` (how a launched child ended, read once from the OS and kept) and `Connection::stream_mut` (the raw stream, for tests that must break the protocol).
+- Dyno's agent, command line, plugin API and host, helper and app now use `paddock-ipc`; `apps/dyno/crates/dyno-ipc` and its three `known-copies.toml` entries are deleted.
+  The one change users of Dyno's wire can see: the IPC handshake carries the app protocol (or the plugin / helper protocol) as its major version, so a peer of
+  another protocol is refused with which side to update. Everything else is kept: calls over the concurrency limit wait in order, a plugin's memory cap is still
+  a hard Windows job-object commit limit.
+- `PeerOptions::call_queue` (and `BodyOptions::calls`): opt-in bounded FIFO for calls over `max_concurrent_calls` (default 0: refused with `busy`, as before).
+- `MemoryCap::hard_commit` / `ChildSpec::memory_hard` (`paddock-proc`, `paddock-ipc`): also set `JOB_OBJECT_LIMIT_PROCESS_MEMORY` on the child's job object (Windows).
+
+### `paddock-ipc`: a system endpoint with OS-supplied caller identity, a client check of the server, per-account caps (Dyno ADR 0027, WP-1a)
+- New `identity` module: `AccountId` (`Uid` or `Sid`), `PeerSource` (implemented by `endpoint::Stream::raw_peer`), `RawPeer`, `AdminRule`, `Caller` and the pure
+  `identify` / `caller_of`. The facts come from the connection: macOS `LOCAL_PEERTOKEN` (audit token; groups by `getgrouplist` for the uid; the program through
+  `proc_pidpath_audittoken`), Linux `SO_PEERCRED` uid and `SO_PEERGROUPS` (the program for the audit line through `SO_PEERPIDFD`, none before Linux 6.5), Windows
+  `ImpersonateNamedPipeClient` + `OpenThreadToken` + `RevertToSelf` (the account SID and Administrators membership from the caller's own token; a UAC-filtered
+  administrator counts, D9). A pid is never an identity: it and the program live in `AuditHint`, which `identify` never reads. A fact that cannot be read refuses the
+  connection (`PeerError`); on Windows the OS may refuse before the client's first bytes arrive (`PeerError::NotReady`; Windows 11 build 26300 identified a client that had sent nothing).
+- New `trust` module and `Stream::connect_system`: the client opens the system pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and, before sending
+  anything, requires the pipe's owner (`GetSecurityInfo`) to be SYSTEM (`S-1-5-18`); on Unix the socket's folder (opened by handle, no symlink) must be root's with
+  no group or world write bit and the listener must run as root. A failure is `SystemConnectError::Untrusted(Untrusted)`, which names the owner. `Listener::bind_system`
+  checks the same folder rule on the serving side.
+- `Access::system_for_all_users()` (correction, review 2026-11-03: `GRGW` for `IU` included `FILE_CREATE_PIPE_INSTANCE`, now `0x12019b` in both lists; mode 0666; SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)(D;;GA;;;NU)`). Fix: `Access::service_for_interactive_users()` now
+  starts with `O:SY` too (WP-0: a LocalSystem service's objects are owned by Administrators unless the descriptor names the owner, and a client that checks the owner
+  refuses the real service). A process that is not SYSTEM can no longer create a pipe with either list (`ERROR_INVALID_OWNER`). No app outside the crate's own tests uses
+  `service_for_interactive_users` yet (Pitcrew's service pipe does not), so no app changes.
+- New `limits` module: `AccountLimits` (per-account concurrency caps: four requests in all, one `Weight::Slow`; `try_acquire` never waits and answers `Busy`; a `Permit`
+  frees its slot on drop and reports `held()` on the injected `Clock`).
+
+### `paddock-shell`: `files_*` commands always have their service
+
+An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).
+
+### `paddock-proc`: `console::attach_parent_console` for GUI-subsystem sidecars
+- A program built for the Windows GUI subsystem (so a Run entry, a service or the app starts it without a console window) calls it first thing: it attaches to
+  the parent terminal's console, when there is one, and points missing standard handles at `CONIN$`/`CONOUT$`, so `--version` and friends still print.
+  A no-op on other platforms and without a parent console. `handle_missing` is the pure rule.
+
+### `paddock-window`: the tray popover survives the blur that follows the tray click (Windows)
+- Fixed: on Windows the popover showed and vanished at once. Measured in the Windows 11 VM (grace 0): `Focused(true)` at 83 ms after show, `Focused(false)` 1 ms later
+  (the shell's taskbar took the foreground back after the click's mouse-up), `Focused(true)` again 1 ms after the close began; `set_focus` had succeeded. A blur
+  within `BLUR_GRACE` (600 ms, **Windows only**: `popover::blur_grace_for`; macOS and Linux keep closing on every blur, grace 0) of showing is now kept; when
+  the grace is over `popover::grace_end` decides: it has the focus again, it stays; the shell (`Shell_TrayWnd`, the overflow) still has the foreground, it asks
+  for the focus once more and a refusal closes it; any other window in front, it closes (a real dismissal). The grace and the fade run on the `Popovers` clock
+  (`Popovers::clock`, a `FakeClock` in tests), the wait is cancelled when the popover closes, and `Popovers::blur_grace` / `foreground_class` set them for tests.
+  The popover path logs show requested (with the grace), shown (with the `show` and `set_focus` results and the focus), focus gained or lost with the time since
+  shown, and hide with its reason (`toggle`, `blur`, `blur after grace`, `focus refused`, `requested`).
+
+### `paddock-service`: launchd's job report carries the pid and the last exit; `System::write_private`
+- `parse::JobReport` has three new fields read from the job's own keys of `launchctl print` (nested blocks skipped, as before): `pid` (`pid = <n>`,
+  only while it runs), `last_exit_code` (`last exit code = <n>`, `None` before the first exit or after a signal) and `last_signal` (`last terminating
+  signal = …`). A launcher that runs a program as a launchd job tracks it by them (Dyno ADR 0026, amendment 2).
+- `exit_config` now means exactly exit code 78, read from the parsed code; before, any line starting with `last exit code = 78` counted (780 too). The
+  copies in Pitwall and Pitcrew keep the old prefix match until they adopt this crate.
+- `port::System::write_private`: an atomic write that leaves the file owner-only (0600 on Unix), for a job definition launchd loads. Its default
+  calls `write`, so other implementations of the port are unchanged.
+
 ### `paddock-health` and `@decryp7/paddock-ui/shell/notify`: delete selected or all notifications
 - New commands `notifications_dismiss_many` (`ids`, at most 1000; returns how many were removed) and `notifications_dismiss_all` (`upTo`: removes the messages up to the newest id the user saw, so one that arrived meanwhile stays; returns the count; no change event when nothing was removed) remove the
   calling window's messages (its project's and the app's list; an app list is saved again, so a deleted message does not return after a restart). Ids the
@@ -44,6 +227,7 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
 
 ### `@decryp7/paddock-ui/table`: `PdTable.expandAllGroups()` and `collapseAllGroups()`
 - Public methods for an app's toolbar on a `groupBy` table (the table kept the fold state to itself); `groupKeys(rows, column)` is exported next to `groupItems`.
+
 ### `@decryp7/paddock-ui/shell/dialogs` and `paddock-dialogs`: a dialog is fitted to content that arrives after the ready handshake (Dyno 1.0.1)
 - Dyno 1.0.0 showed Updates with a scrollbar beside one line (reproduced on Windows 11, below). The ready handshake in `DialogShell` now reads the content again, at the same pinned width, once the window system has
   answered, and sends a refit when it differs. Before, `DialogFrame.watch()` took its baseline from a measure read after that round trip, so content that
@@ -60,6 +244,49 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
   scale, the zoom and a `Phase` (`ready`, `fit`, `scale`). The shell sets `data-fit-settled` on `<html>` once the handshake's measures are sent.
 - `dialogFitProblems` (`@decryp7/paddock-e2e`) waits for no Loading and `data-fit-settled`, and reports a body that scrolls in a window below the cap.
   `MemoryUpdatesOptions.holdStatus` delays the first status (Dyno's browser build takes it from `__pdHoldUpdatesStatus`) for the late-status e2e.
+
+### Dyno moves from `dyno-ipc` to `paddock-ipc`; `paddock-ipc` gains `BodyPeer` (Dyno ADR 0027, WP-1b)
+- New `body` module: `BodyPeer<B>`, `BodyOptions<B>`, `BodyHandler<B>` and `body_handler`, a typed view over `Peer` for apps whose wire is one postcard enum
+  (calls, answers and pushes are all `B`). The frames on the wire are the same as any peer's; a body that does not decode is `invalid` (a call) or counted in
+  `undecodable_pushes` (a push), never a closed connection. `BodyPeer::wrap` views a peer that was started elsewhere (a `Child`'s).
+- `Child::exit_status(wait)` (how a launched child ended, read once from the OS and kept) and `Connection::stream_mut` (the raw stream, for tests that must break the protocol).
+- Dyno's agent, command line, plugin API and host, helper and app now use `paddock-ipc`; `apps/dyno/crates/dyno-ipc` and its three `known-copies.toml` entries are deleted.
+  The one change users of Dyno's wire can see: the IPC handshake carries the app protocol (or the plugin / helper protocol) as its major version, so a peer of
+  another protocol is refused with which side to update. Everything else is kept: calls over the concurrency limit wait in order, a plugin's memory cap is still
+  a hard Windows job-object commit limit.
+- `PeerOptions::call_queue` (and `BodyOptions::calls`): opt-in bounded FIFO for calls over `max_concurrent_calls` (default 0: refused with `busy`, as before).
+- `MemoryCap::hard_commit` / `ChildSpec::memory_hard` (`paddock-proc`, `paddock-ipc`): also set `JOB_OBJECT_LIMIT_PROCESS_MEMORY` on the child's job object (Windows).
+
+### `paddock-ipc`: a system endpoint with OS-supplied caller identity, a client check of the server, per-account caps (Dyno ADR 0027, WP-1a)
+- New `identity` module: `AccountId` (`Uid` or `Sid`), `PeerSource` (implemented by `endpoint::Stream::raw_peer`), `RawPeer`, `AdminRule`, `Caller` and the pure
+  `identify` / `caller_of`. The facts come from the connection: macOS `LOCAL_PEERTOKEN` (audit token; groups by `getgrouplist` for the uid; the program through
+  `proc_pidpath_audittoken`), Linux `SO_PEERCRED` uid and `SO_PEERGROUPS` (the program for the audit line through `SO_PEERPIDFD`, none before Linux 6.5), Windows
+  `ImpersonateNamedPipeClient` + `OpenThreadToken` + `RevertToSelf` (the account SID and Administrators membership from the caller's own token; a UAC-filtered
+  administrator counts, D9). A pid is never an identity: it and the program live in `AuditHint`, which `identify` never reads. A fact that cannot be read refuses the
+  connection (`PeerError`); on Windows the OS may refuse before the client's first bytes arrive (`PeerError::NotReady`; Windows 11 build 26300 identified a client that had sent nothing).
+- New `trust` module and `Stream::connect_system`: the client opens the system pipe with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION` and, before sending
+  anything, requires the pipe's owner (`GetSecurityInfo`) to be SYSTEM (`S-1-5-18`); on Unix the socket's folder (opened by handle, no symlink) must be root's with
+  no group or world write bit and the listener must run as root. A failure is `SystemConnectError::Untrusted(Untrusted)`, which names the owner. `Listener::bind_system`
+  checks the same folder rule on the serving side.
+- `Access::system_for_all_users()` (correction, review 2026-11-03: `GRGW` for `IU` included `FILE_CREATE_PIPE_INSTANCE`, now `0x12019b` in both lists; mode 0666; SDDL `O:SYD:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;IU)(D;;GA;;;NU)`). Fix: `Access::service_for_interactive_users()` now
+  starts with `O:SY` too (WP-0: a LocalSystem service's objects are owned by Administrators unless the descriptor names the owner, and a client that checks the owner
+  refuses the real service). A process that is not SYSTEM can no longer create a pipe with either list (`ERROR_INVALID_OWNER`). No app outside the crate's own tests uses
+  `service_for_interactive_users` yet (Pitcrew's service pipe does not), so no app changes.
+- New `limits` module: `AccountLimits` (per-account concurrency caps: four requests in all, one `Weight::Slow`; `try_acquire` never waits and answers `Busy`; a `Permit`
+  frees its slot on drop and reports `held()` on the injected `Clock`).
+### `@decryp7/paddock-ui/table`: `pd-table` carries `data-fit-width`
+- The host has `data-fit-width`, the width in pixels its columns are fitted to (1024 until the first measurement). An e2e that measures a header waits
+  until it equals the drawn width; WebKit sometimes measured the first frame (headers "need 912px, has 634px" at a 900 px window, 4 of 12 runs, also on main).
+
+### `@decryp7/paddock-ui/widgets`: the movable, resizable widget grid (family ADR 0044, WP-B)
+- New `PdWidgetGrid` (`pd-widget-grid`): draws the `LayoutView`'s arrangement for the container's width (design arrangement at its widest, derived ones
+  below), edit mode with Done, Undo and Redo, a "⋯" actions menu, keyboard gestures (arrows, Shift, Home, End, Delete, Ctrl/Cmd Z) enabled from the
+  engine's `moves`, `LiveAnnouncer` results, a stale reload-and-retry once, and the loading, error, empty and blocked states. It sends `GridGesture`
+  intents and draws what the engine returns.
+- New `PdGridGesture` (`pdGridGesture`): the pointer move and resize directive (not CDK drag-drop), with a placeholder, snapping guides, auto-scroll and
+  cancel. New `WidgetGridBackend` / `PD_WIDGET_GRID_BACKEND` (preview, edit, reload) and `FrameScheduler` / `PD_FRAME_SCHEDULER` (with `ManualFrameScheduler` for specs).
+- `PdWidgetFrame` gains `variant="card"` (fills its grid cell). New tokens `--pd-widget-row` (24 px) and `--pd-snap-guide`.
+- The chooser and area take the generic wire types: `LayoutView<S, W, Span, K>`; a kind's spans are `KindInfo.size` (`{ arrangement: 'spans', spans }`).
 
 ### `paddock-dialogs` and `@decryp7/paddock-ui/shell/dialogs`: an open dialog window is re-targeted by a native event
 - New event `paddock://dialog-inputs` (`INPUTS_EVENT`, `DIALOG_EVENTS.inputs`, payload `{ dialogId, inputs }`) and `DialogIo.sendInputs(label, dialogId,
@@ -91,35 +318,7 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
   Comfortable and Standard (default), 28 px Compact; an unlabelled field is `--pd-control-height` (32 / 28 / 24).
 ### `paddock-proc`: the instance lock re-checks a held lock; `is_held` becomes `is_held_settled`, new `is_held_now`
 - `InstanceLock::claim` reports a lock held only after `HELD_CHECKS` (5) consecutive checks `HELD_TICK` (100 ms) apart, so a lock that only a spawning child's copy of the descriptor holds is not taken for a holder (macOS, any spawn); a held lock now costs about 400 ms to report.
-- Breaking: `is_held(path)` is renamed `is_held_settled(path)` (the same re-check and wait), for a one-shot decision. New `is_held_now(path)`: one check, never waits, only for a loop where a held reading leads to waiting and looking again at the caller's own pace (a supervisor); a false "held" there only delays. Dyno's link uses it in every look; with the waiting probe there, every look waited 400 ms on a held lock and the link's counted waits stretched twentyfold (CI 7257). `dyno_agent::instance::is_held` is removed (only `is_held_now` remains), so the link cannot pick the waiting probe.
-
-### `paddock-service`: stop timeout and network wait in the spec
-
-### `paddock-service`: stop timeout in the spec
-- `SpecBuilder::stop_timeout_secs(u32)` / `ServiceSpec::stop_timeout_secs()` (default 60, 1 to 3600, a typed `SpecError` otherwise): the systemd `TimeoutStopSec=` and the `ExitTimeOut` of a launchd daemon (a user agent's plist has none). A service that must finish a running job before it stops (Pitcrew, ADR 0009) sets 300. A launchd user agent and a Windows service ignore the stop timeout. There is no network-wait option: a system unit already orders after `network-online.target`, and a `systemd --user` instance cannot order after that system target, so a user service retries its own network use. Defaults render the same files as before (goldens unchanged). An AppImage's program is already copied to a stable place before a unit points at it (`backend::choose`, `system::stable_copy`), as Pitcrew's own code did; neither refuses it.
-
-### `paddock-service`: a stopped service process is waited for, not called idle
-- `StartFacts` has `run_state` (`paddock_proc::RunState`), read by the launchd backends from the job's pid through the new `System::run_state(pid)` (default `Unknown`; `RealSystem` uses `paddock_proc::run_state` by process identity; `FakeSystem::set_run_state` for tests). `StartWait` feeds a stopped process to the judge as `Liveness::Paused` (the judge's own `StallCause::Paused`), so a running job with flat CPU that the system has stopped (App Tamer, SIGSTOP) keeps being waited for with the note "the service is paused by the system; waiting". Where the OS cannot say (`Unknown`, `Exited`), an idle stall is `StillWorking`, never `Failed`; only a process known to be running that uses no CPU is stuck.
-
-### `paddock-service`: Windows hardening (sc.exe by full path, any display language, no timeout on the elevated step)
-- `sc.exe` is run by full path from the folder Windows names (`GetSystemDirectoryW`; new `paths::default_sc_exe()`, with the pure `paths::sc_exe_in(dir)` as the tested part; a folder that is not a full path gives `C:\Windows\System32`), not as a bare `sc` found on `PATH` and not from `%SystemRoot%`, which a user can override for a process that runs elevated. `paths::SC` is gone; `WindowsService::with_sc` and `ElevatedWindowsService::with_sc` give tests another path. New cargo feature of the `windows` dependency: `Win32_System_SystemInformation`.
-- `parse::sc_state` and `sc_config` read `sc query` / `sc qc` output in any display language: the English labels still win, otherwise the state is the second and the program and start type the fourth and second indented `label : value` entry (the order does not change with the language). Proven with German and French fixtures.
-- The elevated install is no longer given up on after 120 s (the UI reported failure while it still ran). `Elevator::run_elevated` takes a backstop `ceiling` (`ELEVATED_CEILING`, 15 minutes, replaces `ELEVATED_TIMEOUT`); the Windows adapter waits in 30 s slices and logs that it is still working; new `port::elevated_result` and `ElevatedEnd` turn the end into the exit code, or, for a program still running at the ceiling, an error that says it was not stopped and may still finish (not "exit code 1"). A failed wait (`WAIT_FAILED`) ends it at once with the Windows error code (`ElevatedEnd::WaitFailed`), never spun on; the slice loop is the pure `port::wait_in_slices`, tested on every OS. Declined and a non-zero exit are reported as before.
-
-### `paddock-service`: `StartWatch`, judge the wait for the service by what the OS shows
-- New hook `StartWatch` (`reset()`, `poll(&StartObservation) -> StartVerdict { Waiting, StillWorking(note), Up, Refused(seen), Failed(why) }`) and `Manager::with_start_watch(Box<dyn StartWatch>)`. `repair::replace_watched` (and `Manager`'s repair, install and `on_start`) asks it each poll while waiting for the service after a registration; `repair::replace` and a `Manager` without a watch are unchanged (the fixed `Timings::start_wait`). `Refused` sends the repair round another cycle (one-step replacements fail with next steps instead), `Failed` ends it with `RepairOutcome::Failed` naming what was observed, and the watch decides how long the wait lasts (a cancel still stops it).
-- `StartWait` (module `start_wait`, re-exported) is the recommended watch, moved in from Pitcrew's `start_wait.rs`: pure over `paddock_proc::StartJudge`, patience in polls not seconds. A job the OS has not started yet spends no patience (waited for far past the old 120 s), a running job that uses no CPU for a minute is stuck, one that vanishes fails only after three missing looks in a row, a job that restarts three more times with a non-zero exit is a crash loop, when the OS starts the job again as another process (the pid changes) the judge starts afresh while the run count stays, it says "still working" once after 20 polls (also for a job that is only pending), and `START_CEILING_POLLS` (200) names the observed state when it ends a wait. A look the OS could not answer is neither gone nor seen: it never counts toward "vanished".
-- `Backend::observe_start() -> Option<StartFacts>` (default `None`: systemd and Windows keep the fixed wait); the launchd backends answer from one `launchctl print` (job, pid, runs, last exit) and the process's CPU time. `StartFacts` is exported. New `System::cpu_time(pid) -> Option<Duration>` (default `None`; `RealSystem` reads it through `paddock_proc` by process identity; `FakeSystem::set_cpu_time` for tests). Pitcrew's local `StartWait`, `parse_extras` and `JobExtras` become deletable when it adopts this.
-
-### `paddock-service`: optional `KillMode` for the systemd unit
-- New `KillMode` (`ControlGroup`, `Mixed`, `Process`, `None`; `KillMode::systemd()` is the unit's word) and `SpecBuilder::kill_mode(mode)` / `ServiceSpec::kill_mode() -> Option<KillMode>`. `render::systemd_unit` writes `KillMode=<value>` after `TimeoutStopSec` only when the spec sets it; a spec that does not renders the same unit as before (no golden changes). The type admits no bad value, so `build()` has nothing to validate. launchd and Windows ignore it. For a service that starts helpers it must not take down with it (`Process`, `Mixed`).
-
-### `paddock-service`: `JobReport` carries the pid, the run count and the last exit code
-- `parse::JobReport` has three new fields read from `launchctl print`: `pid` (`pid = N`), `runs` (`runs = N`) and `last_exit` (`last exit code = N`, also with words after it such as `78: EX_CONFIG`, and a negative signal number; `None` for `(never exited)`). Like the existing keys they count only on the job's own lines: a nested block's `pid`, `runs` or `last exit code` never does, so macOS 26's coalition blocks cannot change them. A missing or unparsable line reads as `None`, never 0. `JobReport` stays `Copy`; an app that built one by listing every field adds `..JobReport::default()` (no app in the repo does). Pitcrew's local `parse_extras` becomes deletable when it adopts this.
-
-### `paddock-service`: a pending or running launchd job is never stale; shared launchctl helpers
-- `JobReport::stale()` no longer counts "has a launch constraint and is not running": every healthy `SMAppService` job has `has LWCR`, so a pending job at login read as refused and the repair killed the healthy agent (Dyno B4; Pitwall 1.1 had the same logic). Stale now means found, not running, and spawn failed, exit 78 or "needs LWCR update". New `JobReport::needs_repair(answers)` (stale and the service does not answer) is the one decision for every app, and `JobReport::describe()` the observed state in words for logs and messages. Also affects `Job::Refused` in the launchd backend (a running job is never refused).
-- New `parse::launchctl_output` (stdout of a successful `launchctl` call through the `System` port, bounded and read while it runs; output past the cap comes back truncated) and new public module `launchctl` with `job_report` (`None` = launchd could not be asked, distinct from "does not know the job") and `bootout` (exit 3, 113 or "No such process" is success), moved out of the launchd backend. Pitwall uses them and drops its copies; Dyno and Pitcrew adopt them on their own branches.
+- Breaking: `is_held(path)` is renamed `is_held_settled(path)` (the same re-check and wait), for a one-shot decision. New `is_held_now(path)`: one check, never waits, only for a loop where a held reading leads to waiting and looking again at the caller's own pace (a supervisor); a false "held" there only delays. With the waiting probe in a supervisor's look, every look waited 400 ms on a held lock and the counted waits stretched twentyfold (Dyno's link, CI 7257). `held_state(path)` (from Dyno 1.1.0) keeps its settled answer and is the third reading, `HeldState::Unknown`. Dyno 1.1.0's `dyno_agent::instance::is_held` and its link still use the settled probe; moving the link to `is_held_now` is Dyno's change.
 
 ### Pitwall: the tray popup shows widgets you choose (family ADR 0035)
 - The popup is the shared `pd-tray-popover` with the widget area: Server, Activity, Memory, Loaded models, Downloads, Updates and Recent errors. The default shows Server, Activity, Memory and Loaded models and fits the family's 520 px cap whole in its worst state (a CI check, `e2e/tray.e2e.ts`). Models, downloads and errors open their page; a download in progress is a working widget with its progress and Cancel.
@@ -179,6 +378,7 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
 - The Name column shows the host (`hooks.example.com`, `ntfy.sh/topic`) with the whole address as tooltip and accessible name; Events is wider.
 - The page sits in a card with the family's control height and shape; the home-network control is a switch with its help text aligned; "Other events" is behind Show advanced (names a channel already has stay visible).
 - `SettingsPageDef.autosaves` (default true). A page with its own Save button declares `false` and the Settings footer then omits "Changes are saved as you make them."; the channels page does.
+
 ### `paddock-net`: a public-address limit for `check_host`, and no TLS stack without the `http` feature (additive)
 - `PublicAccess::{Policy, Deny}` and `Egress::check_host_with(host, port, lan, public)`: with `Deny` a name that resolves to any
   public address is refused (`Refusal::TooFar(Class::Public)`, "the name points at a public address"), so a connection that is
@@ -401,7 +601,7 @@ An app that did not call `Builder::files` registered `files_open_url` (About's "
 
 ### Quit in the menu bar: `QUIT_CONTRIBUTIONS`, and clicks with no window open (`paddock-menu`, `paddock-shell`, `@decryp7/paddock-ui/shell`)
 - Fix: no shell app had Quit in its menu bar: nothing contributed `pd.app.quit` (only the constant existed), so Cmd+Q did nothing. `provideNativeMenu` (so `provideShellPages` and `provideWorkbench`) now registers `QUIT_CONTRIBUTIONS` (the command `pd.app.quit`, `Mod+Q`, last in the app menu, group `quit`) for every app whose native menu port can quit (`tauriNativeMenuPort(ipc)` now has `quitApp()`, the shell's `app_quit` path); no app registers Quit itself. In the in-app menu on Windows the item reads "Exit" (`MENU_OS`).
-- To change what Quit does, an app provides `APP_QUIT` (Pitwall: its `quit::request`); it never contributes a second `pd.app.quit`. Pitwall's own `pd.app.quit` contribution is dropped (1.1 branch `pitwall/1.1-quit`): it provides `APP_QUIT` (its quit flow) and `Builder::menu_quit_without_window` (`quit::request_from_menu`), so Quit in the menu bar works with no window open. New `Builder::menu_without_window(id, f)` (`paddock-shell`): what a click on an app's own menu item does when no window is open (instead of only bringing the main window back); Pitwall uses it for "Quit Pitwall and stop serving". `QUIT_CONTRIBUTIONS` stays exported for manifest specs, which list what the frame adds.
+- To change what Quit does, an app provides `APP_QUIT` (Pitwall: its `quit::request`); it never contributes a second `pd.app.quit`. Pitwall's own `pd.app.quit` contribution is dropped (1.1 branch `pitwall/1.1-quit`): it provides `APP_QUIT` (its quit flow) and `Builder::menu_quit_without_window` (`quit::request_from_menu`), so Quit in the menu bar works with no window open. New `Builder::menu_action_without_window(id, f)` (`paddock-shell`, the name Dyno 1.1.0 gave the same hook; registering an id again replaces it, and the Quit id panics): what a click on an app's own menu item does when no window is open (instead of only bringing the main window back); Pitwall uses it for "Quit Pitwall and stop serving". `QUIT_CONTRIBUTIONS` stays exported for manifest specs, which list what the frame adds.
 - `ShellCore` has a new member `quitApp()`; the UI of a shell app that implements `ShellCore` by hand adds it.
 - Fix: with the last window closed to the tray (destroyed), the menu bar still shows the last model but a click had no target window and was dropped. `paddock-menu` now hands a click on a shown item to a host-side handler when no window is the target (`NativeMenu::on_no_window`, `on_no_window_by_default`, `route::runs_without_window`). The shell installs its policy unless the app set a handler: Quit runs the shell's quit (as the `app_quit` command; `Builder::menu_quit_without_window` replaces it for an app with its own quit path), any other item brings the main window back as a Dock click does (the click itself is not forwarded: the new window is not listening yet).
 

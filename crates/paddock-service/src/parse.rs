@@ -18,15 +18,16 @@ pub struct JobReport {
     pub needs_lwcr_update: bool,
     /// `has LWCR`: a launch constraint from the registered build is stored.
     pub has_lwcr: bool,
-    /// `pid = N`: the job's process while it runs (`None`: no such line).
+    /// `pid = <n>`: the process launchd runs for the job now (only while it runs).
     pub pid: Option<u32>,
-    /// `runs = N`: how often launchd has started the job (`None`: no such line).
-    pub runs: Option<u32>,
-    /// `last exit code = N`, also the words after it (`78: EX_CONFIG`) and a negative signal number. `None` while it never
-    /// exited (`(never exited)`) or when the line is missing.
+    /// `last exit code = <n>`: how the job's last process exited (`None`: it never exited, or a signal ended it).
     pub last_exit_code: Option<i32>,
-    /// `last terminating signal = ...`: a signal ended the job's last process.
+    /// `last terminating signal = …`: a signal ended the job's last process.
     pub last_signal: bool,
+    /// The signal number in `last terminating signal = Killed: 9` (`None`: no signal, or none named).
+    pub signal: Option<i32>,
+    /// `runs = <n>`: how often launchd started the job's process.
+    pub runs: Option<u32>,
 }
 
 /// Reads the report of `launchctl print` (catalogue R03). Only the job's own keys count: nested blocks (`arguments`,
@@ -54,14 +55,16 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
         } else if line == "job state = spawn failed" {
             job.spawn_failed = true;
         } else if let Some(code) = line.strip_prefix("last exit code = ") {
-            job.last_exit_code = leading_int(code);
+            // `78: EX_CONFIG` on newer systems, `78` on older ones, `(never exited)` before the first exit.
+            job.last_exit_code = code.split(':').next().and_then(|c| c.trim().parse().ok());
             job.exit_config = job.last_exit_code == Some(78);
         } else if let Some(pid) = line.strip_prefix("pid = ") {
             job.pid = pid.trim().parse().ok().filter(|p| *p > 0);
-        } else if let Some(n) = line.strip_prefix("runs = ") {
-            job.runs = n.trim().parse().ok();
-        } else if line.starts_with("last terminating signal = ") {
+        } else if let Some(sig) = line.strip_prefix("last terminating signal = ") {
             job.last_signal = true;
+            job.signal = sig.rsplit(':').next().and_then(|n| n.trim().parse().ok());
+        } else if let Some(runs) = line.strip_prefix("runs = ") {
+            job.runs = runs.trim().parse().ok();
         } else if line.starts_with("properties = ") {
             job.needs_lwcr_update = line.contains("needs LWCR update");
             job.has_lwcr = line.contains("has LWCR");
@@ -70,13 +73,22 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
     job
 }
 
-/// The integer a text starts with (`78: EX_CONFIG` is 78, `-9` is -9), `None` when it starts with something else.
-fn leading_int(text: &str) -> Option<i32> {
-    let end = text
-        .char_indices()
-        .find(|&(i, c)| !(c.is_ascii_digit() || (i == 0 && c == '-')))
-        .map_or(text.len(), |(i, _)| i);
-    text[..end].parse().ok()
+/// The `program = <path>` line of the job's own block in `launchctl print` (for the log only: decisions use the record's
+/// registered program, because `BundleProgram` jobs may print a relative `program identifier` instead).
+pub fn print_program(launchctl_print: &str) -> Option<String> {
+    let mut depth = 0usize;
+    for line in launchctl_print.lines().map(str::trim) {
+        if line == "}" {
+            depth = depth.saturating_sub(1);
+        } else if line.ends_with('{') {
+            depth += 1;
+        } else if depth <= 1
+            && let Some(p) = line.strip_prefix("program = ")
+        {
+            return Some(p.trim().to_string());
+        }
+    }
+    None
 }
 
 impl JobReport {
@@ -289,17 +301,114 @@ pub fn startup_switched_off(reg_query: &str, value: &str) -> bool {
         .is_some_and(|b| b & 1 == 1)
 }
 
-/// The service state number in `sc query` output (`STATE : 4  RUNNING`). The numbers do not depend on the display
-/// language but the labels do (German `ZUSTAND`), so when `STATE` is not there the state is the second indented
-/// `label : number` line (after `TYPE`), whatever the label says.
+/// The service state number in `sc query` output (`STATE : 4  RUNNING`; numbers do not depend on the language).
 pub fn sc_state(sc_query: &str) -> Option<u32> {
-    sc_value(sc_query, "STATE", 1)?
+    sc_field(sc_query, "STATE")?
         .split_whitespace()
         .next()?
         .parse()
         .ok()
 }
 
+/// The process id in `sc queryex` output (`PID : 1234`); `None` when the service has no process (`0`).
+pub fn sc_pid(sc_queryex: &str) -> Option<u32> {
+    sc_field(sc_queryex, "PID")?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+        .filter(|p| *p != 0)
+}
+
+/// The pid in `systemctl show -p MainPID` output (`MainPID=1234`); `None` when the unit has no process (`0`).
+pub fn parse_main_pid(show: &str) -> Option<u32> {
+    show.lines()
+        .find_map(|l| l.trim().strip_prefix("MainPID="))
+        .and_then(|v| v.trim().parse().ok())
+        .filter(|p| *p != 0)
+}
+
+/// The privileges in `sc qprivs` output (`Se…Privilege` words, sorted, once each; the names do not depend on the language).
+pub fn sc_privileges(sc_qprivs: &str) -> Vec<String> {
+    let mut found: Vec<String> = sc_qprivs
+        .split_whitespace()
+        .filter(|w| {
+            w.starts_with("Se")
+                && w.ends_with("Privilege")
+                && w.chars().all(|c| c.is_ascii_alphanumeric())
+        })
+        .map(str::to_string)
+        .collect();
+    found.sort();
+    found.dedup();
+    found
+}
+
+/// What `systemctl show -p FragmentPath,UnitFileState,Result,NRestarts,ExecMainStatus,ExecMainCode` printed (`Key=Value`
+/// lines; a key that is missing, empty or not a number reads as `None`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UnitShow {
+    /// `FragmentPath`: the unit file in force (empty for a masked or unknown unit).
+    pub fragment: Option<String>,
+    /// `UnitFileState`: `enabled`, `disabled`, `static`, `masked`, ...
+    pub unit_file_state: Option<String>,
+    /// `Result`: `success`, `exit-code`, `signal`, `core-dump`, `timeout`, ... The judge of a failure; the `ExecMain*` fields
+    /// are its detail.
+    pub result: Option<String>,
+    /// `NRestarts`.
+    pub restarts: Option<u32>,
+    /// `ExecMainStatus`: the exit status, or the signal number when `ExecMainCode` says killed.
+    pub exec_main_status: Option<i32>,
+    /// `ExecMainCode`: `CLD_EXITED` (1), `CLD_KILLED` (2) or `CLD_DUMPED` (3); 0 when the process never ended.
+    pub exec_main_code: Option<i32>,
+}
+
+/// Reads `systemctl show` output.
+pub fn parse_systemctl_show(stdout: &str) -> UnitShow {
+    let mut show = UnitShow::default();
+    for (key, value) in stdout.lines().filter_map(|l| l.split_once('=')) {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        match key.trim() {
+            "FragmentPath" => show.fragment = Some(value.to_string()),
+            "UnitFileState" => show.unit_file_state = Some(value.to_string()),
+            "Result" => show.result = Some(value.to_string()),
+            "NRestarts" => show.restarts = value.parse().ok(),
+            "ExecMainStatus" => show.exec_main_status = value.parse().ok(),
+            "ExecMainCode" => show.exec_main_code = value.parse().ok(),
+            _ => {}
+        }
+    }
+    show
+}
+
+/// The exit codes in `sc query` output of a stopped service: `(WIN32_EXIT_CODE, SERVICE_EXIT_CODE)`.
+pub fn sc_exit_codes(sc_query: &str) -> Option<(u32, u32)> {
+    let first = |name: &str| {
+        sc_field(sc_query, name)?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    };
+    Some((first("WIN32_EXIT_CODE")?, first("SERVICE_EXIT_CODE")?))
+}
+
+/// `ERROR_SERVICE_NEVER_STARTED`: stopped because it has not started since boot (demand or delayed start, or just created);
+/// there is no last exit, and it is not a failure.
+pub const SC_NEVER_STARTED: u32 = 1077;
+
+/// Whether a stopped service's `WIN32_EXIT_CODE` is a last exit at all: a service that never started since boot
+/// ([`SC_NEVER_STARTED`]) has none. The one check for the backend's read-back and for the unelevated start (rule 55).
+pub fn has_last_exit(win32: u32) -> bool {
+    win32 != SC_NEVER_STARTED
+}
+/// `ERROR_SERVICE_SPECIFIC_ERROR`: the real code is `SERVICE_EXIT_CODE`.
+pub const SC_SERVICE_SPECIFIC: u32 = 1066;
+/// `SERVICE_DEMAND_START` start type.
+pub const SC_DEMAND_START: u32 = 3;
 /// `SERVICE_RUNNING`.
 pub const SC_RUNNING: u32 = 4;
 /// `SERVICE_STOPPED`.
@@ -314,26 +423,14 @@ fn sc_field<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
-/// The value of the indented `label : value` lines of `sc` output, in order (the unindented `SERVICE_NAME:` header and the
-/// `[SC]` line are not entries; a wrapped flags line has no colon).
-fn sc_entries(text: &str) -> impl Iterator<Item = &str> {
-    text.lines()
-        .filter(|l| l.starts_with([' ', '\t']))
-        .filter_map(|l| l.split_once(':').map(|(_, v)| v.trim()))
-}
-
-/// The value labelled `label` (English), or the one at `position` among the entries when the labels are in another
-/// language.
-fn sc_value<'a>(text: &'a str, label: &str, position: usize) -> Option<&'a str> {
-    sc_field(text, label).or_else(|| sc_entries(text).nth(position))
-}
-
-/// The program and start type in `sc qc` output. In another display language they are the fourth and the second entry
-/// (`TYPE`, `START_TYPE`, `ERROR_CONTROL`, `BINARY_PATH_NAME`).
+/// The program and start type in `sc qc` output.
 pub fn sc_config(sc_qc: &str) -> (Option<String>, Option<u32>) {
-    let program = sc_value(sc_qc, "BINARY_PATH_NAME", 3).and_then(windows_program_of);
+    let program = sc_qc.lines().find_map(|l| {
+        let (k, v) = l.split_once(':')?;
+        (k.trim() == "BINARY_PATH_NAME").then(|| windows_program_of(v.trim()))?
+    });
     let start =
-        sc_value(sc_qc, "START_TYPE", 1).and_then(|v| v.split_whitespace().next()?.parse().ok());
+        sc_field(sc_qc, "START_TYPE").and_then(|v| v.split_whitespace().next()?.parse().ok());
     (program, start)
 }
 
@@ -353,6 +450,22 @@ pub mod sc_exit {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn main_pid_is_read_and_zero_means_none() {
+        assert_eq!(parse_main_pid("MainPID=4242\n"), Some(4242));
+        assert_eq!(parse_main_pid("MainPID=0\n"), None);
+        assert_eq!(parse_main_pid("MainPID=x\nOther=1\n"), None);
+        assert_eq!(parse_main_pid(""), None);
+    }
+
+    #[test]
+    fn the_service_process_id_is_read_from_queryex() {
+        let text = "SERVICE_NAME: DynoHelper\n        TYPE               : 10  WIN32_OWN_PROCESS\n        STATE              : 4  RUNNING\n        PID                : 9884\n        FLAGS              :\n";
+        assert_eq!(super::sc_pid(text), Some(9884));
+        assert_eq!(super::sc_pid(&text.replace("9884", "0")), None);
+        assert_eq!(super::sc_pid("nothing here"), None);
+    }
+
     use super::*;
 
     const LABEL: &str = "net.decryptology.pitwall.service";
@@ -536,41 +649,9 @@ mod tests {
         );
         assert_eq!(sc_config(""), (None, None));
         assert_eq!(sc_exit::EXISTS, 1073);
-    }
-
-    /// `sc query` / `sc qc` as a localised Windows prints them: the labels change with the display language (invented
-    /// same-shape text), the line order and the numbers do not.
-    const SC_QUERY_DE: &str = "\r\nSERVICE_NAME: Pitwall\r\n        TYP                : 10  WIN32_OWN_PROCESS\r\n        ZUSTAND            : 4  RUNNING\r\n                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\r\n        WIN32_EXIT_CODE    : 0  (0x0)\r\n";
-    const SC_QUERY_FR: &str = "\r\nSERVICE_NAME: Pitwall\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        ETAT               : 1  STOPPED\r\n        CODE_DE_SORTIE     : 0  (0x0)\r\n";
-    const SC_QC_DE: &str = "[SC] QueryServiceConfig ERFOLGREICH\r\n\r\nSERVICE_NAME: Pitwall\r\n        TYP                : 10  WIN32_OWN_PROCESS\r\n        START_TYP          : 4   DISABLED\r\n        FEHLERSTEUERUNG    : 1   NORMAL\r\n        BINAERPFADNAME     : \"C:\\Program Files\\Pitwall\\pitwall-server.exe\" --service\r\n        LADEREIHENFOLGE    :\r\n        ANZEIGENAME        : Pitwall\r\n";
-    const SC_QC_FR: &str = "[SC] QueryServiceConfig R\u{c9}USSITE\r\n\r\nSERVICE_NAME: Pitwall\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        TYPE_DEMARRAGE     : 2   AUTO_START  (DELAYED)\r\n        CONTROLE_ERREUR    : 1   NORMAL\r\n        NOM_CHEMIN_BINAIRE : C:\\Pitwall\\pitwall-server.exe --service\r\n";
-
-    #[test]
-    fn sc_output_is_read_in_other_display_languages_by_position_and_number() {
-        assert_eq!(sc_state(SC_QUERY_DE), Some(SC_RUNNING));
-        assert_eq!(sc_state(SC_QUERY_FR), Some(SC_STOPPED));
-        assert_eq!(
-            sc_config(SC_QC_DE),
-            (
-                Some("C:\\Program Files\\Pitwall\\pitwall-server.exe".into()),
-                Some(SC_DISABLED)
-            )
-        );
-        assert_eq!(
-            sc_config(SC_QC_FR),
-            (Some("C:\\Pitwall\\pitwall-server.exe".into()), Some(2))
-        );
-        // An English label still wins over position, and unindented lines (the header) are never entries.
-        assert_eq!(
-            sc_state("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n  STATE : 1  STOPPED\r\n"),
-            Some(SC_STOPPED)
-        );
-        assert_eq!(sc_state("STATE: 4  RUNNING"), Some(SC_RUNNING));
-        assert_eq!(sc_state("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n"), None);
-        assert_eq!(
-            sc_config("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n  A : 2  Y\r\n"),
-            (None, Some(2))
-        );
+        let privs = "[SC] QueryServiceConfig2 SUCCESS\r\n\r\nSERVICE_NAME: DynoHelper\r\n        PRIVILEGES       : SeChangeNotifyPrivilege\r\n                           SeChangeNotifyPrivilege\r\n";
+        assert_eq!(sc_privileges(privs), ["SeChangeNotifyPrivilege"]);
+        assert!(sc_privileges("PRIVILEGES : \r\n").is_empty());
     }
 
     /// A real `launchctl print` of a healthy job (macOS 26.6.2, 2026-10-31): the whole report, label and ids invented.
@@ -580,41 +661,6 @@ mod tests {
     fn an_unknown_job_is_not_stale_whatever_a_stray_line_says() {
         assert!(!parse_job("\tjob state = spawn failed\n").stale());
         assert!(!parse_job("\tlast exit code = 78\n").stale());
-    }
-
-    #[test]
-    fn the_pid_runs_and_last_exit_come_from_the_jobs_own_lines_only() {
-        let job = parse_job(REAL_RUNNING);
-        assert_eq!(
-            (job.pid, job.runs, job.last_exit_code),
-            (Some(978), Some(2), Some(3)),
-            "{job:?}"
-        );
-        // A job that never exited or has no pid yet: unknown, not zero.
-        let job = parse_job(HEALTHY.replace("pid = 88412\n", "").as_str());
-        assert_eq!((job.pid, job.runs, job.last_exit_code), (None, Some(1), None));
-        assert_eq!(parse_job(RUNNING_MACOS_26).pid, Some(880));
-        // The exit code with its words, a signal (negative) and rubbish.
-        let last = |text: &str| parse_job(text).last_exit_code;
-        assert_eq!(last("\tlast exit code = 78: EX_CONFIG\n"), Some(78));
-        assert_eq!(last("\tlast exit code = -9\n"), Some(-9));
-        assert_eq!(last("\tlast exit code = (never exited)\n"), None);
-        assert_eq!(parse_job("\tpid = x\n\truns = \n").pid, None);
-        assert_eq!(parse_job("").runs, None);
-        // A nested block's pid, runs and exit code never count, whichever way round.
-        let nested = "x = {\n\tthing = {\n\t\tpid = 5\n\t\truns = 9\n\t\tlast exit code = 1\n\t}\n\tstate = waiting\n}\n";
-        let job = parse_job(nested);
-        assert_eq!(
-            (job.pid, job.runs, job.last_exit_code),
-            (None, None, None),
-            "{job:?}"
-        );
-        let own_after = "x = {\n\tthing = {\n\t\tpid = 5\n\t}\n\tpid = 7\n\truns = 2\n\tlast exit code = 4\n}\n";
-        let job = parse_job(own_after);
-        assert_eq!(
-            (job.pid, job.runs, job.last_exit_code),
-            (Some(7), Some(2), Some(4))
-        );
     }
 
     #[test]
@@ -756,5 +802,22 @@ mod tests {
             (other.last_exit_code, other.exit_config),
             (Some(780), false)
         );
+    }
+
+    #[test]
+    fn the_program_line_of_the_jobs_own_block_is_read_and_nested_blocks_are_skipped() {
+        let print = "gui/501/x = {\n\tstate = running\n\tprogram = /Applications/A.app/Contents/MacOS/a\n\tinherited environment = {\n\t\tprogram = /nested\n\t}\n}\n";
+        assert_eq!(
+            super::print_program(print).as_deref(),
+            Some("/Applications/A.app/Contents/MacOS/a")
+        );
+        // Only the top block and the one inside it count: a program line two levels down is not the job's.
+        let deep = "x = {\n\ta = {\n\t\tb = {\n\t\t\tprogram = /deep\n\t\t}\n\t}\n}\n";
+        assert_eq!(super::print_program(deep), None);
+        // After a block closes the depth is back: a line after it still counts.
+        let after = "x = {\n\ta = {\n\t}\n\tprogram = /after\n}\n";
+        assert_eq!(super::print_program(after).as_deref(), Some("/after"));
+        assert_eq!(super::print_program("no program here"), None);
+        assert_eq!(super::print_program(""), None);
     }
 }

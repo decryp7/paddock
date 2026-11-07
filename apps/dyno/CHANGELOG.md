@@ -1,29 +1,80 @@
 # Changelog
 
-## [Unreleased]
+## [1.1.0] - 2026-11-06
 
-### Added
+**On Windows, uninstall Dyno 1.0.0 first (keep your data), then install 1.1.0; 1.0.0 may offer this update but cannot install it.**
 
-- Windows: a one-time notice, shown on the first start and again when a new menu-bar icon is added: "Drag Dyno's icons from ^ to the taskbar to keep them visible", with the button Open taskbar settings (`ms-settings:taskbar`, the command `open_taskbar_settings`, fixed target). Windows 11 puts a new tray icon in the overflow (a promoted icon is on the taskbar; verified in the VM, both icons appear once pinned). Remembered per webview (`dyno.trayHintSeen`).
+To keep your data, open Settings > Apps, uninstall Dyno and leave "Delete the application data" unchecked. Then run the 1.1.0 setup from the releases page. Your history stays. On macOS and Linux, update as usual.
+
+### New
+
+- Administrator helper: optional. Turn it on, repair it, update it or turn it off in Settings.
+  - With it, Dyno reads every account's processes, temperatures, fans, energy, memory modules and which program owns each connection or file.
+  - Without it, everything keeps working with your own rights. A reading Dyno cannot get says why.
+  - Dyno asks the system for permission each time the helper is installed, repaired or removed.
+- Power actions: Sleep, Hibernate and Shut down by a rule. Rules can follow idle time or a time of day.
+  - A countdown with Cancel shows first. Snooze delays the action.
+  - Keep awake holds the computer awake for a time, until a time of day, until you stop it, while a program runs, or while the computer is busy. It is on the Power page, in the tray menu and in the command "dyno awake".
+- Wake-on-LAN: save your other computers, wake them and test whether they wake. A check of this computer says whether it can be woken over the network and what to change.
+- Scheduled wake: wake this computer at a time you choose, keep it awake for a while, and wake chosen computers. It is off until you turn it on in Settings. A wake that was missed is shown as missed and is never run late. Nothing can wake a computer that is shut down.
+- AI access over MCP: Settings > AI access offers read-only tools to a program on this computer that speaks MCP, such as Pitwall.
+  - It is off until you turn it on. Nothing listens until it is on and you have made a key.
+  - Every call is listed on the page. Every tool has its own switch.
+  - Keep awake and wake a computer can change things. Each needs your permission by name.
+  - Dyno never gives out command lines, user names, program paths, the computer's name, network addresses or alarm details.
+- Jobs view: changing Start at login shows Cancel while it works. Cancel stops the change at its next step.
+- Windows: Dyno installs once for every user of the PC, in Program Files.
+  - Updates from the app show one Windows permission prompt. A standard user types an administrator's name and password.
+  - If you decline the prompt or the installer stops, Dyno starts again and says so, with Install again.
+  - After an update the helper is refreshed if it is on. If that fails, Settings offers "Update the helper".
+- Saved views: disk maps, the counter list and the installed-software list show at once after a restart, with their age.
+- Benchmarks: a processor, memory and disk test that you start yourself. It repeats, shows the middle result with its spread and marks an unsteady result. The disk test writes at most 14.5 GiB per drive and deletes it at once. On battery it asks first.
+- Network: choose lists of addresses and Dyno marks matching connections. See your connections on a world map and read your firewall rules. Dyno never changes the firewall. Each network feature has its own switch.
+- Every metric can be its own menu-bar or tray item, up to 32.
+- The dashboard is a free-size grid of widgets. A 1.0 dashboard is upgraded on the first start.
+- Report a problem is one dialog. It explains a broken helper, how Dyno starts at login and what is not in the report. It warns that issue reports are public.
+- If a window does not start, you can still save a problem report from the question Dyno asks, or from a terminal with the option "--export-diagnostics".
+- Quit and stop measuring closes Dyno and the agent until you open Dyno again or log in.
+- Notifications: select and delete messages, or delete all. Deleted messages stay gone after a restart.
+- Dialogs fit their content and keep the size you give them.
 
 ### Fixed
 
-- Disk map: one folder answering "Operation timed out" (os error 60, a File Provider or network-backed folder) no longer stops the whole scan as "the link dropped". The scan root is asked again: if it answers, only that folder is marked incomplete and the scan goes on; only when the root stops answering too is the volume lost. The log tells which (`Disk scan: one folder ... the volume still answers` or `... the volume is lost`, with the raw error text).
-- macOS start-up items: login items and app-registered agents (System Settings > Login Items & Extensions) are not listed because reading them (`sfltool dumpbtm`) needs administrator rights and asks for a password; the page now says so ("Not shown: Login items ...") next to the launch agents it can read, and shows the reason instead of "No startup items" when nothing could be read. The helper in 1.1 will read them. Read failures are logged, and the read is kept between explicit refreshes. A folder that does not answer in time shows "Did not answer in time", and eight such folders in a row end the scan as a lost volume even if the root still answers.
-- About: "See all releases" opens the releases page in the browser (it failed with "state not managed ... `files_open_url`" because the shell served the command without its service; fixed in `paddock-shell`).
-- History: switching the range no longer leaves the chart empty until the view is reopened. The chart resized itself to 0 px while the panel's skeleton detached it between two answers and never recovered; it now ignores a container without a size and fits itself again after each draw.
-- Windows: at logon only the agent started (in a console), with no tray icon and no window. Cause (reproduced in the Windows 11 VM with a restart): the agent's service entry and the app's own autostart entry were both the Run value `Dyno`, and the app's repair, five seconds after every start, replaced `Dyno = dyno-app.exe --hidden` with `Dyno = dyno-agent.exe run`. Now the app's own value is the only logon entry (it starts the agent itself, hidden); the agent's own entry, when someone installs it by hand, is `Dyno agent`; the app's start no longer repairs a Windows entry; and the first start after an update removes the stale `Dyno = dyno-agent.exe run` and, when Start at login is on, registers the app's entry again (when off, removing it is all).
-- Windows: `dyno-agent` is a GUI-subsystem program, so the per-user Run entry (`dyno-agent run` at logon) no longer opens a command prompt window that stays open for as long as the agent runs (reproduced in the Windows 11 VM: a Windows Terminal window titled `dyno-agent.exe`). Run from a terminal, `dyno-agent --version` and `service install` still print (it attaches to the parent console); a prompt does not wait for a GUI program, so for `--version`, `status`, `stop`, `once` and `service ...` in a terminal use `dyno agent <command>` (the console `dyno` program runs the agent's commands and returns their exit code). The release workflow reads the built `dyno-agent.exe` (PE Subsystem 2) and `dyno.exe` (3).
-- Windows: the log tells each tray icon: its static image and size, created or why not, and the first drawn image (size, or the refusal). A new icon of an app that was never pinned sits in the taskbar's overflow (the `^` at the right) on Windows 11 until the user turns it on in Settings > Personalization > Taskbar > Other system tray icons; the registry showed Dyno's icon registered there (`NotifyIconSettings`, tooltip `Dyno`).
-- Windows: the tray popup no longer disappears at once after a click on the tray icon (the shell took the foreground back and the popup closed on that blur; see `paddock-window`). The log tells each tray click, the popup's show, focus and hide with the reason.
-- macOS: the Network page lists every program's sockets also when Start at login is off. The agent the app starts itself was its child process, and macOS 27 shows a child of an ad-hoc signed app only its own sockets; the app now starts it as a launchd job of the user's session (`launchctl bootstrap`, label `net.decryptology.dyno.agent.ondemand`, its definition in Dyno's data folder, not in `~/Library/LaunchAgents`, so nothing starts it at login), and ends it through launchd on Quit. Linux and Windows are unchanged. The log says which way the agent was started (`Via`) and the agent logs what macOS shows it (Dyno ADR 0026).
-## Unreleased
+- Free disk space was stale: the menu bar popup showed the figure from when Dyno started (589 GB on a Mac that had 1,256 GB free). Dyno now reads the free space of every disk once a minute (Settings > Parallelism and cost > Free space refresh), and again when you open the popup or the Disk map.
+- macOS: the popup, the dashboard and the Disk map now agree on free space. All use the figure Finder shows, which counts space the system can give back on demand.
+- Disk and file sizes now read in decimal units like Finder and the disk makers (a 1 TB disk shows 1 TB, not 931 GB). Memory keeps binary units.
+- Repair of the login service no longer waits behind a start, and says what happened and what to do next. Quit waits for a repair or cancels it. Dyno no longer starts a second agent while the system is still registering the service.
+- Start at login: turning it off stays off. On Linux, a unit you disabled stays disabled.
+- macOS: Dyno no longer asks for your Keychain password after an update. Wake-on-LAN passwords and AI access keys are now kept in files only you can read.
+- Snooze on a timed power action now delays it. Before, it cancelled the action for the day.
+- The window and tray no longer miss updates from the agent when they are busy (power, scheduled wakes, alarms, alerts, activity).
+- A scheduled wake saved while Dyno was syncing wakes is no longer cancelled.
+- Dyno lowers its background threads on Linux even when started under "nice".
+- An update package is checked again right before it is installed.
+- macOS: memory in use matches Activity Monitor. Memory alarms can now fire on a Mac where they stayed quiet.
+- Lifespan on an Apple silicon Mac reads the internal SSD.
+- Health: an active alarm lowers the health score.
+- Disk map: one folder that times out no longer stops the whole scan.
+- Windows: at logon the tray icon and window start, and no command prompt stays open. The helper starts with the computer, and says why when it cannot.
+- Windows firewall rules show the name Windows shows.
+- Tables grow and shrink with the window. The page scrolls once.
+- Reports: the Disks card no longer spills, and tiny or empty volumes are left out.
+- History: switching the range no longer leaves the chart empty.
+- macOS: menu-bar icons no longer flash, and show their reading when you hover.
+- "Is this normal?" counts days by your own calendar.
+- About: "See all releases" opens the releases page.
+- AI access: `dyno mcp` answers every request. If Dyno ends the connection first, for example while its agent restarts, each open request gets an error and `dyno mcp` exits with code 1 and says what to do. It no longer ends with code 0 after answering nothing. It says "refused the key" only when the key was wrong.
 
-### Added
+### Removed
 
-- Notifications: select messages (checkboxes, Shift-click for a range) and delete the selected ones, or delete all after a confirmation. Deleted messages stay gone after a restart (shared `paddock-health` commands).
-- Expand all and Collapse all (icon buttons with tooltips) in the toolbars of Network (programs or remote hosts), Processes (Apps and Tree views), and the grouped lists of What changed (days) and Files (groups). Interaction state only; Network keeps its fold in the same saved list as a single fold.
-- Processes: the Tree view no longer searches the whole process list for every row it draws (a map lookup), so opening a tree of thousands of processes is quick.
+- Backup health: the page, its Settings section, the widget, the alarms and the "backup" command. Saved settings that name it still load; the backup parts are dropped.
+
+### Changed
+
+- Lists in widgets show everything and scroll.
+- Lower CPU use when no window is open.
+- The Processes tree opens quickly with thousands of processes.
+- The log says what you did (not what you typed) and how the last run ended.
 
 ## [1.0.0] - 2026-10-29
 

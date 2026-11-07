@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, expectNoButtonLabelWraps, test, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -539,4 +539,9 @@ test.describe('outlined field geometry', () => {
       });
     }
   }
+});
+
+test('Material: no button label wraps, even in a tight row', async ({ page }) => {
+  await open(page, 'dark');
+  await expectNoButtonLabelWraps(page, 'gallery');
 });

@@ -158,8 +158,8 @@ fn an_app_item_can_have_its_own_handler_without_a_window() {
     let seen = Arc::new(std::sync::Mutex::new(Vec::<&'static str>::new()));
     let (first, second) = (seen.clone(), seen.clone());
     let app = app(shell()
-        .menu_without_window("app.stop", move |_| first.lock().unwrap().push("first"))
-        .menu_without_window("app.stop", move |_| second.lock().unwrap().push("second"))
+        .menu_action_without_window("app.stop", move |_| first.lock().unwrap().push("first"))
+        .menu_action_without_window("app.stop", move |_| second.lock().unwrap().push("second"))
         .setup(|app| {
             app.manage(NativeMenu::<MockRuntime>::with_bar(
                 "Shell Demo",
@@ -203,7 +203,7 @@ fn an_app_item_can_have_its_own_handler_without_a_window() {
 #[test]
 #[should_panic(expected = "menu_quit_without_window")]
 fn the_quit_id_cannot_be_given_to_the_generic_no_window_hook() {
-    let _ = shell().menu_without_window("pd.app.quit", |_| ());
+    let _ = shell().menu_action_without_window("pd.app.quit", |_| ());
 }
 
 /// The policy for a click with no window open, on both kinds of shell: Quit goes to the override, else the window layer's
@@ -549,4 +549,21 @@ fn the_default_settings_live_in_the_given_file_or_in_memory() {
         !dir.path().join(paddock_settings::FILE_NAME).exists(),
         "the app's own settings.json is never created"
     );
+}
+
+/// An app's own menu item (Dyno's "Quit and stop measuring") clicked with no window open runs the app's action and does
+/// not bring the window back; other items keep the shell's policy.
+#[test]
+fn an_apps_menu_action_without_a_window_runs_instead_of_reopening() {
+    let plain = app(Builder::new(identity()).in_memory().native_menu(false));
+    let ran = Arc::new(std::sync::Mutex::new(0));
+    let seen = ran.clone();
+    let action: Arc<MenuQuit<MockRuntime>> = Arc::new(move |_| *seen.lock().unwrap() += 1);
+    let actions = vec![("app.stop".to_string(), action)];
+    menu_without_window_with(plain.handle(), "app.stop", None, &actions, |_| {
+        unreachable!("not a quit")
+    });
+    assert_eq!(*ran.lock().unwrap(), 1);
+    menu_without_window_with(plain.handle(), "pd.app.quit", None, &actions, |_| ());
+    assert_eq!(*ran.lock().unwrap(), 1, "Quit is not the app's action");
 }

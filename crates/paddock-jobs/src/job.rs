@@ -118,6 +118,11 @@ impl JobRegistry {
         self.jobs.lock().unwrap_or_else(|p| p.into_inner())
     }
 
+    /// Makes the next job get id `first`, so an app whose Jobs view also shows another registry's jobs (Dyno's agent) keeps the ids apart.
+    pub fn start_ids_at(&self, first: u64) {
+        self.next.store(first, Ordering::Relaxed);
+    }
+
     /// Registers a queued job and emits its first snapshot.
     pub fn register(&self, kind: &str, title: &str, subject: Option<&str>) -> JobContext {
         self.register_with(kind, title, subject, CancelToken::new())

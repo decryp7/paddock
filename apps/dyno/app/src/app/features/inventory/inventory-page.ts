@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } 
 import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { Hint, HintKind, MemoryArray } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatCount, formatGhz } from '../../shared/format';
+import { formatBytes, formatCount, formatGhz, formatStorage } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import type { IconName } from '../../shared/icons';
 import { InventoryStore } from '../../state/inventory.store';
@@ -10,6 +10,7 @@ import { ChipPackage } from './chip-package';
 import { DeviceArt, type DeviceArtKind } from './device-art';
 import { driveKind } from './device-geometry';
 import { MemorySlots } from './memory-slots';
+import { ReadingSource } from '../../core/reading-source';
 import { isAppleSilicon } from './package-geometry';
 import { toDimmSlots, toSocPackage } from './hardware-adapter';
 import { type SlotView, describeSlots, kindLabel, slotModel, speedLabel } from './slot-model';
@@ -41,7 +42,7 @@ const HINT_TONE: Record<HintKind, string> = {
 /** What is installed: the memory (slots drawn as sockets, or Apple silicon's unified memory) with upgrade hints from the engine. */
 @Component({
   selector: 'dy-inventory-page',
-  imports: [SuSegmentedControl, AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots, PdTable, PdCell],
+  imports: [SuSegmentedControl, AsyncState, ChipPackage, DeviceArt, Icon, MemorySlots, PdTable, PdCell, ReadingSource],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -52,7 +53,7 @@ const HINT_TONE: Record<HintKind, string> = {
         </div>
       </header>
 
-      <dy-async [loaded]="!!store.inventory()" [error]="store.error()" what="inventory" [rows]="4" (retry)="store.load()">
+      <dy-async [loaded]="!!store.inventory()" [error]="store.error()" what="inventory" [rows]="4">
         @if (store.inventory(); as inv) {
           <section class="card" aria-label="Memory">
             <div class="card-head">
@@ -62,6 +63,8 @@ const HINT_TONE: Record<HintKind, string> = {
                 <pd-segmented-control label="View" [options]="viewSegs" [value]="table() ? 'table' : 'slots'" (valueChange)="table.set($event === 'table')" />
               }
             </div>
+
+            <dy-reading-source [via]="inv.memoryVia" />
 
             @if (slots(); as a) {
               <dl class="stats">
@@ -74,7 +77,7 @@ const HINT_TONE: Record<HintKind, string> = {
                 <div class="drawing"><dy-memory-slots [slots]="dimmSlots()" [alt]="alt()" /></div>
               } @else {
                 <div class="tablewrap">
-                  <pd-table [toolbar]="false" label="Memory modules" [rows]="model().slots" [columns]="slotColumns" [rowKey]="slotKey" [filterable]="false" [maxHeight]="420">
+                  <pd-table [toolbar]="false" label="Memory modules" [rows]="model().slots" [columns]="slotColumns" [rowKey]="slotKey" [filterable]="false" height="window">
                     <ng-template pdCell="size" let-s>@if (s.module) {<span class="num">{{ bytes(s.module.capacityBytes) }}</span>} @else {<span class="faint">Empty</span>}</ng-template>
                     <ng-template pdCell="part" let-s><span class="mono">{{ s.module?.partNumber ?? (s.module ? '—' : '') }}</span></ng-template>
                   </pd-table>
@@ -120,7 +123,7 @@ const HINT_TONE: Record<HintKind, string> = {
                   <div class="meta">
                     <span class="k">Drive</span>
                     <strong>{{ d.name }}</strong>
-                    <span class="sub"><span class="num">{{ bytes(d.totalBytes) }}</span>{{ d.removable ? ' · removable' : '' }}</span>
+                    <span class="sub"><span class="num">{{ storage(d.totalBytes) }}</span>{{ d.removable ? ' · removable' : '' }}</span>
                   </div>
                 </article>
               }
@@ -134,6 +137,7 @@ const HINT_TONE: Record<HintKind, string> = {
     :host { display: block; --hw-focus: var(--focus); }
     .page { display: grid; gap: var(--sp-4); align-content: start; }
     .page-head { margin-bottom: 0; }
+    dy-async { display: grid; gap: var(--sp-4); }
     .card { padding-bottom: var(--sp-4); }
     .stats { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-2); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-3); }
     .stats dt { color: var(--text-3); font-size: var(--fs-sm); }
@@ -174,6 +178,7 @@ export class InventoryPage implements OnInit {
   protected readonly isApple = isAppleSilicon;
   protected readonly art = (d: { name: string; removable: boolean }): DeviceArtKind => driveKind(d.name, d.removable);
   protected readonly bytes = formatBytes;
+  protected readonly storage = formatStorage;
   protected readonly n = formatCount;
   protected readonly kind = kindLabel;
   protected readonly slotKey = (s: SlotView): string => String(s.index);

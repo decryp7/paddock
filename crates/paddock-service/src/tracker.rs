@@ -4,7 +4,7 @@
 use crate::repair::{RepairOutcome, Step};
 use serde::Serialize;
 use std::sync::{Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// How long "running again" stays on screen.
 pub const SUCCESS_SHOWN: Duration = Duration::from_secs(120);
@@ -39,10 +39,11 @@ pub struct RepairNotice {
     pub step: Option<String>,
 }
 
-/// The progress of the repairs of one service.
+/// The progress of the repairs of one service. Times are readings of the caller's monotonic [`paddock_health::Clock`] (the
+/// tracker never reads a clock itself, so a test or a model passes the time it wants).
 #[derive(Debug)]
 pub struct RepairTracker {
-    inner: Mutex<Option<(RepairNotice, Instant)>>,
+    inner: Mutex<Option<(RepairNotice, Duration)>>,
 }
 
 impl Default for RepairTracker {
@@ -59,12 +60,12 @@ impl RepairTracker {
         }
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Option<(RepairNotice, Instant)>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<(RepairNotice, Duration)>> {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Starts a repair unless one is working; `false` when one is.
-    pub fn start(&self, now: Instant) -> bool {
+    pub fn start(&self, now: Duration) -> bool {
         let mut g = self.lock();
         if g.as_ref()
             .is_some_and(|(n, _)| n.state == RepairState::Working)
@@ -99,7 +100,7 @@ impl RepairTracker {
     }
 
     /// The repair ended with `outcome`.
-    pub fn finish(&self, outcome: &RepairOutcome, now: Instant) {
+    pub fn finish(&self, outcome: &RepairOutcome, now: Duration) {
         let (state, message) = match outcome {
             RepairOutcome::Recovered => (RepairState::Succeeded, SUCCESS_MESSAGE.to_string()),
             RepairOutcome::Registered => (
@@ -132,12 +133,10 @@ impl RepairTracker {
     }
 
     /// The notice to show now: a success fades after [`SUCCESS_SHOWN`]; working and failure stay.
-    pub fn current(&self, now: Instant) -> Option<RepairNotice> {
+    pub fn current(&self, now: Duration) -> Option<RepairNotice> {
         let g = self.lock();
         let (notice, since) = g.as_ref()?;
-        if notice.state == RepairState::Succeeded
-            && now.saturating_duration_since(*since) > SUCCESS_SHOWN
-        {
+        if notice.state == RepairState::Succeeded && now.saturating_sub(*since) > SUCCESS_SHOWN {
             return None;
         }
         Some(notice.clone())
@@ -151,7 +150,7 @@ mod tests {
     #[test]
     fn one_repair_at_a_time_with_its_phase() {
         let t = RepairTracker::default();
-        let t0 = Instant::now();
+        let t0 = Duration::ZERO;
         assert!(!t.working());
         t.step(&Step::Removing);
         assert_eq!(t.current(t0), None, "a phase without a repair is ignored");
@@ -185,7 +184,7 @@ mod tests {
     #[test]
     fn a_success_fades_and_a_failure_stays() {
         let t = RepairTracker::new();
-        let t0 = Instant::now();
+        let t0 = Duration::ZERO;
         t.finish(&RepairOutcome::Recovered, t0);
         assert_eq!(
             t.current(t0 + Duration::from_secs(5)).unwrap().message,
@@ -216,7 +215,7 @@ mod tests {
             panic!("poison");
         })
         .join();
-        assert!(t.start(Instant::now()));
+        assert!(t.start(Duration::ZERO));
     }
 
     #[test]

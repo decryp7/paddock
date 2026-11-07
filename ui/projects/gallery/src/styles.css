@@ -78,3 +78,7 @@
 /* The popup footer menu keeps 6 px clear of its buttons (the focus ring and a gap). */
 .wg-foot-menu.mat-menu-above { margin-bottom: 6px; }
 .wg-foot-menu.mat-menu-below { margin-top: 6px; }
+
+/* A label beside a long text in a narrow row: the shrinking text must never squeeze the button's label onto two lines. */
+.gal-tight { display: flex; align-items: center; justify-content: space-between; gap: var(--pd-space-4); max-width: 360px; margin-bottom: var(--pd-space-3); }
+.gal-tight > span { min-width: 0; }

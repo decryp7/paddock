@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 /// The per-user `Run` key (Windows).
 pub const WINDOWS_RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+/// The machine-wide `Run` key (Windows): what an elevated `tauri-plugin-autostart` once wrote; read and cleaned, never written.
+pub const WINDOWS_MACHINE_RUN_KEY: &str = r"HKLM\Software\Microsoft\Windows\CurrentVersion\Run";
 /// Where Task Manager > Startup (and Settings > Apps > Startup) records that the user switched a `Run` entry off.
 pub const WINDOWS_STARTUP_APPROVED_KEY: &str =
     r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";
@@ -17,49 +19,8 @@ pub const LAUNCHCTL: &str = "/bin/launchctl";
 pub const SYSTEMCTL: &str = "systemctl";
 /// `reg.exe`.
 pub const REG: &str = "reg";
-/// Windows' system folder when the OS cannot be asked (or says something that is not a full path).
-pub const SYSTEM_DIR_FALLBACK: &str = r"C:\Windows\System32";
-
-/// `sc.exe` by full path in `system_dir`, Windows' system folder (`None`, or a value that is not a full path such as
-/// `C:\Windows\System32` or `\\?\C:\Windows\System32`, gives [`SYSTEM_DIR_FALLBACK`]). The pure part of
-/// [`default_sc_exe`], so it is tested on every OS with an injected folder.
-pub fn sc_exe_in(system_dir: Option<&str>) -> String {
-    let dir = system_dir
-        .map(|v| v.trim_end_matches(['\\', '/']))
-        .filter(|v| {
-            let b = v.as_bytes();
-            (b.len() > 2
-                && b[0].is_ascii_alphabetic()
-                && b[1] == b':'
-                && matches!(b[2], b'\\' | b'/'))
-                || v.starts_with(r"\\")
-        })
-        .unwrap_or(SYSTEM_DIR_FALLBACK);
-    format!(r"{dir}\sc.exe")
-}
-
-/// `sc.exe` by full path in the folder the OS names (`GetSystemDirectoryW`), never from an environment variable: a bare
-/// `sc` is looked up on `PATH` (and `sc` is a PowerShell alias), and `%SystemRoot%` is the user's to change while this
-/// runs elevated. Off Windows the fallback folder (the commands only exist there).
-pub fn default_sc_exe() -> String {
-    sc_exe_in(system_directory().as_deref())
-}
-
-#[cfg(windows)]
-fn system_directory() -> Option<String> {
-    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
-    let mut buf = [0u16; 260];
-    // SAFETY: the buffer is valid for its length for the call.
-    let n = unsafe { GetSystemDirectoryW(Some(&mut buf)) } as usize;
-    (n > 0 && n <= buf.len())
-        .then(|| String::from_utf16(&buf[..n]).ok())
-        .flatten()
-}
-
-#[cfg(not(windows))]
-fn system_directory() -> Option<String> {
-    None
-}
+/// `sc.exe`.
+pub const SC: &str = "sc";
 
 fn home(vars: &dyn Vars) -> Result<PathBuf, ServiceError> {
     vars.get("HOME")
@@ -204,37 +165,6 @@ mod tests {
         );
         assert_eq!(systemctl_scope(Kind::UserAgent), ["--user"]);
         assert!(systemctl_scope(Kind::SystemService).is_empty());
-    }
-
-    #[test]
-    fn sc_is_run_by_full_path_from_the_system_directory_with_a_fallback() {
-        let want = r"C:\Windows\System32\sc.exe";
-        assert_eq!(sc_exe_in(None), want);
-        assert_eq!(
-            sc_exe_in(Some(r"D:\WINNT\system32")),
-            r"D:\WINNT\system32\sc.exe"
-        );
-        assert_eq!(
-            sc_exe_in(Some(r"E:\Windows\System32\")),
-            r"E:\Windows\System32\sc.exe"
-        );
-        assert_eq!(
-            sc_exe_in(Some(r"\\?\C:\Windows\System32")),
-            r"\\?\C:\Windows\System32\sc.exe"
-        );
-        // Not a full path (a planted relative folder, empty, a bare drive): never used.
-        for bad in [
-            "", "Windows", r".\evil", "C:", r"C:evil", "/usr", r"ab\x", r"1:\x",
-        ] {
-            assert_eq!(sc_exe_in(Some(bad)), want, "{bad:?}");
-        }
-        assert!(!sc_exe_in(None).eq_ignore_ascii_case("sc"));
-        // The real lookup answers a full path ending in sc.exe on any OS.
-        let real = default_sc_exe();
-        assert!(
-            real.to_ascii_lowercase().ends_with(r"\sc.exe") && real.contains('\\'),
-            "{real}"
-        );
     }
 
     #[test]

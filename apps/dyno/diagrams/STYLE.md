@@ -12,16 +12,16 @@ Light / dark, stroke on fill. Dyno's accent is magenta; everything else is neutr
 
 | Role | Colours | Use here |
 |---|---|---|
-| Own container (accent) | #B01E6E on #FBE8F2 / #F063A8 on dark tint | the app shell, agent and its modules, adapters, states, use cases, classes |
+| Own container (accent) | #B01E6E on #F7E9F1 / #F063A8 on #382332 | the app shell, agent and its modules, adapters, states, use cases, classes |
 | Pure core | #007A5E on #E5F3EF / #2EC4A0 | `dyno-core` and its modules, enumerations |
 | UI | #4C5BD4 on #ECEEFB / #8FA3FF | the Angular UI |
 | Plugin | #0072B2 on #E5F1F7 / #56B4E9 | plugins (the kit's #B0508A is within 30 degrees of the magenta accent, so Dyno takes the next free chart colour) |
 | Process / OS / data | #565E6B on #F0F2F5 / #A0A7B2 | people, operating system, data folder, `dyno-bench` |
-| External | #6B7380 dashed | release host, sister apps, backup tools |
+| External | #6B7380 dashed | release host, sister apps |
 
 Rules that matter most here: planned work keeps its role's colour, dashed on white with a "planned" tag (the Debrief and Pitwall
 links, the Explain this use case); a diagram has at most 12 edges and fits 1600 x 1200 (sequences 1800 tall), so the
-large ones are split (agent in two, deployment per OS, use cases in two, domain model in three); labels are at most three words
+large ones are split (agent in two, deployment per OS, use cases in three, domain model in three); labels are at most three words
 and sit beside their line; protocols go in the node text, not on the line.
 
 The footer reads "Dyno · updated YYYY-MM-DD". Change the date in `docs/diagrams/src/common.mjs` when a diagram changes.

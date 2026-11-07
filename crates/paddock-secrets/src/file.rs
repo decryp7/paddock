@@ -1,14 +1,14 @@
 use crate::{Name, Secret, Secrets, SecretsError};
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 /// Owner-only files in one directory, one file per secret. This is the fallback for a machine without a usable
 /// credential store, and **only an app that opts in constructs it** (Pitwall's admin key); it is never a default.
 ///
-/// - Unix: files are created with mode 0600 (written to a temporary 0600 file and renamed, so a value is never readable
-///   by others, not even briefly) and a file with any group or other permission bit is refused on read
-///   ([`SecretsError::InsecureFile`]).
+/// - Unix: files are created with mode 0600 (written to a unique temporary 0600 file in the same folder, flushed and renamed, so a value
+///   is never readable by others, not even briefly, and concurrent writers never share a temporary file); the folder is
+///   created 0700 and made 0700 when it is loose and ours; a file with any group or other permission bit is refused on read
+///   ([`SecretsError::InsecureFile`]), and so is a file or folder owned by another user.
 /// - Windows: files are created inside `dir`, which must be a per-user folder (the app's data directory under
 ///   `%LOCALAPPDATA%`), whose ACL grants only the owner, SYSTEM and Administrators; no mode check is possible there.
 #[derive(Debug, Clone)]
@@ -49,22 +49,17 @@ impl FileSecrets {
     }
 }
 
+/// Why a Unix secret file or its folder is not trusted by its owner: either belongs to another user (who could read or swap
+/// the secret), judged against the user running the app. Pure, so the decision is tested without a second account.
 #[cfg(unix)]
-fn create_private(path: &Path) -> std::io::Result<fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(path)
-}
-
-#[cfg(not(unix))]
-fn create_private(path: &Path) -> std::io::Result<fs::File> {
-    fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
+fn foreign_owner(file_owner: u32, folder_owner: u32, running_user: u32) -> Option<&'static str> {
+    if file_owner != running_user {
+        Some("is owned by another user")
+    } else if folder_owner != running_user {
+        Some("is in a folder owned by another user")
+    } else {
+        None
+    }
 }
 
 #[cfg(unix)]
@@ -78,6 +73,69 @@ fn insecure(_: &fs::Metadata) -> bool {
     false
 }
 
+/// The user running the app (Unix); 0 elsewhere, where no owner check is possible.
+fn current_user() -> u32 {
+    #[cfg(unix)]
+    {
+        paddock_proc::effective_uid()
+    }
+    #[cfg(not(unix))]
+    {
+        0
+    }
+}
+
+/// The owner problem of the file `meta` in `dir` for the user `me`, as a refusal with the next step.
+fn owner_refusal(path: &Path, dir: &Path, meta: &fs::Metadata, me: u32) -> Option<SecretsError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let folder_owner = fs::metadata(dir).map(|m| m.uid()).unwrap_or(meta.uid());
+        foreign_owner(meta.uid(), folder_owner, me).map(|why| {
+            SecretsError::Failed(format!(
+                "{} {why}, so it is not trusted; remove it and store the secret again, or fix the owner (chown) and try again",
+                path.display()
+            ))
+        })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (path, dir, meta, me);
+        None
+    }
+}
+
+/// Creates the folder 0700 whatever the umask, and makes it 0700 when this user owns it and group or others can write to
+/// it without a sticky bit (the same rule as the MCP key list). A folder someone else owns is refused.
+fn secure_folder(dir: &Path) -> Result<(), SecretsError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+            .map_err(|e| io("the secret folder could not be created", e))?;
+        let meta = fs::metadata(dir).map_err(|e| io("the secret folder could not be read", e))?;
+        if meta.uid() != current_user() {
+            return Err(SecretsError::Failed(format!(
+                "{} is owned by another user, so secrets are not stored in it; use a folder of your own",
+                dir.display()
+            )));
+        }
+        let mode = meta.permissions().mode();
+        if mode & 0o022 != 0 && mode & 0o1000 == 0 {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+                .map_err(|e| io("the secret folder could not be made private", e))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir_all(dir).map_err(|e| io("the secret folder could not be created", e))
+    }
+}
+
 impl Secrets for FileSecrets {
     fn get(&self, name: &Name) -> Result<Option<Secret>, SecretsError> {
         let path = self.path(name);
@@ -88,6 +146,9 @@ impl Secrets for FileSecrets {
         };
         if insecure(&meta) {
             return Err(SecretsError::InsecureFile(path.display().to_string()));
+        }
+        if let Some(e) = owner_refusal(&path, &self.dir, &meta, current_user()) {
+            return Err(e);
         }
         if meta.len() as usize > crate::MAX_SECRET_LEN + 2 {
             return Err(SecretsError::Failed("the secret file is damaged".into()));
@@ -101,21 +162,9 @@ impl Secrets for FileSecrets {
     }
 
     fn set(&self, name: &Name, value: &Secret) -> Result<(), SecretsError> {
-        fs::create_dir_all(&self.dir)
-            .map_err(|e| io("the secret folder could not be created", e))?;
-        let path = self.path(name);
-        let tmp = path.with_extension("tmp");
-        let _ = fs::remove_file(&tmp);
-        let mut f = create_private(&tmp).map_err(|e| io("the secret could not be stored", e))?;
-        let written = f
-            .write_all(value.expose().as_bytes())
-            .and_then(|()| f.sync_all());
-        drop(f);
-        if let Err(e) = written.and_then(|()| fs::rename(&tmp, &path)) {
-            let _ = fs::remove_file(&tmp);
-            return Err(io("the secret could not be stored", e));
-        }
-        Ok(())
+        secure_folder(&self.dir)?;
+        paddock_env::write_atomic(&self.path(name), value.expose().as_bytes(), true)
+            .map_err(|e| SecretsError::Failed(format!("the secret could not be stored: {e}")))
     }
 
     fn delete(&self, name: &Name) -> Result<(), SecretsError> {
@@ -236,5 +285,113 @@ mod tests {
         // A file where the folder should be: even reading fails, with a message (Windows reports the path as missing instead).
         #[cfg(unix)]
         assert!(blocked.get(&n("a")).is_err());
+    }
+
+    #[test]
+    fn two_threads_setting_one_name_never_leave_a_half_written_file() {
+        let d = tempfile::tempdir().unwrap();
+        let f = FileSecrets::new(d.path());
+        let values = ["a".repeat(200), "b".repeat(200)];
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|sc| {
+            for v in &values {
+                let (f, barrier, values) = (&f, &barrier, &values);
+                sc.spawn(move || {
+                    barrier.wait();
+                    for _ in 0..200 {
+                        f.set(&n("token"), &s(v)).unwrap();
+                        let got = f.get(&n("token")).unwrap().unwrap();
+                        assert!(values.iter().any(|x| got == s(x)), "a whole value");
+                    }
+                });
+            }
+        });
+        assert_eq!(
+            fs::read_dir(f.dir()).unwrap().count(),
+            1,
+            "no temporary file is left"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn another_users_file_or_folder_is_refused_with_a_next_step() {
+        assert_eq!(foreign_owner(501, 501, 501), None);
+        assert!(
+            foreign_owner(0, 501, 501)
+                .unwrap()
+                .contains("owned by another user")
+        );
+        assert!(
+            foreign_owner(501, 0, 501)
+                .unwrap()
+                .contains("folder owned by another user")
+        );
+        assert!(foreign_owner(0, 0, 501).is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_folder_is_created_private_and_a_loose_own_folder_is_tightened() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &Path| fs::metadata(p).unwrap().permissions().mode() & 0o7777;
+        let d = tempfile::tempdir().unwrap();
+        let sub = d.path().join("a/b");
+        FileSecrets::new(&sub).set(&n("t"), &s("v")).unwrap();
+        assert_eq!(mode(&sub), 0o700);
+        for loose in [0o775, 0o777, 0o770, 0o757] {
+            fs::set_permissions(&sub, fs::Permissions::from_mode(loose)).unwrap();
+            FileSecrets::new(&sub).set(&n("t"), &s("v")).unwrap();
+            assert_eq!(mode(&sub), 0o700, "from {loose:o}");
+        }
+        // Sticky and writable by others: left as it is.
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o1777)).unwrap();
+        FileSecrets::new(&sub).set(&n("t"), &s("v")).unwrap();
+        assert_eq!(mode(&sub), 0o1777);
+        // Already private: untouched.
+        fs::set_permissions(&sub, fs::Permissions::from_mode(0o750)).unwrap();
+        FileSecrets::new(&sub).set(&n("t"), &s("v")).unwrap();
+        assert_eq!(mode(&sub), 0o750);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_is_refused_when_the_user_running_the_app_is_not_its_owner() {
+        let d = tempfile::tempdir().unwrap();
+        let f = FileSecrets::new(d.path());
+        f.set(&n("token"), &s("v")).unwrap();
+        let p = f.path(&n("token"));
+        let meta = fs::metadata(&p).unwrap();
+        let me = current_user();
+        assert!(owner_refusal(&p, d.path(), &meta, me).is_none());
+        let e = owner_refusal(&p, d.path(), &meta, me + 1)
+            .unwrap()
+            .to_string();
+        assert!(
+            e.contains("owned by another user") && e.contains("chown"),
+            "{e}"
+        );
+        assert!(
+            !e.contains('v') || e.contains("token"),
+            "no value in the message"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_owned_by_another_user_is_refused_without_writing() {
+        use std::os::unix::fs::MetadataExt;
+        let root_owned = Path::new("/tmp");
+        if fs::metadata(root_owned)
+            .map(|m| m.uid())
+            .unwrap_or(current_user())
+            == current_user()
+        {
+            return; // this account owns /tmp (root, or a sandbox): nothing foreign to point at
+        }
+        let e = FileSecrets::new(root_owned)
+            .set(&n("token"), &s("v"))
+            .unwrap_err();
+        assert!(e.to_string().contains("owned by another user"), "{e}");
     }
 }

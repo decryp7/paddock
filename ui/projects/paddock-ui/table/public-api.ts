@@ -3,7 +3,8 @@
  * virtual scroll on the CDK, row keyboard navigation, hover row actions with a "..." button and the same list as the
  * right-click menu. The pure parts (sorting, filtering, grouping, key paths) are exported for the apps' own lists.
  */
-export { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent } from './src/table';
+export { PD_TABLE_VIRTUAL_FROM, PdCell, PdTable, PdTableEmpty, type PdRowActionEvent, type PdTableHeight } from './src/table';
+export { PdViewportFollowsSize } from './src/viewport-follows-size';
 export { PdActionTip } from './src/action-tip';
 export { PD_MEASURE_TEXT, PdMiddleText, middleTruncate, tailOf, type PdMeasureText } from './src/middle-text';
 export {
@@ -23,6 +24,8 @@ export {
   parentIndex,
   PD_HEADER_HEIGHT,
   PD_PRIMARY_MIN_PX,
+  PD_TABLE_FILL_MIN,
+  windowBodyMax,
   PD_ROW_HEIGHTS,
   rowHeightFor,
   PD_FOLD_EXTRA,

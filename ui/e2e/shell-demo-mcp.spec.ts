@@ -18,7 +18,7 @@ test.describe('AI access (MCP) (plan X22)', () => {
   test('turn it on, allow an action, add a client (the key is shown once), revoke it, read and clear the log', async ({ app, page, pageErrors }) => {
     await openPage(page, app, '');
     await expect(page.getByTestId('mcp-enabled').getByRole('switch')).not.toBeChecked();
-    await expect(page.getByText('AI access is off')).toBeVisible();
+    await expect(page.getByTestId('mcp-enabled').getByText('AI access is off')).toBeVisible();
     // Tools are read-only; the action is a separate, off-by-default permission with a warning.
     await expect(page.getByTestId('mcp-tools')).not.toContainText('Export a report');
     await expect(page.getByTestId('mcp-actions-warning')).toContainText('change something');
@@ -81,6 +81,25 @@ test.describe('AI access (MCP) (plan X22)', () => {
     await expect(log).toContainText('No client has called a tool yet.');
     await expect(page.getByTestId('mcp-audit-clear')).toBeDisabled();
     expect(pageErrors).toEqual([]);
+  });
+
+  test('every checkbox box lies inside the page column, so the scroll container does not clip it, at every density', async ({ app, page }) => {
+    await openPage(page, app, '');
+    await expect(page.getByTestId('mcp-actions')).toBeVisible();
+    for (const density of ['comfortable', 'standard', 'compact'] as const) {
+      await page.evaluate((d) => document.documentElement.setAttribute('data-density', d), density);
+      const clipped = await page.locator('pd-mcp-page').evaluate((root) => {
+        const bad: string[] = [];
+        for (const box of Array.from(root.querySelectorAll('.mdc-checkbox__background'))) {
+          const r = box.getBoundingClientRect();
+          const c = root.getBoundingClientRect();
+          if (r.width > 0 && r.left < c.left - 0.5) bad.push(`${box.closest('mat-checkbox')?.getAttribute('data-testid')}: box left ${r.left} < content left ${c.left}`);
+        }
+        if (root.querySelectorAll('.mdc-checkbox__background').length < 4) bad.push('fewer than 4 checkboxes found');
+        return bad;
+      });
+      expect(clipped, `density ${density}`).toEqual([]);
+    }
   });
 
   test('a load error is inline with Retry', async ({ app, page }) => {

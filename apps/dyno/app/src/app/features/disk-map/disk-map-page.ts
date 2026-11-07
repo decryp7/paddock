@@ -12,7 +12,7 @@ import type { DiskNode, Volume } from '../../core/api.types';
 import { PlatformService } from '../../core/platform';
 import { UNAVAILABLE, unreadableShort, unreadableText } from '../../core/measured';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatCount, formatAgo, formatDate, plural } from '../../shared/format';
+import { formatStorage, formatCount, formatAgo, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { RowMenu } from '../../shared/row-menu';
@@ -33,7 +33,9 @@ import {
   jobFraction,
   nothingReadable,
   jobRate,
+  notSavedText,
   revealLabel,
+  savedNote,
   phaseLabel,
   shareText,
   sharePercent,
@@ -65,7 +67,7 @@ import {
           <p>{{ subtitle() }}</p>
         </div>
         @if ((store.outcome() === 'done' || store.outcome() === 'cancelled') && !noAccess()) {
-          <button type="button" matButton="filled" [disabled]="store.starting()" (click)="store.rescan()"><dy-icon name="refresh" /> Rescan {{ store.status()?.name }}</button>
+          <button type="button" matButton="filled" [disabled]="store.starting() || store.refreshing() !== null" (click)="store.rescan()"><dy-icon name="refresh" /> Rescan {{ store.status()?.name }}</button>
         }
       </header>
 
@@ -138,6 +140,38 @@ import {
         }
 
         @if (store.status(); as s) {
+          @if (store.refreshingThis() && store.refreshStatus(); as rs) {
+            <section class="job" aria-label="Rescan progress">
+              <div class="job-top">
+                <div class="job-title"><strong>Rescanning {{ rs.name }}</strong><span class="muted">{{ refreshPhase() }} · the map below stays until this is done</span></div>
+                <button type="button" matButton="text" (click)="store.showProgress()">Show progress</button>
+                <button type="button" matButton="outlined" (click)="store.cancel()">Cancel rescan</button>
+              </div>
+              @if (refreshFraction() !== null) {
+                <mat-progress-bar mode="determinate" [value]="refreshPercent()" [attr.aria-label]="'Rescan of ' + rs.name" [attr.aria-valuetext]="refreshCount()" />
+              } @else if (!reducedMotion) {
+                <mat-progress-bar mode="indeterminate" [attr.aria-label]="'Rescan of ' + rs.name" [attr.aria-valuetext]="refreshCount()" />
+              }
+              <p class="job-count" aria-live="off">{{ refreshCount() }}</p>
+            </section>
+          }
+          @if (store.refreshFailure(); as f) {
+            <div class="callout bad" role="alert">
+              <dy-icon name="alert" />
+              <span><strong>The rescan stopped.</strong> The map below is the earlier one and is unchanged.</span>
+              <button type="button" matButton="outlined" [disabled]="store.starting()" (click)="store.rescan()">Rescan again</button>
+            </div>
+          }
+          @if (savedLine(); as line) {
+            <div class="callout info" role="status" data-testid="saved-map">
+              <dy-icon name="info" />
+              <span>{{ line }}</span>
+              <button type="button" matButton="outlined" (click)="store.forgetSaved()">Forget this map</button>
+            </div>
+          }
+          @if (notSavedLine(); as line) {
+            <div class="callout info" role="status" data-testid="not-saved"><dy-icon name="info" /><span>{{ line }}</span></div>
+          }
           @if (store.outcome() === 'running') {
             <section class="job" aria-label="Scan progress">
               <div class="job-top">
@@ -411,7 +445,7 @@ import {
               <dy-icon [name]="g.id === 'network' ? 'network' : g.id === 'external' ? 'external' : 'disk'" />
               <span class="vol">
                 <strong>{{ v.name }}</strong>
-                <span class="muted">{{ meta(v) }} · @if (v.reachable) { {{ free(v) }} } @else { <span class="warn-text"><dy-icon name="alert" /> Not answering</span> }</span>
+                <span class="muted">{{ meta(v) }} · @if (v.reachable) { {{ free(v) }} } @else { <span class="warn-text"><dy-icon name="alert" /> {{ free(v) }}</span> }</span>
               </span>
             </button>
           }
@@ -634,7 +668,8 @@ export class DiskMapPage implements OnInit {
     const what = s && !s.volume ? `${s.name} · folder` : v ? `${v.name} · ${volumeMeta(v)}` : 'Where the space on a volume or folder went';
     if (!s) return what;
     const state = { running: 'scanning now', done: 'scanned', cancelled: 'partial scan, stopped by you', failed: 'scan stopped' }[this.store.outcome()!];
-    const when = s.scannedAt !== null && this.store.outcome() === 'done' ? `scanned ${formatAgo(s.scannedAt, this.now())}` : state;
+    const saved = typeof s.origin === 'string' ? '' : ' (saved)';
+    const when = s.scannedAt !== null && this.store.outcome() === 'done' ? `scanned ${formatAgo(s.scannedAt, this.now())}${saved}` : state;
     return `${what} · ${when}`;
   });
   protected readonly pickerIcon = computed(() => {
@@ -645,9 +680,22 @@ export class DiskMapPage implements OnInit {
 
   protected readonly revealText = revealLabel(this.platform);
   protected readonly rate = computed(() => (this.store.status() ? jobRate(this.store.status()!) : null));
+  protected readonly refreshFraction = computed(() => (this.store.refreshStatus() ? jobFraction(this.store.refreshStatus()!.progress) : null));
+  protected readonly refreshPercent = computed(() => Math.round((this.refreshFraction() ?? 0) * 100));
+  protected readonly refreshCount = computed(() => (this.store.refreshStatus() ? jobCount(this.store.refreshStatus()!.progress) : ''));
+  protected readonly refreshPhase = computed(() => (this.store.refreshStatus() ? phaseLabel(this.store.refreshStatus()!) : ''));
+  /** The line under a map read back from the cache: its age, the net change in used space, and what Rescan does. */
+  protected readonly savedLine = computed(() => {
+    const s = this.store.status();
+    return s && s.scannedAt !== null ? savedNote(s, formatAgo(s.scannedAt, this.now()), formatStorage) : null;
+  });
+  protected readonly notSavedLine = computed(() => {
+    const s = this.store.status();
+    return s ? notSavedText(s) : null;
+  });
   protected readonly formatCount = formatCount;
   protected readonly plural = plural;
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatStorage;
   protected readonly meta = volumeMeta;
   protected readonly free = volumeFree;
   protected readonly share = shareText;
@@ -670,6 +718,7 @@ export class DiskMapPage implements OnInit {
   protected async load(): Promise<void> {
     await this.store.loadVolumes();
     await this.store.restore();
+    await this.store.refreshOnOpen(this.now());
   }
 
   protected pickerFallback(): string {
@@ -687,10 +736,10 @@ export class DiskMapPage implements OnInit {
   protected capacityLabel(): string {
     const c = this.store.capacity();
     if (!c) return '';
-    const parts = [`Counted ${formatBytes(c.counted)}`];
-    if (c.notCounted > 0) parts.push(`not counted yet ${formatBytes(c.notCounted)}`);
-    if (c.hidden > 0) parts.push(`hidden space ${formatBytes(c.hidden)}`);
-    if (c.free !== null) parts.push(`free ${formatBytes(c.free)}`);
+    const parts = [`Counted ${formatStorage(c.counted)}`];
+    if (c.notCounted > 0) parts.push(`not counted yet ${formatStorage(c.notCounted)}`);
+    if (c.hidden > 0) parts.push(`hidden space ${formatStorage(c.hidden)}`);
+    if (c.free !== null) parts.push(`free ${formatStorage(c.free)}`);
     return parts.join(', ');
   }
 
@@ -785,7 +834,7 @@ export class DiskMapPage implements OnInit {
 
   protected async copySize(node: DiskNode): Promise<void> {
     try {
-      await navigator.clipboard.writeText(formatBytes(node.bytes));
+      await navigator.clipboard.writeText(formatStorage(node.bytes));
       this.notifier.show('Size copied');
     } catch {
       this.notifier.show('The size could not be copied.', 'bad');

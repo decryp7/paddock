@@ -1,23 +1,16 @@
 //! The demo's AI access (plan X22, ADR 0007): an MCP server with two read-only tools and one action, the settings in the config
-//! folder, the client keys in the credential store (a memory vault in tests, rule 7) and the audit log the Settings page shows.
+//! folder, the client keys (hashes only) in an owner-only file beside them and the audit log the Settings page shows.
 
 use paddock_env::AppDirs;
 use paddock_jobs::time::SystemClock;
 use paddock_mcp::{
-    AuditLog, Emit, FileSettings, KeyStore, McpControl, Server, ToolDef, ToolOutput,
+    AuditLog, Emit, FileKeys, FileSettings, KeyStore, McpControl, Server, ToolDef, ToolOutput,
 };
-use paddock_secrets::{KeyringSecrets, MemorySecrets, Secrets};
 use serde_json::json;
 use std::sync::Arc;
 
-/// Builds the control around the event sender the shell hands over. `real_secrets` is the installed app; tests keep keys in memory.
-pub fn control(
-    dirs: &AppDirs,
-    app_name: &str,
-    version: &str,
-    real_secrets: bool,
-    emit: Emit,
-) -> Arc<McpControl> {
+/// Builds the control around the event sender the shell hands over.
+pub fn control(dirs: &AppDirs, app_name: &str, version: &str, emit: Emit) -> Arc<McpControl> {
     let log = Arc::new(AuditLog::new(500));
     let sink = McpControl::announcing_sink(log.clone(), emit.clone());
     let server = Arc::new(
@@ -47,17 +40,12 @@ pub fn control(
             log::error!("the demo's MCP tool was refused: {e}");
         }
     }
-    let secrets: Arc<dyn Secrets> = if real_secrets {
-        Arc::new(KeyringSecrets::os(app_name))
-    } else {
-        Arc::new(MemorySecrets::new(app_name))
-    };
     Arc::new(McpControl::new(
         server,
         log,
         Arc::new(KeyStore::new()),
         Arc::new(FileSettings::new(dirs.config().join("mcp.json"))),
-        secrets,
+        Arc::new(FileKeys::new(dirs.config().join("mcp-keys.json"))),
         emit,
         Arc::new(|| {
             std::time::SystemTime::now()

@@ -10,7 +10,7 @@ import { UpdatesStore } from './updates.store';
 import { toUpdateError } from './wire';
 import type { UpdateErrorDto } from '../generated/about';
 import { ABOUT_STYLES } from './styles';
-import { formatBytes } from './format';
+import { formatStorage } from './format';
 
 /**
  * Updates (a form: modeless, medium, fitted to its content, kept open beside the work). Every step is the engine's: Check, Download (a job: the download
@@ -60,11 +60,19 @@ import { formatBytes } from './format';
           @case ('installing') {
             <p role="status">{{ installing() }}</p>
           }
+          @case ('installerRunning') {
+            <p role="status" data-testid="updates-installer-running">{{ t.installerRunning }}</p>
+          }
           @case ('failed') {
             <p>{{ t.failed }}</p>
           }
         }
       </div>
+      @if (s.install.administratorNotice; as notice) {
+        @if (s.phase.kind === 'available' || s.phase.kind === 'ready') {
+          <p class="pd-muted" data-testid="updates-administrator">{{ notice }}</p>
+        }
+      }
       @if (store.info()?.notes; as notes) {
         <pre class="pd-text" tabindex="0" [attr.aria-label]="t.notes">{{ notes }}</pre>
       }
@@ -95,7 +103,7 @@ import { formatBytes } from './format';
               <pd-select [options]="channelOptions()" [value]="s.channel" [ariaLabel]="t.channel" (valueChange)="setChannel($event)" />
             </label>
           }
-          @if (s.phase.kind === 'ready' && store.canInstall()) {
+          @if (s.phase.kind === 'ready' && store.canInstall() && s.install.installOnQuitAvailable) {
             <mat-checkbox [checked]="installOnQuit()" (change)="store.installOnQuit($event.checked)">{{ t.installOnQuit }}</mat-checkbox>
           }
         </div>
@@ -121,6 +129,7 @@ export class PdUpdatesDialog implements DialogContent {
     upToDate: $localize`:@@pd.updates.up-to-date:You have the latest version.`,
     progressInJobs: $localize`:@@pd.updates.progress-in-jobs:The progress is in Jobs.`,
     failed: $localize`:@@pd.updates.failed:The last step did not finish.`,
+    installerRunning: $localize`:@@pd.updates.installer-running:An update is being installed. This window updates when the installer is done.`,
     notes: $localize`:@@pd.updates.notes:Release notes`,
     autoCheck: $localize`:@@pd.updates.auto-check:Check for updates automatically`,
     channel: $localize`:@@pd.updates.channel:Channel`,
@@ -131,6 +140,8 @@ export class PdUpdatesDialog implements DialogContent {
     discard: $localize`:@@pd.updates.discard:Discard`,
     restart: $localize`:@@pd.updates.restart:Restart to update`,
     openReleases: $localize`:@@pd.updates.open-releases:Open releases page`,
+    install: $localize`:@@pd.updates.install:Install`,
+    installAgain: $localize`:@@pd.updates.install-again:Install again`,
     checkAgain: $localize`:@@pd.updates.check-again:Check again`,
     checkNow: $localize`:@@pd.updates.check-now:Check now`,
     download: $localize`:@@pd.updates.download:Download`,
@@ -168,12 +179,15 @@ export class PdUpdatesDialog implements DialogContent {
       case 'ready':
         // Only a build that can install gets here; one that cannot is not offered the install, whatever the phase.
         if (!this.store.canInstall()) return [run('discard', this.t.discard, 'secondary', () => this.store.cancel())];
-        return [run('discard', this.t.discard, 'secondary', () => this.store.cancel()), run('restart', this.t.restart, 'primary', () => this.store.restart())];
+        return [run('discard', this.t.discard, 'secondary', () => this.store.cancel()), run('restart', s.install.scope === 'perMachine' ? this.t.install : this.t.restart, 'primary', () => this.store.restart())];
       case 'available':
         if (!this.store.canInstall()) return viaReleases(run('check', this.t.checkAgain, 'secondary', () => this.store.check()));
         return [run('check', this.t.checkAgain, 'secondary', () => this.store.check()), run('download', this.t.download, 'primary', () => this.store.download())];
       case 'failed':
         if (!this.store.canInstall()) return viaReleases(run('check', this.t.checkAgain, 'secondary', () => this.store.check()));
+        if (s.phase.error.kind === 'notInstalled' || s.phase.error.kind === 'declined') {
+          return [run('install-again', this.t.installAgain, 'primary', () => this.store.installAgain())];
+        }
         return this.store.canDownload() ? [run('download', this.t.tryAgain, 'primary', () => this.store.download())] : [run('check', this.t.checkAgain, 'primary', () => this.store.check())];
       case 'idle':
       case 'upToDate':
@@ -201,7 +215,7 @@ export class PdUpdatesDialog implements DialogContent {
     const version = this.version();
     const size = this.store.info()?.size;
     return size
-      ? $localize`:@@pd.updates.available.sized:Version ${version}:version: is available (${formatBytes(size)}:size:).`
+      ? $localize`:@@pd.updates.available.sized:Version ${version}:version: is available (${formatStorage(size)}:size:).`
       : $localize`:@@pd.updates.available:Version ${version}:version: is available.`;
   });
 
@@ -231,10 +245,10 @@ export class PdUpdatesDialog implements DialogContent {
     const phase: SuJobPhase | null | undefined = job?.state === 'running' ? job.phase : null;
     if (!phase) return null;
     const fraction = phase.total ? Math.min(1, phase.done / phase.total) : null;
-    const amount = phase.unit === 'bytes' ? formatBytes(phase.done) : String(phase.done);
+    const amount = phase.unit === 'bytes' ? formatStorage(phase.done) : String(phase.done);
     const label =
       phase.total && phase.unit === 'bytes'
-        ? $localize`:@@pd.updates.progress.of:${phase.label}:phase:: ${amount}:done: of ${formatBytes(phase.total)}:total:`
+        ? $localize`:@@pd.updates.progress.of:${phase.label}:phase:: ${amount}:done: of ${formatStorage(phase.total)}:total:`
         : $localize`:@@pd.updates.progress:${phase.label}:phase:: ${amount}:done:`;
     return { label, fraction };
   });

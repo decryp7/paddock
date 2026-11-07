@@ -6,7 +6,6 @@
 //!
 //! Wire shape rules (postcard): externally tagged enums, no `flatten`, no internal tags.
 
-use crate::backup::BackupReport;
 use crate::extras::files::{FinderQuery, FinderResult};
 use crate::extras::{boot::BootReport, sleep::SleepReport, software::SoftwareInventory, usage::UsageReport};
 use crate::issues::{IssuesOverview, IssuesQuery};
@@ -59,8 +58,6 @@ pub enum JobSpec {
         /// The window the result is built for.
         query: IssuesQuery,
     },
-    /// Checks the backup tools now.
-    RefreshBackup,
     /// The SHA-256 of a program's file.
     FileHash {
         /// Which file.
@@ -74,6 +71,32 @@ pub enum JobSpec {
     AppUsage,
     /// The installed software (runs the package tools).
     SoftwareInventory,
+    /// Turns the privileged helper on, repairs, updates or turns it off (ADR 0027).
+    Helper {
+        /// What to do.
+        action: crate::helper_wire::HelperAction,
+    },
+    /// Fetches one list subscription now (a download job with phases and Cancel), then rebuilds the index.
+    UpdateList {
+        /// The list's id.
+        id: String,
+    },
+    /// Fetches the DB-IP location databases now (monthly files; at most one attempt a day).
+    UpdateGeo,
+    /// Rebuilds the match index from the user's lists (after an edit).
+    RebuildIntel,
+    /// Downloads the pinned tool (the user clicked "Download"), checks it and has the helper install it.
+    InstallTool {
+        /// Which tool.
+        tool: crate::helper_requests::ToolKind,
+    },
+    /// Sends a Wake-on-LAN wake to a saved computer; `test` also waits for it to answer (ADR 0032).
+    WolWake {
+        /// The saved computer.
+        id: u64,
+        /// Wait for an answer and say whether it woke.
+        test: bool,
+    },
 }
 
 impl JobSpec {
@@ -82,12 +105,17 @@ impl JobSpec {
         match self {
             JobSpec::FindFiles { .. } => JobKind::FindFiles,
             JobSpec::RescanIssues { .. } => JobKind::RescanIssues,
-            JobSpec::RefreshBackup => JobKind::RefreshBackup,
             JobSpec::FileHash { .. } => JobKind::FileHash,
             JobSpec::SleepBlockers => JobKind::SleepBlockers,
             JobSpec::BootAnalysis => JobKind::BootAnalysis,
             JobSpec::AppUsage => JobKind::AppUsage,
             JobSpec::SoftwareInventory => JobKind::SoftwareInventory,
+            JobSpec::InstallTool { .. } => JobKind::InstallTool,
+            JobSpec::Helper { .. } => JobKind::Helper,
+            JobSpec::UpdateList { .. } => JobKind::UpdateList,
+            JobSpec::UpdateGeo => JobKind::UpdateGeo,
+            JobSpec::RebuildIntel => JobKind::RebuildIntel,
+            JobSpec::WolWake { .. } => JobKind::WolWake,
         }
     }
 }
@@ -100,8 +128,6 @@ pub enum JobKind {
     FindFiles,
     /// Reading the OS logs.
     RescanIssues,
-    /// Checking the backup tools.
-    RefreshBackup,
     /// Hashing a file.
     FileHash,
     /// Reading what keeps the computer awake.
@@ -112,6 +138,18 @@ pub enum JobKind {
     AppUsage,
     /// Listing the installed software.
     SoftwareInventory,
+    /// Setting up the privileged helper.
+    Helper,
+    /// Updating one list subscription.
+    UpdateList,
+    /// Updating the location databases.
+    UpdateGeo,
+    /// Rebuilding the match index of the user's lists.
+    RebuildIntel,
+    /// Downloading the pinned disk-health tool and handing it to the helper.
+    InstallTool,
+    /// Waking a computer over the network.
+    WolWake,
 }
 
 impl JobKind {
@@ -120,12 +158,17 @@ impl JobKind {
         match self {
             JobKind::FindFiles => "Finding files",
             JobKind::RescanIssues => "Reading system logs",
-            JobKind::RefreshBackup => "Checking backups",
             JobKind::FileHash => "Hashing a file",
             JobKind::SleepBlockers => "Reading sleep blockers",
             JobKind::BootAnalysis => "Analysing boots",
             JobKind::AppUsage => "Reading app usage",
             JobKind::SoftwareInventory => "Listing installed software",
+            JobKind::InstallTool => "Installing the disk-health tool",
+            JobKind::Helper => "Setting up administrator readings",
+            JobKind::UpdateList => "Updating a list",
+            JobKind::UpdateGeo => "Updating the location databases",
+            JobKind::RebuildIntel => "Building the match index",
+            JobKind::WolWake => "Waking a computer",
         }
     }
 
@@ -134,12 +177,17 @@ impl JobKind {
         match self {
             JobKind::FindFiles => "find-files",
             JobKind::RescanIssues => "rescan-issues",
-            JobKind::RefreshBackup => "refresh-backup",
             JobKind::FileHash => "file-hash",
             JobKind::SleepBlockers => "sleep-blockers",
             JobKind::BootAnalysis => "boot-analysis",
             JobKind::AppUsage => "app-usage",
             JobKind::SoftwareInventory => "software-inventory",
+            JobKind::InstallTool => "install-tool",
+            JobKind::Helper => "helper",
+            JobKind::UpdateList => "update-list",
+            JobKind::UpdateGeo => "update-geo",
+            JobKind::RebuildIntel => "rebuild-intel",
+            JobKind::WolWake => "wol-wake",
         }
     }
 
@@ -148,12 +196,17 @@ impl JobKind {
         [
             JobKind::FindFiles,
             JobKind::RescanIssues,
-            JobKind::RefreshBackup,
             JobKind::FileHash,
             JobKind::SleepBlockers,
             JobKind::BootAnalysis,
             JobKind::AppUsage,
             JobKind::SoftwareInventory,
+            JobKind::Helper,
+            JobKind::UpdateList,
+            JobKind::UpdateGeo,
+            JobKind::RebuildIntel,
+            JobKind::InstallTool,
+            JobKind::WolWake,
         ]
         .into_iter()
         .find(|k| k.slug() == slug)
@@ -168,8 +221,6 @@ pub enum JobOutput {
     Finder(Box<FinderResult>),
     /// From [`JobSpec::RescanIssues`].
     Issues(Box<IssuesOverview>),
-    /// From [`JobSpec::RefreshBackup`].
-    Backup(Box<BackupReport>),
     /// From [`JobSpec::FileHash`].
     FileHash(FileHashInfo),
     /// From [`JobSpec::SleepBlockers`].
@@ -180,6 +231,14 @@ pub enum JobOutput {
     AppUsage(Box<UsageReport>),
     /// From [`JobSpec::SoftwareInventory`].
     Software(Box<SoftwareInventory>),
+    /// From [`JobSpec::InstallTool`]: what the helper holds of the tool now.
+    Tool(Box<crate::helper_wire::ToolStatus>),
+    /// From [`JobSpec::Helper`]: the helper as it is now.
+    Helper(Box<crate::helper_wire::HelperStatus>),
+    /// From [`JobSpec::UpdateList`], [`JobSpec::UpdateGeo`] and [`JobSpec::RebuildIntel`]: the lists page after the job.
+    Intel(Box<crate::intel_lists::IntelStatus>),
+    /// From [`JobSpec::WolWake`].
+    Wol(Box<crate::wol::WolOutcome>),
 }
 
 #[cfg(test)]
@@ -205,7 +264,6 @@ mod tests {
             serde_json::json!({"findFiles": {"query": {"folder": "/x", "mode": "both", "minBytes": 5}}})
         );
         assert_eq!(spec.kind(), JobKind::FindFiles);
-        assert_eq!(serde_json::to_value(JobSpec::RefreshBackup).unwrap(), "refreshBackup");
         let hash: JobSpec = serde_json::from_value(serde_json::json!({"fileHash": {"source": {"path": "/a"}}})).unwrap();
         assert_eq!(hash.kind(), JobKind::FileHash);
         let rescan: JobSpec = serde_json::from_value(serde_json::json!({"rescanIssues": {"query": {"days": 7}}})).unwrap();
@@ -244,11 +302,11 @@ mod tests {
     #[test]
     fn every_kind_has_a_unique_slug_that_finds_it_again() {
         let specs = [
-            JobSpec::RefreshBackup,
             JobSpec::SleepBlockers,
             JobSpec::BootAnalysis,
             JobSpec::AppUsage,
             JobSpec::SoftwareInventory,
+            JobSpec::WolWake { id: 1, test: false },
         ];
         for spec in specs {
             assert_eq!(JobKind::from_slug(spec.kind().slug()), Some(spec.kind()));
@@ -260,8 +318,6 @@ mod tests {
 
     #[test]
     fn an_output_survives_the_wire() {
-        let out = JobOutput::Backup(Box::default());
-        assert_eq!(round(&out), out);
         assert_eq!(round(&JobOutput::Sleep(Box::default())), JobOutput::Sleep(Box::default()));
         assert_eq!(
             serde_json::to_value(JobOutput::FileHash(FileHashInfo {

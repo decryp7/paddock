@@ -15,34 +15,68 @@ path = "src/main.rs"
 [dependencies]
 dyno-core.workspace = true
 dyno-platform.workspace = true
-dyno-ipc.workspace = true
+paddock-ipc.workspace = true
 dyno-plugin-host.workspace = true
 # The family's job mechanism (phases, throttled progress, cancel tokens, hashing copy): the long operations run on it.
 paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 # One instance per data folder by a held OS lock, discovery files as hints, and the start judge (ADR 0031).
 paddock-proc = { path = "../../../../crates/paddock-proc" }
+# "Previous run did not end cleanly" for the agent (the run marker; the OS process table says whether the old run is gone).
+paddock-startup = { path = "../../../../crates/paddock-startup", features = ["os-probe"] }
+# The clock the benchmark child loop takes (a manual one in tests).
+paddock-bench = { path = "../../../../crates/paddock-bench" }
 # The popup layout's placement ids (family ADR 0035).
 paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 # The agent's own log (one dated paddock-log file per process, panic hook and crash marker) and the folders it lives in.
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }
+# Turning the helper on and off (the OS's one prompt) and the trusted connection to its endpoint (ADR 0027).
+dyno-helper-service = { path = "../dyno-helper-service" }
+paddock-service = { path = "../../../../crates/paddock-service" }
+# Subscriptions to the user's own lists and the geo databases: the one outbound door (https only, public reach, Offline switch).
+paddock-net = { path = "../../../../crates/paddock-net" }
+paddock-download = { path = "../../../../crates/paddock-download", default-features = false }
+toml.workspace = true
+# The keep-awake guard over the platform's power port (ADR 0032).
+paddock-power = { path = "../../../../crates/paddock-power" }
+# A Wake-on-LAN computer's SecureOn password is kept in an owner-only file on macOS and in the OS credential store elsewhere (ADR 0032, D6, amended 2026-11-05).
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 log = { version = "0.4", features = ["kv"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-# The diagnostics bundle (MIT; the same build as Debrief's: deflate via the Rust zlib-rs, no C code).
-zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+# The one redactor (the search seed removes personal details with it); the report's zip is the app's, not the agent's.
+paddock-diag = { path = "../../../../crates/paddock-diag" }
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 # Content hashes for the duplicate file finder (MIT OR Apache-2.0; already in the tree through other dependencies).
 sha2 = "0.10"
+# The saved disk maps' chunks (D3, ADR 0029): deflate level 1, on the same Rust zlib-rs back end as the diagnostics zip.
+flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
+# The downloaded geo databases (DB-IP Country and ASN Lite, CC-BY-4.0): ISC; read into memory, never mapped (ADR 0031 D10).
+maxminddb = "0.27"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 [dev-dependencies]
+# The helper rig serves a real dispatcher to the agent (tests/common/helper_rig.rs); no cycle: the helper does not depend on the agent.
+dyno-helper = { path = "../dyno-helper" }
+postcard.workspace = true
 plist = "1"
 tempfile.workspace = true
+proptest = "1"
+# The source scan of tests/helper_wiring.rs (ADR 0052 section 1.1): which non-test code builds each helper request kind (MIT OR Apache-2.0).
+syn = { version = "2", features = ["full", "visit"] }
+
+# The tiny MMDB writer (`geo_db::testdb`) for the fuzz seed corpus.
+[features]
+testdb = []
+
+# A scripted run against a real running agent in a disposable VM (see the file's header).
+[[example]]
+name = "real_run"
+required-features = ["testdb"]
 
 [lints]
 workspace = true

@@ -181,7 +181,7 @@ export class Diagram {
         else if (it.kind === 'tag') this.tag(lx + sw, cy - 1, 'planned', it.role); // role: the stroke of the tagged nodes
         else {
           const planned = it.kind === 'planned';
-          this.raw(`<mxCell id="${this.id()}" value="" style="${this.styleFor(planned ? 'accent' : it.kind, { planned, sw: 1.5, arc: 4 })}" vertex="1" parent="1"><mxGeometry x="${lx}" y="${cy}" width="28" height="16" as="geometry"/></mxCell>`);
+          this.raw(`<mxCell id="${this.id()}" value="" style="${it.ellipse ? 'ellipse;' : ''}${this.styleFor(planned ? 'accent' : it.kind, { planned, sw: 1.5, arc: 4 })}" vertex="1" parent="1"><mxGeometry x="${lx}" y="${cy}" width="28" height="16" as="geometry"/></mxCell>`);
         }
         this.text(this.id(), [lx + sw + 8, cy - 1, lw, 18], it.label, { color: 'muted' });
       }

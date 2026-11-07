@@ -304,6 +304,46 @@ fn loopback_limits_clients_and_bounds_every_line() {
     drop(serving); // dropping stops it too
 }
 
+/// A client turned down because every place is taken reads the refusal, not a reset. The bridge writes its key line at once
+/// and then reads; the listener used to close the refused connection with that line unread, which resets it, and the reset
+/// could reach the client before the refusal (seen on macOS: "Connection reset by peer" instead of "too many MCP clients").
+#[test]
+fn a_client_turned_down_for_lack_of_places_reads_the_refusal_not_a_reset() {
+    let r = rig();
+    let keys = Arc::new(KeyStore::new());
+    let (_, key) = keys.issue("a", 1).unwrap();
+    let serving = serve_loopback(r.server.clone(), keys, listener(), 1).unwrap();
+    let hello = json!({"key": key}).to_string();
+    let mut holder = Conn::open(serving.addr());
+    holder.send(&hello);
+    assert_eq!(holder.next().unwrap()["ok"], true);
+    for attempt in 0..50 {
+        let mut s = TcpStream::connect(serving.addr()).unwrap();
+        s.set_read_timeout(Some(HANG_GUARD)).unwrap();
+        s.write_all(format!("{hello}\n").as_bytes()).unwrap();
+        let mut reader = BufReader::new(s);
+        let mut line = String::new();
+        let read = reader.read_line(&mut line);
+        assert!(
+            read.is_ok(),
+            "attempt {attempt}: the refusal was lost: {read:?}"
+        );
+        let refusal: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(refusal["code"], "busy", "attempt {attempt}: {refusal}");
+        assert!(
+            refusal["error"].as_str().unwrap().contains("too many"),
+            "{refusal}"
+        );
+        line.clear();
+        assert_eq!(
+            reader.read_line(&mut line).unwrap(),
+            0,
+            "attempt {attempt}: then the connection ends"
+        );
+    }
+    drop(serving);
+}
+
 /// Regression: the place of a client that left was only freed when the accept loop next found its thread finished, which
 /// ran on after the client had already seen its connection end. A client reconnecting at once was told "too many" and,
 /// writing its key into the refused connection, got a broken pipe (CI, Linux, under coverage). A client that has seen

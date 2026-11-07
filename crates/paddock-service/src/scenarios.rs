@@ -14,13 +14,12 @@ use crate::repair::{RepairOutcome, Timings};
 use crate::spec::{Kind, ServiceSpec};
 use crate::status::Condition;
 use crate::testing::{Call, FakeAppService, FakeElevator, FakeSystem};
+use paddock_health::Clock;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-/// Where the tests say `sc.exe` is.
-const SC_EXE: &str = r"C:\Windows\System32\sc.exe";
 const LABEL: &str = "net.decryptology.pitwall.service";
 const TARGET: &str = "gui/501/net.decryptology.pitwall.service";
 
@@ -196,12 +195,16 @@ fn changes(sys: &FakeSystem) -> Vec<String> {
         .filter_map(|c| match c {
             Call::Os(s) => Some(s),
             Call::Run(s) if s.contains(" bootout ") || s.contains("bootstrap") => Some(s),
-            Call::Run(s) if s.starts_with("systemctl") && !s.contains("is-") => Some(s),
+            Call::Run(s)
+                if s.starts_with("systemctl") && !s.contains("is-") && !s.contains(" show ") =>
+            {
+                Some(s)
+            }
             Call::Run(s) if s.starts_with("reg add") || s.starts_with("reg delete") => Some(s),
             Call::Run(s)
-                if s.starts_with("C:\\Windows\\System32\\sc.exe ")
-                    && !s.starts_with("C:\\Windows\\System32\\sc.exe query")
-                    && !s.starts_with("C:\\Windows\\System32\\sc.exe qc") =>
+                if s.starts_with("sc ")
+                    && !s.starts_with("sc query")
+                    && !s.starts_with("sc qc") =>
             {
                 Some(s)
             }
@@ -250,8 +253,37 @@ fn r03_an_update_replaces_the_stale_registration_exactly_once_and_recovers() {
     assert_eq!(m.on_start(&no_cancel()), Started::Left(Hold::Healthy));
     assert!(changes(&sys).is_empty());
     assert_eq!(m.status().condition, Condition::Running);
-    let notice = m.tracker().current(std::time::Instant::now()).unwrap();
+    let notice = m
+        .tracker()
+        .current(paddock_health::SystemClock.monotonic())
+        .unwrap();
     assert_eq!(notice.state, crate::tracker::RepairState::Succeeded);
+}
+
+#[test]
+fn a_manager_fades_the_success_notice_on_the_clock_it_is_given() {
+    // The same repair as r03, on a clock that only moves when the test moves it: the success notice fades when the clock (not the machine's) passes `SUCCESS_SHOWN`.
+    use crate::tracker::SUCCESS_SHOWN;
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, Some(1));
+    sim.lock().unwrap().linger = Duration::from_secs(4);
+    let sys = FakeSystem::new();
+    let clock = paddock_health::FakeClock::at_wall_ms(1_700_000_000_000);
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_clock(Arc::new(clock.clone()));
+    crate::record::RecordFile::new(d.path(), LABEL)
+        .save("1.0.3", None)
+        .unwrap();
+    assert_eq!(
+        m.on_start(&no_cancel()),
+        Started::Repaired(Reason::Refused, RepairOutcome::Recovered)
+    );
+    assert!(m.status().repair.is_some(), "the success is shown at once");
+    clock.advance(SUCCESS_SHOWN + Duration::from_secs(1));
+    assert_eq!(
+        m.status().repair,
+        None,
+        "and fades on the clock's time, not the machine's"
+    );
 }
 
 #[test]
@@ -334,19 +366,28 @@ fn a_bootout_that_hangs_is_bounded_and_ends_with_next_steps() {
         t.worst_case()
     );
     let registers = changes(&sys).iter().filter(|c| *c == "register").count();
-    assert_eq!(registers, t.max_cycles as usize + 1);
+    assert_eq!(
+        registers,
+        crate::plan::MAX_ATTEMPTS as usize,
+        "an unattended repair registers at most what is left of the attempts"
+    );
     assert_eq!(
         m.recorded().registered_version,
         None,
         "a failed repair is tried again at the next start"
     );
     assert!(m.status().can_repair);
-    // launchd lets go later: the next start repairs it.
+    // The attempts of this version are used up: the next start holds instead of registering again without limit ...
     sim.lock().unwrap().bootout_hangs = false;
     assert_eq!(
         m.on_start(&no_cancel()),
-        Started::Repaired(Reason::Refused, RepairOutcome::Recovered)
+        Started::Left(Hold::Refused(crate::plan::MAX_ATTEMPTS))
     );
+    // ... and the user's Repair, once launchd lets go, goes through.
+    assert!(matches!(
+        m.repair(&no_cancel()),
+        Ok(RepairOutcome::Recovered)
+    ));
 }
 
 #[test]
@@ -441,8 +482,7 @@ fn nothing_is_installed_unasked_and_install_registers_and_remembers() {
     assert_eq!(
         changes(&sys),
         [
-            "unregister",
-            &format!("/bin/launchctl bootout {TARGET}"),
+            // Nothing was registered, so nothing is removed first.
             "register"
         ]
     );
@@ -458,9 +498,9 @@ fn a_second_copy_repairing_at_the_same_time_is_told_to_wait() {
     let d = tempfile::tempdir().unwrap();
     let sim = launchd(2, Some(1));
     let sys = FakeSystem::new();
-    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_clock(|| 1_000);
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4");
     let other = crate::record::RecordFile::new(d.path(), LABEL);
-    let held = other.lock(1_000).unwrap();
+    let held = other.lock().unwrap();
     assert_eq!(m.on_start(&no_cancel()), Started::Busy);
     assert!(matches!(m.repair(&no_cancel()), Err(ServiceError::Busy)));
     assert!(matches!(m.uninstall(), Err(ServiceError::Busy)));
@@ -665,10 +705,7 @@ fn a_systemd_user_unit_is_written_reloaded_and_enabled() {
     assert_eq!(
         changes(&sys),
         [
-            "systemctl --user disable --now pitwall.service".to_string(),
-            format!("remove {}", unit_path().display()),
-            "systemctl --user daemon-reload".to_string(),
-            "systemctl --user stop pitwall.service".to_string(),
+            // Nothing was registered, so nothing is stopped, disabled or removed first.
             format!("write {}", unit_path().display()),
             "systemctl --user daemon-reload".to_string(),
             "systemctl --user enable --now pitwall.service".to_string(),
@@ -906,6 +943,191 @@ fn a_unit_whose_program_was_moved_or_belongs_to_an_older_copy_is_re_pointed_and_
     );
 }
 
+// ---- ADR 0054 RC-2: the packaged unit's turn-off is judged by what systemd says afterwards, never by an ignored result
+
+const PACKAGED_UNIT: &str = "/usr/lib/systemd/system/pitwall.service";
+
+fn packaged_system_unit(sys: &FakeSystem) -> Systemd {
+    let spec = ServiceSpec::builder(LABEL, "Pitwall", "pitwall-server")
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+    let b = Systemd::new(
+        spec,
+        PACKAGED_UNIT.into(),
+        Target::exe("/usr/bin/pitwall-server"),
+        Box::new(sys.clone()),
+    )
+    .packaged();
+    sys.put_file(PACKAGED_UNIT, &b.definition());
+    sys.put_program("/usr/bin/pitwall-server");
+    b
+}
+
+#[test]
+fn a_packaged_unit_whose_disable_now_failed_and_is_still_enabled_and_running_is_not_reported_removed()
+ {
+    use crate::backend::Backend as _;
+    let sys = FakeSystem::new();
+    let mut b = packaged_system_unit(&sys);
+    sys.answer(
+        "systemctl disable --now",
+        Output {
+            code: Some(1),
+            stderr: "Failed to disable unit: Access denied\n".into(),
+            ..Output::default()
+        },
+    );
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    assert!(
+        b.unregister().is_err(),
+        "the unit is still enabled and active, so the turn-off did not happen"
+    );
+}
+
+#[test]
+fn a_packaged_unit_that_reads_back_disabled_and_stopped_is_removed_whatever_the_tool_said() {
+    use crate::backend::Backend as _;
+    let sys = FakeSystem::new();
+    let mut b = packaged_system_unit(&sys);
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("disabled\n"));
+    assert!(b.unregister().is_ok());
+    assert!(
+        sys.file(Path::new(PACKAGED_UNIT)).is_some(),
+        "dpkg owns the packaged file; it stays"
+    );
+}
+
+#[test]
+fn a_packaged_unit_whose_disable_now_said_yes_but_reads_back_enabled_is_still_present() {
+    use crate::backend::{Backend as _, Job, Registration, UnregisterError};
+    let sys = FakeSystem::new();
+    let mut b = packaged_system_unit(&sys);
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    match b.unregister() {
+        Err(UnregisterError::StillPresent(look)) => {
+            assert_eq!(
+                (look.registration, look.job),
+                (Registration::Registered, Job::Running)
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_failed_disable_now_is_the_tools_own_words_unless_the_read_back_shows_the_unit_gone() {
+    use crate::backend::{Backend as _, UnregisterError};
+    let sys = FakeSystem::new();
+    let mut b = packaged_system_unit(&sys);
+    sys.answer(
+        "systemctl disable --now",
+        Output {
+            code: Some(1),
+            stderr: "Failed to disable unit: Read-only file system\n".into(),
+            ..Output::default()
+        },
+    );
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    match b.unregister() {
+        Err(UnregisterError::Failed(why)) => {
+            assert!(why.contains("Read-only file system"), "{why}")
+        }
+        other => panic!("{other:?}"),
+    }
+    // The same refusal, but the unit already reads back disabled and stopped: nothing is left to do.
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("disabled\n"));
+    assert!(b.unregister().is_ok());
+}
+
+#[test]
+fn a_unit_systemd_does_not_know_is_already_gone_and_an_unreachable_manager_says_what_to_do() {
+    use crate::backend::{Backend as _, Registration, UnregisterError};
+    let sys = FakeSystem::new();
+    // Packaged, but the package is gone: no unit file and systemd says it does not exist.
+    let spec = ServiceSpec::builder(LABEL, "Pitwall", "pitwall-server")
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+    let mut gone = Systemd::new(
+        spec,
+        PACKAGED_UNIT.into(),
+        Target::exe("/p"),
+        Box::new(sys.clone()),
+    )
+    .packaged();
+    sys.answer(
+        "systemctl disable --now",
+        Output {
+            code: Some(1),
+            stderr: "Failed to disable unit: Unit file pitwall.service does not exist.\n".into(),
+            ..Output::default()
+        },
+    );
+    let look = gone.unregister().unwrap();
+    assert_eq!(look.registration, Registration::Absent);
+    // No systemd session at all.
+    sys.answer(
+        "systemctl disable --now",
+        Output {
+            code: Some(1),
+            stderr: "Failed to connect to bus: No medium found\n".into(),
+            ..Output::default()
+        },
+    );
+    assert!(
+        matches!(gone.unregister(), Err(UnregisterError::Unavailable(w)) if w.contains("systemd"))
+    );
+    // The tool cannot be started: nothing is left to read back as gone, so the words are the tool's.
+    let sys = FakeSystem::new();
+    let mut present = packaged_system_unit(&sys);
+    sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
+    sys.on("systemctl disable --now", |_, _| {
+        Err(RunError::TimedOut("systemctl".into()))
+    });
+    assert!(
+        matches!(present.unregister(), Err(UnregisterError::Failed(w)) if w.contains("disable --now"))
+    );
+}
+
+#[test]
+fn every_unregister_error_has_words_and_the_other_backends_return_what_they_read_back() {
+    use crate::backend::{Backend as _, Inspection, Registration, UnregisterError};
+    assert!(
+        UnregisterError::NeedsElevation
+            .to_string()
+            .contains("administrator")
+    );
+    assert_eq!(UnregisterError::Failed("x".into()).to_string(), "x");
+    assert_eq!(UnregisterError::Unavailable("y".into()).to_string(), "y");
+    let still = UnregisterError::StillPresent(Inspection {
+        registration: Registration::Registered,
+        ..Inspection::absent()
+    });
+    assert!(still.to_string().contains("Registered"));
+    assert!(Inspection::absent().withdrawn());
+    let sys = FakeSystem::new();
+    let mut run = WindowsRun::new(pitwall(), Target::exe("C:\\p.exe"), Box::new(sys.clone()));
+    assert_eq!(run.unregister().unwrap().registration, Registration::Absent);
+    let mut file = LaunchdFile::new(
+        pitwall(),
+        501,
+        "/p.plist".into(),
+        Target::exe("/p"),
+        Box::new(sys),
+    );
+    assert_eq!(
+        file.unregister().unwrap().registration,
+        Registration::Absent
+    );
+}
+
 // --------------------------------------------------------------------------------------------------------- Windows
 
 const RUN: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
@@ -936,13 +1158,14 @@ fn a_run_entry_is_added_started_switched_off_by_the_user_and_removed() {
         "1.0.0",
         || true,
     );
-    sys.answer("reg query", Output::code(1));
-    m.install(&no_cancel()).unwrap();
+    // The Run value is absent until `reg add` has run, then it reads back as written.
     let value = format!("\"{DYNO_EXE}\" run");
+    sys.emulate_run_registry();
+    m.install(&no_cancel()).unwrap();
     assert_eq!(
         changes(&sys),
         [
-            format!("reg delete {RUN} /v Dyno /f"),
+            // Nothing was registered, so nothing is removed first.
             format!("reg add {RUN} /v Dyno /t REG_SZ /d {value} /f"),
             format!("spawn {DYNO_EXE} run")
         ]
@@ -979,6 +1202,27 @@ fn a_run_entry_is_added_started_switched_off_by_the_user_and_removed() {
         sys.commands()
             .iter()
             .any(|c| c == &format!("{DYNO_EXE} stop"))
+    );
+}
+
+#[test]
+fn a_run_value_with_no_program_in_it_stops_no_old_agent() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    // Even an empty path that the system calls a program is not run: there is no old agent to stop.
+    sys.put_program("");
+    sys.answer(
+        "reg query HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        Output::ok("    Dyno    REG_SZ    \r\n"),
+    );
+    let mut b = WindowsRun::new(dyno(), Target::exe(DYNO_EXE), Box::new(sys.clone()));
+    let _ = b.register(); // the read-back is the same canned answer: not as written, which is not the point here
+    assert!(
+        !sys.commands()
+            .iter()
+            .any(|c| c.trim_end().ends_with("stop")),
+        "{:?}",
+        sys.commands()
     );
 }
 
@@ -1064,50 +1308,50 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
         .kind(Kind::SystemService)
         .build()
         .unwrap();
+    const EVENT_KEY: &str = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\Pitwall";
     let exe = r"C:\Program Files\Pitwall\pitwall-server.exe";
-    let mut b =
-        WindowsService::new(svc.clone(), Target::exe(exe), Box::new(sys.clone())).with_sc(SC_EXE);
+    let mut b = WindowsService::new(svc.clone(), Target::exe(exe), Box::new(sys.clone()));
     b.register().unwrap();
     assert_eq!(
         sys.commands(),
         [
             format!(
-                "C:\\Windows\\System32\\sc.exe create Pitwall binPath= \"{exe}\" --service start= delayed-auto DisplayName= Pitwall local LLM server"
+                "reg add {EVENT_KEY} /v EventMessageFile /t REG_EXPAND_SZ /d %SystemRoot%\\System32\\EventCreate.exe /f"
             ),
-            "C:\\Windows\\System32\\sc.exe description Pitwall Serves local language models.".to_string(),
-            "C:\\Windows\\System32\\sc.exe failure Pitwall reset= 86400 actions= restart/10000/restart/60000/restart/300000"
+            format!("reg add {EVENT_KEY} /v TypesSupported /t REG_DWORD /d 7 /f"),
+            format!(
+                "sc create Pitwall binPath= \"{exe}\" --service start= delayed-auto DisplayName= Pitwall local LLM server"
+            ),
+            "sc description Pitwall Serves local language models.".to_string(),
+            "sc failure Pitwall reset= 86400 actions= restart/10000/restart/60000/restart/300000"
                 .to_string(),
-            "C:\\Windows\\System32\\sc.exe failureflag Pitwall 1".to_string(),
-            "C:\\Windows\\System32\\sc.exe start Pitwall".to_string(),
+            "sc failureflag Pitwall 1".to_string(),
+            "sc start Pitwall".to_string(),
+            // The read-back (ADR 0054 section 1.1).
+            "sc query Pitwall".to_string(),
+            "sc qc Pitwall".to_string(),
         ]
     );
-    sys.answer("C:\\Windows\\System32\\sc.exe create", Output::code(5));
+    sys.answer("sc create", Output::code(5));
     assert_eq!(b.register(), Err(RegisterError::NeedsElevation));
-    sys.answer("C:\\Windows\\System32\\sc.exe create", Output::code(1072));
+    sys.answer("sc create", Output::code(1072));
     assert!(matches!(b.register(), Err(RegisterError::Other(e)) if e.contains("Services window")));
-    sys.on("C:\\Windows\\System32\\sc.exe create", |_, _| {
-        Err(RunError::TimedOut("sc".into()))
-    });
+    sys.on("sc create", |_, _| Err(RunError::TimedOut("sc".into())));
     assert!(b.register().is_err());
-    sys.answer("C:\\Windows\\System32\\sc.exe create", Output::code(0));
-    sys.answer("C:\\Windows\\System32\\sc.exe start", Output::code(1056));
+    sys.answer("sc create", Output::code(0));
+    sys.answer("sc start", Output::code(1056));
     assert!(b.register().is_ok(), "already running");
-    sys.answer("C:\\Windows\\System32\\sc.exe start", Output::code(1053));
+    sys.answer("sc start", Output::code(1053));
     assert!(b.register().is_err());
-    sys.on("C:\\Windows\\System32\\sc.exe start", |_, _| {
-        Err(RunError::TimedOut("sc".into()))
-    });
+    sys.on("sc start", |_, _| Err(RunError::TimedOut("sc".into())));
     assert!(b.register().is_err());
     // Inspect.
-    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::code(1060));
+    sys.answer("sc query", Output::code(1060));
     assert_eq!(b.inspect(), crate::backend::Inspection::absent());
     assert!(b.job_gone());
+    sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
     sys.answer(
-        "C:\\Windows\\System32\\sc.exe query",
-        Output::ok("STATE : 4  RUNNING"),
-    );
-    sys.answer(
-        "C:\\Windows\\System32\\sc.exe qc",
+        "sc qc",
         Output::ok(&format!(
             "START_TYPE : 2 AUTO_START\r\nBINARY_PATH_NAME : \"{exe}\" --service\r\n"
         )),
@@ -1124,48 +1368,54 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
         )
     );
     assert!(!b.job_gone());
-    sys.answer(
-        "C:\\Windows\\System32\\sc.exe qc",
-        Output::ok("START_TYPE : 4 DISABLED\r\n"),
-    );
+    sys.answer("sc qc", Output::ok("START_TYPE : 4 DISABLED\r\n"));
     assert_eq!(b.inspect().registration, Registration::SwitchedOff);
-    sys.answer(
-        "C:\\Windows\\System32\\sc.exe query",
-        Output::ok("STATE : 1  STOPPED"),
-    );
+    sys.answer("sc query", Output::ok("STATE : 1  STOPPED"));
     assert_eq!(b.inspect().job, Job::NotRunning);
     assert!(b.job_gone());
-    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::ok("garbage"));
+    sys.answer("sc query", Output::ok("garbage"));
     assert_eq!(b.inspect().job, Job::Unknown);
-    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::code(5));
+    sys.answer("sc query", Output::code(5));
     assert!(matches!(
         b.inspect().registration,
         Registration::Unavailable(_)
     ));
-    sys.on("C:\\Windows\\System32\\sc.exe query", |_, _| {
-        Err(RunError::NotStarted("sc".into()))
-    });
+    sys.on("sc query", |_, _| Err(RunError::NotStarted("sc".into())));
     assert!(matches!(
         b.inspect().registration,
         Registration::Unavailable(_)
     ));
     // Remove and stop.
     for (code, ok) in [(0, true), (1060, true), (1072, true), (5, false)] {
-        sys.answer("C:\\Windows\\System32\\sc.exe delete", Output::code(code));
+        sys.answer("sc delete", Output::code(code));
         assert_eq!(b.unregister().is_ok(), ok, "{code}");
     }
-    sys.on("C:\\Windows\\System32\\sc.exe delete", |_, _| {
-        Err(RunError::TimedOut("sc".into()))
-    });
+    sys.on("sc delete", |_, _| Err(RunError::TimedOut("sc".into())));
     assert!(b.unregister().is_err());
     for (code, ok) in [(0, true), (1062, true), (1060, true), (5, false)] {
-        sys.answer("C:\\Windows\\System32\\sc.exe stop", Output::code(code));
+        sys.answer("sc stop", Output::code(code));
         assert_eq!(b.evict().is_ok(), ok, "{code}");
     }
-    sys.on("C:\\Windows\\System32\\sc.exe stop", |_, _| {
-        Err(RunError::TimedOut("sc".into()))
-    });
+    sys.on("sc stop", |_, _| Err(RunError::TimedOut("sc".into())));
     assert!(b.evict().is_err());
+}
+
+/// An elevator that remembers the elevated install happened (the scripted SCM then reads this copy's program back).
+struct MarksInstalled(FakeElevator, Arc<std::sync::atomic::AtomicBool>);
+
+impl crate::port::Elevator for MarksInstalled {
+    fn run_elevated(
+        &mut self,
+        program: &Path,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<i32, RegisterError> {
+        let code = self.0.run_elevated(program, args, timeout)?;
+        if code == 0 && args == ["install"] {
+            self.1.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(code)
+    }
 }
 
 #[test]
@@ -1178,23 +1428,33 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
         .unwrap();
     let exe = PathBuf::from(r"C:\Program Files\Pitwall\pitwall-server.exe");
     sys.put_program(&exe);
+    sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
     sys.answer(
-        "C:\\Windows\\System32\\sc.exe query",
-        Output::ok("STATE : 4  RUNNING"),
-    );
-    sys.answer(
-        "C:\\Windows\\System32\\sc.exe qc",
+        "sc qc",
         Output::ok("BINARY_PATH_NAME : \"C:\\Other\\pitwall-server.exe\" --service\r\n"),
     );
     sys.put_program("C:\\Other\\pitwall-server.exe");
     let elevator = FakeElevator::new(&sys);
+    // The elevated install re-registers the service for this copy: the SCM reads it back as this program afterwards.
+    let installed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reset = installed.clone();
+    let here = format!("BINARY_PATH_NAME : \"{}\" --service\r\n", exe.display());
+    let flag = installed.clone();
+    sys.on("sc qc", move |_, _| {
+        Ok(Output::ok(
+            &if flag.load(std::sync::atomic::Ordering::SeqCst) {
+                here.clone()
+            } else {
+                "BINARY_PATH_NAME : \"C:\\Other\\pitwall-server.exe\" --service\r\n".to_string()
+            },
+        ))
+    });
     let b = ElevatedWindowsService::new(
         svc.clone(),
         exe.clone(),
         Box::new(sys.clone()),
-        Box::new(elevator.clone()),
-    )
-    .with_sc(SC_EXE);
+        Box::new(MarksInstalled(elevator.clone(), installed)),
+    );
     let mut m = Manager::new("Pitwall", Box::new(b), d.path(), LABEL, "1.0.0", || true);
     crate::record::RecordFile::new(d.path(), LABEL)
         .save("1.0.0", None)
@@ -1209,6 +1469,9 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
         changes(&sys),
         [format!("elevated {} install", exe.display())]
     );
+    // The service works now, so a request leaves it alone; the OS shows another copy's registration again for what follows.
+    assert_eq!(m.repair(&no_cancel()).unwrap(), RepairOutcome::Recovered);
+    reset.store(false, std::sync::atomic::Ordering::SeqCst);
     // Declined, failed.
     elevator.results([Err(RegisterError::Declined)]);
     assert!(matches!(
@@ -1221,29 +1484,25 @@ fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
     );
     // Uninstall: one elevated uninstall.
     sys.clear_calls();
-    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::code(1060));
+    sys.answer("sc query", Output::code(1060));
     m.uninstall().unwrap();
     assert_eq!(
         changes(&sys),
         [format!("elevated {} uninstall", exe.display())]
     );
     elevator.results([Err(RegisterError::Declined)]);
-    sys.answer(
-        "C:\\Windows\\System32\\sc.exe query",
-        Output::ok("STATE : 4  RUNNING"),
-    );
+    sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
     assert!(matches!(m.uninstall(), Err(ServiceError::Failed(e)) if e.contains("declined")));
     // The installer re-registered it for this version: only remembered.
     sys.answer(
-        "C:\\Windows\\System32\\sc.exe qc",
+        "sc qc",
         Output::ok(&format!(
             "BINARY_PATH_NAME : \"{}\" --service\r\n",
             exe.display()
         )),
     );
     let b =
-        ElevatedWindowsService::new(svc, exe.clone(), Box::new(sys.clone()), Box::new(elevator))
-            .with_sc(SC_EXE);
+        ElevatedWindowsService::new(svc, exe.clone(), Box::new(sys.clone()), Box::new(elevator));
     let mut m = Manager::new("Pitwall", Box::new(b), d.path(), LABEL, "1.0.1", || true);
     assert_eq!(m.on_start(&no_cancel()), Started::Marked);
 }
@@ -1402,15 +1661,11 @@ fn backend_contract_details() {
         .kind(Kind::SystemService)
         .build()
         .unwrap();
-    let mut ws = WindowsService::new(svc.clone(), Target::exe("C:\\p.exe"), Box::new(sys.clone()))
-        .with_sc(SC_EXE);
+    let mut ws = WindowsService::new(svc.clone(), Target::exe("C:\\p.exe"), Box::new(sys.clone()));
     assert_eq!(ws.mechanism(), Mechanism::WindowsService);
     assert!(ws.capabilities().automatic);
-    sys.answer(
-        "C:\\Windows\\System32\\sc.exe query",
-        Output::ok("STATE : 4  RUNNING"),
-    );
-    sys.answer("C:\\Windows\\System32\\sc.exe qc", Output::code(5));
+    sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
+    sys.answer("sc qc", Output::code(5));
     let i = ws.inspect();
     assert_eq!(
         (i.registration, i.job, i.program),
@@ -1422,12 +1677,11 @@ fn backend_contract_details() {
         "C:\\p.exe".into(),
         Box::new(sys.clone()),
         Box::new(FakeElevator::new(&sys)),
-    )
-    .with_sc(SC_EXE);
+    );
     assert!(el.register().is_ok() && el.evict().is_ok());
     assert_eq!(el.mechanism(), Mechanism::WindowsService);
     assert!(!el.capabilities().automatic);
-    sys.answer("C:\\Windows\\System32\\sc.exe query", Output::code(1060));
+    sys.answer("sc query", Output::code(1060));
     assert!(el.job_gone());
 }
 
@@ -1440,10 +1694,13 @@ fn manager_contract_details() {
     assert_eq!(m.check(), crate::plan::Plan::Replace(Reason::Refused));
     // A repair that already works (in another thread of this app) makes the next one wait.
     let t = m.tracker();
-    assert!(t.start(std::time::Instant::now()));
+    assert!(t.start(paddock_health::SystemClock.monotonic()));
     assert_eq!(m.on_start(&no_cancel()), Started::Busy);
     assert!(matches!(m.uninstall(), Err(ServiceError::Busy)));
-    t.finish(&RepairOutcome::Cancelled, std::time::Instant::now());
+    t.finish(
+        &RepairOutcome::Cancelled,
+        paddock_health::SystemClock.monotonic(),
+    );
     // The state file was written by a newer app: the repair works, the version is not overwritten (and says so in the log).
     std::fs::write(
         d.path().join(format!("service-{LABEL}.json")),
@@ -1451,10 +1708,16 @@ fn manager_contract_details() {
     )
     .unwrap();
     let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4");
+    // Nothing is changed that cannot be recorded (no OS call without a durable write): the start says so and holds.
     assert!(matches!(
         m.on_start(&no_cancel()),
-        Started::Repaired(Reason::Refused, RepairOutcome::Recovered)
+        Started::Left(Hold::RecordUnavailable(_))
     ));
+    // The user's own request goes on (loudly) without a record.
+    assert!(
+        matches!(m.repair(&no_cancel()), Err(ServiceError::Failed(_))),
+        "an unwritable record changes nothing"
+    );
     assert!(
         std::fs::read_to_string(d.path().join(format!("service-{LABEL}.json")))
             .unwrap()
@@ -1487,7 +1750,13 @@ fn manager_contract_details() {
         "1.0.0",
         || false,
     );
+    sys.clear_calls();
     m.uninstall().unwrap();
+    assert!(
+        !sys.calls().iter().any(|c| matches!(c, Call::Pause(_))),
+        "a job that is gone is not waited for: {:?}",
+        sys.calls()
+    );
     // A job that never stops is waited for a bounded time.
     sys.answer("systemctl --user is-active", Output::ok("active\n"));
     sys.clear_calls();
@@ -1506,210 +1775,180 @@ fn manager_contract_details() {
     assert_eq!(paused, Timings::default().gone_wait);
 }
 
-// ------------------------------------------------------------------------------------------------ start watch
-
-/// A manager over the bundled backend whose `launchctl print` follows `print` (called with the number of looks so far)
-/// and whose service answers from the `answers_after`th ask.
-fn watched_manager(
-    sys: &FakeSystem,
-    dir: &Path,
-    print: impl Fn(u32) -> Output + Send + 'static,
-    answers_after: u32,
-    watch: bool,
-) -> Manager {
-    let looks = Arc::new(Mutex::new(0u32));
-    let l = looks.clone();
-    sys.on("/bin/launchctl print gui", move |_, _| {
-        let mut n = l.lock().unwrap();
-        *n += 1;
-        Ok(print(*n))
-    });
-    let app = FakeAppService::new(sys);
-    let backend = LaunchdBundled::new(pitwall(), 501, Box::new(app), Box::new(sys.clone()));
-    let asked = Arc::new(Mutex::new(0u32));
-    let m = Manager::new(
-        "Pitwall",
-        Box::new(backend),
-        dir,
-        LABEL,
-        "1.0.4",
-        move || {
-            let mut a = asked.lock().unwrap();
-            *a += 1;
-            *a > answers_after
-        },
-    );
-    if watch {
-        m.with_start_watch(Box::new(crate::StartWait::new()))
-    } else {
-        m
-    }
-}
-
-fn pending_print() -> Output {
-    Output::ok("\tstate = spawn scheduled\n\truns = 1\n\tproperties = keepalive | has LWCR\n")
-}
-
 #[test]
-fn a_late_start_is_waited_for_past_the_old_fixed_limit_only_with_a_watch() {
-    // launchd needs about 4 minutes to start the job (about 80 polls of 3 s); the old fixed wait gave up after 2.
-    let late = |n: u32| {
-        if n < 100 {
-            pending_print()
-        } else {
-            Output::ok(
-                "\tstate = running\n\tpid = 41\n\truns = 1\n\tproperties = keepalive | has LWCR\n",
-            )
-        }
-    };
-    let d = tempfile::tempdir().unwrap();
-    let sys = FakeSystem::new();
-    sys.set_cpu_time(41, Duration::from_secs(1));
-    let mut m = watched_manager(&sys, d.path(), late, 90, false);
-    assert_eq!(m.install(&no_cancel()).unwrap(), RepairOutcome::Registered);
-    let d = tempfile::tempdir().unwrap();
-    let sys = FakeSystem::new();
-    sys.set_cpu_time(41, Duration::from_secs(1));
-    let mut m = watched_manager(&sys, d.path(), late, 90, true);
-    assert_eq!(m.install(&no_cancel()).unwrap(), RepairOutcome::Recovered);
-    assert!(sys.now() > Timings::default().start_wait, "{:?}", sys.now());
-}
-
-#[test]
-fn a_crash_looping_job_fails_the_repair_early_with_what_launchd_said() {
-    let looping = |n: u32| {
-        Output::ok(&format!(
-            "\tstate = not running\n\truns = {}\n\tlast exit code = 3\n\tproperties = keepalive | has LWCR\n",
-            n
-        ))
-    };
-    let d = tempfile::tempdir().unwrap();
-    let sys = FakeSystem::new();
-    let mut m = watched_manager(&sys, d.path(), looping, u32::MAX, true);
-    let Err(ServiceError::Failed(why)) = m.install(&no_cancel()) else {
-        panic!()
-    };
-    assert!(
-        why.contains("keeps exiting") && why.contains("last exit code 3"),
-        "{why}"
-    );
-    assert!(sys.now() < Duration::from_secs(60), "{:?}", sys.now());
-}
-
-#[test]
-fn a_launchctl_that_cannot_be_asked_is_not_a_job_that_is_gone() {
-    let d = tempfile::tempdir().unwrap();
-    let sys = FakeSystem::new();
-    let slow = |n: u32| {
-        // The first 70 looks fail (a timeout shows as a non-zero exit), then the job runs.
-        if n < 70 {
-            Output::code(1)
-        } else {
-            Output::ok("\tstate = running\n\tpid = 41\n")
-        }
-    };
-    sys.set_cpu_time(41, Duration::from_secs(1));
-    let mut m = watched_manager(&sys, d.path(), slow, 60, true);
-    assert_eq!(m.install(&no_cancel()).unwrap(), RepairOutcome::Recovered);
-}
-
-#[test]
-fn the_other_backends_cannot_observe_a_start_and_keep_the_fixed_wait() {
+fn a_systemd_unit_registered_over_another_text_is_restarted_and_over_the_same_text_is_not() {
     use crate::backend::Backend;
     let sys = FakeSystem::new();
-    assert!(systemd(&sys, "/p").observe_start().is_none());
-    let mut win = WindowsRun::new(pitwall(), Target::exe("C:\\p.exe"), Box::new(sys.clone()));
-    assert!(win.observe_start().is_none());
-}
-
-#[test]
-fn a_launchd_file_job_is_observed_with_its_pid_runs_exit_and_cpu() {
-    use crate::backend::{Backend, Job};
-    let sys = FakeSystem::new();
-    sys.answer(
-        "/bin/launchctl print gui",
-        Output::ok("\tstate = running\n\tpid = 41\n\truns = 2\n\tlast exit code = 3\n"),
-    );
-    sys.set_cpu_time(41, Duration::from_millis(1500));
-    let mut b = LaunchdFile::new(
-        pitwall(),
-        501,
-        PathBuf::from("/p.plist"),
-        Target::exe("/p"),
-        Box::new(sys.clone()),
-    );
-    let f = b.observe_start().unwrap();
-    assert_eq!(
-        (f.job, f.pid, f.runs, f.last_exit, f.cpu),
-        (
-            Job::Running,
-            Some(41),
-            Some(2),
-            Some(3),
-            Some(Duration::from_millis(1500))
-        )
-    );
-    // Not running: no CPU is read (the pid of a past run is not asked about).
-    sys.answer(
-        "/bin/launchctl print gui",
-        Output::ok("\tstate = waiting\n\tpid = 41\n"),
-    );
-    assert_eq!(b.observe_start().unwrap().cpu, None);
-    // Not answerable: unknown, not gone.
-    sys.answer("/bin/launchctl print gui", Output::code(1));
-    assert_eq!(b.observe_start().unwrap().job, Job::Unknown);
-}
-
-#[test]
-fn the_windows_service_runs_sc_by_full_path_by_default() {
-    let sys = FakeSystem::new();
-    let svc = ServiceSpec::builder(
-        "net.decryptology.pitwall.service",
-        "Pitwall",
-        "pitwall-server",
-    )
-    .kind(Kind::SystemService)
-    .build()
-    .unwrap();
-    let mut ws = WindowsService::new(svc, Target::exe("C:\\p.exe"), Box::new(sys.clone()));
-    crate::backend::Backend::inspect(&mut ws);
-    let cmds = sys.commands();
-    assert!(
-        cmds.len() == 2
-            && cmds
-                .iter()
-                .all(|c| c.to_ascii_lowercase().contains(r"\system32\sc.exe ")),
-        "{cmds:?}"
-    );
-}
-
-#[test]
-fn a_job_with_flat_cpu_is_waited_for_when_its_process_is_stopped_or_unreadable_and_fails_when_it_runs()
- {
-    use paddock_proc::RunState;
-    let flat = |_: u32| {
-        Output::ok(
-            "\tstate = running\n\tpid = 41\n\truns = 1\n\tproperties = keepalive | has LWCR\n",
-        )
+    sys.put_program("/usr/bin/pitwall-server");
+    let mut b = systemd(&sys, "/usr/bin/pitwall-server");
+    let text = b.definition();
+    let restarts = |sys: &FakeSystem| {
+        changes(sys)
+            .iter()
+            .filter(|c| c.contains("restart"))
+            .count()
     };
-    let run = |state: Option<RunState>| {
+    // Another text was there: the running service still has the old program, so registering restarts it.
+    sys.put_file(unit_path(), "[Service]\nExecStart=/old\n");
+    let _ = b.register();
+    assert_eq!(restarts(&sys), 1, "{:?}", changes(&sys));
+    assert_eq!(sys.file(&unit_path()).unwrap(), text);
+    // The same text: nothing changed, nothing to restart.
+    sys.clear_calls();
+    let _ = b.register();
+    assert_eq!(restarts(&sys), 0, "{:?}", changes(&sys));
+    // No unit before: nothing runs the old program either.
+    let sys2 = FakeSystem::new();
+    sys2.put_program("/usr/bin/pitwall-server");
+    let mut c = systemd(&sys2, "/usr/bin/pitwall-server");
+    let _ = c.register();
+    assert_eq!(restarts(&sys2), 0, "{:?}", changes(&sys2));
+}
+
+#[test]
+fn a_run_value_replaced_by_another_copy_stops_the_agent_the_old_value_started() {
+    use crate::backend::Backend;
+    let sys = FakeSystem::new();
+    let old = r"C:\Program Files\Dyno\old\dyno.exe";
+    let new = r"C:\Program Files\Dyno\new\dyno.exe";
+    sys.put_program(old);
+    sys.put_program(new);
+    sys.emulate_run_registry();
+    let mut first = WindowsRun::new(dyno(), Target::exe(old), Box::new(sys.clone()));
+    first.register().unwrap();
+    sys.clear_calls();
+    let mut second = WindowsRun::new(dyno(), Target::exe(new), Box::new(sys.clone()));
+    second.register().unwrap();
+    let stops: Vec<String> = sys
+        .calls()
+        .into_iter()
+        .filter_map(|c| match c {
+            Call::Run(s) if s.starts_with(old) => Some(s),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        stops,
+        [format!("{old} stop")],
+        "the old agent is asked to stop once the new value is written"
+    );
+}
+
+#[test]
+fn a_cancelled_replace_puts_the_record_back_even_when_it_held_another_versions_attempt() {
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, Some(1));
+    let sys = FakeSystem::new();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4");
+    let before = crate::record::State::Attempting {
+        version: "1.0.3".into(),
+        attempts: 1,
+        phase: crate::record::Phase::Awaiting,
+    };
+    crate::record::RecordFile::new(d.path(), LABEL)
+        .save("1.0.3", None)
+        .unwrap();
+    crate::record::RecordFile::new(d.path(), LABEL)
+        .set_state(before.clone())
+        .unwrap();
+    let cancel = AtomicBool::new(true);
+    assert_eq!(
+        m.on_start(&cancel),
+        Started::Repaired(Reason::Refused, RepairOutcome::Cancelled)
+    );
+    assert_eq!(
+        m.recorded().state,
+        before,
+        "a cancel before anything was changed leaves the record as it was"
+    );
+    assert!(changes(&sys).is_empty());
+}
+
+#[test]
+fn a_failed_register_is_recorded_as_such_the_moment_it_fails() {
+    use crate::record::{FailKind, Phase, RecordFile, State};
+    // A disk that fills up part-way: whatever write number it stops at, the last record written says what happened.
+    let mut seen_failed = false;
+    for allowed_writes in 1..10 {
         let d = tempfile::tempdir().unwrap();
+        let sim = launchd(2, Some(1));
+        sim.lock().unwrap().register_error = Some(RegisterError::Other("denied".into()));
         let sys = FakeSystem::new();
-        sys.set_cpu_time(41, Duration::from_secs(1));
-        if let Some(s) = state {
-            sys.set_run_state(41, s);
+        let record = RecordFile::memory();
+        let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+        record.mark("1.0.3", None).unwrap();
+        record
+            .memory_handle()
+            .unwrap()
+            .fail_writes_after(allowed_writes);
+        let _ = m.on_start(&no_cancel());
+        if matches!(
+            record.load().state,
+            State::Attempting {
+                phase: Phase::RegisterFailed(FailKind::Other),
+                ..
+            }
+        ) {
+            seen_failed = true;
         }
-        // The service answers on the 100th ask, far past the idle patience (20 polls) of a flat CPU time.
-        let mut m = watched_manager(&sys, d.path(), flat, 100, true);
-        m.install(&no_cancel())
-    };
-    assert_eq!(
-        run(Some(RunState::Stopped)).unwrap(),
-        RepairOutcome::Recovered
+    }
+    assert!(
+        seen_failed,
+        "a register that failed is on record before the next step begins"
     );
-    assert_eq!(run(None).unwrap(), RepairOutcome::Recovered);
-    let Err(ServiceError::Failed(why)) = run(Some(RunState::Running)) else {
-        panic!()
-    };
-    assert!(why.contains("done nothing"), "{why}");
+}
+
+#[test]
+fn what_this_version_registered_and_waited_for_is_recorded_as_its_own_when_it_is_replaced() {
+    use crate::record::{Phase, RecordFile, State};
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, Some(2));
+    let sys = FakeSystem::new();
+    let record = RecordFile::memory();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+    // This version registered it and waits (the record names no registered version); the user asks for a repair.
+    record
+        .set_state(State::Attempting {
+            version: "1.0.4".into(),
+            attempts: 1,
+            phase: Phase::Awaiting,
+        })
+        .unwrap();
+    // One write is allowed: the first state of the replace. Nothing else is written, so nothing else is done.
+    record.memory_handle().unwrap().fail_writes_after(1);
+    let _ = m.install(&no_cancel());
+    assert!(
+        matches!(
+            record.load().state,
+            State::Attempting {
+                phase: Phase::RemovingOld { ours: true, .. },
+                ..
+            }
+        ),
+        "{:?}",
+        record.load().state
+    );
+}
+
+#[test]
+fn a_first_registration_with_nothing_to_remove_starts_at_registering_not_at_a_removal() {
+    use crate::record::{Phase, RecordFile, State};
+    let d = tempfile::tempdir().unwrap();
+    let sim = launchd(2, None);
+    let sys = FakeSystem::new();
+    let record = RecordFile::memory();
+    let mut m = mac_manager(&sim, &sys, d.path(), "1.0.4").with_record(record.reopen());
+    record.memory_handle().unwrap().fail_writes_after(1);
+    let _ = m.install(&no_cancel());
+    assert!(
+        matches!(
+            record.load().state,
+            State::Attempting {
+                phase: Phase::Registering,
+                ..
+            }
+        ),
+        "{:?}",
+        record.load().state
+    );
 }

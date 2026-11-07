@@ -1,7 +1,7 @@
 import { Component, input } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, provideRouter, Router } from '@angular/router';
-import type { JobOutput, MaintenanceSettings, SleepReport } from '../../core/api.types';
+import type { JobOutput, MaintenanceSettings, ReadVia, SleepReport } from '../../core/api.types';
 import { mockBoot, mockSoftware, mockUsage } from '../../core/mock/extras';
 import { BACKEND } from '../../core/backend';
 import type { MockBackend } from '../../core/mock-backend';
@@ -59,6 +59,21 @@ const clickTab = async (f: Parameters<typeof settle>[0], el: HTMLElement, text: 
 const returns = (mock: MockBackend, output: JobOutput) => vi.spyOn(mock, 'jobResult').mockResolvedValue(output);
 
 describe('dy-extras-page', () => {
+  it('shows the software list an earlier run saved at once, with its age, and Refresh has the fresh one', async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
+    const { f, el, store } = render('inventory', { savedListsAgeMs: 3 * 3_600_000 });
+    await settle(f);
+    expect(store.software().data!.savedAt).toBe(NOW - 3 * 3_600_000);
+    const note = el.querySelector('[data-testid="saved-list"]')!.textContent!.replace(/\s+/g, ' ');
+    expect(note).toContain('Last known list, read 3 h ago.');
+    expect(el.textContent).toContain('Visual Studio Code');
+    btn(el, 'Refresh').click();
+    await settle(f);
+    expect(store.software().data!.savedAt).toBeNull();
+    expect(el.querySelector('[data-testid="saved-list"]')).toBeNull();
+    vi.useRealTimers();
+  });
+
   it('has the eight tabs in a tablist, opens What changed first, and reads each tab only when opened', async () => {
     const { f, el, mock } = render();
     const spy = vi.spyOn(mock, 'startJob');
@@ -136,7 +151,7 @@ describe('dy-extras-page', () => {
     expect(el.textContent).toContain('Video call in progress');
     expect(el.textContent).toContain('42 min 17 s');
     expect(rowsOf(el, 'Recent wakes').length).toBe(5);
-    const report: SleepReport = { blockers: [], wakes: [], blockersUnavailable: 'pmset is not available here.', wakesUnavailable: null };
+    const report: SleepReport = { blockers: [], wakes: [], blockersUnavailable: 'pmset is not available here.', wakesUnavailable: null, blockersVia: 'local' };
     returns(mock, { sleep: report });
     await TestBed.inject(ExtrasStore).reload('sleep');
     await settle(f);
@@ -147,6 +162,25 @@ describe('dy-extras-page', () => {
     await settle(f);
     expect(el.textContent).toContain('Nothing is keeping this computer awake');
     expect(el.textContent).toContain('No log.');
+  });
+
+  it('Sleep: the reading source says who read the blockers, and when the helper would the reason is said once with the button', async () => {
+    const { f, el, mock } = render('sleep');
+    await settle(f);
+    const report: SleepReport = { blockers: [], wakes: [], blockersUnavailable: null, wakesUnavailable: null, blockersVia: 'helper' };
+    returns(mock, { sleep: report });
+    await TestBed.inject(ExtrasStore).reload('sleep');
+    await settle(f);
+    expect(el.querySelector('[data-testid="reading-source-helper"]')?.textContent).toContain('administrator helper');
+    const reason = 'Windows only lets an administrator list what keeps it awake.';
+    const via: ReadVia = { needsHelper: { reason, next: { openSettings: 'helper' } } };
+    returns(mock, { sleep: { ...report, blockersUnavailable: `${reason} Turn on Administrator readings in Settings so the helper can read this.`, blockersVia: via } });
+    await TestBed.inject(ExtrasStore).reload('sleep');
+    await settle(f);
+    expect(el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain(reason);
+    expect(el.querySelector('[data-testid="reading-source-turn-on"]')?.textContent).toContain('Turn on administrator readings');
+    expect(el.querySelectorAll('.none')[0]?.querySelector('span')).toBeNull();
+    expect(el.textContent?.split(reason).length).toBe(2);
   });
 
   it('Boot: last start-up, verdict, what slowed it and a note when steps are unavailable', async () => {
@@ -253,11 +287,11 @@ describe('dy-extras-page', () => {
     await store.reload('inventory');
     await settle(f);
     expect(el.textContent).toContain('more packages than Dyno lists');
-    returns(mock, { software: { items: [], truncated: false, unavailable: 'No package manager.' } });
+    returns(mock, { software: { items: [], truncated: false, unavailable: 'No package manager.', savedAt: null } });
     await store.reload('inventory');
     await settle(f);
     expect(el.querySelector('.none')!.textContent).toContain('No package manager.');
-    returns(mock, { software: { items: [], truncated: false, unavailable: null } });
+    returns(mock, { software: { items: [], truncated: false, unavailable: null, savedAt: null } });
     await store.reload('inventory');
     await settle(f);
     expect(el.querySelector('.none strong')!.textContent).toBe('No software found');
@@ -311,7 +345,7 @@ describe('dy-extras-page', () => {
     await settle(f);
     btn(el, '1 GB').click();
     await settle(f);
-    expect(store.minMib()).toBe(1024);
+    expect(store.minMb()).toBe(1000);
     expect(el.querySelector('.none strong')).toBeNull();
     const limit = { limit: 'files' as const, message: 'Stopped after 500000 files and folders. Choose a smaller folder to see everything in it.' };
     vi.spyOn(mock, 'jobResult').mockResolvedValue({ finder: { scanId: 's', folder: '/x', large: [], duplicates: [], scanned: 10, unreadable: 0, limit, wastedBytes: 0 } });

@@ -1,15 +1,27 @@
 //! macOS: the launch agent inside the app bundle registered through `SMAppService` ([`LaunchdBundled`]), and a plist
 //! file loaded with `launchctl bootstrap` ([`LaunchdFile`], development builds and launch daemons). Both read launchd's
 //! own report (`launchctl print`, `print-disabled`) to see a stale registration (R03) and the user's switch.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
-use super::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, StartFacts, Target};
+use super::{
+    Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
+    Registration, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError, as_written,
+    with_failure,
+};
 use crate::launchctl::{bootout, job_report};
 use crate::parse::{JobReport, parse_print_disabled, plist_program};
 use crate::paths::{LAUNCHCTL, launchd_domain, launchd_target};
 use crate::port::{AppService, AppServiceStatus, RegisterError, System};
 use crate::render::{LaunchdProgram, launchd_plist};
 use crate::spec::ServiceSpec;
-use paddock_proc::RunState;
+use crate::stop::StopMechanism;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -19,37 +31,69 @@ fn job_of(report: Option<JobReport>) -> Job {
         Some(r) if !r.found => Job::Absent,
         Some(r) if r.stale() => Job::Refused,
         Some(r) if r.running => Job::Running,
-        Some(_) => Job::NotRunning,
+        Some(r) => with_failure(Job::NotRunning, last_exit_of(&r)),
+    }
+}
+
+/// How launchd says the job's last process ended: the terminating signal when it names one, else the exit code (`None`
+/// before the first exit).
+fn last_exit_of(report: &JobReport) -> Option<LastExit> {
+    match (report.signal, report.last_exit_code) {
+        (Some(signal), _) => Some(LastExit::Signal(signal)),
+        (None, Some(code)) => Some(LastExit::Code(code)),
+        (None, None) => None,
+    }
+}
+
+/// Everything the report says: the job, how its last process ended and how often launchd restarted it (`runs` minus
+/// the first start).
+fn look_at(report: Option<JobReport>) -> (Job, Option<LastExit>, Option<u32>) {
+    let last_exit = report.as_ref().and_then(last_exit_of);
+    let restarts = report
+        .and_then(|r| r.runs)
+        .map(|runs| runs.saturating_sub(1));
+    (job_of(report), last_exit, restarts)
+}
+
+/// What launchd's override database says about the label: listed disabled or enabled, not listed, or could not be read
+/// (the tool failed or timed out: that is not "switched on").
+fn disabled_mark(sys: &mut dyn System, domain: &str, label: &str) -> DisabledMark {
+    let out = match sys.run(LAUNCHCTL, &["print-disabled", domain]) {
+        Ok(out) if out.success() => out,
+        _ => return DisabledMark::Unreadable,
+    };
+    match parse_print_disabled(&out.stdout, label) {
+        Some(true) => DisabledMark::Disabled,
+        Some(false) => DisabledMark::Enabled,
+        None => DisabledMark::NotListed,
     }
 }
 
 /// Whether launchd's override database marks the label disabled (`None`: not listed or not readable).
 fn disabled(sys: &mut dyn System, domain: &str, label: &str) -> Option<bool> {
-    let out = sys.run(LAUNCHCTL, &["print-disabled", domain]).ok()?;
-    if !out.success() {
-        return None;
-    }
-    parse_print_disabled(&out.stdout, label)
+    disabled_mark(sys, domain, label).as_option()
+}
+
+/// The launchd job a stop names, while launchd holds it.
+fn stop_of(sys: &mut dyn System, target: String) -> Option<StopMechanism> {
+    job_report(sys, &target)
+        .is_some_and(|r| r.found)
+        .then_some(StopMechanism::Launchd { target })
+}
+
+/// The process launchd runs for the job (`pid =` of `launchctl print`), by identity; `None` when none runs or it cannot be read.
+fn process_of(sys: &mut dyn System, target: &str) -> Option<paddock_proc::ProcessId> {
+    let pid = job_report(sys, target).and_then(|r| r.pid)?;
+    sys.process(pid)
+}
+
+/// Whether launchd holds the job (a job that could not be asked about is not found).
+fn held(sys: &mut dyn System, target: &str) -> bool {
+    job_report(sys, target).is_some_and(|r| r.found)
 }
 
 fn gone(sys: &mut dyn System, target: &str) -> bool {
     job_report(sys, target).is_some_and(|r| !r.found)
-}
-
-/// What launchd says about a starting job (one `launchctl print`), plus the CPU time of its process while it runs.
-fn start_facts(sys: &mut dyn System, target: &str) -> StartFacts {
-    let Some(report) = job_report(sys, target) else {
-        return StartFacts::unknown();
-    };
-    let running_pid = report.pid.filter(|_| report.running);
-    StartFacts {
-        job: job_of(Some(report)),
-        pid: report.pid,
-        runs: report.runs,
-        last_exit: report.last_exit_code,
-        cpu: running_pid.and_then(|pid| sys.cpu_time(pid)),
-        run_state: running_pid.map_or(RunState::Unknown, |pid| sys.run_state(pid)),
-    }
 }
 
 /// The launch agent inside the app bundle (`Contents/Library/LaunchAgents/<label>.plist`, rendered by
@@ -60,6 +104,10 @@ pub struct LaunchdBundled {
     uid: u32,
     app: Box<dyn AppService>,
     sys: Box<dyn System>,
+    /// The program this copy registers, and the program the record says the registration was made for (ADR 0056 section 8:
+    /// `SMAppService` does not say which copy it holds, so the identity comes from the record).
+    own: Option<String>,
+    registered: Option<String>,
 }
 
 impl LaunchdBundled {
@@ -75,7 +123,26 @@ impl LaunchdBundled {
             uid,
             app,
             sys,
+            own: None,
+            registered: None,
         }
+    }
+
+    /// Which copy the registration is for: its program, whether that is still there, and whether it is this copy's.
+    /// Unknown (`None`) when the record names no program (a Dyno 1.0.0 install) or nothing is registered.
+    fn identity(
+        &mut self,
+        registration: &Registration,
+    ) -> (Option<String>, Option<bool>, Option<bool>) {
+        if matches!(registration, Registration::Absent) {
+            return (None, None, None);
+        }
+        let Some(registered) = self.registered.clone() else {
+            return (None, None, None);
+        };
+        let exists = self.sys.is_program(std::path::Path::new(&registered));
+        let here = self.own.as_ref().map(|own| *own == registered);
+        (Some(registered), Some(exists), here)
     }
 
     fn target(&self) -> String {
@@ -99,7 +166,8 @@ impl Backend for LaunchdBundled {
     fn inspect(&mut self) -> Inspection {
         let status = self.app.status();
         let domain = launchd_domain(self.spec.kind(), self.uid);
-        let off = disabled(self.sys.as_mut(), &domain, self.spec.label()) == Some(true);
+        let mark = disabled_mark(self.sys.as_mut(), &domain, self.spec.label());
+        let off = mark == DisabledMark::Disabled;
         let registration = match status {
             AppServiceStatus::RequiresApproval => Registration::NeedsApproval,
             _ if off => Registration::SwitchedOff,
@@ -110,19 +178,41 @@ impl Backend for LaunchdBundled {
             AppServiceStatus::Enabled => Registration::Registered,
         };
         let target = self.target();
+        let (job, last_exit, restarts) = look_at(job_report(self.sys.as_mut(), &target));
+        let (program, program_exists, points_here) = self.identity(&registration);
         Inspection {
             registration,
-            job: job_of(job_report(self.sys.as_mut(), &target)),
+            job,
+            program,
+            program_exists,
+            points_here,
+            last_exit,
+            restarts,
+            login_item: Some(LoginItemFacts { status, mark }),
             ..Inspection::absent()
         }
     }
 
-    fn register(&mut self) -> Result<(), RegisterError> {
-        self.app.register()
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
+        self.app.register()?;
+        // What the OS holds now is this copy's: the record learns it with the next look; this read-back must not call it
+        // another copy's.
+        if self.own.is_some() {
+            self.registered.clone_from(&self.own);
+        }
+        let after = self.inspect();
+        log::info!(registration:? = after.registration, job:? = after.job; "launchd: bundled agent registered, read back");
+        as_written(after, true)
     }
 
-    fn unregister(&mut self) -> Result<(), String> {
-        self.app.unregister()
+    fn know_copy(&mut self, own: Option<&str>, registered: Option<&str>) {
+        self.own = own.map(str::to_string);
+        self.registered = registered.map(str::to_string);
+    }
+
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
+        self.app.unregister().map_err(UnregisterError::Failed)?;
+        Ok(self.inspect())
     }
 
     fn evict(&mut self) -> Result<(), String> {
@@ -135,11 +225,6 @@ impl Backend for LaunchdBundled {
         gone(self.sys.as_mut(), &target)
     }
 
-    fn observe_start(&mut self) -> Option<StartFacts> {
-        let target = self.target();
-        Some(start_facts(self.sys.as_mut(), &target))
-    }
-
     fn pause(&mut self, how_long: Duration) {
         self.sys.pause(how_long);
     }
@@ -147,6 +232,21 @@ impl Backend for LaunchdBundled {
     fn open_login_items(&mut self) -> bool {
         self.app.open_login_items();
         true
+    }
+
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        let target = self.target();
+        process_of(self.sys.as_mut(), &target)
+    }
+
+    fn job_found(&mut self) -> bool {
+        let target = self.target();
+        held(self.sys.as_mut(), &target)
+    }
+
+    fn stop_mechanism(&mut self) -> Option<StopMechanism> {
+        let target = self.target();
+        stop_of(self.sys.as_mut(), target)
     }
 }
 
@@ -223,12 +323,14 @@ impl Backend for LaunchdFile {
 
     fn inspect(&mut self) -> Inspection {
         let target = self.launchd_target();
-        let job = job_of(job_report(self.sys.as_mut(), &target));
+        let (job, last_exit, restarts) = look_at(job_report(self.sys.as_mut(), &target));
         let text = match self.sys.read(&self.plist) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Inspection {
                     job,
+                    last_exit,
+                    restarts,
                     ..Inspection::absent()
                 };
             }
@@ -239,6 +341,8 @@ impl Backend for LaunchdFile {
                         self.plist.display()
                     )),
                     job,
+                    last_exit,
+                    restarts,
                     ..Inspection::absent()
                 };
             }
@@ -260,10 +364,22 @@ impl Backend for LaunchdFile {
             program,
             program_exists,
             definition_current: Some(text == self.definition()),
+            last_exit,
+            restarts,
+            unit: Some(UnitFile {
+                path: self.plist.clone(),
+                origin: UnitOrigin::Admin,
+                enabled: if off {
+                    UnitFileState::Disabled
+                } else {
+                    UnitFileState::Enabled
+                },
+            }),
+            login_item: None,
         }
     }
 
-    fn register(&mut self) -> Result<(), RegisterError> {
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
         let text = self.definition();
         if let Err(e) = self.sys.write(&self.plist, &text) {
             return Err(if e.kind() == std::io::ErrorKind::PermissionDenied {
@@ -278,7 +394,11 @@ impl Backend for LaunchdFile {
         let domain = launchd_domain(self.spec.kind(), self.uid);
         let plist = self.plist.to_string_lossy().into_owned();
         match self.sys.run(LAUNCHCTL, &["bootstrap", &domain, &plist]) {
-            Ok(o) if o.success() => Ok(()),
+            Ok(o) if o.success() => {
+                let after = self.inspect();
+                log::info!(registration:? = after.registration, job:? = after.job; "launchd: plist bootstrapped, read back");
+                as_written(after, true)
+            }
             Ok(o) if denied(&o.stderr) => Err(RegisterError::NeedsElevation),
             Ok(o) => Err(RegisterError::Other(format!(
                 "launchctl bootstrap: {}",
@@ -288,15 +408,18 @@ impl Backend for LaunchdFile {
         }
     }
 
-    fn unregister(&mut self) -> Result<(), String> {
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         match self.sys.remove(&self.plist) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(format!(
-                "{} could not be removed: {e}",
-                self.plist.display()
-            )),
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(UnregisterError::Failed(format!(
+                    "{} could not be removed: {e}",
+                    self.plist.display()
+                )));
+            }
         }
+        Ok(self.inspect())
     }
 
     fn evict(&mut self) -> Result<(), String> {
@@ -309,16 +432,26 @@ impl Backend for LaunchdFile {
         gone(self.sys.as_mut(), &target)
     }
 
-    fn observe_start(&mut self) -> Option<StartFacts> {
-        let target = self.launchd_target();
-        Some(start_facts(self.sys.as_mut(), &target))
-    }
-
     fn pause(&mut self, how_long: Duration) {
         self.sys.pause(how_long);
     }
 
     fn definition(&self) -> Option<String> {
         Some(Self::definition(self))
+    }
+
+    fn job_process(&mut self) -> Option<paddock_proc::ProcessId> {
+        let target = self.launchd_target();
+        process_of(self.sys.as_mut(), &target)
+    }
+
+    fn job_found(&mut self) -> bool {
+        let target = self.launchd_target();
+        held(self.sys.as_mut(), &target)
+    }
+
+    fn stop_mechanism(&mut self) -> Option<StopMechanism> {
+        let target = self.launchd_target();
+        stop_of(self.sys.as_mut(), target)
     }
 }

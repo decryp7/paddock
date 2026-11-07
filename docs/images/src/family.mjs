@@ -4,13 +4,15 @@
 export const CODEBASE_TOOL = 'Pacenotes';
 
 // Status chip per app on the hero and the app posters (README and ecosystem tables use the same wording by hand). To flip a status,
-// edit it here and regenerate. tone: ok | soon | dev | design.
+// edit it here and regenerate. tone: ok | soon | dev | design | muted (posters only: a dropped item).
 export const STATUS = {
   pitcrew: { text: 'v1.0.1', tone: 'ok' },
   pitwall: { text: 'v1.0.3', tone: 'ok' },
   debrief: { text: 'v1.1.1', tone: 'ok' },
   spotter: { text: 'In development', tone: 'dev' },
-  dyno: { text: 'In development', tone: 'dev' },
+  dyno: { text: 'v1.0.0, 1.1.0 in progress', tone: 'ok' },
   sighter: { text: 'Planned', tone: 'design' },
   pacenotes: { text: 'Planned', tone: 'design' },
+  recce: { text: 'Planned', tone: 'design' },
+  scrutineer: { text: 'Dropped', tone: 'muted' },
 };

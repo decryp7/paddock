@@ -10,7 +10,7 @@ fn the_build_leaves_no_empty_sidecar_in_the_build_folder() {
     let exe = std::env::current_exe().unwrap();
     let profile_dir = exe.parent().and_then(std::path::Path::parent).unwrap();
     let ext = if cfg!(windows) { ".exe" } else { "" };
-    for name in ["dyno", "dyno-agent"] {
+    for name in ["dyno", "dyno-agent", "dyno-bench"] {
         let path = profile_dir.join(format!("{name}{ext}"));
         // Absent is fine (this run did not build that binary); present must be a real program.
         if let Ok(meta) = std::fs::metadata(&path) {

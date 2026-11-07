@@ -64,7 +64,12 @@ impl InstanceLock {
 /// Whether an agent holds the lock for `dirs` right now. A free lock is taken and dropped at once to find out, so an agent
 /// starting at that very instant may be refused (it exits; the caller starts or finds one on its next pass).
 pub fn is_held(dirs: &Dirs) -> bool {
-    paddock_proc::is_held(&dirs.instance_lock())
+    paddock_proc::is_held_settled(&dirs.instance_lock())
+}
+
+/// [`is_held`] that says "unknown" when the lock could not be looked at (an unreadable folder), instead of "free".
+pub fn held_state(dirs: &Dirs) -> paddock_proc::HeldState {
+    paddock_proc::held_state(&dirs.instance_lock())
 }
 
 #[cfg(test)]

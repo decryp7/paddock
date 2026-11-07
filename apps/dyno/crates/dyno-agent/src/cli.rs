@@ -1,11 +1,15 @@
 //! The `dyno-agent` command line: `run` (the service entry), `status`, `stop`, `service …`, `once` and `bench`.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use crate::discovery::Discovery;
 use crate::paths::Dirs;
-use crate::service::{Service, Status};
+use crate::wire;
 use crate::{Running, StartError};
 use dyno_core::protocol::{LiveDetail, Message, Reply, Request};
-use dyno_ipc::{Client, Peer, PeerOptions};
+use paddock_ipc::{BodyOptions, BodyPeer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -57,7 +61,7 @@ fn end_process(code: i32) -> ! {
 /// the agent runs). Once the agent runs, the main loop stops it cleanly (store closed, lock released, discovery file removed);
 /// this thread only makes sure the process ends if that stop hangs.
 fn spawn_signal_watch() {
-    let _ = std::thread::Builder::new().name("dyno-signal".into()).spawn(|| {
+    let spawned = std::thread::Builder::new().name("dyno-signal".into()).spawn(|| {
         while !SIGNALLED.load(Ordering::SeqCst) {
             // pace: how often the flag is looked at (a signal handler cannot wake a thread).
             std::thread::sleep(Duration::from_millis(100));
@@ -79,12 +83,15 @@ fn spawn_signal_watch() {
             }
         }
     });
+    if let Err(e) = spawned {
+        log::error!(error:% = e; "the signal watch could not start; a TERM during a slow start is only seen once the agent runs");
+    }
 }
 
 const USAGE: &str = "dyno-agent — measures your computer and keeps its history\n\n\
 usage:\n  dyno-agent run                 run in the foreground (what the service starts)\n  dyno-agent status              is an agent running?\n  \
 dyno-agent stop                ask the running agent to exit\n  dyno-agent once                print one measurement as JSON (changes nothing)\n  \
-dyno-agent bench [seconds] [none|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \
+dyno-agent bench [seconds] [none|tray|summary|processes]   run for a while and report Dyno's own CPU and memory as JSON\n  \
 dyno-agent service install|uninstall|status|ensure   register it to start at login\n";
 
 /// The exit code of `run` when another agent already runs for the data folder: this one started nothing and changed
@@ -111,7 +118,7 @@ pub fn main(args: Vec<String>) -> i32 {
             .and_then(|n| bench(n, who)),
         ["service", cmd] => service(cmd),
         ["--version"] | ["-V"] => {
-            println!("dyno-agent {}", env!("CARGO_PKG_VERSION"));
+            println!("{}", version_line(env!("CARGO_PKG_VERSION"), option_env!("PADDOCK_BUILD_COMMIT")));
             Ok(())
         }
         _ => {
@@ -128,23 +135,32 @@ pub fn main(args: Vec<String>) -> i32 {
     }
 }
 
+/// `dyno-agent 1.1.0 (build abc1234)`: the version and the commit the build embeds (`PADDOCK_BUILD_COMMIT`), so a VM run or a
+/// bug report names the exact build; without a commit (a local build) only the version.
+pub fn version_line(version: &str, commit: Option<&str>) -> String {
+    match commit.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(c) => format!("dyno-agent {version} (build {c})"),
+        None => format!("dyno-agent {version}"),
+    }
+}
+
 /// Connects to the agent named in the discovery file.
-pub fn connect(dirs: &Dirs) -> Result<(Peer<Message>, Discovery), String> {
+pub fn connect(dirs: &Dirs) -> Result<(BodyPeer<Message>, Discovery), String> {
     let d = Discovery::read(&dirs.discovery()).ok_or("No agent is running.")?;
     let token = d.token().ok_or("The discovery file is damaged.")?;
     let conn =
-        Client::connect(&d.endpoint, &token).map_err(|e| format!("The agent in {} did not answer ({e}).", dirs.discovery().display()))?;
-    let peer = Peer::start(conn, PeerOptions::new()).map_err(|e| e.to_string())?;
+        wire::connect(&d.endpoint, &token).map_err(|e| format!("The agent in {} did not answer ({e}).", dirs.discovery().display()))?;
+    let peer = BodyPeer::start(conn, BodyOptions::new("the agent")).map_err(|e| e.to_string())?;
     Ok((peer, d))
 }
 
 /// Sends one request and unwraps the reply.
-pub fn ask(peer: &Peer<Message>, request: Request) -> Result<Reply, String> {
+pub fn ask(peer: &BodyPeer<Message>, request: Request) -> Result<Reply, String> {
     ask_within(peer, request, Duration::from_secs(15))
 }
 
 /// Like [`ask`] with an explicit deadline, for requests that read slow system sources (hardware inventory, diagnostics).
-pub fn ask_within(peer: &Peer<Message>, request: Request, within: Duration) -> Result<Reply, String> {
+pub fn ask_within(peer: &BodyPeer<Message>, request: Request, within: Duration) -> Result<Reply, String> {
     match peer.call(Message::Request(Box::new(request)), within) {
         Ok(Message::Reply(r)) => (*r).map_err(|e| e.message),
         Ok(_) => Err("The agent sent something unexpected.".into()),
@@ -154,7 +170,7 @@ pub fn ask_within(peer: &Peer<Message>, request: Request, within: Duration) -> R
 
 /// Starts the job `spec`, waits until it ends and returns what it produced, or the message it ended with. For callers that
 /// want the answer and have nothing to show meanwhile (the CLI, the tests); the app shows the progress instead.
-pub fn run_job(peer: &Peer<Message>, spec: dyno_core::jobs::JobSpec, within: Duration) -> Result<dyno_core::jobs::JobOutput, String> {
+pub fn run_job(peer: &BodyPeer<Message>, spec: dyno_core::jobs::JobSpec, within: Duration) -> Result<dyno_core::jobs::JobOutput, String> {
     use paddock_jobs::wire::WireState;
     let started = std::time::Instant::now();
     let Reply::Job(job) = ask(peer, Request::StartJob { spec })? else {
@@ -203,9 +219,10 @@ fn reveal() -> crate::agent::Reveal {
 }
 
 /// The OS ports, and a second process source for on-demand details.
-fn platforms() -> (dyno_platform::Platform, Box<dyn dyno_core::ports::ProcessSource>) {
-    let platform = dyno_platform::platform();
-    let details = dyno_platform::platform().processes;
+fn platforms(dirs: &Dirs) -> (dyno_platform::Platform, Box<dyn dyno_core::ports::ProcessSource>) {
+    let secrets = dirs.secrets_folder();
+    let platform = dyno_platform::platform(&secrets);
+    let details = dyno_platform::platform(&secrets).processes;
     (platform, details)
 }
 
@@ -240,9 +257,13 @@ fn run() -> Result<(), StartError> {
     );
     install_signal_handlers();
     spawn_signal_watch();
-    let (platform, details) = platforms();
+    let (platform, details) = platforms(&dirs);
     // Takes the data folder's agent lock first: a second agent exits here, before it opens or writes anything.
+    let root = dirs.root().to_path_buf();
     let running = Running::start_os(dirs, platform, details, reveal())?;
+    // The lock is held, so this is the one agent: say whether the last one died, and leave this run's marker.
+    let (run_marker, _previous) =
+        paddock_startup::run_marker::begin(&root, "agent", std::process::id(), &paddock_startup::lifecycle::os_probe);
     eprintln!("dyno-agent {} running (pid {})", env!("CARGO_PKG_VERSION"), running.discovery.pid);
     log::info!(ElapsedMs = crate::logging::elapsed_ms(), Pid = running.discovery.pid; "Agent running");
     log_socket_view();
@@ -258,6 +279,7 @@ fn run() -> Result<(), StartError> {
     log::info!(Reason = reason; "Agent stopping");
     running.stop();
     STOPPED.store(true, Ordering::SeqCst);
+    run_marker.end();
     log::info!(ElapsedMs = crate::logging::elapsed_ms(); "Agent stopped");
     Ok(())
 }
@@ -319,7 +341,7 @@ fn view() -> Result<(), String> {
 }
 
 fn once() -> Result<(), String> {
-    let mut p = dyno_platform::platform();
+    let mut p = dyno_platform::platform(&std::env::temp_dir());
     let t = crate::agent::now();
     p.sensors.sample(t);
     std::thread::sleep(Duration::from_millis(1_000));
@@ -331,29 +353,8 @@ fn once() -> Result<(), String> {
 fn service(cmd: &str) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("Could not find this program: {e}"))?;
     crate::service::refuse_inside_app_bundle(crate::service::Os::current(), &exe)?;
-    let mut svc = Service::for_current_user(exe)?;
-    match cmd {
-        "install" => svc.install().map(|()| println!("installed and started")),
-        "uninstall" => svc.uninstall().map(|()| println!("removed")),
-        "ensure" => svc
-            .ensure()
-            .map(|changed| println!("{}", if changed { "registered again" } else { "nothing to do" })),
-        "status" => {
-            println!(
-                "{}",
-                match svc.status() {
-                    Status::NotInstalled => "not installed".to_string(),
-                    Status::Installed { running, current } => format!(
-                        "installed, {}{}",
-                        if running { "running" } else { "not running" },
-                        if current { "" } else { ", registered for another executable" }
-                    ),
-                }
-            );
-            Ok(())
-        }
-        _ => Err("service takes install, uninstall, status or ensure".into()),
-    }
+    let mut verbs = crate::service::verbs_for_current_user(exe)?;
+    crate::service::run_verb(cmd, verbs.as_mut()).map(|line| println!("{line}"))
 }
 
 /// Runs the agent in-process against this machine with a subscriber asking for the processes (the heaviest case the
@@ -363,12 +364,13 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
         "none" => None,
         "summary" => Some(LiveDetail::Summary),
         "processes" => Some(LiveDetail::Processes),
-        _ => return Err("bench subscribers: none, summary or processes".into()),
+        "tray" => Some(LiveDetail::Tray),
+        _ => return Err("bench subscribers: none, tray, summary or processes".into()),
     };
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
     let tmp = tempfile_dir()?;
     let dirs = Dirs::at(tmp.join("data"));
-    let (platform, details) = platforms();
+    let (platform, details) = platforms(&dirs);
     let running = Running::start_os(dirs.clone(), platform, details, Box::new(|_| Ok(())))?;
     let (peer, _) = connect(&dirs)?;
     let seen = Arc::new(Mutex::new((0u64, 0f32, 0u64)));
@@ -377,10 +379,10 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
         let (conn_peer, _) = connect(&dirs)?;
         drop(conn_peer);
         let d = Discovery::read(&dirs.discovery()).ok_or("agent vanished")?;
-        let conn = Client::connect(&d.endpoint, &d.token().ok_or("bad token")?).map_err(|e| e.to_string())?;
-        Peer::start(
+        let conn = wire::connect(&d.endpoint, &d.token().ok_or("bad token")?).map_err(|e| e.to_string())?;
+        BodyPeer::start(
             conn,
-            PeerOptions::new().on_push(move |m| {
+            BodyOptions::new("the agent").on_push(move |m| {
                 if let Message::Live(l) = m {
                     let mut g = crate::agent::lock(&s);
                     g.0 += 1;
@@ -405,7 +407,7 @@ fn bench(seconds: u64, who: &str) -> Result<(), String> {
     let (updates, reported_cpu, reported_mem) = *crate::agent::lock(&seen);
     drop((peer, listener));
     running.stop();
-    let _ = std::fs::remove_dir_all(&tmp);
+    paddock_proc::cleanup::remove_dir_all(&tmp);
     let report = serde_json::json!({
         "subscriber": who,
         "seconds": started.elapsed().as_secs_f32(),
@@ -431,6 +433,13 @@ fn tempfile_dir() -> Result<std::path::PathBuf, String> {
 mod tests {
     use super::*;
     use crate::instance::LockError;
+
+    #[test]
+    fn the_version_line_names_the_build_commit_when_there_is_one() {
+        assert_eq!(version_line("1.1.0", Some("abc1234")), "dyno-agent 1.1.0 (build abc1234)");
+        assert_eq!(version_line("1.1.0", Some(" ")), "dyno-agent 1.1.0");
+        assert_eq!(version_line("1.1.0", None), "dyno-agent 1.1.0");
+    }
 
     #[test]
     fn a_refused_second_agent_exits_with_its_own_code_and_other_failures_with_one() {

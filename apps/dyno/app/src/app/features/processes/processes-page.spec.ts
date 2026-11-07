@@ -71,6 +71,32 @@ describe('ProcessesPage', () => {
     expect(el.querySelector('[data-key="other-users"] .pd-icon-btn')).toBeNull();
     f.destroy();
   });
+  it('shows where the list came from: the chip when the helper read it, the reason and the button when it did not', async () => {
+    const withVia = async (via: unknown) =>
+      make((m) => {
+        const live = m.liveUpdate.bind(m);
+        m.liveUpdate = (d) => ({ ...live(d), via: { processes: via, others: 'local', temperatures: 'local' } }) as ReturnType<typeof live>;
+      });
+    let r = await withVia('helper');
+    expect(r.el.querySelector('[data-testid="processes-source"] [data-testid="reading-source-helper"]')).not.toBeNull();
+    expect([...r.el.querySelectorAll('[role="columnheader"]')].some((h) => h.textContent?.includes('Account'))).toBe(true);
+    r.f.destroy();
+    TestBed.resetTestingModule();
+    r = await withVia({ needsHelper: { reason: 'Other accounts’ processes are not shown. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } });
+    expect(r.el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain('Other accounts’ processes are not shown');
+    expect(r.el.querySelector('[data-testid="reading-source-turn-on"]')).not.toBeNull();
+    r.f.destroy();
+  });
+  it('says the Other users total was counted by the helper', async () => {
+    const { f, store, el } = await make((m) => {
+      const live = m.liveUpdate.bind(m);
+      m.liveUpdate = (d) => ({ ...live(d), via: { processes: 'helper', others: 'helper', temperatures: 'local' }, otherUsers: { count: 4, cpu: { value: 2 }, memory: { value: 5 }, partial: false } });
+    });
+    store.setMode('flat');
+    f.detectChanges();
+    expect(el.querySelector('[data-testid="other-users-note"]')?.textContent).toContain('counted by the administrator helper');
+    f.destroy();
+  });
   it('the view buttons switch the store mode', async () => {
     const { f, store, el } = await make();
     const buttons = [...el.querySelectorAll<HTMLButtonElement>('[aria-label="View"] button')];

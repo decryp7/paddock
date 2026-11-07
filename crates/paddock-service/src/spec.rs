@@ -4,6 +4,7 @@
 //! names and arguments that would break a file or a command line (parse, don't validate).
 
 use crate::error::SpecError;
+use crate::hardening::Hardening;
 
 /// Who the process runs as (decision D4: a per-user agent unless the work must run without a logged-on user).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,31 +49,6 @@ pub enum Restart {
     OnFailure,
 }
 
-/// What systemd ends when it stops the unit (`KillMode=`). Only systemd reads it; launchd and Windows ignore it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KillMode {
-    /// Every process of the unit's control group (systemd's default).
-    ControlGroup,
-    /// The main process gets SIGTERM, the rest of the group SIGKILL.
-    Mixed,
-    /// Only the main process: the children it started live on.
-    Process,
-    /// No process is ended (the stop command must do it).
-    None,
-}
-
-impl KillMode {
-    /// The systemd value.
-    pub fn systemd(self) -> &'static str {
-        match self {
-            KillMode::ControlGroup => "control-group",
-            KillMode::Mixed => "mixed",
-            KillMode::Process => "process",
-            KillMode::None => "none",
-        }
-    }
-}
-
 /// The longest label, bundle id or name part.
 pub const MAX_NAME: usize = 128;
 /// The longest display name or description.
@@ -101,8 +77,8 @@ pub struct ServiceSpec {
     low_priority: bool,
     memory_high_mb: Option<u32>,
     docs_url: Option<String>,
-    kill_mode: Option<KillMode>,
-    stop_timeout_secs: u32,
+    hardening: Option<Hardening>,
+    windows_start: WindowsStart,
 }
 
 impl ServiceSpec {
@@ -128,8 +104,8 @@ impl ServiceSpec {
                 low_priority: false,
                 memory_high_mb: None,
                 docs_url: None,
-                kill_mode: None,
-                stop_timeout_secs: 60,
+                hardening: None,
+                windows_start: WindowsStart::Delayed,
             },
         }
     }
@@ -141,6 +117,10 @@ impl ServiceSpec {
     /// The app's name (Windows service name and `Run` value name).
     pub fn name(&self) -> &str {
         &self.name
+    }
+    /// The systemd unit's name without the suffix (`pitwall`).
+    pub fn unit_name(&self) -> &str {
+        &self.unit
     }
     /// The systemd unit's file name (`pitwall.service`).
     pub fn unit_file_name(&self) -> String {
@@ -207,22 +187,37 @@ impl ServiceSpec {
     pub fn docs_url(&self) -> Option<&str> {
         self.docs_url.as_deref()
     }
-    /// How long the OS waits for the process to exit when stopping it, in seconds (systemd `TimeoutStopSec=`, launchd
-    /// `ExitTimeOut` of a daemon; a launchd user agent and a Windows service ignore it; default 60).
-    pub fn stop_timeout_secs(&self) -> u32 {
-        self.stop_timeout_secs
+    /// What a privileged service gives up (Windows token privileges, who may start it, the systemd sandbox).
+    pub fn hardening(&self) -> Option<&Hardening> {
+        self.hardening.as_ref()
     }
-    /// What systemd ends when it stops the unit; `None`: systemd's own default, no `KillMode=` line.
-    pub fn kill_mode(&self) -> Option<KillMode> {
-        self.kill_mode
+    /// When the Service Control Manager starts a Windows service after boot.
+    pub fn windows_start(&self) -> WindowsStart {
+        self.windows_start
+    }
+}
+
+/// When Windows starts an automatic service after boot (`sc create start=`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowsStart {
+    /// `delayed-auto`: a minute or two after the boot, when the load of the start-up has eased (the default).
+    #[default]
+    Delayed,
+    /// `auto`: with the boot itself, for a service people wait for at log-in (a helper the app expects).
+    Auto,
+}
+
+impl WindowsStart {
+    /// The word `sc.exe` takes.
+    pub fn sc_word(self) -> &'static str {
+        match self {
+            WindowsStart::Delayed => "delayed-auto",
+            WindowsStart::Auto => "auto",
+        }
     }
 }
 
 /// Builds a [`ServiceSpec`]; [`SpecBuilder::build`] checks every part.
-///
-/// There is no option to wait for the network: a system unit already orders after `network-online.target`, and a user
-/// service cannot (that target belongs to the system manager, which a `systemd --user` instance cannot order after), so a
-/// user service retries its own network use.
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct SpecBuilder {
@@ -284,7 +279,7 @@ impl SpecBuilder {
         self.spec.supervised_env = Some(var.to_string());
         self
     }
-    /// Lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`, idle I/O; launchd low-priority I/O).
+    /// Lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`, best-effort I/O at the lowest priority, never the idle class (rule 52); launchd low-priority I/O).
     pub fn low_priority(mut self) -> Self {
         self.spec.low_priority = true;
         self
@@ -294,21 +289,21 @@ impl SpecBuilder {
         self.spec.memory_high_mb = Some(mb);
         self
     }
-    /// How long the OS waits for the process to exit when stopping it (default 60 s; 1 to 3600): a service that must finish
-    /// a running job needs longer. Only systemd (`TimeoutStopSec=`) and a launchd daemon (`ExitTimeOut`) honour it; a launchd
-    /// user agent and a Windows service ignore it (the SCM uses its own stop timeout).
-    pub fn stop_timeout_secs(mut self, secs: u32) -> Self {
-        self.spec.stop_timeout_secs = secs;
-        self
-    }
-    /// What systemd ends when it stops the unit (`KillMode=`; default: not written, systemd's own default applies).
-    pub fn kill_mode(mut self, mode: KillMode) -> Self {
-        self.spec.kill_mode = Some(mode);
-        self
-    }
     /// The documentation link (`https://` only).
     pub fn docs_url(mut self, url: &str) -> Self {
         self.spec.docs_url = Some(url.to_string());
+        self
+    }
+
+    /// What a privileged service gives up ([`Hardening`]); only for [`Kind::SystemService`].
+    pub fn hardening(mut self, hardening: Hardening) -> Self {
+        self.spec.hardening = Some(hardening);
+        self
+    }
+
+    /// When Windows starts the service after boot ([`WindowsStart::Delayed`] unless this is called).
+    pub fn windows_start(mut self, start: WindowsStart) -> Self {
+        self.spec.windows_start = start;
         self
     }
 
@@ -349,9 +344,6 @@ impl SpecBuilder {
         if !(1..=3600).contains(&s.throttle_secs) {
             return Err(SpecError::new("throttle", "must be 1 to 3600 seconds"));
         }
-        if !(1..=3600).contains(&s.stop_timeout_secs) {
-            return Err(SpecError::new("stop timeout", "must be 1 to 3600 seconds"));
-        }
         if let Some(v) = &s.supervised_env {
             let ok = !v.is_empty()
                 && v.len() <= 64
@@ -369,6 +361,12 @@ impl SpecBuilder {
             && !(16..=65536).contains(&mb)
         {
             return Err(SpecError::new("memory high", "must be 16 to 65536 MiB"));
+        }
+        if let Some(h) = &s.hardening {
+            if s.kind != Kind::SystemService {
+                return Err(SpecError::new("hardening", "is only for a system service"));
+            }
+            h.check()?;
         }
         if let Some(u) = &s.docs_url {
             let ok = u.starts_with("https://")
@@ -533,17 +531,30 @@ mod tests {
         assert!(bad(base().supervised_env("1X")).contains("supervised"));
         assert!(bad(base().supervised_env("")).contains("supervised"));
         assert!(bad(base().memory_high_mb(1)).contains("memory"));
-        for secs in [0, 3601, u32::MAX] {
-            assert!(
-                bad(base().stop_timeout_secs(secs)).contains("stop timeout"),
-                "{secs}"
-            );
-        }
-        assert!(
-            base().stop_timeout_secs(1).build().is_ok()
-                && base().stop_timeout_secs(3600).build().is_ok()
-        );
         assert!(bad(base().docs_url("http://x")).contains("docs"));
         assert!(bad(base().docs_url("https://x y")).contains("docs"));
+    }
+
+    #[test]
+    fn hardening_is_for_system_services_and_checked() {
+        use crate::hardening::{Hardening, Sandbox};
+        let h = || Hardening::new().windows_privileges(["SeChangeNotifyPrivilege"]);
+        let err = base().hardening(h()).build().unwrap_err();
+        assert_eq!(err.field, "hardening");
+        let s = base()
+            .kind(Kind::SystemService)
+            .hardening(h())
+            .build()
+            .unwrap();
+        assert_eq!(
+            s.hardening().unwrap().privileges(),
+            ["SeChangeNotifyPrivilege"]
+        );
+        assert!(base().build().unwrap().hardening().is_none());
+        let bad = base()
+            .kind(Kind::SystemService)
+            .hardening(Hardening::new().sandbox(Sandbox::new()))
+            .build();
+        assert_eq!(bad.unwrap_err().field, "sandbox");
     }
 }

@@ -1,4 +1,6 @@
 import { TestBed } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
+import { MatTooltip } from '@angular/material/tooltip';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
 import { copyText } from './clipboard';
@@ -97,6 +99,13 @@ describe('PdPathText', () => {
     el.querySelector('.pd-text')?.dispatchEvent(new MouseEvent('mouseenter'));
     expect(document.querySelector('.mat-mdc-tooltip')).toBeNull();
     expect(el.querySelector('.pd-copy')).toBeNull();
+    // Nothing is cut: not a keyboard stop.
+    expect(el.querySelector('.pd-text')?.hasAttribute('tabindex')).toBe(false);
+  });
+
+  it('a text that shows less than the whole value is a keyboard stop, so its tooltip shows on focus', () => {
+    const el = make({ value: 'system.log', full: '/var/log/app/system.log' });
+    expect(el.querySelector('.pd-text')?.getAttribute('tabindex')).toBe('0');
   });
 
   it('shows what it is given but copies and titles the full value', async () => {
@@ -110,7 +119,7 @@ describe('PdPathText', () => {
     const el = f.nativeElement as HTMLElement;
     const text = el.querySelector('.pd-text')!;
     text.dispatchEvent(new MouseEvent('mouseenter'));
-    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('/var/log/app/system.log'));
+    await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.replaceAll('\u200b', '').trim()).toBe('/var/log/app/system.log'));
     text.dispatchEvent(new MouseEvent('mouseleave'));
     const button = el.querySelector<HTMLButtonElement>('.pd-copy')!;
     expect(button.getAttribute('aria-label')).toBe('Copy the full path');
@@ -164,7 +173,44 @@ describe('PdPathText', () => {
       expect(shown).toContain('…');
       expect(shown.length).toBeLessThan('/var/log/app/system.log'.length);
       el.querySelector('.pd-text')?.dispatchEvent(new MouseEvent('mouseenter'));
-      await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.trim()).toBe('/var/log/app/system.log'));
+      await vi.waitFor(() => expect(document.querySelector('.mat-mdc-tooltip')?.textContent?.replaceAll('\u200b', '').trim()).toBe('/var/log/app/system.log'));
+    });
+
+    describe('where the tooltip goes inside a scrolling list', () => {
+      // Material hides a tooltip whose panel falls outside the scrolling ancestor of its origin, so the side with room wins (the first row of a short
+      // table body has no room above: the Linux e2e run saw the tooltip show and hide 5 ms later).
+      async function placed(rowTop: number): Promise<string> {
+        canvas(10);
+        const host = document.createElement('div');
+        host.className = 'cdk-virtual-scrollable';
+        document.body.append(host);
+        vi.spyOn(host, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 232, height: 132 } as DOMRect);
+        const f = TestBed.createComponent(PdPathText);
+        host.append(f.nativeElement as HTMLElement);
+        f.componentRef.setInput('value', '/var/log/app/system.log');
+        f.componentRef.setInput('keepTail', 6);
+        f.detectChanges();
+        const text = (f.nativeElement as HTMLElement).querySelector<HTMLElement>('.pd-text')!;
+        const rect = vi.spyOn(text, 'getBoundingClientRect').mockReturnValue({ width: 150, top: rowTop, bottom: rowTop + 16 } as DOMRect);
+        measure?.(() => undefined);
+        await f.whenStable();
+        f.detectChanges();
+        rect.mockReturnValue({ width: 150, top: rowTop, bottom: rowTop + 16 } as DOMRect);
+        text.dispatchEvent(new FocusEvent('focus'));
+        const tip = f.debugElement.query(By.directive(MatTooltip)).injector.get(MatTooltip);
+        const side = tip.position;
+        tip.hide(0);
+        host.remove();
+        return side;
+      }
+
+      it('opens below the first row, where there is no room above', async () => {
+        expect(await placed(106)).toBe('below');
+      });
+
+      it('opens above a row near the bottom', async () => {
+        expect(await placed(210)).toBe('above');
+      });
     });
 
     it('shortens the end of a title when asked to', async () => {

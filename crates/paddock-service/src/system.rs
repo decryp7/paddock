@@ -1,5 +1,13 @@
 //! The real [`System`]: helper programs through `paddock-proc` (no console window, a timeout that ends the whole tree,
 //! bounded output), files through `paddock-env`'s atomic write.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::port::{Output, RunError, System};
 use paddock_proc::{Limits, Outcome};
@@ -45,7 +53,10 @@ impl RealSystem {
 
 impl System for RealSystem {
     fn run(&mut self, program: &str, args: &[&str]) -> Result<Output, RunError> {
-        let mut cmd = paddock_proc::command(program);
+        let resolved = crate::privileged::system_tool(program).map_err(|e| {
+            RunError::NotStarted(format!("{program}: the system folder is unknown: {e}"))
+        })?;
+        let mut cmd = paddock_proc::command(&resolved);
         cmd.args(args);
         let out =
             paddock_proc::run_bounded(cmd, Limits::new(self.timeout).max_output(MAX_HELPER_OUTPUT))
@@ -104,15 +115,6 @@ impl System for RealSystem {
 
     fn pause(&mut self, how_long: Duration) {
         std::thread::sleep(how_long);
-    }
-
-    fn cpu_time(&mut self, pid: u32) -> Option<Duration> {
-        paddock_proc::ProcessId::of(pid).and_then(paddock_proc::tree_cpu_time)
-    }
-
-    fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
-        paddock_proc::ProcessId::of(pid)
-            .map_or(paddock_proc::RunState::Unknown, paddock_proc::run_state)
     }
 }
 
@@ -191,19 +193,6 @@ mod tests {
             .unwrap();
         // It finished (no timeout) and the output is kept up to the cap.
         assert_eq!((o.code, o.stdout.len()), (Some(0), MAX_HELPER_OUTPUT));
-    }
-
-    #[test]
-    fn the_cpu_time_of_a_process_is_read_by_identity_and_a_missing_one_is_not_known() {
-        let mut sys = RealSystem::new();
-        // Only this test process is looked at (read-only).
-        assert!(sys.cpu_time(std::process::id()).is_some());
-        assert_eq!(sys.cpu_time(u32::MAX), None);
-        assert_eq!(
-            sys.run_state(std::process::id()),
-            paddock_proc::RunState::Running
-        );
-        assert_eq!(sys.run_state(u32::MAX), paddock_proc::RunState::Unknown);
     }
 
     #[test]

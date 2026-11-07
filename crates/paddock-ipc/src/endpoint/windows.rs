@@ -4,6 +4,14 @@
 //! path), so the `OVERLAPPED` and the buffer outlive the operation. Overlapped handles let one thread read while
 //! another writes; a synchronous pipe handle would serialise them and deadlock a peer. A shared "shutdown" event ends
 //! blocked operations from any thread.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 use crate::token::random_hex;
@@ -261,7 +269,16 @@ impl Listener {
             .ok_or_else(|| io::Error::other("the endpoint already has its connection"))?;
         // The next client needs a fresh instance of the same pipe; until it exists a connecting client sees "busy" and
         // waits. If it cannot be made, later accepts report that, this connection still works.
-        self.pipe = create_instance(&self.name, false, &self.sddl).ok();
+        self.pipe = match create_instance(&self.name, false, &self.sddl) {
+            Ok(next) => Some(next),
+            Err(e) => {
+                paddock_proc::cleanup::report(
+                    "making the next pipe instance (later accepts report it)",
+                    &e,
+                );
+                None
+            }
+        };
         Ok((Stream::new(connected)?, pid))
     }
 }
@@ -284,7 +301,32 @@ impl Stream {
         })
     }
 
+    /// The facts of the client, after the first read (the OS refuses to impersonate before).
+    pub(super) fn raw_peer(&self) -> Result<crate::identity::RawPeer, crate::identity::PeerError> {
+        super::windows_peer::raw_peer(self.pipe.as_raw_handle())
+    }
+
+    /// Connects at identification level and trusts the pipe only when SYSTEM owns it; see
+    /// [`super::Stream::connect_system`].
+    pub(super) fn connect_system(
+        name: &str,
+        timeout: Duration,
+    ) -> Result<Stream, super::SystemConnectError> {
+        let pipe = open_pipe(name, timeout).map_err(super::SystemConnectError::Connect)?;
+        super::windows_peer::check_owner_is_system(pipe.as_raw_handle())
+            .map_err(super::SystemConnectError::Untrusted)?;
+        Stream::new(pipe).map_err(super::SystemConnectError::Connect)
+    }
+
     pub(super) fn connect(name: &str, timeout: Duration) -> io::Result<Stream> {
+        Stream::new(open_pipe(name, timeout)?)
+    }
+}
+
+/// Opens the pipe `name`, retrying while it is busy. Identification-level impersonation only: whoever serves the pipe
+/// cannot act as us.
+fn open_pipe(name: &str, timeout: Duration) -> io::Result<OwnedHandle> {
+    {
         let wname = wide(name);
         let deadline = Instant::now() + timeout;
         loop {
@@ -303,7 +345,7 @@ impl Stream {
             };
             if h != INVALID_HANDLE_VALUE {
                 // SAFETY: a fresh, valid handle nobody else owns.
-                return Stream::new(unsafe { OwnedHandle::from_raw_handle(h) });
+                return Ok(unsafe { OwnedHandle::from_raw_handle(h) });
             }
             let err = io::Error::last_os_error();
             if err.raw_os_error() != Some(ERROR_PIPE_BUSY as i32) || Instant::now() >= deadline {
@@ -315,7 +357,9 @@ impl Stream {
             }
         }
     }
+}
 
+impl Stream {
     pub(super) fn try_clone(&self) -> io::Result<Stream> {
         Ok(Stream {
             pipe: self.pipe.clone(),

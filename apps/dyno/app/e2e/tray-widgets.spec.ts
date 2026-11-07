@@ -138,8 +138,9 @@ test.describe('popup widgets', () => {
     await page.goto(POPUP());
     await page.getByRole('button', { name: 'More actions' }).click();
     const items = page.getByRole('menuitem');
-    await expect(items).toHaveCount(3);
-    for (let i = 0; i < 3; i++) {
+    // Open Dyno, Quit and stop measuring, Quit Dyno and the Report a problem entry: four (the shell's menu plus Dyno's).
+    await expect(items).toHaveCount(4);
+    for (let i = 0; i < 4; i++) {
       const item = items.nth(i);
       // The panel scales in while it opens: wait for the measurement to settle on the designed size.
       await expect.poll(async () => Math.round((await item.locator('mat-icon').first().boundingBox())?.width ?? 0)).toBe(16);
@@ -163,22 +164,26 @@ test.describe('popup widgets', () => {
 });
 
 test.describe('dashboard and menu-bar editors', () => {
-  test('the dashboard chooser removes a widget, undoes it and applies a preset', async ({ page }) => {
+  test('the dashboard grid removes a widget, undoes it and applies a preset', async ({ page }) => {
     await page.goto('/?latency=0#/');
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-    await page.getByRole('button', { name: 'Customize dashboard' }).click();
-    const chooser = page.locator('dy-widget-board pd-widget-chooser');
-    await expect(shown(chooser)).toHaveCount(15);
-    await chooser.getByRole('button', { name: 'More actions for Health' }).click();
+    await page.getByRole('button', { name: 'Edit layout' }).click();
+    const cells = page.locator('dy-widget-board [data-pd-cell]');
+    await expect(cells).toHaveCount(15);
+    await cells.filter({ has: page.locator('dy-widget[data-kind="health"]') }).getByRole('button', { name: 'Actions for Health' }).click();
     await page.getByRole('menuitem', { name: 'Remove' }).click();
-    await expect(shown(chooser)).toHaveCount(14);
-    await page.getByRole('button', { name: 'Undo' }).click();
-    await expect(shown(chooser)).toHaveCount(15);
-    await chooser.getByRole('button', { name: 'Apply the Developer preset' }).click();
-    await expect(shown(chooser)).toHaveCount(7);
+    await expect(cells).toHaveCount(14);
+    await page.getByRole('button', { name: 'Undo' }).first().click();
+    await expect(cells).toHaveCount(15);
+    await page.getByRole('button', { name: 'More layout actions' }).click();
+    await page.getByRole('menuitem', { name: /Developer/ }).click();
+    await expect(cells).toHaveCount(7);
+    await page.getByRole('button', { name: 'More layout actions' }).click();
+    await page.getByRole('menuitem', { name: /Reset to defaults/ }).click();
+    await expect(cells).toHaveCount(15);
   });
 
-  test('the menu-bar editor adds an item up to four', async ({ page }) => {
+  test('the menu-bar editor starts with the four default items and adds one', async ({ page }) => {
     await page.goto('/?latency=0#/');
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
     await pressMod(page, 'Mod+Comma');
@@ -187,9 +192,9 @@ test.describe('dashboard and menu-bar editors', () => {
     await dialog.getByText('Dyno', { exact: true }).click();
     const editor = dialog.locator('dy-menu-bar-items');
     await editor.scrollIntoViewIfNeeded();
-    await expect(shown(editor)).toHaveCount(2);
-    await editor.getByRole('button', { name: 'Add Number' }).click();
-    await expect(shown(editor)).toHaveCount(3);
+    await expect(shown(editor)).toHaveCount(4);
+    await editor.getByRole('button', { name: 'Add another Number' }).click();
+    await expect(shown(editor)).toHaveCount(5);
   });
 });
 
@@ -221,7 +226,7 @@ test.describe('screenshots for the independent review', () => {
       await snap(p4, 'popup-menu');
       await page.setViewportSize({ width: 1100, height: 900 });
       const chooser = await openChooser(page);
-      for (const [name, count] of [['Network', 4], ['Backup', 5], ['Last issue', 6], ['Pinned counters', 7]] as const) {
+      for (const [name, count] of [['Network', 4], ['Last issue', 6], ['Pinned counters', 7]] as const) {
         await chooser.getByRole('button', { name: `Add ${name}` }).click();
         await expect(shown(chooser)).toHaveCount(count);
       }
@@ -241,7 +246,7 @@ test.describe('screenshots for the independent review', () => {
       await chooser.getByRole('button', { name: /^More actions for Network/ }).click();
       await dialog.screenshot({ path: join(SHOTS!, `chooser-menu-${theme}.png`) });
       await page.keyboard.press('Escape');
-      const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale,network:empty,backupHealth:working,lastIssue:error,pinnedCounters:ready', 1500);
+      const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale,network:empty,lastIssue:error,pinnedCounters:ready', 1500);
       await snap(p2, 'popup-states', p2.locator('pd-tray-popover'));
       // The ready designs of the other kinds: the first three are removed, Top apps added.
       for (const title of ['Active alarms', 'Disk space', 'CPU and memory']) {

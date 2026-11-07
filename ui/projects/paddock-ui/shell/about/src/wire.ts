@@ -11,6 +11,7 @@ const PHASES: ReadonlySet<UpdatePhase['kind']> = new Set([
   'downloading',
   'ready',
   'installing',
+  'installerRunning',
   'failed',
 ]);
 
@@ -24,6 +25,8 @@ export function parseUpdateStatus(v: unknown): UpdateStatus | null {
   const kind = v['phase']['kind'];
   if (typeof kind !== 'string' || !PHASES.has(kind as UpdatePhase['kind'])) return null;
   if (!Array.isArray(v['channels']) || typeof v['channel'] !== 'string' || typeof v['autoCheck'] !== 'boolean' || typeof v['canInstall'] !== 'boolean') return null;
+  const install = v['install'];
+  if (!isObject(install) || typeof install['installOnQuitAvailable'] !== 'boolean' || (install['scope'] !== 'perUser' && install['scope'] !== 'perMachine')) return null;
   return v as unknown as UpdateStatus;
 }
 

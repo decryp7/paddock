@@ -9,12 +9,12 @@ ts! {
 /// A placement's id: 1 to [`MAX_ID`] characters of `[a-z0-9-]`, unique within its layout. Parsed once at the edge.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "ts"), ts(type = "string"))]
-pub struct PlacementId(pub(crate) String);
+pub struct PlacementId(pub(crate) std::sync::Arc<str>);
 
 /// A user preset's id, same rules as [`PlacementId`]; never the id of a built-in preset.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(any(test, feature = "ts"), ts(type = "string"))]
-pub struct PresetId(pub(crate) String);
+pub struct PresetId(pub(crate) std::sync::Arc<str>);
 }
 
 /// Why a string is not an id.
@@ -35,12 +35,12 @@ macro_rules! id_conversions {
         impl TryFrom<String> for $t {
             type Error = BadId;
             fn try_from(s: String) -> Result<Self, BadId> {
-                check_id(&s).map(|()| $t(s))
+                check_id(&s).map(|()| $t(s.into()))
             }
         }
         impl From<$t> for String {
             fn from(id: $t) -> String {
-                id.0
+                id.0.to_string()
             }
         }
         impl Serialize for $t {
@@ -61,7 +61,7 @@ macro_rules! id_conversions {
         impl $t {
             /// Parses an id from text.
             pub fn new(text: &str) -> Result<Self, BadId> {
-                check_id(text).map(|()| $t(text.to_string()))
+                check_id(text).map(|()| $t(text.into()))
             }
 
             /// The id as text.

@@ -12,19 +12,22 @@ const out = join(here, '..');
 const W = 1600; // H follows from the layout (see the legend)
 
 
-// Layout: Pacenotes, Debrief and Sighter form a triangle on top; Pitcrew, Dyno and Spotter below; Pitwall is the band between.
+// Layout: Pacenotes, Debrief and Sighter on top; Recce, Dyno and Spotter below; Pitwall is the band between. Pitcrew, which needs no
+// Pitwall, sits alone under Dyno.
 const row1 = [
   { id: 'pacenotes', name: CODEBASE_TOOL, accent: '#657C1F', lines: ['Understands code in any', 'language: link graph, code', 'review, local search.'] },
   { id: 'debrief', name: 'Debrief', accent: '#2F6FE0', lines: ['An IDE for analysing logs', 'and diagnostic files.'] },
   { id: 'sighter', name: 'Sighter', accent: '#975EA2', lines: ['Finds any UI element by', 'sight. MCP server and', 'agent for any desktop.'] },
 ];
+// Recce is planned (placeholder icon and page only): its card carries the Planned chip like Sighter's and Pacenotes'.
 const row3 = [
-  { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] },
-  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC:', 'read-only monitor.'] },
+  { id: 'recce-placeholder', key: 'recce', name: 'Recce', accent: '#2E9E75', lines: ['One search box for the', 'whole PC, answers with', 'sources. Retrieval engine.'] },
+  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC and', 'explains why it is slow.'] },
   { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new releases', 'anywhere, the moment', 'one appears.'] },
 ];
+const pitcrew = { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] };
 const CW = 340, GAP = 215, X0 = 75, CH = 170;
-const R1 = 340, HUB = 650, HUBH = 160, R3 = HUB + HUBH + 140;
+const R1 = 340, HUB = 650, HUBH = 160, R3 = HUB + HUBH + 140, R4 = R3 + CH + 100;
 const cardX = (i) => X0 + i * (CW + GAP);
 const cMid = (r) => r + CH / 2;
 const gapL = (i) => cardX(i) + CW, gapR = (i) => cardX(i + 1); // edges of the gap right of column i
@@ -84,13 +87,15 @@ function card(a, i, y) {
   const x = cardX(i);
   const ico = icon(a.id, x + 22, y + 24, 64);
   const bar = `<rect x="${x + 104}" y="${y + 28}" width="20" height="3" rx="1.5" fill="${a.accent ?? 'var(--link)'}"/>`;
-  const tag = statusChip(STATUS[a.id], x + CW - 18, y + 14);
+  const st = STATUS[a.key ?? a.id];
+  // A long status does not fit beside the name: it moves to the bottom right of the card.
+  const tag = statusChip(st, x + CW - 18, st.text.length > 14 ? y + CH - 40 : y + 14);
   const badge = a.ci ? `<text class="cinote" x="${x + 104}" y="${y + 153}">${a.ci}</text>` : '';
   const text = a.lines.map((l, k) => `<text class="promise" x="${x + 104}" y="${y + 96 + k * 23}">${l}</text>`).join('');
   return `<g><rect class="card" x="${x}" y="${y}" width="${CW}" height="${CH}" rx="16"/>${ico}${bar}${tag}${badge}` +
     `<text class="name" x="${x + 104}" y="${y + 64}">${a.name}</text>${text}</g>`;
 }
-const cards = [...row1.map((a, i) => card(a, i, R1)), ...row3.map((a, i) => card(a, i, R3))].join('\n');
+const cards = [...row1.map((a, i) => card(a, i, R1)), ...row3.map((a, i) => card(a, i, R3)), card(pitcrew, 1, R4)].join('\n');
 
 // ---- hand-offs between apps (solid arrows; dashed = later) ----
 const m1 = cMid(R1), m3 = cMid(R3), B1 = R1 + CH, laneTop = B1 + 30;
@@ -102,36 +107,54 @@ links.push(hand([[gapL(0) + 2, m1 + 30], [gapR(0) - 2, m1 + 30]]) + pill((gapL(0
 links.push(hand([[cardX(2) - 2, m1 - 34], [gapL(1) + 2, m1 - 34]]) + pill((gapL(1) + cardX(2)) / 2, m1 - 34, 'Run bundles'));
 // Debrief -> Sighter (MCP host: reproduce a bug from a video)
 links.push(hand([[gapL(1) + 2, m1 + 34], [cardX(2) - 2, m1 + 34]]) + pill((gapL(1) + cardX(2)) / 2, m1 + 34, 'Video repro (MCP)'));
-// Dyno -> Pitcrew, Dyno -> Spotter
-links.push(hand([[cardX(1) - 2, m3], [gapL(0) + 2, m3]]) + pill((gapL(0) + cardX(1)) / 2, m3, 'Machine health'));
+// Dyno -> Pitcrew (straight down), Dyno -> Spotter
+const B3 = R3 + CH, MIDG = (B3 + R4) / 2;
+links.push(hand([[cardX(1) + CW / 2, B3 + 2], [cardX(1) + CW / 2, R4 - 2]]) + pill(cardX(1) + CW / 2, MIDG, 'Machine health'));
 links.push(hand([[gapL(1) + 2, m3], [cardX(2) - 2, m3]]) + pill((gapL(1) + cardX(2)) / 2, m3, 'Installed software'));
 // Pacenotes -> Sighter (test plans) and back (results): nested arcs over the top row
 links.push(hand([[335, R1 - 2], [335, R1 - 40], [1265, R1 - 40], [1265, R1 - 2]]) + pill(800, R1 - 40, 'Test plans (MCP)'));
 links.push(hand([[1385, R1 - 2], [1385, R1 - 100], [275, R1 - 100], [275, R1 - 2]]) + pill(800, R1 - 100, 'Results'));
-// Pitcrew -> Debrief and Dyno -> Debrief (deep links) pass the hub band on its left end: Dyno's line joins Pitcrew's below the
-// band and one line runs on to Debrief. Spotter -> Sighter (later) passes the band on its right end. Nothing crosses the band.
-const LX = 122, DYX = 660, JOIN = HUB + HUBH + 50, SX = 1462;
-links.push(hand([[LX, R3 - 2], [LX, laneTop], [DYX, laneTop], [DYX, B1 + 2]]) + pill(LX, (JOIN + R3) / 2, 'Job logs'));
-links.push(hand([[DYX, R3 - 2], [DYX, JOIN], [LX, JOIN]], { headless: true }) + pill(380, JOIN, 'Issues') +
+// Pitcrew -> Debrief and Dyno -> Debrief (deep links) run up the left margin, outside Recce and the hub band: Dyno's line leaves
+// its bottom and joins Pitcrew's in the gap above Pitcrew, and one line runs on to Debrief. Spotter -> Sighter (later) passes the
+// band on its right end. Nothing crosses the band.
+const LX = 40, DYX = 660, JOIN = MIDG, SX = 1462;
+links.push(hand([[cardX(1) - 2, R4 + CH / 2], [LX, R4 + CH / 2], [LX, laneTop], [DYX, laneTop], [DYX, B1 + 2]]) + pill(330, R4 + CH / 2, 'Job logs'));
+links.push(hand([[DYX, B3 + 2], [DYX, JOIN], [LX, JOIN]], { headless: true }) + pill(330, JOIN, 'Issues') +
   `<circle class="ah" cx="${LX}" cy="${JOIN}" r="4.5"/>`); // junction: Issues joins the Job logs line
 links.push(hand([[SX, R3 - 2], [SX, B1 + 2]], { later: true }) + pill(SX, (HUB + HUBH + R3) / 2, 'Smoke tests'));
 
-// ---- Pitwall stubs: what each app uses the hub for ----
+// ---- Pitwall stubs: what each app uses the hub for; MCP lines: whose tools Pitwall calls ----
 const T = B1 + 4, Bt = HUB - 4, H2 = HUB + HUBH + 4, T3 = R3 - 4;
 const stubs = [
-  stub(cardX(0) + CW / 2, T, Bt, 'Q&amp;A, embeddings', { both: true, at: (T + Bt) / 2 + 14, gap: laneTop }),
+  stub(245, T, Bt, 'Q&amp;A, embeddings', { at: (T + Bt) / 2 + 14, gap: laneTop }),
   stub(720, T, Bt, 'AI engine, paired'),
-  stub(1265, T, Bt, 'Vision, planner', { both: true }),
+  stub(1265, T, Bt, 'Vision, planner'),
+  stub(200, T3, H2, 'Answers'),
   stub(720, T3, H2, 'Diagnosis'),
   stub(1265, T3, H2, 'What’s new'),
 ].join('\n');
+// Pitwall as MCP client and host (planned for Pitwall 1.1): a dash-dot purple line from the hub to each app whose MCP server it calls,
+// the arrow towards the server. Its dash-dot pattern differs from the grey dashed "later" hand-offs, and the label says MCP, so
+// colour is never the only cue; the legend says it is planned.
+function mcp(x, y0, y1, { at, gap } = {}) {
+  const mid = at ?? (y0 + y1) / 2;
+  const d = gap == null ? `M${x} ${y0} L${x} ${y1}` : `M${x} ${y0} L${x} ${gap - 9} M${x} ${gap + 9} L${x} ${y1}`;
+  return `<path class="mcp" d="${d}"/>${head(x, y1, y1 > y0 ? 'd' : 'u', 'ahp')}` + pill(x, mid, 'MCP');
+}
+const mcps = [
+  mcp(365, Bt, T, { at: (T + Bt) / 2 + 14, gap: laneTop }), // Pacenotes
+  mcp(880, Bt, T), // Debrief
+  mcp(1395, Bt, T), // Sighter
+  mcp(330, H2, T3), // Recce
+  mcp(880, H2, T3), // Dyno
+].join('\n');
 
 // ---- Pitwall hub band: shorter than the card rows, so the hand-offs that pass it run beside its ends, never through it ----
-const HX = LX + 40, HW = SX - 40 - HX;
+const HX = 162, HW = SX - 40 - HX;
 const cols = [
   [600, 'One local API', ['OpenAI, Anthropic and Ollama', 'compatible, plus /x/v1.']],
-  [930, 'Tools over MCP', ['MCP client and tool', 'router.']],
-  [1150, 'Yours alone', ['Keys, priorities, caching.', 'No cloud, no telemetry.']],
+  [905, 'Chat and tools over MCP', ['Planned for 1.1: chat that', 'calls the apps’ MCP tools.']],
+  [1185, 'Yours alone', ['Keys, priorities, caching.', 'No cloud, no telemetry.']],
 ];
 const hubCols = cols.map(([x, h, ls]) => `<text class="vt" x="${x}" y="${HUB + 62}">${h}</text>` +
   ls.map((l, k) => `<text class="vs" x="${x}" y="${HUB + 90 + k * 23}">${l}</text>`).join('')).join('');
@@ -145,7 +168,7 @@ ${icon('pitwall', HX + 28, HUB + 40, 80)}
 ${hubCols}</g>`;
 
 // ---- Paddock foundation: header with the kits, then two layers (Workbench on top of the App shell), values, legend ----
-const PX = X0, PW = 3 * CW + 2 * GAP, PY = R3 + CH + 60;
+const PX = X0, PW = 3 * CW + 2 * GAP, PY = R4 + CH + 60;
 const chipRow = (labels, right, y, cls) => {
   const widths = labels.map((t) => Math.round(t.length * 7.9 + 26)), gap = 10, total = widths.reduce((s, w) => s + w, 0) + gap * (labels.length - 1);
   let x = right - total;
@@ -154,7 +177,8 @@ const chipRow = (labels, right, y, cls) => {
 // Two equal-width layers, Workbench (tinted) above the App shell (neutral); each names and shows the icons of its apps. All chip rows
 // share one right edge.
 // The App shell layer is taller: its parts take two chip rows.
-const SX0 = PX + 20, SW = PW - 40, CHIPR = SX0 + SW - 24, LH = 100, LH2 = 128, LGAP = 30, L1 = PY + 96, L2 = L1 + LH + LGAP, PH = L2 + LH2 + 20 - PY;
+const SX0 = PX + 20, SW = PW - 40, CHIPR = SX0 + SW - 24, LH = 100, LH2 = 128, LGAP = 30, L1 = PY + 96, L2 = L1 + LH + LGAP;
+const PH = L2 + LH2 + 20 - PY;
 const kits = chipRow(['UI kit, design system', 'Rust crates', 'Diagram kit', 'Icon set', 'Conformance checks', 'Release practices', 'Lessons'], CHIPR, PY + 30, 'chip');
 const layer = (y, h, cls, chipCls, name, who, apps, rows) => {
   const ix = SX0 + 24 + { Workbench: 104, 'App shell': 84 }[name] + 14; // measured title widths at 20px/600
@@ -166,7 +190,7 @@ ${rows.map((parts, k) => chipRow(parts, CHIPR, top + k * 42, chipCls)).join('')}
 };
 const layers = layer(L1, LH, 'layer wb', 'chip', 'Workbench', ['Adds IDE panes to the shell for', 'Debrief, Pacenotes, Sighter.'], ['debrief', 'pacenotes', 'sighter'],
   [['Docked panes, layout planner', 'Activity bar', 'Explorer', 'Command palette', 'AI pane']]) +
-  layer(L2, LH2, 'layer', 'chip2', 'App shell', ['The base of all seven apps. Shell only:', 'Pitcrew, Pitwall, Spotter, Dyno.'], ['pitcrew', 'pitwall', 'spotter', 'dyno'],
+  layer(L2, LH2, 'layer', 'chip2', 'App shell', ['The base of all eight apps. Shell only:', 'Pitcrew, Pitwall, Spotter, Dyno, Recce.'], ['pitcrew', 'pitwall', 'spotter', 'dyno', 'recce-placeholder'],
     [['Startup protection, safe mode', 'Report a problem', 'Services, login items', 'Notifications, health'],
       ['Dialogs', 'Jobs and progress', 'Settings, About, Updates', 'Storage', 'Undo', 'Theme']]);
 // "Builds on": a short arrow from the Workbench down into the App shell, labelled in the gap.
@@ -182,16 +206,17 @@ const valueEls = values.map(([t, s], i) => {
   const x = X0 + i * (PW / 3);
   return `<rect x="${x}" y="${VY - 4}" width="2" height="44" rx="1" class="rule"/><text class="vt" x="${x + 16}" y="${VY + 14}">${t}</text><text class="vs" x="${x + 16}" y="${VY + 36}">${s}</text>`;
 }).join('');
-const LY = VY + 90, H = LY + 86;
+const LY = VY + 90, LY2 = LY + 36, H = LY2 + 76;
 const legend = `<g>
 <path class="hand" d="M${X0} ${LY} L${X0 + 44} ${LY}"/>${head(X0 + 46, LY, 'r', 'ah')}<text class="legt" x="${X0 + 62}" y="${LY + 6}">Hand-off, arrow shows the direction of data</text>
-<path class="hand later" d="M${X0 + 480} ${LY} L${X0 + 524} ${LY}"/>${head(X0 + 526, LY, 'r', 'ah')}<text class="legt" x="${X0 + 542}" y="${LY + 6}">Dashed: later</text>
-<path class="stub" d="M${X0 + 740} ${LY} L${X0 + 784} ${LY}"/>${head(X0 + 786, LY, 'r', 'ahp')}<text class="legt" x="${X0 + 802}" y="${LY + 6}">Uses Pitwall for local AI (optional)</text>
+<path class="hand later" d="M${X0 + 740} ${LY} L${X0 + 784} ${LY}"/>${head(X0 + 786, LY, 'r', 'ah')}<text class="legt" x="${X0 + 802}" y="${LY + 6}">Dashed: later</text>
+<path class="stub" d="M${X0} ${LY2} L${X0 + 44} ${LY2}"/>${head(X0 + 46, LY2, 'r', 'ahp')}<text class="legt" x="${X0 + 62}" y="${LY2 + 6}">Uses Pitwall for local AI (optional)</text>
+<path class="mcp" d="M${X0 + 740} ${LY2} L${X0 + 784} ${LY2}"/>${head(X0 + 786, LY2, 'r', 'ahp')}<text class="legt" x="${X0 + 802}" y="${LY2 + 6}">MCP, planned: Pitwall 1.1 calls the app’s MCP tools</text>
 </g>`;
 
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="t d">
 <title id="t">The Paddock family</title>
-<desc id="d">Seven local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above, Spotter, Dyno and Pitcrew below, Pitwall the optional local AI hub between them. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief and Pacenotes drive Sighter as MCP hosts (Debrief reproduces a bug from a video), Debrief uses Pitwall as its AI engine once paired (its built-in engine is the fallback), Sighter uses Pitwall as its vision model and agent planner, Pitcrew sends Debrief job logs and Dyno sends it issues (both lines pass beside Pitwall, not through it), Dyno sends installed software and machine health, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Underneath, Paddock provides the kits (UI kit and design system, shared Rust crates, diagram kit, icon set, conformance checks, release practices, lessons) and two layers: the App shell every app uses (startup protection and safe mode, Report a problem, background services and login items, notifications and service health, dialogs, jobs and progress, settings, about and updates, the Storage page, undo, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter and Dyno use the shell with pages.</desc>
+<desc id="d">Eight local-first desktop apps. ${CODEBASE_TOOL}, Debrief and Sighter above; Recce, Dyno and Spotter below; Pitwall, the optional local AI hub, between them; Pitcrew under Dyno. Hand-offs: ${CODEBASE_TOOL} and Debrief exchange stack traces and log checks, ${CODEBASE_TOOL} sends Sighter test plans and gets results, Sighter sends Debrief run bundles, Debrief drives Sighter over MCP to reproduce a bug from a video, Pitcrew sends Debrief job logs and Dyno sends it issues (one line up the left margin, beside Recce and Pitwall, not through them), Dyno sends Pitcrew machine health and Spotter installed software, Pitcrew runs CI for all, and Spotter will feed Sighter smoke tests later. Uses of Pitwall (dotted): ${CODEBASE_TOOL} for answers and embeddings, Debrief as its AI engine once paired (its built-in engine is the fallback), Sighter for vision and as agent planner, Recce for answers, Dyno for diagnosis, Spotter for what's-new summaries. Planned for Pitwall 1.1 (dash-dot, labelled MCP): Pitwall as MCP client and host calls the MCP servers of ${CODEBASE_TOOL}, Debrief, Sighter, Recce (the family's retrieval engine, so Pitwall builds no index of its own) and Dyno (its MCP server is opt-in). Recce (one search box for the whole PC) is planned and shown with its placeholder icon. Underneath, Paddock provides the kits (UI kit and design system, shared Rust crates, diagram kit, icon set, conformance checks, release practices, lessons) and two layers: the App shell every app uses (startup protection and safe mode, Report a problem, background services and login items, notifications and service health, dialogs, jobs and progress, settings, about and updates, the Storage page, undo, theme) and, on top of it, the Workbench for the IDE-style apps Debrief, ${CODEBASE_TOOL} and Sighter (docked panes with the layout planner, activity bar, Explorer, command palette, AI pane); Pitcrew, Pitwall, Spotter, Dyno and Recce use the shell with pages.</desc>
 <style>
 :root{--ink:#14161A;--muted:#566070;--card:#FFFFFF;--line:#DDE1E8;--soft:#EEF0F4;--link:#8A93A3;--hand:#566070;--found:#F1F3F7;--hubf:#F0ECFB;--hubs:#6D3FD6;--okf:#E6F2EF;--oks:#007A5E;--line2:#CDD3DD;--wbf:#E8EEF8;--wbs:#B3C2DB}
 @media (prefers-color-scheme: dark){:root{--ink:#F2F4F7;--muted:#A6AEBC;--card:#171A20;--line:#2B303A;--soft:#20242C;--link:#667085;--hand:#A6AEBC;--found:#12151A;--hubf:#242040;--hubs:#A58BFA;--okf:#193330;--oks:#2EC4A0;--line2:#3A414D;--wbf:#1F2939;--wbs:#4A5D80}}
@@ -216,6 +241,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 .ah{fill:var(--hand)}
 .stub{fill:none;stroke:var(--hubs);stroke-width:2;stroke-linecap:round;stroke-dasharray:1 6}
 .ahp{fill:var(--hubs)}
+.mcp{fill:none;stroke:var(--hubs);stroke-width:2;stroke-linecap:round;stroke-dasharray:12 5 1 5}
 .pill{fill:var(--card);stroke:var(--line)}
 .lbl{font-size:17px;font-weight:500;fill:var(--ink)}
 .hub{fill:var(--hubf);stroke:var(--hubs);stroke-width:1.5}
@@ -236,10 +262,11 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 </style>
 
 <text class="eyebrow" x="${W / 2}" y="76" text-anchor="middle">PADDOCK</text>
-<text class="h1" x="${W / 2}" y="136" text-anchor="middle">Seven local-first tools for people who keep systems running</text>
-<text class="sub" x="${W / 2}" y="176" text-anchor="middle">One private AI hub, one shared foundation. Each app is good alone and better together.</text>
+<text class="h1" x="${W / 2}" y="136" text-anchor="middle">Eight local-first apps for people who keep systems running</text>
+<text class="sub" x="${W / 2}" y="176" text-anchor="middle">One private AI hub and one shared foundation. Each app is good alone and better together.</text>
 
 ${stubs}
+${mcps}
 ${cards}
 ${links.join('\n')}
 ${hub}

@@ -17,7 +17,8 @@ pub fn delay(attempt: u32) -> Duration {
 /// Whether the checks can stop: the service is back, or only the user can go on (the OS asks for the approval).
 pub fn done(started: &Started) -> bool {
     match started {
-        Started::Repaired(_, RepairOutcome::Recovered | RepairOutcome::NeedsApproval) | Started::Offered(_) => true,
+        // Removed: an uninstall that was begun is finished, so there is no registration left to check.
+        Started::Repaired(_, RepairOutcome::Recovered | RepairOutcome::NeedsApproval) | Started::Offered(_) | Started::Removed => true,
         // Left alone, current, busy with another repair, or a repair that did not work: the next check looks again.
         Started::Left(_) | Started::Marked | Started::Busy | Started::Repaired(..) => false,
     }

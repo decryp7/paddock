@@ -48,6 +48,12 @@ static RUST_INPUTS: LazyLock<Vec<Regex>> = LazyLock::new(|| [r"^\.cargo/", r"^li
 /// The planner and its tests: besides the scripts' owners, this tool's golden test runs them as its oracle.
 static PLANNER_FILES: LazyLock<Regex> = LazyLock::new(|| re(r"^scripts/affected(\.test)?\.mjs$"));
 
+/// What conformance C91 and paddock-service's `per_machine` sync test read of a per-machine app (scripts/affected.mjs
+/// `PER_MACHINE_INPUT`).
+static PER_MACHINE_INPUT: LazyLock<Regex> = LazyLock::new(|| {
+    re(r"^(apps/[^/]+/app/src-tauri/(tauri(\.windows)?\.conf\.json|windows/)|crates/paddock-setup/nsis/paddock-per-machine\.nsh)")
+});
+
 /// Editor and VCS metadata: marks nothing.
 static META: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [r"(^|/)\.gitignore$", r"^\.editorconfig$", r"(^|/)\.DS_Store$", r"^lefthook\.yml$"]
@@ -72,6 +78,23 @@ enum Marks {
     Reviewed,
 }
 
+/// The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts reads every `.rs` file under `crates/` and `apps/`
+/// against the chip's table, skipping folders named target, node_modules, tests and benches and files named tests.rs. A change to one
+/// marks ui too (the owner keeps its own halves). Same as `isCauseCodeSource` in scripts/affected.mjs.
+fn is_cause_code_source(f: &str) -> bool {
+    let parts: Vec<&str> = f.split('/').collect();
+    let (Some(last), Some(first)) = (parts.last(), parts.first()) else {
+        return false;
+    };
+    (*first == "crates" || *first == "apps")
+        && parts.len() > 1
+        && last.ends_with(".rs")
+        && *last != "tests.rs"
+        && !parts[1..parts.len() - 1]
+            .iter()
+            .any(|d| matches!(*d, "target" | "node_modules" | "tests" | "benches"))
+}
+
 /// Markdown that code or tests read, a declared contract.
 static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
     vec![
@@ -84,6 +107,10 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^apps/(shell-demo|workbench-demo)/README\.md$"), Marks::Projects(&["tools"])),
         (re(r"(^|/)REVIEWED\.md$"), Marks::Reviewed),
+        (
+            re(r"^ui/projects/paddock-ui/format/src/storage-cases\.json$"),
+            Marks::Projects(&["ui", "app:dyno"]),
+        ),
         (re(r"^apps/debrief/docs/ai/sql-views\.md$"), Marks::Owner),
         (re(r"^apps/debrief/docs/testing/quarantine\.md$"), Marks::Owner),
     ]
@@ -153,6 +180,30 @@ pub struct Options {
     pub explain: bool,
     /// The root `package-lock.json` before and after.
     pub lock: (Option<String>, Option<String>),
+    /// The `apps/<app>/app/src-tauri` folders that adopt the shared per-machine installer include (see
+    /// [`per_machine_apps`]); read from the tree by [`plan_for`].
+    pub per_machine_apps: Vec<String>,
+}
+
+/// The apps whose Windows installer adopts the shared include: hooks that include `paddock-per-machine.nsh`, or a
+/// `perMachine` install mode in their Tauri configuration (scripts/affected.mjs `adoptsPerMachine`).
+pub fn per_machine_apps(root: &Path) -> Vec<String> {
+    let Ok(apps) = std::fs::read_dir(root.join("apps")) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = apps
+        .flatten()
+        .filter_map(|a| {
+            let dir = format!("apps/{}/app/src-tauri", a.file_name().to_string_lossy());
+            let read = |p: &str| std::fs::read_to_string(root.join(&dir).join(p)).unwrap_or_default();
+            let per_machine = read("tauri.windows.conf.json") + &read("tauri.conf.json");
+            let adopts = read("windows/installer-hooks.nsh").contains("paddock-per-machine.nsh")
+                || Regex::new(r#""installMode"\s*:\s*"perMachine""#).is_ok_and(|r| r.is_match(&per_machine));
+            adopts.then_some(dir)
+        })
+        .collect();
+    out.sort();
+    out
 }
 
 #[derive(Default)]
@@ -227,6 +278,12 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
                 format!("its golden test compares {f} (tools/paddock-dev/tests/it/golden.rs)"),
             );
         }
+        if PER_MACHINE_INPUT.is_match(f) {
+            st.mark(Some("conformance".to_string()), format!("C91 reads {f}"));
+            if f.starts_with("crates/") || opts.per_machine_apps.iter().any(|d| f.starts_with(&format!("{d}/"))) {
+                st.mark(Some("crates".to_string()), format!("the per_machine sync test reads {f}"));
+            }
+        }
         if RUST_INPUTS.iter().any(|r| r.is_match(f)) {
             for p in ["crates", "paddock-dev"] {
                 st.mark(Some(p.to_string()), format!("rust input {f}"));
@@ -300,6 +357,9 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         };
         for p in &own {
             st.kind(Some(p), half);
+        }
+        if is_cause_code_source(f) {
+            st.mark(Some("ui".to_string()), format!("ui cause-codes.spec.ts scans {f}")); // ui's own tests, not its dependents
         }
         if c.is_none() && own.iter().any(|p| p == "crates") {
             for (d, x) in graph.cargo.iter() {
@@ -461,6 +521,7 @@ pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Val
         all: req.all,
         explain: req.explain,
         lock: (None, None),
+        per_machine_apps: per_machine_apps(root),
     };
     let mut changed = req.files.clone();
     if let (Some(base), false) = (&req.base, req.all) {
@@ -616,6 +677,29 @@ mod tests {
         assert_eq!(plan(&["apps/dyno/CHANGELOG.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["apps/dyno/REVIEWED.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["icons/REVIEWED.md"])["conformance"], true);
+        let src = plan(&["apps/dyno/app/src-tauri/src/health.rs"]);
+        assert_eq!(src["ui"], true, "ui's cause-codes spec scans the apps' Rust sources");
+        assert!(src["kinds"]["dyno"].as_array().unwrap().contains(&json!("rust")));
+        assert_ne!(plan(&["apps/dyno/app/src-tauri/Cargo.toml"])["ui"], true);
+        // Exactly what the spec scans: every .rs under crates/ and apps/, but not tests.rs or tests/, benches/, target/ folders.
+        for f in [
+            "crates/paddock-health/src/lib.rs",
+            "apps/shell-demo/src-tauri/src/main.rs",
+            "apps/dyno/crates/dyno-agent/src/server.rs",
+        ] {
+            assert_eq!(plan(&[f])["ui"], true, "{f}");
+        }
+        for f in [
+            "crates/paddock-health/src/tests.rs",
+            "crates/paddock-health/tests/it.rs",
+            "apps/dyno/crates/dyno-agent/benches/b.rs",
+            "tools/paddock-dev/src/plan.rs",
+        ] {
+            assert_ne!(plan(&[f])["ui"], true, "{f}");
+        }
+        let cases = plan(&["ui/projects/paddock-ui/format/src/storage-cases.json"]);
+        assert!(cases["apps"].as_array().unwrap().contains(&json!("dyno")));
+        assert!(cases["kinds"]["dyno"].as_array().unwrap().contains(&json!("rust")));
         assert_eq!(plan(&["Mystery"])["all"], true);
     }
 
@@ -633,6 +717,27 @@ mod tests {
         let p = plan(&["crates/Cargo.toml"]);
         assert_eq!(p["packages"]["crates"], json!(["paddock-core", "paddock-k", "paddock-kit"]));
         assert_eq!(p["apps"], json!(["dyno"]));
+    }
+
+    #[test]
+    fn a_per_machine_apps_files_mark_the_sync_test_a_per_user_apps_only_conformance() {
+        let opts = Options {
+            per_machine_apps: vec!["apps/dyno/app/src-tauri".to_string()],
+            ..Options::default()
+        };
+        let plan = |f: &str| affected(&[f.to_string()], &sample(), &opts).unwrap();
+        let adopter = plan("apps/dyno/app/src-tauri/windows/per-machine.json");
+        assert_eq!(
+            (adopter["conformance"].clone(), adopter["crates"].clone()),
+            (json!(true), json!(true))
+        );
+        let other = plan("apps/debrief/app/src-tauri/tauri.conf.json");
+        assert_eq!((other["conformance"].clone(), other["crates"].clone()), (json!(true), json!(false)));
+        let include = plan("crates/paddock-setup/nsis/paddock-per-machine.nsh");
+        assert_eq!(
+            (include["conformance"].clone(), include["crates"].clone()),
+            (json!(true), json!(true))
+        );
     }
 
     #[test]

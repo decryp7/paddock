@@ -44,3 +44,10 @@ path = "junit.xml"
 [[profile.ci.overrides]]
 filter = "package(paddock-chromium) & binary(it) & test(/^real_browser::/)"
 slow-timeout = { period = "30s", terminate-after = 6 }
+
+# waiver: not a longer time budget, only output: the crash model's probe (paddock-service tests/it/model.rs) prints what the
+# pieces of one edge cost on the machine, and a passing test's output is hidden by default, so the numbers would never reach
+# the job log (the Windows runner's clock reads are what made the model slow, CI runs 7642 to 7646).
+[[profile.ci.overrides]]
+filter = "package(paddock-service) & binary(it) & test(the_cost_of_the_pieces_of_one_edge_is_reported)"
+success-output = "final"

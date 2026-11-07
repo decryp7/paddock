@@ -116,6 +116,10 @@ pub struct CounterObjectList {
     pub objects: Vec<CounterObjectSummary>,
     /// Whether anything was left out to keep the catalog small.
     pub truncated: bool,
+    /// When the list was last read from the OS, when this answer is the saved one of an earlier run (shown at once while the
+    /// agent lists again); `None` when it was read just now (ADR 0029).
+    #[serde(default)]
+    pub saved_at: Option<crate::time::Timestamp>,
 }
 
 /// Everything the OS offers.
@@ -172,6 +176,7 @@ impl CounterCatalog {
                 })
                 .collect(),
             truncated: self.truncated,
+            saved_at: None,
         }
     }
 

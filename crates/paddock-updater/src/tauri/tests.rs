@@ -3,7 +3,7 @@
 //! update server is an in-memory transport: no network.
 
 use super::*;
-use crate::{UpdatePhase, WhatsNewDecision};
+use crate::{Package, UpdatePhase, WhatsNewDecision};
 use ::tauri::ipc::{CallbackFn, InvokeBody};
 use ::tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
@@ -14,8 +14,10 @@ use paddock_download::{Config, Get, Headers, Response, Transport, TransportError
 use serde_json::{Value, json};
 use std::io::Cursor;
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
 
 type App = ::tauri::App<MockRuntime>;
 
@@ -64,7 +66,7 @@ impl Transport for Server {
 struct FakeInstaller(Mutex<Vec<bool>>);
 
 impl Installer for FakeInstaller {
-    fn install(&self, _file: &Path, _manifest: &Value, relaunch: bool) -> Result<(), UpdateError> {
+    fn install(&self, _package: &Package<'_>, relaunch: bool) -> Result<(), UpdateError> {
         self.0.lock().unwrap().push(relaunch);
         Ok(())
     }
@@ -334,6 +336,45 @@ fn check_download_and_install_on_quit_run_as_jobs_and_report_by_events() {
     assert_eq!(installer.0.lock().unwrap().as_slice(), [false]);
 }
 
+/// The reply of a command that starts a job is the state it started, even when the job finishes before the reply is built.
+#[test]
+fn start_check_and_start_download_reply_with_the_state_they_started_when_the_job_already_finished()
+{
+    let app = app(None);
+    let dir = tempfile::tempdir().unwrap();
+    let b = builder(dir.path())
+        .channel("stable", "Stable", MANIFEST)
+        .public_key(Some(&fixture("key.pub")))
+        .installer(Arc::new(FakeInstaller::default()))
+        .installer_kind("app")
+        .max_download_bytes(1 << 20);
+    let updates = install(app.handle(), b).unwrap();
+    let rx = Arc::new(Mutex::new(statuses(&app)));
+    let finish_before_reply = |kind: &'static str| {
+        let rx = rx.clone();
+        *updates.after_spawn.lock().unwrap() = Some(Arc::new(move || {
+            wait_for(&rx.lock().unwrap(), kind);
+        }));
+    };
+    finish_before_reply("available");
+    let checking = updates.start_check().unwrap();
+    assert!(
+        matches!(checking.phase, UpdatePhase::Checking { job: Some(_) }),
+        "the reply is the started state, listed as a job: {:?}",
+        checking.phase
+    );
+    finish_before_reply("ready");
+    let downloading = updates.start_download().unwrap();
+    assert!(
+        matches!(
+            downloading.phase,
+            UpdatePhase::Downloading { job: Some(_), .. }
+        ),
+        "the reply is the started state: {:?}",
+        downloading.phase
+    );
+}
+
 #[test]
 fn cancel_preferences_and_restart_go_through_the_commands() {
     let app = app(None);
@@ -578,7 +619,7 @@ fn a_download_whose_job_cannot_start_is_abandoned_and_a_failed_install_is_logged
 struct FailingInstaller;
 
 impl Installer for FailingInstaller {
-    fn install(&self, _file: &Path, _manifest: &Value, _relaunch: bool) -> Result<(), UpdateError> {
+    fn install(&self, _package: &Package<'_>, _relaunch: bool) -> Result<(), UpdateError> {
         Err(UpdateError::InstallFailed {
             detail: "read-only volume".into(),
         })
@@ -766,4 +807,102 @@ fn app_without_files() -> App {
     install(app.handle(), builder(dir.path())).unwrap();
     std::mem::forget(dir);
     app
+}
+
+#[test]
+fn the_wait_log_fires_once_per_bound_and_never_spins() {
+    use crate::INSTALLER_WAIT_BOUND;
+    let slice = Duration::from_secs(5);
+    // Slices add up; at the bound the counter restarts and the log line is due once.
+    let (mut waited, mut logged) = (Duration::ZERO, 0);
+    for _ in 0..(INSTALLER_WAIT_BOUND.as_secs() / 5) {
+        let (w, log) = advance_wait(waited, slice);
+        waited = w;
+        logged += usize::from(log);
+    }
+    assert_eq!((logged, waited), (1, Duration::ZERO));
+    // A wait that returns at once still counts a tenth of a slice, so a broken lock cannot spin without the line.
+    assert_eq!(
+        advance_wait(Duration::ZERO, Duration::ZERO),
+        (Duration::from_millis(500), false)
+    );
+}
+
+struct SlowLock {
+    installing: std::sync::atomic::AtomicBool,
+    waits: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::InstallerLock for SlowLock {
+    fn installing(&self) -> bool {
+        self.installing.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    fn wait(&self, _bound: Duration) -> bool {
+        self.waits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(2));
+        !self.installing.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+#[test]
+fn a_per_machine_start_keeps_waiting_off_the_thread_until_the_installer_is_gone() {
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().unwrap();
+    // A hand-off record of a newer version, as the old version finds it after the installer's abort.
+    std::fs::create_dir_all(dir.path().join("config")).unwrap();
+    std::fs::write(
+        dir.path().join("config").join("updates.json"),
+        r#"{"version":1,"handoff":{"version":"9.9.9"}}"#,
+    )
+    .unwrap();
+    let lock = Arc::new(SlowLock {
+        installing: true.into(),
+        waits: 0.into(),
+    });
+    let a = app(Some(
+        json!({ "endpoints": [MANIFEST], "pubkey": fixture("key.pub") }),
+    ));
+    let updates = install(
+        a.handle(),
+        builder(dir.path())
+            .install_scope(
+                crate::InstallScope::PerMachine,
+                Some(PathBuf::from(r"C:\Program Files\Demo")),
+                Some(false),
+            )
+            .installer_lock(lock.clone()),
+    )
+    .unwrap();
+    let status = updates.updater.status();
+    assert_eq!(status.install.scope, crate::InstallScope::PerMachine);
+    assert!(status.install.administrator_notice.is_some());
+    assert!(matches!(status.phase, UpdatePhase::InstallerRunning { .. }));
+    let handle = background(updates.clone(), Duration::from_millis(5)).unwrap();
+    // More than one wait slice passes while the installer runs: the thread does not give up after one bound.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while lock.waits.load(Ordering::SeqCst) < 3 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert!(lock.waits.load(Ordering::SeqCst) >= 3, "kept waiting");
+    assert!(matches!(
+        updates.updater.status().phase,
+        UpdatePhase::InstallerRunning { .. }
+    ));
+    lock.installing.store(false, Ordering::SeqCst);
+    while !matches!(updates.updater.status().phase, UpdatePhase::Failed { .. })
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let UpdatePhase::Failed { error, .. } = updates.updater.status().phase else {
+        panic!("expected the stopped-installer failure")
+    };
+    assert!(
+        error
+            .message()
+            .contains("The installer stopped before it finished")
+    );
+    updates.stop();
+    handle.thread().unpark();
+    handle.join().unwrap();
 }

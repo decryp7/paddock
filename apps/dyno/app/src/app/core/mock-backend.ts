@@ -1,23 +1,24 @@
 import { osTerms } from '../shared/os-terms';
 import type { SuJobPhase, SuJobSnapshot, SuJobState } from '@decryp7/paddock-ui';
-import type { Measured } from './api.types';
-import type { DynoSurface, MetricReading, Navigate, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
-import { MockWidgets, mockMetricReading, mockWidgetChoices, mockWidgetOptionsFromUrl, type MockWidgetsOptions } from './mock/widgets';
-import type { PopoverSurfaceValues } from './widget-types';
+import type { EditOutcome, FirewallView, GeoSummary, IntelEdit, IntelStatus, Measured } from './api.types';
+import { MockIntel } from './mock/intel';
+import type { DynoSurface, MetricReading, Navigate, PreviewReply, PreviewRequest, ReadingQuery, SurfaceEdit, SurfaceView, WidgetActionId, WidgetChoices } from './generated/widgets';
+import gridCases from '../../../../../../ui/projects/paddock-ui/widgets/generated/grid-cases.json';
+import { MockWidgets, mockMetricReading, mockNumberSupport, mockWidgetChoices, mockWidgetOptionsFromUrl, type GridCase, type MockWidgetsOptions } from './mock/widgets';
+import type { DashboardView, PopoverSurfaceValues } from './widget-types';
 import { readValue } from './measured';
 import type {
   Alarm,
   AlarmChange,
   AlarmFilter,
   AlarmStats,
-  BundlePreview,
   HostName,
   RecorderSnapshot,
   RecorderSnapshotInfo,
-  SavedDiagnostics,
   ShelveFor,
   ActivityEntry,
   AgentStatus,
+  TrayAvailability,
   Alert,
   Anomaly,
   CommandError,
@@ -28,6 +29,7 @@ import type {
   LiveDetail,
   LiveUpdate,
   Locker,
+  LockerList,
   PluginInfo,
   ProcessDetails,
   ProcessRef,
@@ -45,6 +47,7 @@ import type {
   SnapshotInfo,
   StartupEntry,
   SystemInventory,
+  HelperStatus,
   ThrottleOverview,
   LifespanOverview,
   BaselineOverview,
@@ -65,12 +68,27 @@ import type {
   WeeklyReport,
   ReportFormat,
   SavedReport,
-  BackupReport,
+  GpuAdapter,
+  BenchExportFormat,
+  BenchEstimateRequest,
+  BenchRunEstimate,
+  AwakeSpec,
+  EnergyReport,
+  PowerView,
+  Neighbour,
+  ThisPcWol,
+  WolDeviceInput,
+  WolView,
+  WakeInput,
+  WakesView,
+  WolOutcome,
   ChangeTimeline,
   ChangesQuery,
   FinderQuery,
   GpuReport,
   InventoryFormat,
+  HelperAction,
+  ToolOffer,
   MaintenanceStatus,
   SavedInventory,
   IssuesOverview,
@@ -89,20 +107,27 @@ import type { DynoBackend, Unsubscribe } from './backend';
 import {
   demoActivity,
   demoAlerts,
+  longActivity,
+  longAlerts,
+  longAnomalies,
   demoAnomalies,
   demoPlugins,
   demoSettings,
   demoStartup,
   healthReasons,
 } from './mock/data';
-import { demoAlarms, demoBundlePreview, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
+import { manyAlarms, demoAlarms, demoHistory, demoSnapshot, demoSnapshotInfos, demoStats, filterAlarms, isShelved } from './mock/alarms';
 import { MockCounters, demoCounterSettings } from './mock/counters';
 import { MockDiskMap } from './mock/disk-map';
 import { mockHostName, mockNetwork } from './mock/network';
 import { mockBoot, mockChanges, mockFinder, mockGpu, mockMaintenanceProblem, mockMaintenanceStatus, mockSleep, mockSoftware, mockUsage } from './mock/extras';
-import { type MockBackupVariant, mockBackupProblem, mockBackupReport } from './mock/backup';
+import { mockToolOffer } from './mock/tool';
+import { HELPER_PHASES, type MockHelperVariant, afterHelperAction, mockHelperStatus } from './mock/helper';
+import { type MockIdleVariant, MockPower, type MockPowerVariant, mockEnergy } from './mock/power';
+import { MockWol, type MockWolVariant } from './mock/wol';
+import { MockWakes, type MockWakeVariant } from './mock/wakes';
 import { mockIssuesOverview, mockSources, mockUnusual, seedUnusual } from './mock/issues';
-import { mockCompare, mockKindResult, mockRun } from './mock/bench';
+import { MOCK_ESTIMATES, mockCompare, mockKindResult, mockRun } from './mock/bench';
 import { mockHash, mockSearchSeed, mockSearchUrl, mockStartupOverview } from './mock/lookups';
 import { mockHistory } from './mock/history';
 import { mockBaselines, mockLifespan, mockThrottling } from './mock/hardware';
@@ -110,6 +135,10 @@ import { mockInventory } from './mock/inventory';
 import { type MockOs, type OsProfile, coreKindsOf, osProfile } from './mock/os';
 import { clamp, wobble } from './mock/noise';
 import { type MockProcess, buildProcesses, groupSamples, round, sampleProcess } from './mock/processes';
+
+/** The note the engine sends when no tray host shows the icons (`dyno_core::tray_host`; the wire contract spec pins the text). */
+const NO_TRAY_HOST_NOTE =
+  "Your desktop isn't showing tray icons. On GNOME, turn on the AppIndicator extension (gnome-shell-extension-appindicator), then Dyno's icons appear.";
 
 const GB = 1024 ** 3;
 const MB = 1024 ** 2;
@@ -125,16 +154,47 @@ export interface MockOptions {
   machine?: MockMachine;
   /** The operating system the mock pretends to run on (default macOS). */
   os?: MockOs;
+  /** The tray icon size in pixels the mock's engine reports (`?tray=24`; default 16 off macOS). */
+  trayPx?: number;
   /** The CPU layout: `hybrid` (performance + efficiency cores; the default on macOS) or `uniform`. */
   cpu?: 'hybrid' | 'uniform';
   /** Simulated round-trip per request (skeletons show in the browser; 0 in unit tests). */
   latencyMs?: number;
   /** The clock (Playwright freezes it for stable screenshots). */
   now?: () => number;
+  /** Disk maps the agent "offers from its cache" at start (ADR 0029), as after a restart: a finished scan, `ageMs` old. */
+  savedMaps?: ReadonlyArray<{ target: DiskTarget; ageMs: number; changedBytes: number | null }>;
+  /**
+   * The counter objects and the software list come first from "the cache of the earlier run", this many ms old, with `savedAt`
+   * set (ADR 0029); the next ask has the list read just now (`savedAt` null), as after the agent's background read.
+   */
+  savedListsAgeMs?: number;
+  /** Scans wait where they are until `window.__dynoReleaseScans()` is called (e2e flows that look at a running scan; `?gate=scans`). */
+  holdScans?: boolean;
+  /** A destination in every country on the map (`?geo=many`), to see the most arcs it draws. */
+  geoMany?: boolean;
+  /** Long activity, alert and issue lists and long popup lists (`?lists=long`), so every widget that can scroll has to. */
+  longLists?: boolean;
+  /** Long lists: sixty firewall rules and sixty alarms instead of a handful (`?rows=many`), to see tables taller than the window. */
+  rowsMany?: boolean;
+  /** The login service supervises the agent, so Quit leaves it measuring (`?keeps=1`; default off). */
+  keepsMeasuring?: boolean;
   /** Requests that reject with an internal error (to see error states: `?fail=health,whySlow`). */
   fail?: ReadonlySet<string>;
-  /** Which backup tools the mock finds (`?backup=none` finds none; default a mix). */
-  backup?: MockBackupVariant;
+  /** The helper's state at the start (`?helper=ready`, `off`, `silent`, `foreign`, `outdated`, `missing`, `notIncluded`; default `off`). */
+  helper?: MockHelperVariant;
+  /** Which keep-awake state the mock starts in (`?power=unavailable|ended|waiting`; default off). */
+  power?: MockPowerVariant;
+  /** Start with the energy numbers filled in (`?energy=priced`): watts, tariff, currency and a CO2 factor. */
+  energyPriced?: boolean;
+  /** Which idle state the mock starts in (`?idle=countdown|watching|blocked|acting|stopped|unavailable`). */
+  idle?: MockIdleVariant;
+  /** Which Wake-on-LAN state the mock starts in (`?wol=empty|off|cantSend|noNeighbours|neighboursFail|readinessCantTell|timeout`; default two saved computers). */
+  wol?: MockWolVariant;
+  /** Whether the mock's desktop shows the tray icons (`?tray=noHost` gives the engine's note about the missing host; default shown). */
+  tray?: 'shown' | 'noHost';
+  /** Which Schedule state the mock starts in (`?wake=empty|needsHelper|unavailable|agent|failed`; default two schedules through the helper). */
+  wake?: MockWakeVariant;
   /** Where the mock pushes the status of the jobs it runs (the shell's in-memory jobs backend); jobs run without one too. */
   jobs?: MockJobSink;
   /** Keep the widget layouts in `localStorage` (the browser build; unit tests keep them in memory). */
@@ -143,32 +203,68 @@ export interface MockOptions {
   widgets?: Pick<MockWidgetsOptions, 'popup' | 'agentStopped'>;
   /** How many steps each job the mock starts takes before it ends (default 1: it ends at once; `?jobsteps=6` keeps it running for screenshots). */
   jobSteps?: number;
+  /** Milliseconds between a job's steps (default 400, or 0 with `latency=0`; `?jobstepms=600000` holds a job at its first step so a test can look at it). */
+  jobStepMs?: number;
 }
 
 /**
  * Reads the mock options from the page's query string: `?mock=` takes `windows`, `macos`, `linux` and/or `desktop`
- * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps.
+ * (comma separated, e.g. `mock=linux,desktop`), `fail=health,whySlow` makes requests fail, `latency=0` removes the delay, `jobsteps=6` makes every job take that many steps,
+ * `saved=3` starts with a saved disk map of the startup disk scanned 3 days ago (ADR 0029) and the counter and software lists as the
+ * earlier run saved them, `gate=scans` holds every scan where it is until `window.__dynoReleaseScans()` is called.
  */
 export function mockOptionsFromUrl(search: string): MockOptions {
   const q = new URLSearchParams(search);
   const fail = q.get('fail');
   const latency = q.get('latency');
   const jobSteps = q.get('jobsteps');
+  const jobStepMs = q.get('jobstepms');
   const tokens = (q.get('mock') ?? '').split(',').map((t) => t.trim().toLowerCase());
   const os = (['windows', 'macos', 'linux'] as const).find((o) => tokens.includes(o));
   const cpu = tokens.includes('hybrid') ? 'hybrid' : tokens.includes('uniform') ? 'uniform' : undefined;
   return {
     machine: tokens.includes('desktop') ? 'desktop' : 'laptop',
     os: os ?? 'macos',
+    ...(Number.isInteger(Number(q.get('tray'))) && Number(q.get('tray')) > 0 ? { trayPx: Number(q.get('tray')) } : {}),
     ...(cpu ? { cpu } : {}),
     latencyMs: latency !== null && Number.isFinite(Number(latency)) ? Number(latency) : 150,
     fail: new Set(fail ? fail.split(',') : []),
     widgetStorage: true,
     widgets: mockWidgetOptionsFromUrl(search),
-    ...(q.get('backup') === 'none' ? { backup: 'none' as const } : {}),
+    ...savedFromUrl(q.get('saved')),
+    ...(q.get('gate') === 'scans' ? { holdScans: true } : {}),
+    ...(HELPER_VARIANTS.includes(q.get('helper') as MockHelperVariant) ? { helper: q.get('helper') as MockHelperVariant } : {}),
+    ...(q.get('geo') === 'many' ? { geoMany: true } : {}),
+    ...(q.get('lists') === 'long' ? { longLists: true } : {}),
+    ...(q.get('rows') === 'many' ? { rowsMany: true } : {}),
+    ...(q.get('keeps') === '1' ? { keepsMeasuring: true } : {}),
+    ...(jobStepMs !== null && jobStepMs !== '' && Number.isInteger(Number(jobStepMs)) && Number(jobStepMs) >= 0 ? { jobStepMs: Number(jobStepMs) } : {}),
+    ...(q.get('energy') === 'priced' ? { energyPriced: true } : {}),
+    ...(['watching', 'blocked', 'countdown', 'acting', 'stopped', 'unavailable'].includes(q.get('idle') ?? '') ? { idle: q.get('idle') as MockIdleVariant } : {}),
+    ...(['unavailable', 'ended', 'waiting', 'busy', 'quiet'].includes(q.get('power') ?? '') ? { power: q.get('power') as MockPowerVariant } : {}),
+    ...(q.get('tray') === 'noHost' ? { tray: 'noHost' as const } : {}),
+    ...(['empty', 'off', 'cantSend', 'noNeighbours', 'neighboursFail', 'readinessCantTell', 'timeout'].includes(q.get('wol') ?? '') ? { wol: q.get('wol') as MockWolVariant } : {}),
+    ...(['on', 'empty', 'off', 'needsHelper', 'unavailable', 'agent', 'failed'].includes(q.get('wake') ?? '') ? { wake: q.get('wake') as MockWakeVariant } : {}),
     ...(jobSteps !== null && Number.isInteger(Number(jobSteps)) && Number(jobSteps) >= 1 && Number(jobSteps) <= 100 ? { jobSteps: Number(jobSteps) } : {}),
   };
 }
+
+/** `?saved=3`: a saved disk map of the startup disk, 3 days old, 12.4 GB more used than when it was scanned, and saved lists. */
+function savedFromUrl(days: string | null): Partial<MockOptions> {
+  const d = days === null || days === '' ? NaN : Number(days);
+  if (!Number.isFinite(d) || d <= 0) return {};
+  return {
+    savedMaps: [{ target: { volume: { id: '/' } }, ageMs: d * 86_400_000, changedBytes: 13_314_398_618 }],
+    savedListsAgeMs: d * 86_400_000,
+  };
+}
+const HELPER_VARIANTS: readonly string[] = ['notIncluded', 'off', 'notRunning', 'starting', 'missing', 'outdated', 'ready', 'silent', 'foreign'];
+/** What the real engine says when these fail: the cause and the next step. */
+const FAIL_TEXT: Readonly<Record<string, string>> = {
+  intelStatus: 'Dyno could not read your IP lists: the agent did not answer. Check that Dyno is running, then try again.',
+  geoSummary: 'Dyno could not read the current connections: the system refused the list of sockets. Try again; if it keeps failing, restart Dyno.',
+  firewall: 'The firewall could not be read: the system tool did not answer in time. Try again; if it keeps failing, restart Dyno.',
+};
 
 const copy = <T>(v: T): T => structuredClone(v);
 
@@ -198,6 +294,9 @@ export function applyMockPlatform(search: string, root: HTMLElement): void {
 /** A mock reading as a plain number: the mock reads everything. */
 const num = (m: Measured<number>): number => readValue(m) ?? 0;
 
+/** How many seconds of live samples a new summary subscriber gets first (the live store keeps SPARK_CAPACITY = 60 including the current one). */
+export const LIVE_BACKLOG = 59;
+
 export class MockBackend implements DynoBackend {
   private readonly machine: MockMachine;
   private readonly latencyMs: number;
@@ -210,6 +309,7 @@ export class MockBackend implements DynoBackend {
   private processes: MockProcess[];
   private activityLog: ActivityEntry[];
   private alertLog: Alert[];
+  private readonly longLists: boolean;
   private settingsValue: Settings = demoSettings();
   private counters!: MockCounters;
   private startup: StartupEntry[] = demoStartup();
@@ -221,6 +321,8 @@ export class MockBackend implements DynoBackend {
   private readonly alertListeners = new Set<(a: Alert) => void>();
   private readonly activityListeners = new Set<(a: ActivityEntry) => void>();
   private readonly agentListeners = new Set<(s: AgentStatus) => void>();
+  private trayValue: TrayAvailability;
+  private readonly trayListeners = new Set<(a: TrayAvailability) => void>();
   private readonly alarmListeners = new Set<(c: AlarmChange) => void>();
   /** The widget layouts and the popup's values (family ADR 0035), kept in the browser's storage so a reload keeps them. */
   readonly widgets: MockWidgets;
@@ -233,15 +335,38 @@ export class MockBackend implements DynoBackend {
   readonly savedInventories: InventoryFormat[] = [];
   /** Folder choices the mock was asked to show, for tests. */
   pickedFolders = 0;
-  private readonly backupVariant: MockBackupVariant;
-  private backupCheckedAt: number;
+  private helperVariant: MockHelperVariant;
+  private toolInstalled = false;
+  private rowsMany = false;
+  private readonly keepAwake: MockPower;
+  private readonly powerListeners = new Set<(v: PowerView) => void>();
+  private readonly wolMock: MockWol;
+  private readonly wakeMock: MockWakes;
+  private readonly wolListeners = new Set<(v: WolView) => void>();
+  private readonly wakesListeners = new Set<(v: WakesView) => void>();
   private alarmList: Alarm[] | null = null;
   private snapshotInfos: RecorderSnapshotInfo[] | null = null;
   /** Bundles the mock "saved", for tests. */
-  readonly savedBundles: SavedDiagnostics[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  /** The lists whose saved answer was already given once (`savedListsAgeMs`). */
+  private readonly savedGiven = new Set<string>();
+  private readonly options: MockOptions;
+  /** What the tray draws of a number: the mock's OS and (`?tray=16`) the taskbar's icon size. */
+  private readonly os: MockOs;
+  private readonly trayPx: number;
+
+  /** True the first time a list is asked for when `savedListsAgeMs` is set: the saved answer; the next ask has the fresh one. */
+  private takeSaved(list: string): boolean {
+    if (this.options.savedListsAgeMs === undefined || this.savedGiven.has(list)) return false;
+    this.savedGiven.add(list);
+    return true;
+  }
 
   constructor(options: MockOptions = {}) {
+    this.options = options;
+    this.keepsMeasuring = options.keepsMeasuring ?? false;
+    this.os = options.os ?? 'macos';
+    this.trayPx = options.trayPx ?? (this.os === 'macos' ? 18 : 16);
     this.machine = options.machine ?? 'laptop';
     const base = osProfile(options.os ?? 'macos');
     this.profile =
@@ -251,21 +376,46 @@ export class MockBackend implements DynoBackend {
     this.counters = new MockCounters(this.profile.os);
     this.settingsValue = { ...this.settingsValue, counters: demoCounterSettings(this.profile.os) };
     this.latencyMs = options.latencyMs ?? 0;
+    this.intel.many = options.geoMany ?? false;
+    this.intel.manyRules = options.rowsMany ?? false;
+    this.rowsMany = options.rowsMany ?? false;
     this.jobSink = options.jobs;
     this.jobSteps = options.jobSteps ?? 1;
-    this.jobStepMs = this.latencyMs === 0 ? 0 : 400;
+    this.jobStepMs = options.jobStepMs ?? (this.latencyMs === 0 ? 0 : 400);
     this.now = options.now ?? (() => Date.now());
     this.fail = options.fail ?? new Set();
-    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, ...(options.widgets ?? {}) });
+    this.widgets = new MockWidgets({ storage: browserStorage(options.widgetStorage), now: this.now, gridCases: gridCases as unknown as GridCase[], longLists: options.longLists ?? false, ...(options.widgets ?? {}) });
     // A scan reports a few times: one timer per step (zero delay with no latency, so a test sees the first status before the rest).
     const latency = this.latencyMs;
     this.disk = new MockDiskMap(this.now, (fn, step) => setTimeout(fn, latency === 0 ? 0 : Math.max(300, latency * 2) * step), err);
+    for (const m of options.savedMaps ?? []) this.disk.seedSaved(m.target, m.ageMs, m.changedBytes);
+    if (options.holdScans) {
+      this.disk.hold();
+      if (typeof window !== 'undefined') (window as unknown as { __dynoReleaseScans?: () => void }).__dynoReleaseScans = () => this.disk.release();
+    }
     this.start = this.now();
-    this.backupVariant = options.backup ?? 'mixed';
-    this.backupCheckedAt = this.start - 40 * MIN;
+    this.helperVariant = options.helper ?? 'off';
+    this.keepAwake = new MockPower(options.power ?? 'normal', this.now, options.idle);
+    if (options.idle && options.idle !== 'disabled') {
+      // The engine is the single source: a state that says the rule is running comes with the rule switched on and its action.
+      const p = this.settingsValue.power;
+      this.settingsValue = { ...this.settingsValue, power: { ...p, idle: { ...p.idle, enabled: true, action: options.idle === 'acting' || options.idle === 'stopped' ? 'shutDown' : 'sleep' } } };
+    }
+    if (options.energyPriced) {
+      const p = this.settingsValue.power;
+      this.settingsValue = { ...this.settingsValue, power: { ...p, energy: { ...p.energy, wattsOn: 65, wattsSleep: 1.5, tariffPerKwh: 0.32, currency: 'S$', co2GPerKwh: 408 } } };
+    }
+    this.trayValue = options.tray === 'noHost' ? { noHost: { hint: NO_TRAY_HOST_NOTE } } : 'shown';
+    this.wolMock = new MockWol(options.wol ?? 'normal', this.now, () => this.settingsValue.power.wol.enabled);
+    this.wakeMock = new MockWakes(options.wake ?? 'normal', this.now, () => this.settingsValue.power.wake.enabled);
+    // Scheduled wake is off on a fresh install (the engine's default); a variant that shows the tab at work turns it on.
+    if (options.wake !== undefined && options.wake !== 'off' && options.wake !== 'normal') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wake: { enabled: true } } };
+    if (options.wake === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wake: { enabled: false } } };
+    if (options.wol === 'off') this.settingsValue = { ...this.settingsValue, power: { ...this.settingsValue.power, wol: { ...this.settingsValue.power.wol, enabled: false } } };
     this.processes = buildProcesses(this.start, this.profile.specs, this.profile.rootPid);
-    this.activityLog = demoActivity(this.start);
-    this.alertLog = demoAlerts(this.start);
+    this.longLists = options.longLists ?? false;
+    this.activityLog = this.longLists ? [...demoActivity(this.start), ...longActivity(this.start)] : demoActivity(this.start);
+    this.alertLog = this.longLists ? [...demoAlerts(this.start), ...longAlerts(this.start)] : demoAlerts(this.start);
     this.snapshotList = [
       { id: 'snap-1', at: this.start - 3 * 60 * MIN, label: 'Before the build', processCount: this.processes.length - 7 },
       { id: 'snap-2', at: this.start - 20 * MIN, label: 'Morning baseline', processCount: this.processes.length - 2 },
@@ -279,7 +429,10 @@ export class MockBackend implements DynoBackend {
   onLive(detail: LiveDetail, listener: (u: LiveUpdate) => void): Unsubscribe {
     this.liveListeners.set(listener, detail);
     setTimeout(() => {
-      if (this.liveListeners.has(listener)) listener(this.liveUpdate(detail));
+      if (!this.liveListeners.has(listener)) return;
+      // The summary subscriber (the shared live store) opens with the last minute already measured, so its sparklines are full width.
+      if (detail === 'summary') for (const u of this.liveBacklog()) listener(u);
+      listener(this.liveUpdate(detail));
     }, 0);
     this.timer ??= setInterval(() => this.tick(), 1000);
     return () => {
@@ -321,9 +474,20 @@ export class MockBackend implements DynoBackend {
     for (const [listener, detail] of this.liveListeners) listener(detail === 'processes' || !wantsProcesses ? update : { ...update, processes: null, groups: null });
   }
 
+  /** The summary updates of the {@link LIVE_BACKLOG} seconds before the current one, oldest first (time comes from the injected clock). */
+  liveBacklog(): LiveUpdate[] {
+    const t = Math.floor(this.now() / 1000);
+    const out: LiveUpdate[] = [];
+    for (let s = t - LIVE_BACKLOG; s < t; s++) out.push(this.liveUpdateAt(s, 'summary'));
+    return out;
+  }
+
   /** The live sample at the current second. */
   liveUpdate(detail: LiveDetail): LiveUpdate {
-    const t = Math.floor(this.now() / 1000);
+    return this.liveUpdateAt(Math.floor(this.now() / 1000), detail);
+  }
+
+  private liveUpdateAt(t: number, detail: LiveDetail): LiveUpdate {
     const samples = this.samplesAt(t);
     const groups = groupSamples(this.processes, samples);
     const system = this.system(t, samples);
@@ -343,6 +507,7 @@ export class MockBackend implements DynoBackend {
       processes: detail === 'processes' ? samples : null,
       groups: detail === 'processes' ? groups : null,
       otherUsers: null,
+      via: { processes: 'local', others: 'local', temperatures: 'local' },
     };
   }
 
@@ -513,18 +678,19 @@ export class MockBackend implements DynoBackend {
     }
   }
 
-  lockers(path: string): Promise<Locker[]> {
+  lockers(path: string): Promise<LockerList> {
     return this.reply('lockers', () => {
       if (!path.trim()) throw err('badRequest', 'Enter a file or folder path.');
       const lower = path.toLowerCase();
       const pick = (name: string, kind: string | null) => {
         const p = this.processes.find((x) => x.name === name);
-        return p ? [{ process: { pid: p.pid, started: p.started }, name: p.name, kind }] : [];
+        return p ? [{ process: { pid: p.pid, started: p.started }, name: p.name, kind, via: 'local' as const }] : [];
       };
-      if (lower.includes('target')) return [...pick(this.profile.names.rustc, 'Writes build output'), ...pick(this.profile.names.code, 'rust-analyzer watches it'), ...pick(this.profile.names.indexer, 'Indexing')];
-      if (lower.includes('chrome')) return pick(this.profile.names.chrome, 'Browser profile');
-      if (lower.endsWith('.log')) return pick(this.profile.names.agent, null);
-      return [];
+      const all = (lockers: Locker[]): LockerList => ({ lockers, notListed: 0, truncated: false });
+      if (lower.includes('target')) return all([...pick(this.profile.names.rustc, 'Writes build output'), ...pick(this.profile.names.code, 'rust-analyzer watches it'), ...pick(this.profile.names.indexer, 'Indexing')]);
+      if (lower.includes('chrome')) return all(pick(this.profile.names.chrome, 'Browser profile'));
+      if (lower.endsWith('.log')) return all(pick(this.profile.names.agent, null));
+      return all([]);
     });
   }
 
@@ -653,7 +819,7 @@ export class MockBackend implements DynoBackend {
   }
 
   anomalies(): Promise<Anomaly[]> {
-    return this.reply('anomalies', () => demoAnomalies(this.start));
+    return this.reply('anomalies', () => (this.longLists ? [...demoAnomalies(this.start), ...longAnomalies(this.start)] : demoAnomalies(this.start)));
   }
 
   history(range: HistoryRange, end: Timestamp | null): Promise<History> {
@@ -688,8 +854,16 @@ export class MockBackend implements DynoBackend {
     return this.reply('diskVolumes', () => this.disk.volumes());
   }
 
-  startDiskScan(target: DiskTarget): Promise<DiskScanStatus> {
-    return this.reply('startDiskScan', () => this.disk.start(target));
+  startDiskScan(target: DiskTarget, replaces: number | null = null): Promise<DiskScanStatus> {
+    return this.reply('startDiskScan', () => this.disk.start(target, replaces));
+  }
+
+  forgetSavedDiskMap(scan: number): Promise<void> {
+    return this.reply('forgetSavedDiskMap', () => this.disk.forgetSaved(scan));
+  }
+
+  forgetSavedDiskMaps(): Promise<void> {
+    return this.reply('forgetSavedDiskMaps', () => this.disk.forgetAllSaved());
   }
 
   cancelDiskScan(scan: number): Promise<void> {
@@ -730,7 +904,7 @@ export class MockBackend implements DynoBackend {
     return this.reply('health', () => {
       const reasons = healthReasons();
       const score = 100 - reasons.reduce((a, r) => a + r.impact, 0);
-      return { at: this.now(), score, grade: score >= 80 ? 'good' : score >= 60 ? 'fair' : 'poor', reasons };
+      return { at: this.now(), score, grade: score >= 80 ? 'good' : score >= 60 ? 'fair' : 'poor', performanceScore: score, cappedBy: null, reasons };
     });
   }
 
@@ -744,8 +918,19 @@ export class MockBackend implements DynoBackend {
     return this.reply('inventory', () => mockInventory(this.profile.os));
   }
 
+  toolOffer(): Promise<ToolOffer> {
+    return this.reply('toolOffer', () => mockToolOffer(this.helperVariant, this.profile.os, this.toolInstalled));
+  }
+
+  helperStatus(): Promise<HelperStatus> {
+    return this.reply('helperStatus', () => mockHelperStatus(this.helperVariant, this.profile.os));
+  }
+
   counterObjects(): Promise<CounterObjectList> {
-    return this.reply('counterObjects', () => this.counters.objects());
+    return this.reply('counterObjects', () => {
+      const list = this.counters.objects();
+      return this.takeSaved('counters') ? { ...list, savedAt: this.now() - (this.options.savedListsAgeMs ?? 0) } : list;
+    });
   }
 
   counterObject(name: string): Promise<CounterObject> {
@@ -777,7 +962,7 @@ export class MockBackend implements DynoBackend {
   }
 
   network(query: NetworkQuery): Promise<NetworkSnapshot> {
-    return this.reply('network', () => mockNetwork(query, this.now()));
+    return this.reply('network', () => mockNetwork(query, this.now(), this.rowsMany));
   }
 
   resolveHosts(addresses: string[]): Promise<HostName[]> {
@@ -787,10 +972,31 @@ export class MockBackend implements DynoBackend {
     });
   }
 
+  // -------------------------------------------------------------------------------------------- IP lists, the map, the firewall
+
+  /** The mock's lists (their state lives for the life of the mock). */
+  readonly intel = new MockIntel(() => this.now());
+
+  intelStatus(): Promise<IntelStatus> {
+    return this.reply('intelStatus', () => this.intel.status());
+  }
+
+  intelEdit(edit: IntelEdit): Promise<EditOutcome> {
+    return this.reply('intelEdit', () => this.intel.edit(edit));
+  }
+
+  geoSummary(): Promise<GeoSummary> {
+    return this.reply('geoSummary', () => this.intel.geo());
+  }
+
+  firewall(): Promise<FirewallView> {
+    return this.reply('firewall', () => this.intel.firewall());
+  }
+
   // -------------------------------------------------------------------------------------------- alarms
 
   private alarmRows(): Alarm[] {
-    return (this.alarmList ??= demoAlarms(this.now()));
+    return (this.alarmList ??= this.rowsMany ? manyAlarms(demoAlarms(this.now()), 60) : demoAlarms(this.now()));
   }
 
   private changeAlarm(ids: number[], kind: AlarmChange['kind'], edit: (a: Alarm) => Alarm): Alarm[] {
@@ -888,19 +1094,6 @@ export class MockBackend implements DynoBackend {
     });
   }
 
-  diagnosticsPreview(): Promise<BundlePreview> {
-    return this.reply('diagnosticsPreview', () => demoBundlePreview());
-  }
-
-  saveDiagnostics(): Promise<SavedDiagnostics | null> {
-    return this.reply('saveDiagnostics', () => {
-      const p = demoBundlePreview();
-      const saved = { path: '/Users/me/dyno-diagnostics.zip', bytes: Math.round(p.totalBytes * 0.22), files: p.files.length };
-      this.savedBundles.push(saved);
-      return saved;
-    });
-  }
-
   /** The URLs the mock "opened", for tests. */
   readonly opened: string[] = [];
 
@@ -959,16 +1152,37 @@ export class MockBackend implements DynoBackend {
     ]);
   }
 
+  /** The overview the page shows; a scenario written to `localStorage['dyno.mock.bench']` (the screenshots do) replaces it. */
+  private benchOverview(): BenchOverview {
+    try {
+      const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem('dyno.mock.bench');
+      if (raw) return JSON.parse(raw) as BenchOverview;
+    } catch {
+      /* no storage or a damaged scenario: the default below */
+    }
+    return { running: this.benchRunning, runs: this.runs(), diskTestEnabled: true, estimates: MOCK_ESTIMATES };
+  }
+
   benchmarks(): Promise<BenchOverview> {
-    return this.reply('benchmarks', () => ({ running: this.benchRunning, runs: this.runs() }));
+    return this.reply('benchmarks', () => this.benchOverview());
   }
 
   startBenchmark(r: StartBenchmark): Promise<BenchOverview> {
     return this.reply('startBenchmark', () => {
+      // A start error written to `localStorage['dyno.mock.bench.start-error']` as {code, message} (the screenshots show the battery question).
+      try {
+        const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem('dyno.mock.bench.start-error');
+        if (raw && !r.allowBattery) {
+          const e = JSON.parse(raw) as { code: Parameters<typeof err>[0]; message: string };
+          throw err(e.code, e.message);
+        }
+      } catch (e) {
+        if (e instanceof Error === false && typeof e === 'object' && e !== null && 'code' in e) throw e;
+      }
       if (this.benchRunning) throw err('busy', 'A benchmark is already running; wait for it or cancel it.');
       if (!r.kinds.length) throw err('badRequest', 'Choose at least one benchmark to run.');
       const kinds = [...new Set(r.kinds)];
-      const progress: BenchProgress = { runId: `r${this.runs().length + 1}`, startedAt: Date.now(), kinds, current: kinds[0] ?? null, done: [] };
+      const progress: BenchProgress = { runId: `r${this.runs().length + 1}`, startedAt: Date.now(), kinds, current: kinds[0] ?? null, done: [], phase: { phase: 'cpu', label: 'Pass 3 of 5 · Single core', rep: 2, of: 5, count: 2, total: 5 }, liveness: 'running', limited: null };
       this.benchRunning = progress;
       const step = (i: number) => {
         const p = this.benchRunning;
@@ -992,13 +1206,49 @@ export class MockBackend implements DynoBackend {
         }, 900);
       };
       step(0);
-      return { running: this.benchRunning, runs: this.runs() };
+      return this.benchOverview();
     });
   }
 
   cancelBenchmark(): Promise<void> {
     return this.reply('cancelBenchmark', () => {
       this.benchRunning = null;
+    });
+  }
+
+  /** The engine's `estimate_run`, for the mock only. */
+  benchEstimate(r: BenchEstimateRequest): Promise<BenchRunEstimate | null> {
+    return this.reply('benchEstimate', () => {
+      if (r.kinds.includes('disk') && r.drives === 0) return null;
+      let seconds = 0;
+      let bytes = 0;
+      for (const k of r.kinds) {
+        if (k === 'disk') {
+          const d = MOCK_ESTIMATES.disk.find((x) => x.mib === (r.diskMib ?? MOCK_ESTIMATES.quickMib)) ?? MOCK_ESTIMATES.disk[0]!;
+          seconds += d.seconds * r.drives;
+          bytes = d.bytesWritten;
+          if (r.sustainedWriteGib) {
+            seconds += (MOCK_ESTIMATES.sustainedWrite.find((w) => w.gib === r.sustainedWriteGib)?.seconds ?? 0) * r.drives;
+            bytes += r.sustainedWriteGib * 1024 ** 3;
+          }
+        } else if (k === 'cpu' && r.sustainedMinutes) seconds += r.sustainedMinutes * 60;
+        else seconds += MOCK_ESTIMATES.kinds.find((x) => x.kind === k)?.seconds ?? 0;
+      }
+      return { seconds, bytesPerDrive: bytes };
+    });
+  }
+
+  benchGpuAdapters(): Promise<GpuAdapter[]> {
+    return this.reply('benchGpuAdapters', () => [
+      { index: 0, name: 'Apple M4 Pro', kind: 'integrated', backend: 'Metal', driver: '' },
+      { index: 1, name: 'AMD Radeon Pro (external)', kind: 'discrete', backend: 'Metal', driver: '' },
+    ]);
+  }
+
+  saveBenchmarks(ids: string[], format: BenchExportFormat): Promise<SavedReport | null> {
+    return this.reply('saveBenchmarks', () => {
+      if (!ids.length) throw err('notFound', 'None of those runs exists any more.');
+      return { path: `/Users/me/dyno-benchmarks.${format}`, bytes: 4_096 };
     });
   }
 
@@ -1012,8 +1262,10 @@ export class MockBackend implements DynoBackend {
 
   compareBenchmarks(before: string, after: string): Promise<BenchComparison> {
     return this.reply('compareBenchmarks', () => {
-      const b = this.runs().find((x) => x.id === before);
-      const a = this.runs().find((x) => x.id === after);
+      // The runs the page shows: a screenshot scenario's, or the mock's own.
+      const shown = this.benchOverview().runs;
+      const b = shown.find((x) => x.id === before);
+      const a = shown.find((x) => x.id === after);
       if (!a || !b) throw err('notFound', 'That benchmark run no longer exists.');
       return mockCompare(b, a);
     });
@@ -1048,6 +1300,9 @@ export class MockBackend implements DynoBackend {
         scoreTrend: [66, 68, 71, 70, 72, 74].map((score, i) => ({ at: from + i * 28 * 60 * MIN, score })),
         disks: [
           { disk: this.profile.os === 'windows' ? 'C:' : '/', total: 953 * GB, free: 210 * GB, forecast: { fullInDays: 41 } },
+          // Invented long mount paths: the page must shorten them, never let them push the numbers out of the card.
+          { disk: '/Volumes/Example-Archive-Drive-With-A-Long-Name/Projects-2026/Quarter-Four/Backups-Of-Everything-From-Every-Computer-In-The-House-Kept-Here-For-Ten-Years', total: 3726 * GB, free: 652 * GB, forecast: 'notFilling' },
+          { disk: '/Volumes/Spare', total: 1863 * GB, free: 1210 * GB, forecast: 'notEnoughData' },
         ],
         issues: [
           { at: issueAt(6 * 60), severity: 'warning', title: 'Drive is getting full', detail: '210 GB free of 953 GB; at this rate it is full in about 41 days.' },
@@ -1110,11 +1365,103 @@ export class MockBackend implements DynoBackend {
     return this.reply('saveSettings', () => {
       if (settings.sampling.intervalMs < 250) throw err('badRequest', 'Sample at most 4 times a second (250 ms).');
       if (settings.webApi.port < 1024 || settings.webApi.port > 65535) throw err('badRequest', 'Choose a port between 1024 and 65535.');
-      const extras = mockMaintenanceProblem(settings.maintenance) ?? mockBackupProblem(settings.backup);
+      const extras = mockMaintenanceProblem(settings.maintenance);
       if (extras) throw err('badRequest', extras);
       this.settingsValue = copy(settings);
       return this.settingsValue;
     });
+  }
+
+  powerState(): Promise<PowerView> {
+    return this.reply('powerState', () => this.keepAwake.view());
+  }
+
+  powerKeepAwake(spec: AwakeSpec): Promise<PowerView> {
+    return this.reply('powerKeepAwake', () => {
+      if (!this.settingsValue.power.keepAwake.enabled) throw err('badRequest', 'Keep awake is turned off in Settings.');
+      return this.pushPower(this.keepAwake.start(spec));
+    });
+  }
+
+  powerIdleCancel(): Promise<PowerView> {
+    return this.reply('powerIdleCancel', () => this.pushPower(this.keepAwake.idleCancel()));
+  }
+
+  powerIdleSnooze(minutes: number): Promise<PowerView> {
+    return this.reply('powerIdleSnooze', () => this.pushPower(this.keepAwake.idleSnooze(minutes)));
+  }
+
+  energyReport(days: number): Promise<EnergyReport> {
+    return this.reply('energyReport', () => mockEnergy(days, this.now(), this.settingsValue.power.energy));
+  }
+
+  powerStopKeepAwake(): Promise<PowerView> {
+    return this.reply('powerStopKeepAwake', () => this.pushPower(this.keepAwake.stop()));
+  }
+
+  onPower(listener: (v: PowerView) => void): Unsubscribe {
+    this.powerListeners.add(listener);
+    return () => this.powerListeners.delete(listener);
+  }
+
+  wolDevices(): Promise<WolView> {
+    return this.reply('wolDevices', () => this.wolMock.view());
+  }
+
+  wolCandidates(): Promise<Neighbour[]> {
+    return this.reply('wolCandidates', () => {
+      if (!this.settingsValue.power.wol.discovery) throw err('badRequest', 'Add from network is turned off in Settings.');
+      return this.wolMock.candidates();
+    });
+  }
+
+  wolSave(device: WolDeviceInput): Promise<WolView> {
+    return this.reply('wolSave', () => this.pushWol(this.wolMock.save(device)));
+  }
+
+  wolRemove(id: number): Promise<WolView> {
+    return this.reply('wolRemove', () => this.pushWol(this.wolMock.remove(id)));
+  }
+
+  wolReadiness(): Promise<ThisPcWol> {
+    return this.reply('wolReadiness', () => this.wolMock.readiness());
+  }
+
+  powerWakes(): Promise<WakesView> {
+    return this.reply('powerWakes', () => this.wakeMock.view());
+  }
+
+  powerSetWake(entry: WakeInput): Promise<WakesView> {
+    return this.reply('powerSetWake', () => this.pushWakes(this.wakeMock.set(entry, this.wolMock.view().devices.map((d) => d.id))));
+  }
+
+  powerCancelWake(id: number): Promise<WakesView> {
+    return this.reply('powerCancelWake', () => this.pushWakes(this.wakeMock.cancel(id)));
+  }
+
+  onWakes(listener: (v: WakesView) => void): Unsubscribe {
+    this.wakesListeners.add(listener);
+    return () => this.wakesListeners.delete(listener);
+  }
+
+  private pushWakes(view: WakesView): WakesView {
+    for (const l of [...this.wakesListeners]) l(view);
+    return view;
+  }
+
+  onWol(listener: (v: WolView) => void): Unsubscribe {
+    this.wolListeners.add(listener);
+    return () => this.wolListeners.delete(listener);
+  }
+
+  private pushWol(view: WolView): WolView {
+    for (const l of [...this.wolListeners]) l(view);
+    return view;
+  }
+
+  private pushPower(view: PowerView): PowerView {
+    for (const l of [...this.powerListeners]) l(view);
+    return view;
   }
 
   upsertAlertRule(rule: CustomAlertRule): Promise<Settings> {
@@ -1144,8 +1491,12 @@ export class MockBackend implements DynoBackend {
     return this.reply('widgetLayout', () => this.widgets.view(surface));
   }
 
-  editWidgetLayout(edit: SurfaceEdit): Promise<SurfaceView> {
-    return this.reply('editWidgetLayout', () => this.widgets.edit(edit));
+  editWidgetLayout(edit: SurfaceEdit, baseRevision?: number): Promise<SurfaceView> {
+    return this.reply('editWidgetLayout', () => this.widgets.edit(edit, baseRevision ?? null));
+  }
+
+  previewWidgetLayout(request: PreviewRequest): Promise<PreviewReply<DashboardView>> {
+    return this.reply('previewWidgetLayout', () => this.widgets.preview(request));
   }
 
   popoverValues(): Promise<PopoverSurfaceValues> {
@@ -1222,7 +1573,7 @@ export class MockBackend implements DynoBackend {
   }
 
   widgetChoices(): Promise<WidgetChoices> {
-    return this.reply('widgetChoices', () => mockWidgetChoices());
+    return this.reply('widgetChoices', () => mockWidgetChoices(mockNumberSupport(this.os, this.trayPx)));
   }
 
   showMainWindow(): Promise<void> {
@@ -1241,7 +1592,18 @@ export class MockBackend implements DynoBackend {
     return this.reply('quitApp', () => undefined);
   }
 
-  // ----------------------------------------------------------------------------------------- extras, backup
+  /** The mock's service state: `keepsMeasuring` is set by a test (the login service is installed and supervises the agent). */
+  keepsMeasuring = false;
+
+  quitKeepsMeasuring(): Promise<boolean> {
+    return this.reply('quitKeepsMeasuring', () => this.keepsMeasuring);
+  }
+
+  quitAndStopAgent(): Promise<void> {
+    return this.reply('quitAndStopAgent', () => undefined);
+  }
+
+  // ----------------------------------------------------------------------------------------- extras
 
   changes(query: ChangesQuery): Promise<ChangeTimeline> {
     return this.reply('changes', () => mockChanges(query, this.now()));
@@ -1267,10 +1629,6 @@ export class MockBackend implements DynoBackend {
 
   maintenance(): Promise<MaintenanceStatus> {
     return this.reply('maintenance', () => mockMaintenanceStatus(this.settingsValue.maintenance, this.now()));
-  }
-
-  backup(): Promise<BackupReport> {
-    return this.reply('backup', () => mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt));
   }
 
   // ----------------------------------------------------------------------------------------------- jobs
@@ -1300,15 +1658,19 @@ export class MockBackend implements DynoBackend {
       const live = [...this.jobBook.values()].filter((j) => isActive(j.status));
       const same = live.find((j) => JSON.stringify(j.spec) === JSON.stringify(spec));
       if (same) return same.status.id;
-      if (kind !== 'file-hash' && live.some((j) => j.status.kind === kind)) throw err('busy', `${JOB_TITLES[kind]} is already running; wait for it or cancel it.`);
+      if (kind !== 'file-hash' && kind !== 'wol-wake' && live.some((j) => j.status.kind === kind)) throw err('busy', `${JOB_TITLES[kind]} is already running; wait for it or cancel it.`);
       const o = objectOf(spec);
+      if ('wolWake' in o) {
+        if (!this.wolMock.enabled()) throw err('badRequest', 'Wake-on-LAN is turned off in Settings.');
+        if (!this.wolMock.exists((o as { wolWake: { id: number } }).wolWake.id)) throw err('notFound', 'That computer is no longer in the list.');
+      }
       if ('findFiles' in o && !(o as { findFiles: { query: FinderQuery } }).findFiles.query.folder.trim()) throw err('badRequest', 'Choose a folder to look in.');
       const id = this.nextJobId++;
       const job: MockJob = { spec, status: this.status(id, kind, spec, 1, { state: 'queued' }), step: 0, timer: undefined };
       this.jobBook.set(id, job);
       while (this.jobBook.size > 16) this.jobBook.delete(this.jobBook.keys().next().value as number);
       this.publish(job);
-      this.change(job, { state: 'running', phase: null });
+      this.change(job, { state: 'running', phase: kind === 'wol-wake' ? mockPhase(kind, 0, this.jobSteps) : null });
       this.schedule(job);
       return id;
     });
@@ -1335,8 +1697,8 @@ export class MockBackend implements DynoBackend {
     return {
       id,
       kind,
-      title: JOB_TITLES[kind],
-      subject: jobSubject(spec),
+      title: spec_isTest(spec) ? 'Testing a wake' : JOB_TITLES[kind],
+      subject: this.wakeSubject(spec) ?? jobSubject(spec),
       seq,
       elapsedMs: 0,
       etaMs: null,
@@ -1344,6 +1706,11 @@ export class MockBackend implements DynoBackend {
       notCancellableReason: null,
       ...state,
     } as SuJobSnapshot;
+  }
+
+  private wakeSubject(spec: JobSpec): string | null {
+    const w = objectOf(spec)['wolWake'] as { id: number } | undefined;
+    return w ? this.wolMock.nameOf(w.id) : null;
   }
 
   private publish(job: MockJob): void {
@@ -1361,15 +1728,21 @@ export class MockBackend implements DynoBackend {
     job.timer = setTimeout(() => {
       job.step++;
       if (job.step < this.jobSteps) {
-        this.change(job, { state: 'running', phase: mockPhase(job.status.kind as JobKindSlug, job.step, this.jobSteps - 1) });
+        this.change(job, runningStep(job.status.kind as JobKindSlug, job.step, this.jobSteps - 1));
         this.schedule(job);
         return;
       }
       const problem = this.problemWith(job.spec);
       if (problem) this.change(job, { state: 'failed', message: problem });
       else {
-        if (job.status.kind === 'refresh-backup') this.backupCheckedAt = this.now();
+        if (job.status.kind === 'install-tool') this.toolInstalled = true;
+        if (job.status.kind === 'helper') this.helperVariant = afterHelperAction((objectOf(job.spec)['helper'] as { action: HelperAction }).action);
         this.change(job, { state: 'done' });
+        const wake = objectOf(job.spec)['wolWake'] as { id: number; test: boolean } | undefined;
+        if (wake) {
+          job.wolOutcome = this.wolMock.outcome(wake.id, wake.test);
+          this.pushWol(this.wolMock.view());
+        }
       }
     }, this.jobStepMs);
   }
@@ -1381,6 +1754,7 @@ export class MockBackend implements DynoBackend {
       const folder = (o as { findFiles: { query: FinderQuery } }).findFiles.query.folder;
       return folder.startsWith('/') || /^[A-Za-z]:[\\/]/.test(folder) ? null : 'Give the full path of the folder.';
     }
+    if ('helper' in o && this.fail.has('helperJob')) return 'The permission prompt was declined, so nothing was changed.';
     if ('fileHash' in o) {
       const source = (o as { fileHash: { source: HashSource } }).fileHash.source;
       const path = 'path' in source ? source.path : (this.find(source.process).exe ?? '');
@@ -1407,8 +1781,14 @@ export class MockBackend implements DynoBackend {
     if ('sleepBlockers' in o) return { sleep: mockSleep() };
     if ('bootAnalysis' in o) return { boot: mockBoot(this.now()) };
     if ('appUsage' in o) return { appUsage: mockUsage() };
-    if ('softwareInventory' in o) return { software: mockSoftware() };
-    return { backup: mockBackupReport(this.backupVariant, this.now(), this.backupCheckedAt) };
+    if ('softwareInventory' in o) {
+      const list = mockSoftware();
+      return { software: this.takeSaved('software') ? { ...list, savedAt: this.now() - (this.options.savedListsAgeMs ?? 0) } : list };
+    }
+    if ('helper' in o) return { helper: mockHelperStatus(this.helperVariant, this.profile.os) };
+    if ('updateList' in o || 'updateGeo' in o || 'rebuildIntel' in o) return { intel: this.intel.status() };
+    if ('installTool' in o) return { tool: { tool: 'smartmontools', installed: '7.5' } };
+    return { wol: jobBookOutcome(this.jobBook, o) };
   }
 
   // ---------------------------------------------------------------------------------------------- plumbing
@@ -1417,6 +1797,21 @@ export class MockBackend implements DynoBackend {
   pushAlert(alert: Alert): void {
     this.alertLog = [alert, ...this.alertLog];
     for (const l of this.alertListeners) l(copy(alert));
+  }
+
+  trayAvailability(): Promise<TrayAvailability> {
+    return this.reply('trayAvailability', () => copy(this.trayValue));
+  }
+
+  onTrayAvailability(listener: (a: TrayAvailability) => void): Unsubscribe {
+    this.trayListeners.add(listener);
+    return () => this.trayListeners.delete(listener);
+  }
+
+  /** Emits a change of the tray host (dev tools and tests): the desktop started or stopped showing the icons. */
+  pushTrayAvailability(value: TrayAvailability): void {
+    this.trayValue = value;
+    for (const l of this.trayListeners) l(copy(value));
   }
 
   /** Emits an agent status change (dev tools and tests). */
@@ -1489,7 +1884,7 @@ export class MockBackend implements DynoBackend {
       const gate = this.holds.get(name);
       const run = () => {
         try {
-          if (this.fail.has(name)) throw err('internal', `The mock was asked to fail “${name}”.`);
+          if (this.fail.has(name)) throw err('internal', FAIL_TEXT[name] ?? `The mock was asked to fail “${name}”.`);
           resolve(this.localize(copy(body())));
         } catch (e) {
           reject(e);
@@ -1508,14 +1903,22 @@ export interface MockJobSink {
   emit(job: SuJobSnapshot): void;
 }
 
+/** What the mock's finished wake produced (kept on the job when it ended). */
+function jobBookOutcome(book: Map<number, MockJob>, o: Record<string, unknown>): WolOutcome {
+  const wake = (o as { wolWake: { id: number; test: boolean } }).wolWake;
+  const job = [...book.values()].reverse().find((j) => j.wolOutcome && JSON.stringify(objectOf(j.spec)) === JSON.stringify(o));
+  return job?.wolOutcome ?? { sent: [], answered: null, tested: wake.test, elapsedSecs: 0, timedOut: false, cancelled: false, message: 'Wake packets sent.' };
+}
+
 interface MockJob {
+  wolOutcome?: WolOutcome;
   spec: JobSpec;
   status: SuJobSnapshot;
   step: number;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
-type JobKindSlug = 'find-files' | 'rescan-issues' | 'refresh-backup' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory';
+type JobKindSlug = 'find-files' | 'rescan-issues' | 'file-hash' | 'sleep-blockers' | 'boot-analysis' | 'app-usage' | 'software-inventory' | 'update-list' | 'update-geo' | 'rebuild-intel' | 'helper' | 'install-tool' | 'wol-wake';
 
 /** The part of a snapshot that changes with its state (the shell's flat state tag). */
 type JobStateFields = SuJobState;
@@ -1523,23 +1926,33 @@ type JobStateFields = SuJobState;
 const JOB_TITLES: Record<JobKindSlug, string> = {
   'find-files': 'Finding files',
   'rescan-issues': 'Reading system logs',
-  'refresh-backup': 'Checking backups',
   'file-hash': 'Hashing a file',
   'sleep-blockers': 'Reading sleep blockers',
   'boot-analysis': 'Analysing boots',
   'app-usage': 'Reading app usage',
   'software-inventory': 'Listing installed software',
+  helper: 'Setting up administrator readings',
+  'update-list': 'Updating a list',
+  'update-geo': 'Updating the location databases',
+  'rebuild-intel': 'Building the match index',
+  'install-tool': 'Installing the disk-health tool',
+  'wol-wake': 'Waking a computer',
 };
 
 const SPEC_KIND: Record<string, JobKindSlug> = {
   findFiles: 'find-files',
   rescanIssues: 'rescan-issues',
-  refreshBackup: 'refresh-backup',
   fileHash: 'file-hash',
   sleepBlockers: 'sleep-blockers',
   bootAnalysis: 'boot-analysis',
   appUsage: 'app-usage',
   softwareInventory: 'software-inventory',
+  helper: 'helper',
+  updateList: 'update-list',
+  updateGeo: 'update-geo',
+  rebuildIntel: 'rebuild-intel',
+  installTool: 'install-tool',
+  wolWake: 'wol-wake',
 };
 
 /** The variant of a job spec as an object (a unit variant is a string on the wire). */
@@ -1562,8 +1975,25 @@ function jobSubject(spec: JobSpec): string | null {
   return null;
 }
 
+/** A test wake has its own title. */
+function spec_isTest(spec: JobSpec): boolean {
+  return (objectOf(spec)['wolWake'] as { test: boolean } | undefined)?.test === true;
+}
+
 function isActive(s: SuJobSnapshot): boolean {
   return s.state === 'queued' || s.state === 'running';
+}
+
+/** The running status of a job at `step`: its phase, and for the helper's permission prompt the reason Cancel waits. */
+function runningStep(kind: JobKindSlug, step: number, last: number): JobStateFields {
+  const phase = mockPhase(kind, step, last);
+  const prompt = kind === 'helper' && phase.id === 'prompt';
+  return {
+    state: 'running',
+    phase,
+    cancellable: !prompt,
+    notCancellableReason: prompt ? "The system's permission prompt is open; Cancel takes effect when you have answered it." : null,
+  } as JobStateFields;
 }
 
 /** The phase of a mock job at step `step` of `last`: counts that only grow, each kind on its own scale. */
@@ -1574,10 +2004,24 @@ function mockPhase(kind: JobKindSlug, step: number, last: number): SuJobPhase {
       return { id: 'walk', label: 'Listing files', unit: 'items', done: step * 1_200, total: null };
     case 'rescan-issues':
       return { id: 'source-MacLog', label: 'Reading system log', unit: 'items', done: step * 640, total: null };
-    case 'refresh-backup':
-      return { id: 'tools', label: 'Checking backup tools', unit: 'items', done: Math.min(2, Math.floor(part * 3)), total: 3 };
+    case 'wol-wake':
+      return step < last / 2
+        ? { id: 'sending', label: 'Sending the wake packets', unit: 'items', done: Math.min(6, step * 2), total: 6 }
+        : { id: 'waiting', label: 'Waiting for an answer', unit: 'items', done: step * 2, total: null };
     case 'file-hash':
       return { id: 'hash', label: 'Reading the file', unit: 'bytes', done: Math.floor(part * 48_231_424), total: 48_231_424 };
+    case 'helper': {
+      const phase = HELPER_PHASES[Math.min(HELPER_PHASES.length - 1, Math.floor(part * HELPER_PHASES.length))] as { id: string; label: string };
+      return { id: phase.id, label: phase.label, unit: 'items', done: 0, total: null };
+    }
+    case 'install-tool': {
+      const phases = [
+        { id: 'download', label: 'Downloading smartmontools', unit: 'bytes' as const, done: Math.floor(part * 1_508_408), total: 1_508_408 },
+        { id: 'check', label: 'Checking the download', unit: 'items' as const, done: 0, total: 1 },
+        { id: 'install', label: 'Installing it through the helper', unit: 'items' as const, done: 0, total: 1 },
+      ];
+      return phases[Math.min(2, Math.floor(part * 3))]!;
+    }
     default:
       return { id: 'read', label: JOB_TITLES[kind], unit: 'items', done: 0, total: null };
   }

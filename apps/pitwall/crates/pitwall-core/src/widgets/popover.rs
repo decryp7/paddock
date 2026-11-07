@@ -2,7 +2,7 @@
 //! "is my local AI working, and what is it doing".
 
 use super::PitwallSurface;
-use paddock_widgets::{assign_ids, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
+use paddock_widgets::{assign_spans, Catalogue, KindSpec, Placement, Refresh, Surface, Widget};
 use serde::{Deserialize, Serialize};
 
 /// A widget of the tray popup. None has options yet; the variants are the kinds.
@@ -50,7 +50,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Server",
         summary: "Whether the server is serving, and its engines are healthy",
         icon: "pw:server",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -59,7 +59,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Activity",
         summary: "Chats running now, the queue and tokens per second",
         icon: "pw:bolt",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -68,7 +68,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Memory",
         summary: "RAM and video memory in use, and the pressure",
         icon: "pw:memory",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -77,7 +77,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Loaded models",
         summary: "The models in memory and what each one holds",
         icon: "pw:models",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -86,7 +86,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Downloads",
         summary: "Model and engine downloads in progress",
         icon: "pw:download",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::Live,
     },
@@ -95,7 +95,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Updates",
         summary: "Newer versions of the models you downloaded",
         icon: "pw:sparkles",
-        spans: &[1, 2],
+        size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -104,7 +104,7 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         title: "Recent errors",
         summary: "What failed in the last day",
         icon: "pw:alert",
-        spans: &[2],
+        size: &[2],
         max_instances: 1,
         refresh: Refresh::OnChange,
     },
@@ -152,6 +152,7 @@ pub fn loading_shape() -> Vec<LoadingRows> {
 impl Catalogue for PopoverCatalogue {
     type SurfaceId = PitwallSurface;
     type Widget = PopoverWidget;
+    type Place = paddock_widgets::Span;
     const SURFACE_ID: PitwallSurface = PitwallSurface::Popover;
     const SURFACE: Surface = Surface {
         noun: "popup",
@@ -169,7 +170,7 @@ impl Catalogue for PopoverCatalogue {
     }
 
     fn defaults() -> Vec<Placement<PopoverWidget>> {
-        assign_ids([
+        assign_spans([
             (1, PopoverWidget::Server),
             (1, PopoverWidget::Activity),
             (2, PopoverWidget::Memory),
@@ -214,7 +215,7 @@ mod tests {
 
     #[test]
     fn the_defaults_answer_is_it_working_what_is_it_doing_how_much_memory_and_what_is_loaded() {
-        let placed: Vec<(u8, PopoverKind)> = PopoverCatalogue::defaults().iter().map(|p| (p.span, p.widget.kind())).collect();
+        let placed: Vec<(u8, PopoverKind)> = PopoverCatalogue::defaults().iter().map(|p| (p.place.span, p.widget.kind())).collect();
         assert_eq!(
             placed,
             [

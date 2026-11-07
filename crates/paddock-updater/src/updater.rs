@@ -4,8 +4,9 @@
 //! cancel, a newer check) are recognised by their [`Ticket`] and dropped.
 
 use crate::error::{DEFAULT_MAX_DOWNLOAD_BYTES, UpdateError};
+use crate::install::{InstallInfo, InstallScope, InstallerLock};
 use crate::manifest::{self, MAX_MANIFEST_BYTES, Manifest, Platform, Target};
-use crate::record::{FailedInstall, RecordStore};
+use crate::record::{FailedInstall, Handoff, RecordStore};
 use crate::signature::{self, UpdateKey, VerifyError};
 use crate::state::{self, Event, UpdateInfo, UpdatePhase};
 use paddock_download::{Downloader, Get, Integrity, Request};
@@ -103,18 +104,30 @@ pub struct UpdateStatus {
     /// Whether this build can install what it downloads (an [`Installer`] is set). The dialog offers Download, "Restart to
     /// update" and "Install when the app quits" only when it can; a build that only notifies points to the releases page.
     pub can_install: bool,
+    /// What the Updates UI shows about installing (scope, install on quit, the administrator text).
+    pub install: InstallInfo,
+}
+
+/// A verified package, as handed to the [`Installer`].
+#[derive(Debug, Clone, Copy)]
+pub struct Package<'a> {
+    /// The verified download.
+    pub file: &'a Path,
+    /// The release information as received.
+    pub manifest: &'a serde_json::Value,
+    /// The announced (and signed) version.
+    pub version: &'a str,
+    /// Base64 of the minisign signature file, as the release information has it.
+    pub signature: &'a str,
+    /// The announced size in bytes, when the release says.
+    pub size: Option<u64>,
 }
 
 /// Installs a verified package. The adapter's is `tauri-plugin-updater` (it verifies the signature again); tests use a fake.
 pub trait Installer: Send + Sync {
-    /// Installs the package at `file` for the release information `manifest` (as received). `relaunch`: the installer
-    /// starts the new version (Windows' installer does that itself and ends this process).
-    fn install(
-        &self,
-        file: &Path,
-        manifest: &serde_json::Value,
-        relaunch: bool,
-    ) -> Result<(), UpdateError>;
+    /// Installs `package`. `relaunch`: the installer starts the new version (Windows' installer does that itself and ends
+    /// this process).
+    fn install(&self, package: &Package<'_>, relaunch: bool) -> Result<(), UpdateError>;
 }
 
 /// The app's services across updates (rule 24). An app without background services needs none.
@@ -181,6 +194,12 @@ pub struct UpdaterConfig {
     pub releases_page: Option<String>,
     /// How long after start-up the automatic check may run (default [`state::AUTO_CHECK_DELAY_SECS`]).
     pub auto_check_delay_secs: u64,
+    /// Where the app is installed (default per user).
+    pub scope: InstallScope,
+    /// The install folder of a per-machine app: where the hand-off's `updates\setup.log` is, said in the texts.
+    pub install_dir: Option<PathBuf>,
+    /// Whether the account is an administrator (`None`: not known); a per-machine copy says so to anyone else.
+    pub administrator: Option<bool>,
 }
 
 impl UpdaterConfig {
@@ -199,6 +218,9 @@ impl UpdaterConfig {
             max_download_bytes: DEFAULT_MAX_DOWNLOAD_BYTES,
             releases_page: None,
             auto_check_delay_secs: state::AUTO_CHECK_DELAY_SECS,
+            scope: InstallScope::PerUser,
+            install_dir: None,
+            administrator: None,
         }
     }
 }
@@ -209,6 +231,12 @@ struct Found {
     manifest: Manifest,
     platform: Platform,
 }
+
+/// How long the app waits at start for an installer that is running (ADR 0053 section 4.1 step 4). A timeout means "unknown":
+/// the hand-off record settles it at the next start.
+pub const INSTALLER_WAIT_BOUND: Duration = Duration::from_secs(300);
+/// How long one wait on the installer lock lasts in the background thread (so a stop is noticed); the wait goes on in slices.
+pub const INSTALLER_WAIT_SLICE: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum OnExit {
@@ -238,6 +266,7 @@ pub struct Updater {
     downloader: Arc<Downloader>,
     installer: Option<Arc<dyn Installer>>,
     hooks: Option<Arc<dyn ServiceHooks>>,
+    installer_lock: Option<Arc<dyn InstallerLock>>,
     store: std::sync::OnceLock<Arc<dyn PreferenceStore>>,
     records: Arc<RecordStore>,
     inner: Mutex<Inner>,
@@ -265,17 +294,35 @@ impl Updater {
         let available = config.key.is_some() && !config.channels.is_empty() && current.is_some();
         let rec = records.load();
         // Shown once: forgotten as soon as it is the phase (only then is the record written).
-        let failed = rec.failed_install.clone();
-        if failed.is_some() {
+        // Not shown when the version it names is installed by now (this version or older): a later success, by hand or by
+        // another update, must not leave the earlier failure on screen.
+        let failed = rec.failed_install.clone().filter(|f| {
+            let named = semver::Version::parse(f.version.trim_start_matches('v')).ok();
+            match (&named, &current) {
+                (Some(n), Some(c)) => n > c,
+                _ => true,
+            }
+        });
+        if rec.failed_install.is_some() {
             let _ = records.update(|r| r.failed_install = None);
         }
-        let phase = match (available, failed) {
-            (false, _) => UpdatePhase::Unavailable,
-            (true, Some(f)) => UpdatePhase::Failed {
+        // A hand-off record naming a version that is not newer than this one is done with: the new version clears it. One
+        // naming a newer version is settled by `settle_handoff` (the installer may still be running).
+        let pending = rec.handoff.as_ref().and_then(|h| {
+            let v = semver::Version::parse(h.version.trim_start_matches('v')).ok()?;
+            (current.as_ref().is_some_and(|c| v > *c)).then(|| h.version.clone())
+        });
+        if rec.handoff.is_some() && pending.is_none() {
+            let _ = records.update(|r| r.handoff = None);
+        }
+        let phase = match (available, failed, pending) {
+            (false, _, _) => UpdatePhase::Unavailable,
+            (true, Some(f), _) => UpdatePhase::Failed {
                 error: f.error(),
                 info: None,
             },
-            (true, None) => UpdatePhase::Idle,
+            (true, None, Some(version)) => UpdatePhase::InstallerRunning { version },
+            (true, None, None) => UpdatePhase::Idle,
         };
         let channel = config
             .channels
@@ -287,6 +334,7 @@ impl Updater {
             downloader,
             installer: None,
             hooks: None,
+            installer_lock: None,
             store: std::sync::OnceLock::new(),
             inner: Mutex::new(Inner {
                 phase,
@@ -320,6 +368,12 @@ impl Updater {
 
     pub fn with_service_hooks(mut self, hooks: Arc<dyn ServiceHooks>) -> Updater {
         self.hooks = Some(hooks);
+        self
+    }
+
+    /// The installer lock of a per-machine app (`paddock_setup::installer_probe` and `wait_for_installer`, through the app).
+    pub fn with_installer_lock(mut self, lock: Arc<dyn InstallerLock>) -> Updater {
+        self.installer_lock = Some(lock);
         self
     }
 
@@ -373,6 +427,7 @@ impl Updater {
             endpoint_host,
             releases_page: self.config.releases_page.clone(),
             can_install: self.installer.is_some(),
+            install: InstallInfo::of(self.config.scope, self.config.administrator),
         }
     }
 
@@ -468,6 +523,7 @@ impl Updater {
     /// The check, as a job body: fetches the channel's release information, validates it and picks this system's package.
     /// A failed check is the job's failure and the status's [`UpdatePhase::Failed`].
     pub fn run_check(&self, ctx: &JobContext, ticket: Ticket) -> Result<(), JobError> {
+        let began = std::time::Instant::now();
         ctx.phase(Phase::items(CHECK_PHASE, "Checking for updates", 1));
         let endpoint = {
             let inner = self.lock();
@@ -487,6 +543,18 @@ impl Updater {
             Ok(m) => self.compare(m),
         };
         ctx.add(1);
+        let ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
+        match &result {
+            Ok(Some((info, _))) => {
+                log::info!(Version = info.version.as_str(), Current = self.config.current_version.as_str(), Ms = ms; "update.check: a newer version is available")
+            }
+            Ok(None) => {
+                log::info!(Current = self.config.current_version.as_str(), Ms = ms; "update.check: up to date")
+            }
+            Err(e) => {
+                log::warn!(Why = e.to_string().chars().take(300).collect::<String>().as_str(), Ms = ms; "update.check failed; the feed or the network did not answer as expected")
+            }
+        }
         let now = (self.now)();
         let outcome = result
             .as_ref()
@@ -599,8 +667,11 @@ impl Updater {
             return Err(JobError::Failed(e.to_string()));
         };
         let dest = self.package_path(&found);
+        let began = std::time::Instant::now();
+        log::info!(Version = found.manifest.version.to_string().as_str(), Size = found.platform.size.unwrap_or(0); "update.download started");
         let fail = |e: UpdateError| {
             let msg = e.to_string();
+            log::warn!(Why = msg.chars().take(300).collect::<String>().as_str(), Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "update.download failed; the update stays available to try again");
             self.apply_for(ticket, Event::Downloaded(Err(e)), |_| {});
             JobError::Failed(msg)
         };
@@ -634,6 +705,7 @@ impl Updater {
             Some(ctx),
         ) {
             Ok(()) => {
+                log::info!(Bytes = downloaded.bytes, Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "update.download verified; ready to install");
                 self.apply_for(ticket, Event::Downloaded(Ok(())), |inner| {
                     inner.ready = Some(downloaded.path.clone())
                 });
@@ -684,6 +756,13 @@ impl Updater {
 
     /// Installs the verified update when the app quits (or not).
     pub fn install_on_quit(&self, enabled: bool) -> Result<UpdateStatus, UpdateError> {
+        // A prompt after Quit, or at sign-out when nobody answers it, is never right (ADR 0053 decision O4).
+        if self.config.scope == InstallScope::PerMachine {
+            if enabled {
+                return Err(UpdateError::PerMachine);
+            }
+            return Ok(self.status());
+        }
         if enabled {
             self.require_installer(Event::InstallOnQuit(true))?;
         }
@@ -788,7 +867,7 @@ impl Updater {
 
     /// Runs at exit: installs the update when asked to (after the services' `before_install`).
     pub fn install_at_exit(&self) -> ExitAction {
-        let (on_exit, version, file, manifest) = {
+        let (on_exit, version, file, manifest, platform) = {
             let mut inner = self.lock();
             let version = match inner.phase.info() {
                 Some(info)
@@ -803,7 +882,8 @@ impl Updater {
             };
             let on_exit = std::mem::replace(&mut inner.on_exit, OnExit::Nothing);
             let manifest = inner.found.as_ref().map(|f| f.manifest.raw.clone());
-            (on_exit, version, inner.ready.clone(), manifest)
+            let platform = inner.found.as_ref().map(|f| f.platform.clone());
+            (on_exit, version, inner.ready.clone(), manifest, platform)
         };
         if on_exit == OnExit::Nothing {
             return ExitAction::Nothing;
@@ -811,11 +891,16 @@ impl Updater {
         let relaunch = on_exit == OnExit::InstallAndRelaunch;
         let result = (|| {
             let installer = self.installer.as_ref().ok_or_else(no_installer)?;
-            let (Some(file), Some(manifest)) = (file.filter(|f| f.is_file()), manifest) else {
+            let (Some(file), Some(manifest), Some(platform)) =
+                (file.filter(|f| f.is_file()), manifest, platform)
+            else {
                 return Err(UpdateError::InstallFailed {
                     detail: "the verified download is no longer there".into(),
                 });
             };
+            // The staged file sat on disk since the download: check it against the family key again, before the services
+            // are stopped, so a file changed in between is never installed (the installer's own check is not relied on).
+            self.reverify_staged(&file, &platform, &version)?;
             if let Some(hooks) = &self.hooks {
                 hooks
                     .before_install()
@@ -826,11 +911,37 @@ impl Updater {
             if matches!(self.lock().phase, UpdatePhase::Ready { .. }) {
                 let _ = self.apply(Event::Install, |_| {});
             }
-            installer.install(&file, &manifest, relaunch)
+            // A per-machine hand-off is written first: if the app is gone before it can see the outcome, the next start knows
+            // an installer may be running or may have stopped (ADR 0053 section 4.1 step 2).
+            let handoff = self.config.scope == InstallScope::PerMachine;
+            if handoff {
+                let version = version.clone();
+                let _ = self
+                    .records
+                    .update(|r| r.handoff = Some(Handoff { version }));
+            }
+            let result = installer.install(
+                &Package {
+                    file: &file,
+                    manifest: &manifest,
+                    version: &version,
+                    signature: &platform.signature,
+                    size: platform.size,
+                },
+                relaunch,
+            );
+            if handoff && result.is_err() {
+                // Refused or never started: no installer is running, so there is nothing to settle at the next start.
+                let _ = self.records.update(|r| r.handoff = None);
+            }
+            result
         })();
         match result {
+            // A per-machine install is restarted by the installer (`/R`, in the updating user's session only).
             Ok(()) => ExitAction::Installed {
-                relaunch: relaunch && !cfg!(windows),
+                relaunch: relaunch
+                    && !cfg!(windows)
+                    && self.config.scope != InstallScope::PerMachine,
             },
             Err(e) => {
                 let _ = self
@@ -844,6 +955,72 @@ impl Updater {
                 ExitAction::Failed { relaunch }
             }
         }
+    }
+
+    /// Verifies the staged `file` against the release's signature and the family key again. On a mismatch the file is deleted
+    /// (the next check offers the update again and the download fetches a fresh copy) and the cause is logged.
+    fn reverify_staged(
+        &self,
+        file: &Path,
+        platform: &Platform,
+        version: &str,
+    ) -> Result<(), UpdateError> {
+        let began = std::time::Instant::now();
+        let outcome = match (&self.config.key, semver::Version::parse(version)) {
+            (None, _) => Err(UpdateError::SignatureInvalid {
+                detail: "this build has no update key to check the staged file with".into(),
+            }),
+            (_, Err(e)) => Err(UpdateError::SignatureInvalid {
+                detail: format!("the staged update's version cannot be read ({e})"),
+            }),
+            (Some(key), Ok(announced)) => {
+                signature::verify_file(key, file, &platform.signature, &announced, None)
+                    .map_err(VerifyError::into_update_error)
+            }
+        };
+        match outcome {
+            Ok(()) => {
+                log::info!(Ms = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "update.install staged file verified again");
+                Ok(())
+            }
+            Err(e) => {
+                let why = e.to_string();
+                log::warn!(Why = why.chars().take(300).collect::<String>().as_str(), Version = version; "update.install staged file failed its signature check; deleted, the next check downloads it again");
+                remove(file);
+                self.lock().ready = None;
+                Err(e)
+            }
+        }
+    }
+
+    /// At start-up, when a hand-off record names a newer version than this one (the old version was started again by the
+    /// installer's abort, or by the user while the installer runs): shows "An update is being installed" and waits for the
+    /// installer through the lock, at most `bound` ([`INSTALLER_WAIT_BOUND`]). Once it has ended, a record still naming a newer
+    /// version means the installer did not finish: the phase becomes Failed with "The installer stopped before it finished"
+    /// and the record is cleared. A wait that runs out changes nothing: the next start settles it. Blocking: call it from a
+    /// background thread. Returns whether the record was settled.
+    pub fn settle_handoff(&self, bound: Duration) -> bool {
+        if !matches!(self.lock().phase, UpdatePhase::InstallerRunning { .. }) {
+            return false;
+        }
+        let gone = match &self.installer_lock {
+            // Without a lock to look at, nothing can be running that this app knows of.
+            None => true,
+            Some(lock) => !lock.installing() || lock.wait(bound),
+        };
+        if !gone {
+            return false;
+        }
+        let error = UpdateError::NotInstalled {
+            reason: crate::install::installer_stopped(self.config.install_dir.as_deref()),
+        };
+        let _ = self.records.update(|r| r.handoff = None);
+        self.apply(Event::InstallerEnded(error), |_| {}).is_ok()
+    }
+
+    /// Whether the phase is "an installer is running" (the background thread keeps waiting while it is).
+    pub fn installer_running(&self) -> bool {
+        matches!(self.lock().phase, UpdatePhase::InstallerRunning { .. })
     }
 
     /// At start-up: runs the services' hook once per version change (rule 24). Blocking (the hook waits for the service

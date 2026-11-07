@@ -12,7 +12,6 @@ export const WIDGET_ICONS: Readonly<Record<string, string>> = {
   disk: glyph(['M3.5 14.5h17v5h-17z', 'M5.5 14.5l2-9h9l2 9'], [[17, 17, 0.9]]),
   cpu: glyph(['M7 7h10v10H7z', 'M10 10h4v4h-4z', 'M9 3.5V7M15 3.5V7M9 17v3.5M15 17v3.5M3.5 9H7M3.5 15H7M17 9h3.5M17 15h3.5']),
   network: glyph(['M4 9.5a11 11 0 0 1 16 0', 'M7 13a6.5 6.5 0 0 1 10 0', 'M10 16.5a2.2 2.2 0 0 1 4 0'], [[12, 19.5, 1]]),
-  backup: glyph(['M12 3 19.5 6v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z', 'M9 12l2.2 2.2L15.5 10']),
   issue: glyph(['M10.5 4a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Z', 'M15.25 15.25 20 20', 'M10.5 8v3']),
   counters: glyph(['M9 4h6l-1 5.5 3 3H7l3-3z', 'M12 12.5V20']),
   apps: glyph(['M4 5h16v14H4z', 'M4 9.5h16M8 13h8M8 16h5']),

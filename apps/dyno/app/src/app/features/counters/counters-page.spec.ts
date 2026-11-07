@@ -20,8 +20,8 @@ class StubChart {
   readonly label = input('');
 }
 
-async function open(fail: string[] = []) {
-  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, os: 'windows', fail: new Set(fail) });
+async function open(fail: string[] = [], savedListsAgeMs?: number) {
+  const mock = new MockBackend({ latencyMs: 0, now: () => NOW, os: 'windows', fail: new Set(fail), ...(savedListsAgeMs === undefined ? {} : { savedListsAgeMs }) });
   TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, provideRouter([])] });
   TestBed.overrideComponent(CountersPage, { remove: { imports: [Chart] }, add: { imports: [StubChart] } });
   await TestBed.inject(SettingsStore).load();
@@ -62,6 +62,24 @@ describe('CountersPage', () => {
     expect(el.textContent).toContain('Network');
     await click('[aria-label="Charted counters"] [role="row"][data-key] button[aria-label="Stop charting"]');
     expect(el.textContent).toContain('Nothing charted yet');
+  });
+
+  it('shows the objects an earlier run saved at once, says how old they are, and Refresh has the fresh list', async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ['Date'] });
+    const { el, click, store } = await open([], 2 * 3_600_000);
+    expect(store.objects()!.savedAt).toBe(NOW - 2 * 3_600_000);
+    expect(el.querySelector('[aria-label="Objects"]')!.textContent).toContain('Memory');
+    const note = el.querySelector('[data-testid="saved-list"]')!.textContent!.replace(/\s+/g, ' ');
+    expect(note).toContain('Last known list, read 2 h ago.');
+    expect(note).toContain('listing the counters again');
+    await click('[data-testid="saved-list"] button');
+    expect(store.objects()!.savedAt).toBeNull();
+    expect(el.querySelector('[data-testid="saved-list"]')).toBeNull();
+  });
+
+  it('shows no saved-list note for a list read just now', async () => {
+    const { el } = await open();
+    expect(el.querySelector('[data-testid="saved-list"]')).toBeNull();
   });
 
   it('opens an object with instances and charts the chosen instance', async () => {

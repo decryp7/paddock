@@ -1,13 +1,15 @@
 import { FullTextTip } from '../../shared/full-text-tip';
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { PdViewportFollowsSize } from '@decryp7/paddock-ui/table';
+import { CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf } from '@angular/cdk/scrolling';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import type { ActivityEntry, Alert } from '../../core/api.types';
-import { AsyncState } from '../../shared/async-state';
 import { formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import type { IconName } from '../../shared/icons';
 import { ACTIVITY_ICON, ALERT_ICON, SEVERITY_TONE, type Tone } from '../../shared/labels';
 import { ActivityStore } from '../../state/activity.store';
 import { AlertsStore } from '../../state/alerts.store';
+import { EVENTS_KEPT } from '../../state/events-kept';
 import { LiveStore } from '../../state/live.store';
 
 export interface FeedItem {
@@ -33,39 +35,43 @@ export function buildFeed(activity: readonly ActivityEntry[], alerts: readonly A
   return [...fromActivity, ...fromAlerts].sort((x, y) => y.at - x.at).slice(0, limit);
 }
 
+/**
+ * How many entries the board asks for of each kind (activity and alerts). The engine answers at most 500 of each; asking for fewer keeps
+ * the board's first read small. When either list reaches this, the feed says it shows the latest ones only.
+ */
+export const EVENTS_LOADED = EVENTS_KEPT;
+/** The height of one entry (two lines and its padding), in px: the virtual viewport's fixed item size. */
+export const EVENT_ROW_PX = 48;
+
 /** What Dyno noticed and what it warned about, newest first. */
 @Component({
   selector: 'dy-events-feed',
-  imports: [FullTextTip, AsyncState, Icon],
+  imports: [FullTextTip, Icon, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, PdViewportFollowsSize],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="card" aria-label="Activity and alerts">
-      <div class="card-head">
-        <h2><dy-icon name="bell" /> Activity and alerts</h2>
+    <cdk-virtual-scroll-viewport pdViewportFollowsSize class="viewport" [class.capped]="capped()" [itemSize]="rowPx" role="list" tabindex="0" aria-label="Activity and alerts" [style.--n]="items().length">
+      <div *cdkVirtualFor="let i of items(); trackBy: trackId; let n = index" class="row" role="listitem" [attr.aria-setsize]="items().length" [attr.aria-posinset]="n + 1">
+        <span class="ic" [attr.data-tone]="i.tone"><dy-icon [name]="i.icon" /></span>
+        <div class="txt">
+          <span class="title" [dyFullText]="i.title">{{ i.title }}</span>
+          <span class="detail truncate" [dyFullText]="i.detail">{{ i.detail }}</span>
+        </div>
+        <span class="when num">{{ ago(i.at) }}</span>
       </div>
-      <dy-async [loaded]="loaded()" [error]="error()" [empty]="items().length === 0" emptyTitle="Nothing has happened yet" emptyText="Alerts and notes from Dyno itself show up here. Dyno only looks: it changes nothing on your computer." what="activity" [rows]="4" (retry)="reload()">
-        <ul>
-          @for (i of items(); track i.id) {
-            <li>
-              <span class="ic" [attr.data-tone]="i.tone"><dy-icon [name]="i.icon" /></span>
-              <div class="txt">
-                <span class="title" [dyFullText]="i.title">{{ i.title }}</span>
-                <span class="detail truncate" [dyFullText]="i.detail">{{ i.detail }}</span>
-              </div>
-              <span class="when num">{{ ago(i.at) }}</span>
-            </li>
-          }
-        </ul>
-      </dy-async>
-    </section>
+    </cdk-virtual-scroll-viewport>
+    @if (capped()) {
+      <p class="more num">Showing the latest {{ items().length }} events.</p>
+    }
   `,
   styles: `
     :host { display: block; min-width: 0; }
-    .card { height: 100%; padding-bottom: var(--sp-2); }
-    dy-async { padding: 0 var(--sp-2); }
-    ul { list-style: none; margin: 0; padding: var(--sp-1) 0 0; display: grid; }
-    li { display: flex; align-items: center; gap: var(--sp-3); padding: 7px var(--sp-2); border-radius: var(--r-md); }
-    li:hover { background: var(--surface-hover); }
+    /* As tall as its entries, up to the widget's body (--wv-avail); a longer list scrolls inside it. The wheel passes on at the ends. */
+    .viewport { height: min(calc(var(--n, 1) * 48px), var(--wv-avail, 336px)); min-height: 48px; }
+    /* The note below takes its line out of the viewport, so the widget body does not scroll as well. */
+    .viewport.capped { height: min(calc(var(--n, 1) * 48px), calc(var(--wv-avail, 336px) - 28px)); }
+    .viewport:focus-visible { outline-offset: -2px; }
+    .row { box-sizing: border-box; height: 48px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-1); border-radius: var(--r-md); }
+    .row:hover { background: var(--surface-hover); }
     .ic { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-md); background: var(--surface-active); color: var(--text-2); flex: none; }
     .ic dy-icon { --icon-size: 15px; }
     .ic[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
@@ -74,25 +80,20 @@ export function buildFeed(activity: readonly ActivityEntry[], alerts: readonly A
     .txt { flex: 1; min-width: 0; display: grid; }
     .title { font-weight: var(--fw-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .detail { color: var(--text-3); font-size: var(--fs-xs); }
+    .more { margin: 0; padding: var(--sp-1); color: var(--text-3); font-size: var(--fs-xs); }
     .when { color: var(--text-3); font-size: var(--fs-xs); white-space: nowrap; }
   `,
 })
-export class EventsFeed implements OnInit {
+export class EventsFeed {
+  protected readonly rowPx = EVENT_ROW_PX;
+  protected readonly trackId = (_: number, i: FeedItem) => i.id;
   protected readonly activity = inject(ActivityStore);
   protected readonly alerts = inject(AlertsStore);
   private readonly live = inject(LiveStore);
-  protected readonly items = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), 7));
-  protected readonly loaded = computed(() => this.activity.loaded() || this.alerts.loaded());
-  protected readonly error = computed(() => (this.activity.loaded() || this.alerts.loaded() ? null : (this.activity.error() ?? this.alerts.error())));
+  /** Every entry the stores hold, newest first. */
+  protected readonly items = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), Infinity));
+  /** Either list is as long as the board asked for, so older entries exist that the feed does not show. */
+  protected readonly capped = computed(() => this.activity.entries().length >= EVENTS_LOADED || this.alerts.alerts().length >= EVENTS_LOADED);
   /** Relative to the engine's clock, so the feed reads right whatever the computer's clock does. */
   protected readonly ago = (at: number) => formatRelative(at, this.live.system()?.at ?? Date.now());
-
-  ngOnInit(): void {
-    this.reload();
-  }
-
-  protected reload(): void {
-    void this.activity.load(30);
-    void this.alerts.load(20);
-  }
 }

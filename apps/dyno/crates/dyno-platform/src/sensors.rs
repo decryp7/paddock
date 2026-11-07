@@ -22,6 +22,21 @@ impl SensorProbe for NoProbe {
     fn enrich(&mut self, _sample: &mut SystemSample) {}
 }
 
+/// Splits RAM into (used, available). On macOS sysinfo's available memory counts active, inactive and free pages, so
+/// it treats memory that apps are using as free and "used" came out as only wired plus compressed (17 % where Activity
+/// Monitor said 54 %); there "used" is sysinfo's used memory (app memory, wired and compressed, as Activity Monitor
+/// shows) and available is what is left. Elsewhere available is the OS' own figure (`MemAvailable` on Linux, available
+/// physical memory on Windows) and used is the rest.
+pub(crate) fn split_memory(macos: bool, total: u64, sys_available: u64, sys_used: u64) -> (u64, u64) {
+    if macos {
+        let used = sys_used.min(total);
+        (used, total - used)
+    } else {
+        let available = sys_available.min(total);
+        (total - available, available)
+    }
+}
+
 /// Volumes are re-listed (new USB drives) every this many ticks; between, only their space and I/O are refreshed.
 const RELIST_DISKS_EVERY: u64 = 5;
 /// Volume free space is refreshed at most this often.
@@ -45,7 +60,14 @@ pub struct SysinfoSensors {
     ticks: u64,
     last_storage: Option<Instant>,
     storage_refreshes: u64,
+    /// Capacity and free by `volumes::capacity`, read only when the space is due (the call is not free on macOS).
+    space: std::collections::HashMap<String, (u64, u64)>,
     temperatures: Reading<Vec<Temperature>>,
+}
+
+/// Keeps only the mounts in `listed` in the space map.
+fn prune_space(space: &mut std::collections::HashMap<String, (u64, u64)>, listed: &[String]) {
+    space.retain(|mount, _| listed.contains(mount));
 }
 
 /// The reason given when no temperature sensor is visible.
@@ -69,6 +91,7 @@ impl SysinfoSensors {
             ticks: 0,
             last_storage: None,
             storage_refreshes: 0,
+            space: std::collections::HashMap::new(),
             temperatures: Reading::unavailable(NO_TEMPERATURES),
         }
     }
@@ -97,10 +120,15 @@ impl SysinfoSensors {
         self.sys
             .refresh_memory_specifics(MemoryRefreshKind::nothing().with_ram().with_swap());
         let total = self.sys.total_memory();
-        let available = self.sys.available_memory().min(total);
+        let (used, available) = split_memory(
+            cfg!(target_os = "macos"),
+            total,
+            self.sys.available_memory(),
+            self.sys.used_memory(),
+        );
         let mut m = MemorySample {
             total,
-            used: total - available,
+            used,
             available,
             commit: Reading::unavailable("Commit charge is a Windows measure"),
             swap_used: self.sys.used_swap(),
@@ -139,15 +167,30 @@ impl SysinfoSensors {
             }
             seen.push(mount.clone());
             let name = volume_name(&mount, &d.name().to_string_lossy());
+            // One definition of free for the tray, the dashboard and the disk map (rule 55): `volumes::space`.
+            // A network mount is not asked here (the call can block as long as the server is gone): sysinfo's figures stand.
+            let local = dyno_core::disk::volume::network_protocol(&d.file_system().to_string_lossy()).is_none();
+            if storage_due && local {
+                if let Some(c) = crate::volumes::capacity(&mount) {
+                    self.space.insert(mount.clone(), c);
+                }
+            }
+            let (total, free) = self
+                .space
+                .get(&mount)
+                .copied()
+                .unwrap_or((d.total_space(), d.available_space().min(d.total_space())));
             out.push(DiskSample {
                 id: mount.clone(),
                 name,
                 mount,
-                total: d.total_space(),
-                free: d.available_space().min(d.total_space()),
+                total,
+                free,
                 removable: d.is_removable(),
             });
         }
+        // A volume that is no longer listed (an unplugged drive) does not stay in the map for the life of the agent.
+        prune_space(&mut self.space, &seen);
         let io = DiskIo {
             read_bps: rate(read, secs),
             write_bps: rate(written, secs),
@@ -275,6 +318,13 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_space_map_forgets_volumes_that_are_no_longer_listed() {
+        let mut space = std::collections::HashMap::from([("/".to_string(), (10, 5)), ("/Volumes/usb".to_string(), (20, 9))]);
+        prune_space(&mut space, &["/".to_string()]);
+        assert_eq!(space.keys().collect::<Vec<_>>(), ["/"]);
+    }
+
+    #[test]
     fn helpers() {
         assert_eq!(rate(1000, 2.0), 500.0);
         assert_eq!(rate(1000, 0.0), 0.0);
@@ -291,6 +341,18 @@ mod tests {
         fn enrich(&mut self, sample: &mut SystemSample) {
             sample.fans = Reading::unavailable("probe ran");
         }
+    }
+
+    #[test]
+    fn macos_used_is_app_wired_and_compressed_not_total_minus_active_free() {
+        const GIB: u64 = 1 << 30;
+        // The reported case: 64 GiB, sysinfo "available" 53 GiB (active + inactive + free), used memory 34.8 GiB.
+        let (used, available) = split_memory(true, 64 * GIB, 53 * GIB, 35 * GIB);
+        assert_eq!((used, available), (35 * GIB, 29 * GIB));
+        // Other OSs keep total minus the OS' available figure, and nothing exceeds the total.
+        assert_eq!(split_memory(false, 64 * GIB, 53 * GIB, 35 * GIB), (11 * GIB, 53 * GIB));
+        assert_eq!(split_memory(true, 8 * GIB, 0, 9 * GIB), (8 * GIB, 0));
+        assert_eq!(split_memory(false, 8 * GIB, 9 * GIB, 0), (0, 8 * GIB));
     }
 
     #[test]

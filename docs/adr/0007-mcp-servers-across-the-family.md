@@ -41,7 +41,7 @@ quarantined like any plugin call.
 ### Rules for every server
 
 1. **Local only.** Transport is stdio (the host starts the app's `--mcp` mode) or loopback with a **per-client key** issued like Pitwall pairing
-   (ADR 0004): shown once, held in the OS credential store, revocable in the app. No remote listener, no tunnel.
+   (ADR 0004): shown once, only its SHA-256 kept in an owner-only file in the app's config folder (amended 2026-11-05: not the OS credential store, whose prompt after an update of an ad-hoc signed build blocked Dyno before its first window; a hash is not a secret), revocable in the app. No remote listener, no tunnel.
 2. **Off by default, per app.** The user turns it on in the app's settings; the setting says which tools are exposed and to whom.
 3. **Every call is logged and visible in the app**: time, client, tool, arguments (redacted), result size, duration, outcome. The log
    holds no file contents beyond what the arguments and a size say, and the user can clear it.
@@ -77,3 +77,13 @@ which apps serve MCP and the rules they share; `paddock-mcp` is where `McpTool` 
 
 1. Stdio only for the first server (Debrief), with loopback added when Pitwall hosts remote-process servers? Proposed: yes.
 2. Do the audit logs get a shared viewer in `@decryp7/paddock-ui`? Proposed: yes, after the second server.
+
+## Amendments
+
+- **2026-11-05, Dyno's read tools (user decision).** Dyno 1.1.0 serves eight read-only reading tools (system summary, CPU and
+  memory, disks, top processes, network summary, alarms, history of one metric, sensors) beside its power tools, so that
+  Pitwall's MCP client and any local MCP client can read what its pages show. Rules 1 to 8 apply unchanged: off by default, one
+  switch per tool on Settings > AI access, every call audited and logged without its output, bounded rows and bytes. For any
+  server whose answer goes to an AI client: process rows hold a name, a process id and numbers only (no command line, user name or
+  path), and host names, network addresses and free-text details that can carry paths are left out unless a tool says otherwise.
+  Details: Dyno ADR 0032 amendments.

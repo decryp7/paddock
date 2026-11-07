@@ -26,10 +26,12 @@
 //! job object, which ends the whole tree by handle, so its helpers end with it even when they left its tree or the app
 //! crashed. Both are backed by a walk of the process table, by identity, for helpers that left the group or the job.
 
+pub mod cleanup;
 mod command;
 pub mod console;
 pub mod hint;
 mod identity;
+pub mod installed;
 mod instance;
 #[cfg(windows)]
 mod job;
@@ -48,9 +50,31 @@ mod watch;
 #[cfg(test)]
 mod testchild;
 
+/// The effective user id of this process (Unix only), for checks that a file belongs to whoever runs the app.
+#[cfg(unix)]
+pub fn effective_uid() -> u32 {
+    sys::effective_uid()
+}
+
+#[cfg(all(test, unix))]
+mod uid_tests {
+    use std::os::unix::fs::MetadataExt;
+
+    #[test]
+    fn the_effective_uid_owns_the_files_this_process_creates() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mine");
+        std::fs::write(&file, b"x").unwrap();
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().uid(),
+            super::effective_uid()
+        );
+    }
+}
+
 pub use command::{CREATE_NO_WINDOW, KEPT_ENV, clean_env, command, lower_priority};
 pub use identity::{Ending, Holder, ProcessId, StartTime, holder};
-pub use instance::{Claim, InstanceError, InstanceLock, is_held_now, is_held_settled};
+pub use instance::{Claim, HeldState, InstanceError, InstanceLock, held_state, is_held_now, is_held_settled};
 pub use login::{
     MAX_PATH_LEN, SHELL_TIMEOUT, ask_shell, login_path, merge_path, parse_probe_output,
     probe_script, shell_candidates,

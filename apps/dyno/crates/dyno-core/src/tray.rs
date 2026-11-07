@@ -3,6 +3,35 @@
 //! Bars: one rounded column per metric (up to three), filled from the bottom, on a faint track. Graph: the first
 //! metric's recent values as a filled area. Colours follow the suite icon family: Dyno's hue, the first metric at full
 //! ink and the others at 60 %, the high-load orange when pegged; the track adapts to a light or dark taskbar. The tooltip carries the numbers, so the icon never stands alone.
+//!
+//! The redesigned items (2026-11-03, `docs/design/dyno-tray/README.md`) are [`menu_bar`] (macOS templates, text through the
+//! [`text`] port) and [`pixel`] (Windows and Linux icons); the app does not use them yet.
+
+pub mod menu_bar;
+pub mod pixel;
+pub mod text;
+
+/// Which way a network item counts: an item shows its own direction only ("Network up" is the upload rate and nothing else).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetDir {
+    /// Bytes per second sent.
+    Up,
+    /// Bytes per second received.
+    Down,
+    /// Both, upload over download.
+    Both,
+}
+
+impl NetDir {
+    /// The rows the item draws, top to bottom: `true` is the upload row. One row is centred; two are stacked.
+    pub fn rows(self) -> &'static [bool] {
+        match self {
+            NetDir::Up => &[true],
+            NetDir::Down => &[false],
+            NetDir::Both => &[true, false],
+        }
+    }
+}
 
 /// A metric an icon can draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

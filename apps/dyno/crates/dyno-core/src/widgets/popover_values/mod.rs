@@ -1,5 +1,5 @@
 //! What the tray popup's widgets show: one pure function per kind from the inputs the engine already has (family ADR 0035
-//! §5). The agent builds the slow kinds (alarms, volumes, backups, issues, counters) from state it keeps; the app builds
+//! §5). The agent builds the slow kinds (alarms, volumes, issues, counters) from state it keeps; the app builds
 //! the live kinds (CPU and memory, network, top apps) from the live push it subscribes to. Severity, thresholds, ordering
 //! and staleness are decided here and nowhere else: the UI only draws what arrives.
 //!
@@ -8,7 +8,6 @@
 use super::dashboard::{Thresholds, ValueTone};
 use super::popover::{PopoverKind, PopoverWidget, VolumeChoice};
 use crate::alarms::{Alarm, AlarmState};
-use crate::backup::{BackupReport, BackupState};
 use crate::counters::{CounterReading, CounterUnit};
 use crate::disk::volume::{Volume, VolumeLocation};
 use crate::health::Severity;
@@ -18,10 +17,11 @@ use crate::time::{Timestamp, DAY};
 use paddock_widgets::{PlacementId, PlacementState, Progress, SurfaceNotice, SurfaceValues, Tone, WidgetAction, WidgetState};
 use serde::{Deserialize, Serialize};
 
-/// Alarm rows shown before "+N more".
-pub const ALARM_ROWS: usize = 1;
-/// Volume rows shown by one disk space widget before "+N more".
-pub const VOLUME_ROWS: usize = 2;
+/// The most alarm rows one Active alarms widget sends. The popup lists them all and scrolls; when the bound cuts the list, `more`
+/// counts the rest and the popup says "Showing the latest 200 of N" with a button to the Alarms page.
+pub const ALARM_ROWS: usize = 200;
+/// The most volume rows one Disk space widget sends. The popup lists them all and scrolls; `more` counts what the bound cuts.
+pub const VOLUME_ROWS: usize = 200;
 /// Pinned counters shown.
 pub const COUNTER_ROWS: usize = 4;
 /// Busiest apps shown.
@@ -67,12 +67,12 @@ pub enum Page {
     Network,
     /// Issues.
     Issues,
-    /// Backups.
-    Backups,
     /// Performance counters.
     Counters,
     /// Processes.
     Processes,
+    /// Power (keep awake, Wake-on-LAN).
+    Power,
 }
 
 /// What a widget's button does: a closed set, run by the app's `run_widget_action`.
@@ -88,10 +88,6 @@ pub enum WidgetActionId {
     ChooseVolume,
     /// Open the counters page to pin counters.
     PinCounters,
-    /// Open the backups page to set up checks.
-    SetUpBackupChecks,
-    /// Start the backup check job.
-    StartBackupCheck,
     /// Restart the agent (the app's supervisor, never through the agent).
     RestartAgent,
     /// Open Settings at Menu bar > Popup widgets.
@@ -129,8 +125,6 @@ pub enum Effect {
     Navigate(Navigate),
     /// Ask for the popup's slow values again.
     Refresh,
-    /// Start the backup check job.
-    StartBackupCheck,
     /// Restart the agent through the app's supervisor.
     RestartAgent,
 }
@@ -145,9 +139,7 @@ impl WidgetActionId {
             }
             WidgetActionId::OpenSettings => Effect::Navigate(Navigate::Settings(SettingsSection::General)),
             WidgetActionId::PinCounters => Effect::Navigate(Navigate::Page(Page::Counters)),
-            WidgetActionId::SetUpBackupChecks => Effect::Navigate(Navigate::Page(Page::Backups)),
             WidgetActionId::Retry(_) => Effect::Refresh,
-            WidgetActionId::StartBackupCheck => Effect::StartBackupCheck,
             WidgetActionId::RestartAgent => Effect::RestartAgent,
         }
     }
@@ -251,6 +243,13 @@ pub struct VolumeRow {
     pub tone: ValueTone,
     /// False for a network volume that did not answer ("Not answering").
     pub reachable: bool,
+    /// When the figures were read, ms since the epoch; none before the agent stamped them. For "as of 14:05" and
+    /// "Not answering since 14:05".
+    #[cfg_attr(any(test, feature = "ts"), ts(type = "number | null"))]
+    pub measured_at: Option<i64>,
+    /// How old the figures are against the refresh interval (the agent decides; the app only words it).
+    #[cfg_attr(any(test, feature = "ts"), ts(type = "\"fresh\" | \"late\" | \"stale\""))]
+    pub freshness: crate::disk::volume::Freshness,
 }
 
 /// One pinned counter row.
@@ -281,37 +280,6 @@ pub struct AppRow {
     pub name: String,
     /// Its CPU, percent of the machine; none when it could not be read.
     pub cpu_percent: Option<f32>,
-}
-
-/// How the newest backup tool looks.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub struct BackupValue {
-    /// The tool's name ("Time Machine").
-    pub name: String,
-    /// Its verdict.
-    pub state: BackupVerdict,
-    /// When the last backup finished.
-    #[cfg_attr(any(test, feature = "ts"), ts(type = "number | null"))]
-    pub last_backup: Option<i64>,
-    /// One plain sentence.
-    pub summary: String,
-    /// How many tools are set up.
-    pub tools: u32,
-}
-
-/// A backup tool's verdict.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(any(test, feature = "ts"), derive(ts_rs::TS))]
-#[serde(rename_all = "camelCase")]
-pub enum BackupVerdict {
-    /// The last backup is recent.
-    Healthy,
-    /// The last backup is older than the limit.
-    Stale,
-    /// Set up, but no backup yet.
-    NoBackupYet,
 }
 
 /// The newest issue.
@@ -383,8 +351,6 @@ pub enum PopoverValue {
         /// Upload over the last minute, oldest first.
         tx_minute: Vec<f32>,
     },
-    /// The backup check.
-    BackupHealth(BackupValue),
     /// The newest issue.
     LastIssue(IssueValue),
     /// The pinned counters.
@@ -469,7 +435,7 @@ impl Minute {
     }
 }
 
-/// The agent's volumes, backup report, alarms, newest issue and pinned counters, and the app's live push.
+/// The agent's volumes, alarms, newest issue and pinned counters, and the app's live push.
 pub struct Inputs<'a> {
     /// Now, ms since the epoch.
     pub now: Timestamp,
@@ -481,21 +447,10 @@ pub struct Inputs<'a> {
     pub alarms: Source<&'a [Alarm]>,
     /// The mounted volumes (cached by the agent).
     pub volumes: Source<&'a [Volume]>,
-    /// The backup check's last report.
-    pub backup: Source<BackupInput<'a>>,
     /// The issues of the last [`ISSUE_DAYS`] days, newest first, and how far a reading of the logs has come.
     pub issues: Source<IssuesInput<'a>>,
     /// The pinned counters' latest readings and how many are pinned.
     pub counters: Source<CountersInput<'a>>,
-}
-
-/// The backup report as the backup widget needs it.
-#[derive(Debug, Clone)]
-pub struct BackupInput<'a> {
-    /// The last report.
-    pub report: &'a BackupReport,
-    /// How far the check job has come, while one runs (its own phase and count; nothing is invented when there is none).
-    pub job: Option<JobProgress>,
 }
 
 /// A running job's phase, as its own progress reports it.
@@ -540,7 +495,6 @@ impl<'a> Inputs<'a> {
             minute,
             alarms: Source::NotYet,
             volumes: Source::NotYet,
-            backup: Source::NotYet,
             issues: Source::NotYet,
             counters: Source::NotYet,
         }
@@ -582,7 +536,6 @@ pub fn state(widget: &PopoverWidget, id: &PlacementId, inputs: &Inputs<'_>) -> O
         PopoverWidget::DiskSpace { volume } => disk_space(volume, id, inputs),
         PopoverWidget::CpuMemory => cpu_memory(inputs),
         PopoverWidget::Network => network(inputs),
-        PopoverWidget::BackupHealth => backup(inputs),
         PopoverWidget::LastIssue => last_issue(id, inputs),
         PopoverWidget::PinnedCounters => counters(id, inputs),
         PopoverWidget::TopApps => top_apps(inputs),
@@ -658,6 +611,8 @@ fn volume_row(v: &Volume) -> VolumeRow {
         total_bytes: v.capacity,
         tone: DISK_THRESHOLDS.tone(used_percent.map(f64::from)),
         reachable: v.reachable,
+        measured_at: v.measured_at,
+        freshness: v.freshness,
     }
 }
 
@@ -767,83 +722,6 @@ fn top_apps(inputs: &Inputs<'_>) -> Option<State> {
         })
         .collect();
     ready(PopoverValue::TopApps { rows }, inputs.now)
-}
-
-fn backup(inputs: &Inputs<'_>) -> Option<State> {
-    let (report, job) = match inputs.backup.as_ref() {
-        Source::NotYet => return None,
-        Source::Failed(cause) => {
-            return Some(WidgetState::Error {
-                title: "Couldn't check".into(),
-                cause: Some(cause),
-                next: action(WidgetActionId::StartBackupCheck, "Retry"),
-            })
-        }
-        Source::Ready(i) => (i.report, i.job.clone()),
-    };
-    let as_of = report.checked_at.unwrap_or(inputs.now);
-    let configured: Vec<_> = report.statuses.iter().filter(|s| s.state != BackupState::NotConfigured).collect();
-    // The verdict of the tool that most needs attention: stale, then no backup yet, then healthy.
-    let rank = |s: BackupState| match s {
-        BackupState::Stale => 3,
-        BackupState::NoBackupYet => 2,
-        BackupState::Healthy => 1,
-        _ => 0,
-    };
-    let worst = configured
-        .iter()
-        .filter(|s| s.state != BackupState::CannotCheck)
-        .max_by_key(|s| rank(s.state));
-    let last = worst.map(|w| PopoverValue::BackupHealth(backup_value(w, configured.len())));
-    if report.checking {
-        return match job {
-            // Real progress only: the running job's own phase and count (ER-18). Without one the last value stays, or the
-            // widget is still loading; no count is made up.
-            Some(j) => Some(WidgetState::Working {
-                // Always short: one line in the half-width frame; the body is only the count. The tool's name shows in the
-                // widget's normal state.
-                title: "Checking backup".into(),
-                phase: String::new(),
-                progress: Progress::Count {
-                    done: j.done,
-                    unit: j.unit,
-                },
-                last,
-                cancel: None,
-            }),
-            None => last.and_then(|v| ready(v, as_of)),
-        };
-    }
-    if configured.is_empty() {
-        return Some(WidgetState::Empty {
-            title: "Know when backups ran".into(),
-            calm: false,
-            detail: "No backup set up.".into(),
-            next: action(WidgetActionId::SetUpBackupChecks, "Set up checks"),
-        });
-    }
-    match last {
-        Some(v) => ready(v, as_of),
-        None => Some(WidgetState::Error {
-            title: "Couldn't check".into(),
-            cause: configured.first().map(|s| s.summary.clone()),
-            next: action(WidgetActionId::StartBackupCheck, "Retry"),
-        }),
-    }
-}
-
-fn backup_value(s: &crate::backup::BackupStatus, tools: usize) -> BackupValue {
-    BackupValue {
-        name: s.name.clone(),
-        state: match s.state {
-            BackupState::Stale => BackupVerdict::Stale,
-            BackupState::NoBackupYet => BackupVerdict::NoBackupYet,
-            _ => BackupVerdict::Healthy,
-        },
-        last_backup: s.last_backup.map(Timestamp::millis),
-        summary: s.summary.clone(),
-        tools: count(tools),
-    }
 }
 
 fn last_issue(id: &PlacementId, inputs: &Inputs<'_>) -> Option<State> {

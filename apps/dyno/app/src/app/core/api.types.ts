@@ -193,10 +193,34 @@ export interface ProcessDetails {
   startupSource: string | null;
 }
 
+/** What to do about a reading that could not be given (the engine's `NextStep`). */
+export type NextStep = 'retry' | 'updateHelper' | 'updateApp' | 'showLog' | { openSettings: string } | { none: { why: string } };
+
+/** Who read a reading (the engine's `ReadVia`): the helper, this computer with the person's rights, or nobody, with the reason. */
+export type ReadVia = 'helper' | 'local' | { needsHelper: { reason: string; next: NextStep } } | { unavailable: { reason: string; next: NextStep | null } };
+
+/** Where the parts of one live push came from. */
+export interface LiveVia {
+  processes: ReadVia;
+  others: ReadVia;
+  temperatures: ReadVia;
+}
+
 export interface Locker {
   process: ProcessRef;
   name: string;
   kind: string | null;
+  /** Who read it. Always sent; `local` for a reading that never needed the helper. */
+  via: ReadVia;
+}
+
+/** The answer to "what is locking this file?": the programs, and how many more the reader could not list. */
+export interface LockerList {
+  lockers: Locker[];
+  /** Programs of other accounts that also hold the file but are not named (the helper counts them where the settings say not to name them). */
+  notListed: number;
+  /** The search stopped at its limit: more may hold the file. */
+  truncated: boolean;
 }
 
 /** One application with all its processes. */
@@ -269,9 +293,12 @@ export interface LiveUpdate {
   groups: AppGroup[] | null;
   /** Other users' processes, folded into one row (`processes` and `groups` leave them out); null when there are none. */
   otherUsers: OtherUsers | null;
+  /** Who read the processes, the "Other users" total and the temperatures. */
+  via: LiveVia;
 }
 
-export type LiveDetail = 'summary' | 'processes';
+/** `tray` is the shell's own level with no window open (the menu bar icons); a window asks for `summary` or `processes`. */
+export type LiveDetail = 'summary' | 'processes' | 'tray';
 
 // --------------------------------------------------------------------------------------------------- why slow
 
@@ -458,6 +485,23 @@ export interface DiskSettings {
   finderDepth?: number;
   /** The file finder stops comparing contents after reading this many GiB (1 to 4,096). */
   finderHashGib?: number;
+  /** The disk maps kept for the next time (ADR 0029). */
+  savedMaps?: SavedMapsSettings;
+  /** Seconds between two readings of the volumes' free space: 0 is Auto (60), else 10 to 600. */
+  spaceRefreshSecs?: number;
+}
+
+/** When a saved map is refreshed by itself: never (the default), or at the first look at the page when it is older than this. */
+export type RefreshOnOpen = 'off' | 'olderThanDay' | 'olderThanWeek';
+
+/** `Settings.disk.savedMaps`: every key optional. */
+export interface SavedMapsSettings {
+  /** Whether finished scans are kept for the next time; switching it off forgets every saved map. */
+  enabled?: boolean;
+  /** The most all saved maps may take on disk, in MB (64 to 8,192). */
+  maxMb?: number;
+  /** Whether a saved map is refreshed at the first look at the page. */
+  refreshOnOpen?: RefreshOnOpen;
 }
 
 /** A thread count setting: the engine decides (`'auto'`) or exactly this many (the engine holds it to the setting's own range). */
@@ -494,6 +538,10 @@ export interface Volume {
   reachable: boolean;
   /** Whether used space is a fixed scale for a scan; false for a network share (scanned like a folder). */
   wholeVolume: boolean;
+  /** When capacity and free were read (ms since 1970); absent before the agent stamped it. A share that stopped answering keeps its last figures and this time. */
+  measuredAt?: number | null;
+  /** How old the figures are against the refresh interval, decided by the agent. */
+  freshness?: 'fresh' | 'late' | 'stale';
 }
 
 /** What a scan covers. */
@@ -540,7 +588,21 @@ export interface DiskScanStatus {
   hiddenBytes: number | null;
   /** When the latest pass ended; `null` while the first pass runs. */
   scannedAt: Timestamp | null;
+  /** Scanned in this run, or read back from the saved-maps cache (ADR 0029), where it may be old (its age is `scannedAt`). */
+  origin: ScanOrigin;
+  /** For a saved whole-volume map: the net change in used space since the scan (used now minus used then); `null` otherwise. */
+  changedBytes: number | null;
+  /** The kept scan this one replaces (a Rescan): that map stays on screen until this pass is done. */
+  replaces: number | null;
+  /** Why the finished scan was not saved; `null` when it was, or saving is off. */
+  notSaved: NotSaved | null;
 }
+
+/** Where a scan's tree came from. */
+export type ScanOrigin = 'live' | { saved: { savedAt: Timestamp } };
+
+/** Why a finished scan was not kept in the saved-maps cache. */
+export type NotSaved = 'tooBig' | 'noSpace' | 'failed';
 
 export type NodeKind = 'folder' | 'file' | 'mountPoint' | 'unreadable';
 
@@ -645,12 +707,19 @@ export interface HealthReason {
   /** Points this costs the score. */
   impact: number;
   severity: Severity;
+  /** For an active alarm: when its condition first appeared; null for performance reasons. */
+  since: Timestamp | null;
 }
 
 export interface HealthReport {
   at: Timestamp;
+  /** The score after active alarms cap it. */
   score: number;
   grade: Grade;
+  /** What performance alone scores, before alarms cap it. */
+  performanceScore: number;
+  /** Set when an active alarm of this severity lowered the score (warning caps at Fair, critical at Poor). */
+  cappedBy: Severity | null;
   reasons: HealthReason[];
 }
 
@@ -752,13 +821,15 @@ export interface SavedReport {
 export interface Settings {
   version: number;
   launchAtLogin: boolean;
-  sampling: { intervalMs: number; processIntervalMs: number };
+  /** `helperSweepMs` is how often the helper reads every account's processes; `null` is Auto (5 s, never faster than the process table). */
+  sampling: { intervalMs: number; processIntervalMs: number; helperSweepMs: number | null };
   retention: { rawHours: number; minuteDays: number; quarterHourDays: number; hourDays: number };
   alerts: {
     enabled: boolean;
     lowDiskPercent: number;
     overheatCelsius: number;
     longHighCpuMinutes: number;
+    trayAlertPercent: number;
   };
   webApi: { enabled: boolean; port: number; lan: boolean };
   // The dashboard, menu-bar items and popup layouts travel in the settings JSON too, but a saved `Settings` never replaces
@@ -789,8 +860,8 @@ export interface Settings {
   jobs?: JobSettings;
   /** Maintenance windows: when Dyno's own heavier background work may run. */
   maintenance: MaintenanceSettings;
-  /** Backup health checks. */
-  backup: BackupSettings;
+  /** Power: keep awake (ADR 0032). */
+  power: PowerSettings;
 }
 
 export interface PluginInfo {
@@ -816,6 +887,12 @@ export interface AgentStatus {
   message: string | null;
 }
 
+/**
+ * Whether the desktop shows Dyno's tray icons (the engine's `TrayAvailability`, `crates/dyno-core/src/tray_host.rs`). On Linux the
+ * icons show only when a StatusNotifier host is running; without one the engine sends the whole note to show as `hint`.
+ */
+export type TrayAvailability = 'shown' | { noHost: { hint: string } };
+
 // --------------------------------------------------------------------------------------------------------- errors
 
 export type ErrorCode =
@@ -826,7 +903,9 @@ export type ErrorCode =
   | 'badRequest'
   | 'timeout'
   | 'busy'
-  | 'internal';
+  | 'needsConsent'
+  | 'internal'
+  | 'stale';
 
 /** What every failed backend call rejects with. */
 export interface CommandError {
@@ -910,6 +989,8 @@ export interface SystemInventory {
   memory: MemoryLayout;
   disks: DiskInfo[];
   hints: Hint[];
+  /** Who read the memory layout. */
+  memoryVia: ReadVia;
 }
 
 // ---------------------------------------------------------------------------------------------------------- alarms
@@ -1061,38 +1142,6 @@ export interface RecorderSnapshot {
   samples: RecorderSample[];
 }
 
-// ------------------------------------------------------------------------------------------------------ diagnostics
-// Agent requests: `diagnosticsPreview` -> BundlePreview (nothing is written), `saveDiagnostics {path}` -> SavedDiagnostics.
-// The path comes from the user's save dialog: absolute, ending in `.zip`, in an existing folder (the engine re-checks).
-
-export interface RedactionCounts {
-  homePaths: number;
-  profilePaths: number;
-  machineNames: number;
-  userNames: number;
-  emails: number;
-  ipAddresses: number;
-}
-
-export interface BundleFileInfo {
-  path: string;
-  description: string;
-  bytes: number;
-}
-
-export interface BundlePreview {
-  /** Every file with its size, the manifest included. */
-  files: BundleFileInfo[];
-  totalBytes: number;
-  redactions: RedactionCounts;
-}
-
-export interface SavedDiagnostics {
-  path: string;
-  bytes: number;
-  files: number;
-}
-
 // ------------------------------------------------------------------------------------------------------ benchmarks
 // Mirrors `dyno_core::bench`. Runs start only on a click; the engine answers `BenchOverview` and the UI polls it
 // while `running` is set.
@@ -1106,6 +1155,14 @@ export interface BenchMetric {
   value: number;
   unit: string;
   higherIsBetter: boolean;
+  /** Every repetition, in the order measured; `value` is their median. */
+  samples: number[];
+  min: number;
+  max: number;
+  /** Coefficient of variation of the repetitions (null where the mean is zero). */
+  cv: number | null;
+  /** True when the repetitions varied by more than 10 %. */
+  unsteady: boolean;
 }
 
 export type BenchStatus =
@@ -1118,6 +1175,16 @@ export interface BenchKindResult {
   kind: BenchKind;
   status: BenchStatus;
   millis: number;
+  /** The method version it was measured with; 1 is Dyno 1.0's. */
+  method: number;
+  /** The device measured when a kind runs once per device (the drive's name for the disk test); absent otherwise. */
+  device?: string | null;
+  /** The drive's top is not writable: offer to choose a folder on it and run again. */
+  needsFolder?: boolean;
+  /** The sustained CPU run's trace, one point a second. */
+  trace?: BenchTracePoint[];
+  /** How it was measured, in words (file system, bus, whether the cache was bypassed, the vector width). */
+  details?: string[];
 }
 
 export interface LoadAtRun {
@@ -1135,7 +1202,24 @@ export interface BenchRun {
   load: LoadAtRun;
   machine: string;
   results: BenchKindResult[];
+  /** Measured the 1.0 way: kept, shown as "measured the old way", never compared with a current run. */
+  oldWay: boolean;
+  /** Why this run's numbers are low confidence, when they are. */
+  limited: string | null;
 }
+
+/** Where the measuring program is, as it reports it. `rep` 0 is the warm-up; `total` is null while unknown. */
+export interface BenchPhaseProgress {
+  phase: string;
+  label: string;
+  rep: number;
+  of: number;
+  count: number;
+  total: number | null;
+}
+
+/** How alive a run looks: nothing ends it but the person's Cancel (or a named safety stop). */
+export type BenchLiveness = 'running' | 'stillWorking' | 'notResponding';
 
 export interface BenchProgress {
   runId: string;
@@ -1143,11 +1227,60 @@ export interface BenchProgress {
   kinds: BenchKind[];
   current: BenchKind | null;
   done: BenchKind[];
+  /** The phase being measured now (null between phases and kinds). */
+  phase: BenchPhaseProgress | null;
+  liveness: BenchLiveness;
+  /** Set when the run cannot have full-confidence conditions (Linux without a user manager). */
+  limited: string | null;
+  /** The sustained run's points so far (the page draws them live); empty otherwise. */
+  trace?: BenchTracePoint[];
+}
+
+/** One second of a sustained run. */
+export interface BenchTracePoint {
+  secs: number;
+  /** Work done that second, in the metric's unit (GFLOPS). */
+  throughput: number;
+  freqMhz?: number | null;
+  tempC?: number | null;
+}
+
+export interface BenchKindEstimate {
+  kind: BenchKind;
+  seconds: number;
+}
+
+export interface BenchDiskEstimate {
+  mib: number;
+  /** The most bytes the disk test writes to one drive (the engine's `disk_write_budget`). */
+  bytesWritten: number;
+  seconds: number;
+}
+
+/** What the picker shows before a run; the page adds these up for what is chosen. */
+export interface BenchEstimates {
+  kinds: BenchKindEstimate[];
+  disk: BenchDiskEstimate[];
+  sustainedMinutes: number[];
+  noSensorMaxMinutes: number;
+  sustainedWriteMaxGib: number;
+  quickMib: number;
+  /** The sustained disk write at each offered amount, per drive. */
+  sustainedWrite: { gib: number; seconds: number }[];
 }
 
 export interface BenchOverview {
   running: BenchProgress | null;
   runs: BenchRun[];
+  /** False while the engine keeps the disk test off (ADR 0030 D10); the page shows it as unavailable. */
+  diskTestEnabled: boolean;
+  estimates?: BenchEstimates;
+}
+
+/** A folder chosen for a drive whose top is not writable. */
+export interface BenchDiskFolder {
+  volume: string;
+  folder: string;
 }
 
 export type BenchVerdict = 'better' | 'worse' | 'same';
@@ -1161,6 +1294,10 @@ export interface MetricDelta {
   before: number;
   after: number;
   changePercent: number;
+  /** How widely each run's repetitions varied (max minus min). */
+  beforeSpread: number;
+  afterSpread: number;
+  unsteady: boolean;
   verdict: BenchVerdict;
 }
 
@@ -1171,12 +1308,53 @@ export interface BenchComparison {
   warnings: string[];
 }
 
+/** A graphics adapter, as the GPU runner lists it. */
+export interface GpuAdapter {
+  index: number;
+  name: string;
+  kind: 'discrete' | 'integrated' | 'virtual' | 'cpu' | 'other';
+  backend: string;
+  driver: string;
+}
+
+/** What a run is going to be, for the engine's estimate. */
+export interface BenchEstimateRequest {
+  kinds: BenchKind[];
+  diskMib: number | null;
+  /** How many drives are ticked. */
+  drives: number;
+  sustainedMinutes: number | null;
+  sustainedWriteGib: number | null;
+}
+
+/** About how long it takes and the most it writes to each drive. */
+export interface BenchRunEstimate {
+  seconds: number;
+  bytesPerDrive: number;
+}
+
+export type BenchExportFormat = 'json' | 'csv';
+
 export interface StartBenchmark {
   kinds: BenchKind[];
   label: string;
   group?: string | null;
   phase?: BenchPhase | null;
   diskMib?: number | null;
+  /** The person agreed to run on battery, for this run only. */
+  allowBattery?: boolean;
+  /** The volumes the disk test measures, by id (mount point); empty or absent means the system drive. */
+  diskVolumes?: string[];
+  /** Network drives may be tested in this run; their results are marked network. */
+  allowNetworkDrives?: boolean;
+  /** Folders chosen for drives whose top is not writable. */
+  diskFolders?: BenchDiskFolder[];
+  /** The graphics adapter to measure, by index in the adapter list; absent is the default (the discrete one). */
+  gpuAdapter?: number | null;
+  /** Run the CPU kind as a sustained run of this many minutes (2, 5, 10 or 20). */
+  sustainedMinutes?: number | null;
+  /** Also run the sustained disk write, up to this many GiB per drive; the person confirmed the amount. */
+  sustainedWriteGib?: number | null;
 }
 
 // -------------------------------------------------------------------------------------------------------- network
@@ -1212,6 +1390,10 @@ export interface ConnectionRow {
   stateLabel: string;
   owner: NetOwner;
   firstSeen: Timestamp | null;
+  /** The ISO country the location database gives the remote address; null when none is loaded or it does not know it. */
+  country: string | null;
+  /** The names of your lists that flag the remote address (empty: none does). A flag is a hint, not proof. */
+  flaggedBy: string[];
 }
 
 export interface NetworkQuery {
@@ -1220,6 +1402,17 @@ export interface NetworkQuery {
   state: SocketState | null;
   exposedOnly: boolean;
   search: string;
+  /** Only connections to this country (ISO code, from the location database). */
+  country: string | null;
+  /** Set by "Try again" on the owners' source line: ask the helper now, even if it was left alone after a failure. */
+  retryHelper?: boolean;
+}
+
+/** Other accounts' programs as one total (bytes since each program started). */
+export interface OthersTraffic {
+  programs: number;
+  bytesIn: number;
+  bytesOut: number;
 }
 
 export interface NetworkSnapshot {
@@ -1233,6 +1426,12 @@ export interface NetworkSnapshot {
   traffic?: TrafficRow[];
   /** Why `traffic` is empty (shown as a one-line note), or null when it is available. */
   trafficNote?: string | null;
+  /** Who read the per-program traffic. */
+  trafficVia: ReadVia;
+  /** What other accounts' programs moved together, for a caller the helper scopes to its own programs (no names). */
+  trafficOthers?: OthersTraffic | null;
+  /** Who read the socket owners. */
+  ownersVia: ReadVia;
 }
 
 /** What one program sent and received in the last interval. */
@@ -1319,6 +1518,8 @@ export interface CounterObjectList {
   objects: CounterObjectSummary[];
   /** Something was left out to keep the catalog small. */
   truncated: boolean;
+  /** When the list was last read, when this answer is the one an earlier run saved (shown at once while the agent lists again); `null` when read just now. */
+  savedAt: Timestamp | null;
 }
 
 /** One search match: a counter (of one instance). Paths are `\Object(Instance)\Counter`. */
@@ -1517,7 +1718,8 @@ export type IssueKind =
   | 'serviceFailure'
   | 'memoryExhaustion'
   | 'updateFailure'
-  | 'driverFailure';
+  | 'driverFailure'
+  | 'stoppedFromOutside';
 
 export type IssueSourceId = 'macReports' | 'macLog' | 'windowsEvents' | 'journal' | 'coredumps';
 
@@ -1670,6 +1872,8 @@ export interface StartupOverview {
   signedCount: number;
   /** What could not be read (the list is then partial). */
   unavailable: string[];
+  /** Who read the login items and background tasks (macOS). */
+  btmVia: ReadVia;
 }
 
 export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved';
@@ -1719,6 +1923,8 @@ export interface SleepReport {
   wakes: WakeEvent[];
   blockersUnavailable: string | null;
   wakesUnavailable: string | null;
+  /** Who read the blockers. */
+  blockersVia: ReadVia;
 }
 
 export interface BootStep {
@@ -1778,6 +1984,8 @@ export interface SoftwareInventory {
   items: SoftwareItem[];
   truncated: boolean;
   unavailable: string | null;
+  /** When the list was last read, when this answer is the one an earlier run saved (shown at once while the agent reads again); `null` when read just now. */
+  savedAt: Timestamp | null;
 }
 
 export type InventoryFormat = 'markdown' | 'json';
@@ -1838,7 +2046,7 @@ export interface FinderLimitHit {
 // ------------------------------------------------------------------------------------------------------------- jobs
 
 /**
- * Long operations (find files, read the system logs, check the backups, hash a file, the sleep, boot, app-usage and software
+ * Long operations (find files, read the system logs, hash a file, the sleep, boot, app-usage and software
  * reads) run as jobs in the agent: starting one answers at once with its id, the shell's jobs store follows it through the
  * `paddock://jobs` events, Cancel is the shell's `job_cancel`, and `jobResult` hands over what a done job produced. Mirrors
  * `dyno_core::jobs`; the status itself is the shell's `SuJobSnapshot`.
@@ -1846,23 +2054,72 @@ export interface FinderLimitHit {
 export type JobSpec =
   | { findFiles: { query: FinderQuery } }
   | { rescanIssues: { query: IssuesQuery } }
-  | 'refreshBackup'
   | { fileHash: { source: HashSource } }
   | 'sleepBlockers'
   | 'bootAnalysis'
   | 'appUsage'
-  | 'softwareInventory';
+  | 'softwareInventory'
+  | { helper: { action: HelperAction } }
+  | { updateList: { id: string } }
+  | 'updateGeo'
+  | 'rebuildIntel'
+  | { installTool: { tool: ToolKind } }
+  | { wolWake: { id: number; test: boolean } };
 
 /** What a done job produced, tagged by the kind of job. */
 export type JobOutput =
+  | { intel: IntelStatus }
   | { finder: FinderResult }
   | { issues: IssuesOverview }
-  | { backup: BackupReport }
+ 
   | { fileHash: FileHashInfo }
   | { sleep: SleepReport }
   | { boot: BootReport }
   | { appUsage: UsageReport }
-  | { software: SoftwareInventory };
+  | { software: SoftwareInventory }
+  | { helper: HelperStatus }
+  | { tool: ToolStatus }
+  | { wol: WolOutcome };
+
+// ------------------------------------------------------------------------------------- the privileged helper (ADR 0027)
+
+/**
+ * Whether the helper is usable. `notIncluded`: this build or system has no helper (an AppImage). `off`: never turned on.
+ * `notRunning`: installed but not answering. `starting`: installed and coming up (after a start of Windows): no Repair until it has taken over three minutes. `missing`: damaged. `foreign`: another program answers where the helper should be
+ * (never trusted, never sent anything). `outdated`: needs the bundled newer helper. `ready`: running.
+ */
+export type HelperState = 'notIncluded' | 'off' | 'notRunning' | 'missing' | 'foreign' | 'outdated' | 'ready' | 'starting';
+
+/** What the user asks of the helper; each runs as a job with phases. */
+export type HelperAction = 'turnOn' | 'repair' | 'update' | 'turnOff';
+
+/** How an audited call ended. */
+export type AuditVerdict = 'done' | 'refused' | 'failed';
+
+/** One line of the helper's audit log. */
+export interface AuditEntry {
+  /** Seconds since 1970. */
+  at: number;
+  peer: number | null;
+  what: string;
+  verdict: AuditVerdict;
+  detail: string;
+}
+
+/** Reply of `helperStatus`: the state, one sentence for the person, and what the OS will ask. */
+export interface HelperStatus {
+  state: HelperState;
+  message: string;
+  version: string | null;
+  /** What the OS asks for when turning it on, in words (shown before the prompt). */
+  prompt: string;
+  recent: AuditEntry[];
+  /** What the helper shows, for the card's list (the same list whether it is off or on); empty where the helper cannot exist. */
+  readings: string[];
+  /** Technical details for a "Details" disclosure (versions, an owner's account id, the OS's words); never the headline. */
+  detail: string | null;
+  error: string | null;
+}
 
 export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
@@ -1887,42 +2144,531 @@ export interface MaintenanceStatus {
   nextOpensAt: Timestamp | null;
 }
 
-// ------------------------------------------------------------------------------------------------------- backup
-// Mirrors `dyno_core::backup` (WP-14). Dyno reads each tool's own state with timeouts; it never runs or manages a backup.
+// ---------------------------------------------------------------------------------------------- IP lists, the map, the firewall
 
-export type BackupTool = 'timeMachine' | 'windowsBackup' | 'fileHistory' | 'restic' | 'borg' | 'duplicati';
+/** The switches of the network features: on by default, each its own (there is no Offline mode). */
+export interface NetSwitches {
+  locationDatabases: boolean;
+  ownLocation: boolean;
+  firstRunNoteSeen: boolean;
+}
 
-export type BackupState = 'healthy' | 'stale' | 'noBackupYet' | 'notConfigured' | 'cannotCheck';
+/** When a subscription is refreshed. */
+export type ListSchedule = 'manual' | { automatic: { every: number } };
 
-export interface BackupStatus {
-  tool: BackupTool;
+/** Where a list comes from. */
+export type ListSource = 'manual' | { file: { name: string } } | { url: { url: string; schedule: ListSchedule } };
+
+/** What the page shows for a subscription (and the counts of a typed list). */
+export interface SubscriptionStatus {
+  lastFetchedMs: number | null;
+  lastAttemptMs: number | null;
+  entries: number;
+  duplicates: number;
+  covered: number;
+  skipped: number;
+  error: string | null;
+  note: string | null;
+}
+
+/** One list. */
+export interface ListStatus {
+  id: string;
   name: string;
-  state: BackupState;
-  /** When the last successful backup finished, when known. */
-  lastBackup: Timestamp | null;
+  enabled: boolean;
+  source: ListSource;
+  counts: SubscriptionStatus;
+  /** When a subscription may be updated again (ms since the epoch), when later than now. */
+  nextAllowedMs: number | null;
+  /** The text of a typed or imported list for the editor (at most 64 KB); null for a subscription or a larger list. */
+  text: string | null;
+}
+
+/** The location features. */
+export interface GeoStatus {
+  switches: NetSwitches;
+  databaseOn: boolean;
+  dbDate: string | null;
+  country: SubscriptionStatus;
+  asn: SubscriptionStatus;
+  homeSource: string;
+  attribution: string;
+}
+
+/** Everything the lists page shows. */
+export interface IntelStatus {
+  lists: ListStatus[];
+  allow: string;
+  indexSegments: number;
+  indexRanges: number;
+  indexBytes: number;
+  indexError: string | null;
+  geo: GeoStatus;
+  firstRunNote: string;
+  termsNotice: string;
+}
+
+/** How a new list starts. */
+export type NewSource =
+  | { manual: { text: string } }
+  | { file: { fileName: string; text: string } }
+  | { url: { url: string; everyHours: number | null } };
+
+/** A change the user asks for. */
+export type IntelEdit =
+  | { addList: { name: string; source: NewSource } }
+  | { removeList: { id: string } }
+  | { renameList: { id: string; name: string } }
+  | { setEnabled: { id: string; enabled: boolean } }
+  | { setText: { id: string; text: string } }
+  | { setSchedule: { id: string; everyHours: number | null } }
+  | { dedupePreview: { id: string } }
+  | { dedupeApply: { id: string } }
+  | { setAllow: { text: string } }
+  | { setSwitches: { switches: NetSwitches } };
+
+/** What "Remove duplicates" would do. */
+export interface DedupePreview {
+  before: number;
+  after: number;
+  duplicates: number;
+  covered: number;
+  /** `[removed entry, the entry that stays and covers it]`. */
+  examples: [string, string][];
+}
+
+/** What an edit produced. */
+export type EditOutcome = 'done' | { added: { id: string } } | { preview: DedupePreview } | { removed: { id: string } };
+
+/** The class of a non-public destination. */
+export type AddressClass = 'public' | 'loopback' | 'private' | 'linkLocal' | 'cgnat' | 'multicast' | 'special' | 'reserved';
+
+/** One country on the map. */
+export interface CountryCount {
+  code: string;
+  name: string;
+  connections: number;
+  programs: number;
+  hosts: number;
+  flagged: number;
+  includesContentNetworks: boolean;
+  /** The programs with most connections to it (at most three, busiest first). */
+  topPrograms: string[];
+}
+
+/** Non-public destinations of one class. */
+export interface LocalGroup {
+  class: AddressClass;
+  connections: number;
+  programs: number;
+}
+
+/** The map's data. */
+export interface GeoSummary {
+  countries: CountryCount[];
+  local: LocalGroup[];
+  unknown: number;
+  dbDate: string | null;
+  truncated: number;
+  databaseOn: boolean;
+  homeCountry: string | null;
+  homeSource: string;
+}
+
+export type RuleDirection = 'in' | 'out' | 'any';
+export type RuleAction = 'allow' | 'block';
+export type FirewallProfile = 'domain' | 'private' | 'public' | 'all';
+export type RuleSourceKind = 'windowsFirewall' | 'applicationFirewall' | 'pf' | 'nftables';
+
+export interface FirewallRule {
+  name: string;
+  direction: RuleDirection;
+  action: RuleAction;
+  enabled: boolean;
+  program: string | null;
+  ports: string | null;
+  addresses: string | null;
+  profile: FirewallProfile;
+  source: RuleSourceKind;
+}
+
+export interface FirewallSource {
+  source: RuleSourceKind;
+  states: { profile: FirewallProfile; enabled: boolean }[];
+  switches: [('blockAll' | 'stealth'), boolean][];
+  defaultIn: RuleAction | null;
+  defaultOut: RuleAction | null;
+  ruleCount: number;
+  rules: FirewallRule[];
+  truncated: number;
+  rulesHidden: boolean;
+  note: string | null;
+  /** Who read it. Always sent; `local` for a reading that never needed the helper. */
+  via: ReadVia;
+}
+
+/** The firewall of this computer. */
+export interface FirewallView {
+  os: 'windows' | 'macos' | 'linux';
+  sources: FirewallSource[];
+}
+
+// ------------------------------------------------------------------------------------- the disk-health tool (ADR 0027 section 7)
+
+/** A tool the helper can hold. */
+export type ToolKind = 'smartmontools';
+
+/** What the helper holds of one tool. */
+export interface ToolStatus {
+  tool: ToolKind;
+  installed: string | null;
+}
+
+/** Where the offer stands: downloadable, installed (the version), needs the helper first, or not offered here (what to do instead). */
+export type OfferState = 'available' | { installed: string } | { needsHelper: string } | { notHere: string };
+
+/** Which copy of the tool Dyno uses: the helper's, Dyno's own, or one the person installed (the path of its smartctl). */
+export type ToolSource = 'helper' | 'dyno' | { own: string };
+
+/** What the Settings card shows for the disk-health tool. */
+export interface ToolOffer {
+  tool: ToolKind;
+  name: string;
+  version: string;
+  size: number;
+  from: string;
+  licence: string;
+  sourceUrl: string;
+  state: OfferState;
+  /** Which copy Dyno uses, when it is installed. */
+  source?: ToolSource | null;
+}
+
+// ---------------------------------------------------------------------------------------------------- power (ADR 0032)
+
+/** What stays awake. */
+export type AwakeScope = 'system' | 'systemAndDisplay';
+
+/** One "busy" condition of a "while busy" hold (externally tagged, like the engine's enums: postcard carries them). */
+export type BusyCond =
+  | { cpu: { abovePct: number } }
+  | { network: { aboveBytesPerS: number } }
+  | { disk: { aboveBytesPerS: number } }
+  | { process: { program: string } };
+
+/** Until when to keep awake. */
+export type AwakeUntil =
+  | 'indefinite'
+  | { for: { minutes: number } }
+  | { at: { minuteOfDay: number } }
+  | { whileProcess: { process: ProcessRef } }
+  | { whileBusy: { conds: BusyCond[]; graceSecs: number } };
+
+/** A keep-awake request; one is active at a time and a new one replaces it. */
+export interface AwakeSpec {
+  scope: AwakeScope;
+  until: AwakeUntil;
+}
+
+/** Where a "while busy" hold stands: busy now (and why) or quiet, with the time left before it lets go. */
+export interface BusyNow {
+  active: boolean;
+  detail: string;
+  quietSecs: number;
+  releaseInSecs: number | null;
+}
+
+/** The keep-awake state. */
+export type AwakeView =
+  | 'off'
+  | { holding: { spec: AwakeSpec; since: Timestamp; ends: Timestamp | null; osRef: string; busy: BusyNow | null } }
+  | { waiting: { spec: AwakeSpec; why: string; since: Timestamp; ends: Timestamp | null } }
+  | { ended: { why: string; at: Timestamp } };
+
+/** Whether a power feature works here; the UI never guesses. */
+export type Capability = 'known' | { cantTell: { reason: string } };
+
+/** Everything the Power page shows. */
+export interface PowerView {
+  awake: AwakeView;
+  idle: IdleView;
+  caps: { keepAwake: Capability; sleep: Capability; hibernate: Capability; shutDown: Capability };
+}
+
+export interface KeepAwakeSettings {
+  enabled: boolean;
+  display: boolean;
+  graceSecs: number;
+  cpuPct: number;
+  netBytesPerS: number;
+  diskBytesPerS: number;
+  trayItem: boolean;
+}
+
+export interface EnergySettings {
+  enabled: boolean;
+  wattsOn: number | null;
+  wattsSleep: number | null;
+  tariffPerKwh: number | null;
+  currency: string | null;
+  co2GPerKwh: number | null;
+}
+
+export type IdleAction = 'sleep' | 'hibernate' | 'shutDown';
+
+export interface IdleExceptions {
+  audio: boolean;
+  fullScreen: boolean;
+  otherStayAwake: boolean;
+  cpuPct: number | null;
+  diskBytesPerS: number | null;
+  netBytesPerS: number | null;
+  programs: string[];
+}
+
+export interface IdleSettings {
+  enabled: boolean;
+  action: IdleAction;
+  afterSecs: number;
+  countdownSecs: number;
+  acOnly: boolean;
+  exceptions: IdleExceptions;
+}
+
+/** How often a timed action repeats (externally tagged like the engine's enum). */
+export type Repeat = 'once' | 'daily' | { weekdays: number };
+
+export interface TimedAction {
+  id: number;
+  action: IdleAction;
+  atMinute: number;
+  repeat: Repeat;
+  lastDay: number | null;
+  done: boolean;
+}
+
+export interface TimedSettings {
+  enabled: boolean;
+  entries: TimedAction[];
+}
+
+export interface WolSettings {
+  enabled: boolean;
+  discovery: boolean;
+  directedBroadcast: boolean;
+  testTimeoutSecs: number;
+}
+
+export interface WakeSettings {
+  enabled: boolean;
+}
+
+export interface PowerSettings {
+  keepAwake: KeepAwakeSettings;
+  energy: EnergySettings;
+  idle: IdleSettings;
+  timed: TimedSettings;
+  wol: WolSettings;
+  wake: WakeSettings;
+}
+
+// ------------------------------------------------------------------------------------------ scheduled wake (ADR 0032 section 5)
+
+/** When a scheduled wake repeats: once, every day, or on weekdays (bit 0 Monday to bit 6 Sunday). */
+export type WakeRepeat = 'once' | 'daily' | { days: { mask: number } };
+
+/** The jobs a schedule may run: a fixed list, never a command. */
+export type DynoJob = 'softwareInventory';
+
+export interface WakeLastRun {
+  at: Timestamp;
   summary: string;
-  nextStep: string | null;
 }
 
-export interface BackupReport {
-  statuses: BackupStatus[];
-  /** When it was checked; null while the first check is still running. */
-  checkedAt: Timestamp | null;
-  checking: boolean;
-  loginPathUsed: boolean;
+/** A saved schedule. */
+export interface WakeSchedule {
+  id: number;
+  name: string;
+  minuteOfDay: number;
+  repeat: WakeRepeat;
+  stayAwakeMinutes: number | null;
+  wakeDevices: number[];
+  job: DynoJob | null;
+  enabled: boolean;
+  nextAt: Timestamp | null;
+  lastRun: WakeLastRun | null;
 }
 
-/** Folders to look in before the PATH for one tool installed somewhere unusual. */
-export interface ToolOverride {
-  tool: BackupTool;
-  /** Absolute folders, searched first. */
-  dirs: string[];
+/** What the person chose when adding or changing a schedule. */
+export interface WakeInput {
+  id: number | null;
+  name: string;
+  minuteOfDay: number;
+  repeat: WakeRepeat;
+  stayAwakeMinutes: number | null;
+  wakeDevices: number[];
+  job: DynoJob | null;
+  enabled: boolean;
 }
 
-export interface BackupSettings {
-  /** Check in the background and raise an alarm for a stale backup. */
-  alertWhenStale: boolean;
-  /** A backup older than this many hours is stale (1 to 2160). */
-  staleAfterHours: number;
-  overrides: ToolOverride[];
+export type WakeRoute = 'agent' | 'helper';
+
+/** How a schedule's row is doing (externally tagged). */
+export type WakeRowState = 'off' | 'paused' | 'needsHelper' | { armed: { route: WakeRoute } } | { failed: { why: string } };
+
+export interface WakeRow {
+  entry: WakeSchedule;
+  state: WakeRowState;
+}
+
+/** Who sets the OS wake here and whether it can be done now. */
+export type WakeRouteState = 'helperReady' | { agent: { note: string; cantTell: string[] } } | { needsHelper: { reason: string } } | { unavailable: { reason: string } };
+
+/** What the Schedule tab shows. */
+export interface WakesView {
+  rows: WakeRow[];
+  route: WakeRouteState;
+}
+
+export type BlockerKind = 'audio' | 'fullScreen' | 'stayAwake' | 'cpu' | 'disk' | 'network' | 'program' | 'battery';
+
+/** One reason the action waits; `cantTell` means Dyno could not read it, which blocks too. */
+export interface Blocker {
+  kind: BlockerKind;
+  reason: string;
+  cantTell: boolean;
+}
+
+/** The idle and timed actions' state (externally tagged). */
+export type IdleView =
+  | 'disabled'
+  | { unavailable: { reason: string } }
+  | { watching: { idleSecs: number; blockers: Blocker[]; snoozedUntil: Timestamp | null } }
+  | { countdown: { action: IdleAction; deadline: Timestamp; cause: 'idle' | 'timed' } }
+  | { acting: { action: IdleAction; since: Timestamp } }
+  | { stopped: { why: string } };
+
+/** One day (or the whole range) of the energy report. */
+export interface EnergyDay {
+  dayStart: Timestamp;
+  onSecs: number;
+  sleepSecs: number;
+  /** Seconds Dyno was not running, so it does not know. */
+  unknownSecs: number;
+  kwh: number | null;
+  cost: number | null;
+  co2Kg: number | null;
+  /** CPU energy the helper measured (the processor's alone, not the machine's); null when nothing was measured. */
+  cpuKwh: number | null;
+}
+
+/** The energy report: the person's own watts times the time Dyno saw, labelled as an estimate. */
+export interface EnergyReport {
+  enabled: boolean;
+  days: EnergyDay[];
+  totals: EnergyDay;
+  source: 'estimated' | 'notSet';
+  sleepEnergyCounted: boolean;
+  currency: string | null;
+  trackingSince: Timestamp | null;
+  /** Who measured the CPU energy: `local` where this computer is not asked, so nothing shows. */
+  cpuVia: ReadVia;
+}
+
+// ------------------------------------------------------------------------------------------ Wake-on-LAN (ADR 0032 section 3)
+
+/** How the last wake of a computer ended. */
+export interface LastWake {
+  at: Timestamp;
+  ok: boolean;
+  tested: boolean;
+  summary: string;
+}
+
+/** A saved computer to wake. The SecureOn password is never here: `secureOn` only says there is one. */
+export interface WolDevice {
+  id: number;
+  name: string;
+  /** `aa:bb:cc:dd:ee:ff`. */
+  mac: string;
+  lastIp: string | null;
+  interface: string | null;
+  port: number;
+  secureOn: boolean;
+  lastWake: LastWake | null;
+}
+
+/** What the Wake devices tab shows. */
+export interface WolView {
+  enabled: boolean;
+  devices: WolDevice[];
+  canSend: Capability;
+}
+
+/** What to do with the SecureOn password when saving (externally tagged). */
+export type SecureOnEdit = 'keep' | 'clear' | { set: { password: string } };
+
+/** What the person typed or picked when adding or changing a computer. */
+export interface WolDeviceInput {
+  id: number | null;
+  name: string;
+  mac: string;
+  lastIp: string | null;
+  interface: string | null;
+  secureOn: SecureOnEdit;
+}
+
+export type NeighbourState = 'reachable' | 'stale' | 'probe' | 'permanent' | 'unknown';
+
+/** A neighbour-table entry: a computer the OS has talked to on the local network. */
+export interface Neighbour {
+  mac: string;
+  ip: string;
+  interface: string;
+  state: NeighbourState;
+  /** The host name the agent's resolver knows, when it knows one. */
+  name: string | null;
+}
+
+export interface SendResult {
+  interface: string;
+  dest: string;
+  bytes: number;
+  sent: number;
+  error: string | null;
+}
+
+export type AnswerHow = 'ping' | 'neighbour';
+
+export interface WolAnswer {
+  how: AnswerHow;
+  afterSecs: number;
+  newIp: string | null;
+}
+
+/** What a wake did; `message` is the result in words, with the next step when it did not work. */
+export interface WolOutcome {
+  sent: SendResult[];
+  answered: WolAnswer | null;
+  tested: boolean;
+  elapsedSecs: number;
+  timedOut: boolean;
+  cancelled: boolean;
+  message: string;
+}
+
+export type ReadinessKind = 'nicWake' | 'osSetting' | 'fastStartup' | 'sleepMode' | 'firmware';
+
+/** One finding: fine, a problem with its fix, or "can't tell" with the reason (externally tagged). */
+export type ReadinessState = { ok: { note: string } } | { problem: { note: string; fix: string } } | { cantTell: { reason: string } };
+
+export interface ReadinessItem {
+  kind: ReadinessKind;
+  subject: string | null;
+  state: ReadinessState;
+}
+
+/** This PC's Wake-on-LAN readiness. */
+export interface ThisPcWol {
+  items: ReadinessItem[];
 }

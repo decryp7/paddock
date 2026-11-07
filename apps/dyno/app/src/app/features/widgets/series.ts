@@ -15,6 +15,8 @@ export function seriesFor(metric: Metric, s: Series): { values: number[]; values
       return { values: s.netRx, values2: null };
     case 'networkUp':
       return { values: s.netTx, values2: null };
+    case 'networkBoth':
+      return { values: s.netRx, values2: s.netTx };
     case 'gpuLoad':
       return { values: s.gpu, values2: null };
     default:

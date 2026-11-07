@@ -1,4 +1,4 @@
-use crate::{input_hash, plan, slots};
+use crate::{input_hash, plan, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -28,6 +28,8 @@ enum Command {
         #[command(subcommand)]
         command: CiCommand,
     },
+    /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
+    Wait(wait::WaitArgs),
     /// The project graph.
     Graph {
         #[command(subcommand)]
@@ -131,6 +133,7 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::IdleRun(a) => slots::idle_run(&a),
             SlotCommand::Hold(a) => slots::hold(&a),
         },
+        Command::Wait(a) => wait::command(&a),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {

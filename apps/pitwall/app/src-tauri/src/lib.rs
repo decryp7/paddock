@@ -214,7 +214,7 @@ pub fn shell<R: Runtime>(place: Place) -> Builder<R> {
         })
         // Quit in the menu bar with the last window closed to the tray goes through Pitwall's own quit (the setting, or the ask).
         .menu_quit_without_window(|app| quit::request_from_menu(app, None))
-        .menu_without_window(quit::QUIT_STOP_COMMAND, |app| {
+        .menu_action_without_window(quit::QUIT_STOP_COMMAND, |app| {
             quit::request_from_menu(app, Some(quit::QuitChoice::StopServing))
         })
         .updater(move |app| updater(app, test_dir, update_client))

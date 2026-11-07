@@ -15,7 +15,7 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
 
 ## What a build contains
 
-- **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-user).
+- **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-machine in Program Files since 1.1.0).
 - **macOS:** `Dyno_<version>_aarch64.dmg`, and with signing secrets also the `.app.tar.gz` the updater installs. The bundle is
   **ad-hoc signed** (`signingIdentity "-"` in `tauri.macos.conf.json`): `SMAppService` and launch agents refuse a
   linker-signed bundle. It is not notarised: users open it once through Privacy & Security > Open Anyway (twice, then an administrator password; macOS 26). Developer ID signing and
@@ -77,8 +77,8 @@ reinstall from the releases page, and revoke the old secrets.
 In this order, on one commit:
 
 0. Every 1.0 branch is merged: disk-map-1.0, jobs-1.0 (with its CHANGELOG bullet folded into the `[1.0.0]` section), tables/layout and the startup fix. Nothing may land after step 1 without repeating steps 2 and 3.
-1. Bump the version in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files), and date the
-   `CHANGELOG.md` section (`## [1.0.0] - <date>`, never "Unreleased"): the first release's notes are that section and the
+1. Bump the version (and, in the same commit, update the README status line, for example "1.1.0 released") in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files), and date the
+   `CHANGELOG.md` section (`## [1.0.0] - <date>`, never "Unreleased"; the date is set in this bump commit to the tag date): the first release's notes are that section and the
    release run fails without it. `main` is green.
 2. Run one **manual `dyno-release` with `gates: true`** on that commit (Actions > dyno-release > Run workflow, rule 25). It
    runs Dyno's legs of `ci.yml` (WebKit included) and builds the installers on all three systems.
@@ -86,8 +86,22 @@ In this order, on one commit:
    `installers: not built` proves nothing about the release path (rule 54).
 2b. Run the scripted VM start check on those installers, on a fresh clone: `source ~/.zshenv; scripts/vm-smoke/vm-smoke.sh --app dyno --run <the run id>`
    ([scripts/vm-smoke/README.md](../../../scripts/vm-smoke/README.md)). Attach its result file; a failed step blocks the tag.
+2c. Run the benchmark unit check for the Linux runner: `scripts/linux-units-check.sh` (OrbStack `paddock-gate-arm`, a systemd user manager; it runs `cargo test -p dyno-agent --test bench_units -- --ignored --test-threads=1`, ADR 0030 D5). A failure blocks the tag: set `LINUX_UNITS_VERIFIED` to false in `crates/dyno-agent/src/bench.rs` or fix it.
+2d. Release items that need hardware this repository's agents do not have, for the benchmark tool (ADR 0030): run `scripts/bench-smoke.sh` against each installed build (it starts both runners with tiny sizes and asserts mechanics only); verify direct I/O on a **Windows** and on a **Linux** runner (the disk test must report "Direct I/O: yes" on the system drive, or say why not, and leave no scratch file); and do the signing dry runs of `dyno-bench-gpu` on all three systems (macOS signing id and notarization, Windows signing, Linux package contents via `check-bundle.sh`). A failure blocks the tag.
 3. Run the install and update plan, rows 24a to 24i of [testing-manual.md](testing-manual.md#install-and-update-in-a-throwaway-vm),
    on those installers (the VM plan says how the test builds are made).
+3b. Run the power checks of [ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) (P12) on those installers, in the
+   release VM matrix and on real hardware. These three could not be verified with the test VMs, so they block the tag until done:
+   - **Windows tray menu:** the Keep awake submenu (durations, display, While busy, Until a program quits), its header line, and the
+     countdown entries ("Will sleep in 0:48", Cancel, Snooze 30 minutes) with the notification, in the real tray, with the Keep awake
+     tray item on and off (Cancel must show with it off).
+   - **Real sleep:** Sleep and Hibernate through the countdown on real hardware (the Windows VM has no sleep states, `powercfg /a`
+     shows none): the computer sleeps and wakes, the idle rule re-arms only after new activity, and where a system cannot (hibernation
+     off) the page says why. Windows `SetSuspendState`, macOS `pmset sleepnow`, Linux `systemctl suspend`.
+   - **Real audio detection:** with a sound playing, `dyno idle` says audio is playing and the rule waits (Windows WASAPI sessions on
+     the default playback device, macOS `coreaudiod`'s assertion, Linux "Playing audio" inhibitor); with it stopped the countdown
+     starts. The Windows VM has no audio device, so only silence was seen there.
+   Test VMs: revert the Windows VM to the `gui-session-tools` snapshot (not `clean-baseline`) and delete Tart clones afterwards.
 4. Re-measure the overhead numbers in `docs/architecture.md` on a quiet machine (roadmap G13) and refresh `docs/screenshots`
    against the built screens (`npm run screenshots` in `app/`).
 5. Check the notes: the `CHANGELOG.md` section reads well (it is the first release's notes). For a later release:
@@ -119,3 +133,26 @@ fails (in the bundle job, before the three builds) if the section is missing, st
 ## First launch note
 
 Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+
+## The helper's signature (macOS) and how to test it locally
+
+The macOS helper that the one password prompt copies into `/Library/PrivilegedHelperTools` is verified by the elevated install
+against a minisign signature made with the family update key (security review of the helper install; ADR 0027 amendment).
+
+- `app/src-tauri/scripts/sidecar.mjs` signs the final, ad-hoc sealed helper under the file name `dyno-helper-<version>-<target
+  triple>`; the signature's trusted comment carries that name, and the helper accepts only its own version and architecture. The
+  signature is bundled as `Contents/Resources/dyno-helper.minisig`; the hash it covers goes to `binaries/dyno-helper.sha256`.
+- `scripts/check-bundle.sh` fails the build when the helper in the .app is not the file that was signed, and fails a tag build (or
+  a build with `TAURI_UPDATER_PUBKEY` set) whose helper is unsigned. Pull-request and dev builds only warn.
+
+Testing without the family key: make a throwaway pair and build with it.
+
+```sh
+cargo tauri signer generate -w /tmp/throwaway.key -p ""           # prints the public key; keep both out of the repository
+export TAURI_SIGNING_PRIVATE_KEY="$(cat /tmp/throwaway.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+export TAURI_UPDATER_PUBKEY="$(cat /tmp/throwaway.key.pub)"        # compiled into the helper by the same build
+node apps/dyno/app/src-tauri/scripts/sidecar.mjs && (cd apps/dyno/app && npx tauri build -- --profile dist)
+```
+
+The key must be the same for the signature and for the build that compiles `TAURI_UPDATER_PUBKEY` in, or the install says the
+helper does not match its signature. Unit tests use the fixtures in `crates/dyno-helper-service/tests/fixtures/` (a throwaway key).

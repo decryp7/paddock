@@ -408,12 +408,12 @@ Denies the dialog_close command without any pre-configured scope.
 <tr>
 <td>
 
-`paddock-shell:allow-dialog-fit`
+`paddock-shell:allow-dialog-measure`
 
 </td>
 <td>
 
-Enables the dialog_fit command without any pre-configured scope.
+Enables the dialog_measure command without any pre-configured scope.
 
 </td>
 </tr>
@@ -421,12 +421,12 @@ Enables the dialog_fit command without any pre-configured scope.
 <tr>
 <td>
 
-`paddock-shell:deny-dialog-fit`
+`paddock-shell:deny-dialog-measure`
 
 </td>
 <td>
 
-Denies the dialog_fit command without any pre-configured scope.
+Denies the dialog_measure command without any pre-configured scope.
 
 </td>
 </tr>

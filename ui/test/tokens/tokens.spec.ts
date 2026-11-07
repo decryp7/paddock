@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { contrast, deltaE, deltaE2000, parseColor, simulate, type Cvd, type Rgba } from './color';
+import { contrast, deltaE, deltaE2000, lab, parseColor, simulate, type Cvd, type Rgba } from './color';
 import { ACCENTS, readRules, resolve, type Contrast, type Scheme, type Vars } from './css';
 
 const rules = readRules();
@@ -83,6 +83,24 @@ describe.each(MODES)('contrast, %s, %s contrast', (scheme, mode) => {
   it('input and control boundaries are 3:1 against surface-1 and surface-2 (WCAG 1.4.11)', () => {
     expect(ratio(v, '--pd-border-control', '--pd-surface-1')).toBeGreaterThanOrEqual(3);
     expect(contrast(col(v, '--pd-border-control'), col(v, '--pd-surface-2'))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('the widget grid\'s grips, snapping guides and placeholder are 3:1 (WCAG 1.4.11, ADR 0044)', () => {
+    // Grips: --pd-text-muted on the widget surface.
+    expect(contrast(col(v, '--pd-text-muted'), col(v, '--pd-surface-1'))).toBeGreaterThanOrEqual(3);
+    expect(contrast(col(v, '--pd-text-muted'), col(v, '--pd-surface-2'))).toBeGreaterThanOrEqual(3);
+    // Snapping guides (--pd-snap-guide: the accent at 70 %) meet the window background, behind the widgets.
+    expect(v['--pd-snap-guide'] ?? '').toContain('70%');
+    const a = col(v, '--pd-accent');
+    const bg = col(v, '--pd-bg');
+    const guide: Rgba = { r: a.r * 0.7 + bg.r * 0.3, g: a.g * 0.7 + bg.g * 0.3, b: a.b * 0.7 + bg.b * 0.3, a: 1 };
+    expect(contrast(guide, bg)).toBeGreaterThanOrEqual(3);
+    // The placeholder's dashed outline (the accent) on the background and on its own tint.
+    expect(contrast(a, bg)).toBeGreaterThanOrEqual(3);
+    const tint: Rgba = { r: a.r * 0.14 + bg.r * 0.86, g: a.g * 0.14 + bg.g * 0.86, b: a.b * 0.14 + bg.b * 0.86, a: 1 };
+    expect(contrast(a, tint)).toBeGreaterThanOrEqual(3);
+    // The focus ring on the widget surface.
+    expect(contrast(col(v, '--pd-focus-ring'), col(v, '--pd-surface-1'))).toBeGreaterThanOrEqual(3);
   });
 
   it('white on the danger fill is AA', () => {
@@ -347,5 +365,81 @@ describe('widget frame (ADR 0035)', () => {
   it('keeps one geometry at every density: no row-height or card-padding token, the popup is 8 / 12 px by design', () => {
     for (const f of ['frame.ts', 'area.ts']) expect(src(f), f).not.toMatch(/--pd-(row-height|card-padding)/);
     expect(src('frame.ts')).toContain('padding: var(--pd-space-2) var(--pd-space-3)');
+  });
+});
+
+// The count ramp (--pd-count-1 to -5, fewest to most): five legend steps drawn as country fills on Dyno's connections map, where
+// neighbouring countries are often neighbouring steps. Lightness carries the order (it survives every colour-vision deficiency):
+// neighbours are CIEDE2000 >= 10 apart and at least 1.3:1 in luminance (1.4:1 for the last pair, the darkest or lightest end) in
+// normal vision and under protanopia, deuteranopia and tritanopia, and L* >= 10 apart, rising with the count in dark and falling
+// in light, with the dark end at L* >= 12 so it never reads as text. Step 1 is 3:1 on the page in normal vision only (WCAG 1.4.11), and
+// every step stays clear of the warning colour of the hatched "flagged" marker (the hatch and the flag glyph carry it too). The
+// map's markers are the text colour with a page-colour halo, outside the ramp: CIEDE2000 >= 15 in normal vision; fill or halo 3:1
+// in every vision.
+const COUNT_MIN_DE00 = 10;
+const COUNT_MIN_DL = 10;
+const COUNT_MIN_RATIO = 1.3;
+const COUNT_MIN_RATIO_END = 1.4;
+const COUNT_MIN_END_L = 12;
+const COUNT_MIN_DE00_WARNING = 7;
+const COUNT_MIN_DE00_MARKER = 15;
+const RAMPED = ACCENTS.filter((a) => resolve(rules, 'dark', a)['--pd-count-1'] !== undefined);
+
+describe('count ramp', () => {
+  it('Dyno defines one (its connections map uses it)', () => {
+    expect(RAMPED).toContain('dyno');
+  });
+});
+
+describe.each(SCHEMES.flatMap((s) => RAMPED.map((a) => [s, a] as const)))('count ramp, %s, %s', (scheme, accent) => {
+  const v = resolve(rules, scheme, accent);
+  const ramp = [1, 2, 3, 4, 5].map((i) => col(v, `--pd-count-${i}`));
+  const L = (c: Rgba): number => lab(c)[0];
+
+  it.each(['normal', ...CVDS] as const)(`neighbouring steps are CIEDE2000 >= ${COUNT_MIN_DE00} apart, %s`, (kind) => {
+    const see = (c: Rgba): Rgba => (kind === 'normal' ? c : simulate(c, kind));
+    for (let i = 0; i + 1 < ramp.length; i++) {
+      expect(deltaE2000(see(ramp[i] as Rgba), see(ramp[i + 1] as Rgba)), `step ${i + 1} vs ${i + 2}`).toBeGreaterThanOrEqual(COUNT_MIN_DE00);
+    }
+  });
+
+  it(`lightness orders the steps: L* >= ${COUNT_MIN_DL} per step, lighter with the count in dark, darker in light`, () => {
+    for (let i = 0; i + 1 < ramp.length; i++) {
+      const step = (L(ramp[i + 1] as Rgba) - L(ramp[i] as Rgba)) * (scheme === 'dark' ? 1 : -1);
+      expect(step, `step ${i + 1} to ${i + 2}`).toBeGreaterThanOrEqual(COUNT_MIN_DL);
+    }
+  });
+
+  it.each(['normal', ...CVDS] as const)(`neighbouring steps are ${COUNT_MIN_RATIO}:1 apart in luminance (the last pair ${COUNT_MIN_RATIO_END}:1), %s`, (kind) => {
+    const see = (c: Rgba): Rgba => (kind === 'normal' ? c : simulate(c, kind));
+    for (let i = 0; i + 1 < ramp.length; i++) {
+      const min = i + 2 === ramp.length ? COUNT_MIN_RATIO_END : COUNT_MIN_RATIO;
+      expect(contrast(see(ramp[i] as Rgba), see(ramp[i + 1] as Rgba)), `step ${i + 1} vs ${i + 2}`).toBeGreaterThanOrEqual(min);
+    }
+  });
+
+  it(`the darkest step is L* >= ${COUNT_MIN_END_L} (it never reads as black ink)`, () => {
+    expect(Math.min(...ramp.map(L))).toBeGreaterThanOrEqual(COUNT_MIN_END_L);
+  });
+
+  it(`the marker (the text colour) is CIEDE2000 >= ${COUNT_MIN_DE00_MARKER} from every step, normal vision`, () => {
+    for (const [i, c] of ramp.entries()) expect(deltaE2000(c, col(v, '--pd-text')), `step ${i + 1}`).toBeGreaterThanOrEqual(COUNT_MIN_DE00_MARKER);
+  });
+
+  it.each(['normal', ...CVDS] as const)('the marker\'s fill (the text colour) or its halo (the page colour) is 3:1 against every step, %s', (kind) => {
+    const see = (c: Rgba): Rgba => (kind === 'normal' ? c : simulate(c, kind));
+    for (const [i, c] of ramp.entries()) {
+      const best = Math.max(contrast(see(col(v, '--pd-text')), see(c)), contrast(see(col(v, '--pd-bg')), see(c)));
+      expect(best, `step ${i + 1}`).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('every step is 3:1 against the page (the map\'s sea), normal vision', () => {
+    for (const [i, c] of ramp.entries()) expect(contrast(c, col(v, '--pd-bg')), `step ${i + 1}`).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(['normal', ...CVDS] as const)(`every step is CIEDE2000 >= ${COUNT_MIN_DE00_WARNING} from the warning colour (the flagged hatch), %s`, (kind) => {
+    const see = (c: Rgba): Rgba => (kind === 'normal' ? c : simulate(c, kind));
+    for (const [i, c] of ramp.entries()) expect(deltaE2000(see(c), see(col(v, '--pd-warning'))), `step ${i + 1}`).toBeGreaterThanOrEqual(COUNT_MIN_DE00_WARNING);
   });
 });

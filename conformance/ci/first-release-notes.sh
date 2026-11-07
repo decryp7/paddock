@@ -4,6 +4,7 @@
 # three OS build) and in the release job (writes the notes).
 #
 #   FIRST_CHANGELOG  the app's CHANGELOG.md; empty: nothing to do
+#   NOTES_FROM_CHANGELOG  true: take the section of the tagged version even when an earlier tag of the app exists
 #   TAG              the tag being released (refs/tags name), PREFIX the app's tag prefix (dyno-)
 #   OUT              where to write the section; unset: only check it
 #
@@ -32,9 +33,17 @@ if git remote get-url origin >/dev/null 2>&1; then
 else
   earlier=$(git tag -l "${prefix}v*")
 fi
-if [ -n "$(printf '%s\n' "$earlier" | grep -vxF "$tag" | grep -v '^$' || true)" ]; then
-  exit 0
-fi
+# NOTES_FROM_CHANGELOG=true: this app's notes are always the CHANGELOG section of the tagged version, not only for its first
+# release (an app whose history is squashed landing commits has nothing for git-cliff to list), so an earlier tag does not
+# hand over to git-cliff; a missing, "Unreleased" or empty section still fails below.
+case "${NOTES_FROM_CHANGELOG:-}" in
+  true | 1 | yes) ;;
+  *)
+    if [ -n "$(printf '%s\n' "$earlier" | grep -vxF "$tag" | grep -v '^$' || true)" ]; then
+      exit 0
+    fi
+    ;;
+esac
 
 version=${tag#"${prefix}v"}
 [ -f "$changelog" ] || { echo "::error::$changelog does not exist"; exit 1; }

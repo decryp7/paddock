@@ -114,12 +114,8 @@ struct FakeInstaller {
 }
 
 impl Installer for FakeInstaller {
-    fn install(
-        &self,
-        file: &Path,
-        manifest: &serde_json::Value,
-        relaunch: bool,
-    ) -> Result<(), UpdateError> {
+    fn install(&self, pkg: &Package<'_>, relaunch: bool) -> Result<(), UpdateError> {
+        let (file, manifest) = (pkg.file, pkg.manifest);
         assert_eq!(
             std::fs::read(file).unwrap(),
             package(),
@@ -846,6 +842,58 @@ fn install_on_quit_installs_without_a_relaunch_and_can_be_switched_off() {
     );
     assert!(!installer.calls.lock().unwrap()[0].2, "no relaunch");
     assert!(matches!(r.phase(), UpdatePhase::Installing { .. }));
+}
+
+#[test]
+fn a_staged_file_altered_after_download_is_not_installed_and_is_fetched_again() {
+    let installer = Arc::new(FakeInstaller::default());
+    let hooks = Arc::new(FakeHooks::default());
+    let r = ready_rig(
+        Some(installer.clone()),
+        Some(hooks.clone() as Arc<dyn ServiceHooks>),
+    );
+    let staged: Vec<_> = std::fs::read_dir(r.dir.path().join("downloads"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.is_file())
+        .collect();
+    assert_eq!(staged.len(), 1, "one staged package");
+    let mut bytes = std::fs::read(&staged[0]).unwrap();
+    bytes.push(0);
+    std::fs::write(&staged[0], bytes).unwrap();
+    r.updater.prepare_restart().unwrap();
+    assert_eq!(
+        r.updater.install_at_exit(),
+        ExitAction::Failed { relaunch: true }
+    );
+    assert!(
+        installer.calls.lock().unwrap().is_empty(),
+        "nothing altered is installed"
+    );
+    assert!(
+        hooks.seen.lock().unwrap().is_empty(),
+        "the services are left running"
+    );
+    assert!(!staged[0].exists(), "the altered file is deleted");
+    assert!(matches!(
+        r.phase(),
+        UpdatePhase::Failed {
+            error: UpdateError::SignatureInvalid { .. },
+            ..
+        }
+    ));
+    // The next check offers the update again and the download fetches a fresh, valid copy.
+    r.check().unwrap();
+    r.download().unwrap();
+    assert!(staged[0].is_file());
+    r.updater.prepare_restart().unwrap();
+    assert_eq!(
+        r.updater.install_at_exit(),
+        ExitAction::Installed {
+            relaunch: !cfg!(windows)
+        }
+    );
+    assert_eq!(installer.calls.lock().unwrap().len(), 1);
 }
 
 #[test]

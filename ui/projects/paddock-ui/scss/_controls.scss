@@ -487,6 +487,7 @@
   border: 1px solid var(--pd-hairline);
 
   > button {
+    white-space: nowrap;
     min-height: calc(var(--pd-control-height) - 6px);
     padding: 0 var(--pd-space-3);
     border: 0;

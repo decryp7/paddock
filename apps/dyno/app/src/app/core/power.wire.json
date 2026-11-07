@@ -1,0 +1,456 @@
+{
+  "energy": {
+    "notSet": {
+      "cpuVia": "local",
+      "currency": null,
+      "days": [
+        {
+          "co2Kg": null,
+          "cost": null,
+          "cpuKwh": null,
+          "dayStart": 1700006400000,
+          "kwh": null,
+          "onSecs": 34800,
+          "sleepSecs": 30000,
+          "unknownSecs": 21600
+        },
+        {
+          "co2Kg": null,
+          "cost": null,
+          "cpuKwh": null,
+          "dayStart": 1700092800000,
+          "kwh": null,
+          "onSecs": 0,
+          "sleepSecs": 0,
+          "unknownSecs": 7200
+        }
+      ],
+      "enabled": true,
+      "sleepEnergyCounted": false,
+      "source": "notSet",
+      "totals": {
+        "co2Kg": null,
+        "cost": null,
+        "cpuKwh": null,
+        "dayStart": 1700006400000,
+        "kwh": null,
+        "onSecs": 34800,
+        "sleepSecs": 30000,
+        "unknownSecs": 28800
+      },
+      "trackingSince": 1700000000000
+    },
+    "priced": {
+      "cpuVia": "local",
+      "currency": "S$",
+      "days": [
+        {
+          "co2Kg": 0.2386666666666667,
+          "cost": 0.29833333333333334,
+          "cpuKwh": null,
+          "dayStart": 1700006400000,
+          "kwh": 0.5966666666666667,
+          "onSecs": 34800,
+          "sleepSecs": 30000,
+          "unknownSecs": 21600
+        },
+        {
+          "co2Kg": 0.0,
+          "cost": 0.0,
+          "cpuKwh": null,
+          "dayStart": 1700092800000,
+          "kwh": 0.0,
+          "onSecs": 0,
+          "sleepSecs": 0,
+          "unknownSecs": 7200
+        }
+      ],
+      "enabled": true,
+      "sleepEnergyCounted": true,
+      "source": "estimated",
+      "totals": {
+        "co2Kg": 0.2386666666666667,
+        "cost": 0.29833333333333334,
+        "cpuKwh": null,
+        "dayStart": 1700006400000,
+        "kwh": 0.5966666666666667,
+        "onSecs": 34800,
+        "sleepSecs": 30000,
+        "unknownSecs": 28800
+      },
+      "trackingSince": 1700000000000
+    }
+  },
+  "idleViews": {
+    "acting": {
+      "acting": {
+        "action": "sleep",
+        "since": 1700000000000
+      }
+    },
+    "countdown": {
+      "countdown": {
+        "action": "shutDown",
+        "cause": "timed",
+        "deadline": 1700000060000
+      }
+    },
+    "disabled": "disabled",
+    "stopped": {
+      "stopped": {
+        "why": "Shutdown did not happen: an app may be asking you to save"
+      }
+    },
+    "unavailable": {
+      "unavailable": {
+        "reason": "this system gives Dyno no idle time"
+      }
+    },
+    "watching": {
+      "watching": {
+        "blockers": [
+          {
+            "cantTell": false,
+            "kind": "audio",
+            "reason": "audio is playing"
+          }
+        ],
+        "idleSecs": 420,
+        "snoozedUntil": null
+      }
+    }
+  },
+  "requests": [
+    "powerState",
+    {
+      "powerKeepAwake": {
+        "spec": {
+          "scope": "system",
+          "until": {
+            "for": {
+              "minutes": 30
+            }
+          }
+        }
+      }
+    },
+    "powerStopKeepAwake",
+    "powerIdleCancel",
+    {
+      "powerIdleSnooze": {
+        "minutes": 30
+      }
+    },
+    {
+      "energyReport": {
+        "days": 7
+      }
+    }
+  ],
+  "settings": {
+    "energy": {
+      "co2GPerKwh": null,
+      "currency": null,
+      "enabled": true,
+      "tariffPerKwh": null,
+      "wattsOn": null,
+      "wattsSleep": null
+    },
+    "idle": {
+      "acOnly": true,
+      "action": "sleep",
+      "afterSecs": 1800,
+      "countdownSecs": 60,
+      "enabled": false,
+      "exceptions": {
+        "audio": true,
+        "cpuPct": 50.0,
+        "diskBytesPerS": 5242880,
+        "fullScreen": true,
+        "netBytesPerS": 512000,
+        "otherStayAwake": true,
+        "programs": []
+      }
+    },
+    "keepAwake": {
+      "cpuPct": 50.0,
+      "diskBytesPerS": 5242880,
+      "display": false,
+      "enabled": true,
+      "graceSecs": 120,
+      "netBytesPerS": 512000,
+      "trayItem": false
+    },
+    "timed": {
+      "enabled": false,
+      "entries": []
+    },
+    "wake": {
+      "enabled": false
+    },
+    "wol": {
+      "directedBroadcast": true,
+      "discovery": true,
+      "enabled": true,
+      "testTimeoutSecs": 120
+    }
+  },
+  "specs": [
+    {
+      "scope": "system",
+      "until": "indefinite"
+    },
+    {
+      "scope": "systemAndDisplay",
+      "until": {
+        "for": {
+          "minutes": 60
+        }
+      }
+    },
+    {
+      "scope": "system",
+      "until": {
+        "at": {
+          "minuteOfDay": 605
+        }
+      }
+    },
+    {
+      "scope": "system",
+      "until": {
+        "whileProcess": {
+          "process": {
+            "pid": 7,
+            "started": 8
+          }
+        }
+      }
+    },
+    {
+      "scope": "system",
+      "until": {
+        "whileBusy": {
+          "conds": [
+            {
+              "cpu": {
+                "abovePct": 50.0
+              }
+            },
+            {
+              "network": {
+                "aboveBytesPerS": 512000
+              }
+            },
+            {
+              "disk": {
+                "aboveBytesPerS": 5242880
+              }
+            },
+            {
+              "process": {
+                "program": "build.exe"
+              }
+            }
+          ],
+          "graceSecs": 120
+        }
+      }
+    }
+  ],
+  "timed": {
+    "action": "hibernate",
+    "atMinute": 1380,
+    "done": false,
+    "id": 3,
+    "lastDay": null,
+    "repeat": {
+      "weekdays": 31
+    }
+  },
+  "views": {
+    "cantTell": {
+      "awake": "off",
+      "caps": {
+        "hibernate": "known",
+        "keepAwake": {
+          "cantTell": {
+            "reason": "this system has no logind"
+          }
+        },
+        "shutDown": "known",
+        "sleep": "known"
+      },
+      "idle": "disabled"
+    },
+    "ended": {
+      "awake": {
+        "ended": {
+          "at": 1700000100000,
+          "why": "Dyno restarted"
+        }
+      },
+      "caps": {
+        "hibernate": "known",
+        "keepAwake": "known",
+        "shutDown": "known",
+        "sleep": "known"
+      },
+      "idle": "disabled"
+    },
+    "holding": {
+      "awake": {
+        "holding": {
+          "busy": null,
+          "ends": 1700003600000,
+          "osRef": "IOPMAssertion 4242",
+          "since": 1700000000000,
+          "spec": {
+            "scope": "system",
+            "until": {
+              "for": {
+                "minutes": 60
+              }
+            }
+          }
+        }
+      },
+      "caps": {
+        "hibernate": "known",
+        "keepAwake": "known",
+        "shutDown": "known",
+        "sleep": "known"
+      },
+      "idle": "disabled"
+    },
+    "holdingBusy": {
+      "awake": {
+        "holding": {
+          "busy": {
+            "active": true,
+            "detail": "CPU at 72%",
+            "quietSecs": 0,
+            "releaseInSecs": null
+          },
+          "ends": null,
+          "osRef": "IOPMAssertion 4242",
+          "since": 1700000000000,
+          "spec": {
+            "scope": "system",
+            "until": {
+              "whileBusy": {
+                "conds": [
+                  {
+                    "cpu": {
+                      "abovePct": 50.0
+                    }
+                  }
+                ],
+                "graceSecs": 120
+              }
+            }
+          }
+        }
+      },
+      "caps": {
+        "hibernate": "known",
+        "keepAwake": "known",
+        "shutDown": "known",
+        "sleep": "known"
+      },
+      "idle": "disabled"
+    },
+    "holdingForever": {
+      "awake": {
+        "holding": {
+          "busy": null,
+          "ends": null,
+          "osRef": "IOPMAssertion 4242",
+          "since": 1700000000000,
+          "spec": {
+            "scope": "system",
+            "until": "indefinite"
+          }
+        }
+      },
+      "caps": {
+        "hibernate": "known",
+        "keepAwake": "known",
+        "shutDown": "known",
+        "sleep": "known"
+      },
+      "idle": "disabled"
+    },
+    "holdingQuiet": {
+      "awake": {
+        "holding": {
+          "busy": {
+            "active": false,
+            "detail": "quiet",
+            "quietSecs": 40,
+            "releaseInSecs": 80
+          },
+          "ends": null,
+          "osRef": "IOPMAssertion 4242",
+          "since": 1700000000000,
+          "spec": {
+            "scope": "system",
+            "until": {
+              "whileBusy": {
+                "conds": [
+                  {
+                    "cpu": {
+                      "abovePct": 50.0
+                    }
+                  }
+                ],
+                "graceSecs": 120
+              }
+            }
+          }
+        }
+      },
+      "caps": {
+        "hibernate": "known",
+        "keepAwake": "known",
+        "shutDown": "known",
+        "sleep": "known"
+      },
+      "idle": "disabled"
+    },
+    "off": {
+      "awake": "off",
+      "caps": {
+        "hibernate": "known",
+        "keepAwake": "known",
+        "shutDown": "known",
+        "sleep": "known"
+      },
+      "idle": "disabled"
+    },
+    "waiting": {
+      "awake": {
+        "waiting": {
+          "ends": 1700003600000,
+          "since": 1700000000000,
+          "spec": {
+            "scope": "system",
+            "until": {
+              "for": {
+                "minutes": 60
+              }
+            }
+          },
+          "why": "the computer went to sleep"
+        }
+      },
+      "caps": {
+        "hibernate": "known",
+        "keepAwake": "known",
+        "shutDown": "known",
+        "sleep": "known"
+      },
+      "idle": "disabled"
+    }
+  }
+}

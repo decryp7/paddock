@@ -1,33 +1,25 @@
 //! The plugin's side of the connection: a plugin's `main` is `dyno_plugin_api::serve(MyPlugin)`.
 
 use crate::plugin::Plugin;
-use crate::protocol::{codes, PluginMessage, PluginReply, PluginRequest};
-use dyno_ipc::{ChildLink, Peer, PeerOptions, RemoteError};
+use crate::protocol::{codes, wire, PluginMessage, PluginReply, PluginRequest};
+use paddock_ipc::{body_handler, child, RemoteError};
 use std::process::ExitCode;
 use std::sync::Arc;
 
 /// Connects to the host (the bootstrap line on stdin), answers its calls until the connection or stdin closes, and
 /// returns the exit code. A panic in a provider becomes a `panic` failure of that call (the host restarts the plugin).
 pub fn serve<P: Plugin>(plugin: P) -> ExitCode {
-    let conn = match ChildLink::from_stdin() {
-        Ok(conn) => conn,
-        Err(e) => {
-            eprintln!("this is a Dyno plugin; Dyno starts it itself. It could not connect: {e}");
-            return ExitCode::FAILURE;
-        }
-    };
     let plugin = Arc::new(plugin);
-    let handler = move |msg: PluginMessage| match msg {
-        PluginMessage::Request(req) => handle(&*plugin, req).map(PluginMessage::Reply),
-        PluginMessage::Reply(_) => Err(RemoteError::new(codes::BAD_REQUEST, "a plugin answers requests only")),
+    let make = move |_: &paddock_ipc::Bootstrap| {
+        body_handler(move |msg: PluginMessage| match msg {
+            PluginMessage::Request(req) => handle(&*plugin, req).map(PluginMessage::Reply),
+            PluginMessage::Reply(_) => Err(RemoteError::new(codes::BAD_REQUEST, "a plugin answers requests only")),
+        })
     };
-    match Peer::start(conn, PeerOptions::new().serve(handler)) {
-        Ok(peer) => {
-            peer.wait_closed(None);
-            ExitCode::SUCCESS
-        }
+    match child::serve("Dyno", wire(), make, |_, _| {}) {
+        Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("cannot serve the connection: {e}");
+            eprintln!("this is a Dyno plugin; Dyno starts it itself. It could not serve the connection: {e}");
             ExitCode::FAILURE
         }
     }

@@ -531,6 +531,42 @@
       "height": null,
       "commands": []
     },
+    "sd.fixture-decision": {
+      "kind": "decision",
+      "modality": "modal",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 400,
+      "height": null,
+      "commands": []
+    },
+    "sd.fixture-form": {
+      "kind": "form",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 560,
+      "height": null,
+      "commands": []
+    },
+    "sd.fixture-tool": {
+      "kind": "tool",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 960,
+      "height": 680,
+      "commands": []
+    },
+    "sd.fixture-viewer": {
+      "kind": "viewer",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 720,
+      "height": 560,
+      "commands": []
+    },
     "sd.inspector": {
       "kind": "form",
       "modality": "modeless",
@@ -626,6 +662,7 @@
     "sd.dialog.about": "About the shell demo",
     "sd.dialog.choose-style": "Choose a greeting style",
     "sd.dialog.confirm-reset": "Reset greetings?",
+    "sd.dialog.fixture": "Size fixture",
     "sd.dialog.inspector": "Engine inspector",
     "sd.dialog.rename": "Rename",
     "sd.dialog.unsaved": "Unsaved changes",

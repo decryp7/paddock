@@ -1,5 +1,5 @@
 import { LocalStorageLanguageStorage, type LanguageStorage } from './language-storage';
-import { language, PSEUDO_LOCALE, resolveLocale, setActiveLocale, SOURCE_LOCALE, textDirection } from './locale';
+import { language, PSEUDO_LOCALE, resolveLocale, setActiveLocale, SOURCE_LOCALE, textDirection } from '@decryp7/paddock-ui/locale';
 
 /** Message id -> translated text, in the `$localize` runtime format (`{$PLACEHOLDER}` placeholders). */
 export type Translations = Record<string, string>;

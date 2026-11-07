@@ -6,6 +6,25 @@ export function prefersReducedMotion(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/**
+ * Whether a chart animates this draw: only its first one, and never with reduced motion. Options are replaced whole
+ * (`notMerge`), so an animated update replays the entry animation, about 18 canvas frames, on every poll of a live chart
+ * (the Counters chart every 2 s); later draws therefore change in one frame.
+ */
+export function animateDraw(firstDraw: boolean, reducedMotion: boolean): boolean {
+  return firstDraw && !reducedMotion;
+}
+
+/**
+ * Whether options draw any data: a series or a dataset with at least one point. A skeleton or an empty first draw does not
+ * count, so it does not use up the entry animation.
+ */
+export function hasData(options: EChartsCoreOption): boolean {
+  const filled = (v: unknown): boolean => Array.isArray(v) ? v.length > 0 : typeof v === 'object' && v !== null && filled((v as { source?: unknown }).source);
+  const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : v ? [v] : []);
+  return list(options['series']).some((s) => filled((s as { data?: unknown } | null)?.data)) || list(options['dataset']).some(filled);
+}
+
 /** Whether `doc` can give a canvas a 2D context, which ECharts' canvas renderer needs. */
 function hasCanvas2d(doc: Document): boolean {
   try {
@@ -48,6 +67,8 @@ export class Chart {
   private chart: EChartsType | null = null;
   protected readonly failed = signal(false);
   private readonly ready = signal(false);
+  /** Whether the chart has drawn data once (only that first draw animates). */
+  private drawn = false;
 
   /**
    * Gives the chart the size its container has now, only when that differs from the chart's own. A container with no size
@@ -100,7 +121,8 @@ export class Chart {
       const options = this.options();
       if (!this.ready() || !this.chart || !options) return;
       try {
-        this.chart.setOption({ animation: !prefersReducedMotion(), animationDuration: 300, ...options }, { notMerge: true, lazyUpdate: true });
+        this.chart.setOption({ animationDuration: 300, ...options, animation: animateDraw(!this.drawn, prefersReducedMotion()) }, { notMerge: true, lazyUpdate: true });
+        if (hasData(options)) this.drawn = true;
         this.failed.set(false);
         // The container may have been detached and back since the last resize (a panel's skeleton between two answers).
         requestAnimationFrame(() => this.fit());

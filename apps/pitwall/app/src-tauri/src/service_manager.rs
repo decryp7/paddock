@@ -7,7 +7,7 @@ use crate::commands::{forward, SharedClient};
 use crate::app_state;
 use paddock_service::backend::Side;
 use paddock_service::render::{launchd_plist, LaunchdProgram};
-use paddock_service::{Manager, ProcessType, RepairTracker, ServiceError, ServiceSpec, StartWait, Timings};
+use paddock_service::{Manager, ProcessType, RepairTracker, ServiceError, ServiceSpec, Timings};
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use std::sync::{Arc, OnceLock};
 
@@ -67,11 +67,11 @@ pub fn manager(client: &SharedClient, timings: Timings) -> Result<Manager, Comma
     Ok(Manager::new(APP_NAME, backend, &data, LABEL, env!("CARGO_PKG_VERSION"), answers)
         .with_program(&program.to_string_lossy())
         .with_tracker(tracker())
-        .with_start_watch(Box::new(StartWait::with_poll(timings.start_poll)))
         .with_timings(timings))
 }
 
 /// The step the running repair is at (`None` when none works), for the job's phase label.
 pub fn repair_step() -> Option<String> {
-    tracker().current(std::time::Instant::now()).and_then(|n| n.step)
+    // The manager stamps the notice with the shared monotonic clock (its default), so it is read on the same clock.
+    tracker().current(paddock_jobs::time::Clock::monotonic(&paddock_jobs::time::SystemClock)).and_then(|n| n.step)
 }

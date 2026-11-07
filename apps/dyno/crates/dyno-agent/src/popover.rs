@@ -1,6 +1,6 @@
-//! The tray popup's slow values (family ADR 0035 §5): alarms, disk space, backup, the last issue and the pinned
+//! The tray popup's slow values (family ADR 0035 §5): alarms, disk space, the last issue and the pinned
 //! counters, built by `dyno_core::widgets::popover_values` from state the agent already keeps. Nothing here reads the OS or
-//! the disk on a request: volumes come from the cached list, the backup report is the last one, counters are the newest
+//! the disk on a request: volumes come from the cached list, counters are the newest
 //! kept readings and issues come from the index.
 
 use crate::agent::{lock, now, Shared};
@@ -9,7 +9,7 @@ use dyno_core::jobs::JobKind;
 use dyno_core::protocol::AgentError;
 use dyno_core::time::DAY;
 use dyno_core::widgets::popover_values::{
-    is_live_push, state, BackupInput, CountersInput, Inputs, IssuesInput, JobProgress, Minute, PopoverState, Source, ISSUE_DAYS,
+    is_live_push, state, CountersInput, Inputs, IssuesInput, JobProgress, Minute, PopoverState, Source, ISSUE_DAYS,
 };
 use dyno_core::widgets::PopoverKind;
 use paddock_jobs::wire::WireState;
@@ -50,11 +50,6 @@ pub fn values(shared: &Arc<Shared>, asked: &[PlacementId]) -> Result<Vec<Popover
     } else {
         Source::NotYet
     };
-    let backup_report = has(PopoverKind::BackupHealth).then(|| crate::extras::backup_check::last_report(shared));
-    let backup_job = backup_report
-        .as_ref()
-        .filter(|r| r.checking)
-        .and_then(|_| job_progress(shared, JobKind::RefreshBackup));
     let (issues, reading, scanned_at) = if has(PopoverKind::LastIssue) {
         let list = lock(&shared.core).store.issues(t.minus(ISSUE_DAYS * DAY), t, ISSUE_LOOK);
         let reading = job_progress(shared, JobKind::RescanIssues).map(|j| j.done);
@@ -76,9 +71,6 @@ pub fn values(shared: &Arc<Shared>, asked: &[PlacementId]) -> Result<Vec<Popover
     let mut inputs = Inputs::empty(t, &minute);
     inputs.alarms = alarms.as_slice();
     inputs.volumes = volumes.as_slice();
-    if let Some(report) = &backup_report {
-        inputs.backup = Source::Ready(BackupInput { report, job: backup_job });
-    }
     inputs.issues = match &issues {
         Source::Ready(l) => Source::Ready(IssuesInput {
             recent: l,

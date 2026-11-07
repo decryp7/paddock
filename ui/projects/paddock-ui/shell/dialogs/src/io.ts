@@ -1,28 +1,15 @@
 import { InjectionToken } from '@angular/core';
-import { DIALOG_EVENTS, type DialogInfo, type DialogRequest, type DialogSize, type DialogStart } from '@decryp7/paddock-ui/shell';
+import { DIALOG_EVENTS, type DialogInfo, type DialogMeasureWire, type DialogRequest, type DialogStart } from '@decryp7/paddock-ui/shell';
 
 /** Stops listening. */
 export type Unlisten = () => void;
 
 /**
- * What the dialog frame measured, the dialog's own inner logical size (ADR 0026 §4.2): `content` is what it needs at its
- * declared width (header, body at its natural height, footer), `minContent` the least it can be (header, footer, the
- * body's declared minimum; the footer's buttons on one line), which the window system makes the OS minimum.
+ * What the dialog frame measured (ADR 0026 §4.2, ADR 0043 §2): the wire type `DialogMeasureWire`, generated from Rust's
+ * `Measure`; `content` is what it needs at its declared width, `minContent` the least it can be, `overflow` whether the body
+ * scrolls. Declared nowhere else.
  */
-export interface DialogMeasure {
-  readonly content: DialogSize;
-  readonly minContent: DialogSize;
-  /**
-   * The page's `innerHeight` when it measured, CSS px: Rust adds what the window's inner height has beyond it (the spike
-   * saw a viewport 32 px short of the window on a Mac, cutting the footer off).
-   */
-  readonly viewportHeight?: number;
-  /**
-   * The page's `window.devicePixelRatio` when it measured. Rust converts CSS px to logical px with the webview zoom,
-   * `devicePixelRatio` over the window's scale factor (1 when absent). Finite, 0.25 to 8.
-   */
-  readonly devicePixelRatio?: number;
-}
+export type DialogMeasure = DialogMeasureWire;
 
 /**
  * Everything the dialog layer needs from the window system, in one seam (rule: code against abstractions). The desktop
@@ -51,13 +38,13 @@ export interface DialogIo {
    */
   log?(level: 'info' | 'warn', message: string): void;
   /**
-   * The ready handshake (ADR 0026 §4.2): the frame measured its content after the content and `document.fonts.ready`,
-   * synchronously, without waiting for a frame (the 1.1-0 spike: a hidden window never runs `requestAnimationFrame` on a
-   * sleeping Mac). The window system sizes the window and shows it. Sent once.
+   * One measure of the page (ADR 0043 §2, `dialog_measure`): the frame measured its content, synchronously where the window
+   * is still hidden (the 1.1-0 spike: a hidden window never runs `requestAnimationFrame`). `(epoch, seq)` order it: a lower
+   * `seq` of the same `epoch` is ignored, a new `epoch` (a reloaded page) restarts the order. Rust sizes the window.
    */
-  ready(measure: DialogMeasure): Promise<void>;
-  /** A refit (ADR 0026 §4.5): the content's natural size, the theme, density or fonts changed, or the content asked. */
-  fit(measure: DialogMeasure): Promise<void>;
+  measure(epoch: number, seq: number, measure: DialogMeasure): Promise<void>;
+  /** The page says measure `seq` of `epoch` is the one to show the window at (`dialog_ready`); it carries no size. */
+  ready(epoch: number, seq: number): Promise<void>;
   /** Sets this dialog window's title bar text (a title the content knows only at run time). Optional: a window system without it keeps the title it was opened with. */
   setTitle?(title: string): Promise<void>;
 }
@@ -82,9 +69,9 @@ export interface TauriBridge {
 /**
  * The dialog layer over Tauri: the `paddock_dialogs::tauri` commands and its events.
  *
- * The seam of package 1.1b (ADR 0026 §4): `ready` and `fit` are the only calls that size or show a dialog window. They
- * send the measure (`dialog_ready { measure }`, `dialog_fit { measure }`, the wire type `DialogMeasureWire`); Rust makes
- * `minContent` the OS minimum, sizes, and shows the window on ready. The show mechanism per OS lives in Rust alone.
+ * The seam of ADR 0043: `measure` and `ready` are the only calls that size or show a dialog window. `measure` sends the
+ * measure (`dialog_measure { epoch, seq, measure }`, the wire type `DialogMeasureWire`); Rust makes `minContent` the OS
+ * minimum and sizes the window; `ready { epoch, seq }` names the measure to show at. The show mechanism per OS lives in Rust alone.
  */
 export function tauriDialogIo(tauri: TauriBridge): DialogIo {
   return {
@@ -94,8 +81,8 @@ export function tauriDialogIo(tauri: TauriBridge): DialogIo {
     listen: (event, handler) => tauri.listen(event, (e) => handler(e.payload)),
     requestClose: (label) => tauri.emitTo(label, DIALOG_EVENTS.closeRequested, null),
     sendInputs: (label, dialogId, inputs) => tauri.emitTo(label, DIALOG_EVENTS.inputs, { dialogId, inputs }),
-    ready: (measure) => tauri.invoke<void>('dialog_ready', { measure }),
-    fit: (measure) => tauri.invoke<void>('dialog_fit', { measure }),
+    measure: (epoch, seq, measure) => tauri.invoke<void>('dialog_measure', { epoch, seq, measure }),
+    ready: (epoch, seq) => tauri.invoke<void>('dialog_ready', { epoch, seq }),
     ...(tauri.setWindowTitle ? { setTitle: (title: string) => tauri.setWindowTitle!(title) } : {}),
     ...(tauri.log ? { log: (level: 'info' | 'warn', message: string) => void tauri.log!(level, message).catch(() => undefined) } : {}),
   };
@@ -131,6 +118,7 @@ export function browserDialogIo(loc: Pick<Location, 'hash'> = location): DialogI
         modality: p.get('modality') === 'modal' ? 'modal' : 'modeless',
         requiredChoice: false,
         input,
+        epoch: nextBrowserEpoch(id),
       };
     },
     close: async (result) => {
@@ -147,12 +135,27 @@ export function browserDialogIo(loc: Pick<Location, 'hash'> = location): DialogI
     setTitle: async (title) => {
       document.title = title;
     },
-    ready: async (m) => {
-      document.documentElement.dataset['dialogReady'] = 'true';
+    measure: async (epoch, seq, m) => {
+      document.documentElement.dataset['fitSeq'] = String(seq);
+      document.documentElement.dataset['fitEpoch'] = String(epoch);
       publishMeasure(m);
     },
-    fit: async (m) => publishMeasure(m),
+    ready: async () => {
+      document.documentElement.dataset['dialogReady'] = 'true';
+    },
   };
+}
+
+/** The page load count of dialog `id`'s window in this tab (the browser build's `epoch`: a reload sends a new one). */
+function nextBrowserEpoch(id: string): number {
+  try {
+    const key = `paddock.dialog.epoch.${id}`;
+    const n = (Number(sessionStorage.getItem(key)) || 0) + 1;
+    sessionStorage.setItem(key, String(n));
+    return n;
+  } catch {
+    return 1;
+  }
 }
 
 function publishMeasure(m: DialogMeasure): void {

@@ -1,0 +1,166 @@
+{
+  "history": {
+    "events": [
+      {
+        "at": 1700000020000,
+        "kind": "alert",
+        "label": "CPU high"
+      }
+    ],
+    "from": 1700000000000,
+    "series": [
+      {
+        "path": "\\Processor(0)\\% Processor Time",
+        "points": [
+          {
+            "at": 1700000015000,
+            "value": 12.5
+          },
+          {
+            "at": 1700000030000,
+            "value": 80.0
+          }
+        ],
+        "unit": "percent"
+      }
+    ],
+    "to": 1700000060000
+  },
+  "hits": [
+    {
+      "counter": "% Processor Time",
+      "instance": "0",
+      "object": "Processor",
+      "path": "\\Processor(0)\\% Processor Time",
+      "unit": "percent"
+    },
+    {
+      "counter": "Available Bytes",
+      "instance": null,
+      "object": "Memory",
+      "path": "\\Memory\\Available Bytes",
+      "unit": "bytes"
+    }
+  ],
+  "object": {
+    "counters": [
+      {
+        "help": "How busy the CPU is.",
+        "kind": "gauge",
+        "name": "% Processor Time",
+        "unit": "percent"
+      },
+      {
+        "help": null,
+        "kind": "cumulative",
+        "name": "Interrupts/sec",
+        "unit": "perSec"
+      }
+    ],
+    "instances": [
+      "0",
+      "1"
+    ],
+    "instancesTotal": 16,
+    "name": "Processor"
+  },
+  "objectList": {
+    "objects": [
+      {
+        "counters": 12,
+        "instancesTotal": 0,
+        "name": "Memory"
+      },
+      {
+        "counters": 9,
+        "instancesTotal": 16,
+        "name": "Processor"
+      }
+    ],
+    "savedAt": null,
+    "truncated": false
+  },
+  "objectListSaved": {
+    "objects": [
+      {
+        "counters": 12,
+        "instancesTotal": 0,
+        "name": "Memory"
+      },
+      {
+        "counters": 9,
+        "instancesTotal": 16,
+        "name": "Processor"
+      }
+    ],
+    "savedAt": 1700000100000,
+    "truncated": false
+  },
+  "readings": [
+    {
+      "path": "\\Processor(0)\\% Processor Time",
+      "percent": 12.5,
+      "tone": "ok",
+      "unit": "percent",
+      "value": {
+        "available": 12.5
+      }
+    },
+    {
+      "path": "\\Processor(0)\\% Processor Time",
+      "percent": 95.0,
+      "tone": "bad",
+      "unit": "percent",
+      "value": {
+        "available": 95.0
+      }
+    },
+    {
+      "path": "\\Memory\\Available Bytes",
+      "percent": null,
+      "tone": "ok",
+      "unit": "bytes",
+      "value": {
+        "available": 4096.0
+      }
+    },
+    {
+      "path": "\\Memory\\Available Bytes",
+      "percent": null,
+      "tone": "ok",
+      "unit": "bytes",
+      "value": {
+        "unavailable": "needs a second reading"
+      }
+    }
+  ],
+  "requests": {
+    "history": {
+      "counterHistory": {
+        "minutes": 5,
+        "paths": [
+          "\\Processor(0)\\% Processor Time"
+        ]
+      }
+    },
+    "object": {
+      "counterObject": {
+        "name": "Processor"
+      }
+    },
+    "objects": "counterObjects",
+    "search": {
+      "counterSearch": {
+        "limit": 20,
+        "query": "processor time"
+      }
+    },
+    "values": {
+      "counterValues": {
+        "paths": [
+          "\\Processor(0)\\% Processor Time"
+        ]
+      }
+    }
+  }
+}

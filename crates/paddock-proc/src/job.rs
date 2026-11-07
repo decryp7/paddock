@@ -3,6 +3,14 @@
 //! exits or crashes and Windows closes its handles, every process in the job ends: the child and the helpers it started,
 //! even those that left its process tree (an orphan's parent pid no longer leads back to the child, so `taskkill /T`
 //! cannot find it, but the job still holds it). From Dyno's `dyno-ipc` `job.rs`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 use std::io;
@@ -12,10 +20,10 @@ use std::ptr::null;
 use windows_sys::Win32::Foundation::ERROR_MORE_DATA;
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION,
-    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_PROCESS_ID_LIST,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
-    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
-    TerminateJobObject,
+    JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_PROCESS_MEMORY,
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+    SetInformationJobObject, TerminateJobObject,
 };
 
 /// A kill-on-close job; closing its handle (on drop) ends every process in it.
@@ -90,7 +98,7 @@ impl Job {
 
     /// Puts `child` into a new kill-on-close job. Processes it starts afterwards join the job too (nested jobs: Windows 8
     /// and later, also when the app itself runs in a job).
-    pub(crate) fn assign(child: &Child) -> io::Result<Job> {
+    pub(crate) fn assign(child: &Child, commit_limit: Option<u64>) -> io::Result<Job> {
         // SAFETY: no attributes, no name; the handle is owned below.
         let h = unsafe { CreateJobObjectW(null(), null()) };
         if h.is_null() {
@@ -102,6 +110,11 @@ impl Job {
         // A crash in the child ends it rather than waiting on a Windows Error Reporting dialog nobody sees.
         info.BasicLimitInformation.LimitFlags =
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION;
+        if let Some(limit) = commit_limit {
+            // An allocation past the limit fails in the child at once (Rust aborts it), however fast it allocates.
+            info.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+            info.ProcessMemoryLimit = usize::try_from(limit).unwrap_or(usize::MAX);
+        }
         // SAFETY: `info` is a valid structure of the size passed, for the class passed.
         let set = unsafe {
             SetInformationJobObject(

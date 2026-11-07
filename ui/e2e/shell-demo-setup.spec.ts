@@ -24,13 +24,16 @@ test.describe('set-up checklist (plan X19)', () => {
   });
 
   test('a step shows "Still working" for as long as it runs, and nothing gives up on it', async ({ app, page }) => {
-    await app.dialogs.openWindow('pd.setup', {}, { title: 'Set-up', query: '?setup=fresh&setup-outcome=hang' });
+    await app.dialogs.openWindow('pd.setup', {}, { title: 'Set-up', query: '?setup=fresh&setup-outcome=hang&setup-step=manual' });
     await page.getByTestId('setup-act-login').click();
     await expect(page.getByTestId('setup-still-working')).toContainText('Still working');
     await expect(page.getByTestId('setup-act-login')).toBeDisabled();
     await expect(page.getByTestId('setup-skip-login')).toBeDisabled();
-    await page.waitForTimeout(1500);
+    // The engine's one step is run by hand (`?setup-step=manual`); a hanging step then has nothing left to run, and the page still says so.
+    await page.waitForFunction(() => '__sdSetupStep' in window);
+    await page.evaluate(() => (window as unknown as { __sdSetupStep: () => void }).__sdSetupStep());
     await expect(page.getByTestId('setup-still-working')).toBeVisible();
+    await expect(page.getByTestId('setup-act-login')).toBeDisabled();
   });
 
   test('a failed step says why and its Repair is the primary button', async ({ app, page }) => {

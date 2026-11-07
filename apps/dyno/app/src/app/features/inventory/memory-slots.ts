@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { MatTooltip } from '@angular/material/tooltip';
+import { FullTextTip } from '../../shared/full-text-tip';
 import { type ModuleGeometry, facePath, moduleGeometry, speedText, techLabel } from './dimm-geometry';
 import { HW_TOKENS } from './hardware-tokens';
 import type { DimmSlotModel } from './hardware-models';
@@ -32,7 +33,7 @@ interface RowArt {
  */
 @Component({
   selector: 'dy-memory-slots',
-  imports: [MatTooltip],
+  imports: [MatTooltip, FullTextTip],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <figure class="bank" [style.--art-w.px]="artWidth()">
@@ -116,7 +117,7 @@ interface RowArt {
                   @if (r.speed) {
                     <span class="speed" [class.below]="!!m.ratedMts && !!m.runningMts && m.ratedMts !== m.runningMts">{{ r.speed }}</span>
                   }
-                  <span class="maker">{{ maker(m) }}</span>
+                  <span class="maker" [dyFullText]="maker(m)">{{ maker(m) }}</span>
                 } @else {
                   <span class="cap"><strong class="size free">Free slot</strong></span>
                 }

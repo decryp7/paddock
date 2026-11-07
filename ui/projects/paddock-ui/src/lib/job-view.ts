@@ -1,4 +1,4 @@
-import { formatBytes as formatBytesOf, formatCount as formatCountOf } from '@decryp7/paddock-ui/format';
+import { formatStorage as formatStorageOf, formatCount as formatCountOf } from '@decryp7/paddock-ui/format';
 
 /** Wire model of `paddock-jobs` (Rust, ADR 0008): one snapshot is the whole job as of `seq`. */
 export type SuJobUnit = 'items' | 'bytes';
@@ -67,9 +67,9 @@ export function formatCount(n: number): string {
   return formatCountOf(Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0);
 }
 
-/** A size for a job's counters ("4.2 MB", "512 bytes"): the one formatter of `@decryp7/paddock-ui/format`, 0 when unusable. */
+/** A size for a job's counters (storage, decimal: "4.2 MB", "512 bytes"): the one formatter of `@decryp7/paddock-ui/format`, 0 when unusable. */
 export function formatBytes(n: number): string {
-  return formatBytesOf(Number.isFinite(n) ? Math.max(0, n) : 0);
+  return formatStorageOf(Number.isFinite(n) ? Math.max(0, n) : 0);
 }
 
 /** "12 s left", "about 3 min left", "about 1 h 5 min left"; empty for null or non-finite. */

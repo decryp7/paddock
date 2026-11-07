@@ -6,6 +6,7 @@ use crate::dto::CommandError;
 use crate::link::AgentLink;
 use crate::shell::Shell;
 use dyno_core::protocol::{Reply, Request};
+use paddock_widgets::{PreviewRequest, Previews};
 use serde_json::Value;
 use std::sync::Arc;
 use tauri::{AppHandle, State, Webview};
@@ -19,9 +20,13 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
         Request::Shutdown => Err(CommandError::bad("The window may not stop the agent.")),
         // A file is written only where the OS save dialog said (the `save_*` commands), never to a path the webview names:
         // `dyno` is reachable from the tray and dialog windows too.
-        Request::SaveInventoryReport { .. } | Request::SaveDiagnostics { .. } | Request::SaveReport { .. } | Request::SaveIssues { .. } => {
+        Request::SaveInventoryReport { .. } | Request::SaveReport { .. } | Request::SaveIssues { .. } => {
             Err(CommandError::bad("Use the Export or Save button: it asks where to save the file."))
         }
+        // The agent's report files are unredacted: only Report a problem reads them (Rust to Rust), redacts and previews them.
+        Request::DiagnosticsFiles => Err(CommandError::bad(
+            "Use Report a problem: it redacts the files and shows them before saving.",
+        )),
         // The widget layouts have their own commands (typed arguments, the popup's values are the app's own).
         Request::WidgetLayout { .. } | Request::EditWidgetLayout { .. } | Request::PopoverValues { .. } => {
             Err(CommandError::bad("Use the widget commands for layouts and the popup's values."))
@@ -30,6 +35,9 @@ pub fn parse_request(value: Value) -> Result<Request, CommandError> {
     }
 }
 
+/// The id of the next logged action (ties its line to the request).
+static NEXT_ACTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 /// Runs one request against the agent. A `Subscribe` is this window's wish for the live detail; everything else is
 /// forwarded. Blocking (it waits for the agent): call it off the async runtime's threads.
 pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -> Result<Value, CommandError> {
@@ -37,7 +45,29 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
         link.set_detail(window, detail)?;
         return Ok(Value::Null);
     }
-    let reply = link.call(request)?;
+    let action = crate::breadcrumb::describe(&request);
+    let (id, started) = (
+        NEXT_ACTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        std::time::Instant::now(),
+    );
+    let saved_keys = match (&action, &request) {
+        (Some(_), Request::SaveSettings { settings }) => {
+            crate::breadcrumb::settings_saved(serde_json::to_value(settings).unwrap_or_default())
+        }
+        _ => Vec::new(),
+    };
+    let reply = match link.call(request) {
+        Ok(reply) => reply,
+        Err(e) => {
+            if let Some(a) = &action {
+                crate::breadcrumb::log_end(a, id, started.elapsed().as_millis(), Err(&format!("{:?}", e.code)), &[]);
+            }
+            return Err(e);
+        }
+    };
+    if let Some(a) = &action {
+        crate::breadcrumb::log_end(a, id, started.elapsed().as_millis(), Ok(()), &saved_keys);
+    }
     if let Reply::Settings(s) = &reply {
         // Saved settings drive the tray style and the login items; a failed registration is reported to the user.
         shell
@@ -49,22 +79,63 @@ pub fn handle(link: &AgentLink, shell: &Shell, window: &str, request: Request) -
         .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
 }
 
+/// The previews' copy of a dashboard view the agent sent, so a drag is answered here and never by the agent (ADR 0044 §6).
+fn record_view(previews: &Previews, reply: &Reply) {
+    if let Reply::WidgetLayout(view) = reply {
+        if let dyno_core::widgets::SurfaceView::Dashboard(view) = view.as_ref() {
+            if !previews.record::<dyno_core::widgets::DashboardCatalogue>(view) {
+                log::warn!(
+                    "The dashboard view could not be recorded for previews (revision {}).",
+                    view.revision
+                );
+            }
+        }
+    }
+}
+
 /// One surface's widget layout (the chooser, the dashboard): the agent's view of it.
 #[tauri::command]
-pub async fn widget_layout(link: State<'_, Arc<AgentLink>>, surface: dyno_core::widgets::DynoSurface) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::WidgetLayout { surface })?))
-        .await
-        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+pub async fn widget_layout(
+    link: State<'_, Arc<AgentLink>>,
+    previews: State<'_, Arc<Previews>>,
+    surface: dyno_core::widgets::DynoSurface,
+) -> Result<Value, CommandError> {
+    let (link, previews) = (link.inner().clone(), previews.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let reply = link.call(Request::WidgetLayout { surface })?;
+        record_view(&previews, &reply);
+        to_json(reply)
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
 }
 
 /// An edit of one surface's widget layout. The agent validates the whole result and saves it; a refused edit answers why.
+/// `base_revision` is the revision of the view the edit was computed on: a layout edited meanwhile refuses it.
 #[tauri::command]
-pub async fn edit_widget_layout(link: State<'_, Arc<AgentLink>>, edit: dyno_core::widgets::SurfaceEdit) -> Result<Value, CommandError> {
-    let link = link.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || to_json(link.call(Request::EditWidgetLayout { edit })?))
-        .await
-        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+pub async fn edit_widget_layout(
+    link: State<'_, Arc<AgentLink>>,
+    previews: State<'_, Arc<Previews>>,
+    edit: dyno_core::widgets::SurfaceEdit,
+    base_revision: Option<u64>,
+) -> Result<Value, CommandError> {
+    let (link, previews) = (link.inner().clone(), previews.inner().clone());
+    tauri::async_runtime::spawn_blocking(move || {
+        let reply = link.call(Request::EditWidgetLayout { edit, base_revision })?;
+        record_view(&previews, &reply);
+        to_json(reply)
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))?
+}
+
+/// What an arrangement gesture on the dashboard would give (a drag or a resize in edit mode): the view of the result,
+/// computed here, in the app's process, from the last view the agent sent. Nothing is applied or saved. A revision that
+/// is not the recorded one is refused as stale and the webview reloads the view.
+#[tauri::command]
+pub async fn preview_widget_layout(previews: State<'_, Arc<Previews>>, request: PreviewRequest) -> Result<Value, CommandError> {
+    let reply = previews.preview(&request).map_err(|e| CommandError::bad(e.to_string()))?;
+    serde_json::to_value(reply).map_err(|e| CommandError::internal(format!("The preview could not be written: {e}")))
 }
 
 /// The tray popup has opened and asks for its first paint: it counts as visible from now and its slow widgets are asked for
@@ -110,11 +181,30 @@ pub async fn metric_readings(shell: State<'_, Arc<Shell>>, queries: Vec<dyno_cor
         .map_err(|e| CommandError::internal(format!("The readings could not be read: {e}")))
 }
 
+/// Whether the agent keeps measuring after a plain Quit: the login service is installed and supervises it, asked of the OS now
+/// (it can take a moment, so off the UI thread). The menus show "Quit Dyno (keeps measuring)" for it.
+#[tauri::command]
+pub async fn quit_keeps_measuring() -> Result<bool, CommandError> {
+    tauri::async_runtime::spawn_blocking(|| crate::quit::keeps_measuring(crate::login::service_probe()()))
+        .await
+        .map_err(|e| CommandError::internal(format!("The request was interrupted: {e}")))
+}
+
+/// "Quit and stop measuring": returns at once; a worker stops the agent, checks with the system that it is gone and quits.
+#[tauri::command]
+pub async fn quit_and_stop_measuring(app: AppHandle) -> Result<(), CommandError> {
+    crate::quit::quit_and_stop(&app);
+    Ok(())
+}
+
 /// For each kind the chooser can add: a ready default widget and the metrics the engine accepts for it.
 #[tauri::command]
 pub async fn widget_choices() -> Result<Value, CommandError> {
-    serde_json::to_value(dyno_core::widgets::widget_choices())
-        .map_err(|e| CommandError::internal(format!("The choices could not be read: {e}")))
+    serde_json::to_value(dyno_core::widgets::widget_choices(
+        dyno_core::widgets::TrayPlatform::current(),
+        crate::tray::native_icon_px(),
+    ))
+    .map_err(|e| CommandError::internal(format!("The choices could not be read: {e}")))
 }
 
 /// The page or Settings section a widget asked the main window to open, once: a window that was still being created when
@@ -140,13 +230,6 @@ impl crate::actions::ActionPorts for LivePorts {
     }
     fn refresh(&self) {
         self.shell.popover_changed();
-    }
-    fn start_backup_check(&self) -> Result<(), CommandError> {
-        self.link
-            .call(Request::StartJob {
-                spec: dyno_core::jobs::JobSpec::RefreshBackup,
-            })
-            .map(|_| ())
     }
     fn restart_agent(&self) {
         self.link.retry();
@@ -235,6 +318,14 @@ pub async fn open_taskbar_settings(app: AppHandle) -> Result<Value, CommandError
     Ok(Value::Null)
 }
 
+/// Whether the desktop shows Dyno's tray icons (the engine's `TrayAvailability`; the changes arrive as `dyno://tray`). Settings ›
+/// Menu bar shows the engine's note when it does not.
+#[tauri::command]
+pub async fn tray_availability(app: AppHandle) -> Result<Value, CommandError> {
+    serde_json::to_value(crate::tray_host::current(&app))
+        .map_err(|e| CommandError::internal(format!("The tray state could not be read: {e}")))
+}
+
 /// What [`open_taskbar_settings`] opens.
 pub const TASKBAR_SETTINGS_URL: &str = "ms-settings:taskbar";
 
@@ -301,6 +392,7 @@ fn check_picked(picked: &PickedFolders, request: &Request) -> Result<(), Command
         } => &query.folder,
         Request::StartDiskScan {
             target: dyno_core::disk::scan::DiskTarget::Folder { path },
+            ..
         } => path,
         _ => return Ok(()),
     };
@@ -361,19 +453,29 @@ fn open_in_browser(app: &AppHandle, url: &str) -> Result<(), CommandError> {
     })
 }
 
-/// "Save bundle...": the OS save dialog (so the path is one the person chose, never one the webview supplied), then the
-/// agent writes the redacted zip there. `null` when they cancel.
+/// "Export" on the Benchmarks page: the OS save dialog (so the path is one the person chose, never one the webview supplied), then
+/// the agent writes the chosen runs there as JSON or CSV. `null` when they cancel.
 #[tauri::command]
-pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -> Result<Value, CommandError> {
+pub async fn save_benchmarks(
+    app: AppHandle,
+    link: State<'_, Arc<AgentLink>>,
+    format: dyno_core::bench::export::ExportFormat,
+    ids: Vec<String>,
+) -> Result<Value, CommandError> {
     let link = link.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        use dyno_core::bench::export::ExportFormat;
         use tauri_plugin_dialog::DialogExt;
+        let (name, filter) = match format {
+            ExportFormat::Json => ("dyno-benchmarks.json", ("JSON", "json")),
+            ExportFormat::Csv => ("dyno-benchmarks.csv", ("Spreadsheet (CSV)", "csv")),
+        };
         let Some(chosen) = app
             .dialog()
             .file()
-            .set_title("Save the diagnostics bundle")
-            .set_file_name("dyno-diagnostics.zip")
-            .add_filter("Zip archive", &["zip"])
+            .set_title("Save the benchmark results")
+            .set_file_name(name)
+            .add_filter(filter.0, &[filter.1])
             .blocking_save_file()
         else {
             return Ok(Value::Null);
@@ -382,7 +484,7 @@ pub async fn save_diagnostics(app: AppHandle, link: State<'_, Arc<AgentLink>>) -
             .into_path()
             .map_err(|e| CommandError::bad(format!("That location cannot be used ({e}).")))?;
         let path = utf8_path(&path)?;
-        let reply = link.call(Request::SaveDiagnostics { path })?;
+        let reply = link.call(Request::SaveBenchmarks { path, format, ids })?;
         reply
             .into_json()
             .map_err(|e| CommandError::internal(format!("The agent's answer could not be read: {e}")))
@@ -492,7 +594,10 @@ mod tests {
         // The report is saved only through the dialog command.
         assert!(parse_request(json!({"saveInventoryReport": {"path": "/tmp/x.md", "format": "markdown"}})).is_err());
         // So are the bundle, the weekly report and the issues: `dyno` is reachable from the tray and dialog windows too.
-        assert!(parse_request(json!({"saveDiagnostics": {"path": "/tmp/x.zip"}})).is_err());
+        assert!(
+            parse_request(json!("diagnosticsFiles")).is_err(),
+            "the unredacted files are for Report a problem only"
+        );
         assert!(parse_request(json!({"saveReport": {"path": "/tmp/x.md", "format": "markdown", "weeksAgo": 0}})).is_err());
         assert!(parse_request(json!({"saveIssues": {"path": "/tmp/x.jsonl", "days": 7}})).is_err());
         // The finder's request parses, but `dyno` refuses a folder nobody picked.
@@ -537,7 +642,7 @@ mod tests {
     #[test]
     fn the_extras_requests_have_the_shape_the_ui_sends() {
         use serde_json::json;
-        for name in ["gpuProcesses", "maintenance", "backup", "jobs"] {
+        for name in ["gpuProcesses", "maintenance", "jobs"] {
             assert!(parse_request(json!(name)).is_ok(), "{name}");
         }
         assert!(matches!(

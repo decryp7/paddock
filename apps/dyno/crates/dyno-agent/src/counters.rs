@@ -2,6 +2,7 @@
 //! [`CounterSource`] port. Every call into the port runs on its own thread under a deadline, so a hung provider
 //! costs the user an error with a Retry, never a frozen agent; only two calls may be in flight at once. Observe-only.
 
+use crate::cache::Cache;
 use dyno_core::counters::{
     search, CounterCatalog, CounterHistory, CounterHit, CounterObject, CounterObjectList, CounterPath, CounterReading, CounterRing,
     CounterSeries, CounterUnit, RateTracker, RawCounter, MAX_HITS, MAX_READ,
@@ -11,10 +12,13 @@ use dyno_core::ports::{CounterSource, PlatformError};
 use dyno_core::protocol::{AgentError, ErrorCode};
 use dyno_core::time::{Timestamp, MINUTE};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+/// The key of the saved catalog in the cache (`view_saved`) and its document format.
+const SAVED_KEY: &str = "counters.catalog";
+const SAVED_FORMAT: u32 = 1;
 /// How long the catalog is reused (it changes when a device appears or a program starts).
 const CATALOG_TTL: Duration = Duration::from_secs(5 * 60);
 /// How long listing everything may take on the user's click (a slow provider finishes into the cache for the retry).
@@ -62,6 +66,14 @@ struct Inner {
     pinned: Mutex<Vec<String>>,
     /// The listing of every counter while one runs (callers join it).
     listing: Mutex<Option<Arc<Listing>>>,
+    /// The saved-views cache (ADR 0029), when there is one.
+    cache: Mutex<Option<Cache>>,
+    /// The catalog an earlier run saved and when: shown at once until the first listing of this run ends.
+    saved: Mutex<Option<(Timestamp, Arc<CounterCatalog>)>>,
+    /// A background listing for the saved catalog is under way.
+    refreshing: AtomicBool,
+    /// Its thread, so a test can wait for it to end.
+    refresh_thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 /// One listing of every counter: its result once it ended.
@@ -148,8 +160,28 @@ impl CounterCentre {
                 rings: Mutex::new(HashMap::new()),
                 pinned: Mutex::new(Vec::new()),
                 listing: Mutex::new(None),
+                cache: Mutex::new(None),
+                saved: Mutex::new(None),
+                refreshing: AtomicBool::new(false),
+                refresh_thread: Mutex::new(None),
             }),
         }
+    }
+
+    /// Gives the centre the saved-views cache and reads the catalog an earlier run saved: the objects list then answers at once
+    /// (with `saved_at`) while the first listing of this run happens in the background. A document that does not parse, or is
+    /// of another format, is ignored.
+    pub fn attach_cache(&self, cache: Option<Cache>) {
+        let saved = cache.as_ref().and_then(|c| c.view(SAVED_KEY)).and_then(|(format, at, data)| {
+            if format != SAVED_FORMAT {
+                return None;
+            }
+            // Parse, then bound again: the file is not trusted more than the OS is.
+            let parsed: CounterCatalog = serde_json::from_str(&data).ok()?;
+            Some((Timestamp(at), Arc::new(CounterCatalog::bounded(parsed.objects))))
+        });
+        *lock(&self.inner.cache) = cache;
+        *lock(&self.inner.saved) = saved;
     }
 
     /// Runs `f` on a thread and waits at most `deadline`. The thread keeps going after a timeout (its result is
@@ -162,13 +194,19 @@ impl CounterCentre {
     ) -> Result<T, AgentError> {
         let (tx, rx) = mpsc::channel();
         self.start(what, move |inner| {
-            let _ = tx.send(f(inner));
+            let value = f(inner);
+            // Sent once the slot is free: whoever receives the answer may start the next call at once.
+            move || {
+                let _ = tx.send(value);
+            }
         })?;
         rx.recv_timeout(deadline).map_err(|_| timed_out(what, deadline))
     }
 
-    /// Runs `f` on its own thread, counted as a call in flight until it ends; refused when [`MAX_IN_FLIGHT`] are.
-    fn start(&self, what: &str, f: impl FnOnce(&Arc<Inner>) + Send + 'static) -> Result<(), AgentError> {
+    /// Runs `f` on its own thread, counted as a call in flight until it ends; refused when [`MAX_IN_FLIGHT`] are. `f` returns
+    /// the hand-over that tells waiting callers it is done: it runs after the slot is freed, so a caller that has its
+    /// answer never meets a Busy caused by the call that just answered it.
+    fn start<D: FnOnce() + Send + 'static>(&self, what: &str, f: impl FnOnce(&Arc<Inner>) -> D + Send + 'static) -> Result<(), AgentError> {
         if self.inner.in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_IN_FLIGHT {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
             return Err(AgentError::new(
@@ -181,8 +219,9 @@ impl CounterCentre {
         let spawned = std::thread::Builder::new().name("dyno-counters".into()).spawn(move || {
             // The user waits for it on the Counters page: live work (rule 52).
             dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
-            let _slot = slot;
-            f(&inner);
+            let done = f(&inner);
+            drop(slot);
+            done();
         });
         if let Err(e) = spawned {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
@@ -192,7 +231,51 @@ impl CounterCentre {
     }
 
     fn catalog(&self) -> Result<Arc<CounterCatalog>, AgentError> {
-        self.catalog_within(CATALOG_DEADLINE)
+        self.catalog_with_origin().map(|(c, _)| c)
+    }
+
+    /// The catalog, and when it was saved if this is the one an earlier run saved. Before the first listing of this run a saved
+    /// catalog is answered at once and the listing runs in the background; otherwise as always: the catalog of the last five
+    /// minutes, or a listing the caller waits for.
+    fn catalog_with_origin(&self) -> Result<(Arc<CounterCatalog>, Option<Timestamp>), AgentError> {
+        let fresh = lock(&self.inner.catalog).as_ref().is_some_and(|(at, _)| at.elapsed() < CATALOG_TTL);
+        if !fresh {
+            let first_of_this_run = lock(&self.inner.catalog).is_none();
+            let saved = lock(&self.inner.saved).clone();
+            if let (true, Some((at, c))) = (first_of_this_run, saved) {
+                self.list_in_background();
+                return Ok((c, Some(at)));
+            }
+        }
+        self.catalog_within(CATALOG_DEADLINE).map(|c| (c, None))
+    }
+
+    /// Lists everything on a thread nobody waits for; the saved catalog is replaced when it ends. One at a time.
+    fn list_in_background(&self) {
+        if self.inner.refreshing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let me = CounterCentre { inner: self.inner.clone() };
+        let spawned = std::thread::Builder::new().name("dyno-counters-refresh".into()).spawn(move || {
+            let outcome = me.catalog_within(CATALOG_DEADLINE);
+            match outcome {
+                Ok(_) => log::info!("Counter catalog listed again in the background"),
+                Err(e) => log::warn!(Cause = e.message.as_str(); "Counter catalog could not be listed again; the saved one stays; next step: open the page again"),
+            }
+            me.inner.refreshing.store(false, Ordering::SeqCst);
+        });
+        match spawned {
+            Ok(h) => *lock(&self.inner.refresh_thread) = Some(h),
+            Err(_) => self.inner.refreshing.store(false, Ordering::SeqCst),
+        }
+    }
+
+    /// Waits for the background listing of the saved catalog to end, if one is running.
+    pub fn wait_background_listing(&self) {
+        let handle = lock(&self.inner.refresh_thread).take();
+        if let Some(h) = handle {
+            let _ = h.join();
+        }
     }
 
     fn catalog_within(&self, deadline: Duration) -> Result<Arc<CounterCatalog>, AgentError> {
@@ -215,11 +298,18 @@ impl CounterCentre {
                         let found = inner.source.catalog().map(|c| Arc::new(CounterCatalog::bounded(c.objects)));
                         if let Ok(c) = &found {
                             *lock(&inner.catalog) = Some((Instant::now(), c.clone()));
+                            // Listed in this run: the saved one is no longer the latest, and this one is kept for the next run.
+                            *lock(&inner.saved) = None;
+                            if let (Some(cache), Ok(json)) = (lock(&inner.cache).clone(), serde_json::to_string(&**c)) {
+                                cache.put_view(SAVED_KEY, SAVED_FORMAT, json);
+                            }
                         }
                         // Ended: a later call starts afresh (after a failure, too); callers already waiting get this result.
                         *lock(&inner.listing) = None;
-                        *lock(&mine.result) = Some(found);
-                        mine.done.notify_all();
+                        move || {
+                            *lock(&mine.result) = Some(found);
+                            mine.done.notify_all();
+                        }
                     })?;
                     *running = Some(l.clone());
                     l
@@ -239,7 +329,10 @@ impl CounterCentre {
 
     /// The first level of the browser.
     pub fn objects(&self) -> Result<CounterObjectList, AgentError> {
-        Ok(self.catalog()?.summaries())
+        let (catalog, saved_at) = self.catalog_with_origin()?;
+        let mut list = catalog.summaries();
+        list.saved_at = saved_at;
+        Ok(list)
     }
 
     /// One object with its counters and instances.
@@ -662,6 +755,122 @@ mod tests {
         let listed = c.catalog_within(Duration::from_secs(20)).unwrap();
         assert!(listed.object("Memory").is_some());
         assert_eq!(src.calls.load(Ordering::SeqCst), 1, "listed once");
+    }
+
+    fn cache_in(dir: &std::path::Path, clock: Arc<crate::cache::testing::FakeClock>) -> Cache {
+        Cache::start(
+            dir.join("cache.db"),
+            crate::cache::CacheSettings::default(),
+            crate::cache::CacheDeps {
+                clock,
+                free: Arc::new(crate::cache::db::tests::Roomy),
+            },
+        )
+        .cache
+        .unwrap()
+    }
+
+    /// ADR 0029 (D7): the catalog an earlier run saved is shown at once, with its time, while the first listing of this run
+    /// happens in the background; when that ends the answer is the fresh one and is saved for the next run.
+    #[test]
+    fn the_saved_catalog_is_shown_at_once_and_replaced_when_the_listing_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(crate::cache::testing::FakeClock::new(5_000));
+        // The first run lists and saves.
+        let first = CounterCentre::new(Arc::new(FakeCounters::new(vec![Entry::new(
+            "Memory",
+            None,
+            "Free",
+            U::Bytes,
+            CounterKind::Gauge,
+            1.0,
+        )])));
+        let cache = cache_in(dir.path(), clock.clone());
+        first.attach_cache(Some(cache.clone()));
+        let listed = first.objects().unwrap();
+        assert_eq!((listed.objects.len(), listed.saved_at), (1, None), "read just now");
+        cache.flush();
+        drop(first);
+        drop(cache);
+        // The second run: the source is slow; the saved list answers at once.
+        clock.advance(86_400_000);
+        let src = Arc::new(SlowCatalog {
+            calls: AtomicUsize::new(0),
+            released: Mutex::new(false),
+            changed: std::sync::Condvar::new(),
+        });
+        let second = CounterCentre::new(src.clone());
+        let cache = cache_in(dir.path(), clock);
+        second.attach_cache(Some(cache.clone()));
+        let at_once = second.objects().unwrap();
+        assert_eq!(at_once.saved_at, Some(Timestamp(5_000)), "the time it was saved");
+        assert_eq!(at_once.objects[0].name, "Memory");
+        assert!(
+            second.object("Memory").is_ok(),
+            "the objects below it come from the saved catalog too"
+        );
+        assert!(!second.search("free", 5).unwrap().is_empty());
+        *lock(&src.released) = true;
+        src.changed.notify_all();
+        // The background listing ends (joined, not polled): the next answer is fresh.
+        second.wait_background_listing();
+        assert_eq!(second.objects().unwrap().saved_at, None);
+        assert_eq!(src.calls.load(Ordering::SeqCst), 1, "listed once, in the background");
+        cache.flush();
+        assert_eq!(
+            cache.view(SAVED_KEY).unwrap().1,
+            86_405_000,
+            "saved again with the time of the second run"
+        );
+    }
+
+    #[test]
+    fn a_saved_catalog_that_does_not_parse_or_has_another_format_is_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let clock = Arc::new(crate::cache::testing::FakeClock::new(1));
+        let cache = cache_in(dir.path(), clock);
+        for (format, data) in [
+            (1u32, "{not json".to_string()),
+            (2, "{\"objects\":[],\"truncated\":false}".to_string()),
+        ] {
+            cache.put_view(SAVED_KEY, format, data);
+            cache.flush();
+            let c = CounterCentre::new(Arc::new(FakeCounters::new(vec![Entry::new(
+                "Memory",
+                None,
+                "Free",
+                U::Bytes,
+                CounterKind::Gauge,
+                1.0,
+            )])));
+            c.attach_cache(Some(cache.clone()));
+            let l = c.objects().unwrap();
+            assert_eq!(l.saved_at, None, "listed, not taken from the file");
+            assert_eq!(l.objects.len(), 1);
+        }
+    }
+
+    /// A request that has answered no longer counts as in flight: the answer is sent after the slot is released, so the
+    /// next request or pinned read never meets a phantom Busy (flake seen in a full nextest run, 2026-11-04).
+    #[test]
+    fn an_answered_request_has_already_freed_its_slot() {
+        let src = Arc::new(FakeCounters::new(vec![Entry::new(
+            "Memory",
+            None,
+            "Free",
+            U::Bytes,
+            CounterKind::Gauge,
+            1.0,
+        )]));
+        let c = CounterCentre::new(src);
+        for i in 0..3000 {
+            c.values(&["\\Memory\\Free".into()], Timestamp(i)).unwrap();
+            assert_eq!(
+                c.inner.in_flight.load(Ordering::SeqCst),
+                0,
+                "round {i}: the answer came before the slot was freed"
+            );
+        }
     }
 
     /// Records the thread role every call into the OS ran at.
