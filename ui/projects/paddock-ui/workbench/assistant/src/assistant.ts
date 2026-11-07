@@ -2,7 +2,7 @@ import { NgComponentOutlet } from '@angular/common';
 import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
 import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
-import { AssistantStore } from './assistant.store';
+import { AssistantStore, type ActionsGate } from './assistant.store';
 import { chipText, conversationTitle, waitingPhase, type TurnPart, type TurnView } from './chat-model';
 import type { ProviderPhase } from '../generated/assistant';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
@@ -209,7 +209,7 @@ const SCROLL_STICK_PX = 24;
         (keydown)="key($event)"
       ></textarea>
       <div class="send-row">
-        @if (store.hasWriteTools()) {
+        @if (store.hasWriteTools() && store.actionsGate() === 'tick') {
           <label class="allow" [attr.title]="t.allowHint">
             <input type="checkbox" data-testid="assistant-allow-actions" [checked]="store.allowWrite()" [disabled]="store.busy() || blocked()" (change)="store.setAllowWrite($any($event.target).checked)" />
             <span>{{ t.allowActions }}</span>
@@ -314,6 +314,8 @@ export class PdAssistant {
 
   /** Offer "Open AI settings" in the needs-AI state (the app's AI page). */
   readonly settingsLink = input(false);
+  /** How tools that write are gated: the per-message "Allow actions" tick (default), or the engine asking on every call. */
+  readonly actionsGate = input<ActionsGate>('tick');
   /** The empty conversation's hint in the host app's words (default: the workbench's "tools of this app"). */
   readonly emptyHint = input<string | null>(null);
   /** The likely cause under a failed answer in the host app's words (default: check that Pitwall is running; an app that
@@ -389,6 +391,8 @@ export class PdAssistant {
   });
 
   constructor() {
+    // The host's gate reaches the store, which sends it with each question (an input, not derived state of the store).
+    effect(() => this.store.setActionsGate(this.actionsGate()));
     // Keeps the newest text in view while an answer streams in, but only for a user who is at the bottom (DOM only).
     // effect-state: `unseen` records the scroll decision of this effect; the user's position is not a signal, so it cannot be derived.
     effect(() => {

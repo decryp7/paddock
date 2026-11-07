@@ -9,6 +9,7 @@ Conventional Commits; one semver tag for the whole repo.
 - The pane shows "Waiting for the model…" and "Loading the model… 12 s" until the words arrive, instead of "Thinking…".
 - An approval card that offers it has Allow once, Always allow and Decline; an action's arguments are shown open. Each tool card says how its call ran: "Allowed once", "Always allowed" or "Allowed earlier" (nothing for a call the policy did not ask about).
 - `MemoryAssistantBackend`: `/look` (asks first with Always allow, then remembered) and `/cold` (the phases of a cold start).
+- `<pd-assistant>` gains `actionsGate` (`'tick'`, the default: "Allow actions" per message; `'per-call'`: no tick, tools that write are always offered and the engine's policy asks on every call; new type `ActionsGate`).
 - `<pd-assistant>` gains `emptyHint` and `failedCause` inputs, for a host whose words differ from the workbench's (Pitwall is the engine itself, so "check that Pitwall is running" does not fit).
 
 ### `paddock-assistant`: the tool path for Pitwall's chat (ADR 0023 WP-2a)

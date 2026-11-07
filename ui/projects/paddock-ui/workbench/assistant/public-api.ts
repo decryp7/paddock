@@ -18,7 +18,7 @@
 export { PdAssistant } from './src/assistant';
 export { ASSISTANT_VIEW, ASSISTANT_VIEW_ID, ASSISTANT_ACTIVITY, ASSISTANT_CONTRIBUTIONS, ASSISTANT_FOCUS_COMMAND } from './src/assistant.contributions';
 export { provideAssistant, type AssistantOptions } from './src/provide-assistant';
-export { AssistantStore, type AssistantStoreType, type AssistantRun, type ContextChip, type PendingApproval } from './src/assistant.store';
+export { AssistantStore, type ActionsGate, type AssistantStoreType, type AssistantRun, type ContextChip, type PendingApproval } from './src/assistant.store';
 export { AssistantBackend, TauriAssistantBackend, MemoryAssistantBackend, type AssistantIpc, type MemoryAssistantOptions, type Unlisten } from './src/backend';
 export {
   ASSISTANT_TOOL_RENDERERS,

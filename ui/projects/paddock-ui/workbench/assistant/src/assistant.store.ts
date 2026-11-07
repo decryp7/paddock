@@ -8,6 +8,12 @@ import { AssistantBackend, type Unlisten } from './backend';
 import { answerText, chipText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
 import { assistantMessage } from './wire';
 
+/**
+ * How a host gates the tools that write: `tick`, the user ticks "Allow actions" per message (each call still asks);
+ * `per-call`, they are always offered and the engine's policy asks on every call (Pitwall: Dyno's own allow is the other gate).
+ */
+export type ActionsGate = 'tick' | 'per-call';
+
 /** Where the conversation is: nothing going on, a question on its way to the engine, answering, or being stopped. */
 export type AssistantRun = 'idle' | 'sending' | 'running' | 'stopping';
 
@@ -50,6 +56,7 @@ interface AssistantState {
   /** Chips the user switched on (those off by default). */
   on: readonly string[];
   allowWrite: boolean;
+  actionsGate: ActionsGate;
   run: AssistantRun;
   /** The last command that failed, in the engine's words. */
   failure: string | null;
@@ -69,6 +76,7 @@ const initialState: AssistantState = {
   off: [],
   on: [],
   allowWrite: false,
+  actionsGate: 'tick',
   run: 'idle',
   failure: null,
   listOpen: false,
@@ -201,7 +209,7 @@ export const AssistantStore = signalStore(
     };
     /** Starts a turn with this question and context. */
     const submit = async (text: string, context: readonly ContextItem[]): Promise<void> => {
-      const allowWrite = store.allowWrite() && store.hasWriteTools();
+      const allowWrite = (store.actionsGate() === 'per-call' || store.allowWrite()) && store.hasWriteTools();
       const conversationId = store.activeId();
       patchState(store, {
         run: 'sending',
@@ -261,6 +269,10 @@ export const AssistantStore = signalStore(
       },
       setAllowWrite(allowWrite: boolean): void {
         patchState(store, { allowWrite });
+      },
+      /** The host's gate for tools that write (the pane's `actionsGate` input). */
+      setActionsGate(actionsGate: ActionsGate): void {
+        patchState(store, { actionsGate });
       },
       toggleListOpen(): void {
         patchState(store, { listOpen: !store.listOpen() });

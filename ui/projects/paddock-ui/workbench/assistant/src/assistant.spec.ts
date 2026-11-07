@@ -710,6 +710,20 @@ describe('PdAssistant', () => {
       expect(r.all('[data-testid=assistant-tool-approval]').map((e) => e.textContent?.trim())).toEqual(['Always allowed', 'Allowed earlier']);
     });
 
+    it("drops the Allow actions tick when the host gates every action per call, and offers the writing tools", async () => {
+      const { r, backend } = await open({}, { actionsGate: 'per-call' });
+      expect(r.all('[data-testid=assistant-allow-actions]')).toHaveLength(0);
+      await press(r, await type(r, '/write'), { key: 'Enter' });
+      await settle(r.fixture);
+      expect(backend.sent[0]?.allowWrite).toBe(true);
+      // The action still asks for this call.
+      expect(r.all('[data-testid=assistant-approval]')).toHaveLength(1);
+      const tick = await open();
+      expect(tick.r.all('[data-testid=assistant-allow-actions]')).toHaveLength(1);
+      await press(tick.r, await type(tick.r, 'q'), { key: 'Enter' });
+      expect(tick.backend.sent[0]?.allowWrite).toBe(false);
+    });
+
     it("takes the host app's own words for the empty state and the likely cause of a failure (an app that is the engine)", async () => {
       const own = { emptyHint: 'Ask a local model. Connected apps lend it their tools.', failedCause: 'Likely cause: the model stopped. Try again, or pick another model.' };
       const { r } = await open({ pitwall: null }, own);
