@@ -9,7 +9,7 @@ import { withTimeout } from './timeout-backend';
  * fail, `?mock-empty` starts with nothing, `?mock-static` stops the simulated live updates, `?mock-down` takes the server
  * down (the service controls keep working), `?mock-startfailed` shows launchd refusing the service after an update,
  * `?mock-consent` shows the first-run service question, `?mock-updates` offers model updates, `?mock-install` shows
- * llama.cpp installing itself, `?mock-quit` opens the quit question, `?mock-clean` leaves no old files on
+ * llama.cpp installing itself, `?mock-quit` opens the quit question, `?mock-nochat` plays a build without the Playground's chat, `?mock-clean` leaves no old files on
  * disk, `?mock-os=windows` (or `linux`) words the background service for that OS and `?mock-popup=worst` (or `empty`,
  * `down`, `loading`) shows the tray popup's widgets as the engine recorded them for that scenario.
  */
@@ -31,6 +31,7 @@ export function mockOptionsFrom(search: string): MockOptions {
     installing: q.has('mock-install'),
     noLeftovers: q.has('mock-clean'),
     quitAsk: q.has('mock-quit'),
+    chat: !q.has('mock-nochat'),
     ...(popup === 'demo' || popup === 'empty' || popup === 'worst' || popup === 'down' || popup === 'loading' ? { popover: popup } : {}),
     ...(os === 'windows' || os === 'linux' || os === 'macos' ? { platform: os } : {}),
     failing: fail ? (fail.split(',') as (keyof PitwallBackend)[]) : [],

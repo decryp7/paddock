@@ -10,6 +10,13 @@
   padding-bottom: var(--pd-space-6);
 }
 
+/* Compare is on (a build without the chat): an accent tint, never a second filled primary (UI review 2 rule 18). */
+.mat-mdc-outlined-button.on {
+  --mat-button-outlined-label-text-color: var(--pd-accent);
+  --mat-button-outlined-outline-color: color-mix(in srgb, var(--pd-accent) 45%, transparent);
+  background: var(--pd-accent-tint);
+}
+
 .tabs {
   --mat-tab-container-divider-color: var(--pd-hairline);
   ::ng-deep .mat-mdc-tab-body-content {

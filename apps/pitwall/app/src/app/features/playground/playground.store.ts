@@ -34,6 +34,8 @@ interface PlaygroundState {
   temperature: number;
   maxTokens: number;
   compare: boolean;
+  /** This build has the chat (Rust decides); `null` until known. */
+  chatEnabled: boolean | null;
   panes: [Pane, Pane];
 }
 
@@ -45,6 +47,7 @@ const initial: PlaygroundState = {
   temperature: 0.7,
   maxTokens: 512,
   compare: false,
+  chatEnabled: null,
   panes: [
     { modelId: null, turns: [] },
     { modelId: null, turns: [] },
@@ -112,6 +115,11 @@ export const PlaygroundStore = signalStore(
     return {
       async load(): Promise<void> {
         patchState(store, { loading: true, error: null });
+        if (store.chatEnabled() === null) {
+          // A build that cannot say has no chat; with the chat, Compare always shows its two models (the one-model chat is the Chat tab).
+          const chatEnabled = await (async () => backend.chatEnabled())().catch(() => false);
+          patchState(store, { chatEnabled, ...(chatEnabled ? { compare: true } : {}) });
+        }
         try {
           const models = await backend.localModels();
           patchState(store, { models, loading: false });

@@ -59,6 +59,27 @@ describe('PlaygroundPage', () => {
     expect(el.querySelector('pw-playground-chat pd-assistant')).not.toBeNull();
   });
 
+  it('is the Playground as before in a build without the chat: no tabs, one model, the Compare toggle', async () => {
+    const { fixture, el } = await render(PlaygroundPage, backend({ chat: false }));
+    await until(fixture, el, () => el.querySelectorAll('.pane').length > 0);
+    expect(el.querySelectorAll('[role=tab]')).toHaveLength(0);
+    expect(el.querySelector('pw-playground-chat')).toBeNull();
+    expect(el.querySelectorAll('.pane')).toHaveLength(1);
+    expect(box(el).placeholder).toBe('Message the model…');
+    const toggle = button(el, 'Compare');
+    expect(toggle.getAttribute('aria-pressed')).toBe('false');
+    toggle.click();
+    await settle(fixture);
+    expect(el.querySelectorAll('.pane')).toHaveLength(2);
+    expect(toggle.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('treats a build that cannot say whether it has the chat as one without it', async () => {
+    const { fixture, el } = await render(PlaygroundPage, backend({ failing: ['chatEnabled'] }));
+    await until(fixture, el, () => el.querySelectorAll('.pane').length > 0);
+    expect(el.querySelectorAll('[role=tab]')).toHaveLength(0);
+  });
+
   it('shows the empty state with suggestions and a disabled Send', async () => {
     const { el } = await renderCompare(backend());
     expect(el.querySelector('.empty')?.textContent).toContain('Ask anything');

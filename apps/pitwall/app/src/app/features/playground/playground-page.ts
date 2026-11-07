@@ -1,3 +1,4 @@
+import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, ElementRef, OnInit, afterRenderEffect, computed, inject, signal, viewChildren } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
@@ -23,12 +24,14 @@ export function statsText(s: TurnStats): string {
 }
 
 /**
- * The Playground (ADR 0023 Decision 2): two tabs. Chat is the full chat with a connected app's tools (`<pd-assistant>` over
- * the chat engine); Compare puts two models side by side on one prompt, text only and without tools, as before.
+ * The Playground (ADR 0023 Decision 2). In a build with the chat (Rust says so, `chatEnabled`), two tabs: Chat is the full
+ * chat with a connected app's tools (`<pd-assistant>` over the chat engine, every action asked per call); Compare puts two
+ * models side by side on one prompt, text only and without tools. In a build without it, the Playground as before: one
+ * model, or two with the Compare toggle.
  */
 @Component({
   selector: 'pw-playground-page',
-  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, MatTabGroup, MatTab, MatTabContent, Panel, PdSelect, PlaygroundChat],
+  imports: [MatButton, MatFormField, MatLabel, MatInput, MatSlider, MatSliderThumb, MatIconModule, MatTooltipModule, MatTabGroup, MatTab, MatTabContent, NgTemplateOutlet, Panel, PdSelect, PlaygroundChat],
   providers: [PlaygroundStore],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './playground-page.html',
@@ -57,8 +60,6 @@ export class PlaygroundPage implements OnInit {
   }
 
   ngOnInit(): void {
-    // Compare always shows its two models; the one-model chat is the Chat tab now.
-    this.store.setCompare(true);
     void this.store.load();
   }
 

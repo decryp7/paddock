@@ -32,4 +32,13 @@ test.describe('playground', () => {
     await page.getByRole('tab', { name: 'Chat' }).click();
     await expect(chat.getByTestId('assistant-user')).toContainText('hello');
   });
+
+  test('a build without the chat is the Playground as before: no tabs, the Compare toggle', async ({ page }) => {
+    await openApp(page, '/playground', 'mock-fast&mock-static&mock-nochat');
+    await expect(page.getByLabel('Message')).toBeVisible();
+    await expect(page.getByRole('tab')).toHaveCount(0);
+    await expect(page.locator('pw-playground-chat')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Compare' }).click();
+    await expect(page.locator('.pane')).toHaveCount(2);
+  });
 });

@@ -46,7 +46,8 @@ describe('playground helpers', () => {
 });
 
 describe('PlaygroundStore', () => {
-  function setup(backend: PitwallBackend = new MockBackend({ streamDelayMs: 0, latencyMs: 0 })) {
+  // A build without the chat: one model, the Compare toggle (the chat build is covered below).
+  function setup(backend: PitwallBackend = new MockBackend({ streamDelayMs: 0, latencyMs: 0, chat: false })) {
     TestBed.configureTestingModule({ providers: [PlaygroundStore, { provide: BACKEND, useValue: backend }] });
     return { store: TestBed.inject(PlaygroundStore), backend };
   }
@@ -65,6 +66,21 @@ describe('PlaygroundStore', () => {
     expect(a.modelId).not.toBeNull();
     expect(b.modelId).not.toBeNull();
     expect(a.modelId).not.toBe(b.modelId);
+  });
+
+  it('asks Rust once whether the chat is built in; with it, Compare shows two models; a backend that cannot say means no chat', async () => {
+    const { store, backend } = setup(new MockBackend({ streamDelayMs: 0, latencyMs: 0 }));
+    const asked = vi.spyOn(backend, 'chatEnabled');
+    await store.load();
+    await store.load();
+    expect(store.chatEnabled()).toBe(true);
+    expect(store.compare()).toBe(true);
+    expect(asked).toHaveBeenCalledTimes(1);
+    TestBed.resetTestingModule();
+    const old = setup({ localModels: () => Promise.resolve([]) } as unknown as PitwallBackend);
+    await old.store.load();
+    expect(old.store.chatEnabled()).toBe(false);
+    expect(old.store.compare()).toBe(false);
   });
 
   it('keeps a model the user already picked when reloading', async () => {
@@ -150,7 +166,7 @@ describe('PlaygroundStore', () => {
 
   it('sends the earlier turns, the system prompt and the parameters with a follow-up', async () => {
     const seen: PlaygroundRequest[] = [];
-    const base = new MockBackend({ streamDelayMs: 0 });
+    const base = new MockBackend({ streamDelayMs: 0, chat: false });
     const spy: PitwallBackend = Object.create(base, {
       chat: {
         value: (r: PlaygroundRequest, on: (e: PlaygroundEvent) => void): Unsubscribe => {
