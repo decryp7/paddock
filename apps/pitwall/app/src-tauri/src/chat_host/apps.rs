@@ -6,12 +6,14 @@
 use super::policy::PitwallPolicy;
 use super::tool::{tool_set, tools_of, ToolNames};
 use paddock_assistant::{Assistant, AssistantTool};
+use paddock_jobs::time::{Backoff, BackoffPolicy, Retry};
 use paddock_mcp::client::{connect_loopback, Connection, ConnectionConfig};
 use paddock_secrets::{Name, Secret, Secrets};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 /// The family apps the chat can connect to: id (its `paddock-env` folder name) and title. Recce joins when it serves MCP.
 pub const KNOWN: &[(&str, &str)] = &[("dyno", "Dyno")];
@@ -93,7 +95,7 @@ pub fn parse_key(text: &str) -> Result<String, AppsError> {
 type Discovery = Box<dyn Fn(&str) -> Option<PathBuf> + Send + Sync>;
 
 struct Live {
-    _conn: Arc<Connection>,
+    conn: Arc<Connection>,
     tools: Vec<Arc<dyn AssistantTool>>,
 }
 
@@ -107,6 +109,18 @@ pub struct ConnectedApps {
     live: Mutex<BTreeMap<String, Live>>,
     problems: Mutex<BTreeMap<String, (String, bool)>>,
     changed: Mutex<Option<OnChange>>,
+    retry: Mutex<BTreeMap<String, Retrying>>,
+}
+
+/// An app whose connection was lost: when to try again, on the family's back-off (1 s doubling to 60 s, never giving up:
+/// the app may come back at any time).
+struct Retrying {
+    backoff: Backoff,
+    next: Duration,
+}
+
+fn reconnect_policy() -> BackoffPolicy {
+    BackoffPolicy::retry_forever(Duration::from_secs(1), Duration::from_secs(60), Duration::from_secs(300))
 }
 
 /// Told every apps' views after each change.
@@ -147,7 +161,67 @@ impl ConnectedApps {
             live: Mutex::default(),
             problems: Mutex::default(),
             changed: Mutex::default(),
+            retry: Mutex::default(),
         }
+    }
+
+    /// The app's timer (every second or so, `now` from the monotonic clock): a connection that ended is dropped and retried
+    /// on the back-off; an app with a saved key that is not connected is tried when its delay is over. A refused key is never
+    /// retried (only a new key helps); a connect the user starts resets the back-off.
+    pub fn tick(&self, now: Duration) {
+        let ended: Vec<(String, String)> = lock(&self.live)
+            .iter()
+            .filter_map(|(id, l)| l.conn.closed().map(|why| (id.clone(), why)))
+            .collect();
+        for (id, why) in &ended {
+            lock(&self.live).remove(id);
+            let title = title_of(id).unwrap_or("The app");
+            log::warn!(target: "pitwall_chat", "connected apps: {id} connection ended ({why}); retrying with back-off");
+            lock(&self.problems).insert(
+                id.clone(),
+                (
+                    format!("{title} closed the connection ({why}). Trying again when {title} is back."),
+                    false,
+                ),
+            );
+            self.schedule(id, now);
+        }
+        if !ended.is_empty() {
+            self.publish();
+        }
+        let due: Vec<String> = lock(&self.retry)
+            .iter()
+            .filter(|(_, r)| r.next <= now)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in due {
+            let v = self.attempt(&id);
+            // Connected, or only the user can help now (a refused or removed key): stop retrying.
+            if v.connected || v.key_refused || !v.key_saved {
+                lock(&self.retry).remove(&id);
+            } else {
+                self.schedule(&id, now);
+                // Keep the words that say it is retrying.
+                if let Some(p) = lock(&self.problems).get_mut(&id) {
+                    if !p.0.contains("Trying again") {
+                        p.0.push_str(" Trying again.");
+                    }
+                }
+            }
+        }
+    }
+
+    fn schedule(&self, id: &str, now: Duration) {
+        let mut retry = lock(&self.retry);
+        let r = retry.entry(id.to_string()).or_insert_with(|| Retrying {
+            backoff: Backoff::new(reconnect_policy()),
+            next: now,
+        });
+        r.next = match r.backoff.failed(now) {
+            Retry::After(d) => now + d,
+            // A policy that never gives up; kept safe anyway.
+            Retry::GiveUp => now + Duration::from_secs(60),
+        };
     }
 
     /// Calls `f` with every app's view after each change (connect, a new key, forget): the app emits it to every window.
@@ -210,9 +284,16 @@ impl ConnectedApps {
         self.connect(id)
     }
 
-    /// Connects (again) with the saved key and lists the app's tools; a failure is kept as the app's problem, in words.
+    /// Connects (again) with the saved key and lists the app's tools; a failure is kept as the app's problem, in words. The
+    /// user asked: the back-off starts again.
     pub fn connect(&self, id: &str) -> Result<ConnectedApp, AppsError> {
-        let title = title_of(id)?;
+        title_of(id)?;
+        lock(&self.retry).remove(id);
+        Ok(self.attempt(id))
+    }
+
+    fn attempt(&self, id: &str) -> ConnectedApp {
+        let title = title_of(id).unwrap_or("The app");
         lock(&self.live).remove(id);
         // The failure in words, and whether the app refused the key (then only a new key helps).
         let outcome = (|| -> Result<Live, (String, bool)> {
@@ -236,7 +317,7 @@ impl ConnectedApps {
                 .map_err(|e| plain(e.to_string()))?;
             let defs = conn.list_tools().map_err(|e| plain(e.to_string()))?;
             let tools = tools_of(id, title, &defs, true, &conn, &self.names);
-            Ok(Live { _conn: conn, tools })
+            Ok(Live { conn, tools })
         })();
         match outcome {
             Ok(live) => {
@@ -250,7 +331,7 @@ impl ConnectedApps {
             }
         }
         self.publish();
-        Ok(self.view(id))
+        self.view(id)
     }
 
     /// Connects every app that has a key (at start and when the chat opens); failures are each app's problem.

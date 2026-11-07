@@ -101,7 +101,19 @@ pub fn install<R: Runtime>(app: &AppHandle<R>, chat: ChatState) {
         let _ = tauri::Emitter::emit(&emitter, CONNECTED_APPS_EVENT, views);
     });
     let apps = chat.apps.clone();
-    tauri::async_runtime::spawn_blocking(move || apps.connect_saved());
+    // The connected apps' timer: saved apps connected at start, then a lost connection retried on the back-off. Once a
+    // second is plenty for a person (an app comes back within a few seconds of being opened); it holds no lock between ticks.
+    let spawned = std::thread::Builder::new().name("pitwall-connected-apps".into()).spawn(move || {
+        apps.connect_saved();
+        let start = std::time::Instant::now();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            apps.tick(start.elapsed());
+        }
+    });
+    if let Err(e) = spawned {
+        log::warn!(target: "pitwall_chat", "connected apps: no reconnect timer ({e}); next step: Refresh tools reconnects by hand");
+    }
     app.manage(Arc::new(chat));
 }
 

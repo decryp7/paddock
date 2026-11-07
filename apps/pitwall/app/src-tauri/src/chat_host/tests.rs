@@ -86,7 +86,7 @@ fn ended(e: &AssistantEvent) -> bool {
 /// Dyno as far as the chat can tell: a read tool whose text tries to steer the model, an action that counts its runs, and a
 /// read tool that hangs until stopped.
 struct FakeDyno {
-    _listener: Arc<Listener>,
+    listener: Arc<Listener>,
     key: String,
     awake: Arc<AtomicUsize>,
     dir: tempfile::TempDir,
@@ -131,12 +131,7 @@ fn fake_dyno() -> FakeDyno {
     let (_, key) = keys.issue("Pitwall", 1).unwrap();
     let listener = Arc::new(Listener::new(Arc::new(server), keys, discovery_path(dir.path()), 4));
     listener.reconcile(true);
-    FakeDyno {
-        _listener: listener,
-        key,
-        awake,
-        dir,
-    }
+    FakeDyno { listener, key, awake, dir }
 }
 
 struct Host {
@@ -549,4 +544,58 @@ fn a_tool_reads_as_a_verb_phrase_with_its_title() {
     assert_eq!(tool::title_of(&def("cpu_memory", None)), "Cpu memory");
     assert_eq!(tool::phrase("Dyno", "Top processes", false), "Read top processes from Dyno");
     assert_eq!(tool::phrase("Dyno", "Keep awake", true), "Keep awake (Dyno)");
+}
+
+#[test]
+fn a_lost_connection_is_retried_with_back_off_until_the_app_is_back() {
+    use super::apps::ConnectedApps;
+    use std::time::Duration as D;
+    let dyno = fake_dyno();
+    let file = discovery_path(dyno.dir.path());
+    let names = ToolNames::default();
+    let data = tempfile::tempdir().unwrap();
+    let policy = Arc::new(PitwallPolicy::new(None, names.clone(), || 1));
+    let clock = paddock_health::FakeClock::at_wall_ms(1_700_000_000_000);
+    let store = Arc::new(ConversationStore::open(data.path().join("c.json"), Arc::new(clock.clone())));
+    let model = Arc::new(Script(Mutex::default(), Mutex::default()));
+    let assistant = Assistant::new(
+        model,
+        paddock_assistant::Tools::none(),
+        store,
+        Arc::new(clock),
+        AssistantConfig::new("Pitwall", "s"),
+    );
+    let secrets = Arc::new(paddock_secrets::MemorySecrets::new("Pitwall"));
+    let apps = ConnectedApps::new(secrets, move |_| Some(file.clone()), assistant.clone(), policy, names);
+    assert!(apps.set_key("dyno", &dyno.key).unwrap().connected);
+    let t0 = D::from_secs(100);
+    apps.tick(t0);
+    assert!(apps.views()[0].connected, "a live connection is left alone");
+
+    // Dyno quits (its listener stops): the next tick sees the connection ended, says so and takes the tools away.
+    dyno.listener.reconcile(false);
+    let mut t = t0;
+    while apps.views()[0].connected {
+        t += D::from_millis(100);
+        assert!(t < t0 + D::from_secs(30), "the end of the connection was never noticed");
+        // The read loop notices the closed socket on its own thread; ticking is what a timer does in the app.
+        std::thread::yield_now();
+        apps.tick(t);
+    }
+    let v = &apps.views()[0];
+    assert!(v.problem.as_deref().unwrap_or("").contains("Trying again"), "{v:?}");
+    assert!(assistant.info().tools.is_empty());
+
+    // Dyno is back: no attempt before the delay, one after it.
+    dyno.listener.reconcile(true);
+    let lost = t;
+    apps.tick(lost + D::from_millis(500));
+    assert!(!apps.views()[0].connected, "the back-off's first delay (1 s) is kept");
+    apps.tick(lost + D::from_secs(2));
+    assert!(
+        apps.views()[0].connected,
+        "reconnected after the delay: {:?}",
+        apps.views()[0].problem
+    );
+    assert_eq!(assistant.info().tools.len(), 3);
 }
