@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { buildStep, expectedCommit } from './verdict.mjs';
 import { requiredSteps } from './manifest.mjs';
 import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep } from './report.mjs';
+import { loginJobsRow, linuxLoginJobsDriver } from './login-jobs-drivers.mjs';
 import { readingSteps } from './helper-readings.mjs';
 import { trayHostChecks } from './linux-tray-host.mjs';
 import { judgeCard, judgeLoginSwitch, parseSwitchState } from './linux-judges.mjs';
@@ -241,6 +242,10 @@ async function main(argv) {
     const why = g('echo "pkexec: $(pgrep -x pkexec || echo none)"; echo "service: $(systemctl is-active dyno-helper.service) enabled: $(systemctl is-enabled dyno-helper.service 2>&1)"; ls -l /usr/lib/systemd/system/dyno-helper.service /etc/systemd/system/dyno-helper.service /etc/systemd/system/multi-user.target.wants/dyno-helper.service 2>&1; ls -ld /var/lib/dyno-helper 2>&1; sudo journalctl -u dyno-helper.service --no-pager 2>&1 | tail -5').stdout.trim();
     const card = atspi('tree dyno 60').stdout.split('\n').map((l) => l.trim()).filter((l) => /administrator|Turn|helper|polkit|authenticate|not allowed|cancel/i.test(l)).slice(0, 8);
     push(result('Admin helper Turn off removes it', checks, [...why.split('\n'), '$ sudo ls -la /var/lib/dyno-helper', ...folder.split('\n'), ...card], 'service and data removed'));
+
+    // Row 5a: the Start at login change in the Jobs list with Cancel (Settings is open here).
+    push(await loginJobsRow(linuxLoginJobsDriver(atspi, parseSwitchState), { now: () => Date.now(), sleep }));
+    press('^Dyno$'); await sleep(1000);
 
     // 7. Quit: File > Quit ends the app and the agent.
     press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit Dyno( \\(keeps measuring\\))?$', 'menu item'); await sleep(8000);

@@ -247,6 +247,7 @@ export async function repeatInstall(browser) {
   return result('Windows: repeat install of the disk health tool', checks, [`first: ${first.outcome}`, `second: ${second.outcome}`], 'a second install works and smartctl.exe is there');
 }
 
+import { loginJobsRow, windowsLoginJobsDriver } from './login-jobs-drivers.mjs';
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
 import { scopingStep } from './win-scoping.mjs';
 const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
@@ -329,11 +330,6 @@ export async function trayTooltips(actor) {
   return result('Windows: tray icons and their live tooltips', checks, evidence, 'every created icon is in the notification area with a readable tooltip');
 }
 
-/** The raw `wbadmin get versions` on the VM as administrator, next to what the Backup page says, so a "could not check" can be explained. */
-export function wbadminRaw() {
-  const raw = ssh('wbadmin get versions 2>&1 | Out-String', { admin: true });
-  return { title: 'Windows: raw `wbadmin get versions` (evidence for the Backup page)', status: 'info', summary: 'captured as administrator', checks: [], evidence: raw.split('\n').slice(0, 25) };
-}
 
 /** The served counts: stop the helper (a stopped service writes its final tally) and read the `served:` line of its log. */
 export function servedCounts() {
@@ -385,7 +381,8 @@ export const helperSteps = [
   ({ browser }) => helperExploit(browser),
   ({ browser }) => repeatInstall(browser),
   ({ browser }) => diskHealth(browser),
-  () => wbadminRaw(),
+  // Row 5a: the Start at login change in the Jobs list (login-jobs-row.mjs). The raw `wbadmin` evidence step is gone with Backup health (removed in 1.1.0).
+  async ({ browser }) => loginJobsRow(windowsLoginJobsDriver(browser, { openSettings, mainPage }), { now: () => Date.now(), sleep }),
   // WP-VMH: one step per helper reading while the helper is on
   ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser), { ssh })),
   () => scopingStep(),
