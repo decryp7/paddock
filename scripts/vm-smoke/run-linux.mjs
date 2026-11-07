@@ -197,8 +197,11 @@ async function main(argv) {
       if (autostarted) {
         // The autostart entry starts Dyno with --hidden (tray only): a second start of dyno-app hands over to the running instance and shows its window.
         ses('systemd-run --user --collect --unit=dyno-gui-show -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1');
-        for (let i = 0; i < 15 && !/Processes/.test(atspi('tree dyno 60 2>&1').stdout); i++) await sleep(2000);
+        for (let i = 0; i < 45 && !/link\s+Processes/.test(atspi('tree dyno 20 2>&1').stdout); i++) await sleep(2000);
       }
+      // The card lives in the Settings window, which the reboot closed: open it the way a user does (File > Settings…), as at the first step.
+      await sleep(3000);
+      press('^File$', 'menu item'); await sleep(1000); press('^Settings…$', 'menu item'); await sleep(4000);
       const cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim();
       press('^Processes$', 'link'); await sleep(4000);
       const procPage = atspi('tree dyno 80').stdout;
@@ -215,7 +218,8 @@ async function main(argv) {
       const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-mcp${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
       const mg = makeMcpGuest({
         os: 'linux', dyno: '/usr/bin/dyno', sh: async (c) => { const r = ses(c); return { code: r.code, stdout: r.stdout }; },
-        configDir: async () => { const d = ses('dirname "$(find "$HOME/.config" "$HOME/.local/share" -maxdepth 3 -name settings.json -path "*yno*" 2>/dev/null | head -1)"').stdout.trim(); return d && d !== '.' ? d : null; },
+        // Linux config folder = $XDG_CONFIG_HOME/<app id> (paddock-env dirs.rs): ~/.config/dyno. settings.json is only written after a change, so the folder is not found by it.
+        configDir: async () => { const d = ses('d="${XDG_CONFIG_HOME:-$HOME/.config}/dyno"; mkdir -p "$d" && echo "$d"').stdout.trim().split('\n').at(-1); return d && d.startsWith('/') ? d : null; },
         stopApp: async () => { g('pkill -x dyno-app; true'); await sleep(4000); }, startApp,
         killAgent: async () => { g('sudo systemctl --user -M admin@ stop dyno-agent 2>/dev/null; pkill -9 -x dyno-agent; true'); },
         agentAlive: async () => g('pgrep -x dyno-agent >/dev/null').code === 0,
