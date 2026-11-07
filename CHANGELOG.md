@@ -4,6 +4,15 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-assistant`: the tool path for Pitwall's chat (ADR 0023 WP-2a)
+- New `ApprovalPolicy` port (`approval.rs`): per call, `check` says `Verdict::Run`, `Remembered`, `AskEveryTime` or `AskOrRemember`, and `record` hears the user's `ApprovalChoice` (`allowOnce`, `alwaysAllow`, `deny`). `DefaultPolicy` keeps today's behaviour (a write asks every call, a read-only tool runs unasked); an app sets its own in `AssistantConfig::policy`. Malformed calls, unknown tools and bad arguments are refused before the policy sees them.
+- `ApprovalNeeded` gains `remember` (the card offers Always allow); `ToolFinished` and the stored tool message gain `approval` (`notAsked`, `once`, `always`, `remembered`) for a call that ran.
+- `Budgets::max_wall` and `approval_wait` are `Option<Duration>`: `None` means no wall limit (ER-19, ADR 0031); the defaults are unchanged.
+- `Assistant::set_tools` replaces the tool set from the next turn on; a running turn keeps the set it started with.
+- `ToolCall::native(id, name, arguments)` reads an engine's native tool call strictly (blank arguments are `{}`; text that is not one JSON value, or too long, is the unreadable-call marker and never runs).
+- Fixed: tool-call ids are unique over a conversation. The prompted protocol numbers calls per answer, so a second tool round reused `call_1` and its card overwrote the first round's; an empty or repeated id now becomes the first free `call_<n>`.
+- Breaking (before v1): `Assistant::approve` and the `assistant_approve_tool` command take a `choice` (`ApprovalChoice`) instead of `approved: bool`; `AssistantBackend.approve` of `@decryp7/paddock-ui/workbench/assistant` takes the choice too; `Gate::decide` returns `Result<(), Refused>`; `Decision` is `Chosen(ApprovalChoice)`, `Cancelled` or `TimedOut`. New `AssistantError::NotOffered` (an `invalid` command error) for Always allow on a card that did not offer it.
+
 ### `@decryp7/paddock-ui`: the status chip has words for Dyno's update and agent-mismatch causes
 - `service-status-text.ts`: `dy.setup.updated` is now `dy.update.restart` ("updated: restart to finish"); new `dy.agent.other-build-returns` ("another build keeps starting") and `dy.agent.mismatch` ("needs a reinstall"). The planner marks ui when an app's `src-tauri/src/**/*.rs` changes, since `cause-codes.spec.ts` scans those sources against the table.
 

@@ -1,6 +1,7 @@
 import type { AssistantCommand } from '../generated/assistant-commands';
 import {
   ASSISTANT_EVENT,
+  type ApprovalChoice,
   type AssistantEvent,
   type AssistantInfo,
   type Conversation,
@@ -40,8 +41,8 @@ export abstract class AssistantBackend {
   abstract send(request: SendRequest): Promise<SendAck>;
   /** Stops the conversation's turn; false when none runs. */
   abstract stop(id: string): Promise<boolean>;
-  /** Answers the write waiting in the conversation's turn. */
-  abstract approve(id: string, callId: string, approved: boolean): Promise<void>;
+  /** Answers the call waiting in the conversation's turn with the user's choice (`alwaysAllow` only when its card offers it). */
+  abstract approve(id: string, callId: string, choice: ApprovalChoice): Promise<void>;
   /** Every event until the returned function is called. */
   abstract listen(handler: (event: Envelope) => void): Promise<Unlisten>;
 }
@@ -82,8 +83,8 @@ export class TauriAssistantBackend extends AssistantBackend {
     return (await this.ipc.invoke<unknown>('assistant_stop', { conversationId: id })) === true;
   }
 
-  async approve(id: string, callId: string, approved: boolean): Promise<void> {
-    await this.ipc.invoke<unknown>('assistant_approve_tool', { conversationId: id, callId, approved });
+  async approve(id: string, callId: string, choice: ApprovalChoice): Promise<void> {
+    await this.ipc.invoke<unknown>('assistant_approve_tool', { conversationId: id, callId, choice });
   }
 
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
@@ -134,14 +135,14 @@ export const DEMO_ANSWER =
 export class MemoryAssistantBackend extends AssistantBackend {
   private readonly listeners = new Set<(e: Envelope) => void>();
   private readonly store = new Map<string, Conversation>();
-  private readonly running = new Map<string, { stopped: boolean; decision: ((approved: boolean) => void) | null; call: string | null; halt: (() => void) | null }>();
+  private readonly running = new Map<string, { stopped: boolean; decision: ((choice: ApprovalChoice) => void) | null; call: string | null; halt: (() => void) | null }>();
   private gate: Promise<void> | null = null;
   private open: (() => void) | null = null;
   private counter = 0;
   /** Every request sent, in order. */
   readonly sent: SendRequest[] = [];
-  /** Every approval answered: [callId, approved]. */
-  readonly approvals: [string, boolean][] = [];
+  /** Every approval answered: [callId, choice]. */
+  readonly approvals: [string, ApprovalChoice][] = [];
   /** The engine's tool is `erase`; how often it ran. */
   erased = 0;
 
@@ -217,17 +218,19 @@ export class MemoryAssistantBackend extends AssistantBackend {
     const run = this.running.get(id);
     if (!run) return Promise.resolve(false);
     run.stopped = true;
-    run.decision?.(false);
+    run.decision?.('deny');
     run.halt?.();
     this.release();
     return Promise.resolve(true);
   }
 
-  approve(id: string, callId: string, approved: boolean): Promise<void> {
+  approve(id: string, callId: string, choice: ApprovalChoice): Promise<void> {
     const run = this.running.get(id);
     if (!run || run.call !== callId || !run.decision) return Promise.reject(new Error('No action waits for a decision.'));
-    this.approvals.push([callId, approved]);
-    run.decision(approved);
+    // The demo's one write asks every time, as the engine's default policy does: it never offers Always allow.
+    if (choice === 'alwaysAllow') return Promise.reject(new Error('This tool asks every time it is used, so it cannot be always allowed.'));
+    this.approvals.push([callId, choice]);
+    run.decision(choice);
     return Promise.resolve();
   }
 
@@ -294,8 +297,8 @@ export class MemoryAssistantBackend extends AssistantBackend {
     } else if (command === '/write' && allowWrite) {
       run.call = 'call_2';
       startCall('call_2', 'erase', 'Erase everything', true, true);
-      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, input: {} });
-      const approved = await new Promise<boolean>((resolve) => (run.decision = resolve));
+      this.emit(id, { type: 'approvalNeeded', callId: 'call_2', name: 'erase', summary: 'Erase everything', destructive: true, remember: false, input: {} });
+      const approved = (await new Promise<ApprovalChoice>((resolve) => (run.decision = resolve))) !== 'deny';
       run.decision = null;
       run.call = null;
       if (approved) this.erased++;

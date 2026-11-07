@@ -3,7 +3,7 @@ import { patchState, signalStore, withComputed, withHooks, withMethods, withProp
 import { ShellContextHost } from '@decryp7/paddock-ui/shell';
 import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { WorkbenchRegistry } from '@decryp7/paddock-ui/workbench';
-import { ASSISTANT_LIMITS, type AssistantInfo, type ContextItem, type ConversationSummary, type Envelope } from '../generated/assistant';
+import { ASSISTANT_LIMITS, type ApprovalChoice, type AssistantInfo, type ContextItem, type ConversationSummary, type Envelope } from '../generated/assistant';
 import { AssistantBackend, type Unlisten } from './backend';
 import { answerText, chipText, conversationTitle, reduceTurn, setDeclined, startTurn, turnsOf, type TurnView } from './chat-model';
 import { assistantMessage } from './wire';
@@ -336,16 +336,17 @@ export const AssistantStore = signalStore(
           patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.stop:The assistant could not be stopped.`) });
         }
       },
-      /** The user's decision on a write. */
-      async approve(callId: string, approved: boolean): Promise<void> {
+      /** The user's choice on a call that waits (Allow once, Always allow when offered, Deny). */
+      async approve(callId: string, choice: ApprovalChoice): Promise<void> {
         const id = store.activeId();
         if (!id) return;
+        const denied = choice === 'deny';
         // A declined call is the user's choice: mark it before the engine's "did not run" arrives, so it is never drawn as a failure.
-        if (!approved) update((t) => setDeclined(t, callId, true));
+        if (denied) update((t) => setDeclined(t, callId, true));
         try {
-          await store._backend.approve(id, callId, approved);
+          await store._backend.approve(id, callId, choice);
         } catch (e) {
-          if (!approved) update((t) => setDeclined(t, callId, false));
+          if (denied) update((t) => setDeclined(t, callId, false));
           patchState(store, { failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.approve:The decision could not be sent.`) });
         }
       },

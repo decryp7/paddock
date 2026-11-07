@@ -179,7 +179,7 @@ fn refusals_are_command_errors_with_the_right_code() {
         code(invoke(
             &w,
             "assistant_approve_tool",
-            json!({"conversationId": "x", "callId": "c", "approved": true})
+            json!({"conversationId": "x", "callId": "c", "choice": "allowOnce"})
         )),
         "notFound"
     );
@@ -252,10 +252,18 @@ fn a_write_waits_for_the_approval_command() {
             break;
         }
     }
+    // The default policy asks a write every time: Always allow is an invalid choice, and the call still waits.
+    let refused = invoke(
+        &w,
+        "assistant_approve_tool",
+        json!({"conversationId": ack["conversationId"], "callId": "c1", "choice": "alwaysAllow"}),
+    )
+    .unwrap_err();
+    assert_eq!(refused["code"], "invalid", "{refused}");
     invoke(
         &w,
         "assistant_approve_tool",
-        json!({"conversationId": ack["conversationId"], "callId": "c1", "approved": true}),
+        json!({"conversationId": ack["conversationId"], "callId": "c1", "choice": "allowOnce"}),
     )
     .unwrap();
     loop {

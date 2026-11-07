@@ -5,6 +5,7 @@
 //! - `assistant-fixtures.ts`: a conversation with a tool call and the events of a turn, produced by this crate's own code.
 //! - `assistant-commands.ts` (with the `tauri` feature): the adapter's command names.
 
+use crate::approval::{Approval, ApprovalChoice};
 use crate::conversation::*;
 use crate::event::*;
 use crate::service::{AssistantInfo, MAX_USER_CHARS, SendAck, SendRequest};
@@ -37,6 +38,8 @@ fn types() -> String {
         ErrorKind::decl(),
         ContextItem::decl(),
         ToolOutcome::decl(),
+        ApprovalChoice::decl(),
+        Approval::decl(),
         StoredError::decl(),
         StoredMessage::decl(),
         Conversation::decl(),
@@ -94,7 +97,8 @@ fn fixtures() -> String {
                 "3 events found".into(),
                 Some(json!({"ids": [4, 7, 9]})),
                 3_000,
-            ),
+            )
+            .with_approval(Some(Approval::NotAsked)),
             StoredMessage::assistant(
                 "The build failed at event 7: the linker ran out of memory.",
                 vec![],
@@ -125,6 +129,7 @@ fn fixtures() -> String {
             summary: "3 events found".into(),
             data: Some(json!({"ids": [4, 7, 9]})),
             outcome: None,
+            approval: Some(Approval::NotAsked),
         },
         AssistantEvent::Delta {
             text: "The build failed at event 7".into(),
