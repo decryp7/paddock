@@ -4,9 +4,10 @@
  * go through `$localize` with `@@pd.format.` ids. Unknown, negative or non-finite input shows as "—" (`NONE`), except
  * where the value is optional decoration (a rate or an ETA), which returns '' so callers can drop the whole fragment.
  *
- * Two kinds of size, both labelled KB / MB / GB / TB. Memory and transfer use binary steps (1024; `formatBytes`,
- * `formatRate`), as Task Manager and Activity Monitor do. Storage (disks, volumes, files) uses decimal steps (1000;
- * `formatStorage`), as Finder and the disk makers do, so a 1 TB disk reads "1.0 TB" and not "931 GB". Pick the kind by
+ * Two kinds of size, both labelled KB / MB / GB / TB. Memory and transfer rates use binary steps (1024; `formatBytes`,
+ * `formatRate`), as Task Manager and Activity Monitor do. Storage (disks, volumes, files, and the size of a file to
+ * download) uses decimal steps (1000; `formatStorage`), as Finder and the disk makers do, so a 1 TB disk reads "1.0 TB"
+ * and not "931 GB". Pick the kind by
  * what the number measures, never by taste. Keep exact values in a tooltip (`formatExactBytes`). Domain wording
  * (token counts, GHz) stays in the apps.
  */

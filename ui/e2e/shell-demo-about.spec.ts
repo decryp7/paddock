@@ -36,7 +36,7 @@ test('Help ▸ Check for updates… finds, downloads and verifies an update, and
   await expect(dialog.getByTestId('updates-current')).toHaveText(`You have version ${VERSION}.`);
   await expect(dialog).toHaveAttribute('aria-modal', 'false');
   await dialog.getByRole('button', { name: 'Check now' }).click();
-  await expect(dialog.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (39 MB).');
+  await expect(dialog.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (41 MB).');
   await expect(app.notifications.toasts).toContainText('Version 99.0.0 is available');
   await dialog.getByRole('button', { name: 'Download' }).click();
   await expect(dialog.getByTestId('updates-phase')).toContainText('downloaded and its signature verified');
@@ -83,7 +83,7 @@ test('the download shows a determinate Material progress bar, and an indetermina
   await expect(bar).toHaveCount(0);
   await page.evaluate(() => (window as unknown as { sdUpdatesDownload: { progress(d: number, t: number | null): void } }).sdUpdatesDownload.progress(20_500_000, 41_000_000));
   await expect(bar).toHaveAttribute('aria-valuenow', '50');
-  await expect(bar).toHaveAccessibleName('Downloading: 20 MB of 39 MB');
+  await expect(bar).toHaveAccessibleName('Downloading: 21 MB of 41 MB');
   expect(await axeViolations(page, { idsOnly: true })).toEqual([]);
   await page.evaluate(() => (window as unknown as { sdUpdatesDownload: { progress(d: number, t: number | null): void } }).sdUpdatesDownload.progress(1000, null));
   await expect(dialog.locator('mat-progress-bar')).toHaveAttribute('mode', 'indeterminate');
@@ -142,7 +142,7 @@ test('over Tauri: the Updates window follows the engine’s events and shows its
   await page.getByRole('button', { name: 'Check now' }).click();
   await expect.poll(() => ipc.names()).toContain('updates_check');
   expect(await ipc.emit('paddock://updates', status({ kind: 'available', info: INFO }))).toBeGreaterThan(0);
-  await expect(page.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (1,000 bytes).');
+  await expect(page.getByTestId('updates-phase')).toContainText('Version 99.0.0 is available (1 KB).');
   await page.getByRole('button', { name: 'Download' }).click();
   await expect.poll(() => ipc.names()).toContain('updates_download');
   await ipc.emit(
