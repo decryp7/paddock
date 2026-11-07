@@ -12,7 +12,7 @@ import type { DiskNode, Volume } from '../../core/api.types';
 import { PlatformService } from '../../core/platform';
 import { UNAVAILABLE, unreadableShort, unreadableText } from '../../core/measured';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatCount, formatAgo, formatDate, plural } from '../../shared/format';
+import { formatStorage, formatCount, formatAgo, formatDate, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { Notifier } from '../../shared/notifier';
 import { RowMenu } from '../../shared/row-menu';
@@ -687,7 +687,7 @@ export class DiskMapPage implements OnInit {
   /** The line under a map read back from the cache: its age, the net change in used space, and what Rescan does. */
   protected readonly savedLine = computed(() => {
     const s = this.store.status();
-    return s && s.scannedAt !== null ? savedNote(s, formatAgo(s.scannedAt, this.now()), formatBytes) : null;
+    return s && s.scannedAt !== null ? savedNote(s, formatAgo(s.scannedAt, this.now()), formatStorage) : null;
   });
   protected readonly notSavedLine = computed(() => {
     const s = this.store.status();
@@ -695,7 +695,7 @@ export class DiskMapPage implements OnInit {
   });
   protected readonly formatCount = formatCount;
   protected readonly plural = plural;
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatStorage;
   protected readonly meta = volumeMeta;
   protected readonly free = volumeFree;
   protected readonly share = shareText;
@@ -736,10 +736,10 @@ export class DiskMapPage implements OnInit {
   protected capacityLabel(): string {
     const c = this.store.capacity();
     if (!c) return '';
-    const parts = [`Counted ${formatBytes(c.counted)}`];
-    if (c.notCounted > 0) parts.push(`not counted yet ${formatBytes(c.notCounted)}`);
-    if (c.hidden > 0) parts.push(`hidden space ${formatBytes(c.hidden)}`);
-    if (c.free !== null) parts.push(`free ${formatBytes(c.free)}`);
+    const parts = [`Counted ${formatStorage(c.counted)}`];
+    if (c.notCounted > 0) parts.push(`not counted yet ${formatStorage(c.notCounted)}`);
+    if (c.hidden > 0) parts.push(`hidden space ${formatStorage(c.hidden)}`);
+    if (c.free !== null) parts.push(`free ${formatStorage(c.free)}`);
     return parts.join(', ');
   }
 
@@ -834,7 +834,7 @@ export class DiskMapPage implements OnInit {
 
   protected async copySize(node: DiskNode): Promise<void> {
     try {
-      await navigator.clipboard.writeText(formatBytes(node.bytes));
+      await navigator.clipboard.writeText(formatStorage(node.bytes));
       this.notifier.show('Size copied');
     } catch {
       this.notifier.show('The size could not be copied.', 'bad');

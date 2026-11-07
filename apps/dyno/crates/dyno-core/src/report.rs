@@ -5,7 +5,7 @@ use crate::forecast::Forecast;
 use crate::health::Severity;
 use crate::history::{Consumer, HistoryPoint};
 use crate::time::{offset_label, to_local, LocalZone, Timestamp};
-use crate::units::bytes;
+use crate::units::{bytes, storage};
 use serde::{Deserialize, Serialize};
 
 /// The report.
@@ -348,8 +348,8 @@ pub fn to_markdown(r: &WeeklyReport, zone: &dyn LocalZone) -> String {
             o.push_str(&format!(
                 "- {}: {} free of {}, {}\n",
                 d.disk,
-                bytes(d.free),
-                bytes(d.total),
+                storage(d.free),
+                storage(d.total),
                 forecast_text(d.forecast)
             ));
         }
@@ -449,8 +449,8 @@ pub fn to_html(r: &WeeklyReport, zone: &dyn LocalZone) -> String {
             o.push_str(&format!(
                 "<li>{}: {} free of {}, {}</li>\n",
                 e(&d.disk),
-                bytes(d.free),
-                bytes(d.total),
+                storage(d.free),
+                storage(d.total),
                 forecast_text(d.forecast)
             ));
         }
@@ -699,7 +699,7 @@ mod tests {
         assert!(md.contains("Health score 80 (+10 against a week ago)."));
         assert!(md.contains("Recorded scores, oldest first: 70, 80."));
         assert!(md.contains("| <b>Evil\\|App</b> | 12.5% | 2.0 GB |"));
-        assert!(md.contains("- C:: 20.0 GB free of 500.0 GB, full in about 12 days"));
+        assert!(md.contains("- C:: 21.5 GB free of 536.9 GB, full in about 12 days"));
         assert!(md.contains("not filling up") && md.contains("not enough history for a forecast"));
         assert!(md.contains("1970-01-01 05:00 Warning: Issue 5 (detail)"));
     }

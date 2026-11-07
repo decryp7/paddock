@@ -7,6 +7,7 @@ import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons
 import type { AlarmRow, AppRow, CounterRow, IssueValue, Level, Page, PopoverValue, VolumeRow, WidgetActionId } from '../../../core/generated/widgets';
 import { FullTextTip } from '../../../shared/full-text-tip';
 import { formatBytes, formatPercent, formatRate, splitValue } from '../../../shared/format';
+import { volumeSpaceText } from './popover-meta';
 import { formatCounter } from '../../counters/counters-model';
 import { SPARK_CAPACITY } from '../../../state/live.store';
 
@@ -219,7 +220,7 @@ export class DynoPopoverWidgets {
     return splitValue(formatRate(bps));
   }
   protected free(v: VolumeRow): string {
-    return `${formatBytes(v.freeBytes)} free of ${formatBytes(v.totalBytes)}`;
+    return volumeSpaceText(v.freeBytes, v.totalBytes);
   }
   protected counter(r: CounterRow): string {
     return formatCounter(r.value ?? 0, r.unit).join(' ');

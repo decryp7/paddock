@@ -1,6 +1,6 @@
 import type { PdSunburstNode } from '@decryp7/paddock-ui/chart';
 import type { DiskChildren, DiskNode, RingNode, DiskScanStatus, ScanFailure, ScanProgress, ScanState, Volume } from '../../core/api.types';
-import { formatBytes, formatCount, formatDuration, plural } from '../../shared/format';
+import { formatStorage, formatCount, formatDuration, plural } from '../../shared/format';
 import type { WindowPlatform } from '../../core/platform';
 
 /**
@@ -35,7 +35,7 @@ export function volumeMeta(v: Volume): string {
 export function volumeFree(v: Volume): string {
   if (!v.reachable) return 'Not answering';
   if (v.free === null) return 'Free space not reported';
-  return v.wholeVolume ? `${formatBytes(v.free)} free` : `${formatBytes(v.free)} free on the server`;
+  return v.wholeVolume ? `${formatStorage(v.free)} free` : `${formatStorage(v.free)} free on the server`;
 }
 
 /** The share (0 to 100) of `part` in `whole`; 0 when the whole is empty. */
@@ -56,7 +56,7 @@ export function phaseLabel(s: DiskScanStatus): string {
 /** "1,116,387 items · 325.9 GB of 568.6 GB counted", or just the growing count when the total is unknown. */
 export function jobCount(p: ScanProgress): string {
   const items = plural(p.items, 'item');
-  return p.totalBytes === null ? `${items} · ${formatBytes(p.bytes)} counted` : `${items} · ${formatBytes(p.bytes)} of ${formatBytes(p.totalBytes)} counted`;
+  return p.totalBytes === null ? `${items} · ${formatStorage(p.bytes)} counted` : `${items} · ${formatStorage(p.bytes)} of ${formatStorage(p.totalBytes)} counted`;
 }
 
 /** 0 to 1 for a determinate bar, `null` when the total is unknown (a growing count instead). */
@@ -92,7 +92,7 @@ export function failureText(f: ScanFailure, name: string): FailureText {
 /** "Stopped by you at 56%": how far a stopped scan got, when the total is known. */
 export function stoppedAt(p: ScanProgress): string {
   const f = jobFraction(p);
-  return f === null ? `Stopped by you after ${formatBytes(p.bytes)}` : `Stopped by you at ${Math.round(f * 100)}%`;
+  return f === null ? `Stopped by you after ${formatStorage(p.bytes)}` : `Stopped by you at ${Math.round(f * 100)}%`;
 }
 
 /** The whole "Dyno can't read it" state: the engine says Full Disk Access is the likely reason and nothing at all was counted. */

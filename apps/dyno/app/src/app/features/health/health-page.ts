@@ -4,7 +4,7 @@ import { PdCell, PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { ImpactRating, StartupEntry } from '../../core/api.types';
 import { FullTextTip } from '../../shared/full-text-tip';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatSeconds } from '../../shared/format';
+import { formatSeconds, formatStorage } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { LOCATION_LABEL, startupStateText } from '../../shared/labels';
 import { ViewPrefs } from '../../core/view-prefs';
@@ -102,7 +102,7 @@ export class HealthPage implements OnInit {
     if (typeof v !== 'object') return null;
     return 'needsHelper' in v ? v.needsHelper.reason : v.unavailable.reason;
   });
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatStorage;
   protected readonly secs = formatSeconds;
   protected readonly state = (e: StartupEntry) => startupStateText(e.state);
   protected readonly impact = (e: StartupEntry) => IMPACT_LABEL[e.impact.rating];

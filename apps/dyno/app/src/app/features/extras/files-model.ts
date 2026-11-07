@@ -1,5 +1,5 @@
 import type { FinderMode, FinderResult, FoundFile } from '../../core/api.types';
-import { formatBytes, plural } from '../../shared/format';
+import { formatStorage, plural } from '../../shared/format';
 
 const MIB = 1024 * 1024;
 
@@ -32,7 +32,7 @@ export function fileRows(result: FinderResult, collapsed: ReadonlySet<string>): 
   if (result.large.length > 0) {
     const key = 'g:large';
     const bytes = result.large.reduce((a, f) => a + f.bytes, 0);
-    rows.push({ kind: 'group', key, title: 'Large files', detail: `${plural(result.large.length, 'file')}, ${formatBytes(bytes)}`, open: !collapsed.has(key) });
+    rows.push({ kind: 'group', key, title: 'Large files', detail: `${plural(result.large.length, 'file')}, ${formatStorage(bytes)}`, open: !collapsed.has(key) });
     if (!collapsed.has(key)) for (const f of result.large) rows.push({ kind: 'file', key: `l:${f.id}`, file: f });
   }
   result.duplicates.forEach((g, i) => {
@@ -41,7 +41,7 @@ export function fileRows(result: FinderResult, collapsed: ReadonlySet<string>): 
       kind: 'group',
       key,
       title: `${plural(g.files.length, 'copy', 'copies')} of ${baseName(g.files[0]?.path ?? '')}`,
-      detail: `${formatBytes(g.bytesEach)} each, ${formatBytes(g.wastedBytes)} wasted`,
+      detail: `${formatStorage(g.bytesEach)} each, ${formatStorage(g.wastedBytes)} wasted`,
       open: !collapsed.has(key),
     });
     if (!collapsed.has(key)) g.files.forEach((f) => rows.push({ kind: 'file', key: `d${i}:${f.id}`, file: f }));

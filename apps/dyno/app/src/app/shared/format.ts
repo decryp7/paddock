@@ -16,7 +16,10 @@ function trimZero(s: string): string {
   return s.includes('.') ? s.replace(/\.?0+$/, '') : s;
 }
 
-/** `1536` → `1.5 KB` (binary multiples, labelled as users expect from Explorer / Finder). */
+/**
+ * Memory and transfer sizes, binary multiples: `1536` → `1.5 KB`. Memory is labelled KB / MB / GB as Task Manager and Activity
+ * Monitor do. Disks, volumes and files are storage: use {@link formatStorage} (decimal, like Finder).
+ */
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
   const sign = bytes < 0 ? '−' : '';
@@ -29,6 +32,27 @@ export function formatBytes(bytes: number | null | undefined): string {
   // Below 1000 of a unit, but ≥ 1000 would print "1000 MB": promote it so it reads "0.98 GB".
   if (value >= 1000 && unit < BYTE_UNITS.length - 1) {
     value /= 1024;
+    unit++;
+  }
+  return `${sign}${unit === 0 ? Math.round(value) : compact(value)} ${BYTE_UNITS[unit]}`;
+}
+
+/**
+ * Storage sizes (disks, volumes, files), decimal multiples like Finder and the disk makers: `994_662_584_320` → `995 GB`, a "1 TB"
+ * disk → `1 TB`. The twin of the shared `formatStorage` for this app's conventions (`B`, sign, `compact`); keep the steps in step.
+ */
+export function formatStorage(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '—';
+  const sign = bytes < 0 ? '−' : '';
+  let value = Math.abs(bytes);
+  let unit = 0;
+  while (value >= 1000 && unit < BYTE_UNITS.length - 1) {
+    value /= 1000;
+    unit++;
+  }
+  // 999.9 KB would print "1000 KB": promote it so it reads "1 MB".
+  if (unit > 0 && unit < BYTE_UNITS.length - 1 && compact(value) === '1000') {
+    value /= 1000;
     unit++;
   }
   return `${sign}${unit === 0 ? Math.round(value) : compact(value)} ${BYTE_UNITS[unit]}`;

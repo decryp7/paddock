@@ -22,7 +22,7 @@ import { JobStarter, progressOf, type JobRun } from '../core/job-starter';
 import { JobsStore } from '@decryp7/paddock-ui/shell/jobs';
 import { DEFAULT_MIN_MIB, mibToBytes } from '../features/extras/files-model';
 import type { ExtrasTab } from '../features/extras/extras-model';
-import { fileName, formatBytes } from '../shared/format';
+import { fileName, formatStorage } from '../shared/format';
 import { Notifier } from '../shared/notifier';
 import { SettingsStore } from './settings.store';
 
@@ -277,7 +277,7 @@ export const ExtrasStore = signalStore(
           patchState(store, { exporting: false });
           if (saved) {
             patchState(store, { saved });
-            notifier.show(`Saved ${fileName(saved.path)} (${formatBytes(saved.bytes)})`);
+            notifier.show(`Saved ${fileName(saved.path)} (${formatStorage(saved.bytes)})`);
           }
         } catch (e) {
           patchState(store, { exporting: false, saveError: toCommandError(e) });

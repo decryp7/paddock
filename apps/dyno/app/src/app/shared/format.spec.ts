@@ -2,6 +2,7 @@ import {
   formatAffinity,
   formatBytes,
   formatBytesDelta,
+  formatStorage,
   formatClock,
   formatCount,
   formatDate,
@@ -22,6 +23,24 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const NOW = 1_700_000_000_000;
+
+describe('formatStorage', () => {
+  it('uses decimal multiples like Finder', () => {
+    expect(formatStorage(994_662_584_320)).toBe('995 GB');
+    expect(formatStorage(4_000_577_273_856)).toBe('4 TB');
+    expect(formatStorage(1_000_000_000_000)).toBe('1 TB');
+    expect(formatStorage(0)).toBe('0 B');
+    expect(formatStorage(999)).toBe('999 B');
+    expect(formatStorage(1500)).toBe('1.5 KB');
+    expect(formatStorage(999_900)).toBe('1 MB');
+    expect(formatStorage(-2_500_000)).toBe('−2.5 MB');
+    expect(formatStorage(null)).toBe('—');
+  });
+  it('differs from the binary kind used for memory', () => {
+    expect(formatBytes(16 * 1024 ** 3)).toBe('16 GB');
+    expect(formatStorage(16 * 1024 ** 3)).toBe('17.2 GB');
+  });
+});
 
 describe('formatBytes', () => {
   it('uses binary multiples', () => {

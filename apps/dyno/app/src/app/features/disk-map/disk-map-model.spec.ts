@@ -24,7 +24,7 @@ import {
   volumeMeta,
 } from './disk-map-model';
 
-const GB = 1024 ** 3;
+const GB = 1000 ** 3;
 const progress = (o: Partial<ScanProgress> = {}): ScanProgress => ({ bytes: 0, items: 0, folders: 0, totalBytes: null, unreadable: 0, ...o });
 const node = (id: number, name: string, bytes: number, o: Partial<DiskNode> = {}): DiskNode => ({ id, name, kind: 'folder', bytes, logicalBytes: bytes, items: 3, newestChange: 1000 + id, complete: true, hasChildren: true, unreadableReason: null, ...o });
 const level = (): DiskChildren => ({

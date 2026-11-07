@@ -1,5 +1,5 @@
 import type { PopoverValue } from '../../../core/generated/widgets';
-import { popoverMeta } from './popover-meta';
+import { popoverMeta, volumeSpaceText } from './popover-meta';
 
 const ready = (value: PopoverValue) => ({ state: 'ready' as const, value, asOf: 0, staleSince: null });
 
@@ -15,5 +15,12 @@ describe('popoverMeta', () => {
   });
   it('says nothing for a widget that is not ready', () => {
     expect(popoverMeta('a', { state: 'error', title: 't', cause: null, next: null })).toBeNull();
+  });
+});
+
+describe('volumeSpaceText', () => {
+  it('writes storage in decimal units like Finder', () => {
+    expect(volumeSpaceText(416_000_000_000, 994_662_584_320)).toBe('416 GB free of 995 GB');
+    expect(volumeSpaceText(null, null)).toBe('— free of —');
   });
 });
