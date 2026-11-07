@@ -146,6 +146,11 @@ describe('buildRows: groups', () => {
     expect(names(rows)).toEqual(['Chrome', 'Code', 'Services']);
     expect(rows[0]).toMatchObject({ kind: 'group', key: 'gchrome', count: 2, expandable: true, expanded: false, user: 'alex', pid: null, ref: null, groupId: 'chrome' });
   });
+  it('a group of one process shows that process\'s pid in the PID column; a group of several shows none', () => {
+    const rows = buildRows(input({ processes, groups }));
+    expect(rows.find((r) => r.name === 'Code')).toMatchObject({ pid: 3 });
+    expect(rows.find((r) => r.name === 'Chrome')).toMatchObject({ pid: null });
+  });
   it('a group shows the account its members share, "Several" when they differ, and none when no member reads', () => {
     const mixed = [sample(1, 'a', { user: 'alex' }), sample(2, 'a', { user: 'bob' }), sample(3, 'b', { user: null }), sample(4, 'b', { user: null }), sample(5, 'c', { user: 'alex' }), sample(6, 'c', { user: null })];
     const gs = [group('a', 'A', [1, 2], 5), group('b', 'B', [3, 4], 4), group('c', 'C', [5, 6], 3)];

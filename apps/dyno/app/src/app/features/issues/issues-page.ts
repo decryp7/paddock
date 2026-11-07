@@ -22,7 +22,7 @@ type View = 'issues' | 'unusual';
   imports: [MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, JobProgressCard, IssuesView, UnusualView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="page wide fill">
+    <div class="page fill">
       <header class="page-head">
         <div class="titles">
           <h1>Issues</h1>
@@ -59,7 +59,7 @@ type View = 'issues' | 'unusual';
   `,
   styles: `
     :host { display: block; height: 100%; }
-    /* The page fills the page area; on the issues view only the table scrolls (pd-table height="fill"). */
+    /* A multi-section page (score card, two summary tables, the list): the 1440 px layout; the list takes the height left and keeps at least about six rows (the page scrolls below that). */
     .page { display: flex; flex-direction: column; gap: var(--sp-3); min-height: 100%; padding-bottom: var(--sp-4); }
     .page > * { flex: none; }
     .page > dy-issues-view { flex: 1 1 auto; }

@@ -1,4 +1,4 @@
-import { expect, test } from '@decryp7/paddock-e2e';
+import { expect, test, type Page } from '@decryp7/paddock-e2e';
 
 /**
  * Every Dyno page, with the many-rows mock, at 1920x1080 and 1280x800 (design guide section 2):
@@ -15,31 +15,61 @@ const SIZES = [
 ] as const;
 
 type Width = 'wide' | 1440 | 880;
-const PAGES: { name: string; hash: string; fill?: boolean; width: Width }[] = [
-  { name: 'dashboard', hash: '/', width: 1440 },
+/**
+ * `fill`: the page's main list takes the height left (a page of one table, or one table per source, or the Issues list under its
+ * summaries); `wide`: that page is one table and uses the whole page area. `open`: what to do before measuring (a tab to switch to).
+ */
+const PAGES: { name: string; hash: string; fill?: boolean; width: Width; open?: (page: Page) => Promise<void>; nestedWaiver?: string }[] = [
+  { name: 'dashboard', hash: '/', width: 1440, nestedWaiver: 'a grid of fixed-height widgets, some with a scrolling body: card heights are for a later change' },
   { name: 'processes', hash: '/processes', fill: true, width: 'wide' },
   { name: 'why-slow', hash: '/why-slow', width: 1440 },
   { name: 'throttling', hash: '/throttling', width: 1440 },
-  { name: 'issues', hash: '/issues', fill: true, width: 'wide' },
+  { name: 'issues', hash: '/issues', fill: true, width: 1440 },
   { name: 'inventory', hash: '/inventory', width: 1440 },
   { name: 'disk-map', hash: '/disk-map', width: 1440 },
   { name: 'network', hash: '/network', fill: true, width: 'wide' },
-  { name: 'network-listening', hash: '/network?tab=listening', fill: true, width: 'wide' },
+  { name: 'network-listening', hash: '/network', fill: true, width: 'wide', open: (page) => page.getByRole('radio', { name: 'Listening' }).click() },
   { name: 'map', hash: '/map', width: 1440 },
   { name: 'lists', hash: '/lists', width: 1440 },
-  { name: 'firewall', hash: '/firewall', width: 1440 },
+  { name: 'firewall', hash: '/firewall', fill: true, width: 'wide' },
   { name: 'counters', hash: '/counters', width: 1440 },
   { name: 'benchmarks', hash: '/benchmarks', width: 1440 },
-  { name: 'alarms', hash: '/alarms', width: 1440 },
+  { name: 'alarms', hash: '/alarms', fill: true, width: 'wide' },
+  { name: 'alarms-history', hash: '/alarms', fill: true, width: 'wide', open: (page) => page.getByRole('tab', { name: 'History' }).click() },
   { name: 'reports', hash: '/reports', width: 1440 },
   { name: 'recorder', hash: '/recorder', width: 1440 },
   { name: 'health', hash: '/health', width: 1440 },
   { name: 'power', hash: '/power', width: 1440 },
   { name: 'extras-changes', hash: '/extras?tab=changes', width: 1440 },
-  { name: 'extras-inventory', hash: '/extras?tab=inventory', width: 1440 },
+  { name: 'extras-inventory', hash: '/extras?tab=inventory', fill: true, width: 'wide' },
   { name: 'lifespan', hash: '/lifespan', width: 1440 },
   { name: 'diagnostics', hash: '/diagnostics', width: 1440 },
 ];
+
+/**
+ * Every chart has drawn and finished its entry animation: each dy-chart has a canvas, and the painted pixels of all canvases are the same
+ * in two checks a frame apart (the first draw loads ECharts on demand and animates, so a capture before that shows empty axes).
+ */
+async function chartsDrawn(page: Page): Promise<void> {
+  await page.waitForFunction(() => {
+    const charts = [...document.querySelectorAll('dy-chart')];
+    if (charts.length === 0) return true;
+    if (charts.some((c) => !c.querySelector('canvas'))) return false;
+    const sig = [...document.querySelectorAll('dy-chart canvas')]
+      .map((c) => {
+        const cv = c as HTMLCanvasElement;
+        const d = cv.getContext('2d')!.getImageData(0, 0, cv.width, cv.height).data;
+        let n = 0;
+        for (let i = 3; i < d.length; i += 4) if (d[i]! > 0) n++;
+        return n;
+      })
+      .join(',');
+    const w = window as unknown as { __sig?: string; __same?: number };
+    w.__same = w.__sig === sig ? (w.__same ?? 0) + 1 : 0;
+    w.__sig = sig;
+    return w.__same >= 8;
+  }, undefined, { timeout: 30_000, polling: 'raf' });
+}
 
 for (const p of PAGES) {
   for (const size of SIZES) {
@@ -48,22 +78,31 @@ for (const p of PAGES) {
       await page.goto(`/?latency=0&rows=many#${p.hash}`);
       await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible({ timeout: 45_000 });
       await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]'), undefined, { timeout: 30_000 });
+      if (p.open) await p.open(page);
+      await expect(page.locator('#pd-main [role=grid] .pd-body [role=row], #pd-main [role=treegrid] .pd-body [role=row]').first()).toBeVisible().catch(() => undefined);
+      await chartsDrawn(page);
       const shots = process.env['SHOTS_DIR'];
       if (shots) await page.screenshot({ path: `${shots}/${p.name}-${size.width}x${size.height}.png` });
       const m = await page.evaluate(() => {
         const main = document.querySelector('#pd-main') as HTMLElement;
         const status = (document.querySelector('[data-pd-region=status]') as HTMLElement).getBoundingClientRect();
         const content = main.querySelector('.page, .wrap') as HTMLElement | null;
-        const inner = [...main.querySelectorAll<HTMLElement>('*')].filter((e) => {
+        const active = (e: HTMLElement) => {
           const o = getComputedStyle(e).overflowY;
           return (o === 'auto' || o === 'scroll') && e.scrollHeight > e.clientHeight + 1 && e.clientHeight > 0;
-        });
+        };
+        const inner = [main, ...main.querySelectorAll<HTMLElement>('*')].filter(active);
+        // Two vertical scrollers active at once in one region: an element that scrolls inside an ancestor (below the page area) that scrolls.
+        const nestedEls = inner.filter((e) => e !== main && inner.some((o) => o !== e && o.contains(e)));
+        const nested = nestedEls.length;
         const bottoms = [...main.querySelectorAll<HTMLElement>('.pd-body')].map((b) => b.getBoundingClientRect().bottom);
         return {
           overflowY: main.scrollHeight - main.clientHeight,
           overflowX: main.scrollWidth - main.clientWidth,
           docX: document.documentElement.scrollWidth - window.innerWidth,
           innerScrollers: inner.length,
+          nested,
+          nestedWho: nestedEls.map((e) => `${e.tagName.toLowerCase()}.${e.className}`),
           width: content ? Math.round(content.getBoundingClientRect().width) : -1,
           area: main.clientWidth,
           statusTop: status.top,
@@ -72,6 +111,8 @@ for (const p of PAGES) {
       });
       const why = JSON.stringify(m);
       expect(m.overflowX, `horizontal overflow of the page area: ${why}`).toBeLessThanOrEqual(1);
+      // A short window is the one place a list's least height and the page's scroll may meet (the page scrolls to the list, the list scrolls its rows).
+      if (!p.nestedWaiver && !(p.fill && size.height < 1000)) expect(m.nested, `two vertical scrollers are active in one region: ${why}`).toBe(0);
       expect(m.docX, `the window scrolls horizontally: ${why}`).toBeLessThanOrEqual(1);
       
       if (p.fill && size.height >= 1000) {

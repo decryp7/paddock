@@ -30,6 +30,7 @@ const NEVER = [
       <section class="card" aria-label="Before you share the zip">
         <div class="card-head"><h2>Issue reports are public</h2></div>
         <p class="look">Look through the zip before you attach it. The dialog lists every file with its size, what was replaced, and what may remain.</p>
+        <p class="look">Never in the bundle:</p>
         <ul class="never" aria-label="What is never included">
           @for (n of never; track n) {
             <li><dy-icon name="close" />{{ n }}</li>

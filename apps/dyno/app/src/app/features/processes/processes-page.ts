@@ -57,7 +57,7 @@ import { MatMenuModule } from '@angular/material/menu';
       <div class="source" data-testid="processes-source"><dy-reading-source [via]="store.via()?.processes" [canRetry]="true" (retry)="retry()" /></div>
 
       <div class="body" [class.open]="!!store.selected()">
-        <section class="table card">
+        <section class="table">
           @if (agentError(); as e) {
             <dy-async [loaded]="false" [error]="e" what="processes" (retry)="retry()" />
           } @else {
@@ -153,7 +153,7 @@ import { MatMenuModule } from '@angular/material/menu';
     /* Under 1100 px the panel goes below the table (the table needs about 610 px), as on the alarms page. The table row never gets
        less than its body's minimum (240 px) plus the table's header and frame, and the pane scrolls when both rows do not fit. */
     @media (max-width: 1100px) { .body.open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(300px, 1fr) minmax(240px, 45%); overflow-y: auto; } }
-    .table { display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; padding: var(--sp-2); }
+    .table { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
     .nm-cell { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
     .nm { min-width: 0; }
     .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

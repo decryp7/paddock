@@ -197,6 +197,9 @@ function readCollapsed(): Set<string> {
     /* The page fills the page area and only the table scrolls (pd-table height="fill"): page > dy-async > .layout > table each take what is left. */
     .page { display: flex; flex-direction: column; gap: var(--sp-3); height: 100%; min-height: 0; padding-bottom: var(--sp-4); }
     .page > * { flex: none; }
+    dy-reading-source { display: contents; }
+    /* The toolbar holds only the Columns button here (no filter, no count): as tall as the button, not 44 px. */
+    pd-table { --pd-toolbar-height: 28px; }
     .page > dy-async { flex: 1 1 0; }
     dy-async { display: flex; flex-direction: column; min-height: 0; gap: var(--sp-3); }
     .summary { margin: 0; display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; color: var(--text-2); font-size: var(--fs-sm); }
@@ -283,7 +286,7 @@ export class NetworkPage implements OnInit, OnDestroy {
     if (this.tab() === 'connections') {
       return [
         ...prog,
-        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(110px, 2fr)', sortable: false },
+        { key: 'remote', header: 'Remote', value: (r) => this.itemRemote(r), required: true, width: 'minmax(180px, 320px)', sortable: false },
         ...(this.store.resolveNames() ? [{ key: 'host', header: 'Host name', value: (r: Row) => (r.kind === 'item' ? (this.hostName(r.item as ConnectionRow) ?? '') : ''), width: 'minmax(90px, 2fr)', sortable: false }] : []),
         { key: 'service', header: 'Service', value: (r) => this.itemService(r), width: 'minmax(70px, 1fr)', sortable: false },
         { key: 'proto', header: 'Protocol', value: (r) => (r.kind === 'item' ? protoText((r.item as ConnectionRow).proto, (r.item as ConnectionRow).ipv6) : ''), width: '68px', sortable: false },

@@ -3,7 +3,7 @@ import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
 /**
  * Tables size to the window (pd-table `height="window"`): on a page that scrolls once, each table is as tall as its rows up to the
  * height of the visible page area, follows the window live, never needs more than the window, and leaves the wheel to the page at the
- * end of its rows. Three window sizes, one page of each kind: Firewall (one table per source), an Extras tab, Alarms.
+ * end of its rows. Three window sizes, one page of each kind: an Extras tab and Alarms (single-table pages: the table fills the window down to its least height, then the page scrolls once; Firewall, Network and the rest are in page-layout.spec.ts).
  * Everything waits on a condition, never on a fixed time (ER-12).
  */
 const SIZES = [
@@ -13,7 +13,6 @@ const SIZES = [
 ] as const;
 
 const PAGES = [
-  { name: 'Firewall', hash: '/firewall', grid: 'macOS Application Firewall rules' },
   { name: 'Extras: installed software', hash: '/extras?tab=inventory', grid: 'Installed software' },
   { name: 'Alarms', hash: '/alarms', grid: 'Open alarms' },
 ] as const;
@@ -87,10 +86,10 @@ for (const p of PAGES) {
   });
 }
 
-test('Firewall: at the edge of the table the wheel scrolls the page, not a second scrollbar', async ({ page }) => {
+test('Extras inventory: at the edge of the table the wheel scrolls the page, not a second scrollbar', async ({ page }) => {
   await page.setViewportSize(SIZES[0]);
-  await page.goto(url('/firewall'));
-  const grid = page.getByRole('grid', { name: 'macOS Application Firewall rules' });
+  await page.goto(url('/extras?tab=inventory'));
+  const grid = page.getByRole('grid', { name: 'Installed software' });
   await expect(grid).toBeVisible();
   await grid.scrollIntoViewIfNeeded();
   const area = page.locator('#pd-main');
