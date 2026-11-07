@@ -151,14 +151,19 @@ test.describe('contributions (plan S2)', () => {
 
 test.describe('jobs (plan S9)', () => {
   test('a job reports its phases in the status item and the list, and stops on Cancel', async ({ app, page, pageErrors }) => {
-    await page.goto('/');
+    // Ticks are fired by the test (`?jobs-step=manual`), so each phase is held for as long as the assertions need.
+    await page.goto('/?jobs-step=manual');
+    const tick = (n: number) => page.evaluate((count) => (window as unknown as { __sdJobsTick: (n: number) => void }).__sdJobsTick(count), n);
     const status = app.statusBar.jobs;
     await expect(status).toHaveText('Jobs');
     await page.getByRole('button', { name: 'Start sample job' }).click();
     // The item names the lead job; its phase is in the tooltip.
     // The lead's phase and value follow its name (rule 11).
-    await expect(status).toHaveText(/^1 running: Importing logs · (Finding files [\d,]+ so far|Reading \d+%)$/);
-    await expect(status).toHaveAttribute('title', /^Importing logs: (Finding files|Reading)$/);
+    await tick(1); // the first tick brings the first count
+    await expect(status).toHaveText(/^1 running: Importing logs · Finding files [\d,]+ so far$/);
+    await expect(status).toHaveAttribute('title', 'Importing logs: Finding files');
+    await tick(29);
+    await expect(status).toHaveText(/^1 running: Importing logs · Reading \d+%$/);
 
     await status.click();
     await expect(status).toHaveAttribute('aria-expanded', 'true');
@@ -169,6 +174,7 @@ test.describe('jobs (plan S9)', () => {
     await expect(job.getByRole('progressbar')).toHaveAttribute('aria-valuenow', /\d+/);
     await expect(job).toContainText('Reading');
     await job.getByRole('button', { name: 'Cancel' }).click();
+    await tick(1); // the engine honours the request on its next tick
     await expect(job).toContainText('Cancelled');
     await expect(job).toContainText('Stopped at your request.');
     await expect(status).toHaveText('Jobs');
@@ -181,18 +187,19 @@ test.describe('jobs (plan S9)', () => {
   });
 
   test('a job that finishes is announced; the step that cannot be stopped says so', async ({ app, page }) => {
-    await page.clock.install();
-    await page.goto('/');
+    // The demo engine runs on ticks the test fires (`?jobs-step=manual`, 100 ms of job time each), not on the wall clock.
+    await page.goto('/?jobs-step=manual');
     await page.getByRole('button', { name: 'Start sample job' }).click();
     await app.statusBar.jobs.click();
     const job = app.jobs.items;
-    // Finding files (2 s) and reading (5 s) pass; writing the index cannot be interrupted.
-    await page.clock.runFor(7_100);
+    const tick = (n: number) => page.evaluate((count) => (window as unknown as { __sdJobsTick: (n: number) => void }).__sdJobsTick(count), n);
+    // Finding files (2 s) and reading (5 s) pass; writing the index cannot be interrupted and is held until the test steps on.
+    await tick(70);
     await expect(job).toContainText('Writing the index');
     // Cancel works in every phase (rule 11): this step stops when it ends, and the card says so.
     await expect(job.getByRole('button', { name: 'Cancel' })).toBeEnabled();
     await expect(job).toContainText('Cancel takes effect when this step ends');
-    await page.clock.runFor(1_000);
+    await tick(10);
     await expect(job).toContainText('Done');
     await expect(app.notifications.toasts).toContainText('Importing logs: done');
   });
