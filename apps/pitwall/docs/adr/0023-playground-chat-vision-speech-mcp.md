@@ -405,7 +405,7 @@ the PoC.
 | 2a | `paddock-assistant`, the tool path: `ApprovalPolicy` port, optional wall limits, a tool set per turn, native tool calls; TypeScript regenerated; the workbench demo updated (its only other user) | shared | **2–3** | | yes |
 | 2b | `paddock-assistant`: message parts and the `ConversationStore` port | shared | 1.5–2.5 | 2a | |
 | 3a | Pitwall's `LlmProvider` over `ServerClient`; conversations kept for the session only | app | **1–1.5** | 1, 2a | yes |
-| 3b | The saved store (Decision 3), attachments on disk, limits, "Don't save this chat", Report-a-problem exclusion test, prompt-cache measurement | app | 1.5–2.5 | 2b, 3a | |
+| 3b | The saved store (Decision 3), attachments on disk, limits, "Don't save this chat", Report-a-problem exclusion test, prompt-cache measurement | app | 1.5–2.5 | 2b, 3a | Done on `pitwall/1.1-wp3b` except the prompt-cache measurement, **open**: it runs later with a downloaded test model on a test VM, never against the user's installed models or data (ER-14), and is recorded per rule 48 in `apps/pitwall/docs/performance.md` |
 | 4a | UI: Chat and Compare tabs, `<pd-assistant>` with tool-call cards, approval cards, phases and Stop; mock first | app + shared (`workbench/assistant`) | **2–3** | 2a | yes |
 | 4b | UI: attachments, mic, context meter, "Still working" on `paddock-jobs::patience`, layout at 900 to 1440, a11y, e2e, screenshots for review | app + shared | 2.5–4 | 4a, 2b; Debrief 2.6c for the quiet-spell note | |
 | 5 | Images: picker, paste, drop, decode, downscale to `max_image_pixels`, gating, fixtures; real-model test | app | 2–3 | 3b, 4b | |
