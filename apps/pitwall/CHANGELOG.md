@@ -9,8 +9,24 @@ Paddock family key (`9a20012beece5338`). **Install 1.1.0 once by hand** from the
 in-app updater of 1.0.x cannot see or verify it. Your settings, keys, models and history are kept. From 1.1.0 on, updates
 arrive in the app as usual.
 
+### Security
+
+- Windows: the Pitwall service, which runs as the system, is registered only for a Pitwall installed directly in Program
+  Files and protected from other accounts, and never for another copy. The installer shows why when it refuses, and what to do
+  (uninstall Pitwall, then install it again into Program Files).
+- Windows: the Pitwall service no longer writes `%ProgramData%\Pitwall\logs\service.log`. A standard user who made that
+  folder first could have had the system delete any file through it (1.0.x shipped this). The service writes to the
+  Application event log instead (Event Viewer, source Pitwall). Settings > Service shows why an install or Repair is
+  refused before Windows asks for permission, and a registration of another copy that is not safe to run as the system is removed.
+
 ### Added
 
+- Report a problem (Help menu, command palette): a diagnostics zip you review file by file and save where you choose;
+  nothing is sent. It holds the system facts, your settings, the recent logs of the app, the server and the command line,
+  the server's settings, which engines and model files are installed (names and sizes), and what the server and the
+  background service say about themselves. Chats, attachments, presets, keys and the model files themselves are never in
+  it, and keys that reach a log (`pw_…`, `pmk_…`) are replaced by `***`. The Logging settings page sets how much the app
+  logs.
 - Long operations are jobs: loading a model, a benchmark, the model update check, installing and removing the background
   service, Repair and the app update run in the background with phase-labelled progress (a growing count when the total is
   unknown), Cancel in every phase, "Stop waiting" when Cancel did not take effect, and no time limit in the window: a job

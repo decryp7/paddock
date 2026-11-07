@@ -1272,6 +1272,9 @@ export class MockBackend implements PitwallBackend {
         return;
       }
       let i = 0;
+      const cold = !this.loaded.some((m) => m.modelId === request.modelId);
+      if (cold) onEvent({ kind: 'phase', phase: { kind: 'loading', elapsedMs: 0 } });
+      onEvent({ kind: 'phase', phase: { kind: 'generating' } });
       const step = () => {
         if (stopped) return;
         if (i < limit) {
@@ -1279,7 +1282,7 @@ export class MockBackend implements PitwallBackend {
           timers.push(setTimeout(step, this.streamDelay));
         } else {
           const fast = request.modelId.includes('qwen3.5-4b');
-          onEvent({ kind: 'done', promptTokens: 18 + request.messages.reduce((s, m) => s + Math.ceil(m.content.length / 4), 0), completionTokens: Math.round(limit * 1.3), ttftMs: fast ? 96 : 214, genTps: fast ? 118.4 : 61.8, coldStartMs: this.loaded.some((m) => m.modelId === request.modelId) ? null : 2100 });
+          onEvent({ kind: 'done', finish: limit < words.length ? 'length' : 'stop', promptTokens: 18 + request.messages.reduce((s, m) => s + Math.ceil(m.content.length / 4), 0), completionTokens: Math.round(limit * 1.3), ttftMs: fast ? 96 : 214, genTps: fast ? 118.4 : 61.8, coldStartMs: this.loaded.some((m) => m.modelId === request.modelId) ? null : 2100 });
         }
       };
       timers.push(setTimeout(step, this.streamDelay ? this.streamDelay * 4 : 0));

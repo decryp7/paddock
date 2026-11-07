@@ -9,6 +9,7 @@ import {
 } from '@decryp7/paddock-ui/shell/about';
 import { MemoryNotificationCentre, MemoryServiceHealth, TauriNotificationsBackend, TauriServiceHealthBackend } from '@decryp7/paddock-ui/shell/notify';
 import { MemorySettingsBackend, SETTINGS_OVERVIEW_FIXTURE, TauriSettingsBackend, type SettingsBackend } from '@decryp7/paddock-ui/shell/settings';
+import { MemoryDiagnosticsBackend, TauriDiagnosticsBackend, type DiagnosticsBackend } from '@decryp7/paddock-ui/shell/diagnostics';
 import { tauriIpc } from './ipc';
 
 /**
@@ -97,4 +98,31 @@ function healthOf() {
 function centreOf() {
   const ipc = tauriIpc();
   return ipc ? new TauriNotificationsBackend(ipc) : inject(BrowserEngines).centre;
+}
+
+let diagnostics: DiagnosticsBackend | null = null;
+
+/**
+ * Report a problem over Tauri in the app; in the browser one in-memory engine per page, holding the files a real report holds for
+ * Pitwall: the system facts, the shell's settings, the dated logs of the app, the server and the command line (read from disk, so
+ * they are there with the server down) and Pitwall's own files (`src-tauri/src/report.rs`). Chats and attachments are never in it.
+ */
+export function diagnosticsBackend(): DiagnosticsBackend {
+  const ipc = tauriIpc();
+  if (ipc) return new TauriDiagnosticsBackend(ipc);
+  diagnostics ??= new MemoryDiagnosticsBackend({
+    save: 'save',
+    files: [
+      { name: 'system-info.json', kind: 'system-info', bytes: 412, summary: 'Pitwall, your operating system and processor type, no hardware serial numbers' },
+      { name: 'settings.json', kind: 'settings', bytes: 380, summary: 'Your settings; passwords, tokens and keys are replaced by ***' },
+      { name: 'logs/pitwall.2026-11-08.log', kind: 'log', bytes: 96_400, summary: '640 log lines, the recent part of pitwall.2026-11-08.log; file contents are never logged' },
+      { name: 'logs/pitwall-server.2026-11-08.log', kind: 'log', bytes: 182_400, summary: '1,204 log lines, the recent part of pitwall-server.2026-11-08.log; file contents are never logged' },
+      { name: 'logs/pitwall-cli.2026-11-08.log', kind: 'log', bytes: 2_100, summary: '14 log lines, all of pitwall-cli.2026-11-08.log; file contents are never logged' },
+      { name: 'pitwall/settings.toml', kind: 'app', bytes: 640, summary: "The server's settings; passwords, tokens and keys are replaced by ***" },
+      { name: 'pitwall/inventory.json', kind: 'app', bytes: 1_800, summary: 'The engines and model files installed, by name and size (their contents are not in the report)' },
+      { name: 'pitwall/server.json', kind: 'app', bytes: 2_400, summary: 'What the Pitwall server says about itself now' },
+      { name: 'pitwall/service.json', kind: 'app', bytes: 300, summary: 'How the background service is registered and whether it answers' },
+    ],
+  });
+  return diagnostics;
 }

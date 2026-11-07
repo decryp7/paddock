@@ -302,15 +302,22 @@ fn install_with<R: Runtime>(b: UpdatesBuilder, app: &tauri::AppHandle<R>, _key: 
                 Arc::new(per_machine::SetupFacts),
             )
         });
-    let b = match handoff {
-        Ok(h) => b.installer(Arc::new(h)),
-        Err(why) => {
-            logging::info(&format!("updates cannot be installed from this copy: {why}"));
-            b
-        }
-    };
+    let b = adopt_handoff(b, handoff.map(|h| Arc::new(h) as Arc<dyn paddock_updater::Installer>));
     b.install_scope(InstallScope::PerMachine, dir, Some(per_machine::administrator()))
         .installer_lock(Arc::new(per_machine::SetupLock::new(&app.config().identifier)))
+}
+
+/// The updater with the per-machine hand-off when there is one; a copy without it (no install folder, or one outside Program
+/// Files) only notifies: it says so with `no_install`, which the updater requires of a builder without an installer.
+#[cfg(any(windows, test))]
+fn adopt_handoff(b: UpdatesBuilder, handoff: Result<Arc<dyn paddock_updater::Installer>, String>) -> UpdatesBuilder {
+    match handoff {
+        Ok(h) => b.installer(h),
+        Err(why) => {
+            logging::info(&format!("updates cannot be installed from this copy, they are only offered: {why}"));
+            b.no_install()
+        }
+    }
 }
 
 #[cfg(not(windows))]
@@ -715,6 +722,24 @@ mod diagnostics_tests {
 #[cfg(test)]
 mod updater_tests {
     use super::*;
+
+    /// Regression (review of the Pitwall 1.1 merge, P1-1): a Windows copy that cannot hand updates to the elevated installer
+    /// (no install folder, or not under Program Files) must still say how it installs, or the updater refuses the builder
+    /// (`InstallError::InstallerUndeclared`) and the shell cannot start. It declares that it only notifies.
+    #[test]
+    fn a_copy_without_the_hand_off_only_notifies_and_still_starts() {
+        let refused = adopt_handoff(UpdatesBuilder::new(APP_NAME), Err("not under Program Files".into()));
+        assert!(refused.declares_install(), "the builder says how it installs");
+        assert!(!refused.has_installer(), "nothing installs from this copy");
+        struct Never;
+        impl paddock_updater::Installer for Never {
+            fn install(&self, _: &paddock_updater::Package<'_>, _: bool) -> Result<(), paddock_updater::UpdateError> {
+                unreachable!("not installed in this test")
+            }
+        }
+        let handed = adopt_handoff(UpdatesBuilder::new(APP_NAME), Ok(Arc::new(Never)));
+        assert!(handed.declares_install() && handed.has_installer());
+    }
 
     /// About lists the third-party notices first and they name what Dyno ships: Rust crates of the app, npm packages of the UI and
     /// the licence text each is under (the attribution Apache-2.0 and MIT require).

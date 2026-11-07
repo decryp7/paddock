@@ -11,7 +11,7 @@ import { MockBackend } from '../core/mock-backend';
 import { PITWALL_APP_QUIT, QuitFlow } from '../features/quit/quit-flow';
 import { APP_COMMANDS } from '../generated/app-commands';
 import { DIALOG_BASE } from '../generated/dialog-contracts';
-import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIALOGS } from './contributions';
+import { ABOUT_CONTRIBUTIONS, CONTRIBUTIONS, DIAGNOSTICS_CONTRIBUTIONS, DIALOGS } from './contributions';
 import { pitwallContext } from './context';
 import { DIALOG_BASE_COMMANDS } from './dialog-base';
 import { NAV } from './nav';
@@ -143,7 +143,7 @@ describe('Pitwall dialogs', () => {
 
 describe('Pitwall manifest', () => {
   it('keeps paddock-manifest.json equal to the main window’s contributions', async () => {
-    configure([CONTRIBUTIONS, QUIT_CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never);
+    configure([CONTRIBUTIONS, QUIT_CONTRIBUTIONS, ABOUT_CONTRIBUTIONS, DIAGNOSTICS_CONTRIBUTIONS, SETTINGS_CONTRIBUTIONS] as never);
     const manifest = buildManifest(TestBed.inject(ContributionRegistry));
     expect([...manifest.healthServices]).toEqual([]);
     const fs = await nodeFs();

@@ -3796,6 +3796,7 @@ dependencies = [
 name = "pitwall-app"
 version = "1.1.0"
 dependencies = [
+ "chrono",
  "getrandom 0.3.4",
  "keyring",
  "objc2",
@@ -3803,8 +3804,11 @@ dependencies = [
  "objc2-service-management",
  "paddock-build",
  "paddock-commands",
+ "paddock-diag",
  "paddock-dialogs",
+ "paddock-env",
  "paddock-jobs",
+ "paddock-log",
  "paddock-menu",
  "paddock-proc",
  "paddock-service",
@@ -3836,6 +3840,9 @@ name = "pitwall-cli"
 version = "1.1.0"
 dependencies = [
  "keyring",
+ "log",
+ "paddock-env",
+ "paddock-log",
  "paddock-testkit",
  "pitwall-core",
  "pitwall-loopback",
@@ -3889,6 +3896,8 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "log",
+ "paddock-env",
+ "paddock-log",
  "paddock-proc",
  "paddock-service",
  "pitwall-core",

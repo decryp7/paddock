@@ -15,6 +15,7 @@ pub mod fake_engine;
 pub mod http;
 pub mod leftovers;
 pub mod library;
+pub mod logging;
 pub mod mgmt;
 pub mod ops;
 pub mod os_signals;

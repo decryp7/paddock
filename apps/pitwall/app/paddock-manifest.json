@@ -10,6 +10,10 @@
       "title": "pd.app.quit"
     },
     {
+      "id": "pd.diagnostics.report",
+      "title": "pd.diag.open"
+    },
+    {
       "id": "pd.settings.open",
       "title": "pd.settings.open"
     },
@@ -94,6 +98,13 @@
       "group": "about",
       "order": 300,
       "accelerator": null
+    },
+    {
+      "menu": "help",
+      "command": "pd.diagnostics.report",
+      "group": "support",
+      "order": 400,
+      "accelerator": null
     }
   ],
   "pages": [
@@ -111,11 +122,13 @@
   ],
   "settingsPages": [
     "pd.appearance",
+    "pd.logging",
     "pw.general",
     "pw.tray"
   ],
   "settingsForms": [
-    "pd.appearance"
+    "pd.appearance",
+    "pd.logging"
   ],
   "dialogs": {
     "pd.about": {
@@ -139,6 +152,20 @@
       "width": 400,
       "height": null,
       "commands": []
+    },
+    "pd.report-problem": {
+      "kind": "form",
+      "modality": "modeless",
+      "instanced": false,
+      "requiredChoice": false,
+      "width": 720,
+      "height": null,
+      "commands": [
+        "diagnostics_cancel",
+        "diagnostics_preview",
+        "diagnostics_save",
+        "log_from_webview"
+      ]
     },
     "pd.settings": {
       "kind": "tool",
@@ -256,7 +283,10 @@
     "pd.category.app": "Application",
     "pd.category.help": "Help",
     "pd.confirm.title": "Confirm",
+    "pd.diag.open": "Report a problem…",
+    "pd.diag.title": "Report a problem",
     "pd.settings.appearance": "Appearance",
+    "pd.settings.logging": "Logging",
     "pd.settings.open": "Settings…",
     "pd.settings.title": "Settings",
     "pd.updates.notification.available": "Update available",

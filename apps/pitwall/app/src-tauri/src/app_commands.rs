@@ -20,7 +20,7 @@ fn internal(m: impl Into<String>) -> CommandError {
     CommandError::new(ErrorCode::Internal, m)
 }
 
-async fn compose_state(client: &SharedClient) -> ServiceInstall {
+pub(crate) async fn compose_state(client: &SharedClient) -> ServiceInstall {
     let os = {
         let client = client.clone();
         // The shared manager asks launchd and the server: blocking calls, off the runtime's threads.
@@ -683,6 +683,9 @@ mod tests {
             step,
         );
         at_step_rx.recv().await.unwrap();
+        // The repair thread holds the paused clock still (tokio does not auto-advance while a blocking task runs), so the job's
+        // next poll of the step does not come by itself: advance the clock by one poll interval instead of waiting for it.
+        tokio::time::advance(STEP_POLL).await;
         events
             .until("the step shows as a phase", |e| {
                 phases(e).contains(&"Removing the old registration")
@@ -695,6 +698,52 @@ mod tests {
             "{:?}",
             events.all()
         );
+    }
+
+    /// The first poll of the step comes before the repair reaches its first step (the field order, and the usual one on a busy
+    /// machine). The label must still reach the job once the repair has a step: the poll repeats on the job's own ticker.
+    #[tokio::test(start_paused = true)]
+    async fn a_step_reached_after_the_first_poll_still_shows_as_a_phase() {
+        let jobs = jobs();
+        let step = Arc::new(Mutex::new(None::<String>));
+        let (polled_tx, mut polled_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
+        let (at_step, mut at_step_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel::<()>();
+        let (sink, events) = collector();
+        let (shared, read) = (step.clone(), step);
+        jobs::start(&jobs, spec("repair-service", "t", "p"), sink, move |ctx| {
+            repair_job(
+                ctx,
+                Box::new(move |_: &AtomicBool| {
+                    // Held until the job has polled the step once, so the poll comes first.
+                    go_rx.recv().unwrap();
+                    *shared.lock().unwrap() = Some("Removing the old registration".to_string());
+                    at_step.send(()).unwrap();
+                    finish_rx.recv().unwrap();
+                    Ok(RepairOutcome::Recovered)
+                }),
+                Arc::new(move || {
+                    let _ = polled_tx.send(());
+                    read.lock().unwrap().clone()
+                }),
+                // The end state is the test's own (ER-14), as in `start_repair`.
+                || async { Ok(serde_json::json!({ "installed": true })) },
+            )
+        });
+        polled_rx.recv().await.unwrap();
+        go_tx.send(()).unwrap();
+        at_step_rx.recv().await.unwrap();
+        // The repair thread holds the paused clock still (tokio does not auto-advance while a blocking task runs), so the job's
+        // next poll of the step does not come by itself: advance the clock by one poll interval instead of waiting for it.
+        tokio::time::advance(STEP_POLL).await;
+        events
+            .until("the step shows as a phase", |e| {
+                phases(e).contains(&"Removing the old registration")
+            })
+            .await;
+        finish_tx.send(()).unwrap();
+        events.until_terminal().await;
     }
 
     #[tokio::test(start_paused = true)]

@@ -27,6 +27,10 @@ pub const MAX_TEXT: usize = 1024;
 pub const MAX_CHAT_MESSAGES: usize = 512;
 /// See [`MAX_CHAT_MESSAGES`].
 pub const MAX_CHAT_BYTES: usize = 8 * 1024 * 1024;
+/// Most tools one chat request offers, and most bytes of their definitions together (names, descriptions, schemas).
+pub const MAX_CHAT_TOOLS: usize = 64;
+/// See [`MAX_CHAT_TOOLS`].
+pub const MAX_CHAT_TOOL_BYTES: usize = 256 * 1024;
 
 /// How long a method may take before the app answers for the server. Short for reads; longer for single calls of the server's own work
 /// (long operations are jobs and have no deadline, ADR 0024); the UI shows an inline error with Retry when one fires.
@@ -127,8 +131,24 @@ impl Validate for PlaygroundRequest {
         if self.messages.len() > MAX_CHAT_MESSAGES {
             return Err(bad(field, "too many messages"));
         }
-        if self.messages.iter().map(|m| m.content.len()).sum::<usize>() > MAX_CHAT_BYTES {
+        let call_bytes =
+            |m: &pitwall_core::mgmt::PlaygroundMessage| m.tool_calls.iter().map(|c| c.arguments.len() + c.name.len()).sum::<usize>();
+        if self.messages.iter().map(|m| m.content.len() + call_bytes(m)).sum::<usize>() > MAX_CHAT_BYTES {
             return Err(bad(field, "the conversation is too large"));
+        }
+        if self.tools.len() > MAX_CHAT_TOOLS {
+            return Err(bad(field, "too many tools"));
+        }
+        let tool_bytes: usize = self
+            .tools
+            .iter()
+            .map(|t| t.name.len() + t.description.len() + t.parameters.to_string().len())
+            .sum();
+        if tool_bytes > MAX_CHAT_TOOL_BYTES {
+            return Err(bad(field, "the tool definitions are too large"));
+        }
+        if self.tools.iter().any(|t| t.name.is_empty() || t.name.len() > MAX_TEXT) {
+            return Err(bad(field, "a tool needs a name of 1 to 1024 characters"));
         }
         if !(0.0..=4.0).contains(&self.temperature) || self.max_tokens == 0 || self.max_tokens > 1_000_000 {
             return Err(bad(field, "temperature must be 0 to 4 and max tokens 1 to 1000000"));
@@ -445,12 +465,11 @@ mod tests {
     fn request() -> PlaygroundRequest {
         PlaygroundRequest {
             model_id: "m".into(),
-            messages: vec![PlaygroundMessage {
-                role: pitwall_core::chat::Role::User,
-                content: "hi".into(),
-            }],
+            messages: vec![PlaygroundMessage::text(pitwall_core::chat::Role::User, "hi")],
             temperature: 0.7,
             max_tokens: 256,
+            tools: vec![],
+            tool_choice: Default::default(),
         }
     }
 
@@ -486,6 +505,27 @@ mod tests {
         let mut r = request();
         r.model_id = "m".repeat(MAX_TEXT + 1);
         assert!(r.validate("r").is_err());
+        let tool = |name: &str, description: String| pitwall_core::mgmt::PlaygroundTool {
+            name: name.into(),
+            description,
+            parameters: json!({"type": "object"}),
+        };
+        let mut r = request();
+        r.tools = vec![tool("cpu_memory", "d".into())];
+        assert!(r.validate("r").is_ok());
+        r.tools = (0..=MAX_CHAT_TOOLS).map(|i| tool(&format!("t{i}"), "d".into())).collect();
+        assert!(r.validate("r").is_err(), "too many tools");
+        r.tools = vec![tool("big", "x".repeat(MAX_CHAT_TOOL_BYTES + 1))];
+        assert!(r.validate("r").is_err(), "definitions too large");
+        r.tools = vec![tool("", "d".into())];
+        assert!(r.validate("r").is_err(), "a tool without a name");
+        let mut r = request();
+        r.messages[0].tool_calls = vec![pitwall_core::mgmt::PlaygroundToolCall {
+            id: "c".into(),
+            name: "n".into(),
+            arguments: "x".repeat(MAX_CHAT_BYTES),
+        }];
+        assert!(r.validate("r").is_err(), "tool call arguments count toward the size");
         assert!(AppPermissions::default().validate("p").is_ok());
         assert!(pitwall_core::cache::ClearRequest::All.validate("scope").is_ok());
         assert!(pitwall_core::cache::ClearRequest::App { app_id: "debrief".into() }
