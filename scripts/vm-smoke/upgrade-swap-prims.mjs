@@ -50,23 +50,31 @@ export function macSwapPrimitives({ guest, gui, check, share, bundle, beforeDmg 
     /** App chip + log line, helper card (Update available) and "Update the helper" with one prompt, then Quit and reopen leaves nothing from before the install. */
     async extraChecks({ boundaryMs }) {
       const out = [];
+      let helperSame = false;
       // Why each agent started or stopped: the agent and app log lines about starts, exits, evictions and builds since the install began (evidence for a restart-loop question).
       const why = (await exec(`cat "$HOME/Library/Logs/Dyno/"dyno*.log 2>/dev/null | grep -i -E "agent (starting|exit|stopp)|asked to exit|another build|evict|Dyno [0-9.]+ starting|program files changed|replacing|swap" | tail -n 30 | cut -c1-260`)).stdout.trim();
       out.push(chk(true, `agent/app log lines about starts, exits and builds (last 30): ${why.replace(/\n/g, ' || ') || '(none)'}`));
       await gui.ensureMainWindow().catch(() => {});
-      const chip = await gui.waitFor(async () => (await gui.texts()).some((t) => /Dyno was updated\. Restart Dyno to finish/.test(t.text)), 60_000);
+      const chip = await gui.waitFor(async () => (await gui.texts()).some((t) => /Dyno was updated\. Restart Dyno to finish|updated: restart to finish/i.test(t.text)), 60_000);
       const chipShot = await keepShot(gui, 'swap-chip');
       const seenTexts = async (re) => (await gui.texts()).map((t) => t.text).filter((t) => re.test(t)).slice(0, 12).join(' | ') || '(none)';
       out.push(chip.ok ? chk(true, `the chip "Dyno was updated. Restart Dyno to finish." is shown (the old app still runs); screenshot ${chipShot}`) : chk(false, `the chip "Dyno was updated. Restart Dyno to finish." is not shown 60 s after the install (screenshot ${chipShot}); texts about it: ${await seenTexts(/restart|updated|finish/i)}`));
       const log = (await exec(`cat "$HOME/Library/Logs/Dyno/"dyno*.log 2>/dev/null | grep -c "program files changed while it ran"`)).stdout.trim().split('\n').at(-1);
       out.push(chk(Number(log) > 0, Number(log) > 0 ? `the log line "Dyno's program files changed while it ran" is there (${log} time(s))` : 'the log line "Dyno\'s program files changed while it ran" is missing'));
       // The helper: another build of the same version reads "Update available"; "Update the helper" asks for the password once; then the installed helper is the bundled one.
+      // Is the helper another build at all? The two files are compared first: a build that leaves the helper byte-identical must NOT make the card read "Update available".
+      const hashes = (await exec(`a=$(shasum -a 256 ${sq(helperFile)} 2>/dev/null | cut -c1-64); b=$(shasum -a 256 ${sq(bin('dyno-helper'))} | cut -c1-64); echo "$a $b"`)).stdout.trim().split('\n').at(-1).split(' ');
+      helperSame = Boolean(hashes[0]) && hashes[0] === hashes[1];
+      out.push(chk(true, `installed helper ${hashes[0].slice(0, 12) || 'absent'} vs bundled ${String(hashes[1]).slice(0, 12)}: ${helperSame ? 'the same file, so no helper update is expected' : 'another build, so "Update available" is expected'}`));
       const nav = await gui.openSettingsSection('^Dyno$');
-      const outdated = await gui.waitFor(async () => (await gui.texts()).some((t) => /Update available|Outdated|another build/i.test(t.text)), 30_000);
-      out.push(outdated.ok ? chk(true, 'the helper card reads "Update available" (the helper is another build)') : chk(false, `the helper card does not read "Update available" (${nav.ok ? 'Settings opened' : nav.detail}); helper card texts: ${await seenTexts(/helper|administrator|outdated|update|build/i)}`));
+      const outdated = await gui.waitFor(async () => (await gui.texts()).some((t) => /Update available|Outdated|another build/i.test(t.text)), helperSame ? 8_000 : 30_000);
+      if (helperSame) {
+        const bad = outdated.ok;
+        out.push(chk(!bad, bad ? 'the card reads "Update available" although the helper file is byte-identical to the bundled one' : 'the card does not read "Update available" (the helper is the bundled build)'));
+      } else out.push(outdated.ok ? chk(true, 'the helper card reads "Update available" (the helper is another build)') : chk(false, `the helper card does not read "Update available" (${nav.ok ? 'Settings opened' : nav.detail}); helper card texts: ${await seenTexts(/helper|administrator|outdated|update|build/i)}`));
       const cardShot = await keepShot(gui, 'swap-helper-card');
       out.push(chk(true, `screenshot of Settings with the helper card (before the update): ${cardShot}`));
-      if (outdated.ok) {
+      if (!helperSame && outdated.ok) {
         const pressed = await gui.press(gui.app, '^Update the helper$');
         out.push(chk(pressed, pressed ? '"Update the helper" pressed' : 'no "Update the helper" button on the card'));
         if (pressed) {
@@ -86,7 +94,7 @@ export function macSwapPrimitives({ guest, gui, check, share, bundle, beforeDmg 
       for (let i = 0; i < 30; i++) { if ((await exec(`${bin('dyno-agent')} status >/dev/null 2>&1`)).code === 0) break; await guest.sleep(4000); }
       await guest.sleep(5000);
       const now = await guestNowMs(exec);
-      const old = [...(await agentProcs(exec, now)), ...(await helperProcs(now))].filter((x) => x.startMs < boundaryMs);
+      const old = [...(await agentProcs(exec, now)), ...(helperSame ? [] : await helperProcs(now))].filter((x) => x.startMs < boundaryMs);
       const appOld = (await exec(`ps -axo pid=,etime=,command= | grep '${bundle}/Contents/MacOS/dyno-app' | grep -v grep`)).stdout.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => { const [pid, etime] = l.split(/\s+/); return { pid: Number(pid), startMs: now - etimeSeconds(etime) * 1000 }; }).filter((x) => x.startMs < boundaryMs);
       const all = [...old, ...appOld];
       out.push(chk(all.length === 0, all.length ? `after Quit and reopen ${all.length} process(es) from before the install remain: ${all.map((x) => x.pid).join(', ')}` : 'after Quit and reopen no process from before the install remains'));
