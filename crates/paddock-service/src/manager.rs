@@ -774,20 +774,11 @@ impl Manager {
                 "Nothing was changed, because the service state cannot be saved: {e}"
             )));
         }
-        let unregistered = self.backend.unregister();
-        if let Err(e) = self.backend.evict() {
-            log::info!(error:% = e; "removing the service's job did not succeed");
-        }
-        let mut polled = Duration::ZERO;
-        while !self.backend.job_gone()
-            && polled.max(since(self.clock.as_ref())) < self.timings.gone_wait
-        {
-            self.backend.pause(self.timings.gone_poll);
-            polled += self.timings.gone_poll;
-        }
-        if let Err(e) = unregistered
-            && self.backend.inspect().present()
-        {
+        let clock = self.clock.clone();
+        let removed = crate::elevated::remove(self.backend.as_mut(), &self.timings, &|| {
+            since(clock.as_ref())
+        });
+        if let Err(e) = removed {
             // Not removed (declined, failed): back to what it was, so the next start does not finish a removal that never was.
             if let Err(w) = self.write_state(before) {
                 log::warn!(error:% = w; "the state before the removal could not be restored");

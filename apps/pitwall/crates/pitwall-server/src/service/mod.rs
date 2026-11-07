@@ -20,9 +20,8 @@ pub mod watch;
 mod windows;
 
 use crate::paths::Dirs;
-use paddock_service::backend::Side;
-use paddock_service::{Manager, ServiceError, Timings, Verb};
-use pitwall_service::{spec, LABEL, NAME, SUPERVISED_ENV};
+use paddock_service::{Backend, Manager, ServiceError, Timings, Verb};
+use pitwall_service::{spec, SUPERVISED_ENV};
 use placement::{Install, Plan, Refusal};
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -95,16 +94,18 @@ pub trait Registered {
 }
 
 /// `pitwall-server install` on Windows, after [`placement::plan_install`] decided over this program and what the service
-/// manager holds: a refusal changes nothing and says what to do; otherwise the shared manager registers this program
-/// (replacing an unsafe registration of another copy, or repairing this program's own), and the registration is read back:
-/// one that does not start the checked program is deleted again. `log` is the service's OS log (Event Viewer).
+/// manager holds: a refusal changes nothing and says what to do; otherwise the shared elevated step registers this program over
+/// the Service Control Manager backend `b` (replacing an unsafe registration of another copy, or repairing this program's own;
+/// the backend reads the registration back before it starts it), and the registration is read back once more through `reg`:
+/// one that does not start the checked program is deleted. No manager, no record and no data folder: the elevated process
+/// touches no folder the user controls ([`paddock_service::elevated`]). `log` is the service's OS log (Event Viewer).
 ///
 /// # Errors
 /// The words for the user.
 pub fn install_planned(
     plan: Result<Install, Refusal>,
     program: &str,
-    m: &mut Manager,
+    b: &mut dyn Backend,
     reg: &mut dyn Registered,
     log: &mut dyn FnMut(&str),
 ) -> Result<String, String> {
@@ -128,7 +129,7 @@ pub fn install_planned(
             }
         }
     }
-    let installed = m.install(&AtomicBool::new(false));
+    let installed = paddock_service::elevated::install(b, &Timings::default(), &mut |step| log(&format!("install: {step}")));
     let held = reg.held();
     let mismatched = held.as_deref().is_some_and(|h| !placement::same_path(h, program));
     if installed.is_ok() || mismatched {
@@ -141,21 +142,51 @@ pub fn install_planned(
             removed
         })?;
     }
-    installed
-        .map(|_| "Pitwall's service is installed and started".to_string())
-        .map_err(|e| e.to_string())
+    installed.map(|_| "Pitwall's service is installed and started".to_string())
 }
 
-/// The shared manager over this OS's backend, for the program side. `install` does not wait for the service to answer (the
-/// installer and the elevated child must return).
+/// `uninstall` and `status` on Windows, over the Service Control Manager backend alone (no manager and no record: the elevated
+/// step touches no folder the user controls). The other verbs are not this function's.
+///
+/// # Errors
+/// Why the verb failed, in words for the user.
+pub fn scm_verb(verb: Verb, b: &mut dyn Backend) -> Result<String, String> {
+    match verb {
+        Verb::Uninstall => {
+            paddock_service::elevated::uninstall(b, &Timings::default()).map(|()| "Pitwall's service is removed".to_string())
+        }
+        Verb::Status => {
+            let look = b.inspect();
+            Ok(match (look.present(), look.job) {
+                (false, _) => "not installed (run `pitwall-server install`)".to_string(),
+                (true, paddock_service::Job::Running) => "installed; the server runs".to_string(),
+                (true, job) => format!("installed; not running ({})", job.describe()),
+            })
+        }
+        other => Err(format!("{} is not a Service Control Manager verb here", other.word())),
+    }
+}
+
+/// The shared manager over this OS's backend, for the program side (Linux: the systemd user unit; on Windows the verbs run
+/// elevated and use no manager). `install` does not wait for the service to answer.
+#[cfg(not(windows))]
 fn manager(program: &Path, data: &Path) -> Result<Manager, ServiceError> {
-    let backend = paddock_service::native::host_backend(&spec(), program, Side::Program, data)?;
+    let backend = paddock_service::native::host_backend(&spec(), program, paddock_service::backend::Side::Program, data)?;
     Ok(manager_over(backend, data))
 }
 
 /// [`manager`] over a backend (the tests pass a fake one).
+#[cfg(any(not(windows), test))]
 fn manager_over(backend: Box<dyn paddock_service::Backend>, data: &Path) -> Manager {
-    Manager::new(NAME, backend, data, LABEL, env!("CARGO_PKG_VERSION"), || false).with_timings(Timings::default().without_start_wait())
+    Manager::new(
+        pitwall_service::NAME,
+        backend,
+        data,
+        pitwall_service::LABEL,
+        env!("CARGO_PKG_VERSION"),
+        || false,
+    )
+    .with_timings(Timings::default().without_start_wait())
 }
 
 /// What a verb prints, or why it failed. Pure over the manager.
@@ -215,13 +246,22 @@ fn run_verb(verb: Verb, args: &[String]) -> i32 {
             "on macOS the Pitwall app registers the launch agent (Settings, Service); this program has nothing to install".to_string(),
         ));
     }
+    registration_verb(verb, args, &program)
+}
+
+/// Windows: the verbs run elevated (the installer, Windows' prompt) and take no folder from the user or the environment, so
+/// there is no manager and no `--data-dir` here.
+#[cfg(windows)]
+fn registration_verb(verb: Verb, _args: &[String], program: &Path) -> i32 {
+    report(windows::run_verb(verb, program))
+}
+
+/// Linux: the manager over the systemd user unit, with its record in the user's data folder.
+#[cfg(not(windows))]
+fn registration_verb(verb: Verb, args: &[String], program: &Path) -> i32 {
     let data = data_dir_arg(args).map_or_else(Dirs::for_user, Dirs::at);
-    #[cfg(windows)]
-    if verb == Verb::Install {
-        return report(windows::install(&program, &data.root));
-    }
-    match manager(&program, &data.root) {
-        Ok(mut m) => report(run_with(verb, &mut m, &program)),
+    match manager(program, &data.root) {
+        Ok(mut m) => report(run_with(verb, &mut m, program)),
         Err(e) => report(Err(e.to_string())),
     }
 }
@@ -366,14 +406,16 @@ mod tests {
         }
     }
 
-    fn over_fake_scm(dir: &Path) -> (Manager, FakeSystem) {
+    /// The Service Control Manager backend over a fake one that remembers what `sc create` wrote (no manager, no record).
+    fn over_fake_scm() -> (paddock_service::backend::WindowsService, FakeSystem) {
         let sys = FakeSystem::new();
+        sys.emulate_scm();
         let backend = paddock_service::backend::WindowsService::new(
             pitwall_service::spec_of(true),
             paddock_service::backend::Target::exe(EXE),
             Box::new(sys.clone()),
         );
-        (manager_over(Box::new(backend), dir), sys)
+        (backend, sys)
     }
 
     /// B6 merged into B1b: the shared manager replaces whatever is registered, so the Program Files plan must come first. A
@@ -396,8 +438,7 @@ mod tests {
             },
         ];
         for refusal in refusals {
-            let dir = tempfile::tempdir().unwrap();
-            let (mut m, sys) = over_fake_scm(dir.path());
+            let (mut m, sys) = over_fake_scm();
             let mut reg = holding(None);
             let mut lines = vec![];
             let said = install_planned(Err(refusal.clone()), EXE, &mut m, &mut reg, &mut |l| lines.push(l.to_string()));
@@ -418,8 +459,7 @@ mod tests {
                 old: "D:\\x\\pitwall-server.exe".into(),
             },
         ] {
-            let dir = tempfile::tempdir().unwrap();
-            let (mut m, sys) = over_fake_scm(dir.path());
+            let (mut m, sys) = over_fake_scm();
             let mut reg = holding(Some(EXE));
             let mut lines = vec![];
             let _ = install_planned(planned(plan.clone()), EXE, &mut m, &mut reg, &mut |l| lines.push(l.to_string()));
@@ -432,8 +472,7 @@ mod tests {
         }
         // This very program registered already: repaired in place, and check-install does not refuse it.
         assert!(check_verdict(Err(Refusal::AlreadyInstalled)).is_ok());
-        let dir = tempfile::tempdir().unwrap();
-        let (mut m, sys) = over_fake_scm(dir.path());
+        let (mut m, sys) = over_fake_scm();
         let _ = install_planned(Err(Refusal::AlreadyInstalled), EXE, &mut m, &mut holding(Some(EXE)), &mut |_| {});
         assert!(!sys.commands().is_empty(), "the manager looks at the registration");
     }
@@ -443,8 +482,7 @@ mod tests {
     #[test]
     fn a_registration_read_back_as_another_program_is_removed() {
         for remove in [Ok(()), Err("access denied".to_string())] {
-            let dir = tempfile::tempdir().unwrap();
-            let (mut m, _) = over_fake_scm(dir.path());
+            let (mut m, _) = over_fake_scm();
             let mut reg = FakeRegistered {
                 held: Some("D:\\Elsewhere\\pitwall-server.exe".into()),
                 remove: remove.clone(),
@@ -459,6 +497,31 @@ mod tests {
             }
             assert!(lines.iter().any(|l| l.contains("removing it")), "{lines:?}");
         }
+    }
+
+    /// `status` and `uninstall` on Windows need no manager: they ask and change the Service Control Manager alone.
+    #[test]
+    fn status_and_uninstall_on_windows_are_service_manager_calls_only() {
+        let (mut b, sys) = over_fake_scm();
+        sys.answer("sc query", paddock_service::Output::code(1060));
+        assert_eq!(
+            scm_verb(Verb::Status, &mut b).unwrap(),
+            "not installed (run `pitwall-server install`)"
+        );
+        sys.answer("sc query", paddock_service::Output::ok("STATE : 4  RUNNING\r\n"));
+        sys.answer(
+            "sc qc",
+            paddock_service::Output::ok(&format!("BINARY_PATH_NAME : \"{EXE}\" --service\r\n")),
+        );
+        assert_eq!(scm_verb(Verb::Status, &mut b).unwrap(), "installed; the server runs");
+        sys.answer("sc query", paddock_service::Output::code(1060));
+        assert!(scm_verb(Verb::Uninstall, &mut b).unwrap().contains("removed"));
+        assert!(sys.commands().iter().any(|c| c == "sc delete Pitwall"), "{:?}", sys.commands());
+        assert!(scm_verb(Verb::PrintUnit, &mut b).is_err());
+        assert!(sys.calls().iter().all(|c| !matches!(
+            c,
+            paddock_service::testing::Call::Write(..) | paddock_service::testing::Call::Remove(_)
+        )));
     }
 
     /// The plan's ImagePath is the one the shared manager registers (one command-line writer, ADR 0054 §1.1).
@@ -521,5 +584,102 @@ mod tests {
         );
         assert!(parts[0].1.contains("native::host_program"), "the service runs on the shared host");
         assert!(parts[4].1.contains("os_log.write"), "the shared host writes to the OS log");
+    }
+
+    /// Review of the B1b/B6 merge (P1 for Pitwall): the elevated `install` and `uninstall` (the installer, Windows' prompt) ran
+    /// the whole shared manager, which writes its record into the data folder (`%APPDATA%\Pitwall`, `PITWALL_HOME`,
+    /// `--data-dir`: folders the user controls), and chose its backend from the environment. The elevated path is now Pitwall's
+    /// `windows.rs`, `install_planned` and `scm_verb` here, paddock-service's `elevated` step, the Service Control Manager
+    /// backend, the replace it runs, and the real system's `run`. None of it reads or writes a file or reads the environment;
+    /// the backend's one look at the disk is `is_program`, a size check of the registered program (no open, no write).
+    #[test]
+    fn the_elevated_registration_touches_no_folder_the_user_controls() {
+        fn code_of(text: &str) -> String {
+            text.lines()
+                .map(|l| l.split("//").next().unwrap_or(""))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+        fn between<'a>(text: &'a str, from: &str, to: &str) -> &'a str {
+            let start = text.find(from).unwrap_or_else(|| panic!("{from} is gone: re-point this test"));
+            let rest = &text[start..];
+            &rest[..rest.find(to).unwrap_or_else(|| panic!("{to} is gone: re-point this test"))]
+        }
+        fn non_test(text: &str) -> &str {
+            text.split("#[cfg(test)]").next().unwrap_or(text)
+        }
+        let here = include_str!("mod.rs");
+        let backend = include_str!("../../../../../../crates/paddock-service/src/backend/windows.rs");
+        let system = include_str!("../../../../../../crates/paddock-service/src/system.rs");
+        let parts = [
+            ("pitwall windows.rs", code_of(include_str!("windows.rs"))),
+            (
+                "pitwall install_planned",
+                code_of(between(here, "pub fn install_planned(", "/// The shared manager over")),
+            ),
+            (
+                "pitwall registration_verb (Windows)",
+                code_of(between(here, "#[cfg(windows)]\nfn registration_verb", "/// Linux: the manager")),
+            ),
+            (
+                "paddock-service elevated.rs",
+                code_of(non_test(include_str!("../../../../../../crates/paddock-service/src/elevated.rs"))),
+            ),
+            (
+                "paddock-service WindowsService",
+                code_of(between(
+                    backend,
+                    "pub struct WindowsService {",
+                    "pub struct ElevatedWindowsService {",
+                )),
+            ),
+            (
+                "paddock-service repair.rs",
+                code_of(non_test(include_str!("../../../../../../crates/paddock-service/src/repair.rs"))),
+            ),
+            (
+                "paddock-service RealSystem::run",
+                code_of(between(system, "fn run(&mut self, program: &str", "fn spawn(")),
+            ),
+            (
+                "paddock-service known_folders.rs",
+                code_of(non_test(include_str!(
+                    "../../../../../../crates/paddock-service/src/privileged/known_folders.rs"
+                ))),
+            ),
+        ];
+        for (name, code) in &parts {
+            for banned in [
+                "fs::",
+                "File::",
+                "OpenOptions",
+                "var_os(",
+                "env::var",
+                "create_dir",
+                "Dirs::",
+                "data_dir",
+                "Manager::new",
+                "manager(",
+                "host_backend",
+            ] {
+                assert!(!code.contains(banned), "{name} uses {banned}");
+            }
+        }
+        // The backend asks the system only to run its tools, name a process, pause, and check the registered program's size.
+        let used: std::collections::BTreeSet<&str> = parts[4]
+            .1
+            .split("self.sys.")
+            .skip(1)
+            .filter_map(|rest| rest.split('(').next())
+            .collect();
+        let allowed = ["is_program", "pause", "process", "run"];
+        assert!(
+            used.iter().all(|m| allowed.contains(m)),
+            "the SCM backend now asks the system for {used:?}"
+        );
+        assert!(
+            parts[0].1.contains("elevated::windows_service"),
+            "the elevated verbs run over the SCM backend alone"
+        );
     }
 }

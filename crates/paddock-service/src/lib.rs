@@ -59,6 +59,7 @@
 pub mod apple_event;
 pub mod backend;
 pub mod control;
+pub mod elevated;
 mod error;
 pub mod fake_systemd;
 pub mod hardening;

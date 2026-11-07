@@ -1,6 +1,8 @@
 //! The Windows side of Pitwall's service verbs: the LocalSystem host (`--service`), `install` with the Program Files check
-//! (plan B6) before the shared manager, `check-install`, and the read-back of the registration through one handle with
-//! DELETE access. The decisions are pure and tested on every OS ([`super::placement`], [`super::install_planned`]); this file
+//! (plan B6) before the shared elevated step, `uninstall` and `status` over the Service Control Manager alone, `check-install`,
+//! and the read-back of the registration through one handle with DELETE access. The verbs run elevated (the installer,
+//! Windows' prompt), so they use no manager, no record and no data folder: nothing in a folder the user controls, and no path
+//! from the environment (paddock-service `elevated`). The decisions are pure and tested on every OS ([`super::placement`], [`super::install_planned`]); this file
 //! only passes the real ports.
 //!
 //! The service writes no file and reads no environment variable of its own (B6 security review P1-1, P1-2): a log folder a
@@ -59,20 +61,16 @@ pub(super) fn check_install() -> Result<String, String> {
     super::check_verdict(plan(&exe.to_string_lossy()))
 }
 
-/// `install`: the plan first, then the shared manager, then the read-back (see [`super::install_planned`]).
-pub(super) fn install(program: &Path, data: &Path) -> Result<String, String> {
-    let text = program.to_string_lossy().into_owned();
-    let decided = plan(&text);
-    // The manager is built only once the plan let the install go on, so a refusal changes nothing at all.
-    if let Err(refusal) = &decided {
-        if *refusal != placement::Refusal::AlreadyInstalled {
-            log(&refusal.log_line());
-            return Err(refusal.to_string());
-        }
+/// A registration verb, elevated or not: `install` (the plan first, then the shared elevated step, then the read-back; see
+/// [`super::install_planned`]), `uninstall` and `status` over the Service Control Manager alone ([`super::scm_verb`]).
+pub(super) fn run_verb(verb: paddock_service::Verb, program: &Path) -> Result<String, String> {
+    let mut scm = paddock_service::elevated::windows_service(&spec(), program);
+    if verb != paddock_service::Verb::Install {
+        return super::scm_verb(verb, &mut scm);
     }
-    let mut m = super::manager(program, data).map_err(|e| e.to_string())?;
+    let text = program.to_string_lossy().into_owned();
     let mut reg = ReadBack(None);
-    super::install_planned(decided, &text, &mut m, &mut reg, &mut log)
+    super::install_planned(plan(&text), &text, &mut scm, &mut reg, &mut log)
 }
 
 /// The read-back: one handle with query and DELETE access, opened at the first read and used for the removal.
