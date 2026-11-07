@@ -118,6 +118,7 @@ export async function mcpStep(g) {
   await g.quitApp();
   const third = await g.mcp(key, mcpInput());
   checks.push(...judgeAfterQuit({ code: third.code, out: third.out, discovery: await g.discovery() }));
+  await g.restoreAgent?.();
   return makeResult(title, checks, [], 'ten tools listed, a live system_summary, an error with the agent dead, "isn\'t open" after Quit');
 }
 

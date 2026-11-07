@@ -296,7 +296,9 @@ async function main(argv) {
             stopApp: async () => { await exec(`osascript -e 'quit app "Dyno"' ; pkill -x dyno-app; true`); await sleepMs(4000); },
             startApp: async () => { await exec(`open -a ${bundle}`); for (let i = 0; i < 30; i++) { if ((await exec(`${bundle}/Contents/MacOS/dyno-agent status >/dev/null 2>&1`)).code === 0) break; await sleepMs(4000); } await sleepMs(8000); },
             // The agent is supervised (launchd job net.decryptology.dyno.agent.ondemand restarts a killed one within seconds): take the job out first, or the "agent is gone" half cannot be seen.
-            killAgent: async () => { await exec('for j in $(launchctl print gui/$(id -u) | grep -o "net.decryptology.dyno.agent[A-Za-z.]*" | sort -u); do launchctl bootout gui/$(id -u)/$j 2>&1; done; for n in 1 2 3; do p=$(pgrep -x dyno-agent); [ -z "$p" ] && break; kill -9 $p; sleep 1; done; true'); },
+            killAgent: async () => { await exec('for j in $(launchctl print gui/$(id -u) | grep -o "net.decryptology.dyno.agent[A-Za-z.]*" | sort -u); do launchctl print gui/$(id -u)/$j | sed -n "s/^[[:space:]]*path = //p" | head -1 > /tmp/dyno-job-$j.path; launchctl bootout gui/$(id -u)/$j 2>&1; done; for n in 1 2 3; do p=$(pgrep -x dyno-agent); [ -z "$p" ] && break; kill -9 $p; sleep 1; done; true'); },
+            // The login job was booted out to keep the killed agent dead: put it back so the later Quit and login-job steps see the product's own state.
+            restoreAgent: async () => { await exec('for f in /tmp/dyno-job-*.path; do [ -s "$f" ] && launchctl bootstrap gui/$(id -u) "$(cat "$f")" 2>&1; rm -f "$f"; done; true'); },
             agentAlive: async () => (await exec('pgrep -x dyno-agent >/dev/null')).code === 0,
             quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; true`); await sleepMs(4000); },
             pidAlive: async (pid) => (await exec(`kill -0 ${pid} 2>/dev/null`)).code === 0,

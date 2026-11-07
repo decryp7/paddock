@@ -84,6 +84,7 @@ export function makeMcpGuest(p) {
     },
     async mcp(key, input) { const r = splitExit((await p.sh(mcpCommand(p.os, key, input, p.dyno))).stdout); return r; },
     killAgent: () => p.killAgent(),
+    restoreAgent: () => p.restoreAgent?.(),
     agentDead: async () => !(await p.agentAlive()),
     quitApp: () => p.quitApp(),
     async discovery() {
