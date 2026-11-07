@@ -25,6 +25,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "time", "io-util", "io-std"] }
+# The family's log (ER-27, ER-22): `pitwall-cli.<day>.log` in the app's log folder, the same format as the app and the server.
+paddock-log = { path = "../../../../crates/paddock-log" }
+paddock-env = { path = "../../../../crates/paddock-env" }
+log = { version = "0.4", features = ["kv"] }
 # The OS credential store holds the app's copy of the admin key (the same entry the Pitwall window uses).
 keyring = "4.2"
 

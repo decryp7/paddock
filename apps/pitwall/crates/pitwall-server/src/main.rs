@@ -44,13 +44,18 @@ async fn main() {
         }
         return;
     }
+    let moved = dir.is_some() || std::env::var_os("PITWALL_HOME").is_some_and(|v| !v.is_empty());
     let dirs = dir.map_or_else(Dirs::for_user, Dirs::at);
+    // First: every later line, the panic hook and the crash marker go to pitwall-server.<day>.log (ER-27).
+    let _log = pitwall_server::logging::install(&dirs, moved);
+    log::info!(target: "pitwall_server", "starting: version {}, pid {}, data folder moved {moved}", env!("CARGO_PKG_VERSION"), std::process::id());
     let st = AppState::open(dirs, None).await;
     let port = port.unwrap_or(st.cfg().server.port);
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
+            log::error!(target: "pitwall_server", "cannot listen on {addr}: {e}");
             eprintln!("Pitwall cannot listen on {addr}: {e}. Is another Pitwall (or an Ollama on the same port) running? Change the port in Settings > Server or start with --port.");
             std::process::exit(1);
         }
@@ -59,6 +64,7 @@ async fn main() {
     st.port.store(bound, std::sync::atomic::Ordering::SeqCst);
     st.write_discovery(bound);
     st.spawn_tasks();
+    log::info!(target: "pitwall_server", "serving on port {bound}");
     eprintln!("Pitwall {} serving on http://127.0.0.1:{bound}", env!("CARGO_PKG_VERSION"));
     let app = http::router(st.clone());
     let shutdown = async {
@@ -72,7 +78,10 @@ async fn main() {
         let _ = tokio::signal::ctrl_c().await;
     };
     if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
+        log::error!(target: "pitwall_server", "stopped with an error: {e}");
         eprintln!("server stopped: {e}");
+    } else {
+        log::info!(target: "pitwall_server", "stopped: asked to end");
     }
     st.remove_discovery();
 }
