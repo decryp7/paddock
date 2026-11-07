@@ -4,6 +4,20 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-secrets`: one owner-only secret file at a chosen path; links, pipes and loose Windows DACLs refused
+- New `SecretFile::new(path)` with `read`, `write` and `delete`: one secret in a file the app names (Pitwall's `admin.key`,
+  ADR 0057 WP-4). `FileSecrets` is now a folder of these, so both share one implementation.
+- Reads open the file with `O_NOFOLLOW | O_NONBLOCK` and check the open handle: a symbolic link, a pipe or any other
+  non-regular file is refused (before, `fs::metadata` followed a link and a planted pipe would block the read). On
+  Windows a reparse point is refused, and so is a file whose DACL grants anyone besides its owner, the user, SYSTEM and
+  Administrators (`InsecureFile`).
+- Writes on Windows give the empty temporary file a protected DACL for the user running the process before the value is
+  written (before, the file inherited the folder's access list).
+- Breaking (before v1): a secrets folder that group or others can read (not only write), such as 0750 or 0755, is now
+  made 0700 when it is ours.
+- `paddock-env`: new `write_atomic_prepared(path, bytes, private, prepare)`, which runs `prepare` on the empty temporary
+  file before any byte is written; a failed preparation replaces nothing and leaves no temporary file.
+
 ### `@decryp7/paddock-ui`: the status chip has words for Dyno's update and agent-mismatch causes
 - `service-status-text.ts`: `dy.setup.updated` is now `dy.update.restart` ("updated: restart to finish"); new `dy.agent.other-build-returns` ("another build keeps starting") and `dy.agent.mismatch` ("needs a reinstall"). The planner marks ui when an app's `src-tauri/src/**/*.rs` changes, since `cause-codes.spec.ts` scans those sources against the table.
 

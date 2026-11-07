@@ -96,7 +96,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 |---|---|---|
 | `paddock-jobs` | long operations: job/phase/progress model, throttled reporter, cancel token, hash-while-writing, parallel walk/map/pipeline, job pool (ADR 0008); `time`: the family's clock port, fake clock, deadlines, restart back-off (plan X20) | yes (all five apps); built |
 | `paddock-commands`, `-health`, `-dialogs`, `-startup`, `-download`, `-settings`, `-updater`, `-window`, `-menu`, `-shell` | the app shell (ADR 0012) | yes; all built (plan S1-S17), `paddock-shell` is the plugin that wires them |
-| `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, opt-in owner-only file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
+| `paddock-secrets` | credentials: `Secrets` port, `Secret` that never prints, keyring adapter, `MemorySecrets`, owner-only files (`FileSecrets`, `SecretFile`) and the file fallback, naming scheme (D6), one-time rename (plan X5) | yes (Debrief, Pitwall, Pitcrew, Spotter, Sighter PoC); built |
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-assistant` | the assistant (plan W6): `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for writes, the bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, Tauri commands and the `paddock://assistant` event | yes (Pacenotes, Sighter; Debrief's chat moves onto it); built |
 | `paddock-guard` | crash containment (ADR 0001, plan X51): `catch`, `Quarantine` (3 failures in 10 minutes, shared `Clock`, persisted through paddock-env), `Guard::call` (time budget, hang abandoned, typed refusal) | yes (Debrief, Pacenotes, Dyno plugin hosts); built |
@@ -834,11 +834,19 @@ let header = secrets.get(&name)?.map(|s| format!("Bearer {}", s.expose()));
   what to fix and never contain a value.
 - `Secrets` (port): `get -> Result<Option<Secret>>`, `set`, `delete` (missing is not an error). `Vault` is the raw
   `(service, account)` layer under it (`OsVault`, `MemoryVault`); `VaultSecrets::new(service, vault)` adds the scheme.
-- Fallback: `WithFileFallback::new(primary, FileSecrets::new(dir))` is the opt-in (Pitwall's admin key). The file is used
-  only when the primary is *unavailable* (no Secret Service, locked keychain) or has no value; files are created 0600
-  (written to a 0600 temp file and renamed) and a file with group/other bits is refused (`InsecureFile`). On Windows no mode
-  exists: `dir` must be a per-user folder (the app's data dir under `%LOCALAPPDATA%`), whose ACL is owner, SYSTEM and
-  Administrators only.
+- Files: `FileSecrets::new(dir)` is a folder of owner-only files, one per name; `SecretFile::new(path)` is one at a path the
+  app chooses (Pitwall's `<data>/admin.key`, which its CLI and scripts read: the file holds the value only). Both share one
+  implementation. Unix: written to a unique 0600 temporary file in the same folder and renamed (a link in the target's place
+  is replaced, never followed); the folder is created 0700 and made 0700 when it is ours and group or others have any
+  access (a sticky folder is left alone; a folder of another user is refused). On read the file is opened with
+  `O_NOFOLLOW | O_NONBLOCK` and checked on the open handle: a link, a pipe or anything not a regular file, a group or other
+  bit (`InsecureFile`) or another owner is refused, with the next step and never the value. Windows: the empty temporary
+  file gets a protected DACL that grants only the user running the process (`paddock_env::write_atomic_prepared`), before
+  the value is written; on read a reparse point is refused, and so is a DACL that grants anyone besides the owner, that
+  user, SYSTEM and Administrators (`InsecureFile`). The value is plain text at rest (ADR 0057 §5): any program running as
+  the same user can read it, like `~/.netrc`; other users cannot.
+- Fallback: `WithFileFallback::new(primary, FileSecrets::new(dir))` uses the files only when the primary is *unavailable*
+  (no Secret Service, locked keychain) or has no value.
 - Old entries: `rename_entry(vault, (old_service, old_account), (new_service, new_account))` reads old, writes new, deletes
   old (idempotent, never loses the secret); Pitcrew's `Pitcrew notification channel` / `<key>` becomes `Pitcrew` /
   `channel:<key>`, its `Pitcrew Gitea API` / `<url>` becomes `Pitcrew` / `<url>:read token`, and so on.

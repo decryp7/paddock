@@ -14,6 +14,8 @@ static NEXT_TMP: AtomicU64 = AtomicU64::new(0);
 /// Points in a write where a test can make it fail (a stand-in for a kill or a full disk).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stage {
+    /// The temporary file exists and is empty.
+    Created,
     /// Half of the bytes are in the temporary file.
     PartlyWritten,
     /// All bytes are flushed; the rename has not happened.
@@ -23,14 +25,32 @@ pub(crate) enum Stage {
 /// Writes `bytes` to `path` atomically, creating its folder; with `private` the file is owner-only (0600) on Unix. One
 /// write at a time per process. On failure the old file is untouched and the temporary file is removed.
 pub fn write_atomic(path: &Path, bytes: &[u8], private: bool) -> Result<()> {
-    write_hooked(path, bytes, private, &mut |_| Ok(()))
+    write_hooked(path, bytes, private, &mut |_, _| Ok(()))
+}
+
+/// [`write_atomic`] with a step on the new, still empty temporary file before any byte is written to it: `prepare`
+/// gets its path (`paddock-secrets` sets an owner-only DACL there on Windows, so a secret is never in a file others can
+/// read). A failed preparation fails the write like any other step: nothing is replaced and the temporary file is removed.
+pub fn write_atomic_prepared(
+    path: &Path,
+    bytes: &[u8],
+    private: bool,
+    prepare: &mut dyn FnMut(&Path) -> std::io::Result<()>,
+) -> Result<()> {
+    write_hooked(path, bytes, private, &mut |stage, tmp| {
+        if stage == Stage::Created {
+            prepare(tmp)
+        } else {
+            Ok(())
+        }
+    })
 }
 
 pub(crate) fn write_hooked(
     path: &Path,
     bytes: &[u8],
     private: bool,
-    hook: &mut dyn FnMut(Stage) -> std::io::Result<()>,
+    hook: &mut dyn FnMut(Stage, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
     let _one = WRITER
         .lock()
@@ -65,16 +85,17 @@ fn write_and_rename(
     path: &Path,
     bytes: &[u8],
     private: bool,
-    hook: &mut dyn FnMut(Stage) -> std::io::Result<()>,
+    hook: &mut dyn FnMut(Stage, &Path) -> std::io::Result<()>,
 ) -> Result<()> {
     let mut file = create(tmp, private).map_err(io("write", tmp))?;
+    hook(Stage::Created, tmp).map_err(io("prepare", tmp))?;
     let (first, rest) = bytes.split_at(bytes.len() / 2);
     file.write_all(first).map_err(io("write", tmp))?;
-    hook(Stage::PartlyWritten).map_err(io("write", tmp))?;
+    hook(Stage::PartlyWritten, tmp).map_err(io("write", tmp))?;
     file.write_all(rest).map_err(io("write", tmp))?;
     file.sync_all().map_err(io("flush", tmp))?;
     drop(file);
-    hook(Stage::Written).map_err(io("write", tmp))?;
+    hook(Stage::Written, tmp).map_err(io("write", tmp))?;
     std::fs::rename(tmp, path).map_err(io("replace", path))?;
     sync_dir(path.parent().unwrap_or(Path::new(".")));
     Ok(())
@@ -132,7 +153,7 @@ mod tests {
             let f = t.path().join("state.json");
             write_atomic(&f, b"old content", false).unwrap();
             let mut seen_old = true;
-            let r = write_hooked(&f, b"new content that is longer", false, &mut |s| {
+            let r = write_hooked(&f, b"new content that is longer", false, &mut |s, _| {
                 // At the failure point the target is still the complete old file.
                 seen_old &= std::fs::read(&f).unwrap() == b"old content";
                 if s == stage {
@@ -155,7 +176,9 @@ mod tests {
     fn a_failure_on_a_new_file_leaves_no_file() {
         let t = tempfile::tempdir().unwrap();
         let f = t.path().join("state.json");
-        let r = write_hooked(&f, b"x", false, &mut |_| Err(std::io::Error::other("full")));
+        let r = write_hooked(&f, b"x", false, &mut |_, _| {
+            Err(std::io::Error::other("full"))
+        });
         assert!(r.is_err());
         assert!(!f.exists());
     }
@@ -203,5 +226,35 @@ mod tests {
         let got = std::fs::read(&f).unwrap();
         assert_eq!(got.len(), 4096);
         assert!(got.iter().all(|b| *b == got[0]));
+    }
+
+    /// The preparation runs on the empty temporary file, before any byte is in it (a secret's owner-only DACL on Windows).
+    #[test]
+    fn the_preparation_sees_the_empty_temporary_file_before_any_byte() {
+        let t = tempfile::tempdir().unwrap();
+        let f = t.path().join("admin.key");
+        let mut seen = Vec::new();
+        write_atomic_prepared(&f, b"secret", true, &mut |tmp| {
+            seen.push((tmp.to_path_buf(), std::fs::read(tmp)?.len()));
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&f).unwrap(), b"secret");
+        assert_eq!(seen.len(), 1, "once per write");
+        assert_eq!(seen[0].1, 0, "nothing was written before the preparation");
+        assert_eq!(
+            seen[0].0.parent(),
+            Some(t.path()),
+            "the temporary file is beside the target"
+        );
+        assert_ne!(seen[0].0, f);
+        // A failed preparation writes nothing and leaves no temporary file.
+        let e = write_atomic_prepared(&f, b"other", true, &mut |_| {
+            Err(std::io::Error::other("no acl"))
+        })
+        .unwrap_err();
+        assert!(e.to_string().contains("no acl"), "{e}");
+        assert_eq!(std::fs::read(&f).unwrap(), b"secret");
+        assert!(leftovers(t.path()).is_empty());
     }
 }

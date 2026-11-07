@@ -5,7 +5,7 @@
 //! - [`Secrets`]: the port an app's engine codes against; [`MemorySecrets`] for tests.
 //! - [`Vault`]: one raw `(service, account)` store; [`VaultSecrets`] puts the naming scheme and the checks over it.
 //!   With the `keyring` feature, [`KeyringSecrets`] is that over the OS credential store.
-//! - [`FileSecrets`] and [`WithFileFallback`]: the owner-only file fallback, only when the app opts in.
+//! - [`FileSecrets`] (a folder of owner-only files), [`SecretFile`] (one at a chosen path) and [`WithFileFallback`].
 //! - [`rename_entry`]: the one-time move of an old entry to the new scheme.
 //!
 //! Tests never reach the real credential store (rule 7): the native layer refuses unless `PADDOCK_SECRETS_REAL=1`.
@@ -22,7 +22,7 @@ mod vault;
 
 pub use error::SecretsError;
 pub use fallback::WithFileFallback;
-pub use file::FileSecrets;
+pub use file::{FileSecrets, SecretFile};
 pub use memory::{MemorySecrets, MemoryVault};
 pub use name::{MAX_NAME_LEN, Name};
 #[cfg(feature = "keyring")]
