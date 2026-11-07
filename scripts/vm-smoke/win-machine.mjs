@@ -11,6 +11,7 @@ import { judgeColdUninstall, coldUninstallAccepted, judgeInstalled, judgeKilledI
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
 import { swapNotDriven } from './upgrade-swap-row.mjs';
 import { winSwapRow } from './win-swap.mjs';
+import { hiddenStartStep } from './login-start-rows.mjs';
 import { makeResult } from './verdict.mjs';
 import { judgeUninstall as judgeUninstallFacts, triState } from './win-judges.mjs';
 
@@ -223,4 +224,18 @@ export async function winQuitStop() {
   });
 }
 
-export const afterQuitSteps = [() => sameVersionRefused(), () => winMcpStep(), () => uninstall(), () => installRows(), () => winSwapRow({ oldStaged: process.env.PADDOCK_OLD_SETUP === '1' }), () => notDrivenWinRows(), () => winHung(), () => winQuitStop()];
+const RUN_KEY = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+/** The entry's own command (HKCU Run "Dyno") started in the interactive session; judged: the agent answers and dyno-app has no main window. */
+export async function winHiddenStart() {
+  const cmd = ssh(`(Get-ItemProperty '${RUN_KEY}' -ErrorAction SilentlyContinue).Dyno`).trim().split('\n').at(-1) || `"${PROG}\\dyno-app.exe" --hidden`;
+  const r = await hiddenStartStep({
+    sleep,
+    stop: async () => { ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(4000); },
+    startEntry: async () => { ssh(`Set-Content C:\\paddock-test\\vmcheck\\run-entry.cmd '${cmd.replace(/'/g, "''")}'; schtasks /create /tn DynoRunEntry /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c C:\\paddock-test\\vmcheck\\run-entry.cmd" | Out-Null; schtasks /run /tn DynoRunEntry | Out-Null`); },
+    agentUp: async () => /"cpuPercent"/.test(ssh(`& '${PROG}\\dyno.exe' status --json 2>$null`)),
+    windows: async () => ssh("Get-Process dyno-app -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | ForEach-Object { 'pid ' + $_.Id + ' title ' + $_.MainWindowTitle }").split('\n').map((l) => l.trim()).filter(Boolean),
+  });
+  r.evidence = [...(r.evidence ?? []), `entry command: ${cmd}`];
+  return r;
+}
+export const afterQuitSteps = [() => sameVersionRefused(), () => winMcpStep(), () => uninstall(), () => installRows(), () => winSwapRow({ oldStaged: process.env.PADDOCK_OLD_SETUP === '1' }), () => notDrivenWinRows(), () => winHung(), () => winHiddenStart(), () => winQuitStop()];

@@ -250,6 +250,7 @@ export async function repeatInstall(browser) {
 import { loginJobsRow, windowsLoginJobsDriver } from './login-jobs-drivers.mjs';
 import { diskSpaceStep, windowsAdapter } from './disk-space-row.mjs';
 import { discoveryStep, windowsDiscoveryPrims } from './discovery-row.mjs';
+import { loginSwitchStep } from './login-start-rows.mjs';
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
 import { scopingStep } from './win-scoping.mjs';
 const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
@@ -383,6 +384,12 @@ export const helperSteps = [
   ({ browser }) => helperExploit(browser),
   ({ browser }) => repeatInstall(browser),
   ({ browser }) => diskHealth(browser),
+  // Release row: Launch at login (first-run default, the switch, the entry HKCU Run "Dyno"), BEFORE row 5a presses the switch.
+  async ({ browser }) => {
+    const d = windowsLoginJobsDriver(browser, { openSettings, mainPage });
+    const RUN = "(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).Dyno";
+    return loginSwitchStep({ sleep, readSwitch: () => d.readSwitch(), pressSwitch: () => d.pressSwitch(), readEntry: async () => { const c = ssh(RUN).trim().split('\n').at(-1); return { present: Boolean(c), command: c, count: c ? 1 : 0 }; } });
+  },
   // Row 5a: the Start at login change in the Jobs list (login-jobs-row.mjs). The raw `wbadmin` evidence step is gone with Backup health (removed in 1.1.0).
   async ({ browser }) => loginJobsRow(windowsLoginJobsDriver(browser, { openSettings, mainPage }), { now: () => Date.now(), sleep }),
   // Release row: disk space (Dyno's figure against Explorer's, decimal units, refresh within 60 s of a 1 GB write)
