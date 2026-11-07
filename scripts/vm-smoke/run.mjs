@@ -296,22 +296,9 @@ async function main(argv) {
             stopApp: async () => { await exec(`osascript -e 'quit app "Dyno"' ; pkill -x dyno-app; true`); await sleepMs(4000); },
             startApp: async () => { await exec(`open -a ${bundle}`); for (let i = 0; i < 30; i++) { if ((await exec(`${bundle}/Contents/MacOS/dyno-agent status >/dev/null 2>&1`)).code === 0) break; await sleepMs(4000); } await sleepMs(8000); },
             // The agent is supervised (launchd job net.decryptology.dyno.agent.ondemand restarts a killed one within seconds): take the job out first, or the "agent is gone" half cannot be seen.
-            killAgent: async () => { await exec('for j in $(launchctl print gui/$(id -u) | grep -o "net.decryptology.dyno.agent[A-Za-z.]*" | sort -u); do launchctl print gui/$(id -u)/$j | sed -n "s/^[[:space:]]*path = //p" | head -1 > /tmp/dyno-job-$j.path; launchctl bootout gui/$(id -u)/$j 2>&1; done; for n in 1 2 3; do p=$(pgrep -x dyno-agent); [ -z "$p" ] && break; kill -9 $p; sleep 1; done; true'); },
-            // The login job was booted out to keep the killed agent dead: put it back so the later Quit and login-job steps see the product's own state.
-            restoreAgent: async () => {
-              // bootstrap by the saved plist path first; when the job is still missing, the app registers it again itself: Start Dyno at login off, then on, in Settings (the Row 5a switch).
-              const has = async () => (await exec('launchctl print gui/$(id -u)/net.decryptology.dyno.agent >/dev/null 2>&1; echo $?')).stdout.trim().split('\n').at(-1) === '0';
-              await exec('for f in /tmp/dyno-job-*.path; do [ -s "$f" ] && launchctl bootstrap gui/$(id -u) "$(cat "$f")" 2>&1; rm -f "$f"; done; true');
-              if (await has()) return;
-              try {
-                await exec(`open -a ${bundle}`); await gui.ensureMainWindow();
-                const d = macLoginJobsDriver(gui);
-                const state = await d.readSwitch();
-                if (state === 'on') { await d.pressSwitch(); await guest.sleep(5000); await d.pressSwitch(); } else if (state === 'off') await d.pressSwitch();
-                for (let n = 0; n < 15 && !(await has()); n++) await guest.sleep(2000);
-              } catch { /* the Quit step then reports the missing job */ }
-            },
-            agentAlive: async () => (await exec('pgrep -x dyno-agent >/dev/null')).code === 0,
+            killAgent: async () => { await exec('p=$(pgrep -x dyno-agent | head -1); echo "$p" > /tmp/dyno-killed.pid; [ -n "$p" ] && kill -9 $p; for n in 1 2 3 4 5 6; do kill -0 $p 2>/dev/null || break; sleep 0.5; done; true'); }, // by pid only: the login job stays loaded (the product's own state); launchd may start a new agent within seconds, so "dead" means the killed pid
+            restoreAgent: async () => {},
+            agentAlive: async () => (await exec('p=$(cat /tmp/dyno-killed.pid 2>/dev/null); [ -n "$p" ] && kill -0 $p 2>/dev/null')).code === 0,
             quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; true`); await sleepMs(4000); },
             pidAlive: async (pid) => (await exec(`kill -0 ${pid} 2>/dev/null`)).code === 0,
           });
