@@ -5,8 +5,8 @@ Conventional Commits; one semver tag for the whole repo.
 ## Unreleased
 
 ### Dyno: an app updated while it runs no longer restarts its agent in a loop
-- An agent whose build id is the agent file on disk is the one the app would start, whatever version it reports (`matches_key` judges by build when the key has one). When such an agent speaks another protocol, the app leaves it alone and the chip says "Dyno was updated. Restart Dyno to finish." (cause `dy.setup.updated`). The link also stops asking agents of another build to exit after three in a row (Retry starts the count again).
-- The update notice has its own chip row, `dy.update` ("Dyno itself"), so it no longer shares the installer program's row. The flag latches once the files have changed. An agent program that cannot be read is logged once per reason.
+- An agent whose build id is the agent file on disk is the one the app would start, whatever version it reports (`matches_key` judges by build when the key has one). When such an agent speaks another protocol, the app leaves it alone and the chip says "Dyno was updated. Restart Dyno to finish." (cause `dy.update.restart`). The link also stops asking agents of another build to exit after three in a row (Retry starts the count again).
+- The update notice has its own chip row, `dy.update` ("Dyno itself"), so it no longer shares the installer program's row. The flag latches once the files have changed. An agent program that cannot be read is logged once per change of reason.
 - Additive on the wire: no field changed; the app-side `HintSeen` gained `of_disk_file`.
 
 ### `@decryp7/paddock-ui`: storage sizes (files and disks) are decimal; `formatStorage`

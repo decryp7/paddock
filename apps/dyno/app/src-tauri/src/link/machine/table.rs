@@ -1668,3 +1668,109 @@ fn repeated_replacements_of_agents_that_come_back_give_up_within_a_bound() {
     }
     assert!(asks <= 3, "asked {asks} agents to exit in a row; it never gave up");
 }
+
+fn lines_with(needle: &str) -> usize {
+    crate::logging::testlog::lines().iter().filter(|l| l.contains(needle)).count()
+}
+
+#[test]
+fn an_own_agent_of_the_file_on_disk_with_another_protocol_is_waited_for_not_connected_to() {
+    // No login service: the app's old agent exited and the app launched the new file, which this app cannot speak to.
+    let _ = crate::logging::testlog::lines();
+    let mut s = starting();
+    let cmds = run_ticks(&mut s, NOTE_AFTER * 4, |seq, _| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(PID, 1_500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        child: Some((1, Child::Running { pid: PID })),
+        ..look(seq)
+    });
+    assert!(
+        !cmds
+            .iter()
+            .any(|c| matches!(c, Command::Connect { .. } | Command::EndHeldChild { .. } | Command::Launch { .. })),
+        "a connection that the driver refuses, or the child ended: {:?}",
+        cmds.iter().filter(|c| matches!(c, Command::Connect { .. })).count()
+    );
+    assert_eq!(
+        s.snapshot().stall.map(|(_, k)| k),
+        Some(Stall::AppUpdated),
+        "the update state, not a holder"
+    );
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::Stall { .. })).count(), 1, "one note");
+    assert_eq!(
+        lines_with(&format!("pid {PID} is the installed build")),
+        1,
+        "logged on entering the state only"
+    );
+}
+
+#[test]
+fn the_update_wait_shows_the_update_state_at_once_and_logs_once() {
+    let _ = crate::logging::testlog::lines();
+    let (s, cmds) = first(|l| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(880_001, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated), "{cmds:?}");
+    let mut s = s;
+    run_ticks(&mut s, NOTE_AFTER * 3, |seq, _| Look {
+        hint: Some(HintSeen {
+            of_disk_file: true,
+            ..hint(880_001, 500, false)
+        }),
+        lock: Some(LockSeen::Held),
+        ..look(seq)
+    });
+    assert_eq!(
+        s.snapshot().stall.map(|(_, k)| k),
+        Some(Stall::AppUpdated),
+        "never the holder's note"
+    );
+    assert_eq!(lines_with("pid 880001 is the installed build"), 1);
+}
+
+#[test]
+fn giving_up_on_replacing_agents_says_so_with_its_own_stall_and_logs_once() {
+    let _ = crate::logging::testlog::lines();
+    let mut s = Supervisor::new();
+    let mut seq = look_seq(&s.step(Event::Begin));
+    let mut gave_up = None;
+    for _ in 0..8 {
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(880_002, 500, false)),
+            lock: Some(LockSeen::Held),
+            ..look(seq)
+        }));
+        if let Some(st) = stall_of(&cmds) {
+            gave_up = Some(st);
+            break;
+        }
+        let c = connect_seq(&cmds);
+        s.step(Event::Connected {
+            seq: c,
+            peer: 5,
+            pid: Some(880_002),
+        });
+        let t = tick_look(&mut s);
+        let cmds = s.step(Event::Looked(Look {
+            hint: Some(hint(880_002, 500, false)),
+            ..look(t)
+        }));
+        seq = look_seq(&cmds);
+    }
+    assert_eq!(gave_up, Some(Stall::OtherBuildKeepsComing));
+    run_ticks(&mut s, NOTE_AFTER * 2, |seq, _| Look {
+        hint: Some(hint(880_002, 500, false)),
+        lock: Some(LockSeen::Held),
+        ..look(seq)
+    });
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
+    assert_eq!(lines_with("pid 880002 keep coming back"), 1, "logged once, not on every look");
+}

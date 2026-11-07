@@ -1651,3 +1651,19 @@ fn an_agent_of_the_file_on_disk_with_another_protocol_is_marked_so_it_is_not_evi
     let other = super::ports::hint_of(&disc_built("1.1.0", "bbbb"), &key);
     assert!(!other.same_build && !other.of_disk_file, "another build is replaced as before");
 }
+
+#[test]
+fn a_first_read_without_a_build_id_does_not_make_a_later_hashed_read_an_update() {
+    use dyno_agent::build_id::build_key;
+    let r = rig_keyed(false, patient(), "1.0.0");
+    let key = std::sync::Arc::new(Mutex::new("1.0.0".to_string())); // the file could not be hashed yet
+    let cell = key.clone();
+    r.link.set_wanted_source(Arc::new(move || lock(&cell).clone()));
+    r.link.wanted_key();
+    *lock(&key) = build_key("1.0.0", "aaaaaaaaaaaaaaaa");
+    r.link.wanted_key();
+    assert!(!r.link.app_updated(), "a key that gained its build id is not a replaced file");
+    *lock(&key) = build_key("1.0.0", "bbbbbbbbbbbbbbbb");
+    r.link.wanted_key();
+    assert!(r.link.app_updated(), "the hashed build changed: updated");
+}
