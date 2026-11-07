@@ -215,7 +215,10 @@ mod tests {
 
     #[test]
     fn the_defaults_answer_is_it_working_what_is_it_doing_how_much_memory_and_what_is_loaded() {
-        let placed: Vec<(u8, PopoverKind)> = PopoverCatalogue::defaults().iter().map(|p| (p.place.span, p.widget.kind())).collect();
+        let placed: Vec<(u8, PopoverKind)> = PopoverCatalogue::defaults()
+            .iter()
+            .map(|p| (p.place.span, p.widget.kind()))
+            .collect();
         assert_eq!(
             placed,
             [

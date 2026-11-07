@@ -127,10 +127,7 @@ pub fn compose(os: OsState, running: bool, ask_consent: bool) -> ServiceInstall 
         (false, true) => Some("The server is running outside the service (started by hand); it stops when you log out.".into()),
         _ => None,
     });
-    let repairing = os
-        .repair
-        .as_ref()
-        .is_some_and(|r| r.state == RepairState::Working);
+    let repairing = os.repair.as_ref().is_some_and(|r| r.state == RepairState::Working);
     let broken = !running && !os.disabled_in_login_items && !repairing;
     let start_failed = broken && os.job_stale;
     let not_in_login_items = broken && os.job_unlisted;
@@ -156,7 +153,6 @@ pub const PLATFORM: &str = if cfg!(windows) {
 } else {
     "linux"
 };
-
 
 /// The OS state from the shared manager's status.
 pub fn os_state_of(s: &ServiceStatus) -> OsState {
@@ -275,7 +271,6 @@ mod imp {
     }
 }
 
-
 #[cfg(target_os = "macos")]
 mod imp {
     //! The launch agent inside the app bundle (`SMAppService`), looked after by the shared manager
@@ -304,7 +299,10 @@ mod imp {
     /// Registers the service (replacing what is there) and waits for it to answer; the OS asks the user where it must.
     pub fn install(client: &SharedClient) -> Result<(), CommandError> {
         let cancel = AtomicBool::new(false);
-        manager(client, Timings::default())?.install(&cancel).map(drop).map_err(command_error)
+        manager(client, Timings::default())?
+            .install(&cancel)
+            .map(drop)
+            .map_err(command_error)
     }
 
     /// Stops and removes the service.
@@ -391,7 +389,6 @@ mod imp {
         run_verb("uninstall")
     }
 }
-
 
 pub use imp::{install, os_state, uninstall};
 

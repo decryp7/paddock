@@ -3,8 +3,8 @@
 //! once-per-version re-registration and the Login Items switch all live in the shared crate. This module only says what
 //! Pitwall's service is (its [`spec`]) and how Pitwall asks whether the server answers.
 
-use crate::commands::{forward, SharedClient};
 use crate::app_state;
+use crate::commands::{forward, SharedClient};
 use paddock_service::backend::Side;
 use paddock_service::render::{launchd_plist, LaunchdProgram};
 use paddock_service::{Manager, ProcessType, RepairTracker, ServiceError, ServiceSpec, Timings};
@@ -73,5 +73,7 @@ pub fn manager(client: &SharedClient, timings: Timings) -> Result<Manager, Comma
 /// The step the running repair is at (`None` when none works), for the job's phase label.
 pub fn repair_step() -> Option<String> {
     // The manager stamps the notice with the shared monotonic clock (its default), so it is read on the same clock.
-    tracker().current(paddock_jobs::time::Clock::monotonic(&paddock_jobs::time::SystemClock)).and_then(|n| n.step)
+    tracker()
+        .current(paddock_jobs::time::Clock::monotonic(&paddock_jobs::time::SystemClock))
+        .and_then(|n| n.step)
 }

@@ -58,7 +58,9 @@ mod tests {
             Some(Started::Repaired(Reason::VersionChanged, RepairOutcome::Recovered)),
         ]
         .into_iter();
-        let ran = run(&mut |d| waits.push(d), &mut || answers.next().expect("no check after the service is back"));
+        let ran = run(&mut |d| waits.push(d), &mut || {
+            answers.next().expect("no check after the service is back")
+        });
         assert_eq!(ran, 4);
         assert_eq!(waits, [3, 60, 60, 60].map(Duration::from_secs));
     }

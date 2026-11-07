@@ -5,8 +5,8 @@ use crate::app_state::{self, AppState, FirstRun};
 use crate::commands::{forward, SharedClient};
 use crate::jobs::{self, JobEvent, JobSink, JobSpec, Jobs, Outcome};
 use crate::service_install::{self, ServiceInstall};
-use paddock_service::RepairOutcome;
 use paddock_jobs::Phase;
+use paddock_service::RepairOutcome;
 use pitwall_core::mgmt::{CommandError, ErrorCode};
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -316,11 +316,7 @@ pub async fn start_uninstall_service(
     }))
 }
 
-async fn blocking_install(
-    client: SharedClient,
-    f: fn(&SharedClient) -> Result<(), CommandError>,
-    what: &str,
-) -> Result<(), CommandError> {
+async fn blocking_install(client: SharedClient, f: fn(&SharedClient) -> Result<(), CommandError>, what: &str) -> Result<(), CommandError> {
     tauri::async_runtime::spawn_blocking(move || f(&client))
         .await
         .map_err(|e| internal(format!("{what} stopped unexpectedly: {e}")))?
@@ -688,7 +684,9 @@ mod tests {
         );
         at_step_rx.recv().await.unwrap();
         events
-            .until("the step shows as a phase", |e| phases(e).contains(&"Removing the old registration"))
+            .until("the step shows as a phase", |e| {
+                phases(e).contains(&"Removing the old registration")
+            })
             .await;
         go_tx.send(()).unwrap();
         events.until_terminal().await;
@@ -717,7 +715,9 @@ mod tests {
         );
         started_rx.recv().await.unwrap();
         assert!(jobs.cancel(id));
-        events.until("the job shows it is cancelling", |e| phases(e).contains(&"Cancelling...")).await;
+        events
+            .until("the job shows it is cancelling", |e| phases(e).contains(&"Cancelling..."))
+            .await;
         go_tx.send(()).unwrap();
         events.until_terminal().await;
         assert_eq!(
