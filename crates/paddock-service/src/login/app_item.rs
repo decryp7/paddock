@@ -171,6 +171,7 @@ mod tests {
     use crate::login::Elevation;
     use crate::testing::FakeSystem;
     use std::ffi::OsString;
+    #[cfg(not(any(target_os = "macos", windows)))]
     use std::path::Path;
 
     const DEMO: AppItem<'static> = AppItem {
@@ -187,27 +188,37 @@ mod tests {
         }
     }
 
+    /// An absolute path on every OS: `/x` on Unix, `C:/x` on Windows (a bare `/x` has no drive there, so is not absolute).
+    fn abs(p: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!("C:{p}"))
+        } else {
+            PathBuf::from(p)
+        }
+    }
+
     fn missing() -> std::io::Result<PathBuf> {
         Err(std::io::Error::new(std::io::ErrorKind::NotFound, "gone"))
     }
 
     #[test]
     fn the_config_folder_is_an_absolute_xdg_config_home_or_the_homes_dot_config() {
-        let os = |s: &str| Some(OsString::from(s));
+        let os = |s: &str| Some(abs(s).into_os_string());
+        let rel = |s: &str| Some(OsString::from(s));
         assert_eq!(
             xdg_config_dir(os("/x/config"), os("/home/u")),
-            Some(PathBuf::from("/x/config"))
+            Some(abs("/x/config"))
         );
         // A relative XDG_CONFIG_HOME is ignored (the XDG spec: such a value is invalid).
         assert_eq!(
-            xdg_config_dir(os("config"), os("/home/u")),
-            Some(PathBuf::from("/home/u/.config"))
+            xdg_config_dir(rel("config"), os("/home/u")),
+            Some(abs("/home/u").join(".config"))
         );
         assert_eq!(
             xdg_config_dir(None, os("/home/u")),
-            Some(PathBuf::from("/home/u/.config"))
+            Some(abs("/home/u").join(".config"))
         );
-        assert_eq!(xdg_config_dir(os("rel"), None), None);
+        assert_eq!(xdg_config_dir(rel("rel"), None), None);
         assert_eq!(xdg_config_dir(None, None), None);
     }
 
@@ -216,21 +227,28 @@ mod tests {
         let sys = FakeSystem::new();
         let item = DEMO
             .xdg(
-                Some(PathBuf::from("/home/u/.config")),
-                Ok(PathBuf::from("/opt/demo/demo-app")),
+                Some(abs("/home/u").join(".config")),
+                Ok(abs("/opt/demo/demo-app")),
                 Box::new(sys.clone()),
             )
             .unwrap();
         assert_eq!(
             item.definition(),
-            "[Desktop Entry]\nType=Application\nName=Demo\nExec=\"/opt/demo/demo-app\" \"--hidden\"\nTerminal=false\n\
-             X-GNOME-Autostart-enabled=true\n"
+            format!(
+                "[Desktop Entry]\nType=Application\nName=Demo\nExec=\"{}\" \"--hidden\"\nTerminal=false\n\
+                 X-GNOME-Autostart-enabled=true\n",
+                abs("/opt/demo/demo-app").display()
+            )
         );
         let mut item = item;
         item.set(true).unwrap();
         assert!(
-            sys.file(Path::new("/home/u/.config/autostart/Demo.desktop"))
-                .is_some()
+            sys.file(
+                &abs("/home/u/.config")
+                    .join("autostart")
+                    .join("Demo.desktop")
+            )
+            .is_some()
         );
     }
 
