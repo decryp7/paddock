@@ -599,3 +599,50 @@ fn a_lost_connection_is_retried_with_back_off_until_the_app_is_back() {
     );
     assert_eq!(assistant.info().tools.len(), 3);
 }
+
+#[test]
+fn open_starts_the_app_and_tries_to_connect_at_the_next_tick() {
+    use super::apps::{ConnectedApps, Opened};
+    use std::time::Duration as D;
+    let dyno = fake_dyno();
+    let file = discovery_path(dyno.dir.path());
+    let names = ToolNames::default();
+    let data = tempfile::tempdir().unwrap();
+    let policy = Arc::new(PitwallPolicy::new(None, names.clone(), || 1));
+    let clock = paddock_health::FakeClock::at_wall_ms(1_700_000_000_000);
+    let store = Arc::new(ConversationStore::open(data.path().join("c.json"), Arc::new(clock.clone())));
+    let assistant = Assistant::new(
+        Arc::new(Script(Mutex::default(), Mutex::default())),
+        paddock_assistant::Tools::none(),
+        store,
+        Arc::new(clock),
+        AssistantConfig::new("Pitwall", "s"),
+    );
+    let apps = ConnectedApps::new(
+        Arc::new(paddock_secrets::MemorySecrets::new("Pitwall")),
+        move |_| Some(file.clone()),
+        assistant,
+        policy,
+        names,
+    );
+    let started = Arc::new(Mutex::new(Vec::<String>::new()));
+    let log = started.clone();
+    apps.set_opener(move |id| {
+        log.lock().unwrap().push(id.to_string());
+        if id == "dyno" {
+            Opened::Started
+        } else {
+            Opened::Problem("Recce isn't installed.".into())
+        }
+    });
+    // Dyno is closed (its listener off) while a key is saved: not connected.
+    dyno.listener.reconcile(false);
+    assert!(!apps.set_key("dyno", &dyno.key).unwrap().connected);
+    // Open Dyno: it starts, and the next tick connects once Dyno listens.
+    assert_eq!(apps.open("dyno").unwrap(), Opened::Started);
+    assert_eq!(*started.lock().unwrap(), ["dyno"]);
+    dyno.listener.reconcile(true);
+    apps.tick(D::from_secs(1));
+    assert!(apps.views()[0].connected, "{:?}", apps.views()[0].problem);
+    assert!(apps.open("recce").is_err(), "not a known app");
+}

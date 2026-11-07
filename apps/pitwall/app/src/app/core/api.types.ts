@@ -1121,3 +1121,6 @@ export interface ChatModels {
   /** Why some models can't be chosen, in full (the picker's hint). */
   note: string | null;
 }
+
+/** What "Open <app>" came to (`chat_host::apps::Opened`): starting, or the words saying why not. */
+export type OpenedApp = { kind: 'started' } | { kind: 'problem'; message: string };

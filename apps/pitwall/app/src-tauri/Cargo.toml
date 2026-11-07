@@ -40,6 +40,8 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 # The Playground chat's host (ADR 0023 WP-9a): the MCP client to connected apps.
 paddock-mcp = { path = "../../../../crates/paddock-mcp" }
+# "Open Dyno" (ADR 0023 Decision 7): the family's hand-off starts the app.
+paddock-siblings = { path = "../../../../crates/paddock-siblings" }
 # The pasted MCP keys (ADR 0023 Decision 7): an owner-only file on macOS, the OS store elsewhere (the target section below).
 paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 # Report a problem (plan B4): Pitwall's sections beside paddock-diag's, the app's folders and the log handle its Logging

@@ -110,6 +110,7 @@ pub struct ConnectedApps {
     problems: Mutex<BTreeMap<String, (String, bool)>>,
     changed: Mutex<Option<OnChange>>,
     retry: Mutex<BTreeMap<String, Retrying>>,
+    opener: Mutex<Option<Opener>>,
 }
 
 /// An app whose connection was lost: when to try again, on the family's back-off (1 s doubling to 60 s, never giving up:
@@ -122,6 +123,19 @@ struct Retrying {
 fn reconnect_policy() -> BackoffPolicy {
     BackoffPolicy::retry_forever(Duration::from_secs(1), Duration::from_secs(60), Duration::from_secs(300))
 }
+
+/// What opening an app came to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", content = "message", rename_all = "camelCase")]
+pub enum Opened {
+    /// It is starting (or was running and came to the front).
+    Started,
+    /// It could not be opened: not installed, too old; the words say what to do.
+    Problem(String),
+}
+
+/// Starts a family app by id (`paddock-siblings` in the app; a fake in tests).
+type Opener = Box<dyn Fn(&str) -> Opened + Send + Sync>;
 
 /// Told every apps' views after each change.
 type OnChange = Box<dyn Fn(&[ConnectedApp]) + Send + Sync>;
@@ -162,7 +176,33 @@ impl ConnectedApps {
             problems: Mutex::default(),
             changed: Mutex::default(),
             retry: Mutex::default(),
+            opener: Mutex::default(),
         }
+    }
+
+    /// How [`ConnectedApps::open`] starts an app.
+    pub fn set_opener(&self, f: impl Fn(&str) -> Opened + Send + Sync + 'static) {
+        *lock(&self.opener) = Some(Box::new(f));
+    }
+
+    /// Opens the app ("Open Dyno"), then connects at the next tick once it listens (on the back-off after that).
+    pub fn open(&self, id: &str) -> Result<Opened, AppsError> {
+        title_of(id)?;
+        let outcome = lock(&self.opener)
+            .as_ref()
+            .map_or_else(|| Opened::Problem("Pitwall can't open other apps in this build.".into()), |f| f(id));
+        log::info!(target: "pitwall_chat", "connected apps: open {id}: {outcome:?}");
+        if outcome == Opened::Started {
+            let mut retry = lock(&self.retry);
+            retry.insert(
+                id.to_string(),
+                Retrying {
+                    backoff: Backoff::new(reconnect_policy()),
+                    next: Duration::ZERO,
+                },
+            );
+        }
+        Ok(outcome)
     }
 
     /// The app's timer (every second or so, `now` from the monotonic clock): a connection that ended is dropped and retried

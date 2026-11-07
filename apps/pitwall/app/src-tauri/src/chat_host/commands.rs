@@ -3,7 +3,7 @@
 //! a build with the `chat` feature ([`crate::chat_switch`]); without it every command answers that the chat is not part
 //! of this build.
 
-use super::apps::{AppsError, ConnectedApp, ConnectedApps};
+use super::apps::{AppsError, ConnectedApp, ConnectedApps, Opened};
 use super::models::{chat_models, ChatModels, Facts};
 use super::{ChatLog, PitwallPolicy, ToolNames};
 use crate::chat_provider::{ServerChatProvider, SessionChats};
@@ -96,6 +96,16 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
 pub fn install<R: Runtime>(app: &AppHandle<R>, chat: ChatState) {
     let wrap: paddock_assistant::tauri::SinkWrap = Arc::new(|inner: Arc<dyn EventSink>| Arc::new(ChatLog(inner)) as Arc<dyn EventSink>);
     paddock_assistant::tauri::manage_with(app, chat.assistant.clone(), Some(wrap));
+    chat.apps.set_opener(|id| match paddock_siblings::Siblings::native("pitwall") {
+        Ok(s) => match s.open(id, &paddock_siblings::Handoff::Open) {
+            Ok(paddock_siblings::Outcome::Opened { .. }) => Opened::Started,
+            Ok(paddock_siblings::Outcome::NotInstalled { message, .. } | paddock_siblings::Outcome::NeedsUpdate { message, .. }) => {
+                Opened::Problem(message)
+            }
+            Err(e) => Opened::Problem(e.to_string()),
+        },
+        Err(e) => Opened::Problem(e.to_string()),
+    });
     let emitter = app.clone();
     chat.apps.on_change(move |views| {
         let _ = tauri::Emitter::emit(&emitter, CONNECTED_APPS_EVENT, views);
@@ -161,6 +171,12 @@ pub async fn set_app_key<R: Runtime>(app: AppHandle<R>, app_id: String, key: Str
 #[tauri::command]
 pub async fn connect_app<R: Runtime>(app: AppHandle<R>, app_id: String) -> Result<ConnectedApp, CommandError> {
     on_apps(&app, move |a| a.connect(&app_id)).await
+}
+
+/// Opens `app_id` ("Open Dyno"); the chat connects once it listens.
+#[tauri::command]
+pub async fn open_connected_app<R: Runtime>(app: AppHandle<R>, app_id: String) -> Result<Opened, CommandError> {
+    on_apps(&app, move |a| a.open(&app_id)).await
 }
 
 /// Asks again for one tool of `app_id`: its Always allow is forgotten.

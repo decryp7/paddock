@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
 import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
@@ -35,6 +35,9 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
               </span>
               <span class="spacer"></span>
               <button type="button" matButton="outlined" [disabled]="busy()" (click)="connect(app)">{{ app.keySaved ? 'Replace key…' : 'Connect…' }}</button>
+              @if (app.keySaved && !app.connected && !app.keyRefused) {
+                <button type="button" matButton="outlined" [disabled]="busy()" (click)="open(app)">Open {{ app.title }}</button>
+              }
               @if (app.keySaved) {
                 @if (!app.keyRefused) {
                   <button type="button" matButton [disabled]="busy()" (click)="refresh(app)">Refresh tools</button>
@@ -44,6 +47,9 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
             </div>
             @if (app.problem) {
               <p class="problem" role="alert" data-testid="connected-app-problem">{{ app.problem }}</p>
+            }
+            @if (opening()[app.id]; as note) {
+              <p class="problem" role="status" data-testid="connected-app-opening">{{ note }}</p>
             }
             @if (app.connected) {
               <ul class="tools" [attr.aria-label]="app.title + ' tools'">
@@ -95,9 +101,19 @@ export class ConnectedAppsPage {
   protected readonly loading = signal(false);
   protected readonly error = signal<CommandError | null>(null);
   protected readonly busy = signal(false);
+  /** What "Open <app>" said, per app, until the app connects. */
+  protected readonly opening = signal<Record<string, string>>({});
 
   constructor() {
     void this.load();
+    // Rust tells every window about each change (a connect made by the timer after Open, a lost connection).
+    const stop = this.backend.onConnectedApps((apps) => {
+      this.apps.set(apps);
+      const open = { ...this.opening() };
+      for (const a of apps) if (a.connected) delete open[a.id];
+      this.opening.set(open);
+    });
+    inject(DestroyRef).onDestroy(stop);
   }
 
   async load(): Promise<void> {
@@ -144,6 +160,23 @@ export class ConnectedAppsPage {
 
   protected refresh(app: ConnectedApp): Promise<void> {
     return this.act(() => this.backend.connectApp(app.id));
+  }
+
+  /** Opens the app; the chat connects as soon as it listens (Rust's timer), and the page hears it. */
+  protected async open(app: ConnectedApp): Promise<void> {
+    this.busy.set(true);
+    try {
+      const outcome = await this.backend.openConnectedApp(app.id);
+      // It may have connected already (the event can come before this answer): then there is nothing to say.
+      const connected = this.apps()?.some((a) => a.id === app.id && a.connected) === true;
+      if (outcome.kind === 'problem' || !connected) {
+        this.opening.set({ ...this.opening(), [app.id]: outcome.kind === 'started' ? `Opening ${app.title}…` : outcome.message });
+      }
+    } catch (e) {
+      this.error.set(toCommandError(e));
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   /** Asks again before one tool (its Always allow is forgotten). */

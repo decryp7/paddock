@@ -131,6 +131,7 @@ paddock_commands::command_table! {
     Mutation [WINDOW] => chat_host::commands::connect_app,
     Mutation [WINDOW] => chat_host::commands::forget_app,
     Mutation [WINDOW] => chat_host::commands::revoke_tool_approval,
+    Mutation [WINDOW] => chat_host::commands::open_connected_app,
     Query [WINDOW] => chat_host::commands::chat_models_list,
     Mutation [WINDOW] => chat_host::commands::set_chat_model,
     Query [WINDOW] => commands::benchmarks,

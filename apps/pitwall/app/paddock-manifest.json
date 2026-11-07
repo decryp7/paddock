@@ -188,6 +188,7 @@
         "edit_popover",
         "forget_app",
         "get_autostart",
+        "open_connected_app",
         "open_service_login_items",
         "overview",
         "popover_header",

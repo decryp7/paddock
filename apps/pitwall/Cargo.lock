@@ -3833,6 +3833,7 @@ dependencies = [
  "paddock-secrets",
  "paddock-service",
  "paddock-shell",
+ "paddock-siblings",
  "paddock-startup",
  "paddock-testkit",
  "paddock-updater",

@@ -42,6 +42,7 @@ export const APP_COMMANDS = {
   install_build: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   local_models: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   model_fit: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+  open_connected_app: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   open_service_login_items: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   overview: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   packs: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },

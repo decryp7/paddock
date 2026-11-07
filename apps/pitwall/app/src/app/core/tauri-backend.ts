@@ -2,6 +2,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
   ChatModels,
+  OpenedApp,
   ConnectedApp,
   AppInfo,
   CacheClearScope,
@@ -415,6 +416,9 @@ export class TauriBackend implements PitwallBackend {
   }
   forgetApp(appId: string): Promise<ConnectedApp> {
     return this.run('forget_app', { appId });
+  }
+  openConnectedApp(appId: string): Promise<OpenedApp> {
+    return this.run('open_connected_app', { appId });
   }
   revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp> {
     return this.run('revoke_tool_approval', { appId, tool });

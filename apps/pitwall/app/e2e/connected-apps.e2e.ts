@@ -38,6 +38,13 @@ test.describe('connected apps and the chat model', () => {
     await expect(dyno.getByText('Top processes')).toBeVisible();
     await expect(dyno.getByRole('button', { name: 'Refresh tools' })).toBeVisible();
 
+    // Dyno quits: the row says so; Open Dyno starts it and the chat connects again.
+    await page.evaluate(() => (window as unknown as { __pitwallMock?: { dynoQuit(): void } }).__pitwallMock?.dynoQuit());
+    await expect(dyno.getByTestId('connected-app-problem')).toContainText('Trying again when Dyno is back');
+    await dyno.getByRole('button', { name: 'Open Dyno' }).click();
+    await expect(dyno.getByTestId('connected-app-state')).toHaveText('Connected: 6 tools');
+    await expect(dyno.getByTestId('connected-app-opening')).toHaveCount(0);
+
     // One tool is always allowed: Ask again forgets just that one.
     await dyno.getByRole('button', { name: 'Ask again before System summary' }).click();
     await expect(dyno.getByText('Always allowed', { exact: true })).toHaveCount(0);

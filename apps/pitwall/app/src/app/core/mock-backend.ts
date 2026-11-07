@@ -2,6 +2,7 @@ import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
   ChatModels,
+  OpenedApp,
   ConnectedApp,
   ModelPreset,
   PresetDraft,
@@ -115,7 +116,7 @@ const JOB_TITLES: Partial<Record<keyof PitwallBackend, string>> = {
 const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
-  'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval',
+  'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -1454,6 +1455,21 @@ export class MockBackend implements PitwallBackend {
       this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, tools: [], remembered: 0 };
       return this.appsChanged();
     });
+  }
+
+  /** Dyno "opens" and, as the app's timer does, is connected right after when a key is saved. */
+  openConnectedApp(appId: string): Promise<OpenedApp> {
+    return this.reply('openConnectedApp', () => {
+      if (appId !== 'dyno') return { kind: 'problem', message: `Pitwall does not know an app called ${appId}.` } as OpenedApp;
+      if (this.dyno_.keySaved && !this.dyno_.keyRefused) queueMicrotask(() => this.connectDyno(true));
+      return { kind: 'started' } as OpenedApp;
+    });
+  }
+
+  /** Demo and test hook: Dyno quit (its connection ended); the app retries until it is back. */
+  dynoQuit(): void {
+    this.dyno_ = { ...this.dyno_, connected: false, tools: [], problem: 'Dyno closed the connection (the app quit). Trying again when Dyno is back.' };
+    this.appsChanged();
   }
 
   revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp> {

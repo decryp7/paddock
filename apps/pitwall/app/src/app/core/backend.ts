@@ -1,6 +1,7 @@
 import { InjectionToken } from '@angular/core';
 import type {
   ChatModels,
+  OpenedApp,
   ConnectedApp,
   AppInfo,
   CacheClearScope,
@@ -209,6 +210,8 @@ export interface PitwallBackend {
   connectApp(appId: string): Promise<ConnectedApp>;
   /** Forgets an app: its connection, key and remembered approvals. */
   forgetApp(appId: string): Promise<ConnectedApp>;
+  /** Opens a family app ("Open Dyno"); the chat connects once it listens. */
+  openConnectedApp(appId: string): Promise<OpenedApp>;
   /** Asks again for one tool (forgets its Always allow). */
   revokeToolApproval(appId: string, tool: string): Promise<ConnectedApp>;
   /** Every change of the connected apps, from any window (`pitwall://connected-apps`). */

@@ -49,7 +49,13 @@ let browser: PitwallBackend | null = null;
  */
 export function createBackend(search: string = OPENED_WITH): PitwallBackend {
   if (isTauri()) return withTimeout(new TauriBackend());
-  return (browser ??= withTimeout(new MockBackend(mockOptionsFrom(search))));
+  if (!browser) {
+    const mock = new MockBackend(mockOptionsFrom(search));
+    // The browser build only: e2e specs drive what the mock plays (Dyno quitting) through this handle.
+    (globalThis as { __pitwallMock?: MockBackend }).__pitwallMock = mock;
+    browser = withTimeout(mock);
+  }
+  return browser;
 }
 
 /** Forgets the browser build's one backend (specs that boot a window more than once). */
