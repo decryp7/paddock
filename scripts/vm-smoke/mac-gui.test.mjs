@@ -43,3 +43,11 @@ test('addSchedule waits for the "Turn on scheduled wake" banner to go before it 
   assert.deepEqual(order.slice(0, 2), ['turnon', 'add'], 'the first Add press comes after the banner went');
   assert.equal(r.ok, true, r.detail);
 });
+
+test('ensureMainWindow reopens the app when it started hidden and waits for the window; it does nothing when the window is up', async () => {
+  const mk = (windowAfterOpen) => { let up = false; const cmds = [];
+    const g = { now: () => Date.now(), sleep: async () => {}, exec: async (c) => { cmds.push(c); if (/^open -a/.test(c) && windowAfterOpen) up = true; return { code: /axdrive has/.test(c) ? (up ? 0 : 1) : 0, stdout: '', stderr: '' }; } };
+    return { cmds, gui: new MacGui(g, {}) }; };
+  const a = mk(true); assert.equal(await a.gui.ensureMainWindow(), true); assert.ok(a.cmds.some((c) => /^open -a '\/Applications\/Dyno\.app'/.test(c)));
+  const b = mk(true); b.gui.g.exec = async (c) => { b.cmds.push(c); return { code: 0, stdout: '', stderr: '' }; }; assert.equal(await b.gui.ensureMainWindow(), true); assert.ok(!b.cmds.some((c) => /^open -a/.test(c)));
+});

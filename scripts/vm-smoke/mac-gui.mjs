@@ -67,8 +67,20 @@ export class MacGui {
   /** Brings the app to the front (a restarted app is not frontmost, and menu items of a background app do not act). */
   async activate() { await this.g.exec(`osascript -e ${sq(`tell application "${this.app}" to activate`)}`); await this.g.sleep(1000); }
 
+  /**
+   * The main window is on screen. After a restart Dyno starts hidden (`--hidden`: tray / menu bar only), and its pages and Settings rows have nothing to
+   * press. A second `open -a` is the Dock-click reopen, which shows the window of the running app. Waited on the window (the Dashboard link), up to 30 s.
+   */
+  async ensureMainWindow() {
+    const shown = () => this.has(this.app, '^Dashboard$', 'AXLink');
+    if (await shown()) return true;
+    await this.g.exec(`open -a ${sq(`/Applications/${this.app}.app`)}`);
+    return (await this.waitFor(shown, 30_000)).ok;
+  }
+
   /** Dyno > Settings… (the app menu item opens the Settings window), then the section button of that window. */
   async openSettingsSection(sectionRe) {
+    await this.ensureMainWindow();
     if (!(await this.has(this.app, '^Settings$', 'AXWindow'))) {
       // An AXPress on a menu item of an app that is not frontmost is accepted and does nothing (row 25 of 2026-11-05: after the MCP row restarted the app with `open`).
       await this.activate();
@@ -163,6 +175,7 @@ export class MacGui {
 
   /** The Power page on one of its tabs (the real tab buttons; AXPress on a radio needs the trailing value in its label, so no `$`). */
   async openPower(tab) {
+    await this.ensureMainWindow();
     if (!(await this.has(this.app, '^Power$', 'AXHeading'))) await this.press(this.app, '^Power$', 'AXLink');
     const ok = await this.waitFor(() => this.press(this.app, `^${tab}( |$)`, 'AXRadioButton'), 20_000);
     if (ok.ok) await this.waitFor(async () => (await this.texts()).some((t) => t.role === 'AXRadioButton' && t.text.startsWith(tab)), 5_000);

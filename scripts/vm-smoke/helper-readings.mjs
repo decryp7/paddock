@@ -181,6 +181,7 @@ export function macDriver(gui) {
     async cleanup(key) { if (key === 'temp-widget') return removeTemperatureWidget(gui); if (key === 'pf-rule' && loadedPf) { await gui.g.exec('sudo /sbin/pfctl -f /etc/pf.conf >/dev/null 2>&1; true'); loadedPf = false; } },
     async openPage(page, tab, reading = {}) {
       await gui.closeSettings(); // the Settings window stays open after the helper step and would be read as the page
+      await gui.ensureMainWindow(); // after a restart Dyno starts --hidden: show the window first
       if (reading.minWidth && (await gui.has(gui.app, '^Collapse sidebar'))) await gui.press(gui.app, '^Collapse sidebar'); // room for the Account column
       const ok = (await gui.waitFor(() => gui.press(gui.app, `^${label[page]}$`, 'AXLink'), 15_000)).ok;
       if (ok && tab) return (await gui.waitFor(async () => (await gui.press(gui.app, `^(${tab})( |$)`, 'AXRadioButton')) || (await gui.press(gui.app, `^(${tab})( |$)`, 'AXButton')), 10_000)).ok;

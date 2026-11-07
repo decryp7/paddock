@@ -190,6 +190,11 @@ async function main(argv) {
         for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000);
         await sleep(15_000);
       }
+      if (autostarted) {
+        // The autostart entry starts Dyno with --hidden (tray only): a second start of dyno-app hands over to the running instance and shows its window.
+        ses('systemd-run --user --collect --unit=dyno-gui-show -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1');
+        for (let i = 0; i < 15 && !/Processes/.test(atspi('tree dyno 60 2>&1').stdout); i++) await sleep(2000);
+      }
       const cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim();
       press('^Processes$', 'link'); await sleep(4000);
       const procPage = atspi('tree dyno 80').stdout;

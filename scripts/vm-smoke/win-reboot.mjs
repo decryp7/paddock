@@ -234,6 +234,14 @@ async function runRebootSteps(ctx, steps) {
     ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3');
     ctx.launchDyno();
     await sleep(25_000);
+  } else {
+    // After a restart Dyno starts with --hidden (tray only). The Settings and page rows need the main window: a second start of dyno-app hands over to the
+    // running instance, which shows its window (the way a click on the tray icon or the Start menu entry does). Waited on the window, not on a fixed delay.
+    ctx.launchDyno();
+    for (let i = 0; i < 15; i++) {
+      await sleep(2000);
+      if (ssh('(Get-Process dyno-app -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Measure-Object).Count').trim() !== '0') break;
+    }
   }
   t = tunnel();
   let card = 'no window';
