@@ -110,6 +110,19 @@ only when on), **readable by any program running as the same user** (an npm `pos
 silently), and **copied in plain text by backup and clone tools** other than Time Machine (Carbon Copy Cloner, `rsync`, a
 migration). ADR 0057's D1 to D5 are still open (section 9).
 
+**B5 state (2026-11-08, branch `pitwall/1.1-b5`, `056d86e31`, `5ffb943a8`, `cda8cdbcc`).** Built: `paddock_secrets::SecretFile`
+(one owner-only file at a chosen path; `FileSecrets` is a folder of them), the admin key in `admin.key` only on every OS
+(app and CLI; `keyring` out of both), the `"rePair"` flag and revoke rule, Pitwall's Clippy entries, the release note's
+delete commands, and C99 layers 1 and 2. **The pasted `pmk_` key stays as the user decided on 2026-11-07:** an owner-only
+file on macOS, the OS store on Windows and Linux (rule 72 bans only the macOS Keychain), so the chat branch keeps its split
+and `paddock-secrets/keyring` off macOS; only the admin key is file-only on every OS (ADR 0057 D4). The chat merge has a
+`app/src-tauri/Cargo.toml` conflict (both add `paddock-secrets`), resolved at integration. Follow-ups:
+- the rest of C99, ADR 0057 WP-2: the dependency source scan, the macOS graph probe, the Clippy preset entries and C13's
+  `disallowed-types`, the lint fixture, the CI time measured; and C99 in ci.yml's root `--only` list;
+- rule 72's text lands with ADR 0057 (this tree's `docs/rules.md` ends at 55);
+- the Windows tests (`paddock-secrets` `file_windows.rs`: the owner-only DACL, the refused shared DACL) have only been
+  type-checked with `cargo xwin`; they run on a real Windows machine in CI, on the `windows-latest` crate job.
+
 ## 2. Order and critical path
 
 ### Phase A: from S to the PoC (nothing lands on `main`)
