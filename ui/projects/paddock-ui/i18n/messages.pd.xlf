@@ -923,6 +923,9 @@
       <trans-unit id="pd.health.state.unavailable" datatype="html">
         <source>not available</source>
       </trans-unit>
+      <trans-unit id="pd.health.state.updated-restart" datatype="html">
+        <source>updated: restart to finish</source>
+      </trans-unit>
       <trans-unit id="pd.health.state.waiting-service" datatype="html">
         <source>waiting for the login service</source>
       </trans-unit>

@@ -112,7 +112,7 @@ pub fn setup_problem(check: &paddock_setup::versioncheck::VersionCheck) -> Optio
 pub fn updated_problem() -> Cause {
     Cause::new("Dyno was updated.")
         .hint("Restart Dyno to finish: quit it and open it again.")
-        .code("dy.setup.version")
+        .code("dy.setup.updated")
 }
 
 /// Checks the installed `paddock-setup.exe` against this Dyno's version (Windows, at start) and reports a mismatch.
@@ -271,6 +271,13 @@ mod tests {
 
     fn status(state: AgentState, message: Option<&str>) -> AgentStatus {
         AgentStatus::new(state, message.map(str::to_string))
+    }
+
+    #[test]
+    fn an_app_updated_while_it_runs_is_told_to_restart_with_its_own_cause_code() {
+        let cause = updated_problem();
+        assert_eq!(cause.code.as_deref(), Some("dy.setup.updated"));
+        assert!(cause.message.contains("updated") && cause.hint.as_deref().is_some_and(|h| h.contains("Restart Dyno")));
     }
 
     #[test]
