@@ -180,6 +180,8 @@ async function main(argv) {
     // The build binding is read while the app is installed (the uninstall step removes it later).
     const expected = expectedCommit(o.expectCommit) ?? (o.run ? commitOfRun(o.run) : null);
     const buildProbe = expected && done && !blocked ? foundFromPs(clean(ssh(psHasCommit('C:\\Program Files\\Dyno\\dyno-app.exe', expected), 180_000).stdout)) : null;
+    // The install row's precondition for every later setup step: paddock-setup.exe is there with FileVersion 1.1.0 and POSTINSTALL ran (check-version, clean-run in setup.log).
+    const setupFacts = done && !blocked ? (await import('./win-machine.mjs')).setupExeFacts('right after the install') : null;
     let uiSteps = [];
     if (o.ui && done && !blocked) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
@@ -211,6 +213,7 @@ async function main(argv) {
     // The install is per machine: a real UAC prompt must have appeared and been answered (uac-1); none at all is a broken check, not an install.
     if (steps[0] && !uacNotes.some((u) => /^uac-1:/.test(u.detail))) { steps[0].checks.push({ ok: false, kind: 'check', detail: 'no UAC prompt (consent.exe) was seen for the install: the per-machine install was not exercised' }); steps[0].status = 'fail'; }
     if (steps[0]) { steps[0].evidence.push(...uacNotes.map((u) => `UAC: ${u.detail}`)); const badUac = uacNotes.filter((u) => !u.ok); if (badUac.length) { steps[0].status = 'fail'; steps[0].checks.push(...badUac.map((u) => ({ ok: false, detail: u.detail }))); } }
+    if (steps[0] && setupFacts) { steps[0].checks.push(...setupFacts.checks); steps[0].evidence.push(...setupFacts.evidence); if (!setupFacts.ok && steps[0].status === 'pass') { steps[0].status = 'check-broken'; steps[0].cls = 'check'; steps[0].summary = `installed, but ${setupFacts.checks.filter((c) => !c.ok).map((c) => c.detail).join('; ')}`.slice(0, 240); } }
     if (!done) steps.push({ title: 'Suite finished', status: 'fail', summary: 'the suite did not finish within 40 minutes', checks: [], evidence: [] });
     steps.push(...uiSteps);
     steps.push({ title: 'Tray right-click menu, dialogs at 150 % (manual)', status: 'manual', summary: 'Not automated yet: the tray menu and the 150 % scale need native input and a live display-scale change that the VMware display does not allow.' });

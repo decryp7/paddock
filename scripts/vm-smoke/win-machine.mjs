@@ -34,8 +34,40 @@ export function semverOf(productVersion) {
   return m ? `${m[1]}.${m[2]}.${m[3]}` : null;
 }
 
+/**
+ * paddock-setup.exe, the program the installer's POSTINSTALL runs (check-version, clean-run) and apply-update and the uninstaller use. On the 7d06 round it went missing
+ * seconds after the install (app log: error 1812, then 2), so every row that needs it first proves it is there, with FileVersion 1.1.0, and that setup.log shows the
+ * POSTINSTALL steps; otherwise the row is a broken check. Windows Defender's view is always attached (Get-MpThreatDetection, Operational events 1116, 1117, 1006): does
+ * Defender hold or remove the unsigned exe?
+ */
+export function setupExeFacts(label) {
+  const raw = ssh(`$ErrorActionPreference='Continue'; $f='${PROG}\\paddock-setup.exe'; $e=$null; try { $i = Get-Item $f -ErrorAction Stop; 'PRESENT=1'; 'VERSION=' + $i.VersionInfo.FileVersion } catch { 'PRESENT=0'; 'ERROR=' + $_.Exception.Message }; $log = Get-Content '${PROG}\\updates\\setup.log' -ErrorAction SilentlyContinue; 'CHECKVERSION=' + [int][bool]($log | Select-String 'check-version'); 'CLEANRUN=' + [int][bool]($log | Select-String 'clean-run'); if ($Error.Count) { 'LASTERROR=' + ($Error[0] | Out-String).Trim().Replace([char]10,' ') }`, { admin: true });
+  const v = (k) => new RegExp(`^${k}=(.*)$`, 'm').exec(raw)?.[1]?.trim() ?? null;
+  const present = v('PRESENT') === '1';
+  const version = v('VERSION');
+  const okVersion = /^1\.1\.0(\.0)?$/.test(version ?? '');
+  const setupLog = { checkVersion: v('CHECKVERSION') === '1', cleanRun: v('CLEANRUN') === '1' };
+  const defender = defenderEvidence();
+  const evidence = [`--- paddock-setup.exe (${label}): ${present ? `present, FileVersion ${version}` : `MISSING (${v('ERROR') ?? 'no error text'})`}; setup.log check-version ${setupLog.checkVersion ? 'yes' : 'no'}, clean-run ${setupLog.cleanRun ? 'yes' : 'no'}${v('LASTERROR') ? `; $Error[0]: ${v('LASTERROR').slice(0, 300)}` : ''}`, ...defender];
+  const checks = [
+    { ok: present && okVersion, kind: 'check', detail: present ? (okVersion ? `paddock-setup.exe is there (FileVersion ${version})` : `paddock-setup.exe has FileVersion ${version}, not 1.1.0`) : `paddock-setup.exe is missing from ${PROG} (${label}); see the Defender evidence` },
+    { ok: setupLog.checkVersion && setupLog.cleanRun, kind: 'check', detail: setupLog.checkVersion && setupLog.cleanRun ? 'setup.log shows check-version and clean-run (POSTINSTALL ran)' : `setup.log lacks ${[!setupLog.checkVersion && 'check-version', !setupLog.cleanRun && 'clean-run'].filter(Boolean).join(' and ')}: POSTINSTALL did not run as designed` },
+  ];
+  return { present, version, ok: checks.every((c) => c.ok), checks, evidence };
+}
+
+/** Windows Defender: detections and the Operational log's 1116 (detected), 1117 (action taken), 1006 (malware found), newest first. */
+export function defenderEvidence() {
+  const det = ssh("Get-MpThreatDetection -ErrorAction SilentlyContinue | ForEach-Object { '' + $_.InitialDetectionTime + ' threat ' + $_.ThreatID + ' action ' + $_.ActionSuccess + ' ' + ($_.Resources -join ',') }; 'END'", { admin: true });
+  const ev = ssh("Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1116,1117,1006 } -MaxEvents 20 -ErrorAction SilentlyContinue | ForEach-Object { $_.TimeCreated.ToString('s') + ' id=' + $_.Id + ': ' + (($_.Message -replace '\\s+',' ').Substring(0, [Math]::Min(400, $_.Message.Length))) }; 'END'", { admin: true });
+  const lines = (t) => t.replace(/END\s*$/, '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
+  return ['--- Defender Get-MpThreatDetection', ...(/END\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), '--- Defender Operational 1116/1117/1006', ...(/END\s*$/.test(ev) ? (lines(ev).length ? lines(ev) : ['(no events)']) : ['(unreadable)'])];
+}
+
 export function sameVersionRefused() {
   const checks = [];
+  const pre = setupExeFacts('before apply-update');
+  if (!pre.present) return result('Windows: an update from the same version is refused (not newer)', pre.checks, pre.evidence);
   const ver = semverOf(ssh(`(Get-Item '${PROG}\\dyno-app.exe').VersionInfo.ProductVersion`));
   checks.push({ ok: Boolean(ver), detail: ver ? `installed version ${ver}` : 'the installed version could not be read' });
   const hasSig = ssh('Test-Path C:\\paddock-test\\vmcheck\\setup.exe.sig') === 'True';
@@ -50,7 +82,7 @@ export function sameVersionRefused() {
   const left = ssh(`Get-ChildItem '${PROG}\\updates' -Name -ErrorAction SilentlyContinue | Where-Object { $_ -ne 'setup.log' }`, { admin: true }).split('\n').map((l) => l.trim()).filter(Boolean);
   checks.push({ ok: left.length === 0, detail: left.length ? `a refused update left ${left.join(', ')} in updates\\` : 'a refused update leaves nothing in updates\\' });
   const tail = ssh(`Get-Content '${PROG}\\updates\\setup.log' -Tail 8 -ErrorAction SilentlyContinue`, { admin: true }).split('\n');
-  return result('Windows: an update from the same version is refused (not newer)', checks, [...out.split('\n').slice(0, 10), '--- setup.log tail', ...tail], 'apply-update refused the same version (exit 27) and left nothing');
+  return result('Windows: an update from the same version is refused (not newer)', [...pre.checks, ...checks], [...out.split('\n').slice(0, 10), '--- setup.log tail', ...tail, ...pre.evidence], 'apply-update refused the same version (exit 27) and left nothing');
 }
 
 export async function uninstall() {
@@ -61,6 +93,7 @@ export async function uninstall() {
   const has = hasState === 'yes';
   checks.push({ ok: has, ...(hasState === 'unreadable' ? { kind: 'check' } : {}), detail: has ? 'uninstall.exe is in the install folder' : hasState === 'unreadable' ? 'the install folder could not be read (SSH printed nothing)' : 'no uninstall.exe in the install folder' });
   if (!has) return result('Windows: uninstall removes the programs and the machine-wide entries', checks);
+  const pre = setupExeFacts('before the uninstall');
   // The uninstaller runs from the interactive session (see interactiveUninstall); its own exit code, the ~nsu copy's pid and exit code, and setup.log are kept.
   const runText = await interactiveUninstall('uninstall');
   let facts = {};
@@ -88,7 +121,10 @@ export async function uninstall() {
   }
   const evidence = [`uninstall.exe /S from the interactive session: ${runText}`];
   if (facts.folder !== 'no') evidence.push('--- setup.log tail', ...ssh(`Get-Content '${PROG}\\updates\\setup.log' -Tail 30 -ErrorAction SilentlyContinue`, { admin: true }).split('\n').slice(-30));
-  checks.push(...judgeUninstall(facts));
+  // Without paddock-setup.exe (or with a POSTINSTALL that never ran) the uninstaller cannot do its part: what it leaves is then not a product verdict.
+  const judged = judgeUninstall(facts).map((c) => (pre.present ? c : { ...c, ...(c.ok ? {} : { kind: 'check', detail: `${c.detail} (paddock-setup.exe was missing before the uninstall)` }) }));
+  checks.push(...pre.checks, ...judged);
+  evidence.push(...pre.evidence, ...defenderEvidence().map((l) => `[after the uninstall] ${l}`));
   return result('Windows: uninstall removes the programs and the machine-wide entries', checks, evidence, 'the programs, the uninstall entry and the start-at-login values are gone');
 }
 
@@ -220,7 +256,7 @@ export async function winQuitStop() {
         if (!clicked) throw new Error('no "Quit and stop measuring" item in the File menu');
       } finally { t.close(); }
     },
-    count, reopen: async () => { launch(); await sleep(30_000); return count(); }, reboot: async () => null,
+    count, reopen: async () => { launch(); await sleep(30_000); return count(); }, // the reboot half is the restart run's (win-reboot.mjs)
   });
 }
 
