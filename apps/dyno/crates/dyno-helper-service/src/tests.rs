@@ -455,6 +455,10 @@ fn the_maintainer_scripts_are_posix_sh_skip_without_systemd_and_touch_only_the_h
 /// change to the shipped script is where it looks for a running systemd (`/run/systemd/system`, here a folder of the test's).
 /// Returns every systemctl call made in `tmp` so far, one per line.
 #[cfg(unix)]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test runs the shipped sh script itself; it exits on its own over the fake systemctl"
+)]
 fn run_maintainer_script(tmp: &std::path::Path, script: &str, args: &[&str], enabled: bool) -> Vec<String> {
     use std::os::unix::fs::PermissionsExt;
     let bin = tmp.join("bin");
