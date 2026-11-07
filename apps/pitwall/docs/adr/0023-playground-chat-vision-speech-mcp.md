@@ -104,6 +104,12 @@ two models racing through tool approvals is confusing and few would want it).
   with backup, loading tolerates damage) and attachments by SHA-256 beside them. One file per conversation means a save costs
   one conversation, not the whole history.
 - A **"Don't save this chat"** switch per chat and a Settings switch for the default. Delete one or all.
+  **Input for WP-2b (from WP-3a, 2026-11-07):** a chat marked "Don't save" must leave no file behind even if the app
+  crashes, so a temporary folder that is removed on exit is not enough (WP-3a's `SessionChats` is that stop-gap and is
+  replaced). `paddock-assistant`'s `ConversationStore` is file-backed only today (`ConversationStore::open(path, clock)`).
+  WP-2b's `ConversationStore` port therefore needs an **in-memory implementation** that never touches the disk, which
+  Pitwall uses for a "Don't save" chat (and for the session before the saved store exists); the file-backed one stays for
+  saved chats. The shared crate is not changed before WP-2b.
 - Not in the server, not in any log, never sent anywhere. Chats and attachments are **left out of Report a problem**, checked
   by a test that plants a marker.
 - Files are protected by the user's account only, like the request inspector's data. Not encrypted (judgement: encryption
