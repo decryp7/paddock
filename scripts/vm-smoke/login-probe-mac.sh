@@ -8,7 +8,7 @@ export TART_HOME=${TART_HOME:-/Volumes/d7sst7/dev-targets/tart-home}
 BASE=${PADDOCK_MAC_BASE:-vmgui-base-tahoe-4aaa751f}
 STAGE=$(mktemp -d /private/tmp/claude-501/login-mac-stage.XXXXXX); cp "$NEW" $STAGE/new.dmg; cp "$OLD" $STAGE/old.dmg
 res() { echo "RESULT $1: $2 -- $3"; }
-btm() { tart exec $VM bash -c 'sudo sfltool dumpbtm 2>&1' > /tmp/btm-$$.txt; node --input-type=module -e "import('$HERE/login-start-rows.mjs').then(m=>{const p=m.parseBtm(require('fs').readFileSync('/tmp/btm-$$.txt','utf8'));console.log(JSON.stringify({present:p.present,count:p.count,total:p.total,raw:p.raw}))})" 2>&1 | tail -1; }
+btm() { tart exec $VM bash -c 'sudo sfltool dumpbtm 2>&1' > /tmp/btm-$$.txt; node --input-type=module -e "Promise.all([import('$HERE/login-start-rows.mjs'),import('node:fs')]).then(([m,fs])=>{const p=m.parseBtm(fs.readFileSync('/tmp/btm-$$.txt','utf8'));console.log(JSON.stringify({present:p.present,count:p.count,total:p.total,raw:p.raw}))})" 2>&1 | tail -1; }
 g() { tart exec $VM env PADDOCK_DISPOSABLE_VM=1 bash -c "$1" 2>&1; }
 newvm() { VM=paddock-vmsmoke-mac-login-$1-$$; tart clone $BASE $VM || exit 2; tart run --no-audio --no-graphics --dir=stage:$STAGE:ro $VM >/dev/null 2>&1 & RUNPID=$!; for i in $(seq 75); do tart exec $VM true 2>/dev/null && break; sleep 4; done; }
 dropvm() { tart stop $VM >/dev/null 2>&1; tart delete $VM >/dev/null 2>&1; kill $RUNPID 2>/dev/null; }

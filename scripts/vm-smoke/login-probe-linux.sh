@@ -30,8 +30,8 @@ if g "test -f $F" >/dev/null 2>&1; then
 else res default FAIL "no ~/.config/autostart/Dyno.desktop after a fresh install and first start"; fi
 echo "== the agent's login service"; ses 'systemctl --user is-enabled dyno-agent 2>&1; systemctl --user is-active dyno-agent 2>&1'
 echo "== Settings switch"
-ses 'python3 /var/cache/vmsmoke/atspi.py press dyno "^File$" "menu item" >/dev/null 2>&1; sleep 1; python3 /var/cache/vmsmoke/atspi.py press dyno "^Settings…$" "menu item" >/dev/null 2>&1; sleep 5'
-echo "-- tree lines about login:"; ses 'python3 /var/cache/vmsmoke/atspi.py tree dyno 80 2>&1 | grep -i -B1 -A1 "login" | head -20'
+ses 'python3 /var/cache/vmsmoke/atspi.py press dyno "^File$" "menu item" >/dev/null 2>&1; sleep 1; python3 /var/cache/vmsmoke/atspi.py press dyno "^Settings…$" "menu item" >/dev/null 2>&1; sleep 5; python3 /var/cache/vmsmoke/atspi.py press dyno "^Dyno$" "push button" >/dev/null 2>&1; sleep 3'
+echo "-- tree lines about login:"; ses 'python3 /var/cache/vmsmoke/atspi.py tree dyno 80 2>&1 | grep -i -B2 -A2 "login" | head -30; echo ---settings frame:; python3 /var/cache/vmsmoke/atspi.py tree dyno 80 2>&1 | grep -n -i "frame\|Settings" | head -8'
 for ROLE in 'check box|toggle button|switch' 'check box' 'toggle button' 'switch' 'push button' 'radio button'; do
   if ses "python3 /var/cache/vmsmoke/atspi.py state dyno '\"Start Dyno at login\" \"$ROLE\"' 2>&1 | head -2" | grep -qiE 'checked|on|off|true|false'; then echo "switch role works: $ROLE"; break; fi
 done
