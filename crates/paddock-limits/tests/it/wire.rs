@@ -493,3 +493,71 @@ fn every_quantity_reads_back_from_the_wire() {
         serde_json::from_value(serde_json::json!({"id": "a.b", "limit": {"kind": "count", "n": 3}, "reached": null, "scope": "query"})).unwrap();
     assert_eq!(without.reached, None);
 }
+
+/// The job wire carries a `LimitExceeded` as postcard between processes: the quantity must read back from it.
+#[test]
+fn quantities_and_limits_exceeded_survive_postcard() {
+    for q in [
+        Quantity::Bytes(7),
+        Quantity::Count(1 << 40),
+        Quantity::Ratio(200),
+        Quantity::Millis(108_000),
+        Quantity::Percent(80),
+    ] {
+        let bytes = postcard::to_stdvec(&q).unwrap();
+        let back: Quantity =
+            postcard::from_bytes(&bytes).unwrap_or_else(|e| panic!("{q:?} {bytes:?} {e:?}"));
+        assert_eq!(back, q);
+    }
+    let e = LimitExceeded::new(
+        LimitId::new("plugin.memory"),
+        Quantity::Bytes(1 << 30),
+        Scope::Plugin,
+    )
+    .reaching(Quantity::Bytes(3 << 30))
+    .unwrap();
+    let back: LimitExceeded = postcard::from_bytes(&postcard::to_stdvec(&e).unwrap()).unwrap();
+    assert_eq!(back, e);
+    let some: Option<LimitExceeded> =
+        postcard::from_bytes(&postcard::to_stdvec(&Some(e)).unwrap()).unwrap();
+    assert_eq!(some, Some(e));
+    // A hostile compact value is refused, not wrapped: percent 200, ratio over 32 bits, an unknown kind.
+    assert!(
+        postcard::from_bytes::<Quantity>(&postcard::to_stdvec(&(4u32, 200u64)).unwrap()).is_err()
+    );
+    assert!(
+        postcard::from_bytes::<Quantity>(&postcard::to_stdvec(&(2u32, 1u64 << 40)).unwrap())
+            .is_err()
+    );
+    assert!(
+        postcard::from_bytes::<Quantity>(&postcard::to_stdvec(&(9u32, 1u64)).unwrap()).is_err()
+    );
+    assert!(postcard::from_bytes::<Quantity>(&[]).is_err());
+    assert!(postcard::from_bytes::<Quantity>(&postcard::to_stdvec(&1u32).unwrap()).is_err());
+    // JSON: an unknown extra field is ignored, a missing one is refused.
+    assert!(
+        serde_json::from_value::<Quantity>(serde_json::json!({"kind": "count", "n": 1, "x": 1}))
+            .is_ok()
+    );
+    assert!(serde_json::from_value::<Quantity>(serde_json::json!({"kind": "count"})).is_err());
+    assert!(serde_json::from_value::<Quantity>(serde_json::json!({"n": 1})).is_err());
+}
+
+#[test]
+fn a_quantity_of_the_wrong_shape_is_refused_with_a_reason() {
+    let refused = |v: serde_json::Value| {
+        serde_json::from_value::<Quantity>(v)
+            .unwrap_err()
+            .to_string()
+    };
+    assert!(refused(serde_json::json!(5)).contains("a quantity"));
+    assert!(refused(serde_json::json!([])).contains("invalid length 0"));
+    assert!(refused(serde_json::json!(["bytes"])).contains("invalid length 1"));
+    assert!(refused(serde_json::json!({"kind": "ratio", "n": 1u64 << 40})).contains("32 bits"));
+    assert!(refused(serde_json::json!({"kind": "furlongs", "n": 1})).contains("furlongs"));
+    // As a sequence, the way a self-describing format may also write a struct.
+    assert_eq!(
+        serde_json::from_value::<Quantity>(serde_json::json!(["count", 3])).unwrap(),
+        Quantity::Count(3)
+    );
+}
