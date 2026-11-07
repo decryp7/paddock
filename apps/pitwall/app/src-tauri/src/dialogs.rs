@@ -47,7 +47,9 @@ paddock_dialogs::dialogs! {
             app::start_check_updates,
             app::app_job_cancel,
             app::app_job_stop_waiting,
-            // Connected apps (ADR 0023 Decision 7): the apps, a pasted key (from `pw.mcp-key`), Refresh and Forget.
+            // Connected apps (ADR 0023 Decision 7): whether the chat is built in (the page shows only then), the apps, a pasted
+            // key (from `pw.mcp-key`), Refresh, Forget, Open and Ask again.
+            app::chat_enabled,
             app::connected_apps,
             app::set_app_key,
             app::connect_app,
@@ -106,6 +108,7 @@ mod tests {
             "clear_cache",
             "start_install_service",
             "set_autostart",
+            "chat_enabled",
             "connected_apps",
             "set_app_key",
             "connect_app",

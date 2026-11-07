@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp, settingsDialog } from './app';
+import { openApp, openSettings, settingsDialog } from './app';
 
 // ADR 0023 WP-9a against the mock: the Chat tab's picker and apps line, Settings > Connected apps, and the key dialog.
 test.describe('connected apps and the chat model', () => {
@@ -98,4 +98,18 @@ test.describe('connected apps and the chat model', () => {
     await expect(chat.getByTestId('chat-model')).toContainText('Qwen3.5 9B');
   });
 }
+});
+
+test.describe('a build without the chat', () => {
+  test('has no Connected apps page in Settings', async ({ page }) => {
+    await openSettings(page, 'mock-fast&mock-static&mock-nochat');
+    const settings = settingsDialog(page);
+    await expect(settings.getByText('Tray popup', { exact: true }).first()).toBeVisible();
+    await expect(settings.getByText('Connected apps', { exact: true })).toHaveCount(0);
+  });
+
+  test('a build with it lists the page', async ({ page }) => {
+    await openSettings(page);
+    await expect(settingsDialog(page).getByText('Connected apps', { exact: true }).first()).toBeVisible();
+  });
 });

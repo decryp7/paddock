@@ -180,6 +180,7 @@
         "app_job_stop_waiting",
         "apply_preset",
         "cache_info",
+        "chat_enabled",
         "clear_cache",
         "connect_app",
         "connected_apps",

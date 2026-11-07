@@ -28,7 +28,7 @@ import { NAV } from './nav';
  */
 export const SETTINGS_DIALOG = defineDialog(DIALOG_CONTRACTS['pd.settings'], {
   title: msg('pd.settings.title', 'Settings'),
-  providers: () => import('./settings-window').then((m) => m.SETTINGS_WINDOW),
+  providers: () => import('./settings-window').then((m) => m.settingsWindow()),
   load: () => import('@decryp7/paddock-ui/shell/settings/window').then((m) => m.PdSettingsWindow),
 });
 

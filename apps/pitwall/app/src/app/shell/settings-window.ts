@@ -1,7 +1,26 @@
 import type { EnvironmentProviders, Provider } from '@angular/core';
+import type { SettingsPageDef } from '@decryp7/paddock-ui/shell';
 import { settingsWindowProviders } from '@decryp7/paddock-ui/shell/settings/window';
+import type { PitwallBackend } from '../core/backend';
+import { createBackend } from '../core/backend-factory';
 import { SETTINGS_PAGES } from './contributions';
 import { settingsBackend } from './engines';
 
+/** The page of the chat's connected apps: only in a build with the chat. */
+const CONNECTED_APPS_PAGE = 'pw.connected-apps';
+
+/**
+ * Pitwall's Settings pages for this build: Connected apps only when Rust says the chat is built in (`chat_enabled`, the
+ * `chat` feature until ADR 0049's switches); a build that cannot say has no chat. The shared Settings window does not
+ * evaluate a page's `when` (it boots without the app's context), so the list is decided here, before the window starts.
+ */
+export async function settingsPagesFor(backend: PitwallBackend): Promise<readonly SettingsPageDef[]> {
+  const chat = await backend.chatEnabled().catch(() => false);
+  return chat ? SETTINGS_PAGES : SETTINGS_PAGES.filter((p) => p.id !== CONNECTED_APPS_PAGE);
+}
+
 /** The Settings window's providers (its dialog's `providers`): loaded with it, never in the main window's first paint. */
-export const SETTINGS_WINDOW: (Provider | EnvironmentProviders)[] = [...settingsWindowProviders({ backend: settingsBackend, pages: SETTINGS_PAGES })];
+export async function settingsWindow(): Promise<(Provider | EnvironmentProviders)[]> {
+  const pages = await settingsPagesFor(createBackend());
+  return [...settingsWindowProviders({ backend: settingsBackend, pages: [...pages] })];
+}
