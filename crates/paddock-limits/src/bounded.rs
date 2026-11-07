@@ -587,6 +587,18 @@ impl Cut {
     /// `rows: showing 501 to 503 of 1,204 (test.first)`.
     #[must_use]
     pub fn describe(&self) -> String {
+        if self.is_aggregate() {
+            // The count may include lists that were counted before and added again, so it is an upper bound.
+            let Total::Exact { n } = self.total else {
+                return format!("{}: some cuts are not listed", self.limit);
+            };
+            return format!(
+                "the value: the first {} cuts of up to {} are listed ({})",
+                grouped(self.shown),
+                grouped(n),
+                self.limit
+            );
+        }
         let total = match self.total {
             Total::Exact { n } => grouped(n),
             Total::AtLeast { n } => format!("more than {}", grouped(n.saturating_sub(1))),
@@ -1010,6 +1022,17 @@ mod tests {
             6,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn an_aggregate_without_a_count_still_reads_as_a_sentence() {
+        let mut aggregate = cut("");
+        aggregate.limit = BOUNDED_CUTS.id;
+        aggregate.total = Total::Unknown;
+        assert_eq!(
+            aggregate.describe(),
+            "bounded.cuts: some cuts are not listed"
+        );
     }
 
     /// A well-formed aggregate always has an exact count (the wire refuses any other); if one ever did not, `.and` counts
