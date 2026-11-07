@@ -128,3 +128,19 @@ fn kind_and_selections_must_agree() {
     });
     assert!(check_one(stop).is_ok());
 }
+
+#[test]
+fn the_stop_constructor_gives_a_row_that_passes_the_checks() {
+    static ROWS: [LimitRow; 1] = [LimitRow::stop(
+        "kit.stop",
+        Quantity::Millis(30_000),
+        Quantity::Millis(1),
+        Quantity::Millis(60_000),
+        RowValue::Hard,
+        Remedy::None,
+    )];
+    let reg = Registry::new(&ROWS);
+    reg.check().unwrap();
+    assert_eq!((ROWS[0].unit, ROWS[0].kind), (Unit::Millis, RowKind::Stop));
+    assert!(ROWS[0].selections.is_empty());
+}
