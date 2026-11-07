@@ -86,7 +86,7 @@ some fields; "n/s" means the source does not state them.
 ### 2026-11-07, DuckLake trial 2 (branch `docs/debrief-ducklake-trial-2`)
 
 Quoted by [research/2026-11-07-ducklake-trial-2.md](research/2026-11-07-ducklake-trial-2.md). Runs taken 2026-11-07 10:26
-to 15:57.
+to 15:57, plus three targeted catalogue runs from 16:21 to 16:37.
 
 - **Commit:** store at 19aff3b83 (`debrief/1.2-int` plus the DuckDB 2.0 storage format) with the WP-1 page fix
   cherry-picked (c149483e9 and 13e165c75 from `origin/perf/debrief-grid-query`), plus a test-only patch selecting the
@@ -99,8 +99,10 @@ to 15:57.
   - **Start gate:** every run started only at a 1-minute load of 12 or less with no macOS CI job in progress (`run2.sh`,
     checked before and again inside the lock).
   - **Peak loads:** the highest load during each run is in [runs.txt](research/2026-11-07-ducklake-trial-2/runs.txt).
-    10M and layout runs: 3.6 to 7.0. Many 56M store runs peaked at 13 to 32 from other agents' jobs. They are counted and
-    flagged; replacements at 15:37–15:57 were no quieter (16.2 and 16.4), so the time box stopped them.
+    10M and layout runs: 3.6 to 7.0, except `rg-10m-16384-3` at 12.53. 16 of the 23 counted 56M store runs peaked at 12.5
+    to 32 from other agents' jobs. They are counted and flagged, with a flag column in runs.txt; replacements at
+    15:37–15:57 were no quieter (16.2 and 16.4), so the time box stopped them. The one clean run per variant: B0 170.9,
+    B1 92.0, B2 98.6, B3 118.6 ms page p50. Import, searchable and during-import times are load-sensitive.
   - **CI overlap:** `f-56m-base-1` overlapped macOS CI (7657/30879) and is excluded. Earlier runs of the day (`t2-*`,
     `q-*`) are not counted: they ran before the WP-1 fix, or while the CI probe was blind, and most overlapped macOS CI.
 - **Build:** release, `CARGO_BUILD_JOBS=2`, mimalloc, duckdb-rs 1.20000.0 with libduckdb 2.0.0, `ducklake`
@@ -114,17 +116,19 @@ to 15:57.
   - `repl2.sh` (replacements).
 
   The scripts are in [research/2026-11-07-ducklake-trial-2/](research/2026-11-07-ducklake-trial-2/) as `.txt` copies.
-- **Runs:** 3 per cell (B0 at 56M: 4 counted). The worker run and the 1-hour bucket runs were single passes and 3 failed
+- **Runs:** 3 per cell (at 56M: B0 runs 2–5 and B1 runs 1–4 counted). The worker run and the 1-hour bucket runs were single passes and 3 failed
   passes respectively.
 - **Numbers and verdicts against the budgets:**
 
   | Measure (56M unless stated) | B0 | B1 pruned | B2 mirror | B3 native | Budget | Verdict |
   |---|---|---|---|---|---|---|
-  | Page query quiet, p50 | 168–176 ms | 91–108 ms | 91–100 ms | 117–123 ms | interactive < 0.5 s | all met; B1 and B2 about 1.8x faster than B0 |
+  | Page query quiet, p50 | 168–176 ms | 91–108 ms | 91–100 ms | 117–123 ms | interactive < 0.5 s cold | met warm (B1 and B2 about 1.8x faster than B0); cold not measured |
   | Page query during import 2, p50 / max | 295–1,900 / 3,265–4,542 ms | 174–1,737 / 410–4,484 ms | 172–1,769 / 3,112–4,981 ms | 208–1,674 / 3,698–4,244 ms | < 0.5 s | all over at p50 in some runs; at max in every run but one B1 run (410 ms) |
   | Plain field filter, quiet p50 | 1,621–1,649 ms | 1,616–1,777 ms | 1,687–1,745 ms | 1,730–1,758 ms | < 0.5 s | all over |
   | Import 1 (54.4M) | 30.3–41.7 s | 35.6–43.3 s | 40.9–45.4 s | 34.8–42.9 s | ≥ 218k events/s | all met (1.2–1.8M/s) |
-  | Searchable end to end | 306–332 s | 317–329 s | 275–290 s | 274–287 s | none (exploratory) | — |
+  | Searchable end to end | 306–332 s | 317–329 s | 275–290 s | 274–287 s | none (exploratory) | B2 and B3 faster: the catalogue's per-source reads (targeted runs: catalogue B0 270 s, B2 239 s, B0 with per-source file lists 249 s; index 98–120 s) |
+  | Import time per GB (7.32 GB) | 4.1–5.7 s/GB | 4.9–5.9 s/GB | 5.6–6.2 s/GB | 4.8–5.9 s/GB | D7: ≤ 6 s/GB | met, except B2 over in some runs |
+  | Catalogue memory | not separable | not separable | not separable | not separable | D7: catalogue ≤ 512 MB | not applicable here: the background peaks (1.6–1.9 GB at 56M) mix the catalogue with the index build in one process |
   | Undo, searchable again | 5.22–5.55 s | 4.97–5.77 s | 5.71–8.20 s | 5.41–6.16 s | none (exploratory) | — |
   | Time shift (6.4M rows), searchable again | 33.5–41.3 s | 32.3–37.9 s | 35.2–42.8 s | 29.8–37.0 s | none (exploratory) | — |
   | Disk after shift | 4,902–4,976 MB | 4,894–5,034 MB | 4,874–4,966 MB | 5,567–5,696 MB | none (exploratory) | — |
@@ -140,11 +144,11 @@ to 15:57.
   - **B2:** 71.3–73.7 ms;
   - **B3:** 89.3–91.2 ms.
 
-  Undo searchable 0.79–0.93 s and shift searchable 4.5–8.0 s for all. All under the 0.5 s interactive budget except the
-  plain filter (332–393 ms, met at 10M).
+  Undo searchable 0.79–0.93 s and shift searchable 4.5–8.0 s for all. At 10M every query met the 0.5 s budget warm, the plain
+  filter included (332–393 ms).
 
-  C2, rows per row group, 56M page query quiet p50: the budget is interactive < 0.5 s, met by all four; 65,536 is fastest
-  at 56M.
+  C2, rows per row group, 56M page query quiet p50: the budget is interactive < 0.5 s, met warm by all four; 65,536 is
+  tied with 32,768 at 56M, so keep the default.
 
   - **16,384:** 249.9–273.4 ms;
   - **32,768:** 172.9–189.2 ms;
@@ -165,7 +169,8 @@ to 15:57.
 
   - **sorted rewrite:** 74.5–87.7 s, peak 1.3–1.6 GB;
   - **b10 write:** import 1 160.4–189.4 s, import 2 1.8–3.3 s, producing 58 late files; the merge took 21.2–21.8 s;
-  - **b60 (1-hour buckets):** out of memory at 768 MB in 6 of 6 runs.
+  - **b60 (1-hour buckets):** out of memory at 768 MB at both sizes, so every `lay-*` run ended with rc 101 at that step;
+    the earlier layouts completed. 10M: 3 of 3 with insertion order on. 56M: 3 of 3 on and 3 of 3 off.
 
   C1 per 45 s window, 56M segments: 18.3 files and 22.8 row groups by range, against 12.3 files and 12.7 row groups
   holding rows (sorted: 1.6 / 1.7; b10: 1.6 / 6.3).
@@ -175,7 +180,10 @@ to 15:57.
 - **Notes:**
   - B2 and B3 are measured with the correctness failures listed in the note.
   - The worker run for B2 is "check broken": the worker does not inherit `DEBRIEF_TRIAL_STORE`. A 10M check made no lake.
-  - C1, C3 and C4 are SQL-level only.
+  - C1, C3 and C4 are SQL-level only. The store's page path adds about 65 ms over its SQL shape at 56M (B1 91–108 ms
+    against 24 ms), which is not attributed.
+  - The committed harness copy is the latest version: insertion order off for bucket writes, the index/catalogue split
+    and `TRIAL_STOP_AFTER_READY`. The `lay-*` runs used the version before it.
   - Raw output is in `/Volumes/d7sst7/dev-targets/scratch/ducklake-trial/out2/`.
 
 ### 2026-11-06, DuckLake trial (branch `docs/debrief-ducklake-trial`)
@@ -191,9 +199,9 @@ Quoted by [research/2026-11-06-ducklake-trial.md](research/2026-11-06-ducklake-t
   [runs.txt](research/2026-11-06-ducklake-trial/runs.txt). Counted runs: highest 1-minute load 3.0 to 9.5, except
   `l10m-sqlite-1..3` (13.1 to 14.7: flagged, replaced by `l10m-sqlite-4..6` at 3.6 to 4.5). macOS CI: the probe used during
   these runs could not read the Gitea API (a Python certificate error it reported as "none"), so the check was blind at
-  the time (ER-33). Reconstructed on 2026-11-07 from the job start and end times of every macOS job of runs 7600 onwards
-  ([ci-mac-jobs.txt](research/2026-11-07-ducklake-trial-2/ci-mac-jobs.txt), `overlap.py`): no counted run overlapped a
-  macOS CI job. A first 56M pass used a query window that matched 37
+  the time (ER-33). Reconstructed on 2026-11-07 from the job start and end times of every macOS job
+  ([ci-mac-jobs.txt](research/2026-11-07-ducklake-trial-2/ci-mac-jobs.txt), runs 7630 onwards, `overlap.py`): none of the
+  77 runs overlapped a macOS CI job ([trial1-ci-overlap.txt](research/2026-11-07-ducklake-trial-2/trial1-ci-overlap.txt)). A first 56M pass used a query window that matched 37
   rows; it was discarded and rerun (one of its store runs peaked at load 70.9). The review runs (768 MB with 4 threads,
   4-thread raw and adopt queries, 03:31 to 03:36) ran at a highest 1-minute load of 1.9 to 3.8.
 - **Build:** release (`cargo test --release --test ducklake_trial --no-run`, `CARGO_BUILD_JOBS=2`), mimalloc (the store

@@ -1,0 +1,31 @@
+#!/bin/bash
+# usage: run2.sh LABEL VARIANT SIZE [ENV=VAL]  one trial-2 store run (DEBRIEF_TRIAL_STORE=VARIANT) through plock; waits (at most 60 min)
+# until the 1-minute load is at most 12 and no macOS CI job is in progress; logs load before/after, max load and CI.
+T=/Volumes/d7sst7/dev-targets/scratch/ducklake-trial
+P=/Volumes/d7sst7/dev-targets/scratch/pitcrew-lock/plock
+L=/Volumes/d7sst7/dev-targets/debrief-libduckdb/2.0.0/duckdb-shared-libs-osx-arm64
+LABEL=$1; V=$2; Z=$3; X=${4:-}; C=$T/corpus$Z
+Q="TRIAL_Q_FROM=1791936600000 TRIAL_Q_TO=1791936645000 TRIAL_Q_FIELD=Command TRIAL_Q_VALUE=Reserve"
+S=$T/st2/$LABEL; mkdir -p $T/st2 $T/out2
+for attempt in 1 2 3 4 5 6; do
+l1() { sysctl -n vm.loadavg | awk '{print $2}'; }
+n=0; while :; do ci=$($T/bin/ci-mac.sh); if awk -v l=$(l1) 'BEGIN{exit !(l<=12)}' && printf '%s' "$ci" | grep -q '^mac_ci=none'; then break; fi
+  [ $n -ge 720 ] && { echo "$(date '+%F %T') $LABEL gave up waiting: load1 $(l1) $ci" >> $T/log2.txt; exit 3; }
+  [ $((n % 12)) -eq 0 ] && echo "$(date '+%F %T') $LABEL waiting (outside the lock): load1 $(l1) $ci" >> $T/log2.txt
+  n=$((n+1)); perl -e 'select(undef,undef,undef,5)'; done
+$P run --lane normal ducklake-trial-2 -- bash -c "
+  l1() { sysctl -n vm.loadavg | awk '{print \$2}'; }
+  ci=\$($T/bin/ci-mac.sh)
+  if ! awk -v l=\$(l1) 'BEGIN{exit !(l<=12)}' || ! printf '%s' \"\$ci\" | grep -q '^mac_ci=none'; then echo \"\$(date '+%F %T') $LABEL deferred in the lock: load1 \$(l1) \$ci\" >> $T/log2.txt; exit 4; fi
+  echo \"\$(date '+%F %T') $LABEL start load1 \$(l1) \$ci\" >> $T/log2.txt
+  env DYLD_LIBRARY_PATH=$L DEBRIEF_TRIAL_STORE=$V DEBRIEF_TRIAL_EXT=$T/dl/ext $X TRIAL_MODE=store TRIAL_MAIN=$C/main TRIAL_EXTRA=$C/extra TRIAL_STORE=$S $Q $T/bin/ducklake_trial3 --nocapture --test-threads 1 > $T/out2/$LABEL.txt 2>&1 &
+  PID=\$!
+  python3 -I /Volumes/d7sst7/dev-targets/research-data/scripts/procsample.py \$PID $T/out2/$LABEL.csv 0.5 &
+  ( m=0; while kill -0 \$PID 2>/dev/null; do m=\$(awk -v a=\$m -v b=\$(l1) 'BEGIN{print (b>a)?b:a}'); echo \$m > $T/out2/$LABEL.maxload; perl -e 'select(undef,undef,undef,5)'; done ) &
+  wait \$PID; RC=\$?; wait
+  echo \"\$(date '+%F %T') $LABEL end rc=\$RC load1 \$(l1) maxload1 \$(cat $T/out2/$LABEL.maxload) \$($T/bin/ci-mac.sh)\" >> $T/log2.txt
+" > /dev/null 2>&1
+RC=$?
+[ $RC -eq 4 ] || break
+done
+rm -rf "$S" "$S.moved" "$S.hidden"

@@ -327,14 +327,31 @@ fn store_mode() {
     );
 
     let t = Instant::now();
-    let st = store.wait_for_index(Duration::from_secs(7200)).unwrap();
-    let built = store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
+    // The index and the catalogue build at the same time; each one's finish is timed from the end of the imports.
+    let (index_s, catalogue_s, st, built) = std::thread::scope(|sc| {
+        let i = sc.spawn(|| {
+            let st = store.wait_for_index(Duration::from_secs(7200)).unwrap();
+            (st, t.elapsed().as_secs_f64())
+        });
+        let c = sc.spawn(|| {
+            let b = store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
+            (b, t.elapsed().as_secs_f64())
+        });
+        let (st, is) = i.join().unwrap();
+        let (b, cs) = c.join().unwrap();
+        (is, cs, st, b)
+    });
+    println!("trial: background_split index_s={index_s:.2} catalogue_s={catalogue_s:.2}");
     println!(
         "trial: background_index_and_catalogue s={:.2} indexed={} catalogue={built} peak_fp_mb={}",
         t.elapsed().as_secs_f64(),
         st.indexed,
         peak.take()
     );
+    if std::env::var_os("TRIAL_STOP_AFTER_READY").is_some() {
+        println!("trial: ready_end_to_end s={:.2}", started.elapsed().as_secs_f64());
+        return;
+    }
     println!("trial: ready_end_to_end s={:.2}", started.elapsed().as_secs_f64());
     store_disk(&dir, "after_import");
     quiet("quiet_query_after_import", || page(&store));

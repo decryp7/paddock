@@ -49,6 +49,32 @@ pub(crate) fn pruned() -> bool {
     mode() == Mode::Pruned
 }
 
+/// The events of one source for the catalogue: in pruned mode only the segments whose histogram names the source (the
+/// per-file source list the store already keeps), else the `events` view.
+pub(crate) fn source_events(conn: &Connection, source: u32) -> String {
+    if !pruned() {
+        return "events".to_string();
+    }
+    // The store folder of this connection's database (several stores may live in one process).
+    let db: Option<String> = conn
+        .query_row("SELECT path FROM duckdb_databases() WHERE database_name = current_database()", [], |r| r.get(0))
+        .ok();
+    let Some(seg) = db.and_then(|p| Path::new(&p).parent().map(|d| d.join(crate::segments::SEGMENTS_DIR))) else {
+        return "events".to_string();
+    };
+    let files: Vec<String> = conn
+        .prepare("SELECT DISTINCT file FROM histogram WHERE source = ?")
+        .and_then(|mut st| st.query_map(params![source], |r| r.get::<_, String>(0)).map(|r| r.flatten().collect::<Vec<String>>()))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|f: String| seg.join(f).to_string_lossy().into_owned())
+        .collect();
+    if files.is_empty() {
+        return "events".to_string();
+    }
+    format!("(SELECT * FROM {} WHERE {})", crate::schema::parquet_from(&files), crate::schema::READY)
+}
+
 fn q(s: &str) -> String {
     s.replace('\'', "''")
 }

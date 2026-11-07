@@ -6,10 +6,11 @@ trial"](../performance.md#2026-11-06-ducklake-trial-branch-docsdebrief-ducklake-
 [2026-11-06-ducklake-trial/](2026-11-06-ducklake-trial/).
 
 Update 2026-11-07: [trial 2](2026-11-07-ducklake-trial-2.md) measured adopt mode end to end inside the store, with the WP-1
-page fix. A plain ts min/max file list over the same segments (24 ms at 56M) beat DuckLake's access path (53–57 ms), so
+page fix. At the SQL level, a plain ts min/max file list over the same segments (24 ms at 56M) beat DuckLake's access path
+(53–57 ms), so
 the access-path gain below comes from file pruning that the store can do without DuckLake. Trial 2's recommendation
 replaces WP-2 here. The macOS CI check used in this trial was blind at the time; its reconstruction is in the trial 1
-results block.
+results block and [trial1-ci-overlap.txt](2026-11-07-ducklake-trial-2/trial1-ci-overlap.txt) (77 of 77 runs clear).
 
 Question (queued 2026-10-30, asked again 2026-11-06): would DuckLake, DuckDB's lakehouse table format (Parquet data files plus
 a SQL catalog with snapshots), be a better store for Debrief's events than what Debrief 1.2 keeps: Parquet segments that the
