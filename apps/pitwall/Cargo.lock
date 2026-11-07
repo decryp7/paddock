@@ -3143,6 +3143,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-assistant"
+version = "0.1.0"
+dependencies = [
+ "paddock-env",
+ "paddock-health",
+ "paddock-pitwall",
+ "paddock-workspace-hack",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "paddock-build"
 version = "0.1.0"
 dependencies = [
@@ -3792,9 +3804,11 @@ dependencies = [
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
+ "paddock-assistant",
  "paddock-build",
  "paddock-commands",
  "paddock-dialogs",
+ "paddock-health",
  "paddock-jobs",
  "paddock-menu",
  "paddock-proc",

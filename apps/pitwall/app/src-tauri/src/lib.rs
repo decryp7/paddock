@@ -11,6 +11,7 @@
 
 pub mod app_commands;
 pub mod app_state;
+pub mod chat_provider;
 pub mod commands;
 pub mod credentials;
 pub mod dialogs;
