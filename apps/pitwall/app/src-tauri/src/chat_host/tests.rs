@@ -648,7 +648,12 @@ fn open_starts_the_app_and_tries_to_connect_at_the_next_tick() {
     assert!(apps.views()[0].connected, "{:?}", apps.views()[0].problem);
     assert!(apps.open("recce").is_err(), "not a known app");
     // Open that cannot start the app: its words replace the row's problem, and no retry is kept.
-    apps.set_opener(|_| Opened::Problem("Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.".into()));
+    apps.set_opener(|_| {
+        Opened::Needs(
+            super::apps::AppNeed::Install,
+            "Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.".into(),
+        )
+    });
     dyno.listener.reconcile(false);
     apps.tick(D::from_secs(2));
     while apps.views()[0].connected {
@@ -663,6 +668,7 @@ fn open_starts_the_app_and_tries_to_connect_at_the_next_tick() {
         Some("Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.")
     );
     assert!(!v.reconnecting, "nothing to wait for until the app is installed");
+    assert_eq!(v.needs, Some(super::apps::AppNeed::Install), "the chat says what is missing");
 }
 
 #[test]
@@ -674,7 +680,20 @@ fn not_installed_and_too_old_are_said_in_pitwalls_own_words() {
     });
     assert_eq!(
         open_words(missing, "Dyno"),
-        Opened::Problem("Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.".into())
+        Opened::Needs(
+            super::apps::AppNeed::Install,
+            "Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.".into()
+        )
+    );
+    // The wire is unchanged: a need is a problem with its words (the row's `needs` says which).
+    assert_eq!(
+        serde_json::to_value(open_words(Ok(Outcome::NotInstalled { message: String::new() }), "Dyno")).unwrap(),
+        json!({"kind": "problem", "message": "Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno."})
+    );
+    assert_eq!(serde_json::to_value(Opened::Started).unwrap(), json!({"kind": "started"}));
+    assert_eq!(
+        serde_json::to_value(Opened::Problem("x".into())).unwrap(),
+        json!({"kind": "problem", "message": "x"})
     );
     let old = paddock_mcp::client::ClientError::UnsupportedVersion {
         server: "2024-11-05".into(),
@@ -696,4 +715,111 @@ fn the_chats_store_is_in_memory_and_writes_no_file() {
     let (id, _, saved) = store.create(paddock_assistant::StoredMessage::user("q", vec![], 1));
     assert!(saved.is_ok());
     assert!(store.get(&id).is_some());
+}
+
+/// A Dyno too old for this Pitwall: its listener takes the key, then answers `initialize` with a protocol version Pitwall does
+/// not know. Every connection it accepts is counted; it answers until the test drops it.
+struct OldDyno {
+    discovery: std::path::PathBuf,
+    accepted: Arc<AtomicUsize>,
+    _dir: tempfile::TempDir,
+}
+
+fn old_dyno(live_discovery: &std::path::Path) -> OldDyno {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    // The live discovery file names this test process (alive, same start time); only the port is the old Dyno's.
+    let mut hint: Value = serde_json::from_slice(&std::fs::read(live_discovery).unwrap()).unwrap();
+    hint["port"] = json!(port);
+    let dir = tempfile::tempdir().unwrap();
+    let discovery = dir.path().join("mcp.json");
+    std::fs::write(&discovery, hint.to_string()).unwrap();
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let count = accepted.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { return };
+            count.fetch_add(1, Ordering::SeqCst);
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                continue;
+            }
+            let _ = writeln!(stream, "{}", json!({"ok": true}));
+            line.clear();
+            if reader.read_line(&mut line).unwrap_or(0) == 0 {
+                continue;
+            }
+            let id = serde_json::from_str::<Value>(&line).map(|v| v["id"].clone()).unwrap_or(Value::Null);
+            let result = json!({"protocolVersion": "2099-01-01", "capabilities": {}, "serverInfo": {"name": "Dyno", "version": "0.9.0"}});
+            let _ = writeln!(stream, "{}", json!({"jsonrpc": "2.0", "id": id, "result": result}));
+        }
+    });
+    OldDyno {
+        discovery,
+        accepted,
+        _dir: dir,
+    }
+}
+
+/// Round-4 review P1-2: a retry that meets a Dyno too old for Pitwall stops retrying (only the user can update it) and the row
+/// is no longer "reconnecting", so the Refresh tools the words point to is shown.
+#[test]
+fn a_retry_that_meets_a_too_old_app_stops_and_asks_for_an_update() {
+    use super::apps::{AppNeed, ConnectedApps};
+    use std::time::Duration as D;
+    let dyno = fake_dyno();
+    let live = discovery_path(dyno.dir.path());
+    let old = old_dyno(&live);
+    let target = Arc::new(Mutex::new(live.clone()));
+    let names = ToolNames::default();
+    let data = tempfile::tempdir().unwrap();
+    let clock = paddock_health::FakeClock::at_wall_ms(1_700_000_000_000);
+    let store = Arc::new(ConversationStore::open(data.path().join("c.json"), Arc::new(clock.clone())));
+    let assistant = Assistant::new(
+        Arc::new(Script(Mutex::default(), Mutex::default())),
+        paddock_assistant::Tools::none(),
+        store,
+        Arc::new(clock),
+        AssistantConfig::new("Pitwall", "s"),
+    );
+    let to = target.clone();
+    let apps = ConnectedApps::new(
+        Arc::new(paddock_secrets::MemorySecrets::new("Pitwall")),
+        move |_| Some(to.lock().unwrap().clone()),
+        assistant,
+        Arc::new(PitwallPolicy::new(None, names.clone(), || 1)),
+        names,
+    );
+    assert!(apps.set_key("dyno", &dyno.key).unwrap().connected);
+
+    // Dyno quits, and what comes back is an older Dyno.
+    dyno.listener.reconcile(false);
+    *target.lock().unwrap() = old.discovery.clone();
+    let mut t = D::from_secs(10);
+    while apps.views()[0].connected {
+        t += D::from_millis(100);
+        assert!(t < D::from_secs(40), "the end of the connection was never noticed");
+        std::thread::yield_now();
+        apps.tick(t);
+    }
+    assert!(apps.views()[0].reconnecting);
+    apps.tick(t + D::from_secs(2));
+    assert_eq!(old.accepted.load(Ordering::SeqCst), 1, "the retry reached the old Dyno");
+    let v = &apps.views()[0];
+    assert_eq!(
+        v.problem.as_deref(),
+        Some("Dyno is too old for AI access from Pitwall. Update Dyno, then choose Refresh tools.")
+    );
+    assert!(
+        !v.reconnecting,
+        "only an update helps: not reconnecting, so Refresh tools is offered"
+    );
+    assert!(!v.key_refused);
+    assert_eq!(v.needs, Some(AppNeed::Update));
+    // No retry is kept: later ticks leave the old Dyno alone.
+    apps.tick(t + D::from_secs(120));
+    apps.tick(t + D::from_secs(600));
+    assert_eq!(old.accepted.load(Ordering::SeqCst), 1);
 }

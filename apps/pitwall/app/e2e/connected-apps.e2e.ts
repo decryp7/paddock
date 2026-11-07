@@ -58,7 +58,7 @@ test.describe('connected apps and the chat model', () => {
 
     // One tool is always allowed: Ask again forgets just that one.
     await dyno.getByRole('button', { name: 'Ask again before System summary' }).click();
-    await expect(dyno.getByText('Always allowed', { exact: true })).toHaveCount(0);
+    await expect(dyno.getByText('Always', { exact: true })).toHaveCount(0);
     await expect(dyno.getByText('No tool is always allowed yet.')).toBeVisible();
 
     // The Chat tab is another window: it hears the connect and says so without being opened again.
@@ -72,6 +72,63 @@ test.describe('connected apps and the chat model', () => {
     await ask.getByRole('button', { name: 'Forget Dyno' }).click();
     await expect(dyno.getByTestId('connected-app-state')).toHaveText('Not set up');
     await expect(chat.getByTestId('chat-apps')).toHaveText('No app connected: the chat answers without tools.');
+  });
+
+  // Round-4 review P1-1 and P1-2: a problem Open meets is said once, with nothing pulsing, and Open stays available; a Dyno too
+  // old for Pitwall is not "reconnecting", so the Refresh tools its words point to is in the menu.
+  test('not installed and too old are said once, and the actions they name are there', async ({ page }) => {
+    type Hooks = { dynoQuit(): void; dynoUninstalled(): void; dynoTooOld(): void };
+    const hook = (name: keyof Hooks) => page.evaluate((n) => (window as unknown as { __pitwallMock: Hooks }).__pitwallMock[n](), name);
+    await openApp(page, '/playground');
+    const chat = page.locator('pw-playground-chat');
+    await chat.getByTestId('chat-open-apps').click();
+    const settings = settingsDialog(page);
+    const dyno = settings.getByTestId('connected-app');
+    await dyno.getByRole('button', { name: 'Connect…' }).click();
+    const form = page.getByRole('dialog', { name: 'Connect Dyno' });
+    await form.locator('#pw-mcp-key').fill('pmk_good');
+    await form.getByTestId('dialog-action-connect').click();
+    await expect(dyno.getByTestId('connected-app-state')).toHaveText('Connected: 6 tools');
+
+    await hook('dynoQuit');
+    await hook('dynoUninstalled');
+    await dyno.getByRole('button', { name: 'Open Dyno' }).click();
+    await expect(dyno.getByTestId('connected-app-problem')).toHaveText("Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.");
+    await expect(dyno.getByText("Dyno isn't installed on this computer.", { exact: false })).toHaveCount(1);
+    await expect(dyno.getByTestId('connected-app-opening')).toHaveCount(0);
+    await expect(dyno.locator('.pulse')).toHaveCount(0);
+    await expect(dyno.getByRole('button', { name: 'Open Dyno' })).toBeEnabled();
+    await expect(chat.getByTestId('chat-apps')).toHaveText("Dyno isn't installed: the chat answers without its tools.");
+
+    await hook('dynoTooOld');
+    await expect(dyno.getByTestId('connected-app-problem')).toHaveText('Dyno is too old for AI access from Pitwall. Update Dyno, then choose Refresh tools.');
+    await expect(chat.getByTestId('chat-apps')).toHaveText('Dyno needs an update: the chat answers without its tools.');
+    await dyno.getByRole('button', { name: 'More actions for Dyno' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Refresh tools' })).toBeVisible();
+    await page.getByRole('menu').press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  });
+
+  // Round-4 review P2: a tool's name is never cut for its status, and every tool row is as tall as the others.
+  test('tool rows keep the name whole and share one height', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await openApp(page, '/playground');
+    await page.locator('pw-playground-chat').getByTestId('chat-open-apps').click();
+    const dyno = settingsDialog(page).getByTestId('connected-app');
+    await dyno.getByRole('button', { name: 'Connect…' }).click();
+    const form = page.getByRole('dialog', { name: 'Connect Dyno' });
+    await form.locator('#pw-mcp-key').fill('pmk_good');
+    await form.getByTestId('dialog-action-connect').click();
+    await expect(dyno.getByTestId('connected-app-state')).toHaveText('Connected: 6 tools');
+    await expect(dyno.getByRole('button', { name: 'Ask again before System summary' })).toBeVisible();
+    const rows = await dyno.locator('.tools li').evaluateAll((lis) =>
+      lis.map((li) => {
+        const name = li.querySelector('.tool') as HTMLElement;
+        return { height: Math.round(li.getBoundingClientRect().height), cut: name.scrollWidth > name.clientWidth, name: name.textContent };
+      }),
+    );
+    expect(rows.filter((r) => r.cut), 'no name is cut').toEqual([]);
+    expect(new Set(rows.map((r) => r.height)).size, JSON.stringify(rows)).toBe(1);
   });
 
   for (const theme of ['light', 'dark'] as const) {
@@ -106,6 +163,22 @@ test.describe('connected apps and the chat model', () => {
     // The panel fades in: measure once it is fully shown (a condition, not a sleep).
     await expect.poll(async () => (await measure()).opacity).toBe(1);
     expect((await measure()).ratio).toBeGreaterThanOrEqual(4.5);
+    // Round-4 review P2: more is below, so the list fades at its bottom edge; scrolled to the end, the last row is clear of it.
+    const panel = page.locator('.pw-chat-model-panel');
+    const fade = () => panel.evaluate((el) => ({ more: el.scrollHeight > el.clientHeight, mask: getComputedStyle(el).maskImage || getComputedStyle(el).webkitMaskImage }));
+    expect((await fade()).more).toBe(true);
+    expect((await fade()).mask).toContain('linear-gradient');
+    const clear = await panel.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      const options = el.querySelectorAll('mat-option');
+      const last = options[options.length - 1]!.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      const fadePx = parseFloat(getComputedStyle(el).getPropertyValue('--pw-fade')) || 0;
+      return { fadePx, gap: box.bottom - last.bottom };
+    });
+    expect(clear.fadePx).toBeGreaterThan(0);
+    expect(clear.gap).toBeGreaterThanOrEqual(clear.fadePx - 1);
+    await panel.evaluate((el) => (el.scrollTop = 0));
     await page.getByRole('option', { name: /Qwen3.5 9B/ }).click();
     await expect(chat.getByTestId('chat-model')).toContainText('Qwen3.5 9B');
   });

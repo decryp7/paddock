@@ -55,7 +55,7 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
                   <li>
                     <span class="tool" [attr.title]="t.title + ' (' + t.name + ')'">{{ t.title }}</span>
                     @if (t.remembered) {
-                      <span class="kind">Always allowed</span>
+                      <span class="kind" title="Always allowed">Always</span>
                       <button type="button" matButton class="again" [disabled]="busy()" [attr.aria-label]="'Ask again before ' + t.title" (click)="askAgain(app, t.name)">Ask again</button>
                     } @else {
                       <span class="kind">{{ t.readOnly ? 'Reads: asks the first time' : 'Action: asks every time' }}</span>
@@ -86,8 +86,11 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
     .spacer { flex: 1; }
     .problem { margin: 0; color: var(--pd-text); overflow-wrap: anywhere; }
     .tools { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--pd-space-1) var(--pd-space-4); }
-    .tools li { display: flex; align-items: center; gap: var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); padding: var(--pd-space-1) 0; min-height: 36px; }
-    .tools .tool { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Every row is as tall as one with "Ask again" (a compact button), so the grid lines up. */
+    .tools li { display: flex; align-items: center; gap: var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); padding: var(--pd-space-1) 0; min-height: 41px; box-sizing: border-box; }
+    /* The name comes first: about 18 characters before it is ever cut, the status gives way. */
+    .tools .tool { flex: 1 0 auto; min-width: min(18ch, 100%); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tools .again { --mat-button-text-container-height: 32px; }
     .tools .kind { white-space: nowrap; }
     .opening { margin: 0; display: flex; align-items: center; gap: var(--pd-space-2); color: var(--pd-text-muted); }
     .pulse { display: inline-flex; gap: 3px; }
@@ -174,11 +177,13 @@ export class ConnectedAppsPage {
     this.busy.set(true);
     try {
       const outcome = await this.backend.openConnectedApp(app.id);
-      // It may have connected already (the event can come before this answer): then there is nothing to say.
+      const open = { ...this.opening() };
+      // A problem is the row's own (Rust publishes it as the row's problem): nothing is opening, so nothing more is said.
+      // Started: it may have connected already (the event can come before this answer), then there is nothing to say.
       const connected = this.apps()?.some((a) => a.id === app.id && a.connected) === true;
-      if (outcome.kind === 'problem' || !connected) {
-        this.opening.set({ ...this.opening(), [app.id]: outcome.kind === 'started' ? `Opening ${app.title}…` : outcome.message });
-      }
+      if (outcome.kind === 'started' && !connected) open[app.id] = `Opening ${app.title}…`;
+      else delete open[app.id];
+      this.opening.set(open);
     } catch (e) {
       this.error.set(toCommandError(e));
     } finally {

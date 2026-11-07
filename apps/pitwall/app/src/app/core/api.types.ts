@@ -1090,6 +1090,9 @@ export interface AppTool {
   remembered: boolean;
 }
 
+/** What only the user can do before an app connects (`chat_host::apps::AppNeed`). */
+export type AppNeed = 'install' | 'update';
+
 /** A family app the chat can use, in Settings > Connected apps (`chat_host::apps::ConnectedApp`, ADR 0023 Decision 7). */
 export interface ConnectedApp {
   id: string;
@@ -1102,6 +1105,8 @@ export interface ConnectedApp {
   keyRefused: boolean;
   /** The connection was lost; Pitwall is trying again (the chat answers without the app's tools meanwhile). */
   reconnecting: boolean;
+  /** What only the user can do before it connects (install it, update it); null otherwise. Pitwall does not retry meanwhile. */
+  needs: AppNeed | null;
   tools: AppTool[];
   /** Tools always allowed. */
   remembered: number;

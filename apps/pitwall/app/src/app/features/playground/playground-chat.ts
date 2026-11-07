@@ -66,8 +66,16 @@ import { createChatBackend } from './chat-backend';
      * muted text colour, never Material's faded disabled text (UI review: 1.86:1); the options get room between them.
      */
     ::ng-deep .pw-chat-model-panel .mat-mdc-option { min-height: 44px; padding-block: var(--pd-space-1); }
-    /* The list ends mid-row, so it is plain that more (the "Not downloaded" group) is below: 6.5 rows. */
-    ::ng-deep div.mat-mdc-select-panel.pw-chat-model-panel { max-height: 286px; }
+    /*
+     * More is below (the disabled groups): the list fades at its bottom edge, wherever the rows fall, and its padding below the
+     * last row is the fade's height, so scrolled to the end the last row is clear of it.
+     */
+    ::ng-deep div.mat-mdc-select-panel.pw-chat-model-panel {
+      --pw-fade: 32px;
+      max-height: 286px;
+      padding-bottom: var(--pw-fade);
+      mask-image: linear-gradient(to bottom, #000 calc(100% - var(--pw-fade)), transparent);
+    }
     ::ng-deep .pw-chat-model-panel .mat-mdc-option.mdc-list-item--disabled { opacity: 1; }
     ::ng-deep .pw-chat-model-panel .mat-mdc-option.mdc-list-item--disabled .mdc-list-item__primary-text { opacity: 1; color: var(--pd-text-muted); }
     ::ng-deep .pw-chat-model-panel .why { color: var(--pd-text-muted); opacity: 1; }
@@ -112,6 +120,11 @@ export class PlaygroundChat {
     const on = apps.filter((a) => a.connected);
     const back = apps.filter((a) => a.reconnecting);
     if (!on.length && back.length) return `${back.map((a) => a.title).join(', ')} ${back.length === 1 ? 'is' : 'are'} reconnecting: the chat answers without ${back.length === 1 ? 'its' : 'their'} tools for now.`;
+    // Only the user can help: say what is missing (Rust's needs), not just "no app".
+    const missing = apps.find((a) => a.needs === 'install');
+    if (!on.length && missing) return `${missing.title} isn't installed: the chat answers without its tools.`;
+    const old = apps.find((a) => a.needs === 'update');
+    if (!on.length && old) return `${old.title} needs an update: the chat answers without its tools.`;
     if (!on.length) return 'No app connected: the chat answers without tools.';
     return 'Tools from ' + on.map((a) => `${a.title} (${a.tools.length})`).join(', ') + '.';
   });

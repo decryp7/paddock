@@ -1410,7 +1410,7 @@ export class MockBackend implements PitwallBackend {
   }
 
   /** Dyno as the mock knows it: a key that starts `pmk_` connects, `pmk_wrong` is refused, and Dyno is "open". */
-  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, tools: [], remembered: 0 };
+  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, needs: null, tools: [], remembered: 0 };
   private readonly appsHandlers = new Set<(apps: ConnectedApp[]) => void>();
 
   onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
@@ -1452,7 +1452,7 @@ export class MockBackend implements PitwallBackend {
   forgetApp(appId: string): Promise<ConnectedApp> {
     return this.reply('forgetApp', () => {
       if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
-      this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, tools: [], remembered: 0 };
+      this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, needs: null, tools: [], remembered: 0 };
       return this.appsChanged();
     });
   }
@@ -1461,9 +1461,29 @@ export class MockBackend implements PitwallBackend {
   openConnectedApp(appId: string): Promise<OpenedApp> {
     return this.reply('openConnectedApp', () => {
       if (appId !== 'dyno') return { kind: 'problem', message: `Pitwall does not know an app called ${appId}.` } as OpenedApp;
+      if (this.dynoMissing) {
+        // As Rust does: the row's problem is published (it can arrive before this answer), then the same words are answered.
+        const message = "Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.";
+        this.dyno_ = { ...this.dyno_, connected: false, reconnecting: false, needs: 'install', tools: [], problem: message };
+        this.appsChanged();
+        return { kind: 'problem', message } as OpenedApp;
+      }
       if (this.dyno_.keySaved && !this.dyno_.keyRefused) queueMicrotask(() => this.connectDyno(true));
       return { kind: 'started' } as OpenedApp;
     });
+  }
+
+  /** Demo and test hook: Dyno is not installed, so Open Dyno answers that. */
+  dynoUninstalled(): void {
+    this.dynoMissing = true;
+  }
+  private dynoMissing = false;
+
+  /** Demo and test hook: a retry met a Dyno too old for Pitwall; nothing is retried until the user updates it. */
+  dynoTooOld(): void {
+    this.dynoMissing = false;
+    this.dyno_ = { ...this.dyno_, connected: false, reconnecting: false, needs: 'update', tools: [], problem: 'Dyno is too old for AI access from Pitwall. Update Dyno, then choose Refresh tools.' };
+    this.appsChanged();
   }
 
   /** Demo and test hook: Dyno quit (its connection ended); the app retries until it is back. */
@@ -1489,6 +1509,7 @@ export class MockBackend implements PitwallBackend {
           problem: null,
           keyRefused: false,
           reconnecting: false,
+          needs: null,
           tools: [
             { name: 'alarms', title: 'Alarms', readOnly: true, remembered: false },
             { name: 'cpu_memory', title: 'CPU and memory', readOnly: true, remembered: false },
