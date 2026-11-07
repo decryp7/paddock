@@ -398,10 +398,11 @@ static LOG: std::sync::OnceLock<paddock_log::LogHandle> = std::sync::OnceLock::n
 fn diagnostics_setup<R: Runtime>(app: &AppHandle<R>) -> Result<paddock_diag::tauri::Setup, Box<dyn std::error::Error + Send + Sync>> {
     let id = paddock_env::AppId::new(APP_ID, APP_NAME)?;
     let dirs = paddock_env::AppDirs::for_app(&id)?;
+    let app_logs = dirs.logs().to_path_buf();
     let info = paddock_diag::AppInfo::new(APP_ID, APP_NAME, VERSION, option_env!("PADDOCK_BUILD_COMMIT").unwrap_or(""));
     let data = app_state::data_dir().ok_or("Pitwall's data folder cannot be found")?;
     let mut setup = paddock_diag::tauri::Setup::new(info, dirs).settings_file(paddock_shell::logging::SHELL_SETTINGS_FILE);
-    for section in report::sections(app, data) {
+    for section in report::sections(app, data, &app_logs) {
         setup = setup.section(section);
     }
     if let Some(handle) = LOG.get() {

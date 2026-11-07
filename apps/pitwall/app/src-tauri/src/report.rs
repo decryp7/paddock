@@ -18,6 +18,7 @@
 use paddock_diag::{Content, Context, Section, SectionFile, SectionOutput};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -39,9 +40,58 @@ pub trait Ask: Send + Sync {
     fn service(&self) -> Result<Value, String>;
 }
 
-/// The sections of the installed app over its data folder.
-pub fn sections<R: tauri::Runtime>(app: &tauri::AppHandle<R>, data: PathBuf) -> Vec<Arc<dyn Section>> {
-    pitwall_sections(data, Arc::new(Live(app.clone())))
+/// The sections of the installed app over its data folder; `app_logs` is the app's own log folder (the built-in Logs section
+/// reads it), so a moved data folder's logs are added when they are elsewhere.
+pub fn sections<R: tauri::Runtime>(app: &tauri::AppHandle<R>, data: PathBuf, app_logs: &Path) -> Vec<Arc<dyn Section>> {
+    let mut out = pitwall_sections(data, Arc::new(Live(app.clone())));
+    let home = std::env::var("PITWALL_HOME").ok();
+    if let Some(dir) = moved_logs(home.as_deref(), app_logs) {
+        out.push(Arc::new(MovedLogs { dir }));
+    }
+    out
+}
+
+/// Where the server and the command line write their logs when the data folder was moved (`PITWALL_HOME`, their own rule:
+/// `<PITWALL_HOME>/logs`), when that is not the app's own log folder (in a release build the app's folders ignore the
+/// variable, so the two differ).
+pub fn moved_logs(pitwall_home: Option<&str>, app_logs: &Path) -> Option<PathBuf> {
+    let dir = PathBuf::from(pitwall_home.filter(|h| !h.is_empty())?).join("logs");
+    (dir != app_logs).then_some(dir)
+}
+
+/// The logs of a moved data folder: `logs/moved/<file>`, the newest part of each `pitwall*` process log, as the built-in Logs
+/// section reads the app's own folder.
+struct MovedLogs {
+    dir: PathBuf,
+}
+
+impl Section for MovedLogs {
+    fn id(&self) -> &str {
+        "pitwall-moved-logs"
+    }
+
+    fn collect(&self, _cx: &Context<'_>) -> SectionOutput {
+        let found = paddock_diag::window::log_window_report(&self.dir, "pitwall", paddock_diag::window::LOG_WINDOW);
+        let mut out = SectionOutput::default();
+        if let Some(why) = &found.folder_error {
+            out.notes.push(format!("The moved data folder's logs cannot be read ({why})."));
+        }
+        for (name, why) in &found.skipped {
+            out.notes.push(format!(
+                "The log {name} in the moved data folder cannot be read ({why}) and was left out."
+            ));
+        }
+        for (name, bytes, cut) in found.files {
+            let part = if cut { "the recent part of" } else { "all of" };
+            out.files.push(SectionFile {
+                name: format!("logs/moved/{name}"),
+                kind: paddock_diag::FileKind::Log,
+                summary: format!("{part} {name}, from the moved data folder (PITWALL_HOME); file contents are never logged"),
+                content: Content::Log(bytes),
+            });
+        }
+        out
+    }
 }
 
 /// The sections over `data` and `ask` (tests pass a temporary folder and scripted answers).
@@ -313,16 +363,25 @@ impl<R: tauri::Runtime> Live<R> {
 
 impl<R: tauri::Runtime> Ask for Live<R> {
     fn overview(&self) -> Result<Value, String> {
+        static BUSY: AtomicBool = AtomicBool::new(false);
         let client = self.client()?;
-        bounded(ASK_TIMEOUT, move || {
-            tauri::async_runtime::block_on(crate::commands::forward(client.as_ref(), "overview", Value::Null)).map_err(|e| e.message)
+        bounded(&BUSY, ASK_TIMEOUT, move || {
+            // Bounded here too, so the thread itself ends at the bound (not only the report's wait for it).
+            tauri::async_runtime::block_on(tokio::time::timeout(
+                ASK_TIMEOUT,
+                crate::commands::forward(client.as_ref(), "overview", Value::Null),
+            ))
+            .map_err(|_| "the server did not answer in time".to_string())?
+            .map_err(|e| e.message)
         })
     }
 
     fn service(&self) -> Result<Value, String> {
+        static BUSY: AtomicBool = AtomicBool::new(false);
         let client = self.client()?;
-        bounded(ASK_TIMEOUT, move || {
-            let state = tauri::async_runtime::block_on(crate::app_commands::compose_state(&client));
+        bounded(&BUSY, ASK_TIMEOUT, move || {
+            let state = tauri::async_runtime::block_on(tokio::time::timeout(ASK_TIMEOUT, crate::app_commands::compose_state(&client)))
+                .map_err(|_| "the service state was not read in time".to_string())?;
             serde_json::to_value(state).map_err(|e| format!("the service state could not be written: {e}"))
         })
     }
@@ -330,14 +389,27 @@ impl<R: tauri::Runtime> Ask for Live<R> {
 
 /// Runs `f` on a thread of its own and waits at most `timeout` ([`ASK_TIMEOUT`]: the report is never held by a server that
 /// hangs).
-fn bounded(timeout: Duration, f: impl FnOnce() -> Result<Value, String> + Send + 'static) -> Result<Value, String> {
+/// One question at a time per `busy` flag: while an earlier one still runs (it outlived its bound), another is not started, so
+/// threads cannot pile up behind a server that hangs.
+fn bounded(
+    busy: &'static AtomicBool,
+    timeout: Duration,
+    f: impl FnOnce() -> Result<Value, String> + Send + 'static,
+) -> Result<Value, String> {
+    if busy.swap(true, Ordering::SeqCst) {
+        return Err("the last question is still waiting for its answer".into());
+    }
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::Builder::new()
-        .name("pitwall-report-ask".into())
-        .spawn(move || {
-            let _ = tx.send(f());
-        })
-        .map_err(|e| format!("the question could not be asked: {e}"))?;
+    let spawned = std::thread::Builder::new().name("pitwall-report-ask".into()).spawn(move || {
+        let answer = f();
+        // Free the next question before handing the answer over.
+        busy.store(false, Ordering::SeqCst);
+        let _ = tx.send(answer);
+    });
+    if let Err(e) = spawned {
+        busy.store(false, Ordering::SeqCst);
+        return Err(format!("the question could not be asked: {e}"));
+    }
     rx.recv_timeout(timeout)
         .unwrap_or_else(|_| Err(format!("no answer within {} ms", timeout.as_millis())))
 }
@@ -576,6 +648,35 @@ mod tests {
         assert_eq!(v["models"]["count"], 4);
     }
 
+    /// B4 review P2-5: with PITWALL_HOME set in a release build, the server and the command line write to
+    /// `<PITWALL_HOME>/logs` (their own rule) while the app's folders ignore the variable; the report reads that folder too.
+    #[test]
+    fn logs_written_to_a_moved_data_folder_are_in_the_report() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("moved");
+        let line = "{\"@t\":\"2026-11-08T10:00:00Z\",\"@l\":\"Information\",\"@m\":\"server started\"}\n";
+        write(&home.join("logs/pitwall-server.2026-11-08.log"), line);
+        write(&home.join("logs/pitwall-cli.2026-11-08.log"), line);
+        write(&home.join("logs/other-app.2026-11-08.log"), line);
+        let d = dirs(&root.path().join("app"));
+        let moved = moved_logs(Some(home.to_str().unwrap()), d.logs()).expect("a moved folder that is not the app's own");
+        assert_eq!(moved, home.join("logs"));
+        let info = AppInfo::new("pitwall", "Pitwall", "1.1.0", "abc1234");
+        let now = chrono::DateTime::from_timestamp(1_762_596_000, 0).unwrap();
+        let sections: Vec<Arc<dyn Section>> = vec![Arc::new(MovedLogs { dir: moved })];
+        let c = Collected::collect(&info, &d, &sections, &Redactor::new(), now);
+        let names: Vec<&str> = c.files().iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["logs/moved/pitwall-cli.2026-11-08.log", "logs/moved/pitwall-server.2026-11-08.log"],
+            "{names:?}"
+        );
+        // No variable, an empty one, or a folder that is the app's own: nothing more to read.
+        assert_eq!(moved_logs(None, d.logs()), None);
+        assert_eq!(moved_logs(Some(""), d.logs()), None);
+        assert_eq!(moved_logs(Some(d.data().to_str().unwrap()), &d.data().join("logs")), None);
+    }
+
     #[test]
     fn the_logs_of_the_app_the_server_and_the_command_line_are_all_in_the_report() {
         let root = tempfile::tempdir().unwrap();
@@ -618,14 +719,22 @@ mod tests {
 
     #[test]
     fn a_question_that_hangs_ends_at_the_timeout_and_says_so() {
+        static BUSY: AtomicBool = AtomicBool::new(false);
         let (_hold, wait) = std::sync::mpsc::channel::<()>();
         // The question never answers (it waits on a channel nobody sends on): the wait ends at its bound.
-        let why = bounded(Duration::from_millis(20), move || {
+        let why = bounded(&BUSY, Duration::from_millis(20), move || {
             let _ = wait.recv();
             Ok(Value::Null)
         })
         .unwrap_err();
         assert!(why.contains("no answer within 20 ms"), "{why}");
-        assert_eq!(bounded(ASK_TIMEOUT, || Ok(json!(1))), Ok(json!(1)));
+        // B4 review P2-5: while that question still hangs, another is not started (threads cannot pile up).
+        let again = bounded(&BUSY, ASK_TIMEOUT, || unreachable!("not asked while the last one waits")).unwrap_err();
+        assert!(again.contains("still waiting"), "{again}");
+        // A question that ends frees the next one before its answer is handed over.
+        static FREE: AtomicBool = AtomicBool::new(false);
+        assert_eq!(bounded(&FREE, ASK_TIMEOUT, || Ok(json!(1))), Ok(json!(1)));
+        assert!(!FREE.load(std::sync::atomic::Ordering::SeqCst));
+        assert_eq!(bounded(&FREE, ASK_TIMEOUT, || Ok(json!(2))), Ok(json!(2)));
     }
 }
