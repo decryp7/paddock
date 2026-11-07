@@ -592,6 +592,19 @@ mod tests {
     /// `windows.rs`, `install_planned` and `scm_verb` here, paddock-service's `elevated` step, the Service Control Manager
     /// backend, the replace it runs, and the real system's `run`. None of it reads or writes a file or reads the environment;
     /// the backend's one look at the disk is `is_program`, a size check of the registered program (no open, no write).
+    /// paddock-service's os_log.rs outside its tests, without the journal branch that only Linux builds.
+    fn os_log_windows() -> String {
+        let text = include_str!("../../../../../../crates/paddock-service/src/os_log.rs");
+        let text = text.split("#[cfg(test)]").next().unwrap_or(text);
+        let from = "#[cfg(not(any(windows, target_os = \"macos\")))]\n        {";
+        let start = text
+            .find(from)
+            .expect("the journal branch of os_log::open is gone: re-point this test");
+        let rest = &text[start..];
+        let end = rest.find("Ok(Arc::new(JournalLog::stderr(prefixed))").expect("re-point this test");
+        format!("{}{}", &text[..start], &rest[end..])
+    }
+
     #[test]
     fn the_elevated_registration_touches_no_folder_the_user_controls() {
         fn code_of(text: &str) -> String {
@@ -647,6 +660,35 @@ mod tests {
                     "../../../../../../crates/paddock-service/src/privileged/known_folders.rs"
                 ))),
             ),
+            // Security review P2: the process and log code the elevated step reaches, too. paddock-proc: the command, the bounded
+            // run, the process identity and the logged clean-up of a handle (not its file clean-ups, which the step never calls).
+            (
+                "paddock-proc command",
+                code_of(between(
+                    include_str!("../../../../../../crates/paddock-proc/src/command.rs"),
+                    "pub fn command(",
+                    "pub fn clean_env(",
+                )),
+            ),
+            (
+                "paddock-proc run.rs",
+                code_of(non_test(include_str!("../../../../../../crates/paddock-proc/src/run.rs"))),
+            ),
+            (
+                "paddock-proc identity.rs",
+                code_of(non_test(include_str!("../../../../../../crates/paddock-proc/src/identity.rs"))),
+            ),
+            (
+                "paddock-proc cleanup report and logged",
+                code_of(between(
+                    include_str!("../../../../../../crates/paddock-proc/src/cleanup.rs"),
+                    "pub fn report(",
+                    "/// Waits for a helper thread",
+                )),
+            ),
+            // The OS log: on Windows the event log (native.rs, checked by the test above) or standard error; the journal branch,
+            // which reads JOURNAL_STREAM, is Linux's alone and is cut out.
+            ("paddock-service os_log.rs (Windows)", code_of(&os_log_windows())),
         ];
         for (name, code) in &parts {
             for banned in [
@@ -656,6 +698,12 @@ mod tests {
                 "var_os(",
                 "env::var",
                 "create_dir",
+                ".metadata(",
+                ".exists(",
+                ".canonicalize(",
+                ".read_dir(",
+                ".is_file(",
+                ".symlink_metadata(",
                 "Dirs::",
                 "data_dir",
                 "Manager::new",
@@ -672,7 +720,19 @@ mod tests {
             .skip(1)
             .filter_map(|rest| rest.split('(').next())
             .collect();
-        let allowed = ["is_program", "pause", "process", "run"];
+        // Each allowed call, and why it is safe in an elevated process:
+        let allowed = [
+            // `is_program` reads the registered program's metadata, in `inspect` only when the backend looks at the program;
+            // the elevated step's backend is built `without_program_check` (asserted below, and by paddock-service's
+            // the_elevated_backend_does_not_look_at_the_registered_program_on_disk).
+            "is_program",
+            // `pause` sleeps.
+            "pause",
+            // `process` opens the job's process by pid to name it (rule 53): no path.
+            "process",
+            // `run` starts sc.exe and reg.exe from the system folder Windows names (RealSystem::run, scanned above).
+            "run",
+        ];
         assert!(
             used.iter().all(|m| allowed.contains(m)),
             "the SCM backend now asks the system for {used:?}"
@@ -680,6 +740,10 @@ mod tests {
         assert!(
             parts[0].1.contains("elevated::windows_service"),
             "the elevated verbs run over the SCM backend alone"
+        );
+        assert!(
+            parts[3].1.contains(".without_program_check()"),
+            "the elevated backend does not look at the registered program on disk"
         );
     }
 }

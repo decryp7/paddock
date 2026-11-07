@@ -1421,6 +1421,55 @@ impl crate::port::Elevator for MarksInstalled {
     }
 }
 
+/// Security review P2 (B1b/B6): the elevated install writes no record any more, so the first start after the installer finds a
+/// registration and no record. This program's running service is taken over (MarkCurrent: `Started::Marked`); a registration of
+/// another program is offered for Repair (`Moved`). Neither prompts or elevates, and nothing is changed.
+#[test]
+fn an_installer_made_service_without_a_record_is_taken_over_or_offered_never_prompted() {
+    let svc = ServiceSpec::builder(LABEL, "Pitwall", "pitwall-server")
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+    let exe = PathBuf::from(r"C:\Program Files\Pitwall\pitwall-server.exe");
+    let other = r"C:\Program Files\Pitwall Old\pitwall-server.exe";
+    for (registered, want) in [
+        (exe.display().to_string(), Started::Marked),
+        (other.to_string(), Started::Offered(Reason::Moved)),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        assert!(
+            crate::record::RecordFile::new(d.path(), LABEL)
+                .load()
+                .registered_version
+                .is_none(),
+            "no record: the installer wrote none"
+        );
+        let sys = FakeSystem::new();
+        sys.put_program(&exe);
+        sys.put_program(other);
+        sys.answer("sc query", Output::ok("STATE : 4  RUNNING"));
+        sys.answer(
+            "sc qc",
+            Output::ok(&format!(
+                "START_TYPE : 2 AUTO_START\r\nBINARY_PATH_NAME : \"{registered}\" --service\r\n"
+            )),
+        );
+        let b = ElevatedWindowsService::new(
+            svc.clone(),
+            exe.clone(),
+            Box::new(sys.clone()),
+            Box::new(FakeElevator::new(&sys)),
+        );
+        let mut m = Manager::new("Pitwall", Box::new(b), d.path(), LABEL, "1.1.0", || true);
+        assert_eq!(m.on_start(&no_cancel()), want, "{registered}");
+        assert!(
+            changes(&sys).is_empty(),
+            "{registered}: no prompt, no elevation, no change: {:?}",
+            changes(&sys)
+        );
+    }
+}
+
 #[test]
 fn from_the_app_the_service_changes_only_through_one_prompt_on_request() {
     let d = tempfile::tempdir().unwrap();

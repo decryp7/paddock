@@ -215,6 +215,8 @@ pub struct WindowsService {
     spec: ServiceSpec,
     target: Target,
     sys: Box<dyn System>,
+    /// Whether `inspect` looks on disk for the registered program ([`System::is_program`]); the elevated step does not.
+    look_at_program: bool,
 }
 
 fn sc_failure(what: &str, o: &crate::port::Output) -> RegisterError {
@@ -230,7 +232,21 @@ fn sc_failure(what: &str, o: &crate::port::Output) -> RegisterError {
 impl WindowsService {
     /// The service named after the app, starting `target --service`.
     pub fn new(spec: ServiceSpec, target: Target, sys: Box<dyn System>) -> Self {
-        Self { spec, target, sys }
+        Self {
+            spec,
+            target,
+            sys,
+            look_at_program: true,
+        }
+    }
+
+    /// Never looks on disk for the registered program: [`Inspection::program_exists`] stays unknown. For the elevated step
+    /// ([`crate::elevated`]): the registered program can be another copy in a folder the user controls, and a process with an
+    /// administrator's token reads nothing there, not even its metadata.
+    #[must_use]
+    pub fn without_program_check(mut self) -> Self {
+        self.look_at_program = false;
+        self
     }
 
     /// `sc query`: the state number and, for a stopped service, how it ended (`None`: the SCM does not know the service).
@@ -410,7 +426,11 @@ impl Backend for WindowsService {
             Ok(o) if o.success() => sc_config(&o.stdout),
             _ => (None, None),
         };
-        let program_exists = program.as_ref().map(|p| self.sys.is_program(Path::new(p)));
+        let program_exists = if self.look_at_program {
+            program.as_ref().map(|p| self.sys.is_program(Path::new(p)))
+        } else {
+            None
+        };
         let points_here = program
             .as_ref()
             .map(|p| p.eq_ignore_ascii_case(&self.target.exe_text()));
@@ -570,10 +590,12 @@ impl ElevatedWindowsService {
             .run_elevated(&self.program, &[verb.word()], ELEVATED_CEILING)?
         {
             0 => Ok(self.inner.inspect()),
+            // The elevated step writes no log file; its lines are in the Application event log under the service's source.
             code => Err(RegisterError::Other(format!(
-                "{} {} failed (exit code {code}); the service log has details",
+                "{} {} failed (exit code {code}); Event Viewer > Windows Logs > Application, source {}, has the details",
                 self.program.display(),
-                verb.word()
+                verb.word(),
+                self.inner.spec.name()
             ))),
         }
     }

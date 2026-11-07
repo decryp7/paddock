@@ -22,11 +22,16 @@ use std::time::Duration;
 /// The Service Control Manager service of `spec` starting `program`, over the real system tools (found in the system folder
 /// Windows names, never on `PATH`).
 pub fn windows_service(spec: &ServiceSpec, program: &Path) -> WindowsService {
-    WindowsService::new(
-        spec.clone(),
-        Target::exe(program),
-        Box::new(RealSystem::new()),
-    )
+    scm_backend(spec, program, Box::new(RealSystem::new()))
+}
+
+/// The backend the elevated step works over, on any system port (a fake in tests).
+pub fn scm_backend(
+    spec: &ServiceSpec,
+    program: &Path,
+    sys: Box<dyn crate::port::System>,
+) -> WindowsService {
+    WindowsService::new(spec.clone(), Target::exe(program), sys).without_program_check()
 }
 
 /// Registers the service, replacing whatever is registered under its name, and returns at once (the elevated step does not
@@ -149,6 +154,39 @@ mod tests {
         assert!(sys.commands().iter().any(|c| c == "sc delete Pitwall"));
         assert_eq!(b.inspect().registration, Registration::Absent);
         no_file_calls(&sys);
+    }
+
+    /// Security review P2 (B1b/B6): the elevated step looked at the registered program on disk (`is_program`, a metadata read)
+    /// to say whether it exists. That program can be another copy in a user's folder, so the elevated backend does not look:
+    /// it knows nothing about it, and touches no folder the user controls.
+    #[test]
+    fn the_elevated_backend_does_not_look_at_the_registered_program_on_disk() {
+        let sys = FakeSystem::new();
+        let other = r"C:\Users\sam\AppData\Local\Pitwall\pitwall-server.exe";
+        sys.put_program(other);
+        sys.answer(
+            "sc query",
+            crate::port::Output::ok("STATE : 4  RUNNING\r\n"),
+        );
+        sys.answer(
+            "sc qc",
+            crate::port::Output::ok(&format!("BINARY_PATH_NAME : \"{other}\" --service\r\n")),
+        );
+        let spec = ServiceSpec::builder(
+            "net.decryptology.pitwall.service",
+            "Pitwall",
+            "pitwall-server",
+        )
+        .kind(Kind::SystemService)
+        .build()
+        .unwrap();
+        let mut b = scm_backend(&spec, Path::new(EXE), Box::new(sys.clone()));
+        let look = b.inspect();
+        assert_eq!(look.program.as_deref(), Some(other));
+        assert_eq!(
+            look.program_exists, None,
+            "the elevated step does not look at the program on disk"
+        );
     }
 
     #[test]

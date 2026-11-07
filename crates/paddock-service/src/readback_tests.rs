@@ -410,6 +410,33 @@ fn a_healthy_service_registers_and_the_returned_inspection_is_a_fresh_one() {
     assert_eq!(look, b.inspect());
 }
 
+/// Security review P2 (B1b/B6): an elevated step that failed points at where its words are, the Application event log under
+/// the service's own source (the elevated step writes no log file of its own).
+#[test]
+fn a_failed_elevated_step_points_at_the_event_log() {
+    let sys = FakeSystem::new();
+    let elevator = FakeElevator::new(&sys);
+    elevator.results([Ok(1), Ok(1)]);
+    let mut b = ElevatedWindowsService::new(
+        spec(Kind::SystemService),
+        PathBuf::from(SVC_EXE),
+        Box::new(sys.clone()),
+        Box::new(elevator),
+    );
+    let e = b.register().unwrap_err().to_string();
+    assert!(
+        e.contains("exit code 1")
+            && e.contains("Event Viewer > Windows Logs > Application, source Dyno"),
+        "{e}"
+    );
+    assert!(!e.contains("service log"), "{e}");
+    let e = b.unregister().unwrap_err().to_string();
+    assert!(
+        e.contains("Event Viewer > Windows Logs > Application, source Dyno"),
+        "{e}"
+    );
+}
+
 #[test]
 fn the_elevated_service_judges_what_the_elevated_install_left_behind() {
     let sys = FakeSystem::new();
