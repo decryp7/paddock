@@ -83,6 +83,66 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-11-07, events-grid page query: the time range stopped the Parquet pruning (branch `perf/debrief-grid-query`, WP-1)
+
+- **Commit:** before `c149483e9` (benchmark and trace only, same query code as `debrief/1.2-int` 852b35ac0); after the fix commit
+  on the same branch.
+- **Why:** the DuckLake trial ([research note](research/2026-11-06-ducklake-trial.md), branch `docs/debrief-ducklake-trial`)
+  measured the store's page query at 476-485 ms quiet and 1.4-3.1 s during a second import at 56M events, against 55 ms for the
+  same filter as plain `read_parquet` SQL over the same 441-446 segments. Budget: interactive < 0.5 s (ADR 0010, ADR 0014).
+- **Cause:** the time range compiled to `coalesce(e.ts >= F AND e.ts <= T, FALSE)`. DuckDB pushes that expression into the
+  Parquet scan as a row filter but cannot use the segments' min/max statistics with it, so a 45 s window read every
+  segment's `ts` column. `EXPLAIN ANALYZE` of the page's count statement under the store's settings (4 threads, 192 MB):
+  384 MB read and 210-280 ms with the `coalesce`, 7.8 MB read and 50-65 ms with plain `e.ts >= F AND e.ts <= T`
+  (4 interleaved repeats of each form in one process). The page runs that filter three times (count, ids, rows), so the
+  scan cost was paid twice at full size.
+- **Hypotheses and what ruled them out** (same store, same process, interleaved):
+  - Memory limit 192 MB: 8 GB was not faster (130 ms at 192 MB, 170-200 ms at 8 GB, noise); refuted.
+  - `async_threads` 4 against DuckDB's default: 117-145 ms against 126-144 ms; refuted. Thread count (4 against 8): 63 against
+    55 ms in the trial's plain-SQL runs; refuted.
+  - View definition (`union_by_name` over 444 segments with differing `p_*` columns), the `source IN (SELECT ... ready)`
+    filter and the join with `sources`: the same statement without the `coalesce` took 52-57 ms through the view with the
+    join; refuted.
+  - Per-page extra queries: steady state `ctx` 1.3-1.4 ms, `compile` 0.0 ms, `rows` 38 ms (page trace, 56M); not the cost.
+  - Lock contention with the import's writer: not the main cause (quiet runs show the same cost); during an import the
+    first page after a data change is slower for another reason, see "Left open".
+  - Positions lookup: not used on this path (`path=sql`).
+- **Fix:** a time range that is a conjunct of the `WHERE` compiles to plain comparisons (`sql.rs`, `conjunct_sql`); the
+  `coalesce` stays inside `NOT` and `OR`. Regression test `page_tests::a_time_range_is_pushed_into_the_segment_scan` reads
+  DuckDB's plan and fails while the scan's filter is a `COALESCE` (it failed before the fix with the plan in its message).
+- **Machine, build:** Mac mini M4 Pro (shared); release, mimalloc, duckdb-rs 1.20000.0 with libduckdb 2.0.0; store defaults
+  (4 DuckDB threads, 192 MB limit).
+- **Corpus:** invented. 10M: `gen_large.py OUT 0.18`, 9,801,191 events imported first, then 307,734 (the trial's split).
+  56M: the kept `large10`, 54,441,640 events first, then 1,710,492. The first-import store was built once and cloned per run.
+- **Query:** events from 2026-10-14 00:10:00 to 00:10:45 UTC where `Command` = `Reserve`, `PageQuery` limit 500; 205 rows.
+- **Command:** `bench_grid_page` (`GRID_MODE=build|quiet|during|explain`, see the file's header), each run through plock
+  (normal lane) after waiting for a 1-minute load of at most 12 and no macOS CI job. Quiet: second import, wait for the index
+  and catalogue, then 21 page queries one after another (first query reported apart). During: the second import runs while
+  a thread issues the page query every 250 ms. The highest 1-minute load of every run below was 7.9 or less; the
+  one run that overlapped a CI job is marked.
+- **Runs:** 3 per cell, before and after; p50 / max in ms.
+
+| Measure | Before (3 runs) | After (3 runs) | Budget 500 ms |
+|---|---|---|---|
+| 10M, quiet, p50 | 142.5 / 146.1 / 144.5 | 80.3 / 80.7 / 77.8 | met |
+| 10M, during import 2, p50 (max) | 341.6 (413) / 406.1 (453) / 303.9 (1,125) | 218.2 (314) / 339.4 (482) / 238.0 (389) | met at p50 |
+| 56M, quiet, p50 | 476.2 / 508.9 / 480.1 | 170.4 / 169.4 / 169.9 | before: at or over the budget; after: met |
+| 56M, during import 2, p50 (max) | 571.6 (4,020) / 549.5 (3,778) / 533.4 (3,914) | 188.8 (2,889) / 184.0 (3,358) / 188.0 (3,708) | p50 met; max over |
+| 10M, first page after the import | 362 / 371 / 375 | 326 / 298 / 294 | met |
+| 56M, first page after the import | 1,629 / 2,143 / 1,618 | 1,371 / 1,335 / 1,306 | over |
+
+- **Notes:**
+  - Per-phase at 56M quiet (trace, `GRID_TRACE=1`): before count 216-237, ids 217-234, rows 38 ms; after count 63-77,
+    ids 65-79, rows 37-40 ms.
+  - `pre-quiet10-3` ended while a macOS CI job (run 7653) was in progress; it started with none. Its p50 (144.5 ms) matches the
+    other two.
+  - The trial's 56M quiet figure (476-485 ms) is reproduced by the before runs (476-509 ms).
+- **Left open (not fixed here):** the first page after a data change recomputes the field catalogue and default instance key
+  (`Inner::derived`, the `ctx` phase: 1.2 s quiet and up to 3.3 s during an import at 56M; `count(nullif(...))` per source over
+  `events_wide`, `read.rs` `instance_key`). It is the max of the "during" rows and the "first page" rows. The page itself
+  still scans three times (count, ids, rows); merging count and ids into one statement would save about 65 ms at 56M and was
+  not needed for the budget.
+
 ### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
 
 - **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`
