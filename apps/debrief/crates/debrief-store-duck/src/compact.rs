@@ -178,6 +178,11 @@ pub(crate) fn pending(conn: &Connection) -> Result<std::collections::HashSet<Str
 
 /// [`compact`]; `force` merges small segments however few there are ("Compact now" in the Store pane).
 pub(crate) fn compact_with(conn: &Connection, dir: &Path, schema: &Arc<EventSchema>, force: bool) -> Result<Compaction> {
+    if crate::trial_lake::native() {
+        // Trial 2, native: the lake holds the moved and deleted rows; the store's rewrite is not used.
+        let _ = (conn, dir, schema, force);
+        return Ok(Compaction { replaced: 0, written: 0 });
+    }
     empty_trash(conn)?;
     let live = live_rows(conn, dir)?;
     let listed: Vec<Listed> = {

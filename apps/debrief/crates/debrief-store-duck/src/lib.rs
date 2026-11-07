@@ -37,6 +37,7 @@ mod sql;
 pub mod stats;
 mod tail;
 mod turns;
+mod trial_lake;
 mod writer;
 
 pub use compact::Compaction;
@@ -885,9 +886,15 @@ impl DuckStore {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
             _ => {}
         }
+        // Trial 2: a new store gets a new lake.
+        let _ = std::fs::remove_dir_all(dir.join("lake-data"));
+        for f in ["lake.ducklake", "lake.ducklake.wal"] {
+            let _ = std::fs::remove_file(dir.join(f));
+        }
         let conn = open_db(dir, &opts)?;
         let schema = ingest::schema_for(&compiled);
         conn.execute_batch(&schema::ddl(&schema)).map_err(engine)?;
+        trial_lake::attach(&conn, dir).map_err(|e| engine(format!("{e:#}")))?;
         conn.execute_batch(&schema::events_view(&schema, &[])).map_err(engine)?;
         conn.execute_batch(schema::CACHE_DDL).map_err(engine)?;
         conn.execute_batch(lanes::DDL).map_err(engine)?;
@@ -944,6 +951,7 @@ impl DuckStore {
                 "this project was saved by an older preview of Debrief (store format {version}); open its log files again"
             )));
         }
+        trial_lake::attach(&conn, dir).map_err(|e| engine(format!("{e:#}")))?;
         recover(&conn, dir, &schema).map_err(|e| match e.downcast_ref::<MissingSegment>() {
             Some(m) => StoreError::Damaged(m.to_string()),
             None => engine(format!("{e:#}")),
@@ -1256,6 +1264,9 @@ impl Ingest for DuckStore {
         }
         for sql in catalogue::DELETE_SQL {
             conn.execute(sql, params![id.0]).map_err(engine)?;
+        }
+        if trial_lake::native() {
+            trial_lake::delete_source(&conn, id.0).map_err(|e| engine(format!("{e:#}")))?;
         }
         if let Some(f) = &self.inner.fts {
             if let Err(e) = f.delete_source(id.0) {

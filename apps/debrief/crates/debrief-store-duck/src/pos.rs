@@ -250,7 +250,7 @@ impl DuckStore {
         let list: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
         let sql = format!(
             "SELECT id, lower(concat_ws(chr(10), message, exception, template)) FROM {} WHERE id IN ({}) AND {READY}",
-            parquet_from(&files),
+            crate::trial_lake::by_id_source(&files),
             list.join(", ")
         );
         let mut stmt = conn.prepare(&sql).map_err(engine)?;
@@ -272,7 +272,7 @@ impl DuckStore {
         let sql = format!(
             "SELECT {} FROM {} WHERE id IN ({}) AND {READY} ORDER BY id",
             canonical_columns(&self.inner.schema),
-            parquet_from(&files),
+            crate::trial_lake::by_id_source(&files),
             list.join(", ")
         );
         let mut stmt = conn.prepare(&sql).map_err(engine)?;

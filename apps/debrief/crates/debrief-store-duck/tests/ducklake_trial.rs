@@ -1,0 +1,659 @@
+//! DuckLake trial (apps/debrief/docs/research/2026-11-06-ducklake-trial.md): the current store against a DuckLake table on
+//! the same invented events. Off unless `TRIAL_MODE` is set. Run with `--release --test ducklake_trial -- --nocapture`.
+//!
+//! - `TRIAL_MODE=store`: the current store (`DuckStore`). Imports `TRIAL_MAIN`, then `TRIAL_EXTRA` as a second import,
+//!   with a query thread running the representative page query every 250 ms; waits for the index and the catalogue;
+//!   removes the second import's sources (undo); moves `TRIAL_SHIFT` sources by one hour (time shift); waits for the
+//!   index again; compacts. Hard-links the segments after each import into `TRIAL_KEEP/main` and `TRIAL_KEEP/extra`.
+//! - `TRIAL_MODE=lake`: a DuckLake table (`TRIAL_LAKE` folder, catalog `TRIAL_CATALOG=duckdb|sqlite`) filled from the
+//!   kept segments, `TRIAL_LAKE_IMPORT=insert` (DuckDB writes the Parquet files, one commit per `TRIAL_GROUP` segments)
+//!   or `adopt` (`ducklake_add_data_files` registers hard links of the segments), with the same query thread (SQL on a
+//!   second connection); then the same undo (DELETE), time shift (UPDATE) and compaction (rewrite, merge, expire,
+//!   cleanup).
+//! - Query: `TRIAL_Q_FROM`/`TRIAL_Q_TO` (ms) and `TRIAL_Q_FIELD` = `TRIAL_Q_VALUE`.
+//! - Memory: physical footprint (`ri_phys_footprint`, rule 26), peak per phase, sampled every 20 ms.
+//!
+//! Every result line starts with `trial:`.
+
+mod common;
+
+#[global_allocator]
+static GLOBAL: debrief_alloc::MiMalloc = debrief_alloc::MiMalloc;
+
+use debrief_core::ports::{Filter, Ingest, PageQuery, Query, Search, Skew};
+use debrief_core::query::FieldFilter;
+use debrief_core::skew::{OffsetSpec, SetOffsetRequest};
+use debrief_core::{PluginRegistry, Profile};
+use debrief_store_duck::DuckStore;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+fn env(k: &str) -> String {
+    std::env::var(k).unwrap_or_else(|_| panic!("{k} is not set"))
+}
+
+/// Physical footprint of this process in bytes (rule 26).
+fn footprint() -> u64 {
+    // SAFETY: proc_pid_rusage fills the struct it is given for the flavour named; the struct is plain data.
+    unsafe {
+        let mut ri: libc::rusage_info_v4 = std::mem::zeroed();
+        let p = &mut ri as *mut libc::rusage_info_v4 as *mut libc::rusage_info_t;
+        if libc::proc_pid_rusage(libc::getpid(), libc::RUSAGE_INFO_V4, p) == 0 {
+            ri.ri_phys_footprint
+        } else {
+            0
+        }
+    }
+}
+
+struct Peak {
+    peak: Arc<AtomicU64>,
+    stop: Arc<AtomicBool>,
+}
+
+impl Peak {
+    fn start() -> Peak {
+        let peak = Arc::new(AtomicU64::new(footprint()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (p, s) = (peak.clone(), stop.clone());
+        std::thread::spawn(move || {
+            while !s.load(Ordering::Relaxed) {
+                p.fetch_max(footprint(), Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        Peak { peak, stop }
+    }
+    /// Peak footprint since the last call, in MB; starts a new phase.
+    fn take(&self) -> u64 {
+        let now = footprint();
+        self.peak.swap(now, Ordering::Relaxed).max(now) >> 20
+    }
+}
+
+impl Drop for Peak {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+fn dir_stats(p: &Path) -> (f64, u64) {
+    fn walk(p: &Path, acc: &mut (u64, u64)) {
+        if let Ok(rd) = std::fs::read_dir(p) {
+            for e in rd.flatten() {
+                match e.metadata() {
+                    Ok(m) if m.is_dir() => walk(&e.path(), acc),
+                    Ok(m) => {
+                        acc.0 += m.len();
+                        acc.1 += 1;
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+    let mut acc = (0, 0);
+    walk(p, &mut acc);
+    (acc.0 as f64 / 1e6, acc.1)
+}
+
+fn parquet_files(dir: &Path) -> Vec<PathBuf> {
+    let mut v: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map(|rd| rd.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "parquet")).collect())
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// Hard-links the segment files of `from` that `skip` does not hold into `to`; returns their names.
+fn keep(from: &Path, to: &Path, skip: &[String]) -> Vec<String> {
+    std::fs::create_dir_all(to).unwrap();
+    let mut out = Vec::new();
+    for f in parquet_files(from) {
+        let name = f.file_name().unwrap().to_string_lossy().to_string();
+        if skip.contains(&name) {
+            continue;
+        }
+        std::fs::hard_link(&f, to.join(&name)).unwrap();
+        out.push(name);
+    }
+    out
+}
+
+/// Latencies of a query run every 250 ms until stopped: (ms, rows) per run.
+struct Prober {
+    stop: Arc<AtomicBool>,
+    handle: Option<std::thread::JoinHandle<Vec<(f64, usize)>>>,
+}
+
+impl Prober {
+    fn start(mut run: impl FnMut() -> Option<usize> + Send + 'static) -> Prober {
+        let stop = Arc::new(AtomicBool::new(false));
+        let s = stop.clone();
+        let handle = std::thread::spawn(move || {
+            let mut out = Vec::new();
+            while !s.load(Ordering::Relaxed) {
+                let t = Instant::now();
+                if let Some(rows) = run() {
+                    out.push((t.elapsed().as_secs_f64() * 1000.0, rows));
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            out
+        });
+        Prober { stop, handle: Some(handle) }
+    }
+    fn finish(mut self, label: &str) {
+        self.stop.store(true, Ordering::Relaxed);
+        let v = self.handle.take().unwrap().join().unwrap();
+        report_latency(label, &v);
+    }
+}
+
+fn report_latency(label: &str, v: &[(f64, usize)]) {
+    if v.is_empty() {
+        println!("trial: {label} queries=0");
+        return;
+    }
+    let mut ms: Vec<f64> = v.iter().map(|x| x.0).collect();
+    ms.sort_by(f64::total_cmp);
+    let q = |f: f64| ms[((ms.len() - 1) as f64 * f).round() as usize];
+    println!(
+        "trial: {label} queries={} p50_ms={:.1} p95_ms={:.1} max_ms={:.1} rows_last={}",
+        ms.len(),
+        q(0.5),
+        q(0.95),
+        ms[ms.len() - 1],
+        v.last().unwrap().1
+    );
+}
+
+fn quiet(label: &str, mut run: impl FnMut() -> Option<usize>) {
+    let mut v = Vec::new();
+    for _ in 0..21 {
+        let t = Instant::now();
+        if let Some(rows) = run() {
+            v.push((t.elapsed().as_secs_f64() * 1000.0, rows));
+        }
+    }
+    report_latency(label, &v);
+}
+
+struct Q {
+    from: i64,
+    to: i64,
+    field: String,
+    value: String,
+}
+
+fn q() -> Q {
+    Q {
+        from: env("TRIAL_Q_FROM").parse().unwrap(),
+        to: env("TRIAL_Q_TO").parse().unwrap(),
+        field: env("TRIAL_Q_FIELD"),
+        value: env("TRIAL_Q_VALUE"),
+    }
+}
+
+fn ids(var: &str) -> Vec<u32> {
+    std::env::var(var)
+        .unwrap_or_default()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse().unwrap())
+        .collect()
+}
+
+#[test]
+fn ducklake_trial() {
+    match std::env::var("TRIAL_MODE").as_deref() {
+        Ok("store") => store_mode(),
+        Ok("lake") => lake_mode(),
+        Ok("raw") => raw_mode(),
+        _ => eprintln!("skipped: set TRIAL_MODE=store|lake"),
+    }
+}
+
+fn store_disk(dir: &Path, label: &str) {
+    let (seg_mb, seg_n) = dir_stats(&dir.join("segments"));
+    let db_mb = std::fs::metadata(dir.join(debrief_store_duck::DB_FILE)).map_or(0.0, |m| m.len() as f64 / 1e6);
+    let (idx_mb, _) = dir_stats(&dir.join("index"));
+    let (ld_mb, ld_n) = dir_stats(&dir.join("lake-data"));
+    let cat_mb: f64 = ["lake.ducklake", "lake.ducklake.wal"]
+        .iter()
+        .map(|f| std::fs::metadata(dir.join(f)).map_or(0.0, |m| m.len() as f64 / 1e6))
+        .sum();
+    println!(
+        "trial: disk_{label} segments_mb={seg_mb:.1} files={seg_n} db_mb={db_mb:.1} index_mb={idx_mb:.1} lake_data_mb={ld_mb:.1} lake_files={ld_n} lake_catalog_mb={cat_mb:.1} total_mb={:.1}",
+        seg_mb + db_mb + idx_mb + ld_mb + cat_mb
+    );
+}
+
+fn store_mode() {
+    debrief_alloc::tune();
+    let main = PathBuf::from(env("TRIAL_MAIN"));
+    let extra = PathBuf::from(env("TRIAL_EXTRA"));
+    let dir = PathBuf::from(env("TRIAL_STORE"));
+    let kept = std::env::var_os("TRIAL_KEEP").map(PathBuf::from);
+    assert!(!dir.join(debrief_store_duck::DB_FILE).exists(), "TRIAL_STORE must be a new folder");
+    println!("trial: variant={}", std::env::var("DEBRIEF_TRIAL_STORE").unwrap_or_else(|_| "base".into()));
+    let q = q();
+    let peak = Peak::start();
+    let started = Instant::now();
+    let store = Arc::new(DuckStore::create_with(&dir, Profile::default_profile(), PluginRegistry::new(), Default::default()).unwrap());
+    // The grid query with a time range and a field filter, and a plain field filter without a time range.
+    let filter_of = |timed: bool| Filter {
+        from: timed.then_some(q.from),
+        to: timed.then_some(q.to),
+        filters: vec![FieldFilter {
+            field: q.field.clone(),
+            op: "eq".into(),
+            value: Some(q.value.clone()),
+        }],
+        ..Filter::default()
+    };
+    let page_with = |f: Filter| {
+        move |s: &DuckStore| {
+            s.page(&PageQuery {
+                query: f.clone(),
+                offset: 0,
+                limit: 500,
+                ..PageQuery::default()
+            })
+            .ok()
+            .map(|r| r.total)
+        }
+    };
+    let page = page_with(filter_of(true));
+    let plain = page_with(filter_of(false));
+    let probe = |s: &Arc<DuckStore>, timed: bool| {
+        let (s, p) = (s.clone(), page_with(filter_of(timed)));
+        Prober::start(move || p(&s))
+    };
+    let seg = dir.join("segments");
+
+    // Import 1 (main) and import 2 (extra); a page and a plain-filter query thread run during each.
+    let mut extra_ids: Vec<u32> = Vec::new();
+    for (label, root) in [("import_main", &main), ("import_extra", &extra)] {
+        let (p1, p2) = (probe(&store, true), probe(&store, false));
+        let t = Instant::now();
+        let r = store.open(std::slice::from_ref(root)).unwrap().wait().unwrap();
+        let s = t.elapsed().as_secs_f64();
+        p1.finish(&format!("{label}_query"));
+        p2.finish(&format!("{label}_plain"));
+        println!(
+            "trial: {label} events={} s={s:.2} events_per_s={:.0} sources={} peak_fp_mb={}",
+            r.events,
+            r.events as f64 / s,
+            r.sources.len(),
+            peak.take()
+        );
+        if label == "import_extra" {
+            extra_ids = r.sources.iter().map(|x| x.id).collect();
+            let ids: Vec<String> = extra_ids.iter().map(|x| x.to_string()).collect();
+            println!("trial: extra_sources={}", ids.join(","));
+        }
+        if let Some(kept) = &kept {
+            let already: Vec<String> = std::fs::read_dir(kept.join("main"))
+                .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect())
+                .unwrap_or_default();
+            keep(&seg, &kept.join(if label == "import_main" { "main" } else { "extra" }), &already);
+        }
+    }
+    let summary = store.summary().unwrap();
+    let mut by_rows: Vec<(u32, usize, String)> = summary.sources.iter().map(|s| (s.id, s.records, s.path.clone())).collect();
+    by_rows.sort_by_key(|x| std::cmp::Reverse(x.1));
+    println!("trial: total_events={}", summary.total);
+    let mut shift: Vec<u32> = Vec::new();
+    let mut shifted = 0usize;
+    let target = summary.total as f64 * 0.1;
+    for (id, n, _) in by_rows.iter().filter(|x| !extra_ids.contains(&x.0)) {
+        if shift.is_empty() || ((shifted + n) as f64 - target).abs() < (shifted as f64 - target).abs() {
+            shift.push(*id);
+            shifted += n;
+        }
+    }
+    println!(
+        "trial: shift_sources={} rows={shifted} share={:.3}",
+        shift.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","),
+        shifted as f64 / summary.total as f64
+    );
+
+    let t = Instant::now();
+    let st = store.wait_for_index(Duration::from_secs(7200)).unwrap();
+    let built = store.wait_for_catalogue(Duration::from_secs(7200)).unwrap();
+    println!(
+        "trial: background_index_and_catalogue s={:.2} indexed={} catalogue={built} peak_fp_mb={}",
+        t.elapsed().as_secs_f64(),
+        st.indexed,
+        peak.take()
+    );
+    println!("trial: ready_end_to_end s={:.2}", started.elapsed().as_secs_f64());
+    store_disk(&dir, "after_import");
+    quiet("quiet_query_after_import", || page(&store));
+    quiet("quiet_plain_after_import", || plain(&store));
+    let hits = |s: &DuckStore| {
+        s.search(&debrief_core::ports::SearchRequest {
+            text: "Reserve".into(),
+            limit: 0,
+        })
+        .map(|r| r.total)
+        .unwrap_or(0)
+    };
+    println!("trial: search_hits_after_import={}", hits(&store));
+
+    // Undo the second import until it is searchable again (index caught up), then the disk.
+    let t = Instant::now();
+    for id in &extra_ids {
+        store.remove_source(debrief_core::batch::SourceId(*id)).unwrap();
+    }
+    let call = t.elapsed().as_secs_f64();
+    let st = store.wait_for_index(Duration::from_secs(7200)).unwrap();
+    println!(
+        "trial: undo_import sources={} s={call:.3} searchable_s={:.3} indexed={} peak_fp_mb={} total_after={} hits_after={}",
+        extra_ids.len(),
+        t.elapsed().as_secs_f64(),
+        st.indexed,
+        peak.take(),
+        store.summary().unwrap().total,
+        hits(&store)
+    );
+    store_disk(&dir, "after_undo");
+
+    // Time shift of about 10% of the rows by one hour, until the index has the new times.
+    let t = Instant::now();
+    for id in &shift {
+        store
+            .set_source_offset(&SetOffsetRequest {
+                spec: OffsetSpec::Manual {
+                    source: *id,
+                    offset_ms: 3_600_000,
+                },
+            })
+            .unwrap();
+    }
+    let shift_s = t.elapsed().as_secs_f64();
+    let st = store.wait_for_index(Duration::from_secs(7200)).unwrap();
+    println!(
+        "trial: time_shift sources={} s={shift_s:.3} searchable_s={:.3} indexed={} peak_fp_mb={}",
+        shift.len(),
+        t.elapsed().as_secs_f64(),
+        st.indexed,
+        peak.take()
+    );
+    store_disk(&dir, "after_shift");
+    quiet("quiet_query_after_shift", || page(&store));
+
+    let t = Instant::now();
+    let c = store.compact().unwrap();
+    println!(
+        "trial: compact s={:.3} replaced={} written={} peak_fp_mb={}",
+        t.elapsed().as_secs_f64(),
+        c.replaced,
+        c.written,
+        peak.take()
+    );
+    store_disk(&dir, "after_compact");
+    quiet("quiet_query_after_compact", || page(&store));
+    quiet("quiet_plain_after_compact", || plain(&store));
+    let before = (page(&store), plain(&store), hits(&store));
+    drop(store);
+
+    // Move: copy the folder (APFS clone), hide the original, reopen the copy and compare the answers.
+    let moved = dir.with_extension("moved");
+    let status = std::process::Command::new("cp").arg("-cR").arg(&dir).arg(&moved).status().unwrap();
+    assert!(status.success(), "cp -cR failed");
+    let hidden = dir.with_extension("hidden");
+    std::fs::rename(&dir, &hidden).unwrap();
+    let t = Instant::now();
+    let reopened = DuckStore::open_with(&moved, Profile::default_profile(), PluginRegistry::new(), Default::default());
+    match reopened {
+        Ok(s) => {
+            let open_s = t.elapsed().as_secs_f64();
+            let after = (page(&s), plain(&s), hits(&s));
+            println!(
+                "trial: move_reopen s={open_s:.3} same_answers={} before={before:?} after={after:?} peak_fp_mb={}",
+                before == after,
+                peak.take()
+            );
+            drop(s);
+        }
+        Err(e) => println!("trial: move_reopen failed err={:?}", e.to_string()),
+    }
+    std::fs::rename(&hidden, &dir).unwrap();
+    let listed_missing = std::fs::read_dir(&seg).map(|rd| rd.count()).unwrap_or(0);
+    println!("trial: segments_files_in_original={listed_missing}");
+}
+
+const COLS: &str = "id, ts, ts_state, level, source, line, byte_offset, message, template, exception, markers, raw, extra";
+
+fn list(files: &[PathBuf]) -> String {
+    let v: Vec<String> = files.iter().map(|f| format!("'{}'", f.display())).collect();
+    format!("[{}]", v.join(", "))
+}
+
+fn lake_mode() {
+    use duckdb::{Config, Connection};
+    let kept = PathBuf::from(env("TRIAL_KEEP"));
+    let lake = PathBuf::from(env("TRIAL_LAKE"));
+    let ext = PathBuf::from(env("TRIAL_EXT_DIR"));
+    let catalog = std::env::var("TRIAL_CATALOG").unwrap_or_else(|_| "duckdb".into());
+    let how = std::env::var("TRIAL_LAKE_IMPORT").unwrap_or_else(|_| "insert".into());
+    let group: usize = std::env::var("TRIAL_GROUP").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    let threads = std::env::var("TRIAL_THREADS").unwrap_or_else(|_| "8".into());
+    assert!(!lake.exists(), "TRIAL_LAKE must be a new folder");
+    std::fs::create_dir_all(lake.join("data")).unwrap();
+    let q = q();
+    let peak = Peak::start();
+    let config = Config::default()
+        .with("autoinstall_known_extensions", "false")
+        .unwrap()
+        .with("autoload_known_extensions", "false")
+        .unwrap()
+        .threads(threads.parse().unwrap())
+        .unwrap();
+    let conn = Connection::open_in_memory_with_flags(config).unwrap();
+    // `TRIAL_MEMORY_LIMIT`: DuckDB's memory limit (the store uses 192MB, 768MB while an import compacts and orders).
+    if let Ok(m) = std::env::var("TRIAL_MEMORY_LIMIT") {
+        conn.execute_batch(&format!("SET memory_limit = '{m}';")).unwrap();
+    }
+    // `TRIAL_NO_ORDER=1`: `preserve_insertion_order = false` (DuckDB's advice for out-of-memory errors).
+    if std::env::var_os("TRIAL_NO_ORDER").is_some() {
+        conn.execute_batch("SET preserve_insertion_order = false;").unwrap();
+    }
+    conn.execute_batch(&format!("LOAD '{}';", ext.join("ducklake.duckdb_extension").display())).unwrap();
+    let meta = match catalog.as_str() {
+        "sqlite" => {
+            conn.execute_batch(&format!("LOAD '{}';", ext.join("sqlite_scanner.duckdb_extension").display())).unwrap();
+            format!("sqlite:{}", lake.join("catalog.sqlite").display())
+        }
+        _ => lake.join("catalog.ducklake").display().to_string(),
+    };
+    conn.execute_batch(&format!(
+        "ATTACH 'ducklake:{meta}' AS lake (DATA_PATH '{}'); USE lake;",
+        lake.join("data").display()
+    ))
+    .unwrap();
+    let v: String = conn
+        .query_row("SELECT value FROM __ducklake_metadata_lake.ducklake_metadata WHERE key = 'version'", [], |r| r.get(0))
+        .unwrap();
+    let ev: String = conn
+        .query_row("SELECT extension_version FROM duckdb_extensions() WHERE extension_name = 'ducklake'", [], |r| r.get(0))
+        .unwrap();
+    println!("trial: lake catalog={catalog} import={how} group={group} threads={threads} spec={v} extension={ev}");
+    // `TRIAL_ZSTD=1`: the data files in zstd, like the store's segments (DuckDB's Parquet default is snappy).
+    if std::env::var_os("TRIAL_ZSTD").is_some() {
+        conn.execute_batch("CALL ducklake_set_option('lake', 'parquet_compression', 'zstd');").unwrap();
+    }
+    let opts: Vec<String> = conn
+        .prepare("SELECT option_name || '=' || value FROM ducklake_options('lake')")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .flatten()
+        .collect();
+    println!("trial: lake_options {}", opts.join(";").replace(' ', "_"));
+    // Can an Appender write into a DuckLake table (Debrief's batches could then skip the Parquet round trip)?
+    conn.execute_batch("CREATE TABLE probe (i INTEGER);").unwrap();
+    let appended = conn.appender_to_catalog_and_db("probe", "lake", "main").and_then(|mut a| {
+        for i in 0..1000 {
+            a.append_row([i])?;
+        }
+        a.flush()
+    });
+    let probe_rows: i64 = conn.query_row("SELECT count(*) FROM lake.probe", [], |r| r.get(0)).unwrap_or(-1);
+    println!("trial: appender ok={} err={:?} rows={probe_rows}", appended.is_ok(), appended.err().map(|e| e.to_string()));
+    conn.execute_batch("DROP TABLE probe;").unwrap();
+    let main = parquet_files(&kept.join("main"));
+    let extra = parquet_files(&kept.join("extra"));
+    conn.execute_batch(&format!("CREATE TABLE events AS SELECT {COLS} FROM read_parquet('{}') LIMIT 0;", main[0].display()))
+        .unwrap();
+
+    let sql = format!(
+        "SELECT id, ts, level, source, message FROM lake.events WHERE ts >= {} AND ts < {} AND map_extract_value(extra, '{}') = '{}' ORDER BY ts, id",
+        q.from, q.to, q.field, q.value
+    );
+    let reader = Arc::new(Mutex::new(conn.try_clone().unwrap()));
+    let run = {
+        let (reader, sql) = (reader.clone(), sql.clone());
+        move || {
+            let c = reader.lock().unwrap();
+            let mut st = c.prepare(&sql).ok()?;
+            let rows = st.query_map([], |_| Ok(())).ok()?.count();
+            Some(rows)
+        }
+    };
+
+    let extra_ids = ids("TRIAL_EXTRA_SOURCES");
+    let in_list = |v: &[u32]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
+    let extra_in = in_list(&extra_ids);
+    let adopt_dir = lake.join("adopted");
+    for (label, files) in [("import_main", &main), ("import_extra", &extra)] {
+        let p = {
+            let run = run.clone();
+            Prober::start(run)
+        };
+        let t = Instant::now();
+        let mut rows = 0u64;
+        for chunk in files.chunks(group) {
+            match how.as_str() {
+                "adopt" => {
+                    std::fs::create_dir_all(&adopt_dir).unwrap();
+                    let linked: Vec<PathBuf> = chunk
+                        .iter()
+                        .map(|f| {
+                            let to = adopt_dir.join(f.file_name().unwrap());
+                            std::fs::hard_link(f, &to).unwrap();
+                            to
+                        })
+                        .collect();
+                    conn.execute_batch(&format!(
+                        "CALL ducklake_add_data_files('lake', 'events', {}, ignore_extra_columns => true);",
+                        list(&linked)
+                    ))
+                    .unwrap();
+                }
+                _ => {
+                    // Rows by import, whatever file the store's compaction put them in.
+                    let only = if label == "import_main" { format!("NOT IN ({extra_in})") } else { format!("IN ({extra_in})") };
+                    let n = conn
+                        .execute(
+                            &format!(
+                                "INSERT INTO events SELECT {COLS} FROM read_parquet({}, union_by_name = true) WHERE source {only}",
+                                list(chunk)
+                            ),
+                            [],
+                        )
+                        .unwrap();
+                    rows += n as u64;
+                }
+            }
+        }
+        let s = t.elapsed().as_secs_f64();
+        p.finish(&format!("{label}_query"));
+        let total: u64 = conn.query_row("SELECT count(*) FROM events", [], |r| r.get(0)).unwrap();
+        println!(
+            "trial: {label} files={} rows_written={rows} total={total} s={s:.2} events_per_s={:.0} peak_fp_mb={}",
+            files.len(),
+            if rows > 0 { rows as f64 / s } else { f64::NAN },
+            peak.take()
+        );
+    }
+    let disk = |label: &str| {
+        let (d_mb, d_n) = dir_stats(&lake.join("data"));
+        let (a_mb, a_n) = dir_stats(&adopt_dir);
+        let cat_mb: f64 = ["catalog.ducklake", "catalog.ducklake.wal", "catalog.sqlite", "catalog.sqlite-wal"]
+            .iter()
+            .map(|f| std::fs::metadata(lake.join(f)).map_or(0.0, |m| m.len() as f64 / 1e6))
+            .sum();
+        println!("trial: disk_{label} data_mb={d_mb:.1} files={d_n} adopted_mb={a_mb:.1} adopted_files={a_n} catalog_mb={cat_mb:.1}");
+    };
+    disk("after_import");
+    quiet("quiet_query_after_import", run.clone());
+
+    let t = Instant::now();
+    let n = conn.execute(&format!("DELETE FROM events WHERE source IN ({})", in_list(&extra_ids)), []).unwrap();
+    println!(
+        "trial: undo_import rows={n} s={:.3} peak_fp_mb={}",
+        t.elapsed().as_secs_f64(),
+        peak.take()
+    );
+    disk("after_undo");
+
+    let shift = ids("TRIAL_SHIFT");
+    let t = Instant::now();
+    let n = conn
+        .execute(&format!("UPDATE events SET ts = ts + 3600000 WHERE source IN ({})", in_list(&shift)), [])
+        .unwrap();
+    println!(
+        "trial: time_shift rows={n} s={:.3} peak_fp_mb={}",
+        t.elapsed().as_secs_f64(),
+        peak.take()
+    );
+    disk("after_shift");
+    quiet("quiet_query_after_changes", run.clone());
+
+    let t = Instant::now();
+    for step in [
+        "CALL ducklake_rewrite_data_files('lake')",
+        "CALL ducklake_merge_adjacent_files('lake')",
+        "CALL ducklake_expire_snapshots('lake', older_than => now())",
+        "CALL ducklake_cleanup_old_files('lake', cleanup_all => true)",
+    ] {
+        let ts = Instant::now();
+        conn.execute_batch(step).unwrap();
+        println!("trial: compact_step {step} s={:.3}", ts.elapsed().as_secs_f64());
+    }
+    println!("trial: compact s={:.3} peak_fp_mb={}", t.elapsed().as_secs_f64(), peak.take());
+    disk("after_compact");
+    quiet("quiet_query_after_compact", run);
+    let snaps: i64 = conn.query_row("SELECT count(*) FROM ducklake_snapshots('lake')", [], |r| r.get(0)).unwrap();
+    println!("trial: snapshots_left={snaps}");
+}
+
+/// The representative query as plain SQL over the store's kept segment files (`read_parquet` with `union_by_name`, as the
+/// store's view reads them), on its own in-memory connection: the same SQL text as the DuckLake runs, 21 quiet runs.
+fn raw_mode() {
+    use duckdb::{Config, Connection};
+    let kept = PathBuf::from(env("TRIAL_KEEP"));
+    let threads: i64 = std::env::var("TRIAL_THREADS").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    let q = q();
+    let conn = Connection::open_in_memory_with_flags(Config::default().threads(threads).unwrap()).unwrap();
+    let mut files = parquet_files(&kept.join("main"));
+    files.extend(parquet_files(&kept.join("extra")));
+    let sql = format!(
+        "SELECT id, ts, level, source, message FROM read_parquet({}, union_by_name = true) WHERE ts >= {} AND ts < {} AND map_extract_value(extra, '{}') = '{}' ORDER BY ts, id",
+        list(&files),
+        q.from,
+        q.to,
+        q.field,
+        q.value
+    );
+    println!("trial: raw files={} threads={threads}", files.len());
+    quiet("quiet_query_raw_segments", || {
+        let mut st = conn.prepare(&sql).ok()?;
+        Some(st.query_map([], |_| Ok(())).ok()?.count())
+    });
+}

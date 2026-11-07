@@ -168,6 +168,53 @@ impl DuckStore {
         }
         // The id blocks of each affected segment: their documents are replaced (see the module docs).
         let blocks = blocks_of(&conn, &affected).map_err(|e| engine(format!("{e:#}")))?;
+        if crate::trial_lake::native() {
+            // Trial 2, native: the rows move in the lake; the store files that held them are read through the lake from
+            // now on and their search entries are added again.
+            let files: Vec<String> = affected.iter().map(|l| l.file.clone()).collect();
+            crate::trial_lake::shift_lake(&conn, &shifts).map_err(|e| engine(format!("{e:#}")))?;
+            conn.execute_batch("BEGIN TRANSACTION").map_err(engine)?;
+            let done = (|| -> Result<()> {
+                crate::trial_lake::shift(&conn, &shifts, &files)?;
+                for (id, delta) in &shifts {
+                    conn.execute(
+                        &format!(
+                            "UPDATE sources SET ts_from = {}, ts_to = {} WHERE id = ?",
+                            saturating("ts_from", *delta),
+                            saturating("ts_to", *delta)
+                        ),
+                        params![id],
+                    )?;
+                }
+                for (path, new) in changes {
+                    if *new == 0 {
+                        conn.execute("DELETE FROM clock_offsets WHERE path = ?", params![path])?;
+                    } else {
+                        conn.execute("INSERT OR REPLACE INTO clock_offsets VALUES (?, ?)", params![path, new])?;
+                    }
+                }
+                for f in files.iter().filter(|f| blocks.contains_key(*f)) {
+                    conn.execute("UPDATE segments SET indexed = FALSE WHERE file = ?", params![f])?;
+                }
+                Ok(())
+            })();
+            match done {
+                Ok(()) => conn.execute_batch("COMMIT").map_err(engine)?,
+                Err(e) => {
+                    let _ = conn.execute_batch("ROLLBACK");
+                    return Err(engine(format!("{e:#}")));
+                }
+            }
+            if let Some(fts) = &inner.fts {
+                let ranges: Vec<(u64, u64)> = affected.iter().filter_map(|l| blocks.get(&l.file)).flatten().copied().collect();
+                if !ranges.is_empty() {
+                    match fts.delete_blocks(&ranges) {
+                        Ok(()) => fts.wake(),
+                        Err(e) => log::warn!("the moved events' search entries keep their old times: {e:#}"),
+                    }
+                }
+            }
+        } else {
         let mut generation = meta_u64(&conn, "file_generation");
         let mut written: Vec<Segment> = Vec::new();
         for l in &affected {
@@ -231,6 +278,7 @@ impl DuckStore {
             }
         }
         self.reindex_moved(&conn, &affected, &written, &blocks);
+        }
         if !shifts.is_empty() {
             // A failed ordering is marked stale and done again by the next open or import; the correction itself holds.
             let notice = inner.reorder(&conn);

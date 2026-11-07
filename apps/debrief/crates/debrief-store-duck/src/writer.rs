@@ -91,6 +91,14 @@ pub(crate) fn segment_files(conn: &Connection, dir: &Path) -> Result<Vec<String>
 /// Recreates the `events` and `events_wide` views over the listed segments.
 pub(crate) fn refresh_view(conn: &Connection, dir: &Path, schema: &EventSchema) -> Result<()> {
     let files = segment_files(conn, dir)?;
+    if crate::trial_lake::lake() {
+        // DuckDB lets one transaction write one attached database only: the lake is brought in line on its own
+        // connection (committed at once, idempotent, so a rolled-back caller is corrected by the next refresh or open).
+        crate::trial_lake::sync(&conn.try_clone()?, &files)?;
+        return conn
+            .execute_batch(&crate::trial_lake::views(&crate::schema::canonical_columns(schema)))
+            .context("updating the events view over the lake");
+    }
     conn.execute_batch(&events_view(schema, &files)).context("updating the events view")
 }
 

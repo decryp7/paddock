@@ -554,6 +554,9 @@ impl Inner {
         let conn = self.conn()?;
         let ctx = self.ctx(&conn)?;
         let (f, cq) = self.compile(&ctx, &req.query)?;
+        // Trial 2, pruned: only the segments whose minutes overlap the query's time range.
+        let from_sql = crate::trial_lake::pruned_from(&conn, &self.dir, req.query.from, req.query.to)
+            .unwrap_or_else(|| FROM.to_string());
         let limit = req.rows();
         let display = |pos: usize, total: usize| if req.descending { total - 1 - pos } else { pos };
         // No criteria: the time-order positions give the page directly (no sort).
@@ -599,13 +602,13 @@ impl Inner {
         }
         if f.exact {
             let w = f.all_sql();
-            let total = count(&conn, &format!("SELECT count(*) FROM {FROM} WHERE {w}"))?;
+            let total = count(&conn, &format!("SELECT count(*) FROM {from_sql} WHERE {w}"))?;
             let mut offset = req.offset;
             let mut anchor_index = None;
             if let Some(a) = req.anchor {
                 let key: Option<(i64, u32, u32)> = conn
                     .query_row(
-                        &format!("SELECT {TIME_KEY}, e.source, e.line FROM {FROM} WHERE {w} AND e.id = {}", a.0),
+                        &format!("SELECT {TIME_KEY}, e.source, e.line FROM {from_sql} WHERE {w} AND e.id = {}", a.0),
                         [],
                         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                     )
@@ -615,7 +618,7 @@ impl Inner {
                         "{TIME_KEY} < {k} OR ({TIME_KEY} = {k} AND (e.source < {s} OR (e.source = {s} AND (e.line < {l} OR (e.line = {l} AND e.id < {})))))",
                         a.0
                     );
-                    let pos = count(&conn, &format!("SELECT count(*) FROM {FROM} WHERE {w} AND ({before})"))?;
+                    let pos = count(&conn, &format!("SELECT count(*) FROM {from_sql} WHERE {w} AND ({before})"))?;
                     let idx = display(pos, total);
                     anchor_index = Some(idx);
                     offset = idx - idx % limit;
@@ -625,7 +628,7 @@ impl Inner {
             // Two phases: the page's ids by the sort key (narrow columns only), then their rows.
             let mut stmt = conn
                 .prepare(&format!(
-                    "SELECT e.id FROM {FROM} WHERE {w} {} LIMIT {limit} OFFSET {offset}",
+                    "SELECT e.id FROM {from_sql} WHERE {w} {} LIMIT {limit} OFFSET {offset}",
                     order_by(req.descending)
                 ))
                 .map_err(engine)?;
@@ -715,7 +718,7 @@ impl Inner {
         let sql = format!(
             "SELECT {} FROM {} e WHERE e.id IN ({}) AND {}",
             rows_sql(&self.schema),
-            crate::schema::parquet_from(&files),
+            crate::trial_lake::by_id_source(&files),
             list.join(", "),
             crate::schema::READY
         );

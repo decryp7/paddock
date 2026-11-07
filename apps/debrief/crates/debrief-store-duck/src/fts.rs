@@ -364,11 +364,12 @@ impl Fts {
         files: &[String],
         ready: &HashSet<u32>,
         stages: &Stages<'_>,
+        conn: Option<&Connection>,
         mut done: impl FnMut(usize) + Send,
     ) -> Result<()> {
         let ts_field = self.index.schema().get_field("ts")?;
         let keys: Vec<u64> = files.iter().map(|f| segment_key(f)).collect();
-        let mut batches = SegmentBatches::new(seg_dir, files);
+        let mut batches = SegmentBatches::new(seg_dir, files, conn);
         // Reading stops once the process exits (the exit handler waits for running steps only so long).
         let input = std::iter::from_fn(|| if crate::shutdown::down() { None } else { batches.next_batch() });
         let mut first_error: Option<anyhow::Error> = None;
@@ -465,22 +466,37 @@ struct SegmentBatches<'a> {
     dir: &'a Path,
     files: &'a [String],
     next_file: usize,
-    current: Option<(usize, parquet::arrow::arrow_reader::ParquetRecordBatchReader)>,
+    current: Option<(usize, Box<dyn Iterator<Item = Result<Batch, anyhow::Error>> + 'a>)>,
     failed: Option<anyhow::Error>,
+    /// Trial 2, native: the connection through which moved segments are read from the lake.
+    conn: Option<&'a Connection>,
 }
 
 impl<'a> SegmentBatches<'a> {
-    fn new(dir: &'a Path, files: &'a [String]) -> Self {
+    fn new(dir: &'a Path, files: &'a [String], conn: Option<&'a Connection>) -> Self {
         SegmentBatches {
             dir,
             files,
             next_file: 0,
             current: None,
             failed: None,
+            conn,
         }
     }
 
-    fn open(&self, file: &str) -> Result<parquet::arrow::arrow_reader::ParquetRecordBatchReader> {
+    fn open(&self, file: &str) -> Result<Box<dyn Iterator<Item = Result<Batch, anyhow::Error>> + 'a>> {
+        if let Some((lo, hi)) = self.conn.and_then(|c| crate::trial_lake::moved_range(c, file)) {
+            let c = self.conn.expect("checked above");
+            let mut st = c.prepare(&format!(
+                "SELECT id, ts, source, message, exception, template FROM lake.events WHERE id >= {lo} AND id < {hi} ORDER BY id"
+            ))?;
+            let batches: Vec<Batch> = st.query_arrow([])?.collect();
+            return Ok(Box::new(batches.into_iter().map(Ok)));
+        }
+        Ok(Box::new(self.open_file(file)?.map(|r| r.map_err(anyhow::Error::new))))
+    }
+
+    fn open_file(&self, file: &str) -> Result<parquet::arrow::arrow_reader::ParquetRecordBatchReader> {
         let builder = ParquetRecordBatchReaderBuilder::try_new(std::fs::File::open(self.dir.join(file))?)?;
         let names = ["id", "ts", "source", "message", "exception", "template"];
         let schema = builder.parquet_schema();
@@ -507,7 +523,7 @@ impl<'a> SegmentBatches<'a> {
                     Some(Ok(rb)) => return Some((*i, Ok(rb))),
                     Some(Err(e)) => {
                         let i = *i;
-                        self.failed = Some(anyhow::Error::new(e).context(format!("reading {}", self.files[i])));
+                        self.failed = Some(e.context(format!("reading {}", self.files[i])));
                         return None;
                     }
                     None => self.current = None,
@@ -754,7 +770,7 @@ fn step(s: &FtsShared, seg_dir: &Path, conn: &Connection, write_lock: &Mutex<()>
         None => slot.insert(s.fts.writer()?),
     };
     let total = files.len() as u64;
-    let result = s.fts.index_files(w, seg_dir, batch, &ready, &stages(&s.stop), |n| {
+    let result = s.fts.index_files(w, seg_dir, batch, &ready, &stages(&s.stop), crate::trial_lake::native().then_some(conn), |n| {
         s.pending.store(total - n as u64, Ordering::SeqCst)
     });
     if let Err(e) = result {
