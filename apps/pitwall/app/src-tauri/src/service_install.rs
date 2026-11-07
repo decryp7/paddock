@@ -154,6 +154,20 @@ pub const PLATFORM: &str = if cfg!(windows) {
     "linux"
 };
 
+/// The words `pitwall-server check-install` refused with (its standard error), as the UI shows them: trimmed, at most 600
+/// characters, and a plain sentence when it said nothing.
+pub fn refusal_words(stderr: &str) -> String {
+    let t = stderr.trim();
+    if t.is_empty() {
+        return "Pitwall's service cannot be registered for this copy of Pitwall. Uninstall Pitwall, then install it again into Program Files.".into();
+    }
+    let mut out: String = t.chars().take(600).collect();
+    if t.chars().count() > 600 {
+        out.push('…');
+    }
+    out
+}
+
 /// The OS state from the shared manager's status.
 pub fn os_state_of(s: &ServiceStatus) -> OsState {
     OsState {
@@ -172,6 +186,7 @@ mod imp {
     #![allow(unsafe_code)]
 
     use super::*;
+    use std::time::Duration;
     use windows::core::HSTRING;
     use windows::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
     use windows::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
@@ -255,13 +270,22 @@ mod imp {
         } else {
             Err(CommandError::new(
                 ErrorCode::Internal,
-                format!("pitwall-server {verb} failed (exit code {code}); the service log in %ProgramData%\\Pitwall\\logs has details"),
+                format!("pitwall-server {verb} failed (exit code {code}); Event Viewer (Windows Logs > Application, source Pitwall) has the details"),
             ))
         }
     }
 
-    /// Registers and starts the service (the OS asks the user).
+    /// Registers and starts the service (the OS asks the user). The same checks run first without elevation, so a refusal
+    /// (outside Program Files, a folder others can change, another copy's registration) is shown in its own words; the
+    /// elevated run cannot hand its words back.
     pub fn install(_client: &SharedClient) -> Result<(), CommandError> {
+        let mut check = paddock_proc::command(&server_exe()?);
+        check.arg("check-install");
+        let out = paddock_proc::run_bounded(check, paddock_proc::Limits::new(Duration::from_secs(30)).max_output(8 * 1024))
+            .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the server program could not be run: {e}")))?;
+        if !out.success() {
+            return Err(CommandError::new(ErrorCode::Forbidden, refusal_words(&out.stderr_text())));
+        }
         elevated("install")
     }
 
@@ -418,6 +442,16 @@ pub use crate::service_manager::repair_step;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_is_shown_in_its_own_words_bounded_with_a_plain_fallback() {
+        let words = "The Pitwall service runs as the system, so Pitwall must be installed in C:\\Program Files; it is in D:\\x.";
+        assert_eq!(refusal_words(&format!("  {words}\r\n")), words);
+        assert!(refusal_words("").contains("Uninstall Pitwall, then install it again"));
+        let long = refusal_words(&"y".repeat(700));
+        assert_eq!(long.chars().count(), 601);
+        assert!(long.ends_with('…'));
+    }
     use paddock_service::{Condition, Mechanism};
 
     #[cfg(not(target_os = "macos"))]

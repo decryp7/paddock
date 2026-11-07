@@ -59,11 +59,11 @@ const NO_SESSION: u32 = 0xFFFF_FFFF;
 const RESTART_PAUSE: Duration = Duration::from_secs(10);
 /// How often the supervisor looks at its child and the session.
 const POLL: Duration = Duration::from_millis(500);
-const MAX_LOG_BYTES: u64 = 1024 * 1024;
 
 pub(super) fn run_verb(verb: Verb) -> i32 {
     let result = match verb {
         Verb::Install => install().map(|()| "Pitwall's service is installed and started".to_string()),
+        Verb::CheckInstall => check_install().map(|()| "Pitwall's service can be registered for this program".to_string()),
         Verb::Uninstall => uninstall().map(|()| "Pitwall's service is removed".to_string()),
         Verb::Status => status_text(),
         Verb::PrintUnit => Err("print-unit is for Linux (systemd)".to_string()),
@@ -486,26 +486,61 @@ fn start_in_session(session: u32, exe: &Path) -> Result<Process, String> {
     Ok(Process(pi.hProcess))
 }
 
-/// `%ProgramData%\Pitwall\logs\service.log`, kept under 1 MiB (the log holds no request content).
-fn log_path() -> Option<PathBuf> {
-    std::env::var_os("ProgramData").map(|p| PathBuf::from(p).join("Pitwall").join("logs").join("service.log"))
+/// The service's OS log: the Application event log under the source `Pitwall` (paddock-service `os_log`, ADR 0054 §2.3).
+/// A LocalSystem process writes no file of its own: a log folder a user could make first (a junction to an object-manager
+/// link) would let that user have SYSTEM create or delete any file (B6 security review P1-1). The lines hold no request
+/// content and no user's paths.
+fn os_log() -> &'static std::sync::Arc<dyn paddock_service::OsLog> {
+    static LOG: std::sync::OnceLock<std::sync::Arc<dyn paddock_service::OsLog>> = std::sync::OnceLock::new();
+    LOG.get_or_init(|| paddock_service::os_log::open(&super::spec::os_log_spec()))
 }
 
 fn log(line: &str) {
-    use std::io::Write;
-    let Some(path) = log_path() else { return };
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+    os_log().write(log::Level::Info, line);
+}
+
+/// Registers (or with `remove`, removes) the event source, so Event Viewer shows the lines as they are. Logged, never fatal:
+/// without it the lines are still written, Event Viewer only adds a note to each.
+fn event_source(remove: bool) {
+    use paddock_service::System;
+    let spec = super::spec::os_log_spec();
+    let calls = if remove {
+        vec![paddock_service::render::event_source_remove_command(&spec)]
+    } else {
+        paddock_service::render::event_source_commands(&spec)
+    };
+    let mut sys = paddock_service::RealSystem::new();
+    for args in calls {
+        let words: Vec<&str> = args.iter().map(String::as_str).collect();
+        match sys.run(paddock_service::paths::REG, &words) {
+            Ok(o) if o.success() => {}
+            Ok(o) => log(&format!(
+                "the event source was not {}: reg exited {:?}",
+                if remove { "removed" } else { "registered" },
+                o.code
+            )),
+            Err(e) => log(&format!(
+                "the event source was not {}: {e}",
+                if remove { "removed" } else { "registered" }
+            )),
+        }
     }
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() > MAX_LOG_BYTES) {
-        let _ = std::fs::remove_file(&path);
-    }
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let _ = writeln!(f, "{secs} {line}");
-    }
+}
+
+/// What `install` would decide, without changing anything (no elevation needed: the folders' security and the registration can
+/// be read by a standard user). Logs nothing: the app shows the words.
+fn check_install() -> Result<(), String> {
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)
+        .map_err(|e| os_error("Asking the service manager", &e))?;
+    let exe = std::env::current_exe().map_err(|e| format!("the program's own path cannot be found: {e}"))?;
+    super::placement::plan_install(
+        &exe.to_string_lossy(),
+        registered_image_path(&manager).as_deref(),
+        &paddock_service::privileged::OsKnownFolders,
+        &mut paddock_service::privileged::trust_real::RealTrust,
+    )
+    .map(drop)
+    .map_err(|r| r.to_string())
 }
 
 /// Registers the service (automatic delayed start, LocalSystem, restart on failure) and starts it.
@@ -514,17 +549,28 @@ fn install() -> Result<(), String> {
         .map_err(|e| os_error("Installing the service", &e))?;
     let exe = std::env::current_exe().map_err(|e| format!("the program's own path cannot be found: {e}"))?;
     let program = exe.to_string_lossy().into_owned();
-    // A LocalSystem service runs this program: only one no other account can replace (plan B6, ADR 0053 §1).
-    super::placement::check_program(
+    // A LocalSystem service runs this program: only one no other account can replace, and never another copy's registration
+    // moved over (plan B6, ADR 0053 §1 and §5). The whole decision is the pure plan; this only carries it out.
+    let registered = registered_image_path(&manager);
+    let install = super::placement::plan_install(
         &program,
+        registered.as_deref(),
         &paddock_service::privileged::OsKnownFolders,
         &mut paddock_service::privileged::trust_real::RealTrust,
     )
     .map_err(|refusal| {
-        log(&format!("install refused: {refusal}"));
+        log(&refusal.log_line());
         refusal.to_string()
     })?;
-    let registration = super::placement::registration_for(&program);
+    log(&format!(
+        "install checked: {program} is in its protected folder under Program Files"
+    ));
+    if let super::placement::Plan::ReplaceUnsafe { .. } = &install.plan {
+        // Another copy's registration that is not safe to run as the system goes; nothing of that copy is kept.
+        log("install: an unsafe registration of another program is removed first");
+        uninstall()?;
+    }
+    let registration = super::placement::registration_for(&install.program);
     let info = ServiceInfo {
         name: OsString::from(WINDOWS_SERVICE_NAME),
         display_name: OsString::from(WINDOWS_DISPLAY_NAME),
@@ -537,22 +583,27 @@ fn install() -> Result<(), String> {
         account_name: None,
         account_password: None,
     };
-    let service = match manager.create_service(&info, ServiceAccess::CHANGE_CONFIG | ServiceAccess::START) {
+    let service = match manager.create_service(
+        &info,
+        ServiceAccess::CHANGE_CONFIG | ServiceAccess::START | ServiceAccess::QUERY_CONFIG,
+    ) {
         Ok(s) => s,
         Err(e) if raw_code(&e) == Some(ERROR_SERVICE_EXISTS) => {
-            // Another copy's registration is refused, never moved (ADR 0053 §5, no migration before v1).
-            let registered = registered_program(&manager);
-            if let Err(refusal) = super::placement::check_existing(registered.as_deref(), &program) {
-                log(&format!(
-                    "install refused: the service is registered for another program; registered={} this={program}",
-                    registered.as_deref().unwrap_or("?")
-                ));
-                return Err(refusal.to_string());
-            }
-            return Err("Pitwall's service is installed already; uninstall it first".into());
+            return Err(super::placement::Refusal::AlreadyInstalled.to_string());
         }
         Err(e) => return Err(os_error("Installing the service", &e)),
     };
+    // Read back: the registration must start exactly the checked program (ADR 0054 §1.1).
+    let held = service
+        .query_config()
+        .ok()
+        .and_then(|c| super::placement::program_of_image_path(&c.executable_path.to_string_lossy()));
+    if held.as_deref().map(str::to_ascii_lowercase) != Some(install.program.to_ascii_lowercase()) {
+        log("install: the registration read back does not start the checked program; it is removed");
+        let _ = service.delete();
+        return Err("The Pitwall service was registered with another program than this one, so it was removed again. Uninstall Pitwall, then install it again.".into());
+    }
+    event_source(false);
     service
         .set_description(WINDOWS_DESCRIPTION)
         .map_err(|e| os_error("Describing the service", &e))?;
@@ -582,12 +633,11 @@ fn install() -> Result<(), String> {
         .map_err(|e| os_error("Starting the service", &e))
 }
 
-/// The program the registered service starts (its ImagePath's program), when it can be read.
-fn registered_program(manager: &ServiceManager) -> Option<String> {
+/// The registered service's ImagePath (the whole command line, `"<program>" --service`), when there is a service.
+fn registered_image_path(manager: &ServiceManager) -> Option<String> {
     let service = manager.open_service(WINDOWS_SERVICE_NAME, ServiceAccess::QUERY_CONFIG).ok()?;
     let config = service.query_config().ok()?;
-    // The service manager holds the whole command line (`"<program>" --service`).
-    super::placement::program_of_image_path(&config.executable_path.to_string_lossy())
+    Some(config.executable_path.to_string_lossy().into_owned())
 }
 
 /// Stops and removes the service. Removing a service that is not installed succeeds.
@@ -617,7 +667,9 @@ fn uninstall() -> Result<(), String> {
             }
         }
     }
-    service.delete().map_err(|e| os_error("Removing the service", &e))
+    service.delete().map_err(|e| os_error("Removing the service", &e))?;
+    event_source(true);
+    Ok(())
 }
 
 fn status_text() -> Result<String, String> {

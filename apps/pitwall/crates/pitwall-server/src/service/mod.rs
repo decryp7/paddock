@@ -36,6 +36,9 @@ pub enum Verb {
     PrintUnit,
     /// Run under the Windows Service Control Manager.
     WindowsService,
+    /// Say whether `install` would register this program, without changing anything and without elevation (Windows): the
+    /// app runs it first, so the refusal's own words reach the user before Windows asks for permission.
+    CheckInstall,
 }
 
 /// The verb in the arguments (after the program name), if the first one is a service verb.
@@ -46,6 +49,7 @@ pub fn parse_verb(args: &[String]) -> Option<Verb> {
         Some("status") => Some(Verb::Status),
         Some("print-unit") => Some(Verb::PrintUnit),
         Some("--service") => Some(Verb::WindowsService),
+        Some("check-install") => Some(Verb::CheckInstall),
         _ => None,
     }
 }
@@ -96,11 +100,13 @@ fn run_verb(verb: Verb) -> i32 {
         Verb::Status => linux_status(),
         Verb::PrintUnit => systemd::print_unit(),
         Verb::WindowsService => Err("--service is for the Windows Service Control Manager".into()),
+        Verb::CheckInstall => Err("check-install is for Windows".into()),
     });
     #[cfg(not(any(windows, target_os = "linux")))]
     return report(match verb {
         Verb::PrintUnit => Err("print-unit is for Linux (systemd)".into()),
         Verb::WindowsService => Err("--service is for the Windows Service Control Manager".into()),
+        Verb::CheckInstall => Err("check-install is for Windows".into()),
         _ => Err("on macOS the Pitwall app registers the launch agent (Settings, Service); this program has nothing to install".into()),
     });
 }
@@ -136,6 +142,8 @@ mod tests {
         assert_eq!(parse_verb(&a(&["status"])), Some(Verb::Status));
         assert_eq!(parse_verb(&a(&["print-unit"])), Some(Verb::PrintUnit));
         assert_eq!(parse_verb(&a(&["--service"])), Some(Verb::WindowsService));
+        // The unelevated dry run of install (the app shows its words before Windows asks for permission).
+        assert_eq!(parse_verb(&a(&["check-install"])), Some(Verb::CheckInstall));
         assert_eq!(parse_verb(&a(&["--port", "1", "install"])), None);
         assert_eq!(parse_verb(&a(&[])), None);
     }
@@ -151,5 +159,25 @@ mod tests {
     fn reports_map_to_exit_codes() {
         assert_eq!(report(Ok("fine".into())), 0);
         assert_eq!(report(Err("bad".into())), 1);
+    }
+
+    /// Regression (B6 security review P1-1, P1-2): the LocalSystem service logged to `%ProgramData%\Pitwall\logs\service.log`,
+    /// with the folder taken from the environment, made with `create_dir_all`, measured through links and rotated with
+    /// `remove_file` by path, so a standard user who made that folder first (a junction to an object-manager link) could have
+    /// SYSTEM delete any file. The service writes to the OS log instead (the Application event log under its own source,
+    /// paddock-service's `os_log`, ADR 0054 §2.3): no file and no folder of its own outside the protected install.
+    #[test]
+    fn the_system_service_writes_no_file_in_a_folder_users_can_make() {
+        let code = include_str!("windows.rs");
+        for banned in [
+            "var_os(\"ProgramData\")",
+            "remove_file",
+            "create_dir_all",
+            "OpenOptions",
+            "service.log",
+        ] {
+            assert!(!code.contains(banned), "the service code still uses {banned}");
+        }
+        assert!(code.contains("paddock_service::os_log::open"), "the service writes to the OS log");
     }
 }

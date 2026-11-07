@@ -29,6 +29,10 @@ pub enum Refusal {
         /// What the protected-chain rule found, in words.
         why: String,
     },
+    /// The path has `.` or `..` components or a `\\?\` or `\\.\` prefix: it is not looked at.
+    OddPath(String),
+    /// This very program is registered already (the installer removes it before it registers again).
+    AlreadyInstalled,
     /// The service is registered for another program (another copy, or a copy moved since).
     OtherCopy {
         /// The program the registration starts.
@@ -53,6 +57,11 @@ impl fmt::Display for Refusal {
                 f,
                 "The Pitwall service was not registered: {why}. Uninstall Pitwall, then install it again into Program Files."
             ),
+            Refusal::OddPath(path) => write!(
+                f,
+                "The Pitwall service was not registered: the program's path {path} is not a plain folder path. Uninstall Pitwall, then install it again into Program Files."
+            ),
+            Refusal::AlreadyInstalled => f.write_str("Pitwall's service is installed already; uninstall it first"),
             Refusal::OtherCopy { registered, program } => write!(
                 f,
                 "The Pitwall service is registered for another copy ({registered}), not this one ({program}). Uninstall Pitwall (Settings > Apps), then install it again."
@@ -62,6 +71,151 @@ impl fmt::Display for Refusal {
 }
 
 impl std::error::Error for Refusal {}
+
+impl Refusal {
+    /// The refusal for the service's log (ER-27): what was refused and why, with a program path only when it lies in Program
+    /// Files (a path elsewhere can be a user's profile, which the log never holds).
+    pub fn log_line(&self) -> String {
+        match self {
+            Refusal::NoProgramFiles(why) => format!("install refused: Windows did not name Program Files ({why})"),
+            Refusal::OutsideProgramFiles { .. } => "install refused: the program is outside Program Files".into(),
+            Refusal::NotProtected { why } => format!("install refused: not protected: {why}"),
+            Refusal::OddPath(_) => r"install refused: the program's path has . or .. or a \\?\ prefix".into(),
+            Refusal::AlreadyInstalled => "install refused: this program is registered already".into(),
+            Refusal::OtherCopy { registered, program } => format!(
+                "install refused: the service is registered for another program; registered={} this={program}",
+                loggable(registered)
+            ),
+        }
+    }
+}
+
+/// `path` when it lies in a Program Files folder, otherwise only that it does not.
+fn loggable(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    if lower.contains(":\\program files\\") || lower.contains(":\\program files (x86)\\") {
+        path.to_string()
+    } else {
+        "<outside Program Files>".into()
+    }
+}
+
+/// The accounts a refusal names, in words (the protected-chain rule speaks in SIDs).
+fn named_sids(text: &str) -> String {
+    [
+        ("S-1-5-32-545", "Users"),
+        ("S-1-5-11", "Authenticated Users"),
+        ("S-1-1-0", "Everyone"),
+        ("S-1-5-32-546", "Guests"),
+        ("S-1-5-4", "Interactive users"),
+    ]
+    .iter()
+    .fold(text.to_string(), |t, (sid, name)| {
+        t.replace(&format!("account {sid}"), &format!("account {name}")).replace(sid, name)
+    })
+}
+
+/// What `pitwall-server install` does, decided before anything is changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Plan {
+    /// Register the service.
+    Create,
+    /// Another copy is registered and it is not safe to run as the system (outside Program Files, changeable by others, or
+    /// an unquoted path with a space): its registration is removed first, then this one is made. Removing is not migrating:
+    /// nothing of the other copy is kept.
+    ReplaceUnsafe {
+        /// The program the old registration started.
+        old: String,
+    },
+}
+
+/// The plan for this program: what to register (the ImagePath, built with the shared command-line writer) and what to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Install {
+    /// The checked program.
+    pub program: String,
+    /// The ImagePath (`"<program>" --service`).
+    pub image_path: String,
+    /// What to do.
+    pub plan: Plan,
+}
+
+/// The ImagePath of `program`: paddock-service's Windows command line, with `--service`.
+pub fn windows_command_line_for(program: &str) -> String {
+    let r = registration_for(program);
+    paddock_service::render::windows_command_line(&r.program, &r.args)
+}
+
+/// How many entries of the program's folder are checked (the install holds a few dozen files).
+pub const MAX_TREE: usize = 4096;
+
+/// Decides the install of `program` given what the service manager holds (`registered_image_path`, `None` when the service
+/// does not exist), over the folders Windows names and the security of each path (fakes in tests). Every check on this
+/// program comes before anything about the old registration: an odd path, the folder directly under Program Files, the
+/// protected chain, and every file already in the folder (a planted library would load as the system).
+///
+/// # Errors
+/// The [`Refusal`] that says what to do.
+pub fn plan_install(
+    program: &str,
+    registered_image_path: Option<&str>,
+    folders: &dyn KnownFolders,
+    port: &mut dyn TrustPort,
+) -> Result<Install, Refusal> {
+    if odd_path(program) {
+        return Err(Refusal::OddPath(program.to_string()));
+    }
+    check_program(program, folders, port)?;
+    let folder = trust::parent_of(program, Style::Windows).ok_or_else(|| Refusal::OddPath(program.to_string()))?;
+    trust::verify_tree(port, &folder, None, MAX_TREE).map_err(|u| Refusal::NotProtected {
+        why: named_sids(&u.describe()),
+    })?;
+    let plan = match registered_image_path.map(read_image_path) {
+        None => Plan::Create,
+        Some(None) => Plan::ReplaceUnsafe { old: String::new() },
+        Some(Some((old, ambiguous))) => {
+            if !ambiguous && same_path(&old, program) {
+                return Err(Refusal::AlreadyInstalled);
+            }
+            let safe = !ambiguous && !odd_path(&old) && check_program(&old, folders, port).is_ok();
+            if safe {
+                return Err(Refusal::OtherCopy {
+                    registered: old,
+                    program: program.to_string(),
+                });
+            }
+            Plan::ReplaceUnsafe { old }
+        }
+    };
+    Ok(Install {
+        program: program.to_string(),
+        image_path: windows_command_line_for(program),
+        plan,
+    })
+}
+
+/// A path with `.` or `..` components, or a device or verbatim prefix (`\\?\`, `\\.\`), is not judged.
+fn odd_path(path: &str) -> bool {
+    path.starts_with("\\\\?\\") || path.starts_with("\\\\.\\") || path.split(['\\', '/']).any(|c| c == "." || c == "..")
+}
+
+/// Whether two Windows paths name the same file (compared without case).
+fn same_path(a: &str, b: &str) -> bool {
+    trust::is_within(a, b, Style::Windows) && trust::is_within(b, a, Style::Windows)
+}
+
+/// The program an ImagePath starts and whether it is ambiguous: an unquoted path with a space, which the service manager
+/// tries piece by piece (`C:\\Program.exe` first). The program of an unquoted path is read up to its `.exe`.
+fn read_image_path(image_path: &str) -> Option<(String, bool)> {
+    let s = image_path.trim_start();
+    if s.starts_with('"') {
+        return program_of_image_path(s).map(|p| (p, false));
+    }
+    let lower = s.to_ascii_lowercase();
+    let end = lower.find(".exe").map_or_else(|| s.find([' ', '\t']).unwrap_or(s.len()), |i| i + 4);
+    let program = s[..end].to_string();
+    (!program.is_empty()).then(|| (program.clone(), program.contains(' ')))
+}
 
 /// What the service manager registers: the program and its arguments (the service's ImagePath is built from exactly these).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +255,9 @@ pub fn check_program(program: &str, folders: &dyn KnownFolders, port: &mut dyn T
     if !trust::is_within(&parent, &program_files, Style::Windows) || !trust::is_within(&program_files, &parent, Style::Windows) {
         return Err(outside());
     }
-    trust::verify_chain(port, program, FileKind::File, Some(&folder), false).map_err(|u| Refusal::NotProtected { why: u.describe() })
+    trust::verify_chain(port, program, FileKind::File, Some(&folder), false).map_err(|u| Refusal::NotProtected {
+        why: named_sids(&u.describe()),
+    })
 }
 
 /// The program an ImagePath (`"C:\\Program Files\\Pitwall\\pitwall-server.exe" --service`, as the service manager holds it) starts.
@@ -226,7 +382,7 @@ mod tests {
             assert!(matches!(e, Refusal::NotProtected { .. }), "{e:?}");
             let shown = e.to_string();
             assert!(
-                shown.contains("S-1-5-32-545") && shown.contains("install it again into Program Files"),
+                shown.contains("account Users") && shown.contains("install it again into Program Files"),
                 "{shown}"
             );
         }
@@ -236,6 +392,24 @@ mod tests {
             check_program(EXE, &Folders(Some(PF)), &mut port),
             Err(Refusal::NotProtected { .. })
         ));
+    }
+
+    /// Review M1: Users may add files to the folder (FILE_ADD_FILE without delete): a planted DLL would load as SYSTEM.
+    #[test]
+    fn a_folder_users_may_add_files_to_is_refused() {
+        let add_file = "O:BAG:S-1-5-21-1-2-513D:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIID;0x1200af;;;BU)";
+        let mut port = machine(&[(DIR, add_file, false), (EXE, SDDL_INSTALLED, true)]);
+        assert!(matches!(
+            check_program(EXE, &Folders(Some(PF)), &mut port),
+            Err(Refusal::NotProtected { .. })
+        ));
+    }
+
+    /// Review M3: a registration of a folder that holds this program, or of a path this one starts with, is another program.
+    #[test]
+    fn a_registration_that_is_only_a_prefix_or_a_parent_is_another_copy() {
+        assert!(check_existing(Some(DIR), EXE).is_err());
+        assert!(check_existing(Some(&format!("{EXE}.old")), EXE).is_err());
     }
 
     #[test]
@@ -292,5 +466,109 @@ mod tests {
             shown.contains(old) && shown.contains("Uninstall Pitwall (Settings > Apps), then install it again"),
             "{shown}"
         );
+    }
+
+    /// A second protected install, in another folder under Program Files.
+    const OTHER: &str = "C:\\Program Files\\Pitwall Old\\pitwall-server.exe";
+
+    fn two_installs() -> FakePort {
+        machine(&[
+            (DIR, SDDL_INSTALLED, false),
+            (EXE, SDDL_INSTALLED, true),
+            ("C:\\Program Files\\Pitwall Old", SDDL_INSTALLED, false),
+            (OTHER, SDDL_INSTALLED, true),
+        ])
+    }
+
+    fn plan(registered: Option<&str>, port: &mut FakePort) -> Result<Install, Refusal> {
+        plan_install(EXE, registered, &Folders(Some(PF)), port)
+    }
+
+    /// Review P2-2 and P2-5: the whole decision is one pure plan over a fake service manager's ImagePath.
+    #[test]
+    fn the_install_plan_creates_refuses_or_replaces_an_unsafe_copy() {
+        let image = windows_command_line_for(EXE);
+        // Nothing registered: create, with the shared command line, which reads back as this program.
+        let p = plan(None, &mut two_installs()).unwrap();
+        assert_eq!(
+            (p.program.as_str(), p.image_path.as_str(), &p.plan),
+            (EXE, image.as_str(), &Plan::Create)
+        );
+        assert_eq!(program_of_image_path(&p.image_path).as_deref(), Some(EXE), "the round trip");
+        // This copy already: installed already (the installer removes it first).
+        assert_eq!(plan(Some(&image), &mut two_installs()), Err(Refusal::AlreadyInstalled));
+        // Another protected copy: refused, never moved.
+        let other = windows_command_line_for(OTHER);
+        assert!(matches!(plan(Some(&other), &mut two_installs()), Err(Refusal::OtherCopy { .. })));
+        // Another copy that is not safe (outside Program Files, or writable): its registration is removed and this one made.
+        let unsafe_copy = "\"D:\\Tools\\Pitwall\\pitwall-server.exe\" --service";
+        let p = plan(Some(unsafe_copy), &mut two_installs()).unwrap();
+        assert_eq!(
+            p.plan,
+            Plan::ReplaceUnsafe {
+                old: "D:\\Tools\\Pitwall\\pitwall-server.exe".into()
+            }
+        );
+        // An unquoted ImagePath with a space is ambiguous to the service manager (it may start C:\Program.exe): unsafe.
+        let unquoted = "C:\\Program Files\\Pitwall Old\\pitwall-server.exe --service";
+        let p = plan(Some(unquoted), &mut two_installs()).unwrap();
+        assert!(matches!(p.plan, Plan::ReplaceUnsafe { .. }), "{p:?}");
+        // The checks on this program come first: nothing is replaced for a program that may not be registered.
+        let mut port = machine(&[(DIR, SDDL_USER_WRITABLE, false), (EXE, SDDL_INSTALLED, true)]);
+        assert!(matches!(plan(Some(unsafe_copy), &mut port), Err(Refusal::NotProtected { .. })));
+    }
+
+    /// Review P2-6: `.`, `..` and `\\?\` paths are refused before anything is looked at.
+    #[test]
+    fn odd_paths_are_refused_up_front() {
+        for odd in [
+            "C:\\Program Files\\Pitwall\\.\\pitwall-server.exe",
+            "C:\\Program Files\\Other\\..\\Pitwall\\pitwall-server.exe",
+            "\\\\?\\C:\\Program Files\\Pitwall\\pitwall-server.exe",
+            "\\\\.\\C:\\Program Files\\Pitwall\\pitwall-server.exe",
+        ] {
+            let e = plan_install(odd, None, &Folders(Some(PF)), &mut two_installs()).unwrap_err();
+            assert!(matches!(e, Refusal::OddPath(_)), "{odd}: {e:?}");
+        }
+    }
+
+    /// Review P2-3: a file in the folder that Users may change (a DLL Windows would load next to the program) is refused.
+    #[test]
+    fn a_writable_file_already_in_the_folder_is_refused() {
+        let mut port = machine(&[
+            (DIR, SDDL_INSTALLED, false),
+            (EXE, SDDL_INSTALLED, true),
+            ("C:\\Program Files\\Pitwall\\version.dll", SDDL_USER_WRITABLE, true),
+        ]);
+        assert!(matches!(plan(None, &mut port), Err(Refusal::NotProtected { .. })));
+    }
+
+    /// Review P2-7: the words name the account ("Users"), and the log line never holds a profile path.
+    #[test]
+    fn refusals_name_accounts_and_log_no_profile_path() {
+        let mut port = machine(&[(DIR, SDDL_USER_WRITABLE, false), (EXE, SDDL_INSTALLED, true)]);
+        let e = plan(None, &mut port).unwrap_err();
+        assert!(e.to_string().contains("Users") && !e.to_string().contains("S-1-5-32-545"), "{e}");
+        let profile = "C:\\Users\\sam\\AppData\\Local\\Pitwall\\pitwall-server.exe";
+        let e = Refusal::OutsideProgramFiles {
+            program: profile.into(),
+            program_files: PF.into(),
+        };
+        assert!(
+            !e.log_line().contains("sam") && e.log_line().contains("outside Program Files"),
+            "{}",
+            e.log_line()
+        );
+        let e = Refusal::OtherCopy {
+            registered: profile.into(),
+            program: EXE.into(),
+        };
+        assert!(!e.log_line().contains("sam"), "{}", e.log_line());
+        assert!(Refusal::OtherCopy {
+            registered: OTHER.into(),
+            program: EXE.into()
+        }
+        .log_line()
+        .contains("Pitwall Old"));
     }
 }

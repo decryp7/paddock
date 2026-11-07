@@ -14,6 +14,10 @@ arrive in the app as usual.
 - Windows: the Pitwall service, which runs as the system, is registered only for a Pitwall installed directly in Program
   Files and protected from other accounts, and never for another copy. The installer shows why when it refuses, and what to do
   (uninstall Pitwall, then install it again into Program Files).
+- Windows: the Pitwall service no longer writes `%ProgramData%\Pitwall\logs\service.log`. A standard user who made that
+  folder first could have had the system delete any file through it (1.0.x shipped this). The service writes to the
+  Application event log instead (Event Viewer, source Pitwall). Settings > Service shows why an install is refused before
+  Windows asks for permission, and a registration of another copy that is not safe to run as the system is removed.
 
 ### Added
 

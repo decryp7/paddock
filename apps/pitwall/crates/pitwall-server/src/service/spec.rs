@@ -11,6 +11,14 @@ pub const WINDOWS_SERVICE_NAME: &str = "Pitwall";
 pub const WINDOWS_DISPLAY_NAME: &str = "Pitwall local LLM server";
 /// The Windows service's description.
 pub const WINDOWS_DESCRIPTION: &str = "Serves local language models to the apps on this PC (127.0.0.1 only).";
+/// The service as paddock-service names it, for its OS log: the Application event log under the source
+/// [`WINDOWS_SERVICE_NAME`] (paddock-service `os_log`, ADR 0054 §2.3), the one place a LocalSystem service writes to.
+pub fn os_log_spec() -> paddock_service::ServiceSpec {
+    paddock_service::ServiceSpec::builder(LAUNCHD_LABEL, WINDOWS_SERVICE_NAME, "pitwall-server")
+        .build()
+        .unwrap_or_else(|e| unreachable!("Pitwall's own spec is valid: {e}"))
+}
+
 /// The launchd label of the macOS launch agent (its plist ships in the app bundle; the app registers it).
 pub const LAUNCHD_LABEL: &str = "net.decryptology.pitwall.service";
 /// The systemd user unit's name on Linux.
