@@ -60,7 +60,7 @@ export const READINGS = [
   { id: 'lifespan-smart', title: 'Disk health reading (Lifespan)', os: ['windows', 'linux'], page: 'lifespan',
     expect: { windows: [/SSD/], linux: [/SSD/] }, none: [/not installed/i, /needs the helper/i], value: { windows: [LIFESPAN_VALUE], linux: [LIFESPAN_VALUE] },
     // The VM base has no smartmontools: the reading cannot be taken there, which is neither a pass nor a fail of the product.
-    notMeasured: { linux: { when: /smartctl[^.]*is not installed/i, why: 'smartmontools missing in base' } } },
+    notMeasured: { linux: { when: /smartctl[^.]*is not installed|found no SSD with wear counters|smartctl found no drives it can read/i, why: 'the VM exposes no SSD wear counters (smartmontools missing, or smartctl found no drive it can read): VM limitation, not a pass' } } },
 ];
 
 /**

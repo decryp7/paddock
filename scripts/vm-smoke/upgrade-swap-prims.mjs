@@ -45,6 +45,9 @@ export function macSwapPrimitives({ guest, gui, check, share, bundle, beforeDmg 
     /** App chip + log line, helper card (Update available) and "Update the helper" with one prompt, then Quit and reopen leaves nothing from before the install. */
     async extraChecks({ boundaryMs }) {
       const out = [];
+      // Why each agent started or stopped: the agent and app log lines about starts, exits, evictions and builds since the install began (evidence for a restart-loop question).
+      const why = (await exec(`cat "$HOME/Library/Logs/Dyno/"dyno*.log 2>/dev/null | grep -i -E "agent (starting|exit|stopp)|asked to exit|another build|evict|Dyno [0-9.]+ starting|program files changed|replacing|swap" | tail -n 30 | cut -c1-260`)).stdout.trim();
+      out.push(chk(true, `agent/app log lines about starts, exits and builds (last 30): ${why.replace(/\n/g, ' || ') || '(none)'}`));
       await gui.ensureMainWindow().catch(() => {});
       const chip = await gui.waitFor(async () => (await gui.texts()).some((t) => /Dyno was updated\. Restart Dyno to finish/.test(t.text)), 60_000);
       const seenTexts = async (re) => (await gui.texts()).map((t) => t.text).filter((t) => re.test(t)).slice(0, 12).join(' | ') || '(none)';

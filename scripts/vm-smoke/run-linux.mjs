@@ -214,7 +214,14 @@ async function main(argv) {
     }
     // 5. One step per helper reading (WP-VMH), read through AT-SPI.
     const labels = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
-    const driver = { openPage: async (page, tab) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); } };
+    const driver = { openPage: async (page, tab) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); },
+      // Controls: `nft-rule` loads one known rule (tcp dport 59999) into a table of its own, so the firewall page has something to show; cleanup removes the table.
+      async prepare(key) {
+        if (key !== 'nft-rule') return { ok: false, detail: `unknown control ${key}` };
+        const r = g('which nft >/dev/null 2>&1 || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nftables >/dev/null 2>&1; sudo nft add table inet vmsmoke && sudo nft add chain inet vmsmoke input "{ type filter hook input priority 0 ; }" && sudo nft add rule inet vmsmoke input tcp dport 59999 drop; sudo nft list ruleset | grep -c 59999', 180_000);
+        return Number(r.stdout.trim().split('\n').at(-1)) > 0 ? { ok: true, detail: 'nft rule on tcp port 59999 loaded' } : { ok: false, detail: `nft did not list the rule: ${r.stdout.trim().slice(-120)}` };
+      },
+      async cleanup(key) { if (key === 'nft-rule') g('sudo nft delete table inet vmsmoke 2>&1; true'); } };
     for (const fn of readingSteps('linux', async () => driver)) push(await fn({}));
 
     // Rule 71: Dyno's MCP from outside the app (guest only). The key and mcp.json are seeded where the product reads them (mcp-guest.mjs), then the app is restarted.
