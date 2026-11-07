@@ -38,10 +38,8 @@ paddock-health = { path = "../../../../crates/paddock-health" }
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Widget layouts (family ADR 0035): the popup's layout is stored and edited here; its catalogue and values are pitwall-core's.
 paddock-widgets = { path = "../../../../crates/paddock-widgets" }
-# The Playground chat's host (ADR 0023 WP-9a): the assistant engine and the MCP client to connected apps.
-paddock-assistant = { path = "../../../../crates/paddock-assistant" }
+# The Playground chat's host (ADR 0023 WP-9a): the MCP client to connected apps.
 paddock-mcp = { path = "../../../../crates/paddock-mcp" }
-log = "0.4"
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -102,7 +100,6 @@ tempfile.workspace = true
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 # The chat host's tests: a real MCP listener with fake tools.
 paddock-log = { path = "../../../../crates/paddock-log" }
-paddock-health = { path = "../../../../crates/paddock-health" }
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
 tauri = { version = "2.12.4", features = ["test"] }
 # The shell plugin on Tauri's mock runtime: the start test (ADR 0029, C50) opens no window and touches no user folder.

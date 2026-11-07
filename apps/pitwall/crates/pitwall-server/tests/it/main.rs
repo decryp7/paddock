@@ -9,6 +9,8 @@ mod e2e;
 mod engine_pins;
 mod jobs;
 mod llama_e2e;
+mod logging;
+mod playground_chat;
 mod presets;
 mod privacy;
 mod slots;
