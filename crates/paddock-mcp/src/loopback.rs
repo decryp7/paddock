@@ -300,6 +300,15 @@ fn serve_connection(
     }
 }
 
+/// Reads (and drops) a refused client's key line, bounded by [`HANDSHAKE_MAX`], [`HANDSHAKE_TIMEOUT`] and `stop`.
+fn drain_key_line(stream: &TcpStream, stop: Arc<AtomicBool>) {
+    if let Ok(read_half) = stream.try_clone().and_then(|s| Watched::new(s, stop)) {
+        let mut reader = BufReader::new(read_half);
+        reader.get_mut().deadline = Some(Instant::now() + HANDSHAKE_TIMEOUT);
+        let _ = read_line(&mut reader, HANDSHAKE_MAX);
+    }
+}
+
 /// Refuses any address that is not loopback: there is no remote MCP listener.
 fn check_loopback(addr: &SocketAddr) -> io::Result<()> {
     if addr.ip().is_loopback() {
@@ -325,6 +334,7 @@ pub fn serve_loopback(
     let conns: Conns = Arc::default();
     let taken = Arc::new(AtomicUsize::new(0));
     let ids = Arc::new(AtomicU64::new(0));
+    let drains = Arc::new(AtomicUsize::new(0));
     let (stop2, conns2) = (stop.clone(), conns.clone());
     let accept = std::thread::spawn(move || {
         for stream in listener.incoming() {
@@ -356,6 +366,22 @@ pub fn serve_loopback(
                     Refusal::Busy,
                     "too many MCP clients are connected",
                 );
+                // The client sees the refusal and then the end at once, but the socket is closed only once the client's
+                // key line is read: a socket closed with unread data is reset, and the reset can reach the client before
+                // the refusal (2026-11-07). The drain has its own thread, at most `max_connections` at a time, each ended
+                // by the key line, the client's end, the handshake timeout or a stop.
+                let _ = stream.shutdown(Shutdown::Write);
+                if let Some(draining) = Place::take(&drains, max_connections) {
+                    let stream = Arc::new(stream);
+                    let kept = Arc::downgrade(&stream);
+                    let stop = stop2.clone();
+                    let handle = std::thread::spawn(move || {
+                        drain_key_line(&stream, stop);
+                        drop(draining);
+                        drop(stream);
+                    });
+                    list.push((kept, handle));
+                }
                 continue;
             };
             log::info!("paddock_mcp: connection #{id} from port {peer} accepted");
