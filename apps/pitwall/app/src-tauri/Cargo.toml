@@ -30,6 +30,8 @@ paddock-jobs = { path = "../../../../crates/paddock-jobs" }
 paddock-service = { path = "../../../../crates/paddock-service" }
 # The assistant's tool loop and its model port (ADR 0023): Pitwall's chat provider over the management API implements the port.
 paddock-assistant = { path = "../../../../crates/paddock-assistant" }
+# The log facade, as the other apps use it (Dyno: `log` with `kv`); the app's log setup installs the logger.
+log = { version = "0.4", features = ["kv"] }
 # The clock the assistant's conversation store reads.
 paddock-health = { path = "../../../../crates/paddock-health" }
 # Running the server program's install and uninstall verbs bounded (timeout, the tree ended with it): rule 53.

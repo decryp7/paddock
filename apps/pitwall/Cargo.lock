@@ -3801,6 +3801,7 @@ version = "1.1.0"
 dependencies = [
  "getrandom 0.3.4",
  "keyring",
+ "log",
  "objc2",
  "objc2-foundation",
  "objc2-service-management",

@@ -220,7 +220,30 @@ impl LlmProvider for ServerChatProvider {
     }
 
     fn chat(&self, req: &ChatRequest, on_delta: &mut dyn FnMut(&str)) -> Result<ChatResponse, ProviderError> {
-        let body = playground_request(&self.model(), req)?;
+        let model = self.model();
+        let started = std::time::Instant::now();
+        log::info!(target: "pitwall_chat", "model call started: model {model}, {} messages, {} tools", req.messages.len(), req.tools.len());
+        let result = self.run(&model, req, on_delta);
+        let ms = started.elapsed().as_millis();
+        match &result {
+            Ok(r) => log::info!(
+                target: "pitwall_chat",
+                "model call ended: model {model}, finish {:?}, {} tool calls, {} tokens in, {} out, {ms} ms",
+                r.stop_reason,
+                r.tool_calls.len(),
+                r.usage.map_or(0, |u| u.input_tokens),
+                r.usage.map_or(0, |u| u.output_tokens),
+            ),
+            Err(e) => log::warn!(target: "pitwall_chat", "model call failed: model {model}, {ms} ms, cause: {e}"),
+        }
+        result
+    }
+}
+
+impl ServerChatProvider {
+    /// One model call, without its log lines (see [`LlmProvider::chat`]).
+    fn run(&self, model: &str, req: &ChatRequest, on_delta: &mut dyn FnMut(&str)) -> Result<ChatResponse, ProviderError> {
+        let body = playground_request(model, req)?;
         let body = serde_json::to_value(&body).map_err(|e| ProviderError::Failed(format!("The app built an unusable request ({e}).")))?;
         let cancel = req.cancel.clone();
         self.runtime.block_on(async {
@@ -568,6 +591,76 @@ mod tests {
         let stopper = std::thread::spawn(move || cancel.cancel());
         assert_eq!(p.chat(&req, &mut |_| {}).unwrap_err(), ProviderError::Cancelled);
         stopper.join().unwrap();
+    }
+
+    static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    struct Capture;
+
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, r: &log::Record<'_>) {
+            if r.target() == "pitwall_chat" {
+                LOGGED.lock().unwrap_or_else(PoisonError::into_inner).push(r.args().to_string());
+            }
+        }
+        fn flush(&self) {}
+    }
+
+    /// The `pitwall_chat` lines that mention `model` (each test uses a model name of its own).
+    fn logged(model: &str) -> Vec<String> {
+        LOGGED
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter(|l| l.contains(model))
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn every_call_logs_its_start_and_how_it_ended_without_content() {
+        let _ = log::set_logger(&Capture);
+        log::set_max_level(log::LevelFilter::Info);
+        let rt = runtime();
+
+        let ok = Arc::new(FakeServer::new());
+        ok.stream(Ok(vec![
+            frame(&PlaygroundEvent::Delta {
+                text: "secret-answer-text".into(),
+            }),
+            frame(&done(PlaygroundFinish::Stop)),
+        ]));
+        let p = ServerChatProvider::new(ok, rt.handle().clone(), "log-model-ok");
+        let mut req = request();
+        req.messages = vec![ChatMessage::user("secret-question-text")];
+        p.chat(&req, &mut |_| {}).unwrap();
+        let lines = logged("log-model-ok");
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].contains("started") && lines[0].contains("1 messages"), "{lines:?}");
+        assert!(
+            lines[1].contains("ended")
+                && lines[1].contains("finish EndTurn")
+                && lines[1].contains("7 tokens in, 3 out")
+                && lines[1].contains(" ms"),
+            "{lines:?}"
+        );
+
+        let bad = Arc::new(FakeServer::new());
+        bad.stream(Err(CommandError::new(ErrorCode::ServerUnavailable, "not running; use Repair")));
+        let p = ServerChatProvider::new(bad, rt.handle().clone(), "log-model-bad");
+        p.chat(&req, &mut |_| {}).unwrap_err();
+        let lines = logged("log-model-bad");
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(
+            lines[1].contains("failed") && lines[1].contains("cause: not running; use Repair") && lines[1].contains(" ms"),
+            "{lines:?}"
+        );
+
+        let all = LOGGED.lock().unwrap_or_else(PoisonError::into_inner).join("\n");
+        assert!(!all.contains("secret-"), "no content in the log: {all}");
     }
 
     #[test]
