@@ -28,10 +28,6 @@ export const READINGS = [
     expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i], prepare: { windows: 'awake-on' },
     // The control holds the computer awake with `dyno awake on`, so the blockers table must list a Dyno request (not only the chip).
     value: { windows: [/Keeping this computer awake\s+[1-9]\d* programs?/i, /Program\s+It prevents[\s\S]*\bDyno\b/i] } },
-  { id: 'backup-versions', title: 'Windows Backup versions', os: ['windows'], page: 'backup', fullText: 4000,
-    expect: { windows: [/Read by the administrator helper/i] }, none: [/needs the helper/i],
-    // Per row (fix/dyno-vm-findings-1, efe366863): a File History log that never ran reads "Not set up" with a next step, which is right in a VM; "Could not check" is for a real tool failure. A build before that commit still says "Could not check 2 backup tools" and keeps failing.
-    value: { windows: [/no backup of this PC|Windows Backup has \d+ versions?|Not set up/i] }, allowNotSetUp: true },
   { id: 'login-items', title: 'macOS login items (BTM) beside launch agents', os: ['macos'], page: 'health', fullText: 4000,
     // Measured 2026-11-05 on run-7575: login items are listed on Health > Start-up items (Extras > Boot has none). With the helper On the page said
     // "Login items ... need administrator rights to read" because the agent only ever builds NeedsHelperBtm (startup.rs:178); that is the product gap this row catches.
@@ -66,6 +62,18 @@ export const READINGS = [
     // The VM base has no smartmontools: the reading cannot be taken there, which is neither a pass nor a fail of the product.
     notMeasured: { linux: { when: /smartctl[^.]*is not installed/i, why: 'smartmontools missing in base' } } },
 ];
+
+/**
+ * Rows of features that 1.1.0 removed (apps/dyno CHANGELOG 1.1.0, Removed): they are reported as "not applicable (removed in 1.1.0)", never driven and
+ * never required. The Backup health page, its Settings section, widget, alarms and the "backup" command are gone, so the Windows Backup versions reading
+ * has no page to read.
+ */
+export const NOT_APPLICABLE = [
+  { title: 'Windows Backup versions', os: ['windows'], what: 'Backup health (page, Settings section, widget, alarms, command)' },
+];
+
+/** The step of a removed row. */
+export const notApplicableStep = (r, os) => ({ title: `Helper reading (${os}): ${r.title}`, status: 'not-applicable', cls: 'check', summary: `not applicable (removed in 1.1.0): ${r.what}`, checks: [{ ok: true, info: true, detail: `not applicable (removed in 1.1.0): ${r.what}` }], evidence: [] });
 
 /** A row's `notMeasured` entry fires on a page text: `when` is a regex or a function of the text. */
 const fires = (nm, text) => (typeof nm.when === 'function' ? nm.when(text) : nm.when.test(text));
@@ -116,7 +124,8 @@ export async function readingStep(reading, os, driver) {
 
 /** The extension hooks for one OS: one function per reading that applies to it. */
 export function readingSteps(os, makeDriver) {
-  return READINGS.filter((r) => r.os.includes(os)).map((r) => async (ctx) => readingStep(r, os, await makeDriver(ctx)));
+  return [...READINGS.filter((r) => r.os.includes(os)).map((r) => async (ctx) => readingStep(r, os, await makeDriver(ctx))),
+    ...NOT_APPLICABLE.filter((r) => r.os.includes(os)).map((r) => async () => notApplicableStep(r, os))];
 }
 
 /** Windows: the driver over a Playwright page of the main window (hash routes; tabs are pressed by their label). */

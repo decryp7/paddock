@@ -22,7 +22,7 @@ test('every reading names expectations for each OS it lists', () => {
   for (const r of READINGS) for (const os of r.os) assert.ok((r.expect[os] ?? []).length > 0, `${r.id} has no expectation for ${os}`);
 });
 test('hooks are produced per OS', () => {
-  assert.equal(readingSteps('windows', async () => driver('')).length, READINGS.filter((r) => r.os.includes('windows')).length);
+  assert.equal(readingSteps('windows', async () => driver('')).length, READINGS.filter((r) => r.os.includes('windows')).length + 1); // + the removed Backup health row
   assert.ok(readingSteps('linux', async () => driver('')).length >= 4);
 });
 
@@ -33,7 +33,6 @@ const DEAD = [
   ['lifespan-smart', 'linux', 'Lifespan How long your SSD and battery are likely to last. SSD Disk life cannot be estimated'],
   ['lifespan-smart', 'windows', 'Lifespan How long your SSD and battery are likely to last.'],
   ['lifespan-smart', 'linux', 'Lifespan How long your SSD and battery are likely to last.'],
-  ['backup-versions', 'windows', 'Dyno could not check 2 backup tools Read by the administrator helper'],
   ['memory-modules', 'linux', 'Inventory What is installed. Memory modules'],
   ['traffic-by-program', 'windows', 'Network ↓ 0 B/s Read by the administrator helper'],
   ['firewall', 'linux', 'Linux nftables Firewall: Off 0 rules Read by the administrator helper'],
@@ -52,7 +51,6 @@ for (const [id, os, text] of DEAD) {
 test('real values pass: a wear forecast, a backup count, memory modules, a traffic row, a loaded nft rule, a Dyno blocker, a verdict', async () => {
   assert.equal((await run('lifespan-smart', 'windows', 'Lifespan SSD Samsung About 7.4 years of writes left (5.2 to 10 years)')).status, 'pass');
   assert.equal((await run('lifespan-smart', 'linux', 'Lifespan SSD vda Not enough history for a forecast yet Have 6 of 14 days')).status, 'pass');
-  assert.equal((await run('backup-versions', 'windows', 'Backup health Windows Backup has 3 versions Read by the administrator helper')).status, 'pass');
   assert.equal((await run('memory-modules', 'linux', 'Inventory Memory modules Slot Size Part number DIMM0 8 GB')).status, 'pass');
   assert.equal((await run('memory-modules', 'linux', 'Inventory Memory modules 4 GB installed Dyno could not read the individual modules: no DMI data in this virtual machine')).status, 'pass');
   assert.equal((await run('traffic-by-program', 'windows', 'Network Program ↓ ↑ curl.exe 1.2 MB 40 KB Read by the administrator helper')).status, 'pass');
@@ -74,10 +72,6 @@ test('a control that cannot run makes the step check-broken, not a product fail,
 });
 
 test('Backup is judged per row: "Not set up" for File History passes, Windows Backup or a real tool failure still fails', async () => {
-  assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Backup health Windows Backup has 3 versions File History Not set up. Turn it on in Settings. Read by the administrator helper'))).status, 'pass');
-  assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Backup health no backup of this PC File History Not set up. Read by the administrator helper'))).status, 'pass');
-  assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Backup health Windows Backup could not check. Try again. File History Not set up. Read by the administrator helper'))).status, 'fail');
-  assert.equal((await readingStep(by('backup-versions'), 'windows', driver('Dyno could not check 2 backup tools Read by the administrator helper'))).status, 'fail');
 });
 
 test('macOS rows measured 2026-11-05 on run-7575: login items on Health, pf control, the helper own CPU wording, thermal not measured', async () => {
@@ -136,4 +130,13 @@ test('temp-widget control: the new widget is the second CPU menu and the metric 
   assert.equal(bad.ok, false); assert.match(bad.detail, /no "Add Big number" button/);
   calls.length = 0; await removeTemperatureWidget(mk(null));
   assert.deepEqual(calls.slice(0, 3), ['^Edit layout$', '^Actions for Temperature$', '^Remove Temperature$']);
+});
+
+test('the removed Backup health reading is reported as not applicable (removed in 1.1.0), is not driven and is not a required row', async () => {
+  const fns = readingSteps('windows', async () => { throw new Error('no driver may be made for a removed row'); });
+  const steps = [];
+  for (const fn of fns.slice(-1)) steps.push(await fn({}));
+  assert.equal(steps[0].status, 'not-applicable');
+  assert.match(steps[0].summary, /removed in 1\.1\.0/);
+  assert.ok(!READINGS.some((r) => /backup/i.test(r.id)));
 });

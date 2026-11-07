@@ -188,16 +188,17 @@ async function runRebootSteps(ctx, steps) {
     // Counted before any icon is promoted: with Dyno's window open (Settings) every icon the log says was created must be found, and no button of Dyno's own window counts.
     ...judgeTrayCount({ metrics: trayBefore.metrics, visible: trayBefore.visible.length, overflow: trayBefore.overflow.length, measured: trayBefore.measured }),
   ], [before.qc, before.q, '--- helper.log tail', before.log, `card: ${cardBefore}`, ...eventsDump(), '--- tray before', ...fmtTray(trayBefore)].join('\n').split('\n'), `service RUNNING (${before.start}), card On`));
-  // The 7521 death at app quit: read Processes through the helper, quit Dyno (File > Exit), and see whether the helper is still RUNNING 30 s later.
+  // The 7521 death at app quit: read Processes through the helper, quit Dyno (File > Quit Dyno), and see whether the helper is still RUNNING 30 s later.
   try {
     const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
     await main.evaluate(() => { location.hash = '#/processes'; }); await sleep(4000);
     const chip = /Read by the administrator helper/i.test(await main.evaluate(() => document.body.innerText));
     const pre = snapshot();
     await main.evaluate(async () => {
+      const quit = (e) => /^Quit Dyno( \(keeps measuring\))?$/.test(e.textContent.trim()); // 1.1.0: never "Quit and stop measuring"
       const items = () => [...document.querySelectorAll('[role=menuitem]')];
-      if (!items().some((e) => e.textContent.trim().startsWith('Exit'))) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File').click(); await new Promise((r) => setTimeout(r, 600)); }
-      items().find((e) => e.textContent.trim().startsWith('Exit')).click();
+      if (!items().some(quit)) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File').click(); await new Promise((r) => setTimeout(r, 600)); }
+      items().find(quit).click();
     }).catch(() => {});
     await sleep(30_000);
     const post = snapshot();

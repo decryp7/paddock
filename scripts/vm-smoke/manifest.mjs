@@ -58,7 +58,7 @@ const WIN_UI = [
   row('repeat-install', /^Windows: repeat install of the disk health tool/), row('disk-health', /^Windows: disk health install/), ...readings('windows'),
   row('scoping', /^Windows: D6 scoping/), row('served', /^Windows: the helper reports which readings it served/),
   row('repair', /^Windows: Repair through the card/), row('helper-off', /^Windows: admin helper Turn off/),
-  row('quit-exit', /^Windows: Quit \(File > Exit\)/), row('same-version-refused', /^Windows: an update from the same version is refused/), row('uninstall', /^Windows: uninstall removes/),
+  row('quit-exit', /^Windows: Quit Dyno \(File menu\)/), row('same-version-refused', /^Windows: an update from the same version is refused/), row('uninstall', /^Windows: uninstall removes/),
 ];
 const WIN_REBOOT = [
   row('helper-on', /^Windows: admin helper Turn on/), row('restart-before', /^Windows restart: helper, Launch at login and tray before the restart/),

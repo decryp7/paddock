@@ -206,7 +206,7 @@ export function judgeStateFile(content, procs, spec, bundleDir, helperSpec = { n
  * header, a table per step, then each step's evidence. `run.required` is the manifest's list (manifest.mjs); without it the run is INCOMPLETE.
  */
 export function renderResult(run) {
-  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO', 'not-measured': 'NOT MEASURED', 'check-broken': 'CHECK BROKEN' })[s] ?? s.toUpperCase();
+  const mark = (s) => ({ pass: 'PASS', fail: 'FAIL', skip: 'SKIP', manual: 'MANUAL', info: 'INFO', 'not-measured': 'NOT MEASURED', 'not-applicable': 'NOT APPLICABLE', 'check-broken': 'CHECK BROKEN' })[s] ?? s.toUpperCase();
   const v = deriveVerdict({ steps: run.steps, required: run.required ?? [] });
   const partial = run.partial ? ' (partial run: not a release verdict)' : '';
   const lines = [
