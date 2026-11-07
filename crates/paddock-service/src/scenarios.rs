@@ -261,7 +261,7 @@ fn r03_an_update_replaces_the_stale_registration_exactly_once_and_recovers() {
 }
 
 #[test]
-fn a_manager_reads_the_clock_it_is_given_for_the_register_stamp_and_the_notice() {
+fn a_manager_fades_the_success_notice_on_the_clock_it_is_given() {
     // The same repair as r03, on a clock that only moves when the test moves it: the success notice fades when the clock (not the machine's) passes `SUCCESS_SHOWN`.
     use crate::tracker::SUCCESS_SHOWN;
     let d = tempfile::tempdir().unwrap();

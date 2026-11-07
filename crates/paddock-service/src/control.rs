@@ -110,6 +110,8 @@ pub type Emit = Arc<dyn Fn(&ServiceUpdate) + Send + Sync>;
 pub struct ServiceControl {
     manager: Mutex<Manager>,
     tracker: Arc<crate::tracker::RepairTracker>,
+    /// The manager's clock: the tracker's times are its monotonic readings, so every read of the tracker uses it.
+    clock: Arc<dyn Clock>,
     last: Mutex<Option<ServiceStatus>>,
     health: Option<(Arc<Health>, String)>,
     emit: Emit,
@@ -163,6 +165,7 @@ impl ServiceControl {
     fn build(manager: Manager, emit: Emit, health: Option<(Arc<Health>, String)>) -> Arc<Self> {
         Arc::new(Self {
             tracker: manager.tracker(),
+            clock: manager.clock(),
             manager: Mutex::new(manager),
             last: Mutex::new(None),
             health,
@@ -205,9 +208,7 @@ impl ServiceControl {
             }
             Err(std::sync::TryLockError::WouldBlock) => {
                 let mut s = lock(&self.last).clone()?;
-                s.repair = self
-                    .tracker
-                    .current(paddock_health::SystemClock.monotonic());
+                s.repair = self.tracker.current(self.clock.monotonic());
                 if s.repair
                     .as_ref()
                     .is_some_and(|r| r.state == crate::tracker::RepairState::Working)
@@ -342,7 +343,7 @@ impl ServiceControl {
                     code: ServiceErrorCode::Failed,
                     message: self
                         .tracker
-                        .current(paddock_health::SystemClock.monotonic())
+                        .current(self.clock.monotonic())
                         .map(|n| n.message)
                         .unwrap_or_default(),
                     retryable: true,
@@ -524,6 +525,36 @@ mod tests {
         // The health registry's Repair runs the same repair (it fails the same way, with a cause).
         let cause = c.health_repair().unwrap_err();
         assert!(cause.code.as_deref() == Some("service.repairFailed"));
+    }
+
+    #[test]
+    fn the_control_reads_the_tracker_on_the_clock_of_its_manager() {
+        // The tracker holds readings of the manager's monotonic clock, so the control must read it on the same clock: on the
+        // machine's, a success stamped on a test's clock would never fade (and on a real one, compare two origins). While a
+        // repair holds the manager, the status is composed from the last look and the tracker's notice.
+        let d = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let (emit, _) = emitter();
+        let clock = paddock_health::FakeClock::new();
+        let c = ServiceControl::new(
+            dyno(&sys, d.path(), true).with_clock(Arc::new(clock.clone())),
+            emit,
+        );
+        assert!(c.status().is_some());
+        c.tracker
+            .finish(&RepairOutcome::Recovered, clock.monotonic());
+        let held = lock(&c.manager);
+        assert!(
+            c.status().unwrap().repair.is_some(),
+            "a fresh success is shown"
+        );
+        clock.advance(crate::tracker::SUCCESS_SHOWN + Duration::from_secs(1));
+        assert_eq!(
+            c.status().unwrap().repair,
+            None,
+            "and fades on the manager's clock"
+        );
+        drop(held);
     }
 
     #[test]

@@ -4,6 +4,10 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-service`: the manager reads an injected clock
+- New `Manager::with_clock(Arc<dyn Clock>)` and `Manager::clock()` (`paddock_health::Clock`, the real `SystemClock` by default): the waits, the repair notice and the register stamp read it, so a test or a model never touches the system's clocks (a clock read costs 13 to 25 microseconds on some virtual machines).
+- Breaking (before v1): `RepairTracker::start`, `finish` and `current` take a `Duration`, a reading of the caller's monotonic clock, instead of an `Instant`; `repair::Bounds` loses `now` and gains `clock` (the stamp is `repair::start_time_of(clock.wall())`); new `repair::start_time_of(SystemTime) -> StartTime`.
+
 ### `paddock-mcp`: the client key list is an owner-only file, not the credential store
 - Breaking (before v1): `McpControl::new` takes a `KeyListStore` instead of `Arc<dyn Secrets>`; `FileKeys` (a `VersionedFile`, owner-only, `mcp-keys.json` by convention; refuses a list others can write; never restores a damaged file from its backup) and `MemoryKeys` (tests) implement it, and the crate no longer depends on `paddock-secrets`. The entries hold an id, a client name, the SHA-256, a time and a revoked flag, nothing secret. Opening a Keychain item of another ad-hoc signed build blocked Dyno before its first window. No migration: the old `mcp:keys` entry is never read (reading it prompts). A damaged, unreadable or newer file means no key works (logged with the next step); the backup of a damaged file is never used, so a revoked key cannot return. `McpView` gains `keysProblem` (the reason the saved keys are not in use; the page shows it). `paddock_env::VersionedFile::no_restore()` is new. Dyno and the shell demo no longer take `real_secrets`.
 

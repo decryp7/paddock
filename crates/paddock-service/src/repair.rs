@@ -505,7 +505,6 @@ pub fn replace(
         abort: &abort,
         allowed: t.max_cycles + 1,
         register_only: false,
-        now: &wall_clock,
         clock: &paddock_health::SystemClock,
     };
     replace_bounded(b, answers, &bounds, t, &mut || {}, &mut || true, say)
@@ -534,10 +533,9 @@ pub struct Bounds<'a> {
     pub allowed: u32,
     /// Nothing is registered and no job is held: register without removing anything first.
     pub register_only: bool,
-    /// The clock for `registered_at`, in the same units as a process start time.
-    pub now: &'a dyn Fn() -> StartTime,
-    /// The monotonic clock of the waits (how long the OS has been given); a model passes one that stands still, so no
-    /// clock is read in its hot loop.
+    /// The clock of the waits (how long the OS has been given) and of `registered_at`, whose calendar reading is stamped in
+    /// the units of a process start time ([`start_time_of`]). A model passes one that stands still, so no system clock is
+    /// read in its hot loop.
     pub clock: &'a dyn Clock,
 }
 
@@ -556,7 +554,7 @@ pub fn replace_bounded(
         return RepairOutcome::Cancelled;
     }
     let mut stepper = Stepper::new(t, bounds.allowed);
-    let at = (bounds.now)();
+    let at = start_time_of(bounds.clock.wall());
     let mut next = if let Some(result) = b.replace_in_one_step() {
         stepper.registered_at(at);
         match result {
@@ -635,7 +633,7 @@ pub fn replace_bounded(
                 OsResult::Paused
             }
             Action::Register => {
-                stepper.registered_at((bounds.now)());
+                stepper.registered_at(start_time_of(bounds.clock.wall()));
                 match b.register() {
                     Ok(_) => OsResult::RegisterOk,
                     Err(e) => OsResult::RegisterErr(e),
@@ -1360,8 +1358,9 @@ mod tests {
             abort: &abort,
             allowed: 4,
             register_only: false,
-            now: &|| StartTime::from_micros(REGISTERED),
-            clock: &paddock_health::SystemClock,
+            clock: &paddock_health::FakeClock::at_wall(
+                std::time::UNIX_EPOCH + Duration::from_micros(REGISTERED),
+            ),
         };
         let out = replace_bounded(
             &mut s,
@@ -1388,8 +1387,9 @@ mod tests {
             abort: &abort,
             allowed: 4,
             register_only: false,
-            now: &|| StartTime::from_micros(REGISTERED),
-            clock: &paddock_health::SystemClock,
+            clock: &paddock_health::FakeClock::at_wall(
+                std::time::UNIX_EPOCH + Duration::from_micros(REGISTERED),
+            ),
         };
         let out = replace_bounded(
             &mut s,
@@ -1418,8 +1418,9 @@ mod tests {
             abort: &abort,
             allowed: 4,
             register_only: false,
-            now: &|| StartTime::from_micros(1),
-            clock: &paddock_health::SystemClock,
+            clock: &paddock_health::FakeClock::at_wall(
+                std::time::UNIX_EPOCH + Duration::from_micros(1),
+            ),
         };
         let mut asked = 0;
         let out = replace_bounded(
@@ -1470,8 +1471,9 @@ mod tests {
             abort: &abort,
             allowed: 4,
             register_only: false,
-            now: &|| StartTime::from_micros(1),
-            clock: &paddock_health::SystemClock,
+            clock: &paddock_health::FakeClock::at_wall(
+                std::time::UNIX_EPOCH + Duration::from_micros(1),
+            ),
         };
         let mut said = Vec::new();
         let out = replace_bounded(

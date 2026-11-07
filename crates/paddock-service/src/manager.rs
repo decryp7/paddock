@@ -134,6 +134,11 @@ impl Manager {
         self
     }
 
+    /// The time source this manager (and so its tracker's readings) uses.
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        self.clock.clone()
+    }
+
     /// Another time source (a test's fake clock, or the crash model's, which never reads the system's). The repair tracker
     /// reads the same one through the times this manager gives it.
     #[must_use]
@@ -413,7 +418,6 @@ impl Manager {
         log::info!(reason = reason.describe(), mechanism:? = self.backend.mechanism(), attempts = attempts0, allowed = allowed; "replacing the background service's registration");
         let tracker = self.tracker.clone();
         let clock = self.clock.clone();
-        let wall = || crate::repair::start_time_of(clock.wall());
         let record = &self.record;
         let version = self.version.clone();
         let answers = &mut self.answers;
@@ -426,7 +430,6 @@ impl Manager {
             abort: &abort,
             allowed,
             register_only: nothing_to_remove || register_only_once,
-            now: &wall,
             clock: clock.as_ref(),
         };
         // The wait for the service can take 120 s: the lock is let go for it, so a user's event (a removal, a repair) never waits.
@@ -470,7 +473,9 @@ impl Manager {
                         Some(removing)
                     }
                     Step::Registering => {
-                        if let Err(e) = record.set_registered_at(Some(wall().as_micros())) {
+                        if let Err(e) = record.set_registered_at(Some(
+                            crate::repair::start_time_of(clock.wall()).as_micros(),
+                        )) {
                             log::warn!(error:% = e; "the time of the register call could not be recorded");
                         }
                         if free_register {
