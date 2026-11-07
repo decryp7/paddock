@@ -6,7 +6,8 @@
 
 use super::saved::{SavedChats, Usage, CHATS_DIR};
 use paddock_assistant::{
-    Attachment, ChatMessage, Conversation, ConversationStore, ConversationSummary, Conversations, SaveError, StoreLimits, StoredMessage,
+    Attachment, ChatMessage, Conversation, ConversationStore, ConversationSummary, Conversations, Overflow, SaveError, StoreLimits,
+    StoredMessage,
 };
 use paddock_env::VersionedFile;
 use paddock_health::Clock;
@@ -18,7 +19,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 /// The chats' settings, in the chats' folder (written only when the user changes them).
 pub const PREFS_FILE: &str = "prefs.json";
-/// Most chats kept in memory ("Don't save"): past it the least recently changed goes, as the family store does.
+/// Most chats kept in memory ("Don't save"): past it a new one is refused in words; none is ever dropped to make room.
 pub const MAX_UNSAVED: usize = 200;
 /// Most bytes of the unsaved chats' conversations in memory.
 pub const MAX_UNSAVED_BYTES: u64 = 64 << 20;
@@ -97,6 +98,7 @@ fn refs(c: &Conversation) -> Vec<String> {
 pub struct ChatStores {
     saved: SavedChats,
     memory: ConversationStore,
+    unsaved: StoreLimits,
     prefs: VersionedFile<Prefs>,
     save_new: Mutex<Option<bool>>,
     memory_attachments: Mutex<HashMap<String, Arc<Vec<u8>>>>,
@@ -110,16 +112,23 @@ impl ChatStores {
 
     /// Over a given saved store (tests use small limits).
     pub fn with(saved: SavedChats, clock: Arc<dyn Clock>) -> ChatStores {
+        Self::with_unsaved_limits(
+            saved,
+            clock,
+            StoreLimits {
+                conversations: MAX_UNSAVED,
+                file_bytes: MAX_UNSAVED_BYTES,
+            },
+        )
+    }
+
+    /// Over a given saved store, with other bounds for the chats that are not saved (tests).
+    pub fn with_unsaved_limits(saved: SavedChats, clock: Arc<dyn Clock>, unsaved: StoreLimits) -> ChatStores {
         let prefs = VersionedFile::new(saved.dir().join(PREFS_FILE), 1).private();
         ChatStores {
             saved,
-            memory: ConversationStore::in_memory_with(
-                clock,
-                StoreLimits {
-                    conversations: MAX_UNSAVED,
-                    file_bytes: MAX_UNSAVED_BYTES,
-                },
-            ),
+            memory: ConversationStore::in_memory_with(clock, unsaved).with_overflow(Overflow::Refuse),
+            unsaved,
             prefs,
             save_new: Mutex::default(),
             memory_attachments: Mutex::default(),
@@ -180,7 +189,7 @@ impl ChatStores {
                     self.keep_in_memory(sha, bytes)?;
                 }
             }
-            self.memory.adopt(c)?;
+            self.memory.adopt(c).map_err(|e| self.unsaved_full(&e))?;
             if let Err(e) = self.saved.delete(id) {
                 let _ = self.memory.delete(id);
                 return Err(e.into());
@@ -188,6 +197,18 @@ impl ChatStores {
         }
         log::info!(target: "pitwall_chat", "chats: {id} is {}", if save { "saved" } else { "no longer saved" });
         Ok(save)
+    }
+
+    /// A refusal of the chats that are not saved, in Pitwall's words.
+    fn unsaved_full(&self, why: &SaveError) -> SaveError {
+        log::info!(target: "pitwall_chat", "chats: a chat that is not saved was refused ({})", why.0);
+        SaveError(format!(
+            "Chats that are not saved stay in memory until Pitwall closes, at most {} of them and {} MiB in all, so none is \
+             ever dropped to make room: {} Save a chat or delete one, then try again.",
+            self.unsaved.conversations,
+            self.unsaved.file_bytes >> 20,
+            why.0
+        ))
     }
 
     fn keep_in_memory(&self, sha: String, bytes: Vec<u8>) -> Result<(), ChatsError> {
@@ -296,5 +317,17 @@ impl Conversations for ChatStores {
 
     fn take_problem(&self) -> Option<String> {
         self.saved.take_problem()
+    }
+
+    fn admits(&self, conversation_id: Option<&str>, save: bool) -> Result<(), SaveError> {
+        let unsaved = match conversation_id {
+            None => !save,
+            Some(id) => self.memory.get(id).is_some(),
+        };
+        if !unsaved {
+            // The saved store refuses past its limits in words and keeps the chat for the session: never a drop.
+            return Ok(());
+        }
+        self.memory.admits(conversation_id, false).map_err(|e| self.unsaved_full(&e))
     }
 }

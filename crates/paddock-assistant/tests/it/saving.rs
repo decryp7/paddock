@@ -187,3 +187,109 @@ fn the_title_the_bounds_and_the_history_are_the_familys_for_any_store() {
         assert_eq!(history_of(&c, chars), store.history(&id, chars), "{chars}");
     }
 }
+
+#[test]
+fn a_store_that_refuses_at_its_bounds_never_drops_a_conversation_and_says_why() {
+    let clock = FakeClock::at_wall_ms(1_700_000_000_000);
+    let store = ConversationStore::in_memory_with(
+        Arc::new(clock.clone()),
+        StoreLimits {
+            conversations: 2,
+            file_bytes: 4000,
+        },
+    )
+    .with_overflow(Overflow::Refuse);
+    let (a, _, _) = store.create(StoredMessage::user("one", vec![], 1));
+    let (b, _, _) = store.create(StoredMessage::user("two", vec![], 2));
+    assert_eq!(store.admits(Some(&a), true), Ok(()));
+    // A third conversation: refused in words, and nothing is dropped, even if created anyway.
+    let why = store.admits(None, false).unwrap_err();
+    assert!(why.0.contains("at most 2"), "{why}");
+    let (c, _, kept) = store.create(StoredMessage::user("three", vec![], 3));
+    assert!(kept.is_err());
+    assert!(store.get(&c).is_none());
+    assert!(store.get(&a).is_some() && store.get(&b).is_some());
+    // Past the size bound: the answer is kept (it was shown), nothing else goes, and the next question is refused.
+    assert!(
+        store
+            .append(
+                &a,
+                vec![StoredMessage::assistant(
+                    "x".repeat(5000),
+                    vec![],
+                    Some(EndReason::Answered),
+                    4
+                )]
+            )
+            .is_some()
+    );
+    assert_eq!(store.get(&a).unwrap().messages.len(), 2);
+    assert!(store.get(&b).is_some());
+    assert!(store.admits(Some(&b), false).is_err());
+    let moved = from_memory(&clock, "moved");
+    assert!(store.adopt(moved).is_err(), "taking one in is refused too");
+    // A store that evicts (the default) admits everything, as before.
+    assert_eq!(
+        ConversationStore::in_memory(Arc::new(clock)).admits(None, true),
+        Ok(())
+    );
+}
+
+fn from_memory(clock: &FakeClock, text: &str) -> Conversation {
+    let s = ConversationStore::in_memory(Arc::new(clock.clone()));
+    let (id, _, _) = s.create(StoredMessage::user(text, vec![], 1));
+    s.get(&id).unwrap()
+}
+
+/// A port that admits nothing.
+struct Full(ConversationStore);
+
+impl Conversations for Full {
+    fn summaries(&self) -> Vec<ConversationSummary> {
+        self.0.summaries()
+    }
+    fn get(&self, id: &str) -> Option<Conversation> {
+        self.0.get(id)
+    }
+    fn create(&self, first: StoredMessage) -> (String, String, Result<(), SaveError>) {
+        self.0.create(first)
+    }
+    fn append(&self, id: &str, messages: Vec<StoredMessage>) -> Option<Result<(), SaveError>> {
+        self.0.append(id, messages)
+    }
+    fn delete(&self, id: &str) -> Result<bool, SaveError> {
+        self.0.delete(id)
+    }
+    fn history(&self, id: &str, history_chars: usize) -> Vec<ChatMessage> {
+        self.0.history(id, history_chars)
+    }
+    fn admits(&self, _: Option<&str>, save: bool) -> Result<(), SaveError> {
+        Err(SaveError(format!("full (save {save})")))
+    }
+}
+
+#[test]
+fn a_question_the_store_cannot_take_is_refused_in_its_words_and_no_turn_starts() {
+    let clock = FakeClock::at_wall_ms(1_700_000_000_000);
+    let store = Arc::new(Full(ConversationStore::in_memory(Arc::new(clock.clone()))));
+    let assistant = Assistant::with_conversations(
+        Scripted::new(vec![]),
+        Tools::none(),
+        store.clone(),
+        Arc::new(clock),
+        AssistantConfig::new("Demo", "sys"),
+    );
+    let (sink, rx) = sink();
+    let err = assistant
+        .send(
+            SendRequest {
+                save: false,
+                ..ask("hello")
+            },
+            sink,
+        )
+        .unwrap_err();
+    assert_eq!(err, AssistantError::Invalid("full (save false)".into()));
+    assert!(store.summaries().is_empty(), "the question is not kept");
+    assert!(rx.try_recv().is_err(), "no turn started");
+}

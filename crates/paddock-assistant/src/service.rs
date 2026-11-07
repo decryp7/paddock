@@ -346,6 +346,10 @@ impl Assistant {
         sink: Arc<dyn EventSink>,
     ) -> Result<SendAck, AssistantError> {
         let (text, context) = Self::check(&req)?;
+        // A store that does not make room by itself says so before anything is kept (nothing is dropped silently).
+        self.store
+            .admits(req.conversation_id.as_deref(), req.save)
+            .map_err(|e| AssistantError::Invalid(e.0))?;
         let user = StoredMessage::user(text, context, self.now_ms())
             .with_attachments(req.attachments.clone());
         let mut runs = lock(&self.runs);

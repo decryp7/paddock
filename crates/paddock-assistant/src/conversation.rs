@@ -424,9 +424,9 @@ fn bound_message(m: &mut StoredMessage) {
     }
 }
 
-/// Keeps `conversation` within its message bound; a conversation always starts with a user message.
-fn bound_conversation(c: &mut Conversation) {
-    if c.messages.len() > MAX_MESSAGES {
+/// Keeps `conversation` within its message bound (when the store evicts); a conversation always starts with a user message.
+fn bound_conversation(c: &mut Conversation, overflow: Overflow) {
+    if overflow == Overflow::EvictOldest && c.messages.len() > MAX_MESSAGES {
         c.messages.drain(..c.messages.len() - MAX_MESSAGES);
     }
     let first_user = c
@@ -512,6 +512,25 @@ pub trait Conversations: Send + Sync {
     fn take_problem(&self) -> Option<String> {
         None
     }
+    /// Whether the store can take one more question: in the conversation `conversation_id`, or in a new one (`None`, saved
+    /// when `save`). A refusal is in words for the user, and the assistant then refuses the question before a turn starts.
+    /// The default admits everything (a store that makes room by itself).
+    fn admits(&self, conversation_id: Option<&str>, save: bool) -> Result<(), SaveError> {
+        let _ = (conversation_id, save);
+        Ok(())
+    }
+}
+
+/// What a [`ConversationStore`] does at its bounds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Overflow {
+    /// The least recently changed conversations, and a long conversation's oldest messages, make room (the default).
+    #[default]
+    EvictOldest,
+    /// Nothing is ever dropped: a new conversation, a question or a conversation taken in that would pass a bound is
+    /// refused in words ([`Conversations::admits`]); an answer already shown is kept, so a store passes its bounds by at most
+    /// one turn.
+    Refuse,
 }
 
 impl Conversations for ConversationStore {
@@ -536,6 +555,9 @@ impl Conversations for ConversationStore {
     fn take_problem(&self) -> Option<String> {
         ConversationStore::take_problem(self)
     }
+    fn admits(&self, conversation_id: Option<&str>, save: bool) -> Result<(), SaveError> {
+        ConversationStore::admits(self, conversation_id, save)
+    }
 }
 
 /// The assistant's conversations in one file, or in memory only.
@@ -545,6 +567,7 @@ pub struct ConversationStore {
     state: Mutex<State>,
     clock: Arc<dyn Clock>,
     limits: StoreLimits,
+    overflow: Overflow,
 }
 
 impl ConversationStore {
@@ -567,7 +590,7 @@ impl ConversationStore {
         let mut data = loaded.value;
         for c in &mut data.conversations {
             c.messages.iter_mut().for_each(bound_message);
-            bound_conversation(c);
+            bound_conversation(c, Overflow::EvictOldest);
         }
         data.conversations.retain(|c| !c.messages.is_empty());
         bound_data(&mut data, "", limits);
@@ -582,6 +605,7 @@ impl ConversationStore {
             }),
             clock,
             limits,
+            overflow: Overflow::EvictOldest,
         }
     }
 
@@ -602,7 +626,57 @@ impl ConversationStore {
             }),
             clock,
             limits,
+            overflow: Overflow::EvictOldest,
         }
+    }
+
+    /// This store with another policy at its bounds than [`Overflow::EvictOldest`].
+    #[must_use]
+    pub fn with_overflow(mut self, overflow: Overflow) -> ConversationStore {
+        self.overflow = overflow;
+        self
+    }
+
+    /// Whether the store can take one more question in `conversation_id`, or a new conversation (`None`): always with
+    /// [`Overflow::EvictOldest`]; with [`Overflow::Refuse`], not past its bounds, in words.
+    /// `save` is not this store's choice (it keeps every conversation one way) and is ignored.
+    pub fn admits(&self, conversation_id: Option<&str>, save: bool) -> Result<(), SaveError> {
+        let _ = save;
+        let state = self.lock();
+        self.fits(&state, conversation_id)
+    }
+
+    fn fits(&self, state: &State, conversation_id: Option<&str>) -> Result<(), SaveError> {
+        if self.overflow == Overflow::EvictOldest {
+            return Ok(());
+        }
+        match conversation_id {
+            None if state.data.conversations.len() >= self.limits.conversations => {
+                return Err(SaveError(format!(
+                    "at most {} conversations are kept; delete one to start another.",
+                    self.limits.conversations
+                )));
+            }
+            Some(id)
+                if state
+                    .data
+                    .conversations
+                    .iter()
+                    .any(|c| c.id == id && c.messages.len() >= MAX_MESSAGES) =>
+            {
+                return Err(SaveError(format!(
+                    "a conversation holds at most {MAX_MESSAGES} messages; start a new one."
+                )));
+            }
+            _ => {}
+        }
+        if size_of(&state.data) >= self.limits.file_bytes {
+            return Err(SaveError(format!(
+                "the conversations take {} KB, the most kept; delete one to go on.",
+                self.limits.file_bytes / 1024
+            )));
+        }
+        Ok(())
     }
 
     /// Whether this store writes a file (`false`: memory only).
@@ -671,6 +745,9 @@ impl ConversationStore {
             }
         };
         let title = title_of(&first.text);
+        if let Err(e) = self.fits(&state, None) {
+            return (id, title, Err(e));
+        }
         let mut conversation = Conversation {
             id: id.clone(),
             title: title.clone(),
@@ -694,7 +771,7 @@ impl ConversationStore {
             conversation.messages.push(m);
         }
         conversation.updated_ms = now;
-        bound_conversation(conversation);
+        bound_conversation(conversation, self.overflow);
         Some(self.persist(&mut state, id))
     }
 
@@ -725,7 +802,7 @@ impl ConversationStore {
     pub fn adopt(&self, conversation: Conversation) -> Result<(), SaveError> {
         let mut conversation = conversation;
         conversation.messages.iter_mut().for_each(bound_message);
-        bound_conversation(&mut conversation);
+        bound_conversation(&mut conversation, self.overflow);
         if conversation.messages.is_empty() {
             return Err(SaveError("a conversation needs a question.".into()));
         }
@@ -741,13 +818,21 @@ impl ConversationStore {
                 conversation.id
             )));
         }
+        self.fits(&state, None)?;
+        if self.overflow == Overflow::Refuse && conversation.messages.len() > MAX_MESSAGES {
+            return Err(SaveError(format!(
+                "a conversation holds at most {MAX_MESSAGES} messages."
+            )));
+        }
         let id = conversation.id.clone();
         state.data.conversations.push(conversation);
         self.persist(&mut state, &id)
     }
 
     fn persist(&self, state: &mut State, keep: &str) -> Result<(), SaveError> {
-        bound_data(&mut state.data, keep, self.limits);
+        if self.overflow == Overflow::EvictOldest {
+            bound_data(&mut state.data, keep, self.limits);
+        }
         match &self.file {
             Some(file) => file.save(&state.data).map_err(|e| SaveError(e.to_string())),
             None => Ok(()),

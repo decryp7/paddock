@@ -347,3 +347,54 @@ fn delete_all_removes_every_chat_file_and_attachment_but_keeps_the_setting() {
     assert_eq!(chats.storage().chats, 0);
     assert_eq!(chats.storage().attachment_bytes, 0);
 }
+
+/// Coordinator follow-up: chats that are not saved are never dropped to make room. Past their bound a new one (or a question
+/// in a full set) is refused in words, through the assistant too, and every chat is still there.
+#[test]
+fn unsaved_chats_past_their_bound_are_refused_in_words_never_dropped() {
+    use paddock_assistant::{AssistantError, StoreLimits};
+    let data = tempfile::tempdir().unwrap();
+    let c = clock();
+    let chats = Arc::new(ChatStores::with_unsaved_limits(
+        SavedChats::open(data.path().join(CHATS_DIR), Arc::new(c.clone())),
+        Arc::new(c.clone()),
+        StoreLimits {
+            conversations: 2,
+            file_bytes: 1 << 20,
+        },
+    ));
+    let assistant = Assistant::with_conversations(
+        Arc::new(Ok1),
+        Tools::none(),
+        chats.clone(),
+        Arc::new(c.clone()),
+        AssistantConfig::new("Pitwall", "s"),
+    );
+    let (tx, rx) = channel();
+    let sink: Arc<dyn EventSink> = Arc::new(Sink(Mutex::new(tx)));
+    let mut ids = vec![];
+    for q in ["first", "second"] {
+        ids.push(assistant.send(ask(q, false), sink.clone()).unwrap().conversation_id);
+        loop {
+            let e = rx.recv_timeout(Duration::from_secs(30)).expect("the turn ended");
+            if matches!(e.event, AssistantEvent::Done { .. } | AssistantEvent::Error { .. }) {
+                break;
+            }
+        }
+        c.advance(Duration::from_secs(1));
+    }
+    let Err(AssistantError::Invalid(words)) = assistant.send(ask("third", false), sink.clone()) else {
+        panic!("a third unsaved chat must be refused");
+    };
+    assert!(words.contains("not saved") && words.contains("at most 2"), "{words}");
+    for id in &ids {
+        assert_eq!(chats.get(id).unwrap().messages.len(), 2, "nothing was dropped");
+    }
+    assert_eq!(chats.summaries().len(), 2);
+    // Moving a saved chat in is refused the same way; a saved new chat is still fine.
+    let (saved, _, ok) = chats.create(user("saved one"));
+    assert_eq!(ok, Ok(()));
+    assert!(matches!(chats.set_saved(&saved, false), Err(ChatsError::Save(w)) if w.contains("not saved")));
+    assert_eq!(chats.is_saved(&saved), Some(true), "it stays saved");
+    assistant.shutdown();
+}
