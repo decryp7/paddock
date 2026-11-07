@@ -127,11 +127,16 @@ impl LimitExceeded {
     }
 
     fn compose(&self, registry: &Registry, labels: Option<&dyn SettingLabels>) -> String {
+        // The id is for logs; a message built with the schema's words is for a person and shows the value instead.
+        let limit_is = match labels {
+            Some(_) => format!("the limit is {}.", self.limit),
+            None => format!("the limit ({}) is {}.", self.id, self.limit),
+        };
         let mut out = format!("The {} stopped: ", self.scope.word());
         if let Some(reached) = self.reached {
             out.push_str(&format!("it reached {}; ", reached.approx()));
         }
-        out.push_str(&format!("the limit ({}) is {}.", self.id, self.limit));
+        out.push_str(&limit_is);
         if let Some(path) = self.setting_path(registry) {
             let words = labels.and_then(|l| l.label(path)).map_or_else(
                 || path.to_string(),

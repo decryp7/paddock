@@ -60,3 +60,15 @@ package, **1.4b**, after IP1, on its own branch:
 | Format | The crate doc and a test say JSON/self-describing formats only (postcard fails) |
 | Text | `describe()` reads "rows: showing 501 to 503 of 1,204 (test.first)" |
 | Mutations | Both-rows-in-bytes and `AtLeast` outside `First{0}` are now killed (see the commit message) |
+
+## Review 2 of `d5f684c21`: what changed
+
+| Item | Change |
+|---|---|
+| P1 | `Cut::describe()` cannot overflow: the sums saturate; a window's start is clamped so `from + shown` fits u64; `check` refuses `from + shown` past u64 even with an unknown total (red first: debug overflow panic in `describe`) |
+| P2 | An index with a leading zero is not a field path (`groups[03]`) |
+| P2 | `Total::Unknown` doc says what makes it; `Cut::words_key()` gives the UI's word key (`first.unknown` is a page whose total is unknown) |
+| P2 | `LimitId`'s table logs an ERROR once when it is full; `LimitId::register` is called by the app composition (package 1.4b, the shell builder) |
+| P2 | `.and` documents that a list the aggregate already counted is counted again if re-added |
+| P2 | `limit_cases!` documents one module per registry |
+| P2 | `message_with` shows the limit's value, not the id (the id stays in the log form) |

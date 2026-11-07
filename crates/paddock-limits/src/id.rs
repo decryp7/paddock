@@ -114,6 +114,7 @@ pub(crate) struct Interner {
     known: HashSet<&'static str>,
     unknown: HashSet<&'static str>,
     cap: usize,
+    reported: bool,
 }
 
 impl Interner {
@@ -122,6 +123,7 @@ impl Interner {
             known: HashSet::new(),
             unknown: HashSet::new(),
             cap,
+            reported: false,
         }
     }
 
@@ -130,6 +132,14 @@ impl Interner {
             return Ok(found);
         }
         if self.unknown.len() >= self.cap {
+            // Once: a flood is one problem, not one line per key. A registered key is unaffected.
+            if !self.reported {
+                self.reported = true;
+                log::error!(
+                    "paddock-limits: {} unknown limit ids are known; later unknown ids are refused (register the registries with LimitId::register at start-up)",
+                    self.cap
+                );
+            }
             return Err(BadKey::Full);
         }
         let leaked: &'static str = Box::leak(key.to_owned().into_boxed_str());
@@ -536,6 +546,7 @@ mod tests {
         assert_eq!(t.parse("junk.k0"), Ok("junk.k0"));
         assert_eq!(t.parse("junk.new"), Err(BadKey::Full));
         assert!(BadKey::Full.to_string().contains("too many"));
+        assert!(t.reported, "the flood is logged once");
     }
 
     #[test]

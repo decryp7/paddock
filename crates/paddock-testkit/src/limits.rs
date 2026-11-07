@@ -182,7 +182,9 @@ macro_rules! limit_case {
 }
 
 /// Every case of a registry, as `#[test]`s: `name: "limit.id" => stop(..)` or `=> cut(..)` with the arguments of
-/// [`limit_case!`], plus `LIMIT_CASE_IDS` and the test that compares the ids with the registry. Once per module.
+/// [`limit_case!`], plus `LIMIT_CASE_IDS` and the test that compares the ids with the registry. **Once per module, with
+/// all of one registry's cases in it**: the comparison is against the whole registry, so a registry whose cases live in
+/// several modules is compared with `assert_cases_match` in one test over the union of their ids.
 #[macro_export]
 macro_rules! limit_cases {
     ($registry:expr; $( $name:ident : $id:literal => $kind:ident ( $($body:tt)* ) ),* $(,)?) => {
