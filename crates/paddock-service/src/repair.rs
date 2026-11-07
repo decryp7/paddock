@@ -265,6 +265,7 @@ pub struct Stepper {
     /// The last register call failed and the OS did not take the write (`NotAsWritten` is the one failure that may have landed).
     register_lost: bool,
     last_job: Option<Job>,
+    /// The polls of this cycle's wait so far (the fake clock's share of [`Timings::start_wait`]).
     polled: Duration,
     /// Looks of this cycle's judged wait so far (for [`Timings::judged_ceiling_polls`]).
     judged_polls: u32,
@@ -344,12 +345,13 @@ impl Stepper {
         }
     }
 
-    /// A new wait for the service begins (after each register): its backstop counts its own looks, and only a job seen
-    /// running in this wait makes the backstop say "still starting" (B1 re-review P1-A).
+    /// A new wait for the service begins (after each register): its backstop counts its own looks, only a job seen running in
+    /// this wait makes the backstop say "still starting" (B1 re-review P1-A), and a wait without a judge measures its own time.
     fn begin_wait(&mut self) {
         self.stage = Stage::Waiting;
         self.judged_polls = 0;
         self.saw_running = false;
+        self.polled = Duration::ZERO;
     }
 
     fn done(&mut self, mut say: Vec<Step>, outcome: RepairOutcome) -> Next {
@@ -2010,6 +2012,52 @@ mod tests {
             panic!("cycle 2 never ran: Failed, not {end:?}")
         };
         assert!(why.contains("never started after 3 checks"), "{why}");
+    }
+
+    /// The same class as P1-A, for the wait without a judge: the time a cycle waited is that cycle's. A cycle that waited and
+    /// was then refused must not shorten the next cycle's wait for its own registration.
+    #[test]
+    fn each_cycles_fixed_wait_is_its_own() {
+        let t = Timings {
+            start_poll: Duration::from_secs(1),
+            start_wait: Duration::from_secs(3),
+            ..Timings::default()
+        };
+        let mut s = Stepper::new(&t, 4);
+        s.start_register_only();
+        s.next(OsResult::RegisterOk);
+        s.next(settled(Job::NotRunning, false));
+        // Cycle 1: two seconds of looks, then the OS refuses the job.
+        for secs in [0, 1] {
+            assert!(matches!(
+                s.next(looked(false, Job::NotRunning, secs)).action,
+                Action::Pause(_)
+            ));
+            s.next(OsResult::Paused);
+        }
+        let n = s.next(looked(false, Job::Refused, 2));
+        assert_eq!(n.action, Action::Unregister, "{n:?}");
+        s.next(OsResult::Unregistered(Ok(())));
+        s.next(OsResult::Evicted(Ok(())));
+        s.next(OsResult::Gone { timed_out: false });
+        s.next(OsResult::Paused);
+        s.next(OsResult::RegisterOk);
+        s.next(settled(Job::NotRunning, false));
+        // Cycle 2 waits its own three seconds: three looks pause, the fourth ends the wait.
+        for secs in [0, 1, 2] {
+            let n = s.next(looked(false, Job::NotRunning, secs));
+            assert!(
+                matches!(n.action, Action::Pause(_)),
+                "cycle 2 ended at {secs} s: {n:?}"
+            );
+            s.next(OsResult::Paused);
+        }
+        let end = s.next(looked(false, Job::NotRunning, 3));
+        assert_eq!(
+            end.action,
+            Action::Done(RepairOutcome::Registered),
+            "{end:?}"
+        );
     }
 
     #[test]
