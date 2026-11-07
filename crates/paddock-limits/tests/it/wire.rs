@@ -561,3 +561,77 @@ fn a_quantity_of_the_wrong_shape_is_refused_with_a_reason() {
         Quantity::Count(3)
     );
 }
+
+/// Review 3: ADR 0063's MessagePack option and any bincode boundary carry a `Quantity` too: every kind, at its own width.
+#[test]
+fn every_quantity_survives_messagepack_and_bincode() {
+    let all = [
+        Quantity::Bytes(u64::MAX),
+        Quantity::Count(7),
+        Quantity::Ratio(u32::MAX),
+        Quantity::Millis(108_000),
+        Quantity::Percent(100),
+    ];
+    for q in all {
+        let packed = rmp_serde::to_vec(&q).unwrap();
+        assert_eq!(
+            rmp_serde::from_slice::<Quantity>(&packed).unwrap(),
+            q,
+            "messagepack {q:?}"
+        );
+        let named = rmp_serde::to_vec_named(&q).unwrap();
+        assert_eq!(
+            rmp_serde::from_slice::<Quantity>(&named).unwrap(),
+            q,
+            "messagepack, named {q:?}"
+        );
+        let fixed = bincode::serialize(&q).unwrap();
+        assert_eq!(
+            bincode::deserialize::<Quantity>(&fixed).unwrap(),
+            q,
+            "bincode {q:?}"
+        );
+        let compact = postcard::to_stdvec(&q).unwrap();
+        assert_eq!(
+            postcard::from_bytes::<Quantity>(&compact).unwrap(),
+            q,
+            "postcard {q:?}"
+        );
+    }
+}
+
+/// Review 3: a key that repeats is refused, not resolved by taking the last one.
+#[test]
+fn a_repeated_key_is_refused() {
+    let refused = |text: &str| {
+        serde_json::from_str::<Quantity>(text)
+            .unwrap_err()
+            .to_string()
+    };
+    assert!(refused(r#"{"kind":"bytes","kind":"count","n":1}"#).contains("duplicate field `kind`"));
+    assert!(refused(r#"{"kind":"count","n":1,"n":2}"#).contains("duplicate field `n`"));
+    assert_eq!(
+        serde_json::from_str::<Quantity>(r#"{"n":3,"kind":"count"}"#).unwrap(),
+        Quantity::Count(3)
+    );
+}
+
+/// Review 3: the aggregate counts cuts that may have been counted before, so its words say "up to".
+#[test]
+fn the_aggregate_says_up_to() {
+    let mut b = Bounded::complete(());
+    for i in 0..40 {
+        b = b.and(Cut::at_least(
+            &F5,
+            FieldPath::parse(&format!("l{i:02}")).unwrap(),
+            5,
+            6,
+        ));
+    }
+    let text = b.cuts()[31].describe();
+    assert!(text.contains("up to 40"), "{text}");
+    assert!(
+        text.contains("31") && text.contains("bounded.cuts"),
+        "{text}"
+    );
+}

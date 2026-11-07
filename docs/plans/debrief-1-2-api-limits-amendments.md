@@ -72,3 +72,13 @@ package, **1.4b**, after IP1, on its own branch:
 | P2 | `.and` documents that a list the aggregate already counted is counted again if re-added |
 | P2 | `limit_cases!` documents one module per registry |
 | P2 | `message_with` shows the limit's value, not the id (the id stays in the log form) |
+
+## Review 3 of `03f9a652e`: what changed
+
+| Item | Change |
+|---|---|
+| Quantity wire | The tag is read through a derived `Kind` (a name from JSON, an index from a compact format) and the number at the kind's own width (u32 ratio, u8 percentage, u64 otherwise); the `human` flag is gone. Round trips are tested for JSON, postcard, MessagePack (default and named) and bincode (red first: MessagePack failed for every kind, bincode for ratio and percentage) |
+| Repeated keys | `{"kind":"bytes","kind":"count"}` is `duplicate_field`, not the last one |
+| JSON arrays | `["bytes", 5]` is still accepted (compact formats write a struct as a sequence); documented on `Deserialize for Quantity` |
+| Aggregate words | The count can include lists counted before and added again, so `describe()` says "up to N" (`the value: the first 31 cuts of up to 40 are listed (bounded.cuts)`) |
+| Row helper | `LimitRow::stop` builds the usual stop row; 1.4b uses it for the other shared crates |

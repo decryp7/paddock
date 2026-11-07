@@ -144,3 +144,21 @@ fn the_stop_constructor_gives_a_row_that_passes_the_checks() {
     assert_eq!((ROWS[0].unit, ROWS[0].kind), (Unit::Millis, RowKind::Stop));
     assert!(ROWS[0].selections.is_empty());
 }
+
+/// `const` evaluation is not counted by coverage: the same constructor, called at run time.
+#[test]
+fn the_stop_constructor_also_works_at_run_time() {
+    let row = LimitRow::stop(
+        "kit.runtime",
+        Quantity::Count(5),
+        Quantity::Count(1),
+        Quantity::Count(9),
+        RowValue::ByRequest,
+        Remedy::Narrow,
+    );
+    assert_eq!(
+        (row.unit, row.kind, row.remedy),
+        (Unit::Count, RowKind::Stop, Remedy::Narrow)
+    );
+    assert_eq!(row.value, RowValue::ByRequest);
+}

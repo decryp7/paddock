@@ -20,4 +20,7 @@ paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 [dev-dependencies]
 proptest = "1"
 postcard = { version = "1", default-features = false, features = ["use-std"] }
+# ADR 0063 may carry the command wire as MessagePack: the quantity must read back from the compact formats.
+rmp-serde = "1"
+bincode = "1"
 serde_json = "1"

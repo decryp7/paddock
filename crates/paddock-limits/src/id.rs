@@ -380,77 +380,87 @@ impl Quantity {
     }
 }
 
+/// The tag of a [`Quantity`] on the wire: the name in JSON, the variant index in a compact format (the derive reads both).
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum Kind {
+    Bytes,
+    Count,
+    Ratio,
+    Millis,
+    Percent,
+}
+
 impl<'de> Deserialize<'de> for Quantity {
-    /// Reads `{"kind": "bytes", "n": 5}` from JSON and the same two fields in order from a compact format (postcard,
-    /// which cannot buffer an adjacently tagged enum); a percentage over 100 is refused.
+    /// Reads `{"kind": "bytes", "n": 5}` from JSON, and a compact format's fields in order (MessagePack, postcard, bincode)
+    /// with the number at the width the derived `Serialize` wrote (u32 for a ratio, u8 for a percentage, u64 otherwise). A
+    /// percentage over 100 is refused, and so is a key that repeats. A sequence is also accepted from JSON (`["bytes", 5]`):
+    /// compact formats write a struct as one, and telling them apart costs more than the harmless leniency.
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         use serde::de::{Error, IgnoredAny, MapAccess, SeqAccess, Visitor};
 
-        /// The variants in declaration order: a compact format writes the index instead of the name.
-        const KINDS: [&str; 5] = ["bytes", "count", "ratio", "millis", "percent"];
-
-        fn build<E: Error>(kind: &str, n: u64) -> Result<Quantity, E> {
-            match kind {
-                "bytes" => Ok(Quantity::Bytes(n)),
-                "count" => Ok(Quantity::Count(n)),
-                "millis" => Ok(Quantity::Millis(n)),
-                "ratio" => u32::try_from(n)
-                    .map(Quantity::Ratio)
-                    .map_err(|_| E::custom("a ratio does not fit 32 bits")),
-                "percent" if n <= 100 => Ok(Quantity::Percent(n as u8)),
-                "percent" => Err(E::custom(format!("a percentage is 0 to 100, not {n}"))),
-                other => Err(E::unknown_variant(
-                    other,
-                    &["bytes", "count", "ratio", "millis", "percent"],
-                )),
+        fn percent<E: Error>(n: u64) -> Result<Quantity, E> {
+            if n <= 100 {
+                Ok(Quantity::Percent(n as u8))
+            } else {
+                Err(E::custom(format!("a percentage is 0 to 100, not {n}")))
             }
         }
 
-        struct V {
-            human: bool,
+        /// A number read before its kind was known (a map's keys come in any order).
+        fn from_wide<E: Error>(kind: Kind, n: u64) -> Result<Quantity, E> {
+            match kind {
+                Kind::Bytes => Ok(Quantity::Bytes(n)),
+                Kind::Count => Ok(Quantity::Count(n)),
+                Kind::Millis => Ok(Quantity::Millis(n)),
+                Kind::Ratio => u32::try_from(n)
+                    .map(Quantity::Ratio)
+                    .map_err(|_| E::custom("a ratio does not fit 32 bits")),
+                Kind::Percent => percent(n),
+            }
         }
+
+        struct V;
         impl<'de> Visitor<'de> for V {
             type Value = Quantity;
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str("a quantity: a kind and a number")
             }
             fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Quantity, A::Error> {
-                let kind: String = if self.human {
-                    seq.next_element()?
-                        .ok_or_else(|| Error::invalid_length(0, &self))?
-                } else {
-                    let index: u32 = seq
-                        .next_element()?
-                        .ok_or_else(|| Error::invalid_length(0, &self))?;
-                    KINDS
-                        .get(index as usize)
-                        .map(|k| (*k).to_owned())
-                        .ok_or_else(|| Error::custom("an unknown quantity kind"))?
-                };
-                let n: u64 = seq
+                let kind: Kind = seq
                     .next_element()?
-                    .ok_or_else(|| Error::invalid_length(1, &self))?;
-                build(&kind, n)
+                    .ok_or_else(|| Error::invalid_length(0, &self))?;
+                let missing = || Error::invalid_length(1, &self);
+                Ok(match kind {
+                    Kind::Bytes => Quantity::Bytes(seq.next_element()?.ok_or_else(missing)?),
+                    Kind::Count => Quantity::Count(seq.next_element()?.ok_or_else(missing)?),
+                    Kind::Millis => Quantity::Millis(seq.next_element()?.ok_or_else(missing)?),
+                    Kind::Ratio => Quantity::Ratio(seq.next_element()?.ok_or_else(missing)?),
+                    Kind::Percent => {
+                        percent(u64::from(seq.next_element::<u8>()?.ok_or_else(missing)?))?
+                    }
+                })
             }
             fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Quantity, A::Error> {
-                let (mut kind, mut n): (Option<String>, Option<u64>) = (None, None);
+                let (mut kind, mut n): (Option<Kind>, Option<u64>) = (None, None);
                 while let Some(key) = map.next_key::<String>()? {
                     match key.as_str() {
+                        "kind" if kind.is_some() => return Err(Error::duplicate_field("kind")),
                         "kind" => kind = Some(map.next_value()?),
+                        "n" if n.is_some() => return Err(Error::duplicate_field("n")),
                         "n" => n = Some(map.next_value()?),
                         _ => {
                             map.next_value::<IgnoredAny>()?;
                         }
                     }
                 }
-                build(
-                    &kind.ok_or_else(|| Error::missing_field("kind"))?,
+                from_wide(
+                    kind.ok_or_else(|| Error::missing_field("kind"))?,
                     n.ok_or_else(|| Error::missing_field("n"))?,
                 )
             }
         }
-        let human = d.is_human_readable();
-        d.deserialize_struct("Quantity", &["kind", "n"], V { human })
+        d.deserialize_struct("Quantity", &["kind", "n"], V)
     }
 }
 
