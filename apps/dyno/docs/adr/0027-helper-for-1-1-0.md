@@ -217,8 +217,8 @@ Items & Extensions; switching it off there is the `NotRunning` state with its ow
   or the installed helper is older than the app's declared `MIN_HELPER_VERSION` (raised only when a helper fix must reach users):
   `Outdated`, with "Update the helper" (one prompt, the install again). Otherwise the newer bundled helper is offered, never
   forced, so most app updates ask nothing.
-- `.deb`: the package upgrades `/usr/bin/dyno-helper` and `postinst configure` runs `deb-systemd-invoke try-restart` (only if the
-  user enabled it). No prompt.
+- `.deb`: the package upgrades `/usr/bin/dyno-helper` and `postinst configure` runs `systemctl restart` (only if the user enabled
+  it; `prerm upgrade` has stopped it, so a `try-restart` would leave it off, as the 1.1.0 VM round found). No prompt.
 - A 0.x helper registered under the same label (ADR 0016 development builds) is replaced by `install`, which is idempotent and
   takes over the label, the service name and the data folder (re-created under the protected-location rule).
 - Rule 24 applies to the agent's own login service, not to the daemon: the daemon is a plist file run from a root-owned copy, so
