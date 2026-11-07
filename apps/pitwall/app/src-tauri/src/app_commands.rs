@@ -349,9 +349,9 @@ pub async fn start_repair_service(
     Ok(jobs::start(jobs.inner(), spec, channel_sink(on_event), move |ctx| {
         repair_job(
             ctx,
-            client,
             move |cancel| service_install::repair_blocking(&c, cancel),
             Arc::new(service_install::repair_step),
+            move || async move { state_json(&client).await },
         )
     }))
 }
@@ -361,14 +361,19 @@ pub async fn start_repair_service(
 const STEP_POLL: Duration = Duration::from_millis(500);
 
 /// The body of the repair job: `runner` does the blocking repair on a blocking thread, reading the `AtomicBool` that Cancel
-/// sets between its steps; `steps` names the step the repair is at, shown as the job's phase. Cancel shows "Cancelling" and
-/// waits for the repair to reach a safe step.
-async fn repair_job(
+/// sets between its steps; `steps` names the step the repair is at, shown as the job's phase; `state` reads the service
+/// state the job ends with (the OS's and the server's, so tests pass their own). Cancel shows "Cancelling" and waits for the
+/// repair to reach a safe step.
+async fn repair_job<S, F>(
     ctx: paddock_jobs::JobContext,
-    client: SharedClient,
     runner: impl FnOnce(&AtomicBool) -> Result<RepairOutcome, CommandError> + Send + 'static,
     steps: Arc<dyn Fn() -> Option<String> + Send + Sync>,
-) -> Result<Outcome, CommandError> {
+    state: S,
+) -> Result<Outcome, CommandError>
+where
+    S: FnOnce() -> F,
+    F: std::future::Future<Output = Result<Value, CommandError>>,
+{
     let cancel = Arc::new(AtomicBool::new(false));
     let flag = cancel.clone();
     let run = tokio::task::spawn_blocking(move || runner(&flag));
@@ -399,7 +404,7 @@ async fn repair_job(
     }
     .map_err(|e| internal(format!("repairing the service stopped unexpectedly: {e}")))??;
     match outcome {
-        RepairOutcome::Recovered | RepairOutcome::Registered => Ok(Outcome::Done(state_json(&client).await?)),
+        RepairOutcome::Recovered | RepairOutcome::Registered => Ok(Outcome::Done(state().await?)),
         RepairOutcome::NeedsApproval => Err(CommandError::new(
             ErrorCode::Forbidden,
             "macOS needs your approval: allow Pitwall in System Settings > General > Login Items.",
@@ -653,9 +658,11 @@ mod tests {
     /// Starts the repair job over `runner`, whose current step is what `step` holds, and returns its id with the events.
     fn start_repair(jobs: &Arc<Jobs>, runner: Runner, step: Arc<Mutex<Option<String>>>) -> (u64, Arc<Events>) {
         let (sink, events) = collector();
-        let client: SharedClient = Arc::new(CancelAware::new());
+        // The end state is the test's own: reading the real one would ask this machine's launchd and data folder (ER-14).
         let id = jobs::start(jobs, spec("repair-service", "t", "p"), sink, move |ctx| {
-            repair_job(ctx, client, runner, Arc::new(move || step.lock().unwrap().clone()))
+            repair_job(ctx, runner, Arc::new(move || step.lock().unwrap().clone()), || async {
+                Ok(serde_json::json!({ "installed": true }))
+            })
         });
         (id, events)
     }
@@ -663,14 +670,15 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn the_repair_job_shows_the_repairs_steps_and_ends_with_the_service_state() {
         let jobs = jobs();
-        let step = Arc::new(Mutex::new(None));
+        // The repair is at its step before the job starts: the job's first look at the step is immediate, and a later look
+        // needs the paused clock to move, which it does not while the repair blocks on its thread (tokio holds auto-advance
+        // while a blocking task runs). Setting the step inside the runner raced that first look.
+        let step = Arc::new(Mutex::new(Some("Removing the old registration".to_string())));
         let (at_step, mut at_step_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
         let (go_tx, go_rx) = std::sync::mpsc::channel::<()>();
-        let shared = step.clone();
         let (id, events) = start_repair(
             &jobs,
             Box::new(move |_| {
-                *shared.lock().unwrap() = Some("Removing the old registration".to_string());
                 at_step.send(()).unwrap();
                 // Held here until the test has seen the step as a phase (a handshake, no sleeping).
                 go_rx.recv().unwrap();
