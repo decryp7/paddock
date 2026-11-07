@@ -72,7 +72,7 @@ const SCROLL_STICK_PX = 24;
           <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-retry" (click)="store.load()">{{ t.retry }}</button>
         </div>
       } @else if (!store.turns().length && store.isLoaded()) {
-        <p class="hint" data-testid="assistant-empty">{{ t.empty }}</p>
+        <p class="hint" data-testid="assistant-empty">{{ emptyHint() ?? t.empty }}</p>
       }
       @for (turn of store.turns(); track $index; let last = $last) {
         <article class="turn" data-testid="assistant-turn">
@@ -118,7 +118,7 @@ const SCROLL_STICK_PX = 24;
                 <pd-status-glyph class="fail-icon" status="error" [size]="16" />
                 <div class="fail-body">
                   <p class="fail-title">{{ t.failedTitle }}</p>
-                  <p class="fail-cause" data-testid="assistant-error-cause">{{ t.failedCause }}</p>
+                  <p class="fail-cause" data-testid="assistant-error-cause">{{ failedCause() ?? t.failedCause }}</p>
                   @if (details() === $index) {
                     <p class="fail-details" data-testid="assistant-error-details">{{ err.message }}</p>
                   }
@@ -314,6 +314,11 @@ export class PdAssistant {
 
   /** Offer "Open AI settings" in the needs-AI state (the app's AI page). */
   readonly settingsLink = input(false);
+  /** The empty conversation's hint in the host app's words (default: the workbench's "tools of this app"). */
+  readonly emptyHint = input<string | null>(null);
+  /** The likely cause under a failed answer in the host app's words (default: check that Pitwall is running; an app that
+   *  is the engine itself says something else). */
+  readonly failedCause = input<string | null>(null);
   /** A step only the app can run (open or install Pitwall, update, change permissions), from the needs-AI state. */
   readonly step = output<NextStep>();
   /** The user chose "Open AI settings". */

@@ -24,7 +24,7 @@ interface Options extends MemoryAssistantOptions {
   readonly custom?: boolean;
 }
 
-async function open(options: Options = {}) {
+async function open(options: Options = {}, inputs: Readonly<Record<string, unknown>> = {}) {
   const backend = new MemoryAssistantBackend(options);
   const pitwall = options.pitwall === undefined ? new MemoryPitwallBackend({ state: { kind: 'ready', model: 'q', vision: false, contextTokens: 8192 } }) : options.pitwall;
   TestBed.resetTestingModule();
@@ -43,7 +43,7 @@ async function open(options: Options = {}) {
       }),
     ],
   });
-  const r = await render(PdAssistant);
+  const r = await render(PdAssistant, inputs);
   await settle(r.fixture);
   return { r, backend, pitwall };
 }
@@ -708,6 +708,17 @@ describe('PdAssistant', () => {
       await settle(r.fixture);
       expect(r.all('[data-testid=assistant-approval]')).toHaveLength(0);
       expect(r.all('[data-testid=assistant-tool-approval]').map((e) => e.textContent?.trim())).toEqual(['Always allowed', 'Allowed earlier']);
+    });
+
+    it("takes the host app's own words for the empty state and the likely cause of a failure (an app that is the engine)", async () => {
+      const own = { emptyHint: 'Ask a local model. Connected apps lend it their tools.', failedCause: 'Likely cause: the model stopped. Try again, or pick another model.' };
+      const { r } = await open({ pitwall: null }, own);
+      expect(text(r, 'assistant-empty')).toBe(own.emptyHint);
+      await press(r, await type(r, '/fail'), { key: 'Enter' });
+      await settle(r.fixture);
+      expect(text(r, 'assistant-error-cause')).toBe(own.failedCause);
+      const plain = await open();
+      expect(text(plain.r, 'assistant-empty')).toBe('Ask a question. The assistant can look things up with the tools of this app.');
     });
 
     it('shows an action with its arguments open and without Always allow; Allow once is said on its card', async () => {
