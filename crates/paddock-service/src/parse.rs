@@ -301,18 +301,21 @@ pub fn startup_switched_off(reg_query: &str, value: &str) -> bool {
         .is_some_and(|b| b & 1 == 1)
 }
 
-/// The service state number in `sc query` output (`STATE : 4  RUNNING`; numbers do not depend on the language).
+/// The service state number in `sc query` output (`STATE : 4  RUNNING`). The numbers do not depend on the display
+/// language but the labels do (German `ZUSTAND`), so when `STATE` is not there the state is the second indented
+/// `label : value` entry (after `TYPE`), whatever the label says.
 pub fn sc_state(sc_query: &str) -> Option<u32> {
-    sc_field(sc_query, "STATE")?
+    sc_value(sc_query, "STATE", 1)?
         .split_whitespace()
         .next()?
         .parse()
         .ok()
 }
 
-/// The process id in `sc queryex` output (`PID : 1234`); `None` when the service has no process (`0`).
+/// The process id in `sc queryex` output (`PID : 1234`); `None` when the service has no process (`0`). In another display
+/// language it is the seventh entry (`TYPE`, `STATE`, the two exit codes, `CHECKPOINT`, `WAIT_HINT`, `PID`).
 pub fn sc_pid(sc_queryex: &str) -> Option<u32> {
-    sc_field(sc_queryex, "PID")?
+    sc_value(sc_queryex, "PID", 6)?
         .split_whitespace()
         .next()?
         .parse()
@@ -384,16 +387,17 @@ pub fn parse_systemctl_show(stdout: &str) -> UnitShow {
     show
 }
 
-/// The exit codes in `sc query` output of a stopped service: `(WIN32_EXIT_CODE, SERVICE_EXIT_CODE)`.
+/// The exit codes in `sc query` output of a stopped service: `(WIN32_EXIT_CODE, SERVICE_EXIT_CODE)`; in another display
+/// language the third and the fourth entry.
 pub fn sc_exit_codes(sc_query: &str) -> Option<(u32, u32)> {
-    let first = |name: &str| {
-        sc_field(sc_query, name)?
+    let first = |name: &str, position: usize| {
+        sc_value(sc_query, name, position)?
             .split_whitespace()
             .next()?
             .parse()
             .ok()
     };
-    Some((first("WIN32_EXIT_CODE")?, first("SERVICE_EXIT_CODE")?))
+    Some((first("WIN32_EXIT_CODE", 2)?, first("SERVICE_EXIT_CODE", 3)?))
 }
 
 /// `ERROR_SERVICE_NEVER_STARTED`: stopped because it has not started since boot (demand or delayed start, or just created);
@@ -423,14 +427,26 @@ fn sc_field<'a>(text: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
-/// The program and start type in `sc qc` output.
+/// The value of the indented `label : value` lines of `sc` output, in order (the unindented `SERVICE_NAME:` header and the
+/// `[SC]` line are not entries; a wrapped flags line has no colon).
+fn sc_entries(text: &str) -> impl Iterator<Item = &str> {
+    text.lines()
+        .filter(|l| l.starts_with([' ', '\t']))
+        .filter_map(|l| l.split_once(':').map(|(_, v)| v.trim()))
+}
+
+/// The value labelled `label` (English), or the one at `position` among the entries when the labels are in another
+/// language.
+fn sc_value<'a>(text: &'a str, label: &str, position: usize) -> Option<&'a str> {
+    sc_field(text, label).or_else(|| sc_entries(text).nth(position))
+}
+
+/// The program and start type in `sc qc` output. In another display language they are the fourth and the second entry
+/// (`TYPE`, `START_TYPE`, `ERROR_CONTROL`, `BINARY_PATH_NAME`).
 pub fn sc_config(sc_qc: &str) -> (Option<String>, Option<u32>) {
-    let program = sc_qc.lines().find_map(|l| {
-        let (k, v) = l.split_once(':')?;
-        (k.trim() == "BINARY_PATH_NAME").then(|| windows_program_of(v.trim()))?
-    });
+    let program = sc_value(sc_qc, "BINARY_PATH_NAME", 3).and_then(windows_program_of);
     let start =
-        sc_field(sc_qc, "START_TYPE").and_then(|v| v.split_whitespace().next()?.parse().ok());
+        sc_value(sc_qc, "START_TYPE", 1).and_then(|v| v.split_whitespace().next()?.parse().ok());
     (program, start)
 }
 
@@ -467,6 +483,46 @@ mod tests {
     }
 
     use super::*;
+
+    /// `sc query`, `sc queryex` and `sc qc` as a localised Windows prints them: the labels change with the display language
+    /// (invented same-shape text), the line order and the numbers do not. From the Pitwall 1.1 work (a84c7fb5f); the exit
+    /// codes and the pid are read the same way.
+    const SC_QUERY_DE: &str = "\r\nSERVICE_NAME: Pitwall\r\n        TYP                : 10  WIN32_OWN_PROCESS\r\n        ZUSTAND            : 4  RUNNING\r\n                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\r\n        WIN32_EXITCODE     : 0  (0x0)\r\n        DIENST_EXITCODE    : 0  (0x0)\r\n";
+    const SC_QUERY_FR: &str = "\r\nSERVICE_NAME: Pitwall\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        ETAT               : 1  STOPPED\r\n        CODE_DE_SORTIE     : 1066  (0x42a)\r\n        CODE_SORTIE_SERVICE: 3  (0x3)\r\n";
+    const SC_QUERYEX_DE: &str = "\r\nSERVICE_NAME: Pitwall\r\n        TYP                : 10  WIN32_OWN_PROCESS\r\n        ZUSTAND            : 4  RUNNING\r\n                                (STOPPABLE, NOT_PAUSABLE, ACCEPTS_SHUTDOWN)\r\n        WIN32_EXITCODE     : 0  (0x0)\r\n        DIENST_EXITCODE    : 0  (0x0)\r\n        PRUEFPUNKT         : 0x0\r\n        WARTE_HINWEIS      : 0x0\r\n        PROZESS-ID         : 4321\r\n        FLAGS              :\r\n";
+    const SC_QC_DE: &str = "[SC] QueryServiceConfig ERFOLGREICH\r\n\r\nSERVICE_NAME: Pitwall\r\n        TYP                : 10  WIN32_OWN_PROCESS\r\n        START_TYP          : 4   DISABLED\r\n        FEHLERSTEUERUNG    : 1   NORMAL\r\n        BINAERPFADNAME     : \"C:\\Program Files\\Pitwall\\pitwall-server.exe\" --service\r\n        LADEREIHENFOLGE    :\r\n        ANZEIGENAME        : Pitwall\r\n";
+    const SC_QC_FR: &str = "[SC] QueryServiceConfig R\u{c9}USSITE\r\n\r\nSERVICE_NAME: Pitwall\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        TYPE_DEMARRAGE     : 2   AUTO_START  (DELAYED)\r\n        CONTROLE_ERREUR    : 1   NORMAL\r\n        NOM_CHEMIN_BINAIRE : C:\\Pitwall\\pitwall-server.exe --service\r\n";
+
+    #[test]
+    fn sc_output_is_read_in_other_display_languages_by_position_and_number() {
+        assert_eq!(sc_state(SC_QUERY_DE), Some(SC_RUNNING));
+        assert_eq!(sc_state(SC_QUERY_FR), Some(SC_STOPPED));
+        assert_eq!(sc_exit_codes(SC_QUERY_DE), Some((0, 0)));
+        assert_eq!(sc_exit_codes(SC_QUERY_FR), Some((SC_SERVICE_SPECIFIC, 3)));
+        assert_eq!(sc_pid(SC_QUERYEX_DE), Some(4321));
+        assert_eq!(
+            sc_config(SC_QC_DE),
+            (
+                Some("C:\\Program Files\\Pitwall\\pitwall-server.exe".into()),
+                Some(SC_DISABLED)
+            )
+        );
+        assert_eq!(
+            sc_config(SC_QC_FR),
+            (Some("C:\\Pitwall\\pitwall-server.exe".into()), Some(2))
+        );
+        // An English label still wins over position, and unindented lines (the header) are never entries.
+        assert_eq!(
+            sc_state("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n  STATE : 1  STOPPED\r\n"),
+            Some(SC_STOPPED)
+        );
+        assert_eq!(sc_state("STATE: 4  RUNNING"), Some(SC_RUNNING));
+        assert_eq!(sc_state("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n"), None);
+        assert_eq!(
+            sc_config("SERVICE_NAME: P\r\n  TYPE : 10  X\r\n  A : 2  Y\r\n"),
+            (None, Some(2))
+        );
+    }
 
     const LABEL: &str = "net.decryptology.pitwall.service";
     /// The real `launchctl print gui/501/net.decryptology.pitwall.service` of a Mac after an update (trimmed).

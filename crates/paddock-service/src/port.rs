@@ -184,8 +184,6 @@ pub trait AppService: Send {
 pub enum ElevatedEnd {
     /// The program exited with this code.
     Exited(u32),
-    /// The OS gave no process to watch (it finished before it could be): nothing says it failed.
-    NoProcess,
     /// It still ran when the backstop ceiling came; it was not stopped.
     StillRunning(Duration),
     /// The wait itself failed (Windows error code): nothing is known about the program.
@@ -226,18 +224,18 @@ pub fn wait_in_slices(
     }
 }
 
-/// What an elevated run's end means for the caller: the exit code, or, for a program still running at the ceiling, an
-/// error that says so (ER-19: a run that has not ended is not a failed one, and its caller must not report it failed).
+/// What an elevated run's end means for the caller: the exit code, or, for a program still running at the ceiling or a
+/// wait that broke, an error that says so (ER-19: a run that has not ended is not a failed one, and its caller must not
+/// report it failed). The words are the app's own neutral ones; each caller adds its own next step.
 pub fn elevated_result(program: &Path, end: ElevatedEnd) -> Result<i32, RegisterError> {
     match end {
         ElevatedEnd::Exited(code) => Ok(i32::try_from(code).unwrap_or(1)),
-        ElevatedEnd::NoProcess => Ok(0),
         ElevatedEnd::WaitFailed(code) => Err(RegisterError::Other(format!(
-            "waiting for {} failed (Windows error {code}); it may still be running. Check the service in the Services window, then press Repair again if it did not finish",
+            "waiting for {} failed (Windows error {code}); it may still be running and was not stopped",
             program.display()
         ))),
         ElevatedEnd::StillRunning(waited) => Err(RegisterError::Other(format!(
-            "{} was still running after {} minutes and has not been stopped; it may still finish. Check the service in the Services window, then press Repair again if it did not",
+            "{} was still running after {} minutes and has not been stopped; it may still finish",
             program.display(),
             waited.as_secs() / 60
         ))),
@@ -267,7 +265,6 @@ mod tests {
         assert_eq!(elevated_result(p, ElevatedEnd::Exited(0)), Ok(0));
         assert_eq!(elevated_result(p, ElevatedEnd::Exited(5)), Ok(5));
         assert_eq!(elevated_result(p, ElevatedEnd::Exited(u32::MAX)), Ok(1));
-        assert_eq!(elevated_result(p, ElevatedEnd::NoProcess), Ok(0));
         let why = elevated_result(p, ElevatedEnd::StillRunning(Duration::from_secs(900)))
             .unwrap_err()
             .to_string();
@@ -343,7 +340,9 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(
-            why.contains("Windows error 6") && why.contains("Repair again"),
+            why.contains("Windows error 6")
+                && !why.contains("Repair")
+                && !why.contains("Services window"),
             "{why}"
         );
     }

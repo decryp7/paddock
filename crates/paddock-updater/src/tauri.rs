@@ -289,6 +289,12 @@ impl UpdatesBuilder {
         self.installer.is_some()
     }
 
+    /// Whether the builder says how it installs: an installer, or [`no_install`](Self::no_install). [`install`] refuses one
+    /// that does not, so an app can check a branch of its wiring without starting the updater.
+    pub fn declares_install(&self) -> bool {
+        self.installer.is_some() || self.no_install
+    }
+
     /// What this build was bundled as (`nsis`, `msi`, `appimage`, `deb`, `rpm`, `app`): its package is preferred.
     pub fn installer_kind(mut self, kind: &str) -> Self {
         self.installer_kind = Some(kind.into());

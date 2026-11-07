@@ -669,6 +669,14 @@ fn a_builder_that_does_not_say_how_it_installs_is_refused_with_or_without_a_key(
             .has_installer()
     );
     assert!(!bare("8").no_install().has_installer());
+    // What `install` checks, without installing: an installer or the explicit declaration.
+    assert!(!bare("9").declares_install());
+    assert!(bare("10").no_install().declares_install());
+    assert!(
+        bare("11")
+            .installer(Arc::new(FakeInstaller::default()))
+            .declares_install()
+    );
     // An installer, or the explicit declaration, is enough; the last one said wins.
     for (n, b, can) in [
         (
