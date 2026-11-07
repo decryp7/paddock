@@ -187,14 +187,16 @@ fn refuse(stream: &mut impl Write, refusal: Refusal, why: &str) {
     );
 }
 
-/// Reads the key line and answers it. `Err` holds the cause for the log (never the key).
+/// Reads the key line, waiting at most `timeout` ([`HANDSHAKE_TIMEOUT`] when serving), and answers it. `Err` holds the cause
+/// for the log (never the key).
 fn handshake(
     stream: &mut impl Write,
     reader: &mut BufReader<Watched>,
     keys: &dyn KeyVerifier,
+    timeout: Duration,
 ) -> Result<String, String> {
     const SEND: &str = "send {\"key\": \"...\"} as the first line";
-    reader.get_mut().deadline = Some(Instant::now() + HANDSHAKE_TIMEOUT);
+    reader.get_mut().deadline = Some(Instant::now() + timeout);
     let (why, cause) = match read_line(reader, HANDSHAKE_MAX) {
         Ok(Line::Text(t)) => {
             let key = serde_json::from_str::<Value>(&t)
@@ -229,11 +231,8 @@ fn handshake(
             format!("the first line was longer than {HANDSHAKE_MAX} bytes"),
         ),
         Err(e) if e.kind() == io::ErrorKind::TimedOut => (
-            format!(
-                "no key line within {} s; {SEND}",
-                HANDSHAKE_TIMEOUT.as_secs()
-            ),
-            format!("no key line within {} s", HANDSHAKE_TIMEOUT.as_secs()),
+            format!("no key line within {} s; {SEND}", timeout.as_secs()),
+            format!("no key line within {} s", timeout.as_secs()),
         ),
         Err(e) => (
             "the app could not read the key line; try again".to_string(),
@@ -269,7 +268,7 @@ fn serve_connection(
     };
     let mut reader = BufReader::new(read_half);
     let mut writer: &TcpStream = stream;
-    let client = match handshake(&mut writer, &mut reader, keys) {
+    let client = match handshake(&mut writer, &mut reader, keys, HANDSHAKE_TIMEOUT) {
         Ok(client) => client,
         Err(cause) => {
             log::warn!(
@@ -510,7 +509,7 @@ mod tests {
             let mut reader =
                 BufReader::new(Watched::new(server_end, Arc::new(AtomicBool::new(false))).unwrap());
             let mut out = Vec::new();
-            assert!(handshake(&mut out, &mut reader, &keys).is_err());
+            assert!(handshake(&mut out, &mut reader, &keys, HANDSHAKE_TIMEOUT).is_err());
             serde_json::from_slice(&out).unwrap()
         };
         let lost = refusal(b"");
@@ -539,7 +538,7 @@ mod tests {
             BufReader::new(Watched::new(server_end, Arc::new(AtomicBool::new(true))).unwrap());
         let mut out = Vec::new();
         assert!(
-            handshake(&mut out, &mut reader, &keys)
+            handshake(&mut out, &mut reader, &keys, HANDSHAKE_TIMEOUT)
                 .unwrap_err()
                 .contains("listener stopped")
         );
@@ -565,5 +564,259 @@ mod tests {
                 "{bad}"
             );
         }
+    }
+
+    /// The app log, captured, so a test can check what a connection's lines say (ER-27).
+    struct Capture;
+    static LOGGED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, record: &log::Record<'_>) {
+            LOGGED
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(record.args().to_string());
+        }
+        fn flush(&self) {}
+    }
+
+    fn capture_logs() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let _ = log::set_logger(&Capture);
+            log::set_max_level(log::LevelFilter::Info);
+        });
+        assert!(log::logger().enabled(&log::Metadata::builder().build()));
+        log::logger().flush();
+    }
+
+    /// The captured line about connection `id` that holds `text`, if any.
+    fn logged(id: u64, text: &str) -> Option<String> {
+        let prefix = format!("paddock_mcp: connection #{id} ");
+        LOGGED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find(|l| l.starts_with(&prefix) && l.contains(text))
+            .cloned()
+    }
+
+    /// The id the listener gave the connection whose client end is `client` (from its "accepted" line).
+    fn id_of(client: &TcpStream) -> u64 {
+        let port = client.local_addr().unwrap().port();
+        let needle = format!(" from port {port} accepted");
+        let lines = LOGGED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let line = lines
+            .iter()
+            .find(|l| l.ends_with(&needle))
+            .unwrap_or_else(|| panic!("no accepted line for port {port}"));
+        line["paddock_mcp: connection #".len()..]
+            .split(' ')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    fn test_server() -> Arc<Server> {
+        Arc::new(Server::new(
+            "demo",
+            "1",
+            Arc::new(paddock_jobs::FakeClock::at_wall_ms(5)),
+            Arc::new(crate::audit::AuditLog::new(10)),
+            Arc::new(paddock_log::Redactor::new()),
+        ))
+    }
+
+    /// A client that sends `first` and reads every line until the listener ends the connection.
+    fn talk_until_the_end(addr: SocketAddr, first: &str) -> (TcpStream, Vec<String>) {
+        let mut s = TcpStream::connect(addr).unwrap();
+        s.write_all(format!("{first}\n").as_bytes()).unwrap();
+        s.shutdown(Shutdown::Write).unwrap();
+        let lines = std::io::BufRead::lines(BufReader::new(s.try_clone().unwrap()))
+            .map_while(Result::ok)
+            .collect();
+        (s, lines)
+    }
+
+    #[test]
+    fn every_connection_leaves_a_log_line_that_says_how_it_ended() {
+        capture_logs();
+        let keys = Arc::new(crate::keys::KeyStore::new());
+        let (_, closer) = keys.issue("log-test closer", 1).unwrap();
+        let (_, stays) = keys.issue("log-test stays", 1).unwrap();
+        let serving = serve_loopback(
+            test_server(),
+            keys,
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+        )
+        .unwrap();
+        // A wrong key: refused, and the log says it was the key (never the key itself).
+        let (wrong, replies) = talk_until_the_end(serving.addr(), r#"{"key":"pmk_wrong"}"#);
+        assert!(replies[0].contains("\"code\":\"key\""), "{replies:?}");
+        let line = logged(id_of(&wrong), "refused after").unwrap();
+        assert!(line.contains("the key is wrong or revoked"), "{line}");
+        assert!(!line.contains("pmk_"), "no key material in the log: {line}");
+        // A client that closes its side after pairing.
+        let (closed, replies) =
+            talk_until_the_end(serving.addr(), &json!({"key": closer}).to_string());
+        assert!(replies[0].contains("\"ok\":true"), "{replies:?}");
+        let id = id_of(&closed);
+        assert!(logged(id, "paired with client log-test closer").is_some());
+        let line = logged(id, "(log-test closer) ended after").unwrap();
+        assert!(line.contains("the client closed its side"), "{line}");
+        assert!(line.contains("0 read(s) interrupted"), "{line}");
+        // A client still connected when the listener stops.
+        let mut open = TcpStream::connect(serving.addr()).unwrap();
+        open.write_all(format!("{}\n", json!({"key": stays})).as_bytes())
+            .unwrap();
+        let mut ok = String::new();
+        std::io::BufRead::read_line(&mut BufReader::new(open.try_clone().unwrap()), &mut ok)
+            .unwrap();
+        assert!(ok.contains("\"ok\":true"), "{ok}");
+        let id = id_of(&open);
+        serving.stop();
+        let line = logged(id, "(log-test stays) ended after").unwrap();
+        assert!(line.contains("the listener stopped"), "{line}");
+    }
+
+    /// Makes closing `s` reset the connection (SO_LINGER 0), as a client that crashes does.
+    #[cfg(unix)]
+    fn reset_on_close(s: &TcpStream) {
+        use std::os::fd::AsRawFd;
+        let linger = libc::linger {
+            l_onoff: 1,
+            l_linger: 0,
+        };
+        // SAFETY: a valid socket and a correctly sized option value.
+        let r = unsafe {
+            libc::setsockopt(
+                s.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_LINGER,
+                (&raw const linger).cast::<libc::c_void>(),
+                libc::socklen_t::try_from(std::mem::size_of::<libc::linger>()).unwrap(),
+            )
+        };
+        assert_eq!(r, 0, "SO_LINGER");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_connection_reset_by_its_client_is_logged_as_failed_with_the_cause() {
+        capture_logs();
+        let keys = Arc::new(crate::keys::KeyStore::new());
+        let (_, key) = keys.issue("log-test reset", 1).unwrap();
+        let serving = serve_loopback(
+            test_server(),
+            keys,
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            4,
+        )
+        .unwrap();
+        let mut s = TcpStream::connect(serving.addr()).unwrap();
+        s.write_all(format!("{}\n", json!({"key": key})).as_bytes())
+            .unwrap();
+        let mut ok = String::new();
+        std::io::BufRead::read_line(&mut BufReader::new(s.try_clone().unwrap()), &mut ok).unwrap();
+        assert!(ok.contains("\"ok\":true"), "{ok}");
+        let id = id_of(&s);
+        reset_on_close(&s);
+        drop(s);
+        // Waits for the condition (the connection's line), not a time; stopping first could end the read before the reset
+        // arrives. The deadline is only a hang guard.
+        let guard = Instant::now() + Duration::from_secs(10);
+        let line = loop {
+            if let Some(line) = logged(id, "(log-test reset) ") {
+                break line;
+            }
+            assert!(Instant::now() < guard, "no line for the reset connection");
+            std::thread::yield_now();
+        };
+        serving.stop();
+        assert!(line.contains("failed after"), "{line}");
+        assert!(line.contains("ConnectionReset"), "{line}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_key_line_that_cannot_be_read_is_refused_as_a_handshake_problem() {
+        let keys = crate::keys::KeyStore::new();
+        let (server_end, client) = pair();
+        // Set up the read side first: a socket that was already reset may refuse its options (macOS: EINVAL).
+        let mut reader =
+            BufReader::new(Watched::new(server_end, Arc::new(AtomicBool::new(false))).unwrap());
+        reset_on_close(&client);
+        (&client).write_all(b"{").unwrap();
+        drop(client);
+        let mut out = Vec::new();
+        let cause = handshake(&mut out, &mut reader, &keys, HANDSHAKE_TIMEOUT).unwrap_err();
+        assert!(cause.contains("reading the key line failed"), "{cause}");
+        let refusal: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(refusal["code"], "handshake", "{refusal}");
+        assert!(
+            refusal["error"]
+                .as_str()
+                .unwrap()
+                .contains("could not read the key line"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn a_client_that_sends_no_key_line_in_time_is_refused_as_a_handshake_problem() {
+        let keys = crate::keys::KeyStore::new();
+        let (server_end, _client) = pair();
+        let mut reader =
+            BufReader::new(Watched::new(server_end, Arc::new(AtomicBool::new(false))).unwrap());
+        let mut out = Vec::new();
+        // A zero timeout ends the wait after the first empty slice.
+        let cause = handshake(&mut out, &mut reader, &keys, Duration::ZERO).unwrap_err();
+        assert!(cause.contains("no key line within 0 s"), "{cause}");
+        let refusal: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(refusal["code"], "handshake", "{refusal}");
+    }
+
+    /// More refused clients than drain places: the extra one is closed at once, and with nothing unread it still reads its
+    /// refusal and the end. Two silent clients hold the one place and the one drain (it waits for their key lines).
+    #[test]
+    fn a_refused_client_beyond_the_drains_still_reads_its_refusal() {
+        let keys = Arc::new(crate::keys::KeyStore::new());
+        let (_, key) = keys.issue("holder", 1).unwrap();
+        let serving = serve_loopback(
+            test_server(),
+            keys,
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            1,
+        )
+        .unwrap();
+        let mut holder = TcpStream::connect(serving.addr()).unwrap();
+        holder
+            .write_all(format!("{}\n", json!({"key": key})).as_bytes())
+            .unwrap();
+        let mut ok = String::new();
+        std::io::BufRead::read_line(&mut BufReader::new(holder.try_clone().unwrap()), &mut ok)
+            .unwrap();
+        assert!(ok.contains("\"ok\":true"), "{ok}");
+        let read_refusal = |s: &TcpStream| {
+            let lines: Vec<String> =
+                std::io::BufRead::lines(BufReader::new(s.try_clone().unwrap()))
+                    .map_while(Result::ok)
+                    .collect();
+            assert_eq!(lines.len(), 1, "the refusal, then the end: {lines:?}");
+            assert!(lines[0].contains("\"code\":\"busy\""), "{lines:?}");
+        };
+        // The first refused client keeps the one drain busy: it sends nothing and stays connected.
+        let drained = TcpStream::connect(serving.addr()).unwrap();
+        read_refusal(&drained);
+        let extra = TcpStream::connect(serving.addr()).unwrap();
+        read_refusal(&extra);
+        drop(serving);
     }
 }

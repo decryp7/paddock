@@ -266,6 +266,31 @@ enum PeerGoes {
     AfterReadingTheRequests,
     /// Answers the key line with this refusal line and closes.
     Refusing(&'static str),
+    /// Answers the key, waits until the host's first request has arrived and resets the connection: the bridge's read
+    /// fails instead of ending.
+    #[cfg(unix)]
+    ResettingAfterTheFirstRequest,
+}
+
+/// Makes closing `s` reset the connection (SO_LINGER 0).
+#[cfg(unix)]
+fn reset_on_close(s: &TcpStream) {
+    use std::os::fd::AsRawFd;
+    let linger = libc::linger {
+        l_onoff: 1,
+        l_linger: 0,
+    };
+    // SAFETY: a valid socket and a correctly sized option value.
+    let r = unsafe {
+        libc::setsockopt(
+            s.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_LINGER,
+            (&raw const linger).cast::<libc::c_void>(),
+            libc::socklen_t::try_from(std::mem::size_of::<libc::linger>()).unwrap(),
+        )
+    };
+    assert_eq!(r, 0, "SO_LINGER");
 }
 
 /// A fake app: a discovery file naming this test process (so the bridge trusts it) and a loopback port whose one connection
@@ -298,6 +323,16 @@ fn peer_that_goes(
             (&stream)
                 .write_all(format!("{answer}\n").as_bytes())
                 .unwrap();
+        }
+        #[cfg(unix)]
+        if let PeerGoes::ResettingAfterTheFirstRequest = goes {
+            (&stream)
+                .write_all(b"{\"ok\":true,\"client\":\"host\"}\n")
+                .unwrap();
+            // Blocks until the request is there (a condition, not a time), then closes with a reset (SO_LINGER 0), as an
+            // app that crashes does.
+            stream.peek(&mut [0u8; 1]).unwrap();
+            reset_on_close(&stream);
         }
         if let PeerGoes::AfterReadingTheRequests = goes {
             (&stream)
@@ -474,4 +509,111 @@ fn the_bridge_ends_quietly_when_the_host_stops_reading() {
         &mut Gone,
     )
     .unwrap();
+}
+
+#[cfg(unix)]
+/// The app's side failed (reset) rather than ended: every request the bridge carried is still answered. macOS reports the
+/// reset to the read, so the error names it; Linux may report a reset that arrives during the read as the end of input, so
+/// there only the answers are checked.
+#[test]
+fn the_bridge_answers_with_errors_when_the_app_resets_the_connection() {
+    let dir = tempfile::tempdir().unwrap();
+    let peer = peer_that_goes(dir.path(), PeerGoes::ResettingAfterTheFirstRequest, 0);
+    let mut out = Vec::new();
+    let err = bridge::run(
+        &discovery_path(dir.path()),
+        "pmk_x",
+        Cursor::new(four_lines().into_bytes()),
+        &mut out,
+    )
+    .unwrap_err()
+    .to_string();
+    peer.join().unwrap();
+    assert!(err.contains("Demo ended the connection"), "{err}");
+    #[cfg(target_os = "macos")]
+    assert!(
+        err.contains("Demo ended the connection ("),
+        "the cause is named: {err}"
+    );
+    let text = String::from_utf8(out).unwrap();
+    assert!(
+        !text.is_empty(),
+        "at least the request that was there gets an answer"
+    );
+    for l in text.lines() {
+        let r: Value = serde_json::from_str(l).unwrap();
+        assert!(
+            r["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("ended the connection before answering"),
+            "{r}"
+        );
+    }
+}
+
+/// A host that has gone when the bridge has errors to write for unanswered requests: the bridge still ends with its error.
+#[test]
+fn the_bridge_ends_with_its_error_when_the_host_is_gone_too() {
+    struct Gone;
+    impl Write for Gone {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let peer = peer_that_goes(dir.path(), PeerGoes::AfterReadingTheRequests, 3);
+    let err = bridge::run(
+        &discovery_path(dir.path()),
+        "pmk_x",
+        Cursor::new(four_lines().into_bytes()),
+        &mut Gone,
+    )
+    .unwrap_err();
+    peer.join().unwrap();
+    assert!(err.to_string().contains("3 request(s) unanswered"), "{err}");
+}
+
+/// A discovery file whose process is alive but whose port has nobody listening (the listener just closed): "isn't open".
+#[test]
+fn the_bridge_says_the_app_is_not_open_when_its_port_refuses_the_connection() {
+    struct Quiet;
+    impl log::Log for Quiet {
+        fn enabled(&self, _: &log::Metadata<'_>) -> bool {
+            true
+        }
+        fn log(&self, _: &log::Record<'_>) {}
+        fn flush(&self) {}
+    }
+    // The bridge's log line is built only when a logger listens.
+    let _ = log::set_logger(&Quiet);
+    log::set_max_level(log::LevelFilter::Warn);
+    let dir = tempfile::tempdir().unwrap();
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = closed.local_addr().unwrap().port();
+    drop(closed);
+    let me = paddock_proc::ProcessId::of(std::process::id()).unwrap();
+    let hint = Discovery {
+        pid: me.pid(),
+        started_us: me.started().as_micros(),
+        port,
+        app: "Demo".into(),
+        version: "1".into(),
+    };
+    std::fs::write(
+        discovery_path(dir.path()),
+        serde_json::to_string(&hint).unwrap(),
+    )
+    .unwrap();
+    let err = bridge::run(
+        &discovery_path(dir.path()),
+        "pmk_x",
+        Cursor::new(vec![]),
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("Demo isn't open"), "{err}");
 }
