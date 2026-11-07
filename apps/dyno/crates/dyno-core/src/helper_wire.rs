@@ -576,7 +576,7 @@ pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our
             bundled,
         } => status(
             HelperState::Outdated,
-            "The installed helper is an older build than this Dyno. Update the helper.".into(),
+            "The installed helper is another build than the one this Dyno ships. Update the helper.".into(),
             Some(info.version.clone()),
             recent,
             Some(format!(

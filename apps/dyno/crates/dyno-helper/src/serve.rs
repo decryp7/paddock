@@ -106,6 +106,9 @@ pub fn serve_with(paths: &HelperPaths, stop: Arc<AtomicBool>, early: Option<Earl
     }
     let log_gate = log.install();
     log::info!(version = crate::VERSION, host = format!("{:?}", paths.host).as_str(); "Helper: starting");
+    // The build id of this program is read now, not on the first `Build` request: the file may be replaced while the helper runs,
+    // and the id must be the one of the program that is running (it is cached for the process).
+    log::info!(build = dyno_platform::build_id::own_build_id().as_str(); "Helper: build");
     note(paths, None);
     note(paths, Some("starting"));
     let result = start(paths, stop, &log_gate, early);
