@@ -3804,6 +3804,7 @@ dependencies = [
  "paddock-files",
  "paddock-health",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-log",
  "paddock-mcp",
  "paddock-menu",

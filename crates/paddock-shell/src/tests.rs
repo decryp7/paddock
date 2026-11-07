@@ -127,18 +127,14 @@ fn building_a_shell_registers_the_shared_limit_registries() {
         "Limits",
         "0.0.0",
     ));
-    for row in [
-        &paddock_download::limits::SIZE,
-        &paddock_storage::limits::ENTRIES,
-        &paddock_updater::limits::DOWNLOAD,
-        &paddock_diag::limits::FILES,
+    for id in [
+        "download.size",
+        "storage.walk_entries",
+        "updater.download_bytes",
+        "diag.files",
+        "bounded.cuts",
     ] {
-        let parsed = LimitId::parse(row.id.as_str()).unwrap();
-        assert!(
-            std::ptr::eq(parsed.as_str(), row.id.as_str()),
-            "{} was not registered",
-            row.id
-        );
+        assert!(LimitId::is_registered(id), "{id} was not registered");
     }
     // An app's own registry joins through the builder.
     static APP: [paddock_limits::LimitRow; 1] = [paddock_limits::LimitRow::stop(
@@ -155,6 +151,7 @@ fn building_a_shell_registers_the_shared_limit_registries() {
         "0.0.0",
     ))
     .limits(Registry::new(&APP));
-    let parsed = LimitId::parse("app.limit_registered_by_the_builder").unwrap();
-    assert!(std::ptr::eq(parsed.as_str(), APP[0].id.as_str()));
+    assert!(LimitId::is_registered(
+        "app.limit_registered_by_the_builder"
+    ));
 }
