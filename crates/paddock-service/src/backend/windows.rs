@@ -23,7 +23,7 @@ use crate::parse::{
 use crate::paths::{REG, SC, WINDOWS_RUN_KEY, WINDOWS_STARTUP_APPROVED_KEY};
 use crate::port::{Elevator, RegisterError, System};
 use crate::render::{
-    event_source_commands, event_source_remove_command, sc_commands, scm_config,
+    ScmConfig, event_source_commands, event_source_remove_command, sc_commands, scm_config,
     windows_command_line,
 };
 use crate::spec::ServiceSpec;
@@ -300,6 +300,43 @@ impl WindowsService {
 }
 
 impl WindowsService {
+    /// Reads the registration back before anything starts it (ADR 0054 §1.1): the service manager must hold exactly the
+    /// command line that was written, the checked program with its arguments. A registration that does not, or that cannot be
+    /// read, is deleted and never started: the service runs as the system, so a program nobody checked must not run once.
+    fn verify_before_start(&mut self, config: &ScmConfig) -> Result<(), RegisterError> {
+        let held = match self.sys.run(SC, &["qc", &config.name]) {
+            Ok(o) if o.success() => crate::parse::sc_image_path(&o.stdout),
+            _ => None,
+        };
+        if held
+            .as_deref()
+            .is_some_and(|h| h.trim().eq_ignore_ascii_case(config.command_line.trim()))
+        {
+            log::info!(service = config.name.as_str(); "windows: the registration read back as written, before the start");
+            return Ok(());
+        }
+        let held = held.unwrap_or_else(|| "nothing readable".to_string());
+        let removed = match self.sys.run(SC, &["delete", &config.name]) {
+            Ok(o)
+                if o.success()
+                    || o.code == Some(sc_exit::DOES_NOT_EXIST)
+                    || o.code == Some(sc_exit::MARKED_FOR_DELETE) =>
+            {
+                "it was deleted and not started".to_string()
+            }
+            Ok(o) => format!(
+                "it could not be deleted ({}) and was not started",
+                o.reason()
+            ),
+            Err(e) => format!("it could not be deleted (sc.exe {e}) and was not started"),
+        };
+        log::error!(service = config.name.as_str(), held = held.as_str(), written = config.command_line.as_str(), removed = removed.as_str(); "windows: the registration read back is not what was written");
+        Err(RegisterError::Other(format!(
+            "the service {} reads back as {held}, not as the command line written ({}); {removed}",
+            config.name, config.command_line
+        )))
+    }
+
     /// Reads the privileges the SCM now keeps (`sc qprivs`) and refuses to start a service that holds any other than the
     /// declared ones (ADR 0027: `SeChangeNotifyPrivilege` only); nothing is checked when the spec declares none.
     fn check_privileges(&mut self, name: &str, declared: &[String]) -> Result<(), RegisterError> {
@@ -420,6 +457,8 @@ impl Backend for WindowsService {
             }
         }
         self.check_privileges(&config.name, &config.privileges)?;
+        // Created and configured; read back before the start, so a registration that is not what was written never runs.
+        self.verify_before_start(&config)?;
         match self.sys.run(SC, &["start", &config.name]) {
             // 1056: already running.
             Ok(o) if o.success() || o.code == Some(1056) => {}

@@ -142,6 +142,52 @@ impl FakeSystem {
         self
     }
 
+    /// Makes the service manager remember what `sc create` registered: `sc qc` reads back the `binPath=` written (as the real
+    /// `BINARY_PATH_NAME`), and `sc delete` forgets it (`sc qc` then exits 1060, no such service). A later `answer("sc qc", ..)`
+    /// still wins, so a test can show a registration that reads back as something else.
+    pub fn emulate_scm(&self) -> &Self {
+        let held: Arc<Mutex<BTreeMap<String, String>>> = Arc::default();
+        let store = held.clone();
+        self.on("sc create", move |args, _| {
+            let path = args
+                .iter()
+                .position(|a| a == "binPath=")
+                .and_then(|i| args.get(i + 1));
+            if let (Some(name), Some(path)) = (args.get(2), path) {
+                store
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(name.clone(), path.clone());
+            }
+            Ok(Output::code(0))
+        });
+        let store = held.clone();
+        self.on("sc delete", move |args, _| {
+            if let Some(name) = args.get(2) {
+                store
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(name);
+            }
+            Ok(Output::code(0))
+        });
+        self.on("sc qc", move |args, _| {
+            let path = args.get(2).and_then(|name| {
+                held.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get(name)
+                    .map(|p| (name.clone(), p.clone()))
+            });
+            Ok(match path {
+                Some((name, path)) => Output::ok(&format!(
+                    "[SC] QueryServiceConfig SUCCESS\r\n\r\nSERVICE_NAME: {name}\r\n        TYPE               : 10  WIN32_OWN_PROCESS\r\n        START_TYPE         : 2   AUTO_START  (DELAYED)\r\n        ERROR_CONTROL      : 1   NORMAL\r\n        BINARY_PATH_NAME   : {path}\r\n"
+                )),
+                None => Output::code(1060),
+            })
+        });
+        self
+    }
+
     /// Puts a file on the fake disk.
     pub fn put_file(&self, path: impl Into<PathBuf>, text: &str) -> &Self {
         self.lock().files.insert(path.into(), text.to_string());

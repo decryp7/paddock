@@ -234,6 +234,63 @@ fn sc_qc(start: &str, program: &str) -> Output {
     ))
 }
 
+/// The position of the first command starting with `prefix`.
+fn at(sys: &FakeSystem, prefix: &str) -> usize {
+    sys.commands()
+        .iter()
+        .position(|c| c.starts_with(prefix))
+        .unwrap_or_else(|| panic!("no {prefix} in {:?}", sys.commands()))
+}
+
+/// ADR 0054 §1.1, B6 review: the registration is created, configured and read back before anything starts it.
+#[test]
+fn a_service_is_created_configured_and_read_back_before_it_is_started() {
+    let sys = FakeSystem::new();
+    sys.emulate_scm();
+    let mut b = scm(&sys);
+    sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
+    b.register().unwrap();
+    let last_config = at(&sys, "sc failureflag");
+    let read_back = sys
+        .commands()
+        .iter()
+        .enumerate()
+        .position(|(i, c)| i > last_config && c.starts_with("sc qc"))
+        .unwrap_or_else(|| panic!("no read-back after the configuration: {:?}", sys.commands()));
+    assert!(at(&sys, "sc create") < last_config, "{:?}", sys.commands());
+    assert!(read_back < at(&sys, "sc start"), "{:?}", sys.commands());
+}
+
+/// A registration that reads back as another command line, or cannot be read back, is deleted and never started.
+#[test]
+fn a_registration_that_reads_back_wrong_is_deleted_and_never_started() {
+    for held in [
+        Some(sc_qc("2  AUTO_START", r"C:\Users\sam\dyno-helper.exe")),
+        Some(Output::code(5)),
+        None,
+    ] {
+        let sys = FakeSystem::new();
+        sys.emulate_scm();
+        if let Some(out) = held.clone() {
+            sys.answer("sc qc", out);
+        } else {
+            sys.answer("sc qc", Output::ok("[SC] QueryServiceConfig SUCCESS\n"));
+        }
+        let mut b = scm(&sys);
+        let e = b.register().unwrap_err();
+        assert!(
+            matches!(&e, RegisterError::Other(t) if t.contains("deleted and not started")),
+            "{held:?}: {e}"
+        );
+        let cmds = sys.commands();
+        assert!(cmds.iter().any(|c| c == "sc delete Dyno"), "{cmds:?}");
+        assert!(
+            !cmds.iter().any(|c| c.starts_with("sc start")),
+            "{held:?} started: {cmds:?}"
+        );
+    }
+}
+
 #[test]
 fn a_stopped_service_with_a_service_specific_code_reads_as_failed_with_that_code() {
     let sys = FakeSystem::new();
@@ -300,15 +357,17 @@ fn the_service_manager_is_the_origin_and_the_start_type_is_the_enabled_state() {
 }
 
 #[test]
-fn a_service_registered_with_another_program_is_not_as_written() {
+fn a_service_registered_with_another_program_is_deleted_before_it_starts() {
     let sys = FakeSystem::new();
     let mut b = scm(&sys);
     sys.answer("sc query", sc_query("4  RUNNING", "0", "0"));
     sys.answer("sc qc", sc_qc("2  AUTO_START", r"C:\Old\dyno-helper.exe"));
+    // Since the read-back comes before the start, another program is never started and never reaches the inspection.
     match b.register() {
-        Err(RegisterError::NotAsWritten(look)) => assert_eq!(look.points_here, Some(false)),
+        Err(RegisterError::Other(why)) => assert!(why.contains(r"C:\Old\dyno-helper.exe"), "{why}"),
         other => panic!("{other:?}"),
     }
+    assert!(!sys.commands().iter().any(|c| c.starts_with("sc start")));
 }
 
 #[test]
@@ -329,6 +388,8 @@ fn a_service_the_scm_reports_disabled_after_it_was_created_is_not_as_written() {
 fn a_service_the_scm_does_not_know_after_sc_create_succeeded_is_not_as_written() {
     let sys = FakeSystem::new();
     let mut b = scm(&sys);
+    // It read back as written before the start, and is gone afterwards.
+    sys.answer("sc qc", sc_qc("2  AUTO_START", SVC_EXE));
     sys.answer("sc query", Output::code(1060));
     match b.register() {
         Err(RegisterError::NotAsWritten(look)) => {

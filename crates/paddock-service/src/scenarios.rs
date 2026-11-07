@@ -1310,6 +1310,7 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
         .unwrap();
     const EVENT_KEY: &str = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\Pitwall";
     let exe = r"C:\Program Files\Pitwall\pitwall-server.exe";
+    sys.emulate_scm();
     let mut b = WindowsService::new(svc.clone(), Target::exe(exe), Box::new(sys.clone()));
     b.register().unwrap();
     assert_eq!(
@@ -1326,6 +1327,8 @@ fn the_windows_service_is_created_with_sc_and_its_errors_are_read_by_number() {
             "sc failure Pitwall reset= 86400 actions= restart/10000/restart/60000/restart/300000"
                 .to_string(),
             "sc failureflag Pitwall 1".to_string(),
+            // Read back before the start: a registration that is not what was written never runs (ADR 0054 section 1.1).
+            "sc qc Pitwall".to_string(),
             "sc start Pitwall".to_string(),
             // The read-back (ADR 0054 section 1.1).
             "sc query Pitwall".to_string(),

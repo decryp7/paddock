@@ -450,6 +450,12 @@ pub fn sc_config(sc_qc: &str) -> (Option<String>, Option<u32>) {
     (program, start)
 }
 
+/// The whole command line the service manager starts (`BINARY_PATH_NAME` in `sc qc` output, the fourth entry in another display
+/// language), as it holds it: the program and its arguments.
+pub fn sc_image_path(sc_qc: &str) -> Option<String> {
+    sc_value(sc_qc, "BINARY_PATH_NAME", 3).map(str::to_string)
+}
+
 /// `sc.exe` exit codes (it exits with the Win32 error).
 pub mod sc_exit {
     /// Access denied: needs administrator rights.
