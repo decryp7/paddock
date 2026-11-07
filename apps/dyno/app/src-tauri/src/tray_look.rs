@@ -52,7 +52,7 @@ pub fn short_label(spec: &ItemSpec) -> String {
         Metric::Memory | Metric::MemoryPressure => "MEM".into(),
         Metric::Swap => "SWP".into(),
         Metric::DiskActivity | Metric::DiskFree => "DSK".into(),
-        Metric::NetworkUp | Metric::NetworkDown => "NET".into(),
+        Metric::NetworkUp | Metric::NetworkDown | Metric::NetworkBoth => "NET".into(),
         Metric::GpuLoad => "GPU".into(),
         Metric::Temperature => "TMP".into(),
         Metric::Fan => "FAN".into(),
@@ -66,6 +66,7 @@ fn net_dir(m: &Metric) -> Option<NetDir> {
     match m {
         Metric::NetworkUp => Some(NetDir::Up),
         Metric::NetworkDown => Some(NetDir::Down),
+        Metric::NetworkBoth => Some(NetDir::Both),
         _ => None,
     }
 }
@@ -318,6 +319,14 @@ mod tests {
         assert!(matches!(
             mac_kind(&spec(Metric::NetworkUp, Glyph::Graph), 8),
             mb::Kind::Network(NetDir::Up)
+        ));
+        assert!(matches!(
+            mac_kind(&spec(Metric::NetworkBoth, Glyph::Number), 8),
+            mb::Kind::Network(NetDir::Both)
+        ));
+        assert!(matches!(
+            px_kind(&spec(Metric::NetworkBoth, Glyph::Graph)),
+            px::Kind::Network(NetDir::Both)
         ));
         assert!(matches!(
             px_kind(&spec(Metric::NetworkUp, Glyph::Number)),

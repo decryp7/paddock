@@ -251,7 +251,7 @@ export class WidgetView {
   protected readonly sparkFormat = computed<(v: number) => string>(() => {
     if (this.percent()) return formatPercent;
     const m = this.widget().metric;
-    if (m === 'networkDown' || m === 'networkUp') return formatRate;
+    if (m === 'networkDown' || m === 'networkUp' || m === 'networkBoth') return formatRate;
     const unit = this.reading().unit;
     return (v) => `${formatNumber(v)} ${unit}`.trim();
   });

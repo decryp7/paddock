@@ -18,6 +18,19 @@ pub enum NetDir {
     Up,
     /// Bytes per second received.
     Down,
+    /// Both, upload over download.
+    Both,
+}
+
+impl NetDir {
+    /// The rows the item draws, top to bottom: `true` is the upload row. One row is centred; two are stacked.
+    pub fn rows(self) -> &'static [bool] {
+        match self {
+            NetDir::Up => &[true],
+            NetDir::Down => &[false],
+            NetDir::Both => &[true, false],
+        }
+    }
 }
 
 /// A metric an icon can draw.

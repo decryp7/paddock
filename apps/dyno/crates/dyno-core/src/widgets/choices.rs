@@ -201,7 +201,8 @@ mod tests {
     #[test]
     fn the_menu_bar_offers_every_metric_with_a_title() {
         let c = widget_choices(TrayPlatform::Mac, 18);
-        assert_eq!(c.menu_bar_metrics.len(), 13);
+        assert_eq!(c.menu_bar_metrics.len(), 14);
+        assert!(c.menu_bar_metrics.iter().any(|m| m.metric == Metric::NetworkBoth && m.title == "Network (up and down)"));
         assert_eq!(c.menu_bar_metrics[1].title, "CPU per core");
         assert_eq!(Metric::Process("chrome".into()).title(), "Process chrome");
     }

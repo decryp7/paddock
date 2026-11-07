@@ -192,6 +192,7 @@ describe('mockMetricReading', () => {
     expect(mockMetricReading(query('diskFree'), system)).toMatchObject({ text: '40', unit: '%', reason: null });
     expect(mockMetricReading(query('networkDown'), system)).toMatchObject({ text: '2.5', unit: 'MB/s', percent: null, reason: null });
     expect(mockMetricReading(query('networkUp'), system)).toMatchObject({ text: '800', unit: 'B/s' });
+    expect(mockMetricReading(query('networkBoth'), system)).toMatchObject({ text: '2.5', unit: 'MB/s' });
   });
 
   it('says why when the disk reports no busy time', () => {

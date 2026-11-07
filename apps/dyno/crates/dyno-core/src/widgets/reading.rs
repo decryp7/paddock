@@ -133,6 +133,10 @@ pub fn read_metric(metric: &Metric, update: &LiveUpdate, thresholds: &Thresholds
         },
         Metric::NetworkDown => rate_reading(s.network_totals().0, thresholds),
         Metric::NetworkUp => rate_reading(s.network_totals().1, thresholds),
+        Metric::NetworkBoth => {
+            let (down, up) = s.network_totals();
+            rate_reading(down + up, thresholds)
+        }
         Metric::GpuLoad => match s.gpu.value() {
             Some(g) => percent_reading(f64::from(g.utilization), thresholds),
             None => unavailable("No GPU load is reported here."),

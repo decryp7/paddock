@@ -555,12 +555,17 @@ pub fn render(kind: &Kind, r: &Reading, state: State, text: &dyn TextRaster, sca
         Kind::Network(dir) => {
             let l = net_layout(text);
             let cap = text.cap_height(&PAIR);
-            let (bps, up) = match dir {
-                super::NetDir::Up => (r.up, true),
-                super::NetDir::Down => (r.down, false),
-            };
-            {
-                let b = snap(12.0, s);
+            let rows = dir.rows();
+            for (row, &up) in rows.iter().enumerate() {
+                let bps = if up { r.up } else { r.down };
+                let b = snap(
+                    match (rows.len(), row) {
+                        (1, _) => 12.0,
+                        (_, 0) => 7.5,
+                        _ => 16.5,
+                    },
+                    s,
+                );
                 let mid = b - cap / 2.0;
                 let (a0, a1) = (0.0, l.arrow);
                 if up {
@@ -638,6 +643,7 @@ mod tests {
             },
             Kind::Network(crate::tray::NetDir::Up),
             Kind::Network(crate::tray::NetDir::Down),
+            Kind::Network(crate::tray::NetDir::Both),
             Kind::Temperature,
         ]
     }
@@ -767,6 +773,12 @@ mod tests {
             // Its own rate and its arrow do show.
             assert_ne!(draw(NetDir::Up, &at(5e3, 0.0)), draw(NetDir::Up, &at(7e7, 0.0)));
             assert_ne!(draw(NetDir::Up, &at(5e3, 5e3)), draw(NetDir::Down, &at(5e3, 5e3)));
+            // The combined item changes when either rate changes, and differs from both single items.
+            let both = |r: &Reading| draw(NetDir::Both, r);
+            assert_ne!(both(&at(5e3, 5e3)), both(&at(7e7, 5e3)), "both follows up at {scale}x");
+            assert_ne!(both(&at(5e3, 5e3)), both(&at(5e3, 7e7)), "both follows down at {scale}x");
+            assert_ne!(both(&at(5e3, 5e3)), draw(NetDir::Up, &at(5e3, 5e3)));
+            assert_ne!(both(&at(5e3, 5e3)), draw(NetDir::Down, &at(5e3, 5e3)));
         }
     }
 }

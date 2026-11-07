@@ -790,10 +790,7 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             }
         }
         Kind::Network(dir) => {
-            let (bps, up) = match dir {
-                super::NetDir::Up => (r.up, true),
-                super::NetDir::Down => (r.down, false),
-            };
+            let rows = dir.rows();
             // 16 and 20: a log meter with an arrow; 22 and up: a line of small numerals with a unit letter.
             let arrow = |cv: &mut Canvas, x: f32, y: f32, w: f32, up: bool| {
                 let h = (w / 2.0).ceil();
@@ -807,8 +804,13 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             if l.size <= 20 {
                 let aw: f32 = if s <= 16 { 5.0 } else { 6.0 };
                 let mh = if s <= 16 { 3 } else { 4 };
-                {
-                    let y = s / 2 - mh / 2;
+                for (row, &up) in rows.iter().enumerate() {
+                    let bps = if up { r.up } else { r.down };
+                    let y = match (rows.len(), row) {
+                        (1, _) => s / 2 - mh / 2,
+                        (_, 0) => s / 4 - mh / 2,
+                        _ => s * 3 / 4 - mh / 2,
+                    };
                     let ah = (aw / 2.0).ceil();
                     arrow(&mut cv, 0.0, y as f32 + (mh as f32 - ah) / 2.0, aw, up);
                     let v = if state == State::Unavailable { None } else { Some(level(bps)) };
@@ -816,8 +818,13 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
                 }
             } else {
                 let n = l.small;
-                {
-                    let y = (s - n.h) / 2;
+                for (row, &up) in rows.iter().enumerate() {
+                    let bps = if up { r.up } else { r.down };
+                    let y = match (rows.len(), row) {
+                        (1, _) => (s - n.h) / 2,
+                        (_, 0) => (s / 2 - n.h) / 2,
+                        _ => s / 2 + (s / 2 - n.h) / 2,
+                    };
                     let aw = (n.w + 1) as f32;
                     arrow(&mut cv, 0.0, y as f32 + (n.h as f32 - aw / 2.0) / 2.0, aw, up);
                     let (text, unit) = if state == State::Unavailable {
@@ -1230,6 +1237,10 @@ mod tests {
                 draw(NetDir::Down, &at(0.0, 7e7)),
                 "down shows down at {size}"
             );
+            let both = |r: &Reading| draw(NetDir::Both, r);
+            assert_ne!(both(&at(5e3, 5e3)), both(&at(7e7, 5e3)), "both follows up at {size}");
+            assert_ne!(both(&at(5e3, 5e3)), both(&at(5e3, 7e7)), "both follows down at {size}");
+            assert_ne!(both(&at(5e3, 5e3)), draw(NetDir::Up, &at(5e3, 5e3)), "both is not up at {size}");
         }
     }
 }
