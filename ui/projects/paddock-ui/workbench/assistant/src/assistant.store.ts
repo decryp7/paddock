@@ -232,6 +232,8 @@ export const AssistantStore = signalStore(
           draft: text,
           failure: assistantMessage(e, $localize`:@@pd.wb.assistant.err.send:The question could not be sent.`),
           turns: store.turns().slice(0, -1),
+          // A question that was not taken never names the conversation.
+          ...(conversationId ? {} : { pendingTitle: null }),
         });
       }
     };

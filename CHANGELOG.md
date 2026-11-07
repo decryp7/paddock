@@ -9,6 +9,7 @@ Conventional Commits; one semver tag for the whole repo.
 - `ConversationStore::adopt` takes a conversation in with its id (a chat moved between saved and unsaved); it refuses an id it holds and a conversation without a question.
 - Public for any store: `conversation_title`, `StoredMessage::bounded` and `history_of` (what the model reads; `ConversationStore::history` uses it).
 - `Overflow` and `ConversationStore::with_overflow`: `EvictOldest` (the default, unchanged) or `Refuse`, which never drops a conversation or a message to make room and refuses in words instead. New port method `Conversations::admits(conversation_id, save)` (default: admits everything); `Assistant::send` asks it first and refuses a question the store cannot take (`AssistantError::Invalid` with the store's words) before anything is kept or a turn starts. Only the workbench demo uses the evicting default.
+- Fixed: a question the engine refuses no longer leaves its words as the pane's heading; a new conversation is "New conversation" again.
 - `<pd-assistant>` gains the `activeChange` output (the open conversation's id, `null` for a new one), so a host keeps per-chat state beside the pane.
 
 ### `paddock-assistant`: the conversation store is a port, with a store in memory (ADR 0023 WP-2b)

@@ -125,6 +125,8 @@ describe('AssistantStore', () => {
     expect(store.turns()).toHaveLength(0);
     expect(store.failure()).toBe('The assistant is answering already.');
     expect(store.run()).toBe('idle');
+    // A refused question never names the conversation (round-5 review): the heading is "New conversation" again.
+    expect(store.title()).toBe('New conversation');
     store.dismissFailure();
     expect(store.failure()).toBeNull();
   });
