@@ -1792,11 +1792,16 @@ let assistant = Assistant::new(provider, tools, store, clock, AssistantConfig::n
 paddock_assistant::tauri::manage(app.handle(), assistant);                  // commands: `paddock_assistant::tauri::COMMANDS`
 ```
 
-- `AssistantTool`: `spec` (name, description, JSON schema), `access` (`ReadOnly` or `Write`), `budget` (calls per turn, result size),
-  `describe` (the call as the user reads it), `call`. A `Write` tool is offered to the model only when the user ticked "Allow
-  actions" for the message and each call waits for `assistant_approve_tool` (timeout on the clock). Tools never panic the turn.
-- `run`: rounds, tool calls, tokens and wall time are budgets (`Budgets`); the last round has tools off; a call that cannot be read,
-  names an unknown tool or misses a required argument is reported to the model and never run; Stop acts within a read slice.
+- `AssistantTool`: `spec` (name, description, JSON schema), `access` (`ReadOnly`, `Write` or `Destructive`), `budget` (calls per
+  turn, result size), `describe` (the call as the user reads it), `call`. A writing tool is offered to the model only when the user
+  ticked "Allow actions" for the message. Tools never panic the turn. `Assistant::set_tools` swaps the set for the next turn.
+- `ApprovalPolicy` (ADR 0023 WP-2a): which calls wait for `assistant_approve_tool` (`allowOnce`, `alwaysAllow` when the card
+  offers it, `deny`). `DefaultPolicy` asks every call of a writing tool and nothing else; Pitwall's asks the first time per tool,
+  remembers, and asks an action every call. Every call that ran says how it was approved (`approval`).
+- `run`: rounds, tool calls and tokens are budgets (`Budgets`), wall time and the approval wait too unless set to `None`; the last
+  round has tools off; a call that cannot be read, names an unknown tool or misses a required argument is reported to the model and
+  never run; call ids are unique over the conversation; calls come from the prompted protocol or natively (`ToolCall::native`);
+  Stop acts within a read slice.
 - `ConversationStore`: `VersionedFile`; a damaged file gives defaults and one problem, a newer file is never touched; bounds on
   conversations, messages, text, data and file size.
 - Commands (`<area>_<verb>`): `assistant_send`, `assistant_stop`, `assistant_approve_tool`, `assistant_conversations`,

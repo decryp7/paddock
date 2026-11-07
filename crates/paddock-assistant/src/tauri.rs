@@ -17,6 +17,7 @@
 // `CommandError` is the family's one command error (plan X28); its size is its business, not this adapter's.
 #![allow(clippy::result_large_err)]
 
+use crate::approval::ApprovalChoice;
 use crate::conversation::{Conversation, ConversationSummary};
 use crate::event::{EVENT as EVENT_NAME, Envelope, EventSink};
 use crate::service::{Assistant, AssistantError, AssistantInfo, SendAck, SendRequest};
@@ -64,6 +65,7 @@ fn error(e: AssistantError) -> CommandError {
         AssistantError::NotFound => CommandError::not_found(message),
         AssistantError::Busy => CommandError::busy(message),
         AssistantError::NotWaiting => CommandError::not_found(message),
+        AssistantError::NotOffered => CommandError::invalid(message),
         AssistantError::Failed(_) => CommandError::failed(message),
     }
 }
@@ -106,16 +108,16 @@ pub async fn assistant_stop<R: Runtime>(
     Ok(assistant_of(&app)?.stop(&conversation_id))
 }
 
-/// Answers the write waiting in the conversation's run.
+/// Answers the call waiting in the conversation's run with the user's choice (`allowOnce`, `alwaysAllow`, `deny`).
 #[::tauri::command]
 pub async fn assistant_approve_tool<R: Runtime>(
     app: AppHandle<R>,
     conversation_id: String,
     call_id: String,
-    approved: bool,
+    choice: ApprovalChoice,
 ) -> Result<(), CommandError> {
     assistant_of(&app)?
-        .approve(&conversation_id, &call_id, approved)
+        .approve(&conversation_id, &call_id, choice)
         .map_err(error)
 }
 

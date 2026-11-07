@@ -485,13 +485,13 @@ describe('PdAssistant', () => {
       expect(text(r, 'assistant-approval-args')).toBe('No arguments');
       expect(r.one('[data-testid=assistant-allow]').classList.contains('pd-btn--sm')).toBe(false);
       expect(r.one('[data-testid=assistant-decline]').classList.contains('pd-btn--sm')).toBe(false);
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: { path: '/x' } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toContain('"path": "/x"');
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: { big: 'y'.repeat(3000) } });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args').endsWith('…')).toBe(true);
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 's', input: undefined });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 's', input: undefined });
       await settle(r.fixture);
       expect(text(r, 'assistant-approval-args')).toBe('No arguments');
     });
@@ -529,7 +529,7 @@ describe('PdAssistant', () => {
       const { r, backend } = await open();
       r.one<HTMLInputElement>('[data-testid=assistant-allow-actions]').click();
       await press(r, await type(r, '/write'), { key: 'Enter' });
-      backend.emit('m1', { type: 'approvalNeeded', destructive: false, callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
+      backend.emit('m1', { type: 'approvalNeeded', destructive: false, remember: false, callId: 'call_2', name: 'erase', summary: 'Erase everything', input: {} });
       await settle(r.fixture);
       const allow = r.one('[data-testid=assistant-allow]');
       const decline = r.one('[data-testid=assistant-decline]');

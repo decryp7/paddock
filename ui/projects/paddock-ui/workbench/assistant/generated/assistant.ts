@@ -48,6 +48,10 @@ text: string, };
 
 export type ToolOutcome = "declined" | "stopped";
 
+export type ApprovalChoice = "allowOnce" | "alwaysAllow" | "deny";
+
+export type Approval = "notAsked" | "once" | "always" | "remembered";
+
 export type StoredError = { 
 /**
  * One sentence for the user.
@@ -107,6 +111,10 @@ destructive?: boolean,
  * For a tool message: the user declined the call or stopped the turn (not a failure of the tool).
  */
 outcome?: ToolOutcome, 
+/**
+ * For a tool message of a call that ran: how it was approved.
+ */
+approval?: Approval, 
 /**
  * For the last assistant message of a turn that failed: why.
  */
@@ -270,6 +278,10 @@ summary: string,
  */
 destructive: boolean, 
 /**
+ * The card offers "Always allow" besides Allow once and Deny (an action asks every call, so it never does).
+ */
+remember: boolean, 
+/**
  * The arguments.
  */
 input: unknown, } | { "type": "toolFinished", 
@@ -296,7 +308,11 @@ data?: unknown,
 /**
  * Set when the user's choice ended the call: they declined it, or stopped the turn while it waited.
  */
-outcome?: ToolOutcome, } | { "type": "notice", 
+outcome?: ToolOutcome, 
+/**
+ * How the call was approved, when it ran (none for a call that was refused, declined or stopped).
+ */
+approval?: Approval, } | { "type": "notice", 
 /**
  * The sentence.
  */
@@ -384,6 +400,10 @@ summary: string,
  */
 destructive: boolean, 
 /**
+ * The card offers "Always allow" besides Allow once and Deny (an action asks every call, so it never does).
+ */
+remember: boolean, 
+/**
  * The arguments.
  */
 input: unknown, } | { "type": "toolFinished", 
@@ -410,7 +430,11 @@ data?: unknown,
 /**
  * Set when the user's choice ended the call: they declined it, or stopped the turn while it waited.
  */
-outcome?: ToolOutcome, } | { "type": "notice", 
+outcome?: ToolOutcome, 
+/**
+ * How the call was approved, when it ran (none for a call that was refused, declined or stopped).
+ */
+approval?: Approval, } | { "type": "notice", 
 /**
  * The sentence.
  */

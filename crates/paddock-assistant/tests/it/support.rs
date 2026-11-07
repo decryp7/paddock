@@ -387,3 +387,36 @@ impl AssistantTool for Halt {
         ToolOutput::ok("halted")
     }
 }
+
+/// A rig whose assistant config the test sets (budgets, policy).
+pub fn rig_cfg(
+    steps: Vec<Step>,
+    tools: Vec<Arc<dyn AssistantTool>>,
+    cfg: impl FnOnce(&mut AssistantConfig),
+) -> Rig {
+    let dir = tempfile::tempdir().unwrap();
+    let clock = FakeClock::at_wall_ms(1_700_000_000_000);
+    let provider = Scripted::new(steps);
+    let store = Arc::new(ConversationStore::open(
+        dir.path().join("assistant.json"),
+        Arc::new(clock.clone()),
+    ));
+    let mut config = AssistantConfig::new("Demo", "You are the demo assistant.");
+    cfg(&mut config);
+    let assistant = Assistant::new(
+        provider.clone(),
+        Tools::new(tools).unwrap(),
+        store,
+        Arc::new(clock.clone()) as Arc<dyn Clock>,
+        config,
+    );
+    let (sink, rx) = sink();
+    Rig {
+        assistant,
+        provider,
+        clock,
+        dir,
+        rx,
+        sink,
+    }
+}

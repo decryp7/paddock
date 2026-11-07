@@ -31,7 +31,7 @@ describe('reduceTurn', () => {
     const started = run([{ type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: true }]);
     const asked = run([
       { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false },
-      { type: 'approvalNeeded', destructive: true, callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
+      { type: 'approvalNeeded', destructive: true, remember: false, callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
     ]);
     for (const t of [started, asked]) expect(t.parts.map((p) => p.kind === 'tool' && p.card.destructive)).toEqual([true]);
   });
@@ -39,7 +39,7 @@ describe('reduceTurn', () => {
   it('waits for a write, collects citations without duplicates, and closes dangling cards when the turn ends', () => {
     let t = run([
       { type: 'toolStarted', callId: 'c1', name: 'erase', summary: 'Erase', write: true, destructive: false },
-      { type: 'approvalNeeded', destructive: false, callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
+      { type: 'approvalNeeded', destructive: false, remember: false, callId: 'c1', name: 'erase', summary: 'Erase', input: {} },
       { type: 'toolStarted', callId: 'c2', name: 'find', summary: 'x', write: false, destructive: false },
     ]);
     expect(t.parts.map((p) => (p.kind === 'tool' ? p.card.state : 'text'))).toEqual(['awaiting', 'running']);

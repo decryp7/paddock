@@ -2,6 +2,7 @@
 //! backup; a damaged file falls back to defaults with one problem and is kept aside; a newer file is never touched and
 //! saving is refused), bounded in the number of conversations, the messages of each, the size of every text and the file.
 
+use crate::approval::Approval;
 use crate::event::EndReason;
 use crate::types::{ChatMessage, Role, ToolCall};
 use paddock_env::VersionedFile;
@@ -120,6 +121,10 @@ pub struct StoredMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
     pub outcome: Option<ToolOutcome>,
+    /// For a tool message of a call that ran: how it was approved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(optional))]
+    pub approval: Option<Approval>,
     /// For the last assistant message of a turn that failed: why.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(optional))]
@@ -155,6 +160,7 @@ impl StoredMessage {
             write: None,
             destructive: None,
             outcome: None,
+            approval: None,
             error: None,
             end_message: None,
             context: vec![],
@@ -218,6 +224,13 @@ impl StoredMessage {
         self.write = write.then_some(true);
         self.destructive = destructive.then_some(true);
         self.outcome = outcome;
+        self
+    }
+
+    /// A tool message with how its call was approved (when it ran).
+    #[must_use]
+    pub fn with_approval(mut self, approval: Option<Approval>) -> StoredMessage {
+        self.approval = approval;
         self
     }
 

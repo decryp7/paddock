@@ -164,8 +164,8 @@ const SCROLL_STICK_PX = 24;
           </dl>
         </details>
         <div class="actions">
-          <button type="button" class="pd-btn" [class.pd-btn--danger]="ask.destructive" data-testid="assistant-allow" (click)="store.approve(ask.callId, true)">{{ allowLabel(ask.name) }}</button>
-          <button #declineButton type="button" class="pd-btn" [class.pd-btn--ghost]="!ask.destructive" data-testid="assistant-decline" (click)="store.approve(ask.callId, false)">{{ t.decline }}</button>
+          <button type="button" class="pd-btn" [class.pd-btn--danger]="ask.destructive" data-testid="assistant-allow" (click)="store.approve(ask.callId, 'allowOnce')">{{ allowLabel(ask.name) }}</button>
+          <button #declineButton type="button" class="pd-btn" [class.pd-btn--ghost]="!ask.destructive" data-testid="assistant-decline" (click)="store.approve(ask.callId, 'deny')">{{ t.decline }}</button>
         </div>
       </section>
     }
