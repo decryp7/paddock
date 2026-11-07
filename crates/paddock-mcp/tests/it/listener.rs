@@ -626,9 +626,10 @@ fn the_bridge_ends_with_its_error_when_the_host_is_gone_too() {
     assert!(err.to_string().contains("3 request(s) unanswered"), "{err}");
 }
 
-/// A discovery file whose process is alive but whose port has nobody listening (the listener just closed): "isn't open".
+/// A discovery file whose process is alive but whose port cannot be connected to: "isn't open". The port is 0, which no
+/// listener ever holds, so connecting fails on every OS without a port that is freed and could be reused (C39, ADR 0023).
 #[test]
-fn the_bridge_says_the_app_is_not_open_when_its_port_refuses_the_connection() {
+fn the_bridge_says_the_app_is_not_open_when_its_port_cannot_be_reached() {
     struct Quiet;
     impl log::Log for Quiet {
         fn enabled(&self, _: &log::Metadata<'_>) -> bool {
@@ -641,14 +642,11 @@ fn the_bridge_says_the_app_is_not_open_when_its_port_refuses_the_connection() {
     let _ = log::set_logger(&Quiet);
     log::set_max_level(log::LevelFilter::Warn);
     let dir = tempfile::tempdir().unwrap();
-    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = closed.local_addr().unwrap().port();
-    drop(closed);
     let me = paddock_proc::ProcessId::of(std::process::id()).unwrap();
     let hint = Discovery {
         pid: me.pid(),
         started_us: me.started().as_micros(),
-        port,
+        port: 0,
         app: "Demo".into(),
         version: "1".into(),
     };
