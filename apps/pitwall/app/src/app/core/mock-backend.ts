@@ -1410,7 +1410,7 @@ export class MockBackend implements PitwallBackend {
   }
 
   /** Dyno as the mock knows it: a key that starts `pmk_` connects, `pmk_wrong` is refused, and Dyno is "open". */
-  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, tools: [], remembered: 0 };
+  private dyno_: ConnectedApp = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, tools: [], remembered: 0 };
   private readonly appsHandlers = new Set<(apps: ConnectedApp[]) => void>();
 
   onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
@@ -1452,7 +1452,7 @@ export class MockBackend implements PitwallBackend {
   forgetApp(appId: string): Promise<ConnectedApp> {
     return this.reply('forgetApp', () => {
       if (appId !== 'dyno') throw { code: 'bad_request', message: `Pitwall does not know an app called ${appId}.` };
-      this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, tools: [], remembered: 0 };
+      this.dyno_ = { id: 'dyno', title: 'Dyno', keySaved: false, connected: false, problem: null, keyRefused: false, reconnecting: false, tools: [], remembered: 0 };
       return this.appsChanged();
     });
   }
@@ -1468,7 +1468,7 @@ export class MockBackend implements PitwallBackend {
 
   /** Demo and test hook: Dyno quit (its connection ended); the app retries until it is back. */
   dynoQuit(): void {
-    this.dyno_ = { ...this.dyno_, connected: false, tools: [], problem: 'Dyno closed the connection (the app quit). Trying again when Dyno is back.' };
+    this.dyno_ = { ...this.dyno_, connected: false, reconnecting: true, tools: [], problem: 'Dyno closed the connection (the app quit). Trying again when Dyno is back.' };
     this.appsChanged();
   }
 
@@ -1488,6 +1488,7 @@ export class MockBackend implements PitwallBackend {
           connected: true,
           problem: null,
           keyRefused: false,
+          reconnecting: false,
           tools: [
             { name: 'alarms', title: 'Alarms', readOnly: true, remembered: false },
             { name: 'cpu_memory', title: 'CPU and memory', readOnly: true, remembered: false },

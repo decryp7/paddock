@@ -1100,6 +1100,8 @@ export interface ConnectedApp {
   problem: string | null;
   /** The app refused the saved key: only a new key helps (Refresh is hidden). */
   keyRefused: boolean;
+  /** The connection was lost; Pitwall is trying again (the chat answers without the app's tools meanwhile). */
+  reconnecting: boolean;
   tools: AppTool[];
   /** Tools always allowed. */
   remembered: number;

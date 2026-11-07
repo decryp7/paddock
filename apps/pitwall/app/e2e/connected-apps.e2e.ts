@@ -26,7 +26,10 @@ test.describe('connected apps and the chat model', () => {
     await form.getByTestId('dialog-action-connect').click();
     await expect(dyno.getByTestId('connected-app-problem')).toContainText('refused the key');
     // Only a new key helps: no Refresh while the key is refused.
-    await expect(dyno.getByRole('button', { name: 'Refresh tools' })).toHaveCount(0);
+    await dyno.getByRole('button', { name: 'More actions for Dyno' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Refresh tools' })).toHaveCount(0);
+    await page.getByRole('menu').press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
 
     // The right key: connected, its tools listed by kind.
     await dyno.getByRole('button', { name: 'Replace key…' }).click();
@@ -36,10 +39,18 @@ test.describe('connected apps and the chat model', () => {
     await expect(dyno.getByTestId('connected-app-state')).toHaveText('Connected: 6 tools');
     await expect(dyno.getByText('Action: asks every time')).toBeVisible();
     await expect(dyno.getByText('Top processes')).toBeVisible();
-    await expect(dyno.getByRole('button', { name: 'Refresh tools' })).toBeVisible();
+    await dyno.getByRole('button', { name: 'More actions for Dyno' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Refresh tools' })).toBeVisible();
+    await page.getByRole('menu').press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
 
     // Dyno quits: the row says so; Open Dyno starts it and the chat connects again.
     await page.evaluate(() => (window as unknown as { __pitwallMock?: { dynoQuit(): void } }).__pitwallMock?.dynoQuit());
+    await expect(chat.getByTestId('chat-apps')).toHaveText('Dyno is reconnecting: the chat answers without its tools for now.');
+    await dyno.getByRole('button', { name: 'More actions for Dyno' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Refresh tools' })).toHaveCount(0);
+    await page.getByRole('menu').press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
     await expect(dyno.getByTestId('connected-app-problem')).toContainText('Trying again when Dyno is back');
     await dyno.getByRole('button', { name: 'Open Dyno' }).click();
     await expect(dyno.getByTestId('connected-app-state')).toHaveText('Connected: 6 tools');
@@ -54,7 +65,8 @@ test.describe('connected apps and the chat model', () => {
     await expect(chat.getByTestId('chat-apps')).toHaveText('Tools from Dyno (6).');
 
     // Forget asks first, naming what goes.
-    await dyno.getByRole('button', { name: 'Forget Dyno…' }).click();
+    await dyno.getByRole('button', { name: 'More actions for Dyno' }).click();
+    await page.getByRole('menuitem', { name: 'Forget Dyno…' }).click();
     const ask = page.getByRole('alertdialog', { name: /Forget Dyno/ });
     await expect(ask).toContainText("Pitwall removes Dyno's key and its connection.");
     await ask.getByRole('button', { name: 'Forget Dyno' }).click();

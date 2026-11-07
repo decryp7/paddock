@@ -96,15 +96,10 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
 pub fn install<R: Runtime>(app: &AppHandle<R>, chat: ChatState) {
     let wrap: paddock_assistant::tauri::SinkWrap = Arc::new(|inner: Arc<dyn EventSink>| Arc::new(ChatLog(inner)) as Arc<dyn EventSink>);
     paddock_assistant::tauri::manage_with(app, chat.assistant.clone(), Some(wrap));
-    chat.apps.set_opener(|id| match paddock_siblings::Siblings::native("pitwall") {
-        Ok(s) => match s.open(id, &paddock_siblings::Handoff::Open) {
-            Ok(paddock_siblings::Outcome::Opened { .. }) => Opened::Started,
-            Ok(paddock_siblings::Outcome::NotInstalled { message, .. } | paddock_siblings::Outcome::NeedsUpdate { message, .. }) => {
-                Opened::Problem(message)
-            }
-            Err(e) => Opened::Problem(e.to_string()),
-        },
-        Err(e) => Opened::Problem(e.to_string()),
+    chat.apps.set_opener(|id| {
+        let title = super::apps::KNOWN.iter().find(|(k, _)| *k == id).map_or(id, |(_, t)| *t);
+        let outcome = paddock_siblings::Siblings::native("pitwall").and_then(|s| s.open(id, &paddock_siblings::Handoff::Open));
+        super::apps::open_words(outcome, title)
     });
     let emitter = app.clone();
     chat.apps.on_change(move |views| {

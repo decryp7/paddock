@@ -6,6 +6,7 @@ import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import type { CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
+import { ItemsMenu, MoreButton, type MenuItem } from '../../shared/ui/menu';
 import { Panel } from '../../shared/ui/panel';
 import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
 
@@ -17,7 +18,7 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
  */
 @Component({
   selector: 'pw-connected-apps-page',
-  imports: [MatButton, MatIconModule, Panel],
+  imports: [MatButton, MatIconModule, Panel, ItemsMenu, MoreButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -34,28 +35,25 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
                 <mat-icon [svgIcon]="app.connected ? 'pw:check' : app.problem ? 'pw:alert' : 'pw:link'" aria-hidden="true" />{{ stateText(app) }}
               </span>
               <span class="spacer"></span>
-              <button type="button" matButton="outlined" [disabled]="busy()" (click)="connect(app)">{{ app.keySaved ? 'Replace key…' : 'Connect…' }}</button>
               @if (app.keySaved && !app.connected && !app.keyRefused) {
-                <button type="button" matButton="outlined" [disabled]="busy()" (click)="open(app)">Open {{ app.title }}</button>
+                <button type="button" matButton="outlined" [disabled]="busy() || !!opening()[app.id]" (click)="open(app)">Open {{ app.title }}</button>
               }
+              <button type="button" matButton="outlined" [disabled]="busy()" (click)="connect(app)">{{ app.keySaved ? 'Replace key…' : 'Connect…' }}</button>
               @if (app.keySaved) {
-                @if (!app.keyRefused) {
-                  <button type="button" matButton [disabled]="busy()" (click)="refresh(app)">Refresh tools</button>
-                }
-                <button type="button" matButton [disabled]="busy()" (click)="forget(app)">Forget {{ app.title }}…</button>
+                <pw-more-button [menu]="appMenuPanel.menu()" [items]="menuOf(app)" [label]="'More actions for ' + app.title" />
               }
             </div>
             @if (app.problem) {
               <p class="problem" role="alert" data-testid="connected-app-problem">{{ app.problem }}</p>
             }
             @if (opening()[app.id]; as note) {
-              <p class="problem" role="status" data-testid="connected-app-opening">{{ note }}</p>
+              <p class="opening" role="status" data-testid="connected-app-opening"><span class="pulse" aria-hidden="true"><i></i><i></i><i></i></span>{{ note }}</p>
             }
             @if (app.connected) {
               <ul class="tools" [attr.aria-label]="app.title + ' tools'">
                 @for (t of app.tools; track t.name) {
                   <li>
-                    <span class="tool" [attr.title]="t.name">{{ t.title }}</span>
+                    <span class="tool" [attr.title]="t.title + ' (' + t.name + ')'">{{ t.title }}</span>
                     @if (t.remembered) {
                       <span class="kind">Always allowed</span>
                       <button type="button" matButton class="again" [disabled]="busy()" [attr.aria-label]="'Ask again before ' + t.title" (click)="askAgain(app, t.name)">Ask again</button>
@@ -65,11 +63,12 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
                   </li>
                 }
               </ul>
-              <p class="note">{{ app.remembered === 0 ? 'No tool is always allowed yet.' : app.remembered + (app.remembered === 1 ? ' tool is' : ' tools are') + ' always allowed. Forget the app to ask again.' }}</p>
+              <p class="note">{{ app.remembered === 0 ? 'No tool is always allowed yet.' : app.remembered + (app.remembered === 1 ? ' tool is' : ' tools are') + ' always allowed.' }}</p>
             }
           </section>
         }
       </pw-panel>
+      <pw-items-menu #appMenuPanel label="App actions" />
     </div>
   `,
   styles: `
@@ -88,7 +87,15 @@ import { MCP_KEY_DIALOG_ID } from './mcp-key-dialog';
     .problem { margin: 0; color: var(--pd-text); overflow-wrap: anywhere; }
     .tools { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--pd-space-1) var(--pd-space-4); }
     .tools li { display: flex; align-items: center; gap: var(--pd-space-2); border-bottom: 1px solid var(--pd-hairline); padding: var(--pd-space-1) 0; min-height: 36px; }
-    .tools .tool { flex: 1; }
+    .tools .tool { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tools .kind { white-space: nowrap; }
+    .opening { margin: 0; display: flex; align-items: center; gap: var(--pd-space-2); color: var(--pd-text-muted); }
+    .pulse { display: inline-flex; gap: 3px; }
+    .pulse i { width: 5px; height: 5px; border-radius: 50%; background: var(--pd-text-muted); animation: pw-pulse 1.2s ease-in-out infinite; }
+    .pulse i:nth-child(2) { animation-delay: 0.2s; }
+    .pulse i:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes pw-pulse { 0%, 80%, 100% { opacity: 0.25; } 40% { opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .pulse i { animation: none; opacity: 0.6; } }
     .tool { font-size: var(--pd-text-body); }
     .kind { color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .note { margin: 0; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
@@ -177,6 +184,14 @@ export class ConnectedAppsPage {
     } finally {
       this.busy.set(false);
     }
+  }
+
+  /** The row's "…" menu: Refresh tools (not while the key is refused or the app is reconnecting) and Forget. */
+  protected menuOf(app: ConnectedApp): MenuItem[] {
+    const items: MenuItem[] = [];
+    if (!app.keyRefused && !app.reconnecting) items.push({ label: 'Refresh tools', run: () => void this.refresh(app), disabled: this.busy() });
+    items.push({ label: `Forget ${app.title}…`, run: () => void this.forget(app), danger: true, divider: items.length > 0, disabled: this.busy() });
+    return items;
   }
 
   /** Asks again before one tool (its Always allow is forgotten). */

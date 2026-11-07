@@ -584,6 +584,7 @@ fn a_lost_connection_is_retried_with_back_off_until_the_app_is_back() {
     }
     let v = &apps.views()[0];
     assert!(v.problem.as_deref().unwrap_or("").contains("Trying again"), "{v:?}");
+    assert!(v.reconnecting, "the row and the chat say it is reconnecting");
     assert!(assistant.info().tools.is_empty());
 
     // Dyno is back: no attempt before the delay, one after it.
@@ -645,4 +646,42 @@ fn open_starts_the_app_and_tries_to_connect_at_the_next_tick() {
     apps.tick(D::from_secs(1));
     assert!(apps.views()[0].connected, "{:?}", apps.views()[0].problem);
     assert!(apps.open("recce").is_err(), "not a known app");
+    // Open that cannot start the app: its words replace the row's problem, and no retry is kept.
+    apps.set_opener(|_| Opened::Problem("Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.".into()));
+    dyno.listener.reconcile(false);
+    apps.tick(D::from_secs(2));
+    while apps.views()[0].connected {
+        std::thread::yield_now();
+        apps.tick(D::from_secs(3));
+    }
+    assert!(apps.views()[0].reconnecting);
+    apps.open("dyno").unwrap();
+    let v = &apps.views()[0];
+    assert_eq!(
+        v.problem.as_deref(),
+        Some("Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.")
+    );
+    assert!(!v.reconnecting, "nothing to wait for until the app is installed");
+}
+
+#[test]
+fn not_installed_and_too_old_are_said_in_pitwalls_own_words() {
+    use super::apps::{init_problem, open_words, Opened};
+    use paddock_siblings::Outcome;
+    let missing: Result<Outcome, paddock_siblings::SiblingError> = Ok(Outcome::NotInstalled {
+        message: "Dyno was not found (looked for `dyno`). Install Dyno, or open the file in it by hand.".into(),
+    });
+    assert_eq!(
+        open_words(missing, "Dyno"),
+        Opened::Problem("Dyno isn't installed on this computer. Install Dyno, then choose Open Dyno.".into())
+    );
+    let old = paddock_mcp::client::ClientError::UnsupportedVersion {
+        server: "2024-11-05".into(),
+    };
+    assert_eq!(
+        init_problem(&old, "Dyno"),
+        "Dyno is too old for AI access from Pitwall. Update Dyno, then choose Refresh tools."
+    );
+    let closed = paddock_mcp::client::ClientError::Closed { cause: "x".into() };
+    assert_eq!(init_problem(&closed, "Dyno"), closed.to_string());
 }

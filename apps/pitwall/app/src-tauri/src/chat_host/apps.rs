@@ -50,6 +50,8 @@ pub struct ConnectedApp {
     pub problem: Option<String>,
     /// The app refused the saved key: Refresh cannot help, only a new key.
     pub key_refused: bool,
+    /// The connection was lost and Pitwall is trying again on its back-off (the chat answers without its tools meanwhile).
+    pub reconnecting: bool,
     /// Its tools, when connected.
     pub tools: Vec<AppTool>,
     /// How many of its tools are always allowed.
@@ -134,6 +136,35 @@ pub enum Opened {
     Problem(String),
 }
 
+/// What the family's hand-off answered, in Pitwall's words for Connected apps (paddock-siblings speaks of files; here the
+/// user wants the app open).
+pub fn open_words(outcome: Result<paddock_siblings::Outcome, paddock_siblings::SiblingError>, title: &str) -> Opened {
+    match outcome {
+        Ok(paddock_siblings::Outcome::Opened { .. }) => Opened::Started,
+        Ok(paddock_siblings::Outcome::NotInstalled { .. }) => Opened::Problem(format!(
+            "{title} isn't installed on this computer. Install {title}, then choose Open {title}."
+        )),
+        // A program found under the app's name before the family's rename: an old copy.
+        Ok(paddock_siblings::Outcome::NeedsUpdate { .. }) => Opened::Problem(format!(
+            "This copy of {title} is too old to open from Pitwall. Update {title}, then choose Open {title}."
+        )),
+        Err(e) => Opened::Problem(format!("{title} could not be opened: {e}.")),
+    }
+}
+
+/// Why `initialize` failed, in Pitwall's words where they say more. A Dyno too old for Pitwall's AI access shows up here and
+/// only here: a Dyno without the listener at all (before 1.1.0) writes no discovery file, which reads as "isn't open, or AI
+/// access is off", and the handshake line carries no version; the MCP protocol version `initialize` negotiates is the one
+/// signal of an app too old (or too new) for this Pitwall.
+pub fn init_problem(e: &paddock_mcp::client::ClientError, title: &str) -> String {
+    match e {
+        paddock_mcp::client::ClientError::UnsupportedVersion { .. } => {
+            format!("{title} is too old for AI access from Pitwall. Update {title}, then choose Refresh tools.")
+        }
+        other => other.to_string(),
+    }
+}
+
 /// Starts a family app by id (`paddock-siblings` in the app; a fake in tests).
 type Opener = Box<dyn Fn(&str) -> Opened + Send + Sync>;
 
@@ -192,15 +223,24 @@ impl ConnectedApps {
             .as_ref()
             .map_or_else(|| Opened::Problem("Pitwall can't open other apps in this build.".into()), |f| f(id));
         log::info!(target: "pitwall_chat", "connected apps: open {id}: {outcome:?}");
-        if outcome == Opened::Started {
-            let mut retry = lock(&self.retry);
-            retry.insert(
-                id.to_string(),
-                Retrying {
-                    backoff: Backoff::new(reconnect_policy()),
-                    next: Duration::ZERO,
-                },
-            );
+        match &outcome {
+            Opened::Started => {
+                let mut retry = lock(&self.retry);
+                retry.insert(
+                    id.to_string(),
+                    Retrying {
+                        backoff: Backoff::new(reconnect_policy()),
+                        next: Duration::ZERO,
+                    },
+                );
+            }
+            // Its words replace the row's problem (not stacked under the reconnect line), and nothing is retried until the
+            // user acts.
+            Opened::Problem(words) => {
+                lock(&self.retry).remove(id);
+                lock(&self.problems).insert(id.to_string(), (words.clone(), false));
+                self.publish();
+            }
         }
         Ok(outcome)
     }
@@ -306,6 +346,7 @@ impl ConnectedApps {
             key_saved: key_name(id).ok().and_then(|n| self.secrets.get(&n).ok().flatten()).is_some(),
             connected: live.contains_key(id),
             key_refused: problem.as_ref().is_some_and(|p| p.1),
+            reconnecting: !live.contains_key(id) && lock(&self.retry).contains_key(id),
             problem: problem.map(|p| p.0),
             tools,
             remembered: self.policy.remembered().iter().filter(|r| r.server == id).count(),
@@ -354,7 +395,7 @@ impl ConnectedApps {
             })?;
             let conn = Arc::new(link.into_connection(ConnectionConfig::default()));
             conn.initialize("Pitwall", env!("CARGO_PKG_VERSION"))
-                .map_err(|e| plain(e.to_string()))?;
+                .map_err(|e| plain(init_problem(&e, title)))?;
             let defs = conn.list_tools().map_err(|e| plain(e.to_string()))?;
             let tools = tools_of(id, title, &defs, true, &conn, &self.names);
             Ok(Live { conn, tools })
