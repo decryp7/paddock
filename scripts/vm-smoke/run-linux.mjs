@@ -214,7 +214,7 @@ async function main(argv) {
     }
     // 5. One step per helper reading (WP-VMH), read through AT-SPI.
     const labels = { processes: 'Processes', network: 'Network', extras: 'Extras', backup: 'Backup health', firewall: 'Firewall', power: 'Power', inventory: 'Inventory', lifespan: 'Lifespan' };
-    const driver = { openPage: async (page, tab) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); },
+    const driver = { openPage: async (page, tab, reading) => { const okp = press(`^${labels[page]}$`, 'link'); if (okp && reading?.showAll) { await sleep(1500); press('^All$', 'radio button|page tab|push button|toggle button'); await sleep(1500); } if (okp && tab) { await sleep(1500); return press(`^${tab}`, 'page tab|radio button|push button'); } return okp; }, text: async () => { await sleep(2500); return atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' '); },
       // Controls: `nft-rule` loads one known rule (tcp dport 59999) into a table of its own, so the firewall page has something to show; cleanup removes the table.
       async prepare(key) {
         if (key !== 'nft-rule') return { ok: false, detail: `unknown control ${key}` };
@@ -240,6 +240,8 @@ async function main(argv) {
       push(await mcpStep(mg));
       await startApp(); // the app is needed again below (helper Turn off, readings)
     }
+    // The MCP row above restarted the app, which closed the Settings window: open it again the way a user does before the Settings rows (Turn off, Row 5a).
+    for (let i = 0; i < 3 && !/Turn off administrator readings|Turn on administrator readings/.test(atspi('tree dyno 60 2>&1').stdout); i++) { press('^File$', 'menu item'); await sleep(1200); press('^Settings…$', 'menu item'); await sleep(5000); }
     // 6. Turn off: the service and data are gone.
     press('^Dyno$');
     checks = [{ ok: press('Turn off administrator readings'), detail: 'pressed "Turn off administrator readings"' }];
