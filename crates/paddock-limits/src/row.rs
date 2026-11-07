@@ -95,6 +95,32 @@ pub struct LimitRow {
     pub remedy: Remedy,
 }
 
+impl LimitRow {
+    /// A row of a limit that stops work (`kind` stop, no selections), in the unit of `default`: the shape almost every
+    /// limit has. `min` and `max` are the bounds of its Setting, or of what a caller may ask for.
+    #[must_use]
+    pub const fn stop(
+        id: &'static str,
+        default: Quantity,
+        min: Quantity,
+        max: Quantity,
+        value: RowValue,
+        remedy: Remedy,
+    ) -> Self {
+        Self {
+            id: LimitId::new(id),
+            unit: default.unit(),
+            default,
+            min,
+            max,
+            value,
+            kind: RowKind::Stop,
+            selections: &[],
+            remedy,
+        }
+    }
+}
+
 /// A registry that breaks its own rules, found by [`Registry::check`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegistryError {
