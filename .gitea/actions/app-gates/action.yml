@@ -105,7 +105,20 @@ runs:
       run: |
         set -uo pipefail
         status=0
-        step() { echo "::group::$*"; "$@" || { status=1; echo "::error::failed: $*"; }; echo "::endgroup::"; }
+        # A failed step prints one error annotation with its command and, for nextest, the failing tests (ER-27): the
+        # step's output is kept in a file and its FAIL/TIMEOUT/SIG* lines (colours removed) name them, the first ten.
+        step() {
+          echo "::group::$*"
+          local log rc names; log=$(mktemp)
+          "$@" 2>&1 | tee "$log"; rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            status=1
+            names=$(sed $'s/\x1b\\[[0-9;]*m//g' "$log" | sed -nE 's/^ *(FAIL|TIMEOUT|SIGABRT|SIGSEGV|SIGKILL|LEAK-FAIL) +\[[^]]*\] +(\([^)]*\) +)?//p' | sort -u | head -10 | paste -sd ';' - | sed 's/;/; /g')
+            echo "::error::failed (exit $rc): $*${names:+ | failing tests: $names}"
+          fi
+          rm -f "$log"
+          echo "::endgroup::"
+        }
         config=()
         if [ -n "$NEXTEST_CONFIG" ]; then config=(--config-file "${PADDOCK_WORKSPACE:-$GITHUB_WORKSPACE}/$NEXTEST_CONFIG"); fi
         filter=()
