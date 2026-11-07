@@ -24,6 +24,14 @@ use paddock_settings::{FieldKind, SectionOwner, SettingField, SettingsSection};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
+mod app_item;
+mod first_run;
+mod legacy_plist;
+
+pub use app_item::{AppItem, UnavailableItem, xdg_config_dir};
+pub use first_run::{FirstRun, apply_first_run_with};
+pub use legacy_plist::{LegacyLaunchAgent, LegacyPlist};
+
 /// The switch's key in [`launch_at_login_section`].
 pub const LAUNCH_AT_LOGIN: &str = "launchAtLogin";
 
