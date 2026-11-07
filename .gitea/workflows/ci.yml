@@ -490,6 +490,84 @@ jobs:
           env-prefix: PADDOCK
           dir: ${{ env.PADDOCK_TEST_BROWSER_DIR }}
 
+      # ONE-OFF DIAGNOSTIC (branch ci/windows-runner-diag, never merged): why this runner is 25-45x slower on CPU-bound tests.
+      - name: Diag - runner CPU, priority, power throttling (Windows)
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        continue-on-error: true
+        shell: powershell
+        working-directory: .
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Add-Type -TypeDefinition @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class PT {
+            [StructLayout(LayoutKind.Sequential)] public struct STATE { public uint Version; public uint ControlMask; public uint StateMask; }
+            [DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetProcessInformation(IntPtr h, int cls, ref STATE s, int size);
+            public static string Get(IntPtr h) {
+              STATE s = new STATE(); s.Version = 1;
+              if (!GetProcessInformation(h, 4, ref s, Marshal.SizeOf(typeof(STATE)))) return "GetProcessInformation failed, error " + Marshal.GetLastWin32Error();
+              return "ControlMask=" + s.ControlMask + " StateMask=" + s.StateMask + (((s.ControlMask & 1) != 0 && (s.StateMask & 1) != 0) ? " (EXECUTION_SPEED throttling ON)" : " (execution-speed throttling not forced on)");
+            }
+          }
+          "@
+          Write-Host "::group::process chain"
+          $id = $PID
+          for ($i = 0; $i -lt 12 -and $id; $i++) {
+            $cim = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
+            if (-not $cim) { Write-Host "pid $id gone"; break }
+            $p = Get-Process -Id $id -ErrorAction SilentlyContinue
+            $prio = $null; $thr = 'n/a'
+            if ($p) { try { $prio = $p.PriorityClass } catch { $prio = 'denied' }; try { $thr = [PT]::Get($p.Handle) } catch { $thr = 'denied' } }
+            Write-Host ("{0} pid={1} ppid={2} priority={3} throttle: {4}" -f $cim.Name, $id, $cim.ParentProcessId, $prio, $thr)
+            Write-Host ("    cmd: " + $cim.CommandLine)
+            $id = $cim.ParentProcessId
+          }
+          Write-Host "::endgroup::"
+          Write-Host "::group::power"
+          powercfg /getactivescheme
+          powercfg /powerthrottling list
+          Write-Host "::endgroup::"
+          Write-Host "::group::hardware"
+          Get-CimInstance Win32_Processor | Format-List Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed, CurrentClockSpeed, LoadPercentage
+          Get-CimInstance Win32_ComputerSystem | Format-List Manufacturer, Model, HypervisorPresent
+          Write-Host "::endgroup::"
+          Write-Host "::group::counters"
+          Get-Counter '\Processor(_Total)\% Processor Time','\Processor Information(_Total)\% Processor Performance' -SampleInterval 1 -MaxSamples 5 | ForEach-Object { $_.CounterSamples | ForEach-Object { "{0} = {1:N1}" -f $_.Path, $_.CookedValue } }
+          Write-Host "::endgroup::"
+          Write-Host "::group::top 10 processes by CPU over 5 s"
+          $a = @{}; Get-Process | ForEach-Object { if ($_.CPU -ne $null) { $a[$_.Id] = $_.CPU } }
+          Start-Sleep -Seconds 5
+          Get-Process | ForEach-Object {
+            $before = 0; if ($a.ContainsKey($_.Id)) { $before = $a[$_.Id] }
+            $pc = ''; try { $pc = $_.PriorityClass } catch { $pc = 'denied' }
+            [pscustomobject]@{ Name = $_.ProcessName; PID = $_.Id; CpuDeltaSec = [math]::Round(($(if ($_.CPU) { $_.CPU } else { 0 }) - $before), 2); Priority = $pc }
+          } | Sort-Object CpuDeltaSec -Descending | Select-Object -First 10 | Format-Table -AutoSize | Out-String -Width 200
+          Write-Host "::endgroup::"
+          Write-Host "::group::other runner work on this machine"
+          foreach ($n in 'act_runner','cargo','rustc','node','link','cl','sccache','nextest','cargo-nextest') {
+            Write-Host ("{0}: {1}" -f $n, @(Get-Process -Name $n -ErrorAction SilentlyContinue).Count)
+          }
+          Write-Host "::endgroup::"
+
+      - name: Diag - probe tests at inherited priority, then Normal (Windows)
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        continue-on-error: true
+        shell: powershell
+        working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/crates
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $filter = 'test(/the_cost_of_the_pieces_of_one_edge_is_reported|the_crash_model_noauto_fast/)'
+          Write-Host ("== run 1: step priority = " + [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass)
+          $t = Get-Date
+          cargo nextest run -p paddock-service --profile ci --no-capture -E $filter
+          Write-Host ("== run 1 exit {0}, wall {1:N1} s" -f $LASTEXITCODE, ((Get-Date) - $t).TotalSeconds)
+          [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass = 'Normal'
+          Write-Host ("== run 2: step priority = " + [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass)
+          $t = Get-Date
+          cargo nextest run -p paddock-service --profile ci --no-capture -E $filter
+          Write-Host ("== run 2 exit {0}, wall {1:N1} s" -f $LASTEXITCODE, ((Get-Date) - $t).TotalSeconds)
+
       # Every crate's tests with every feature, so the `tauri` adapters are built and tested too (the dialogs and panels on the
       # mock runtime, paddock-chromium against its fake browser and against Chrome for Testing: CHROMIUM_TEST_PATH, never an
       # installed browser, rule 7; a missing browser fails instead of skipping). On Linux the coverage job (crates) runs
