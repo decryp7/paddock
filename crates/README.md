@@ -1105,8 +1105,8 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 ```
 
 - `frame`: 4-byte length + postcard `Frame` (Debrief's frame version 2 plus `Push` at the end), `FrameLimit` 1 KiB to 64 MiB
-  (16 MiB default). A frame over the limit is skipped without being allocated and fails only its call (`IpcError::TooLarge`,
-  or a `tooLarge` failure to the other side); a length beyond 64 MiB or garbage ends the connection. `ProtocolVersion`
+  (16 MiB default). A frame over the limit is skipped without being allocated and fails only its call (`IpcError::TooLarge` for
+  our request, `IpcError::ReplyTooLarge` for the other side's answer, or a `tooLarge` failure to the other side); a length beyond 64 MiB or garbage ends the connection. `ProtocolVersion`
   (same major, known minor) refuses with a message that says which side to update.
 - `endpoint`: a Unix socket in a 0700 folder (`Listener::bind_in(AppDirs::runtime())`, temporary folder as fallback) or a
   named pipe with an `Access` list: `owner_only()` (D:P(A;;GA;;;OW), 0600) or `service_for_interactive_users()` (Pitcrew's

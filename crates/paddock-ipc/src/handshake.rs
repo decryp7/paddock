@@ -178,7 +178,9 @@ impl Authenticator {
         self.authenticate_with_uid(stream, os_pid, pid, uid)
     }
 
-    /// [`Authenticator::authenticate`] with the user id taken from `credentials` (a fake in tests).
+    /// [`Authenticator::authenticate`] with the user id taken from `credentials`. **Test support**: it lets the caller say
+    /// whose uid the client has, so it is hidden from the documentation and must not be used outside tests.
+    #[doc(hidden)]
     pub fn authenticate_as(
         &self,
         stream: Stream,
@@ -366,6 +368,9 @@ impl Host {
 
     /// Refuses a client that does not run as the account of this process (Unix; IP1 item 5). For a host whose clients
     /// are its own children or the user's own helpers; a service that other accounts connect to leaves it off.
+    ///
+    /// **On Windows this checks nothing**: the OS gives no user id for a named pipe's client here, and the pipe's access
+    /// list (`endpoint::Access::owner_only()`, a DACL) is the protection. Use it together with that list, not instead.
     pub fn same_account_only(mut self) -> Host {
         self.auth.same_account = true;
         self

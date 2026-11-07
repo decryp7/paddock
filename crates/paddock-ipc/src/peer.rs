@@ -250,9 +250,20 @@ impl Peer {
         handler: Arc<dyn Handler>,
         opts: PeerOptions,
     ) -> Result<Peer, IpcError> {
+        let writer = conn.stream.try_clone()?;
+        Self::start_with_writer(conn, handler, opts, writer)
+    }
+
+    /// [`Peer::start`] with the stream the writer thread writes to given (a test stands in a writer that fails while the
+    /// reader is still reading).
+    pub(crate) fn start_with_writer(
+        conn: Connection,
+        handler: Arc<dyn Handler>,
+        opts: PeerOptions,
+        mut writer: impl Write + Send + 'static,
+    ) -> Result<Peer, IpcError> {
         let peer_pid = conn.peer_pid();
         let mut reader = conn.stream;
-        let mut writer = reader.try_clone()?;
         let closer = reader.closer()?;
         let (push_tx, push_rx) = mpsc::sync_channel::<Vec<u8>>(opts.push_queue.max(1));
         let on_push = opts.on_push.clone();
@@ -388,17 +399,60 @@ impl Peer {
             .unwrap_or_else(|| IpcError::Closed(GONE.into()))
     }
 
-    fn send(&self, f: &Frame) -> Result<(), IpcError> {
+    /// Sends a frame, waiting for room in the write queue for at most `limit` (a call's own timeout) or the stall.
+    ///
+    /// A stalled send is a frame dropped, and a connection that dropped a frame cannot go on (a lost reply leaves a caller
+    /// waiting, a lost credit stalls a stream, a lost cancel keeps a callee running): it is closed with the reason, which
+    /// fails every pending call, and the owner reconnects. Only a call's own limit running out fails just that call.
+    fn send_within(&self, f: &Frame, limit: Option<Duration>) -> Result<(), IpcError> {
         let bytes = frame::encode(f, self.inner.limit).map_err(IpcError::from)?;
-        match self.inner.out.push(bytes) {
+        match self.inner.out.push(bytes, limit) {
             Push::Queued => Ok(()),
             Push::Closed => Err(self.closed_reason()),
-            // The writer has made no room for `write_stall`: the other side stopped reading. This call fails; nothing grew.
-            Push::Stalled => Err(IpcError::Timeout),
+            Push::Expired => Err(IpcError::Timeout),
+            Push::Stalled | Push::Full => Err(self.stalled()),
         }
     }
 
-    fn begin(&self, body: Vec<u8>, credit: u32) -> Result<(u64, mpsc::Receiver<Event>), IpcError> {
+    fn send(&self, f: &Frame) -> Result<(), IpcError> {
+        self.send_within(f, None)
+    }
+
+    /// Sends a frame from the reader thread, which must never wait for the writer (a full queue would stop it reading, and two
+    /// full sides would wait for each other): no room means the other side stopped reading, and the connection closes.
+    fn send_nowait(&self, f: &Frame) -> Result<(), IpcError> {
+        let bytes = frame::encode(f, self.inner.limit).map_err(IpcError::from)?;
+        match self.inner.out.try_push(bytes) {
+            Push::Queued => Ok(()),
+            Push::Closed => Err(self.closed_reason()),
+            _ => Err(self.stalled()),
+        }
+    }
+
+    /// The other side is not reading: closes the connection with that reason and returns the error of the send.
+    fn stalled(&self) -> IpcError {
+        self.fail(IpcError::Closed(format!(
+            "{} stopped reading for {} s",
+            self.label(),
+            self.inner.opts.write_stall.as_secs()
+        )));
+        IpcError::Timeout
+    }
+
+    /// Closes the connection for `why`: the queue shuts first (so whoever sees the close can no longer queue a frame), pending
+    /// calls fail with it, and the socket closes.
+    fn fail(&self, why: IpcError) {
+        self.inner.out.shutdown();
+        self.mark_closed(why);
+        self.inner.closer.close();
+    }
+
+    fn begin(
+        &self,
+        body: Vec<u8>,
+        credit: u32,
+        limit: Option<Duration>,
+    ) -> Result<(u64, mpsc::Receiver<Event>), IpcError> {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel();
         lock(&self.inner.pending).insert(
@@ -411,7 +465,7 @@ impl Peer {
                 received: 0,
             },
         );
-        if let Err(e) = self.send(&Frame::Call { id, credit, body }) {
+        if let Err(e) = self.send_within(&Frame::Call { id, credit, body }, limit) {
             lock(&self.inner.pending).remove(&id);
             return Err(e);
         }
@@ -419,7 +473,8 @@ impl Peer {
     }
 
     fn cancel(&self, id: u64) {
-        let _ = self.send(&Frame::Cancel { id });
+        // Waits for room no longer than the callee's grace: a cancel that cannot be queued then is moot, the call times out.
+        let _ = self.send_within(&Frame::Cancel { id }, Some(self.inner.opts.cancel_grace));
     }
 
     /// The next event of call `id`, waiting at most `timeout` on the peer's clock (`None`: as long as the connection
@@ -454,7 +509,7 @@ impl Peer {
     /// that ends it with a cancellation, makes this [`IpcError::Timeout`]. A request over the frame limit fails at once
     /// with [`IpcError::TooLarge`] and nothing is sent.
     pub fn call(&self, body: Vec<u8>, timeout: Option<Duration>) -> Result<Vec<u8>, IpcError> {
-        let (id, rx) = self.begin(body, 0)?;
+        let (id, rx) = self.begin(body, 0, timeout)?;
         let event = match self.wait_event(id, &rx, timeout)? {
             Some(e) => e,
             None => {
@@ -492,7 +547,7 @@ impl Peer {
     /// Starts a streamed call: the callee sends items (at most `credit` ahead of what this side took) and then one answer.
     pub fn stream(&self, body: Vec<u8>, credit: u32) -> Result<CallStream, IpcError> {
         let credit = credit.max(1);
-        let (id, rx) = self.begin(body, credit)?;
+        let (id, rx) = self.begin(body, credit, None)?;
         Ok(CallStream {
             peer: self.clone(),
             id,
@@ -565,7 +620,8 @@ impl Peer {
 
     /// Answers a call this side cannot run now with `busy`.
     fn refuse_call(&self, id: u64, message: &str) {
-        let _ = self.send(&Frame::Fail {
+        // Called by the reader thread: it never waits for the writer.
+        let _ = self.send_nowait(&Frame::Fail {
             id,
             error: RemoteError::new(codes::BUSY, message),
         });
@@ -700,7 +756,7 @@ impl Peer {
                 kind: FrameKind::Call,
                 id: Some(id),
             }) => {
-                let _ = self.send(&Frame::Fail {
+                let _ = self.send_nowait(&Frame::Fail {
                     id,
                     error: RemoteError::new(
                         codes::TOO_LARGE,
@@ -720,7 +776,8 @@ impl Peer {
                     p.streams
                 });
                 if streams == Some(true) {
-                    self.cancel(id);
+                    // On the reader thread: no waiting for the writer.
+                    let _ = self.send_nowait(&Frame::Cancel { id });
                 }
                 Ok(())
             }
@@ -784,15 +841,13 @@ impl Peer {
         // `Out::Shutdown` ends the loop after everything queued before it.
         while let Out::Frame(bytes) = self.inner.out.pop() {
             if let Err(e) = w.write_all(&bytes) {
-                self.mark_closed(IpcError::Closed(format!(
+                self.fail(IpcError::Closed(format!(
                     "the connection to {} broke ({e})",
                     self.label()
                 )));
-                break;
+                return;
             }
         }
-        // However the loop ended, nothing more is accepted for a writer that is gone: later sends fail at once.
-        self.inner.out.shutdown();
         self.inner.closer.close();
     }
 
@@ -821,9 +876,7 @@ impl Peer {
                 break e;
             }
         };
-        self.mark_closed(why);
-        self.inner.out.shutdown();
-        self.inner.closer.close();
+        self.fail(why);
     }
 }
 
@@ -1009,4 +1062,58 @@ pub fn decode_request<T: DeserializeOwned>(body: &[u8]) -> Result<T, RemoteError
 /// Encodes a typed reply for a handler.
 pub fn encode_reply<T: Serialize>(reply: &T) -> Result<Vec<u8>, RemoteError> {
     crate::wire::encode(reply).map_err(|e| RemoteError::new(codes::INTERNAL, e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::endpoint;
+
+    /// A writer whose every write fails, while the reader is still reading its stream.
+    struct Failing;
+
+    impl Write for Failing {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "the pipe is broken",
+            ))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    /// IP1 review P2: when the writer dies the queue is shut, so a later send fails at once with the reason the connection
+    /// closed, not after the stall. (Without the shutdown at the end of `write_loop` the send is accepted and never goes out.)
+    #[test]
+    fn a_writer_that_fails_while_the_reader_lives_shuts_the_queue() {
+        let (ours, theirs) = endpoint::pair().unwrap();
+        let conn = Connection::raw(ours, FrameLimit::default());
+        let peer = Peer::start_with_writer(
+            conn,
+            Arc::new(NoCalls),
+            PeerOptions::new("the plugin"),
+            Failing,
+        )
+        .unwrap();
+        // `theirs` stays open and unread-from: the reader is alive, only our writes fail.
+        let _ = peer.push(b"first".to_vec());
+        assert!(
+            peer.wait_closed(Some(Duration::from_secs(10))),
+            "a failing write did not close the connection"
+        );
+        // Whoever sees the close sees a shut queue (not only after the reader notices the end of the stream).
+        assert!(
+            peer.inner.out.is_shut(),
+            "the queue is open after the close"
+        );
+        let reason = peer.closed().unwrap();
+        assert!(
+            matches!(&reason, IpcError::Closed(m) if m.contains("broke")),
+            "{reason:?}"
+        );
+        assert_eq!(peer.push(b"late".to_vec()).unwrap_err(), reason);
+        drop(theirs);
+    }
 }

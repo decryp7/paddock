@@ -236,9 +236,13 @@ impl From<crate::frame::FrameError> for IpcError {
 }
 
 impl IpcError {
-    /// This error as the typed failure a handler answers with: `tooLarge` for one oversized frame, else `internal`.
+    /// This error as the typed failure a handler answers with: `tooLarge` for one oversized frame (our request or the other
+    /// side's answer), else `internal`.
     pub fn to_remote(&self) -> RemoteError {
-        let code = if matches!(self, IpcError::TooLarge { .. }) {
+        let code = if matches!(
+            self,
+            IpcError::TooLarge { .. } | IpcError::ReplyTooLarge { .. }
+        ) {
             codes::TOO_LARGE
         } else {
             codes::INTERNAL

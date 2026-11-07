@@ -28,6 +28,10 @@ pub(crate) enum Push {
     Queued,
     /// No room for `stall`: the other side is not reading.
     Stalled,
+    /// No room for the caller's own limit (shorter than the stall): this call gives up, the queue is as it was.
+    Expired,
+    /// [`WriteQueue::try_push`] found no room.
+    Full,
     /// The queue was shut down.
     Closed,
 }
@@ -37,8 +41,9 @@ struct State {
     items: VecDeque<Out>,
     frames: usize,
     bytes: usize,
-    /// Callers waiting for room.
-    waiters: Vec<CancelToken>,
+    /// Callers waiting for room, by number.
+    waiters: Vec<(u64, CancelToken)>,
+    next_waiter: u64,
     closed: bool,
 }
 
@@ -74,37 +79,73 @@ impl WriteQueue {
         }
     }
 
-    /// Queues a frame, blocking while the queue is full (see the module).
-    pub(crate) fn push(&self, bytes: Vec<u8>) -> Push {
-        let deadline = Deadline::after(self.clock.clone(), self.stall);
+    /// Whether a frame of `len` bytes fits now (an empty queue takes any frame, so one over the byte bound cannot get stuck).
+    fn fits(&self, s: &State, len: usize) -> bool {
+        s.frames < self.max_frames
+            && (s.frames == 0 || s.bytes.saturating_add(len) <= self.max_bytes)
+    }
+
+    fn queue(&self, mut s: MutexGuard<'_, State>, bytes: Vec<u8>) -> Push {
+        s.frames += 1;
+        s.bytes += bytes.len();
+        s.items.push_back(Out::Frame(bytes));
+        drop(s);
+        self.ready.notify_one();
+        Push::Queued
+    }
+
+    /// Queues a frame, blocking while the queue is full (see the module). The wait ends at the stall, or earlier at the
+    /// caller's own `limit` (a call's timeout): [`Push::Stalled`] means the other side stopped reading, [`Push::Expired`]
+    /// only that this caller ran out of time.
+    pub(crate) fn push(&self, bytes: Vec<u8>, limit: Option<Duration>) -> Push {
+        let stall = Deadline::after(self.clock.clone(), self.stall);
+        let own = limit.map(|l| Deadline::after(self.clock.clone(), l));
         loop {
-            let token = {
+            let (id, token) = {
                 let mut s = lock(&self.state);
                 if s.closed {
                     return Push::Closed;
                 }
-                if s.frames < self.max_frames
-                    && (s.frames == 0 || s.bytes.saturating_add(bytes.len()) <= self.max_bytes)
-                {
-                    s.frames += 1;
-                    s.bytes += bytes.len();
-                    s.items.push_back(Out::Frame(bytes));
-                    drop(s);
-                    self.ready.notify_one();
-                    return Push::Queued;
+                if self.fits(&s, bytes.len()) {
+                    return self.queue(s, bytes);
                 }
-                // No room, and the stall is over: the other side is not reading.
-                if deadline.passed() {
+                // No room: say which deadline is over, the stall first (it closes the connection).
+                if stall.passed() {
                     return Push::Stalled;
                 }
+                if own.as_ref().is_some_and(Deadline::passed) {
+                    return Push::Expired;
+                }
                 let token = CancelToken::new();
-                s.waiters.push(token.clone());
-                token
+                s.next_waiter += 1;
+                let id = s.next_waiter;
+                s.waiters.push((id, token.clone()));
+                (id, token)
             };
-            // Ends when the writer frees room (the token is cancelled) or the stall passes; either way look again.
-            let _ = self
-                .clock
-                .wait(deadline.remaining().unwrap_or(Duration::MAX), &token);
+            // Ends when the writer frees room (the token is cancelled) or a deadline passes; either way look again.
+            let left = [
+                stall.remaining(),
+                own.as_ref().and_then(Deadline::remaining),
+            ]
+            .into_iter()
+            .flatten()
+            .min();
+            let _ = self.clock.wait(left.unwrap_or(Duration::MAX), &token);
+            // A waiter that timed out is still listed (the writer only drops the ones it woke): take it out.
+            lock(&self.state).waiters.retain(|(w, _)| *w != id);
+        }
+    }
+
+    /// Queues a frame if there is room now; [`Push::Full`] otherwise. For the thread that reads the connection, which must
+    /// never wait for the writer: a reply it cannot queue means the other side stopped reading, and it closes.
+    pub(crate) fn try_push(&self, bytes: Vec<u8>) -> Push {
+        let s = lock(&self.state);
+        if s.closed {
+            Push::Closed
+        } else if self.fits(&s, bytes.len()) {
+            self.queue(s, bytes)
+        } else {
+            Push::Full
         }
     }
 
@@ -119,7 +160,7 @@ impl WriteQueue {
             }
             std::mem::take(&mut s.waiters)
         };
-        for w in waiters {
+        for (_, w) in waiters {
             w.cancel();
         }
         self.ready.notify_all();
@@ -136,13 +177,19 @@ impl WriteQueue {
                 }
                 let waiters = std::mem::take(&mut s.waiters);
                 drop(s);
-                for w in waiters {
+                for (_, w) in waiters {
                     w.cancel();
                 }
                 return out;
             }
             s = self.ready.wait(s).unwrap_or_else(|p| p.into_inner());
         }
+    }
+
+    /// Whether the queue was shut.
+    #[cfg(test)]
+    pub(crate) fn is_shut(&self) -> bool {
+        lock(&self.state).closed
     }
 
     /// Frames and bytes waiting now.
@@ -157,6 +204,7 @@ impl WriteQueue {
 mod tests {
     use super::*;
     use paddock_jobs::time::FakeClock;
+    use std::sync::mpsc;
     use std::time::Duration;
 
     const GUARD: Duration = Duration::from_secs(10);
@@ -170,12 +218,31 @@ mod tests {
         ))
     }
 
+    /// A push on its own thread, whose outcome arrives on a channel: a push that never returns fails the test after
+    /// `GUARD` instead of hanging it.
+    fn pushing(
+        q: &Arc<WriteQueue>,
+        bytes: Vec<u8>,
+        limit: Option<Duration>,
+    ) -> mpsc::Receiver<Push> {
+        let (tx, rx) = mpsc::channel();
+        let q = q.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(q.push(bytes, limit));
+        });
+        rx
+    }
+
+    fn outcome(rx: &mpsc::Receiver<Push>) -> Push {
+        rx.recv_timeout(GUARD).expect("the push never returned")
+    }
+
     #[test]
     fn frames_come_out_in_order_and_the_counts_follow() {
         let clock = Arc::new(FakeClock::new());
         let q = queue(4, 100, &clock);
-        assert_eq!(q.push(vec![1; 10]), Push::Queued);
-        assert_eq!(q.push(vec![2; 20]), Push::Queued);
+        assert_eq!(q.push(vec![1; 10], None), Push::Queued);
+        assert_eq!(q.push(vec![2; 20], None), Push::Queued);
         assert_eq!(q.queued(), (2, 30));
         assert!(matches!(q.pop(), Out::Frame(b) if b[0] == 1));
         assert_eq!(q.queued(), (1, 20));
@@ -187,13 +254,12 @@ mod tests {
     fn a_frame_over_the_byte_bound_goes_in_alone() {
         let clock = Arc::new(FakeClock::new());
         let q = queue(4, 10, &clock);
-        assert_eq!(q.push(vec![0; 50]), Push::Queued);
+        assert_eq!(q.push(vec![0; 50], None), Push::Queued);
         // Nothing else fits beside it: the next push stalls once the clock passes the stall.
-        let q2 = q.clone();
-        let t = std::thread::spawn(move || q2.push(vec![0; 1]));
+        let rx = pushing(&q, vec![0; 1], None);
         assert!(clock.wait_for_waiters(1, GUARD));
         clock.advance(Duration::from_secs(30));
-        assert_eq!(t.join().unwrap(), Push::Stalled);
+        assert_eq!(outcome(&rx), Push::Stalled);
         assert_eq!(q.queued(), (1, 50));
     }
 
@@ -201,29 +267,51 @@ mod tests {
     fn a_full_queue_blocks_then_fails_at_the_stall_and_never_grows() {
         let clock = Arc::new(FakeClock::new());
         let q = queue(2, 1 << 20, &clock);
-        assert_eq!(q.push(vec![0; 1]), Push::Queued);
-        assert_eq!(q.push(vec![0; 1]), Push::Queued);
-        let q2 = q.clone();
-        let t = std::thread::spawn(move || q2.push(vec![0; 1]));
+        assert_eq!(q.push(vec![0; 1], None), Push::Queued);
+        assert_eq!(q.push(vec![0; 1], None), Push::Queued);
+        let rx = pushing(&q, vec![0; 1], None);
         assert!(clock.wait_for_waiters(1, GUARD));
         // Not before the stall.
         clock.advance(Duration::from_secs(29));
-        assert!(!t.is_finished());
+        assert!(rx.try_recv().is_err());
         clock.advance(Duration::from_secs(1));
-        assert_eq!(t.join().unwrap(), Push::Stalled);
+        assert_eq!(outcome(&rx), Push::Stalled);
         assert_eq!(q.queued(), (2, 2));
+        assert!(
+            lock(&q.state).waiters.is_empty(),
+            "a waiter that timed out is taken out of the list"
+        );
+    }
+
+    #[test]
+    fn a_callers_own_limit_ends_its_wait_before_the_stall_and_leaves_the_queue_as_it_was() {
+        let clock = Arc::new(FakeClock::new());
+        let q = queue(1, 1 << 20, &clock);
+        assert_eq!(q.push(vec![0; 1], None), Push::Queued);
+        let rx = pushing(&q, vec![0; 1], Some(Duration::from_secs(2)));
+        assert!(clock.wait_for_waiters(1, GUARD));
+        clock.advance(Duration::from_secs(1));
+        assert!(rx.try_recv().is_err(), "not before its own limit");
+        clock.advance(Duration::from_secs(1));
+        assert_eq!(outcome(&rx), Push::Expired);
+        assert_eq!(q.queued(), (1, 1));
+        assert!(lock(&q.state).waiters.is_empty());
+        // A limit longer than the stall is the stall.
+        let rx = pushing(&q, vec![0; 1], Some(Duration::from_secs(600)));
+        assert!(clock.wait_for_waiters(1, GUARD));
+        clock.advance(Duration::from_secs(30));
+        assert_eq!(outcome(&rx), Push::Stalled);
     }
 
     #[test]
     fn room_freed_by_the_writer_wakes_the_blocked_caller() {
         let clock = Arc::new(FakeClock::new());
         let q = queue(1, 1 << 20, &clock);
-        assert_eq!(q.push(vec![7; 1]), Push::Queued);
-        let q2 = q.clone();
-        let t = std::thread::spawn(move || q2.push(vec![8; 1]));
+        assert_eq!(q.push(vec![7; 1], None), Push::Queued);
+        let rx = pushing(&q, vec![8; 1], None);
         assert!(clock.wait_for_waiters(1, GUARD));
         assert!(matches!(q.pop(), Out::Frame(b) if b[0] == 7));
-        assert_eq!(t.join().unwrap(), Push::Queued);
+        assert_eq!(outcome(&rx), Push::Queued);
         assert!(matches!(q.pop(), Out::Frame(b) if b[0] == 8));
     }
 
@@ -231,16 +319,26 @@ mod tests {
     fn shutdown_releases_waiters_and_stops_the_writer_after_what_is_queued() {
         let clock = Arc::new(FakeClock::new());
         let q = queue(1, 1 << 20, &clock);
-        assert_eq!(q.push(vec![1; 1]), Push::Queued);
-        let q2 = q.clone();
-        let t = std::thread::spawn(move || q2.push(vec![2; 1]));
+        assert_eq!(q.push(vec![1; 1], None), Push::Queued);
+        let rx = pushing(&q, vec![2; 1], None);
         assert!(clock.wait_for_waiters(1, GUARD));
         q.shutdown();
-        assert_eq!(t.join().unwrap(), Push::Closed);
-        assert_eq!(q.push(vec![3; 1]), Push::Closed);
+        assert_eq!(outcome(&rx), Push::Closed);
+        assert_eq!(q.push(vec![3; 1], None), Push::Closed);
+        assert_eq!(q.try_push(vec![3; 1]), Push::Closed);
         assert!(matches!(q.pop(), Out::Frame(_)));
         assert!(matches!(q.pop(), Out::Shutdown));
         q.shutdown();
+    }
+
+    #[test]
+    fn try_push_never_waits() {
+        let clock = Arc::new(FakeClock::new());
+        let q = queue(1, 1 << 20, &clock);
+        assert_eq!(q.try_push(vec![1; 1]), Push::Queued);
+        assert_eq!(q.try_push(vec![2; 1]), Push::Full);
+        assert_eq!(q.queued(), (1, 1));
+        assert_eq!(clock.waiters(), 0);
     }
 
     #[test]
@@ -248,9 +346,15 @@ mod tests {
         let clock = Arc::new(FakeClock::new());
         let q = queue(2, 100, &clock);
         let q2 = q.clone();
-        let t = std::thread::spawn(move || q2.pop());
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(matches!(q2.pop(), Out::Frame(b) if b == vec![5; 3]));
+        });
         // Queue after the writer is waiting or before: either way it gets the frame.
-        assert_eq!(q.push(vec![5; 3]), Push::Queued);
-        assert!(matches!(t.join().unwrap(), Out::Frame(b) if b == vec![5; 3]));
+        assert_eq!(q.push(vec![5; 3], None), Push::Queued);
+        assert!(
+            rx.recv_timeout(GUARD)
+                .expect("the writer never got the frame")
+        );
     }
 }
