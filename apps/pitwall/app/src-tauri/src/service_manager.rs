@@ -104,4 +104,40 @@ mod tests {
         assert!(m.watches_start(), "the wait for the service is judged");
         assert!(sys.calls().is_empty(), "building the manager asks the machine nothing");
     }
+
+    /// The app's wiring on Windows: the manager over the elevated service backend asks Windows' prompt to run the server
+    /// program's own `install` and `uninstall` verbs (the elevated child is `pitwall-server`, never a password, ADR 0056).
+    #[test]
+    fn on_windows_install_and_uninstall_run_the_servers_verbs_through_the_prompt() {
+        use paddock_service::backend::ElevatedWindowsService;
+        use paddock_service::testing::{Call, FakeElevator};
+        let dir = tempfile::tempdir().unwrap();
+        let sys = FakeSystem::new();
+        let program = std::path::PathBuf::from(r"C:\Program Files\Pitwall\pitwall-server.exe");
+        let backend = ElevatedWindowsService::new(
+            pitwall_service::spec_of(true),
+            program.clone(),
+            Box::new(sys.clone()),
+            Box::new(FakeElevator::new(&sys)),
+        );
+        let mut m = manager_over(
+            Box::new(backend),
+            dir.path(),
+            &program,
+            Timings::default().without_start_wait(),
+            || false,
+        );
+        let _ = m.install(&std::sync::atomic::AtomicBool::new(false));
+        let _ = m.uninstall();
+        let asked: Vec<String> = sys
+            .calls()
+            .into_iter()
+            .filter_map(|c| match c {
+                Call::Os(t) if t.starts_with("elevated ") => Some(t),
+                _ => None,
+            })
+            .collect();
+        assert!(asked.iter().any(|t| t.ends_with("pitwall-server.exe install")), "{asked:?}");
+        assert!(asked.iter().any(|t| t.ends_with("pitwall-server.exe uninstall")), "{asked:?}");
+    }
 }
