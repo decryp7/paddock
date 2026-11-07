@@ -38,6 +38,7 @@ impl VolumeLister for OneVolume {
                 read_only: false,
                 reachable: true,
                 whole_volume: true,
+                measured_at: None,
             },
             root: self.0.clone(),
             identity: None,

@@ -40,6 +40,7 @@ To keep your data, open Settings > Apps, uninstall Dyno and leave "Delete the ap
 
 ### Fixed
 
+- Free disk space was stale: the menu bar popup showed the figure from when Dyno started (589 GB on a Mac that had 1,256 GB free). Dyno now reads the free space of every disk once a minute (Settings > Parallelism and cost > Free space refresh), and again when you open the popup or the Disk map.
 - Repair of the login service no longer waits behind a start, and says what happened and what to do next. Quit waits for a repair or cancels it. Dyno no longer starts a second agent while the system is still registering the service.
 - Start at login: turning it off stays off. On Linux, a unit you disabled stays disabled.
 - macOS: Dyno no longer asks for your Keychain password after an update. Wake-on-LAN passwords and AI access keys are now kept in files only you can read.

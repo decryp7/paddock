@@ -602,7 +602,11 @@ impl Shared {
         let saved_maps = started.cache;
         let saved_maps_settings = settings.disk.saved_maps;
         let settings_limits = settings.disk.limits();
-        let (job_workers, read_threads) = (settings.jobs.worker_count(), settings.disk.read_threads);
+        let (job_workers, read_threads, space_refresh) = (
+            settings.jobs.worker_count(),
+            settings.disk.read_threads,
+            settings.disk.space_refresh_secs,
+        );
         let zone = platform.zone.clone();
         let first_seen = crate::baselines::on_start(&store, t);
         crate::baselines::log_start(dirs.kind(), store_kind, first_seen, &settings.baselines, t, zone.as_ref());
@@ -799,6 +803,7 @@ impl Shared {
             ))));
         }
         shared.disk.set_read_threads(read_threads);
+        shared.disk.set_space_refresh(space_refresh);
         shared.disk.attach_cache(saved_maps.clone());
         shared.counters.attach_cache(saved_maps);
         shared.disk.apply_saved_maps(saved_maps_settings);

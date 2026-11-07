@@ -583,6 +583,7 @@ mod tests {
             read_only: false,
             reachable: true,
             whole_volume: true,
+            measured_at: None,
         };
         let (tx, rx) = sync_channel::<Message>(QUEUE);
         let (scans, volumes) = (ScanSlot::default(), VolumesSlot::default());

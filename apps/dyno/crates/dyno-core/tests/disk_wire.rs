@@ -27,6 +27,7 @@ fn volume(id: &str, location: VolumeLocation, whole: bool) -> Volume {
         read_only: false,
         reachable: true,
         whole_volume: whole,
+        measured_at: None,
     }
 }
 

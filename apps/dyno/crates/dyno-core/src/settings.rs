@@ -424,7 +424,8 @@ mod tests {
                 "finderFiles": 500_000,
                 "finderDepth": 48,
                 "finderHashGib": 64,
-                "savedMaps": {"enabled": true, "maxMb": 1024, "refreshOnOpen": "off"}
+                "savedMaps": {"enabled": true, "maxMb": 1024, "refreshOnOpen": "off"},
+                "spaceRefreshSecs": 0
             })
         );
         assert_eq!(j["jobs"], serde_json::json!({"workers": "auto"}));

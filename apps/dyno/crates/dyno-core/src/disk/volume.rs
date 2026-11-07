@@ -69,6 +69,10 @@ pub struct Volume {
     /// Whether the volume's used space is a fixed scale for a scan. False for a network share: the OS reports the
     /// whole server volume, not the share, so a share is scanned like a folder.
     pub whole_volume: bool,
+    /// When capacity and free were read, in milliseconds since 1970 (the agent's wall clock); `None` before the agent stamped it. A
+    /// volume that stopped answering keeps its last figures and this time, so a view can say "as of 14:05".
+    #[serde(default)]
+    pub measured_at: Option<i64>,
 }
 
 impl Volume {
@@ -235,6 +239,7 @@ pub fn classify(m: &RawMount, traits: &MediaTraits, capacity: Option<(u64, u64)>
         read_only: m.read_only,
         reachable,
         whole_volume,
+        measured_at: None,
     }
 }
 

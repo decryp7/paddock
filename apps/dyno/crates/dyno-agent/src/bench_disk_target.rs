@@ -232,6 +232,7 @@ mod tests {
             read_only: false,
             reachable: true,
             whole_volume: true,
+            measured_at: None,
         }
     }
 

@@ -255,6 +255,23 @@ impl Running {
         inventory::warm(&shared);
         // The volume list is asked for once now, off every request path, so the first page or scan never waits for it.
         shared.disk.refresh_in_background();
+        // The volumes' free space is read again at the Setting's interval whether or not any window is open (the popup and the
+        // Disk map answer from the cache and never touch the disk themselves). OS mount hooks do not exist yet: every fifth
+        // reading lists the mounts again.
+        let s = shared.clone();
+        threads.push(
+            std::thread::Builder::new()
+                .name("dyno-space".into())
+                .spawn(move || {
+                    // A person waits on the figures it fills: live work (rule 52).
+                    dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
+                    while !s.stopped() {
+                        s.disk.tick();
+                        std::thread::sleep(std::time::Duration::from_millis(500));
+                    }
+                })
+                .map_err(|e| format!("could not start the space reader: {e}"))?,
+        );
         let s = shared.clone();
         threads.push(
             std::thread::Builder::new()

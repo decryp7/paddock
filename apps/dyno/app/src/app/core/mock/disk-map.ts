@@ -25,7 +25,7 @@ const MB = 1024 ** 2;
 
 /** The volumes the mock lists. */
 export function mockVolumes(): Volume[] {
-  const base = { rotational: false, readOnly: false, reachable: true, wholeVolume: true };
+  const base = { rotational: false, readOnly: false, reachable: true, wholeVolume: true, measuredAt: null };
   return [
     { ...base, id: '/', name: 'Macintosh HD', mount: '/', fs: 'apfs', location: 'internal', capacity: Math.round(953 * GB), free: Math.round(210 * GB) },
     {
@@ -49,6 +49,7 @@ export function mockVolumes(): Volume[] {
       capacity: Math.round(7800 * GB),
       free: Math.round(2100 * GB),
       wholeVolume: false,
+      measuredAt: null,
     },
   ];
 }

@@ -18,6 +18,7 @@ const internal: Volume = {
   readOnly: false,
   reachable: true,
   wholeVolume: true,
+  measuredAt: null,
 };
 const usb: Volume = { ...internal, id: 'Photos', name: 'Photos', mount: '/Volumes/Photos', location: { external: { bus: 'USB' } } };
 const share: Volume = { ...internal, id: 'Media', name: 'Media', mount: '/Volumes/Media', location: { network: { protocol: 'webDav', host: 'nas.local' } }, wholeVolume: false };
@@ -103,7 +104,7 @@ const rings: DiskRings = {
   capped: false,
 };
 
-const settings: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' } };
+const settings: DiskSettings = { scanFolders: 2_000_000, notableFileMib: 10, readThreads: 'auto', finderFiles: 500_000, finderDepth: 48, finderHashGib: 64, savedMaps: { enabled: true, maxMb: 1024, refreshOnOpen: 'off' }, spaceRefreshSecs: 0 };
 
 const expected = {
   requests: {
