@@ -116,3 +116,45 @@ fn generated_dialog_contracts_are_current() {
     let text = paddock_dialogs::ts::contracts_module("paddock-shell", &crate::DIALOGS, REGENERATE);
     sync_generated(&path, &text, WriteMode::from_env()).unwrap_or_else(|e| panic!("{e}"));
 }
+
+/// ADR 0019: the shared limit registries are known to `LimitId::parse` once a shell is built, so their ids resolve to the
+/// registered rows (the same text, not a copy that a flood of unknown ids could refuse).
+#[test]
+fn building_a_shell_registers_the_shared_limit_registries() {
+    use paddock_limits::{LimitId, Registry};
+    let _ = crate::Builder::<tauri::test::MockRuntime>::new(crate::AppIdentity::new(
+        "net.example.limits",
+        "Limits",
+        "0.0.0",
+    ));
+    for row in [
+        &paddock_download::limits::SIZE,
+        &paddock_storage::limits::ENTRIES,
+        &paddock_updater::limits::DOWNLOAD,
+        &paddock_diag::limits::FILES,
+    ] {
+        let parsed = LimitId::parse(row.id.as_str()).unwrap();
+        assert!(
+            std::ptr::eq(parsed.as_str(), row.id.as_str()),
+            "{} was not registered",
+            row.id
+        );
+    }
+    // An app's own registry joins through the builder.
+    static APP: [paddock_limits::LimitRow; 1] = [paddock_limits::LimitRow::stop(
+        "app.limit_registered_by_the_builder",
+        paddock_limits::Quantity::Count(1),
+        paddock_limits::Quantity::Count(1),
+        paddock_limits::Quantity::Count(1),
+        paddock_limits::RowValue::Hard,
+        paddock_limits::Remedy::None,
+    )];
+    let _ = crate::Builder::<tauri::test::MockRuntime>::new(crate::AppIdentity::new(
+        "net.example.limits",
+        "Limits",
+        "0.0.0",
+    ))
+    .limits(Registry::new(&APP));
+    let parsed = LimitId::parse("app.limit_registered_by_the_builder").unwrap();
+    assert!(std::ptr::eq(parsed.as_str(), APP[0].id.as_str()));
+}

@@ -33,6 +33,7 @@ paddock-files = { workspace = true, features = ["tauri"] }
 paddock-download = { workspace = true, features = ["tauri", "http"] }
 paddock-health = { workspace = true, features = ["tauri"] }
 paddock-jobs = { workspace = true, features = ["tauri"] }
+paddock-limits = { workspace = true }
 paddock-env = { workspace = true }
 paddock-log = { workspace = true }
 paddock-menu = { workspace = true, features = ["tauri"] }

@@ -109,9 +109,33 @@ pub struct Builder<R: Runtime> {
     launch: Option<LaunchArgs>,
 }
 
+/// Makes the ids of the shared crates' limit registries known to `LimitId::parse` before anything decodes one (ADR 0019): an
+/// id that arrives from the wire then resolves to its registered row and can never be refused by a flood of unknown ids.
+/// The crates the shell links are registered here; an app adds its own with [`Builder::limits`].
+fn register_shared_limits() {
+    use paddock_limits::LimitId;
+    for registry in [
+        paddock_limits::BUILTIN,
+        paddock_diag::limits::REGISTRY,
+        paddock_download::limits::REGISTRY,
+        paddock_storage::limits::REGISTRY,
+        paddock_updater::limits::REGISTRY,
+    ] {
+        LimitId::register(&registry);
+    }
+}
+
 impl<R: Runtime> Builder<R> {
+    /// Registers the app's own limit registry (its `LimitId`s decode from the wire; idempotent).
+    #[must_use]
+    pub fn limits(self, registry: paddock_limits::Registry) -> Self {
+        paddock_limits::LimitId::register(&registry);
+        self
+    }
+
     /// The shell of the app `identity`.
     pub fn new(identity: AppIdentity) -> Builder<R> {
+        register_shared_limits();
         Builder {
             identity,
             app_commands: &Table::EMPTY,
