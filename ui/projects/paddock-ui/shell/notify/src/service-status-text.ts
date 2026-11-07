@@ -66,6 +66,7 @@ const CAUSE_WORDS: Readonly<Record<string, () => string>> = {
   'dy.agent.other-holds': () => $localize`:@@pd.health.state.other-holds:held by another agent`,
   'dy.tray.no-host': () => $localize`:@@pd.health.state.tray-hidden:not shown`,
   'dy.setup.version': () => $localize`:@@pd.health.state.setup-version:out of date`,
+  'dy.setup.updated': () => $localize`:@@pd.health.state.updated-restart:updated: restart to finish`,
   'sd.engine.stopped': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.damaged': () => $localize`:@@pd.health.state.stopped:stopped`,
   'sd.index.rebuild': () => $localize`:@@pd.health.state.stopped:stopped`,

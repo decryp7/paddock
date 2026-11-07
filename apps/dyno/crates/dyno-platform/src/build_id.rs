@@ -59,4 +59,21 @@ mod tests {
         assert_eq!(file_build_id(&a).unwrap(), ia, "the same bytes, the same id");
         assert_eq!(file_build_id(&dir.path().join("none")), None);
     }
+
+    /// Measures the hash of real program files: `DYNO_HASH_TIMING=<path>:<path> cargo test -p dyno-platform -- --ignored --nocapture hash_timing`.
+    #[test]
+    #[ignore = "measures files named by DYNO_HASH_TIMING; run by hand"]
+    fn hash_timing() {
+        let Some(list) = std::env::var_os("DYNO_HASH_TIMING") else { return };
+        for path in std::env::split_paths(&list) {
+            let began = std::time::Instant::now();
+            let id = file_build_id(&path);
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            println!(
+                "hash {} size {size} bytes id {id:?} took {} ms",
+                path.display(),
+                began.elapsed().as_millis()
+            );
+        }
+    }
 }

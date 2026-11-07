@@ -108,6 +108,13 @@ pub fn setup_problem(check: &paddock_setup::versioncheck::VersionCheck) -> Optio
     })
 }
 
+/// The line when Dyno's files were replaced while it ran: the new agent is used, the window is the old one.
+pub fn updated_problem() -> Cause {
+    Cause::new("Dyno was updated.")
+        .hint("Restart Dyno to finish: quit it and open it again.")
+        .code("dy.setup.updated")
+}
+
 /// Checks the installed `paddock-setup.exe` against this Dyno's version (Windows, at start) and reports a mismatch.
 #[cfg(windows)]
 pub fn check_setup_version<R: Runtime>(app: &AppHandle<R>, install_dir: &std::path::Path) {
@@ -197,6 +204,18 @@ impl<R: Runtime> Hub<R> {
             .code("dy.agent.failed"))
     }
 
+    /// Tells the chip that Dyno was updated while it ran (its program files are a newer build), or that this no longer holds.
+    pub fn report_updated(&self, updated: bool) {
+        let Some(health) = self.app.get().and_then(|a| a.try_state::<Arc<Health>>().map(|h| h.inner().clone())) else {
+            return;
+        };
+        if updated {
+            health.down(SETUP, updated_problem(), None);
+        } else if health.is_in_outage(SETUP) {
+            health.ok(SETUP);
+        }
+    }
+
     /// Reports a long wait to the chip (with Retry), or that it is over.
     pub fn report_stall(&self, stall: Option<Stall>) {
         let Some(health) = self.app.get().and_then(|a| a.try_state::<Arc<Health>>().map(|h| h.inner().clone())) else {
@@ -252,6 +271,13 @@ mod tests {
 
     fn status(state: AgentState, message: Option<&str>) -> AgentStatus {
         AgentStatus::new(state, message.map(str::to_string))
+    }
+
+    #[test]
+    fn an_app_updated_while_it_runs_is_told_to_restart_with_its_own_cause_code() {
+        let cause = updated_problem();
+        assert_eq!(cause.code.as_deref(), Some("dy.setup.updated"));
+        assert!(cause.message.contains("updated") && cause.hint.as_deref().is_some_and(|h| h.contains("Restart Dyno")));
     }
 
     #[test]

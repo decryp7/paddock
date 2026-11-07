@@ -445,19 +445,13 @@ fn agent_setup<R: Runtime>(
         Arc::new(paddock_jobs::SystemClock),
     );
     let launcher: Box<dyn link::Launcher> = if installed { app_launcher(&dirs) } else { Box::new(NoAgent) };
-    // Which agent build this app wants: the version and the build id of the agent file it would start (a rebuild or release
-    // candidate of the same version is another build). Unreadable: the version alone decides.
-    let build = if installed {
-        login::agent_program()
-            .ok()
-            .and_then(|p| dyno_agent::build_id::file_build_id(&p))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let key = dyno_agent::build_id::build_key(VERSION, &build);
-    logging::info(&format!("Dyno wants agent build {key}"));
-    let link = AgentLink::new(dirs, &key, events.clone(), launcher);
+    let link = AgentLink::new(dirs, VERSION, events.clone(), launcher);
+    // Which agent build this app wants: the version and the build id of the agent file it would start, read again when that file
+    // changes (a rebuild or release candidate of the same version is another build; an app updated while it runs uses the agent
+    // of the new build). It is read on the link's worker threads, so hashing the file never delays the window.
+    if installed {
+        link.set_wanted_source(link::ports::wanted_key_source(VERSION, login::agent_program));
+    }
     #[cfg(windows)]
     if installed {
         if let Some(dir) = per_machine::install_dir() {

@@ -144,10 +144,14 @@ pub fn report_issue(file_name: &str, mtime: Timestamp, head: &[u8], complete: bo
             return None;
         }
         // The signal that ended it: a program others stopped (SIGTERM, SIGKILL) is not a crash.
+        // Only a plain signal counts: the OS ending a program (code signing, a watchdog, RunningBoard, jetsam) is also a SIGKILL
+        // but names another termination namespace, and that is a failure of the program or its install.
         let signal = if complete {
-            serde_json::from_str::<serde_json::Value>(body.trim())
-                .ok()
-                .and_then(|b| b.get("exception")?.get("signal")?.as_str().map(str::to_string))
+            serde_json::from_str::<serde_json::Value>(body.trim()).ok().and_then(|b| {
+                let signal = b.get("exception")?.get("signal")?.as_str()?.to_string();
+                let namespace = b.get("termination").and_then(|t| t.get("namespace")).and_then(|n| n.as_str());
+                namespace.is_none_or(|n| n.eq_ignore_ascii_case("SIGNAL")).then_some(signal)
+            })
         } else {
             None
         };
@@ -396,6 +400,47 @@ mod tests {
 
     const HEADER: &str = r#"{"app_name":"bench_reads_base","timestamp":"2026-10-22 20:48:57.00 +0800","app_version":"1.2","bug_type":"309","os_version":"macOS 27.0.1 (26A434)","incident_id":"C439B0A0","name":"bench_reads_base"}"#;
     const BODY: &str = r#"{"exception":{"type":"EXC_CRASH","signal":"SIGABRT"},"termination":{"namespace":"DYLD","indicator":"Library missing","reasons":["Library not loaded: @rpath/libduckdb.dylib","Referenced from: x"]}}"#;
+
+    #[test]
+    fn a_sigkill_counts_as_stopped_from_outside_only_when_the_termination_is_a_plain_signal() {
+        // (the termination block of an invented report, expected kind)
+        let table = [
+            (
+                r#","termination":{"namespace":"SIGNAL","indicator":"Killed: 9"}"#,
+                IssueKind::StoppedFromOutside,
+            ),
+            (r#","termination":{"namespace":"signal"}"#, IssueKind::StoppedFromOutside),
+            ("", IssueKind::StoppedFromOutside),
+            (r#","termination":{"indicator":"Killed: 9"}"#, IssueKind::StoppedFromOutside),
+            (
+                r#","termination":{"namespace":"CODESIGNING","indicator":"Invalid Page"}"#,
+                IssueKind::AppCrash,
+            ),
+            (
+                r#","termination":{"namespace":"WATCHDOG","indicator":"scene-update watchdog"}"#,
+                IssueKind::AppCrash,
+            ),
+            (
+                r#","termination":{"namespace":"RUNNINGBOARD","indicator":"launch timed out"}"#,
+                IssueKind::AppCrash,
+            ),
+            (
+                r#","termination":{"namespace":"JETSAM","indicator":"per-process-limit"}"#,
+                IssueKind::AppCrash,
+            ),
+            (
+                r#","termination":{"namespace":"DYLD","indicator":"Library missing"}"#,
+                IssueKind::AppCrash,
+            ),
+            (r#","termination":{"namespace":""}"#, IssueKind::AppCrash),
+        ];
+        for (termination, want) in table {
+            let body = format!(r#"{{"exception":{{"type":"EXC_CRASH","signal":"SIGKILL"}}{termination}}}"#);
+            let text = format!("{HEADER}\n{body}");
+            let i = report_issue("bench_reads_base-2026-10-22-204857.ips", Timestamp(1), text.as_bytes(), true).unwrap();
+            assert_eq!(i.kind, want, "{termination}");
+        }
+    }
 
     #[test]
     fn a_report_of_a_program_ended_by_a_signal_from_outside_is_not_a_crash() {

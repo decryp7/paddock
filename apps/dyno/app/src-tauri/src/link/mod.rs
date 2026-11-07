@@ -111,7 +111,14 @@ pub trait Sink: Send + Sync {
     fn connection_made(&self) {}
     /// A connection was made: the shell reads what it needs from the agent (settings, for the tray).
     fn connected(&self, _link: &Arc<AgentLink>) {}
+    /// The program files on disk are another build than the one this app started from (`true`): the app was updated while it ran.
+    /// The link uses the agent of the new build, and the chip says to restart Dyno. `false` when that no longer holds.
+    fn app_updated(&self, _updated: bool) {}
 }
+
+/// Tells the build key of the agent file the app would start now (cached by the file's stamp, so a call costs a `stat` unless
+/// the file changed).
+pub type WantedKey = Arc<dyn Fn() -> String + Send + Sync>;
 
 /// Why a wait for the agent has gone on longer than usual. A wait is never given up on (ADR 0031): this is information
 /// for the status chip, with a Retry that acts on the cause ([`AgentLink::retry`]).
@@ -275,6 +282,12 @@ pub struct AgentLink {
     tuning: machine::Tuning,
     /// `quit` was called (its answer is for the first call only).
     quit_called: AtomicBool,
+    /// Where the build key the app wants is read now; without one it is `app_version` for good.
+    wanted: Mutex<Option<WantedKey>>,
+    /// The key the first read gave: the build this app started from.
+    first_key: std::sync::OnceLock<String>,
+    /// The program files changed under the running app (the last answer to [`AgentLink::wanted_key`] differs from the first).
+    updated: AtomicBool,
 }
 
 impl AgentLink {
@@ -318,7 +331,38 @@ impl AgentLink {
             pace,
             tuning,
             quit_called: AtomicBool::new(false),
+            wanted: Mutex::new(None),
+            first_key: std::sync::OnceLock::new(),
+            updated: AtomicBool::new(false),
         })
+    }
+
+    /// Reads the wanted build key from `source` from now on (it is read on the link's worker threads, never the caller's: it may
+    /// hash a file). The first answer is the build this app started from; a later different one means the app was updated while it
+    /// ran, and the link then uses the agent of the new build instead of evicting it forever (Dyno lesson 2026-11-07).
+    pub fn set_wanted_source(&self, source: WantedKey) {
+        *lock(&self.wanted) = Some(source);
+    }
+
+    /// The build key to compare agents against, now. Tells the sink when the app turns out to be older than the files on disk.
+    pub(crate) fn wanted_key(&self) -> String {
+        let source = lock(&self.wanted).clone();
+        let Some(source) = source else {
+            return self.app_version.clone();
+        };
+        let key = source();
+        let first = self.first_key.get_or_init(|| key.clone());
+        let updated = *first != key;
+        if self.updated.swap(updated, Ordering::SeqCst) != updated {
+            log::warn!(Started = first.as_str(), OnDisk = key.as_str(), Updated = updated; "Dyno's program files changed while it ran");
+            self.sink.app_updated(updated);
+        }
+        key
+    }
+
+    /// Whether the program files on disk are a newer build than this running app.
+    pub fn app_updated(&self) -> bool {
+        self.updated.load(Ordering::SeqCst)
     }
 
     /// Runs the supervisor on its own thread (the owner) and its pace.

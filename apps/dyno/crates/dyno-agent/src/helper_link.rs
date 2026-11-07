@@ -244,7 +244,7 @@ impl<T: HelperTransport> HelperLink<T> {
                     Ok(HelperReply::Entries(e)) => e,
                     _ => Vec::new(),
                 };
-                self.judge(wait, info, recent)
+                self.judge(wait, our_version, info, recent)
             }
             Ok(_) => Probe::Silent("it answered with the wrong kind of reply".into()),
             Err(TransportError::Absent) => Probe::Absent,
@@ -268,11 +268,18 @@ impl<T: HelperTransport> HelperLink<T> {
         status
     }
 
-    /// `Answered`, or `AnsweredOtherBuild` when the helper is an API and version this Dyno accepts but not the build it ships.
-    fn judge(&self, wait: Wait, info: dyno_core::helper_wire::HelperInfo, recent: Vec<dyno_core::helper_wire::AuditEntry>) -> Probe {
-        let acceptable = info.api == dyno_core::helper_wire::HELPER_API
-            && dyno_core::helper_wire::version_at_least(&info.version, dyno_core::helper_wire::MIN_HELPER_VERSION);
-        let Some(bundled_of) = self.bundled_build.as_ref().filter(|_| acceptable) else {
+    /// `Answered`, or `AnsweredOtherBuild` when the helper is of this Dyno's own version and API but not the build it ships. A helper
+    /// of another version is left to the version rule: a newer one stays as it is (a downgrade is never offered), an older one that
+    /// is still accepted is updated by the user's choice.
+    fn judge(
+        &self,
+        wait: Wait,
+        our_version: &str,
+        info: dyno_core::helper_wire::HelperInfo,
+        recent: Vec<dyno_core::helper_wire::AuditEntry>,
+    ) -> Probe {
+        let comparable = info.api == dyno_core::helper_wire::HELPER_API && info.version == our_version;
+        let Some(bundled_of) = self.bundled_build.as_ref().filter(|_| comparable) else {
             return Probe::Answered(info, recent);
         };
         let bundled = bundled_of();
@@ -637,6 +644,11 @@ mod tests {
             assert_eq!(seen.contains(&HelperRequest::Build), asked, "{seen:?}");
             assert_eq!(l.faults(), 0, "a helper that cannot name its build is not an unreachable one");
         }
+        // A helper of a newer version than this Dyno is never judged by build (a downgrade is not offered): Ready, not asked.
+        let l = link(vec![Ok(about("1.2.0", HELPER_API)), Ok(HelperReply::Entries(vec![]))])
+            .with_bundled_build(Arc::new(|| Some("bbbb".into())));
+        assert_eq!(l.status(w, Ok(()), "1.1.0").state, HelperState::Ready);
+        assert!(!l.transport.seen.lock().unwrap().contains(&HelperRequest::Build));
         // Without a bundled program to compare with (a test rig, a build without a helper) the build is never asked.
         let l = link(head());
         assert_eq!(l.status(w, Ok(()), "1.1.0").state, HelperState::Ready);
