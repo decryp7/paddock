@@ -189,7 +189,8 @@ test('a reading the VM base cannot take is NOT MEASURED, not pass or fail', asyn
   const r = READINGS.find((x) => x.id === 'lifespan-smart');
   const s = await readingStep(r, 'linux', { openPage: async () => true, text: async () => 'Lifespan /usr/sbin/smartctl is not installed' });
   assert.equal(s.status, 'not-measured');
-  assert.equal(s.summary, 'not measured: smartmontools missing in base');
+  assert.match(s.summary, /^not measured: the VM exposes no SSD wear counters/);
+  assert.equal((await readingStep(r, 'linux', { openPage: async () => true, text: async () => 'Lifespan SSD Disk life cannot be estimated The helper could not read it: the helper found no SSD with wear counters.' })).status, 'not-measured');
   assert.equal((await readingStep(r, 'linux', { openPage: async () => true, text: async () => 'Lifespan SSD Disk life Have 14 of 14 days' })).status, 'pass');
   assert.match(renderResult({ app: 'Dyno', steps: [s] }), /NOT MEASURED/);
 });
