@@ -248,6 +248,7 @@ export async function repeatInstall(browser) {
 }
 
 import { loginJobsRow, windowsLoginJobsDriver } from './login-jobs-drivers.mjs';
+import { diskSpaceStep, windowsAdapter } from './disk-space-row.mjs';
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
 import { scopingStep } from './win-scoping.mjs';
 const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
@@ -383,6 +384,8 @@ export const helperSteps = [
   ({ browser }) => diskHealth(browser),
   // Row 5a: the Start at login change in the Jobs list (login-jobs-row.mjs). The raw `wbadmin` evidence step is gone with Backup health (removed in 1.1.0).
   async ({ browser }) => loginJobsRow(windowsLoginJobsDriver(browser, { openSettings, mainPage }), { now: () => Date.now(), sleep }),
+  // Release row: disk space (Dyno's figure against Explorer's, decimal units, refresh within 60 s of a 1 GB write)
+  async () => { const adapter = windowsAdapter({ ssh }); return diskSpaceStep({ exec: async (c) => ({ code: 0, stdout: ssh(c, { ms: 280_000 }) }), sleep, now: () => Date.now(), adapter }); },
   // WP-VMH: one step per helper reading while the helper is on
   ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser), { ssh })),
   () => scopingStep(),

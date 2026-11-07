@@ -29,7 +29,7 @@ const MAC_POWER = [
   row('install', /^Install$/), BUILD, row('cold-start', /^Cold start for the power checks/), row('helper-on', /^Admin helper: Turn on/),
   row('keep-awake', /^Keep awake: held by the OS/), row('scheduled-wake', /^Scheduled wake: listed by the OS/), row('wake-on-lan', /^Wake-on-LAN: magic packet/),
   row('tour-menu-bar', /^GUI: menu-bar items/), row('tour-dashboard', /^GUI: dashboard customize/), row('tour-benchmark', /^GUI: short benchmark/),
-  row('idle-action', /^Idle action: countdown/), row('login-jobs', /^Row 5a:/), row('helper-off', /^Admin helper: Turn off/), row('helper-log', /^macOS helper lines in the unified log/),
+  row('idle-action', /^Idle action: countdown/), row('login-jobs', /^Row 5a:/), row('disk-space', /^Release row: disk space matches/), row('helper-off', /^Admin helper: Turn off/), row('helper-log', /^macOS helper lines in the unified log/),
   row('quit', /^Quit after the power checks/),
 ];
 const MAC_HELPER = [
@@ -39,7 +39,7 @@ const MAC_HELPER = [
 ];
 const LINUX = [
   row('install', /^Install \(\.deb/), BUILD, row('cold-start', /^Cold start, one instance/), row('keep-awake', /^Keep awake: held by the OS/),
-  row('helper-on', /^Admin helper Turn on \(polkit\)/), ...readings('linux'), row('helper-off', /^Admin helper Turn off removes it/), row('login-jobs', /^Row 5a:/), row('upgrade-swap', /^Release row: installing the new build over a running older one/), row('quit', /^Quit \(File > Quit\)/),
+  row('helper-on', /^Admin helper Turn on \(polkit\)/), ...readings('linux'), row('helper-off', /^Admin helper Turn off removes it/), row('login-jobs', /^Row 5a:/), row('disk-space', /^Release row: disk space matches/), row('upgrade-swap', /^Release row: installing the new build over a running older one/), row('quit', /^Quit \(File > Quit\)/),
 ];
 const LINUX_REBOOT = [
   row('reboot-before', /^Restart check: before the reboot/), row('reboot-after', /^Restart check: Dyno after the reboot/),
@@ -57,7 +57,7 @@ const WIN_UI = [
   row('wp-sec', /^Windows: WP-SEC folder protection/), row('helper-acl', /^Windows: helper data folder is not writable/), row('exploit', /^Windows: exploit probe/),
   row('repeat-install', /^Windows: repeat install of the disk health tool/), row('disk-health', /^Windows: disk health install/), ...readings('windows'),
   row('scoping', /^Windows: D6 scoping/), row('served', /^Windows: the helper reports which readings it served/),
-  row('login-jobs', /^Row 5a:/), row('repair', /^Windows: Repair through the card/), row('helper-off', /^Windows: admin helper Turn off/),
+  row('login-jobs', /^Row 5a:/), row('disk-space', /^Release row: disk space matches/), row('repair', /^Windows: Repair through the card/), row('helper-off', /^Windows: admin helper Turn off/),
   row('upgrade-swap', /^Release row: installing the new build over a running older one/), row('quit-exit', /^Windows: Quit Dyno \(File menu\)/), row('same-version-refused', /^Windows: an update from the same version is refused/), row('uninstall', /^Windows: uninstall removes/),
 ];
 const WIN_REBOOT = [

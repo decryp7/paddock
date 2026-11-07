@@ -21,6 +21,7 @@ import { macDriver, readingSteps } from './helper-readings.mjs';
 import { swapNotDriven, upgradeSwapStep } from './upgrade-swap-row.mjs';
 import { macSwapPrimitives } from './upgrade-swap-prims.mjs';
 import { loginJobsRow, macLoginJobsDriver } from './login-jobs-drivers.mjs';
+import { diskSpaceStep, unixAdapter } from './disk-space-row.mjs';
 import { macRebootCheck } from './mac-reboot.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep } from './mcp-judges.mjs';
@@ -327,7 +328,8 @@ async function main(argv) {
             rowStep(ROW_TITLES.macLifecycleLog, judgeLifecycleLog({ code: m ? Number(m[1]) : null, out: lg.stdout.replace(/EXIT=\d+\s*$/, '') }), 'a standard user reads the lifecycle log'),
             hung];
         };
-        const rowFns = o.suite === 'power' ? [macRows, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) })] : [];
+        const rowFns = o.suite === 'power' ? [macRows, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
+          async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) })] : [];
         const suite = await runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
         // The keychain other-build measurement (not in the manifest, never a pass or a fail): build A (--installer-before) makes a key through the app's own UI, build B
         // (--installer) is installed over it. It runs last because it replaces the installed app.

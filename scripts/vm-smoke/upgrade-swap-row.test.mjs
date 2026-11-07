@@ -27,3 +27,11 @@ test('the step waits up to 60 s for the swap and an old build that cannot be ins
   assert.match(s.summary, /cannot be installed/);
   assert.equal(versionOf('dyno-agent 1.1.0 (a19d8d288)'), '1.1.0');
 });
+
+const same = { ...base, oldVersion: '1.1.0', oldBuild: 'aaa', newBuild: 'bbb', procs: [{ name: 'dyno-agent', pid: 9, exe: '/x', startMs: 2000 }, { name: 'net.decryptology.dyno.helper', pid: 10, exe: '/h', startMs: 2000 }] };
+test('same version, different build: judged by process identity', () => {
+  assert.equal(bad(judgeSwap(same)).length, 0);
+  assert.ok(bad(judgeSwap({ ...same, procs: [{ name: 'dyno-agent', pid: 5, exe: '/old', startMs: 500 }] })).length > 0);
+  assert.ok(bad(judgeSwap({ ...same, procs: [same.procs[0]] })).some((c) => /helper/.test(c.detail)));
+});
+test('same version and the same build stays a broken check', () => assert.ok(judgeSwap({ ...same, newBuild: 'aaa' }).every((c) => c.ok || c.kind === 'check')));

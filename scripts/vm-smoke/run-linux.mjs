@@ -23,6 +23,7 @@ import { makeResult } from './verdict.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep, quitStopStep } from './mcp-judges.mjs';
 import { hungPageStep } from './hung-page.mjs';
+import { diskSpaceStep, unixAdapter } from './disk-space-row.mjs';
 import { NOT_DRIVEN, ROW_TITLES, judgeLinuxHelperLogDir, notDriven, rowStep } from './release-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -249,6 +250,9 @@ async function main(argv) {
     push(await loginJobsRow(linuxLoginJobsDriver(atspi, parseSwitchState), { now: () => Date.now(), sleep }));
     press('^Dyno$'); await sleep(1000);
 
+    // Release row: disk space (Dyno's figure against the OS's, decimal units, refresh within 60 s of a 1 GB write).
+    push(await diskSpaceStep({ exec: async (c) => ses(c, 300_000), sleep, now: () => Date.now(), adapter: unixAdapter({ os: 'linux', dyno: '/usr/bin/dyno' }) }));
+
     // 7. Quit: File > Quit ends the app and the agent.
     press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit Dyno( \\(keeps measuring\\))?$', 'menu item'); await sleep(8000);
     // Quit: poll up to 40 s (as on macOS and Windows) for no dyno process; print what is left with its parent.
@@ -312,6 +316,8 @@ async function main(argv) {
       if (!o.oldInstaller) push(swapNotDriven('no older build was given (--old-installer <older .deb>: the 1.0.0 .deb or an older RC), so there is nothing to install over'));
       else {
         sh('bash', ['-c', `cat ${JSON.stringify(resolve(o.oldInstaller))} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/DynoOld.deb'`], 600_000);
+        // /tmp is cleared by the restart check's reboot: the new .deb goes into the guest again.
+        sh('bash', ['-c', `cat ${JSON.stringify(deb)} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/Dyno.deb'`], 600_000);
         const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-swap${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
         g('sudo apt-get remove -y -qq dyno >/dev/null 2>&1; pkill -x dyno-app; pkill -x dyno-agent; true', 300_000);
         push(await upgradeSwapStep(linuxSwapPrimitives({ exec: async (c) => ses(c), sleep, now: () => Date.now(), oldDeb: '/tmp/DynoOld.deb', newDeb: '/tmp/Dyno.deb', startApp })).catch((e) => swapNotDriven(String(e.message ?? e))));
