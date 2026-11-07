@@ -106,11 +106,11 @@ export function linuxSwapPrimitives({ exec, sleep, now, oldDeb, newDeb, startApp
       return { oldVersion: versionOf((await exec(`dpkg-query -W -f='\${Version}\\n' dyno`)).stdout), helperWasOn: active };
     },
     async oldAgentBuild16() { return build16((await exec(`cat ${data}/agent.json`)).stdout); },
-    async expectedAgentBuild16() { const h = (await exec(`dpkg-deb --fsys-tarfile ${sq(newDeb)} | tar -xO ./usr/bin/dyno-agent | sha256sum | cut -c1-16`)).stdout.trim().split('\n').at(-1); return /^[0-9a-f]{16}$/.test(h) ? h : null; },
+    async expectedAgentBuild16() { const h = (await exec(`d=$(mktemp -d); dpkg-deb -x ${sq(newDeb)} $d && sha256sum $d/usr/bin/dyno-agent | cut -c1-16; rm -rf $d`)).stdout.trim().split('\n').at(-1); return /^[0-9a-f]{16}$/.test(h) ? h : null; },
     async beginInstall() { return guestNowMs(exec); },
     async installNew() {
       installLog = await dpkg('', newDeb);
-      const want = (await exec(`dpkg-deb --fsys-tarfile ${sq(newDeb)} | tar -xO ./usr/bin/dyno-agent | sha256sum | cut -c1-16`)).stdout.trim().split('\n').at(-1);
+      const want = (await exec(`d=$(mktemp -d); dpkg-deb -x ${sq(newDeb)} $d && sha256sum $d/usr/bin/dyno-agent | cut -c1-16; rm -rf $d`)).stdout.trim().split('\n').at(-1);
       const disk = (await exec('sha256sum /usr/bin/dyno-agent | cut -c1-16')).stdout.trim();
       if (want !== disk) throw new Error(`dpkg -i reported success but /usr/bin/dyno-agent (${disk}) is not the new .deb's (${want}); dpkg output: ${installLog.replace(/\n/g, ' | ').slice(-500)}`);
     },
