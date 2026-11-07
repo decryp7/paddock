@@ -29,6 +29,7 @@ const launchApp = () => ssh(`Set-Content ${V}\\launch-swap.ps1 'Start-Process "$
 
 export async function winSwapRow({ oldStaged }) {
   let helperBefore = '';
+  const swapEvidence = [];
   if (!oldStaged) return swapNotDriven('no older build was given (--old-installer <older setup.exe>), so there is nothing to install over');
   const prims = {
     now: () => Date.now(), sleep,
@@ -71,13 +72,20 @@ export async function winSwapRow({ oldStaged }) {
       const unchanged = Boolean(helperBefore) && helperBefore === bundled;
       if (unchanged) out.push(chk(true, `the helper file was already the bundled one before the install (SHA-256 ${bundled.slice(0, 16)}): no helper refresh is expected, so the refresh log line is not required`));
       else {
-        const line = ssh(`(Select-String -Path '${HELPER_LOG_GLOB}' -Pattern 'refresh: replacing the installed helper' -ErrorAction SilentlyContinue | Measure-Object).Count`, { admin: true }).trim().split('\n').at(-1);
-        out.push(chk(Number(line) > 0, Number(line) > 0 ? 'the helper log has "refresh: replacing the installed helper"' : `the helper changed (${helperBefore.slice(0, 12)} then ${bundled.slice(0, 12)}) but the helper log has no "refresh: replacing the installed helper" line`));
+        // The installer's `dyno-helper refresh` logs "refresh: decided" and "refresh: replacing the installed helper" (dyno-helper setup.rs). Every "refresh:" line of every helper
+        // and setup log is kept as evidence. When the exact line is not found, the replacement is judged by the hashes (old file differs, installed and running equal the bundled).
+        const lines = ssh(`Get-ChildItem 'C:\\ProgramData\\Dyno','${PROG}\\updates' -Recurse -Filter *.log -ErrorAction SilentlyContinue | Select-String -Pattern 'refresh' -ErrorAction SilentlyContinue | Select-Object -Last 12 | ForEach-Object { $_.Filename + ': ' + $_.Line.Trim() }`, { admin: true }).trim();
+        swapEvidence.push('--- "refresh" lines in the helper and setup logs', ...(lines ? lines.split('\n').map((l) => l.trim().slice(0, 300)) : ['(none)']));
+        const exact = /refresh: replacing the installed helper/.test(lines);
+        const byHash = Boolean(helperBefore) && Boolean(bundled) && helperBefore !== bundled && bundled === installed && bundled === rh;
+        out.push(chk(exact || byHash, exact ? 'the helper log has "refresh: replacing the installed helper"' : byHash ? `the helper was replaced, shown by hash (before ${helperBefore.slice(0, 12)}, installed and running now ${bundled.slice(0, 12)} = bundled); the exact refresh line was not found, the log's refresh lines are in the evidence` : `the helper changed (${helperBefore.slice(0, 12)} then ${bundled.slice(0, 12)}) but neither the refresh line nor the hashes show a replacement`));
       }
       const svc = ssh('(Get-Service DynoHelper -ErrorAction SilentlyContinue).Status', { admin: true }).trim().split('\n').at(-1);
       out.push(chk(/Running/.test(svc), `the DynoHelper service is ${svc || 'absent'}`));
       return out;
     },
   };
-  return upgradeSwapStep(prims).catch((e) => swapNotDriven(String(e.message ?? e)));
+  const r = await upgradeSwapStep(prims).catch((e) => swapNotDriven(String(e.message ?? e)));
+  r.evidence = [...(r.evidence ?? []), `helper before the install: SHA-256 ${helperBefore || '(unread)'}`, ...swapEvidence];
+  return r;
 }
