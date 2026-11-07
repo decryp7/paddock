@@ -3,23 +3,24 @@
 //! checks that the process it names is the one that started when the file says (rule 53: the file is only a hint, and a key is
 //! never sent to a port nobody proved), connects to the loopback listener with the key, and carries lines both ways.
 
+use crate::client::{AGAIN, ConnectError, connect_loopback};
 use crate::jsonrpc::{Id, Incoming, parse};
-use crate::listener::Discovery;
 use crate::server::Limits;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, TcpStream};
+use std::io::{BufRead, Read, Write};
+use std::net::Shutdown;
 use std::path::Path;
 use std::sync::{Arc, Mutex, PoisonError};
-use std::time::Duration;
 
 /// Longest line the bridge forwards from the app (a result is already cut by the server's limits).
 const MAX_LINE: u64 = 4 * 1024 * 1024;
 
-/// The next step after the app ended or refused a connection for a reason that is not the key.
-const AGAIN: &str =
-    "It may be restarting; check that it is open with AI access on, then start this again.";
+impl From<ConnectError> for BridgeError {
+    fn from(e: ConnectError) -> Self {
+        BridgeError(e.to_string())
+    }
+}
 
 /// Why the bridge could not start, or why it ended before the app answered everything. The text says what to do.
 #[derive(Debug)]
@@ -32,12 +33,6 @@ impl std::fmt::Display for BridgeError {
 }
 
 impl std::error::Error for BridgeError {}
-
-fn not_open(app: &str) -> BridgeError {
-    BridgeError(format!(
-        "{app} isn't open, or AI access is off or has no key. Open the app and turn on Settings > AI access with a key, then start this again."
-    ))
-}
 
 /// The requests the bridge carried that the app has not answered yet, and whether the host closed its input (not set when
 /// only the bridge's write to the app failed: the host is then still connected).
@@ -110,47 +105,11 @@ pub fn run(
     mut input: impl BufRead + Send + 'static,
     output: &mut (impl Write + Send),
 ) -> Result<(), BridgeError> {
-    let hint = Discovery::read(discovery)
-        .filter(Discovery::writer_alive)
-        .ok_or_else(|| not_open("The app"))?;
-    let app = hint.app.clone();
-    let mut stream =
-        TcpStream::connect_timeout(&([127, 0, 0, 1], hint.port).into(), Duration::from_secs(5))
-            .map_err(|e| {
-                log::warn!(
-                    "paddock_mcp bridge: connect to port {} failed: {e}",
-                    hint.port
-                );
-                not_open(&app)
-            })?;
-    let _ = stream.set_nodelay(true);
-    writeln!(stream, "{}", serde_json::json!({"key": key}))
-        .map_err(|e| BridgeError(format!("Could not reach {app}: {e}")))?;
-    let mut from_app = BufReader::new(stream.try_clone().map_err(|e| BridgeError(e.to_string()))?);
-    let mut first = String::new();
-    let read = from_app
-        .by_ref()
-        .take(4096)
-        .read_line(&mut first)
-        .map_err(|e| BridgeError(format!("{app} did not answer the key ({e}). {AGAIN}")))?;
-    if read == 0 {
-        return Err(BridgeError(format!(
-            "{app} closed the connection before answering the key. {AGAIN}"
-        )));
-    }
-    let answer: serde_json::Value = serde_json::from_str(first.trim())
-        .map_err(|_| BridgeError(format!("{app} did not answer like an MCP listener.")))?;
-    if answer["ok"] != true {
-        let why = answer["error"].as_str().unwrap_or("no reason given");
-        // Only a key refusal may say so: anything else sent users to issue a new key for nothing (2026-11-07).
-        return Err(BridgeError(if answer["code"] == "key" {
-            format!("{app} refused the key: {why}.")
-        } else {
-            format!("{app} turned the connection down: {why}.")
-        }));
-    }
+    let link = connect_loopback(discovery, key)?;
+    let app = link.app().to_string();
+    let (stream, mut from_app) = link.into_parts();
     let pending = Arc::new(Mutex::new(Pending::default()));
-    let writer = stream.try_clone().map_err(|e| BridgeError(e.to_string()))?;
+    let writer = stream.clone();
     // Detached: a host that keeps stdin open must not keep the bridge alive once the app has ended the connection.
     {
         let pending = pending.clone();
@@ -184,7 +143,7 @@ pub fn run(
                 }
             }
             // The host closed its side (or the app's is gone): let the app answer what is pending, then it ends the connection.
-            let _ = writer.shutdown(Shutdown::Write);
+            writer.shutdown(Shutdown::Write);
         });
     }
     let mut line = String::new();
@@ -203,13 +162,13 @@ pub fn run(
                     .is_err()
                 {
                     // The host is gone: nobody is left to answer.
-                    let _ = stream.shutdown(Shutdown::Both);
+                    stream.shutdown(Shutdown::Both);
                     return Ok(());
                 }
             }
         }
     };
-    let _ = stream.shutdown(Shutdown::Both);
+    stream.shutdown(Shutdown::Both);
     let (unanswered, host_closed) = {
         let mut p = pending_lock(&pending);
         (std::mem::take(&mut p.ids), p.host_closed)
