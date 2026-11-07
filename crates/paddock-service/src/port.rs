@@ -2,6 +2,7 @@
 //! Items, systemd, registry or services (rule 7). The real adapters are [`crate::system::RealSystem`] and the native
 //! glue in `native.rs`; tests use [`crate::testing`], which records every command and file write.
 
+use paddock_proc::RunState;
 use std::path::Path;
 use std::time::Duration;
 
@@ -101,6 +102,16 @@ pub trait System: Send {
     fn is_program(&mut self, path: &Path) -> bool;
     /// Waits (the fake only advances its clock).
     fn pause(&mut self, how_long: Duration);
+    /// The CPU time the process `pid` (and its children) used so far, `None` when the OS did not say or there is no such
+    /// process. For judging a start that is taking long; `pid` was just read from the OS's own report. Not known by default.
+    fn cpu_time(&mut self, _pid: u32) -> Option<Duration> {
+        None
+    }
+    /// Whether the process `pid` is stopped by the OS or another app ([`RunState::Stopped`]), read by process identity.
+    /// [`RunState::Unknown`] when the OS does not say (the default).
+    fn run_state(&mut self, _pid: u32) -> RunState {
+        RunState::Unknown
+    }
 }
 
 /// `SMAppService.status`, without the Objective-C type.

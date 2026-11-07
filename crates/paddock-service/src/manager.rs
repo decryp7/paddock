@@ -10,6 +10,7 @@ use crate::error::ServiceError;
 use crate::plan::{Facts, Hold, MAX_ATTEMPTS, Plan, Reason, Refusal, plan};
 use crate::record::{Phase, RecordFile, Recorded, State};
 use crate::repair::{Bounds, RepairOutcome, Step, Timings, replace_bounded};
+use crate::start_wait::StartWatch;
 use crate::status::{Seen, ServiceStatus, compose};
 use crate::tracker::RepairTracker;
 use paddock_health::{Clock, SystemClock};
@@ -55,6 +56,8 @@ pub struct Manager {
     timings: Timings,
     tracker: Arc<RepairTracker>,
     answers: Box<dyn FnMut() -> bool + Send>,
+    /// Judges the wait for the service after a registration ([`Manager::with_start_watch`]).
+    start_watch: Option<Box<dyn StartWatch>>,
     cover: Box<dyn FnMut() -> bool + Send>,
     wanted: Box<dyn FnMut() -> Option<bool> + Send>,
     /// The app said what its switch is ([`Manager::with_app_state`]).
@@ -91,6 +94,7 @@ impl Manager {
             timings: Timings::default(),
             tracker: Arc::new(RepairTracker::new()),
             answers: Box::new(answers),
+            start_watch: None,
             cover: Box::new(|| false),
             wanted: Box::new(|| Some(true)),
             app_state: false,
@@ -106,6 +110,17 @@ impl Manager {
     #[must_use]
     pub fn with_record(mut self, record: RecordFile) -> Self {
         self.record = record;
+        self
+    }
+
+    /// Judges the wait for the service after a registration by what the OS shows of the job instead of a fixed time
+    /// ([`Timings::start_wait`]): a slow start is waited for, a job that vanished, restarts in a loop or is stuck fails
+    /// early with what was observed, a refused one goes round another cycle. [`StartWait`](crate::StartWait) is the
+    /// recommended watch. It only applies to a backend that can observe the job ([`Backend::observe_start`]; launchd);
+    /// the others, and a manager without a watch, keep the fixed wait.
+    #[must_use]
+    pub fn with_start_watch(mut self, watch: Box<dyn StartWatch>) -> Self {
+        self.start_watch = Some(watch);
         self
     }
 
@@ -462,6 +477,7 @@ impl Manager {
             &mut || answers(),
             &bounds,
             &self.timings,
+            self.start_watch.as_deref_mut(),
             &mut release,
             &mut retake,
             &mut |step| {

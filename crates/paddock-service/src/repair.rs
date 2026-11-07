@@ -6,6 +6,7 @@
 
 use crate::backend::{Backend, Job};
 use crate::port::RegisterError;
+use crate::start_wait::{StartObservation, StartVerdict, StartWatch};
 use paddock_health::Clock;
 use paddock_proc::{ProcessId, StartTime};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -212,6 +213,9 @@ pub enum OsResult {
         elapsed: Duration,
         /// The process that answers, when the backend can name it (rule 53); `None` when it cannot.
         process: Option<ProcessId>,
+        /// What the [`StartWatch`] made of this look (ADR 0056, amendment "the wait is judged"); `None`: no watch, or the
+        /// backend cannot observe the job, so the wait is bounded by [`Timings::start_wait`].
+        verdict: Option<StartVerdict>,
         /// The caller asked to cancel.
         cancelled: bool,
     },
@@ -453,6 +457,7 @@ impl Stepper {
                     elapsed,
                     cancelled,
                     process,
+                    verdict,
                 },
             ) => {
                 if answers && self.new_process_answers(process) {
@@ -466,9 +471,33 @@ impl Stepper {
                         vec![Step::Note("The OS now refuses the registration.".into())],
                     );
                 }
-                // The longer of the polls' sum (the fake clock) and the real time (a slow OS call counts too).
+                let mut say = vec![];
+                let judged = verdict.is_some();
+                match verdict {
+                    // A watch is told `answers: false` only (the answer is established above, with the process's identity), so
+                    // `Up` cannot come from one; if a watch says it anyway it is one more poll, never a settled service.
+                    None | Some(StartVerdict::Waiting | StartVerdict::Up) => {}
+                    Some(StartVerdict::StillWorking(note)) => say.push(Step::Note(note)),
+                    // The OS refuses the job it accepted: another cycle, like a refusal seen at once.
+                    Some(StartVerdict::Refused(seen)) => {
+                        return self.next_cycle(
+                            cancelled,
+                            vec![Step::Note(format!(
+                                "The OS refuses the registration ({seen}); registering again."
+                            ))],
+                        );
+                    }
+                    Some(StartVerdict::Failed(why)) => {
+                        let why = format!(
+                            "The service was registered but did not start: {why}. {NEXT_STEPS}"
+                        );
+                        return self.done(vec![Step::Note(why.clone())], RepairOutcome::Failed(why));
+                    }
+                }
+                // The longer of the polls' sum (the fake clock) and the real time (a slow OS call counts too). A judged wait
+                // ends by the judge's own verdict, never by this bound; a cancel ends either.
                 let waited = self.polled.max(elapsed);
-                if waited >= self.t.start_wait || cancelled {
+                if (!judged && waited >= self.t.start_wait) || cancelled {
                     return self.done(
                         vec![Step::Note(format!(
                             "The service is registered but did not answer within {} seconds; it may still start.",
@@ -478,7 +507,7 @@ impl Stepper {
                     );
                 }
                 self.polled += self.t.start_poll;
-                go(vec![], Action::Pause(self.t.start_poll))
+                go(say, Action::Pause(self.t.start_poll))
             }
             (Stage::Waiting, OsResult::Paused) => go(vec![], Action::Look),
             (_, other) => {
@@ -507,7 +536,7 @@ pub fn replace(
         register_only: false,
         clock: &paddock_health::SystemClock,
     };
-    replace_bounded(b, answers, &bounds, t, &mut || {}, &mut || true, say)
+    replace_bounded(b, answers, &bounds, t, None, &mut || {}, &mut || true, say)
 }
 
 /// The wall clock as a process start time (microseconds since the Unix epoch).
@@ -540,11 +569,12 @@ pub struct Bounds<'a> {
 }
 
 /// [`replace`] within `bounds`: the executor of a [`Stepper`], which performs each action and feeds back what the OS answered.
-pub fn replace_bounded(
+pub fn replace_bounded<'w>(
     b: &mut dyn Backend,
     answers: &mut dyn FnMut() -> bool,
     bounds: &Bounds<'_>,
     t: &Timings,
+    mut watch: Option<&mut (dyn StartWatch + 'w)>,
     before_wait: &mut dyn FnMut(),
     after_wait: &mut dyn FnMut() -> bool,
     say: &mut dyn FnMut(Step),
@@ -591,6 +621,10 @@ pub fn replace_bounded(
         for step in next.say.drain(..) {
             if step == Step::WaitingForStart {
                 waiting_since = Some(bounds.clock.monotonic());
+                // Each registration is a new wait: the watch forgets what the last one saw.
+                if let Some(w) = watch.as_deref_mut() {
+                    w.reset();
+                }
                 // The wait is long and changes nothing: the caller lets go of what it holds for it.
                 before_wait();
                 let_go = true;
@@ -656,10 +690,23 @@ pub fn replace_bounded(
                     b.inspect().job
                 };
                 let process = if answered { b.job_process() } else { None };
+                // The watch judges what the backend sees of the job (a backend that cannot observe it is not judged).
+                let verdict = match watch.as_deref_mut() {
+                    Some(w) => b.observe_start().map(|facts| {
+                        let verdict = w.poll(&StartObservation {
+                            answers: false,
+                            facts,
+                        });
+                        log::info!(verdict:? = verdict; "service repair: the start watch judged the look");
+                        verdict
+                    }),
+                    None => None,
+                };
                 log::info!(answers = answered, pid:? = process.map(|p| p.pid()); "service repair: look at the service (the pid is absent when the backend cannot name it)");
                 OsResult::Looked {
                     answers: answered,
                     process,
+                    verdict,
                     job,
                     elapsed: waiting_since.map_or(Duration::ZERO, |s| {
                         bounds.clock.monotonic().saturating_sub(s)
@@ -696,6 +743,7 @@ mod tests {
             elapsed: Duration::from_secs(secs),
             cancelled: false,
             process: None,
+            verdict: None,
         }
     }
 
@@ -884,6 +932,7 @@ mod tests {
             elapsed: Duration::ZERO,
             cancelled: true,
             process: None,
+            verdict: None,
         });
         assert_eq!(cancelled.action, Action::Done(RepairOutcome::Registered));
         // A refusal seen during the wait is another cycle, not a longer wait.
@@ -900,6 +949,7 @@ mod tests {
             elapsed: Duration::ZERO,
             cancelled: true,
             process: None,
+            verdict: None,
         });
         assert_eq!(over.action, Action::Done(RepairOutcome::Cancelled));
     }
@@ -1283,6 +1333,7 @@ mod tests {
             elapsed: Duration::ZERO,
             cancelled: false,
             process,
+            verdict: None,
         }
     }
     fn waiting_after_register() -> Stepper {
@@ -1367,6 +1418,7 @@ mod tests {
             &mut || true,
             &bounds,
             &Timings::default(),
+            None,
             &mut || {},
             &mut || true,
             &mut |_| {},
@@ -1396,6 +1448,7 @@ mod tests {
             &mut || true,
             &bounds,
             &Timings::default(),
+            None,
             &mut || {},
             &mut || true,
             &mut |_| {},
@@ -1431,6 +1484,7 @@ mod tests {
             },
             &bounds,
             &Timings::default(),
+            None,
             &mut || events.borrow_mut().push("release".into()),
             &mut || {
                 events.borrow_mut().push("retake".into());
@@ -1481,6 +1535,7 @@ mod tests {
             &mut || false,
             &bounds,
             &Timings::default(),
+            None,
             &mut || {},
             &mut || false,
             &mut |st| said.push(st.to_string()),
@@ -1547,6 +1602,7 @@ mod tests {
             elapsed: Duration::from_secs(secs),
             cancelled,
             process: None,
+            verdict: None,
         };
         let cancelled = waiting().next(look(0, true));
         assert_eq!(

@@ -81,6 +81,7 @@ pub mod scm_host;
 pub mod service_main;
 pub mod spec;
 pub mod start;
+pub mod start_wait;
 pub mod status;
 pub mod stop;
 pub mod supervised;
@@ -125,7 +126,7 @@ mod scenarios;
 
 pub use backend::{
     Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
-    Registration, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError,
+    Registration, StartFacts, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError,
 };
 pub use control::{Request, ServiceCommandError, ServiceControl, ServiceErrorCode, ServiceUpdate};
 pub use error::{ServiceError, SpecError};
@@ -136,6 +137,7 @@ pub use port::{AppService, AppServiceStatus, Elevator, Output, RegisterError, Ru
 pub use repair::{RepairOutcome, Step, Timings};
 pub use service_main::{Context, Hosting, Outcome, ServiceExit, ServiceMainError, service_main};
 pub use spec::{KillMode, Kind, ProcessType, Restart, ServiceSpec, SpecBuilder, WindowsStart};
+pub use start_wait::{StartObservation, StartVerdict, StartWait, StartWatch};
 pub use status::{Condition, HealthReport, LOGIN_SECTION, ServiceStatus};
 pub use system::RealSystem;
 pub use tracker::{RepairNotice, RepairState, RepairTracker};

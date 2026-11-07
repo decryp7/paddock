@@ -116,6 +116,14 @@ impl System for RealSystem {
     fn pause(&mut self, how_long: Duration) {
         std::thread::sleep(how_long);
     }
+
+    fn cpu_time(&mut self, pid: u32) -> Option<Duration> {
+        paddock_proc::ProcessId::of(pid).and_then(paddock_proc::tree_cpu_time)
+    }
+
+    fn run_state(&mut self, pid: u32) -> paddock_proc::RunState {
+        paddock_proc::ProcessId::of(pid).map_or(paddock_proc::RunState::Unknown, paddock_proc::run_state)
+    }
 }
 
 /// Copies `exe` to `<data>/bin/<file name>` (atomically, executable) and returns the copy: an AppImage's own files

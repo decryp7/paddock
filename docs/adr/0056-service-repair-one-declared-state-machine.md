@@ -371,3 +371,48 @@ two looks name the same process (pid and start time, rule 53), or when the servi
 process is left as before. The read under the lock right after a decision is the same look, not a second one, and `await_start`
 starts its own count so its first look is not confirmed by the decision's. `Facts` gains `job_confirmed`. A test sees a job once
 and then not at all: the attempts and the remembered version stay.
+
+## Amendment: the wait for the service is judged, not clocked (Pitwall 1.1 B1; amends section 5 and the alphabet of section 7)
+
+**Pattern.** Pitwall's 1.1 branch (before it took the rc's crate) gave the wait for a registered service a judge: launchd needed
+about a minute and on one Mac four, and a fixed 120 s ended the repair as `Registered` ("did not answer, may still start") while
+the job was alive, or waited the full time for a job that had vanished or was crash-looping. ADR 0031 says a running job is judged
+on what is observed (patience), not on a wall clock. The rc's `Stepper` knows only the fixed `Timings::start_wait`. Pitwall's
+repair waits a fixed 120 s until this lands; porting the judge as a side hook in the executor would be a second place that decides
+how a repair ends (ER-21), so it enters the declared machine.
+
+**Decision.** The judge is an input of the state machine, not a decider beside it.
+
+- `StartWatch` (`start_wait.rs`) is a port: `poll(&StartObservation) -> StartVerdict`, `reset()` per registration. `StartWait` is its
+  one implementation (over `paddock_proc::StartJudge`: spinning, no CPU and no progress, paused by the system, not observable for
+  long; the job vanished, or restarts in a loop). `Backend::observe_start() -> Option<StartFacts>` is the backend's side; launchd
+  implements it, systemd and Windows answer `None` and keep the fixed wait. `Manager::with_start_watch` installs a watch.
+- **New input of the transition function:** `OsResult::Looked` gains `verdict: Option<StartVerdict>`. `None` means "not judged"
+  (no watch, or a backend that cannot observe): the wait is bounded by `Timings::start_wait` exactly as before. The executor
+  (`replace_bounded`) produces the verdict (one `observe_start` and one `poll` per look) and calls `reset` at every
+  `WaitingForStart`; it decides nothing.
+- **What the `Stepper` does with a verdict** (in `Stage::Waiting`, after the service-answers check, which stays first and keeps
+  rule 53's process identity):
+  - `Waiting` or `StillWorking(note)`: keep waiting (the note is said). **A judged wait is not ended by `start_wait`**; its only
+    bounds are the judge's own ceiling (200 polls of the poll interval, a count of polls, not seconds) and a cancel.
+  - `Refused(seen)`: another cycle, exactly like `Job::Refused` seen at once (`next_cycle`, bounded by `allowed`, so the version's
+    attempts still cap the registers).
+  - `Failed(why)`: the repair ends `Failed("The service was registered but did not start: <why>. <next steps>")`. The
+    registration stays (nothing is removed), the record keeps `Awaiting`, so a hold is derived as before.
+  - `Up`: a watch is told `answers: false` only (whether the service answers, and by which process, is established by the look
+    itself), so `Up` cannot come from `StartWait`; a watch that says it anyway is one more poll, never a settled service. This keeps
+    section 1's "the service answers" meaning one signal.
+- **Invariants that must still hold in every state** (section 7): no new OS call is added; a judged wait changes nothing and the
+  lock is let go as for any wait; the unattended register cap per version is unchanged (a `Refused` verdict spends a cycle, which is
+  an attempt); `Recovered` still needs the service's answer; a cancel ends a judged wait with `Registered`; every verdict ends the
+  wait or is bounded by the ceiling, so the repair always ends; and the hold and `Idle` writes are those of the verdict's outcome
+  (`Failed` leaves a derived hold, `Recovered` writes `Idle`).
+- **The alphabet grows by the OS's start behaviours that only a judge tells apart:** `Looping` (the job exits with a code and is
+  restarted, launchd counts the runs) and `Stalls` (the job runs, answers nothing and uses no CPU), each judged by `StartWait`
+  on a watched Mac configuration. They take the place of "Never" for a watched manager: the claim is that the repair ends `Failed`
+  early with the observation in the message, the registration stays, and no invariant of section 7 breaks. The existing
+  configurations stay unwatched, so their measured sizes and floors do not move.
+
+**What was refuted.** Treating `Failed` as a register error (it is not: the OS accepted the register); making `Refused` a new
+`Hold` (a refused job already is `Hold::Refused` through `Job::Refused` and the attempts, one rule for both ways of seeing it); and
+keeping the verdict in the executor, which would let two places decide how the wait ends.
