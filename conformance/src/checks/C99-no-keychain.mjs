@@ -15,7 +15,8 @@
 // 2. Source scan of the code a release ships (.rs .c .m .h .cpp .swift, the .ts under app/src and ui/projects, and the
 //    Tauri capability files): the SecItem/SecKeychain symbols, a `security` subcommand that touches a keychain, and a
 //    capability shell scope that runs `security`.
-// Positive control (ER-33): a tree with a Cargo.toml but no source file read is "check broken", never a pass.
+// Positive controls (ER-33): a tree with a Cargo.toml but no source file read, a tree with no Cargo.toml whose CI contract
+// does not say "no Rust", and a file that cannot be read are each "check broken", never a pass.
 //
 // Not built yet (ADR 0057 WP-2): the dependency source scan (3), the macOS graph probe with `cargo fetch` (4), the
 // Clippy entries in the preset and C13's disallowed-types (5). Until then a Keychain call inside a dependency, or a
@@ -136,12 +137,36 @@ export default {
   title: 'No shipped process uses the macOS Keychain (rule 72)',
   rule: 72,
   run(ctx) {
+    // `options.readFile` lets a test make a file unreadable (it returns null for it, undefined to read as usual).
+    const read = (f) => {
+      const injected = ctx.options.readFile?.(f);
+      return injected === undefined ? ctx.read(f) : injected;
+    };
+    const unreadable = (file) =>
+      error('C99', 72, file, 1, `check broken: ${file} could not be read, so a Keychain use in it cannot be seen`, 'Make the file readable (permissions, encoding) and run the check again.');
     const files = ctx.files().filter(shipped);
     const manifests = files.filter((f) => f === 'Cargo.toml' || f.endsWith('/Cargo.toml'));
-    if (!manifests.length) return [];
+    if (!manifests.length) {
+      // No Rust is a pass only when the app's CI contract says so (no `cargo` field); otherwise the scan saw nothing (ER-33).
+      const contract = ctx.read('paddock.ci.json');
+      let noRust = false;
+      try {
+        noRust = contract !== null && JSON.parse(contract).cargo === undefined;
+      } catch {
+        noRust = false;
+      }
+      return noRust
+        ? []
+        : [error('C99', 72, '.', 1, 'check broken: no Cargo.toml was found, so the manifest scan read nothing', 'Run the check from the app or repository root, or state "no Rust" by leaving `cargo` out of paddock.ci.json.')];
+    }
     const out = [];
     for (const file of manifests) {
-      for (const f of manifestFindings(file, ctx.read(file) ?? '')) {
+      const text = read(file);
+      if (text === null) {
+        out.push(unreadable(file));
+        continue;
+      }
+      for (const f of manifestFindings(file, text)) {
         out.push(error('C99', 72, file, f.line, `${file} names ${f.what}: a shipped process must not reach the macOS Keychain`,
           'Use the paddock-secrets Secrets port (an owner-only file on macOS); enable paddock-secrets/keyring only under cfg(not(target_os = "macos")) and never depend on keyring or the Keychain crates directly (ADR 0057).'));
       }
@@ -152,7 +177,12 @@ export default {
         'Run the check from the folder that holds the sources (the app or the repository root).'));
     }
     for (const file of sources) {
-      for (const f of sourceFindings(file, ctx.read(file) ?? '')) {
+      const text = read(file);
+      if (text === null) {
+        out.push(unreadable(file));
+        continue;
+      }
+      for (const f of sourceFindings(file, text)) {
         out.push(error('C99', 72, file, f.line, `${file} uses ${f.what}: a shipped process must not reach the macOS Keychain`,
           'Keep the secret in an owner-only file through paddock-secrets (FileSecrets or SecretFile) instead (ADR 0057, rule 72).'));
       }

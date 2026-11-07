@@ -70,5 +70,35 @@ test('C99 through the runner: findings per file, the shared crate passes, and an
   const broken = await findingsOf('C99', empty);
   assert.deepEqual(broken.map((x) => x.severity), ['error']);
   assert.match(broken[0].message, /check broken/);
-  assert.deepEqual(await findingsOf('C99', makeApp({ 'README.md': 'no Rust\n' })), [], 'no Rust: nothing to check');
+  // Review P2-6 (ER-33): no manifest at all is a broken check, unless the app's CI contract says it has no Rust.
+  const none = await findingsOf('C99', makeApp({ 'README.md': 'no Rust\n' }));
+  assert.deepEqual(none.map((x) => x.severity), ['error']);
+  assert.match(none[0].message, /check broken.*no Cargo\.toml/);
+  assert.deepEqual(await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"checks": []}\n' })), [], 'no `cargo` in the CI contract: no Rust');
+  assert.equal((await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"cargo": "."}\n' }))).length, 1, 'a contract with Rust and no manifest is broken');
+});
+
+test('C99: a file that cannot be read is a broken check, not a pass (ER-33)', async () => {
+  const root = makeApp({ 'Cargo.toml': app('[dependencies]\n'), 'src/lib.rs': 'pub fn f() {}\n', 'src/gone.rs': 'x\n' });
+  const f = await findingsOf('C99', root, { options: { readFile: (p) => (p === 'src/gone.rs' ? null : undefined) } });
+  assert.deepEqual(f.map((x) => [x.file, x.severity]), [['src/gone.rs', 'error']]);
+  assert.match(f[0].message, /check broken: .*could not be read/);
+});
+
+// The chat branch's pasted-key store (origin/pitwall/1.1-wp3b, apps/pitwall/app/src-tauri/Cargo.toml): plain
+// paddock-secrets for every target, the keyring feature only off macOS. Rule 72 allows it.
+test('C99: the chat branch shape (keyring feature only off macOS) passes', () => {
+  const chat = app(`[dependencies]
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
+
+[features]
+chat = []
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+`);
+  assert.deepEqual(manifestFindings('apps/pitwall/app/src-tauri/Cargo.toml', chat), []);
 });
