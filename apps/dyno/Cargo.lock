@@ -1269,6 +1269,7 @@ dependencies = [
  "paddock-bench",
  "paddock-commands",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-widgets",
  "postcard",
  "proptest",
