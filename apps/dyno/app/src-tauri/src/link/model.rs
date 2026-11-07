@@ -285,6 +285,7 @@ impl World {
                     }),
                     child: self.child_view(),
                     cpu: Cpu::Unavailable,
+                    app_updated: false,
                 };
                 self.truth.push((seq, self.other != Other::None));
                 if self.truth.len() > 6 {

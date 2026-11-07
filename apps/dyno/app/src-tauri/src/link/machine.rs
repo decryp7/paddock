@@ -151,6 +151,8 @@ pub struct Look {
     pub child: Option<(Generation, Child)>,
     /// The child's tree CPU time when it was asked for ([`Command::Look`] `cpu`), `Unavailable` when the OS did not say.
     pub cpu: Cpu,
+    /// The app was updated while it ran ([`AgentLink::app_updated`](super::AgentLink::app_updated) when the look was taken).
+    pub app_updated: bool,
 }
 
 /// Who runs the agent we are connected to.
@@ -775,21 +777,38 @@ impl Supervisor {
         });
     }
 
-    /// The agent is the file on disk and this app cannot speak to it: the app was updated while it ran. It is neither connected to,
-    /// asked to exit nor ended (the next one would be the same): the chip says to restart Dyno, once, at once.
-    fn wait_for_restart(&mut self, h: &HintSeen, out: &mut Vec<Command>) {
+    /// The agent is the file on disk and this app cannot speak to it. It is neither connected to, asked to exit nor ended (the next
+    /// one would be the same). When the app was updated while it ran, the chip says to restart Dyno; otherwise (a half-done install, a
+    /// stale development binary) a restart would not help, and the chip says to reinstall, with Retry. Said once, at once.
+    fn wait_for_restart(&mut self, h: &HintSeen, app_updated: bool, out: &mut Vec<Command>) {
         if !matches!(self.phase, Phase::WaitingForHolder) {
             self.set_phase(Phase::WaitingForHolder, out);
         }
-        if !matches!(self.stall, Some((_, Stall::AppUpdated))) {
+        let (stall, message) = if app_updated {
+            (Stall::AppUpdated, "Dyno was updated. Restart Dyno to finish.")
+        } else {
+            (
+                Stall::AgentMismatch,
+                "The Dyno agent on this computer does not match this Dyno. Reinstall Dyno.",
+            )
+        };
+        if !matches!(self.stall, Some((_, k)) if k == stall) {
             log::warn!(
-                "The agent (pid {} is the installed build, protocol {}, version {}) is of another protocol than this Dyno: not replaced, Dyno needs a restart",
+                "The agent (pid {} is the installed build, protocol {}, version {}) is of another protocol than this Dyno (app updated while running: {app_updated}): not replaced",
                 h.pid,
                 h.protocol,
                 h.version
             );
         }
-        self.show_stall(Stall::AppUpdated, "Dyno was updated. Restart Dyno to finish.", out);
+        self.show_stall_replacing(stall, message, out);
+    }
+
+    /// Shows `stall`, first clearing a note of another kind (a later cause must not stay hidden behind an earlier one).
+    fn show_stall_replacing(&mut self, stall: Stall, message: &str, out: &mut Vec<Command>) {
+        if matches!(self.stall, Some((_, k)) if k != stall) {
+            self.clear_stall(out);
+        }
+        self.show_stall(stall, message, out);
     }
 
     fn launch(&mut self, out: &mut Vec<Command>) {
@@ -1077,13 +1096,18 @@ impl Supervisor {
     /// What to do from a look when no child is held and no agent answers yet.
     fn decide(&mut self, look: Look, usable_hint: bool, out: &mut Vec<Command>) {
         if let Some(held) = self.child.clone() {
-            if let (Some(h), Some((g, Child::Running { .. }))) =
-                (look.hint.as_ref().filter(|h| !h.same_build && h.of_disk_file), look.child)
+            let running = matches!(look.child, Some((g, Child::Running { .. })) if g == held.generation);
+            if let (Some(h), true) = (look.hint.as_ref().filter(|h| !h.same_build && h.of_disk_file), running) {
+                self.wait_for_restart(h, look.app_updated, out); // our own agent is the new file: kept, not ended, not connected to
+                return;
+            }
+            // One look that misses the file (it is read while the agent rewrites it) does not end that wait.
+            if look.hint.is_none()
+                && running
+                && matches!(self.phase, Phase::WaitingForHolder)
+                && matches!(self.stall, Some((_, Stall::AppUpdated | Stall::AgentMismatch)))
             {
-                if g == held.generation {
-                    self.wait_for_restart(h, out); // our own agent is the new file: kept, not ended, not connected to
-                    return;
-                }
+                return;
             }
             // A child is held (the connection to it dropped): it is starting again until a look says it is gone.
             match look.child {
@@ -1118,7 +1142,7 @@ impl Supervisor {
                         return;
                     }
                 } else if h.of_disk_file {
-                    self.wait_for_restart(&h, out);
+                    self.wait_for_restart(&h, look.app_updated, out);
                     return;
                 } else if look.lock == Some(LockSeen::Held) {
                     if self.evictions >= MAX_EVICTIONS {
@@ -1131,7 +1155,7 @@ impl Supervisor {
                                 self.evictions
                             );
                         }
-                        self.show_stall(
+                        self.show_stall_replacing(
                             Stall::OtherBuildKeepsComing,
                             "Agents of another build keep coming back after being asked to exit.",
                             out,
@@ -1221,7 +1245,7 @@ impl Supervisor {
             }
             StartState::Ready => match look.hint.clone().filter(|h| !h.same_build && h.of_disk_file) {
                 // The agent this app started is the file on disk but of another protocol: waited for, never connected to.
-                Some(h) => self.wait_for_restart(&h, out),
+                Some(h) => self.wait_for_restart(&h, look.app_updated, out),
                 None => self.connect(Purpose::Use, look, out),
             },
             StartState::Stalled(report) => {

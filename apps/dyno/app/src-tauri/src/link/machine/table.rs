@@ -15,6 +15,7 @@ fn look(seq: Seq) -> Look {
         service: None,
         child: None,
         cpu: Cpu::NotRead,
+        app_updated: false,
     }
 }
 
@@ -1685,6 +1686,7 @@ fn an_own_agent_of_the_file_on_disk_with_another_protocol_is_waited_for_not_conn
         }),
         lock: Some(LockSeen::Held),
         child: Some((1, Child::Running { pid: PID })),
+        app_updated: true,
         ..look(seq)
     });
     assert!(
@@ -1716,6 +1718,7 @@ fn the_update_wait_shows_the_update_state_at_once_and_logs_once() {
             ..hint(880_001, 500, false)
         }),
         lock: Some(LockSeen::Held),
+        app_updated: true,
         ..l
     });
     assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated), "{cmds:?}");
@@ -1726,6 +1729,7 @@ fn the_update_wait_shows_the_update_state_at_once_and_logs_once() {
             ..hint(880_001, 500, false)
         }),
         lock: Some(LockSeen::Held),
+        app_updated: true,
         ..look(seq)
     });
     assert_eq!(
@@ -1773,4 +1777,74 @@ fn giving_up_on_replacing_agents_says_so_with_its_own_stall_and_logs_once() {
     });
     assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
     assert_eq!(lines_with("pid 880002 keep coming back"), 1, "logged once, not on every look");
+}
+
+fn disk_hint(pid: u32) -> Option<HintSeen> {
+    Some(HintSeen {
+        of_disk_file: true,
+        ..hint(pid, 1_500, false)
+    })
+}
+
+#[test]
+fn a_look_without_a_file_does_not_end_the_update_wait_of_a_running_own_agent() {
+    let _ = crate::logging::testlog::lines();
+    let mut s = starting();
+    let cmds = run_ticks(&mut s, 60, |seq, _| Look {
+        // Every third look misses the discovery file (it is read while the agent rewrites it).
+        hint: if seq % 3 == 0 { None } else { disk_hint(PID) },
+        lock: Some(LockSeen::Held),
+        child: Some((1, Child::Running { pid: PID })),
+        app_updated: true,
+        ..look(seq)
+    });
+    assert_eq!(
+        cmds.iter().filter(|c| matches!(c, Command::Stall { .. })).count(),
+        1,
+        "the note was cleared and shown again: {cmds:?}"
+    );
+    assert!(!cmds.iter().any(|c| matches!(c, Command::ClearStall)), "{cmds:?}");
+    assert_eq!(*s.phase(), Phase::WaitingForHolder);
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::AppUpdated));
+}
+
+#[test]
+fn an_agent_of_the_installed_file_is_an_update_only_when_the_app_was_updated_otherwise_a_mismatch() {
+    for (updated, want) in [(true, Stall::AppUpdated), (false, Stall::AgentMismatch)] {
+        let mut s = starting();
+        let cmds = run_ticks(&mut s, 5, |seq, _| Look {
+            hint: disk_hint(PID),
+            lock: Some(LockSeen::Held),
+            child: Some((1, Child::Running { pid: PID })),
+            app_updated: updated,
+            ..look(seq)
+        });
+        assert_eq!(stall_of(&cmds), Some(want), "app_updated {updated}");
+        assert!(!cmds.iter().any(|c| matches!(c, Command::Connect { .. })));
+    }
+}
+
+#[test]
+fn a_later_stall_of_another_kind_replaces_the_one_shown() {
+    let (mut s, cmds) = first(|l| Look {
+        hint: disk_hint(880_003),
+        lock: Some(LockSeen::Held),
+        app_updated: true,
+        ..l
+    });
+    assert_eq!(stall_of(&cmds), Some(Stall::AppUpdated));
+    // Eviction attempts were used up meanwhile; the next look sees an ordinary agent of another build.
+    s.evictions = MAX_EVICTIONS;
+    let seq = tick_look(&mut s);
+    let cmds = s.step(Event::Looked(Look {
+        hint: Some(hint(880_003, 500, false)),
+        lock: Some(LockSeen::Held),
+        ..look(seq)
+    }));
+    assert_eq!(stall_of(&cmds), Some(Stall::OtherBuildKeepsComing), "{cmds:?}");
+    assert!(
+        cmds.iter().any(|c| matches!(c, Command::ClearStall)),
+        "the old note was not cleared first: {cmds:?}"
+    );
+    assert_eq!(s.snapshot().stall.map(|(_, k)| k), Some(Stall::OtherBuildKeepsComing));
 }

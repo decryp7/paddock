@@ -4,9 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui`: the status chip has words for Dyno's update and agent-mismatch causes
+- `service-status-text.ts`: `dy.setup.updated` is now `dy.update.restart` ("updated: restart to finish"); new `dy.agent.other-build-returns` ("another build keeps starting") and `dy.agent.mismatch` ("needs a reinstall"). The planner marks ui when an app's `src-tauri/src/**/*.rs` changes, since `cause-codes.spec.ts` scans those sources against the table.
+
 ### Dyno: an app updated while it runs no longer restarts its agent in a loop
 - An agent whose build id is the agent file on disk is the one the app would start, whatever version it reports (`matches_key` judges by build when the key has one). When such an agent speaks another protocol, the app leaves it alone and the chip says "Dyno was updated. Restart Dyno to finish." (cause `dy.update.restart`). The link also stops asking agents of another build to exit after three in a row (Retry starts the count again).
 - The update notice has its own chip row, `dy.update` ("Dyno itself"), so it no longer shares the installer program's row. The flag latches once the files have changed. An agent program that cannot be read is logged once per change of reason.
+- The agent of the installed file with another protocol is shown as "Dyno was updated. Restart Dyno to finish." only when the app really was updated while it ran (no Retry); otherwise as `dy.agent.mismatch` (reinstall, with Retry). The note stays put when one look misses the discovery file, and a later note of another kind replaces the one shown.
 - Additive on the wire: no field changed; the app-side `HintSeen` gained `of_disk_file`.
 
 ### `@decryp7/paddock-ui`: storage sizes (files and disks) are decimal; `formatStorage`

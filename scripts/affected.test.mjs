@@ -138,6 +138,13 @@ describe('the graph of this tree', () => {
     assert.deepEqual([rules.conformance, rules.tools, rules.docs, rules.apps], [true, true, false, []]);
   });
 
+  test("an app's Rust source can emit a health cause code the UI's chip table checks, so it marks ui, the app keeps its halves", () => {
+    const r = run('apps/dyno/app/src-tauri/src/health.rs');
+    assert.ok(r.ui, 'ui cause-codes.spec.ts reads apps/**/*.rs');
+    assert.ok(r.apps.includes('dyno') && r.kinds.dyno.includes('rust'), JSON.stringify(r.kinds));
+    assert.ok(!run('apps/dyno/app/src-tauri/Cargo.toml').ui, 'only the Rust sources are scanned');
+  });
+
   test('global inputs mark everything; an app release workflow marks one app', () => {
     for (const f of ['rust-toolchain.toml', 'package.json', '.npmrc', 'tsconfig/base.json']) {
       const r = run(f);

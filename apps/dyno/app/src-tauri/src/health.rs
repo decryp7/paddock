@@ -84,6 +84,9 @@ pub fn stall_problem(stall: Stall) -> Cause {
             )
             .code("dy.agent.other-holds"),
         Stall::AppUpdated => updated_problem(),
+        Stall::AgentMismatch => Cause::new("The Dyno agent on this computer does not match this Dyno.")
+            .hint("It speaks another protocol, and Dyno was not updated while it ran. Reinstall Dyno, then choose Retry.")
+            .code("dy.agent.mismatch"),
         Stall::OtherBuildKeepsComing => Cause::new("Another Dyno install keeps starting another build of the agent.")
             .hint(
                 "Dyno stopped asking it to exit. Quit the other Dyno or switch off its login service, then choose Retry. \
@@ -320,6 +323,7 @@ mod tests {
             (Stall::ServiceNotAnswering, "dy.agent.system-silent", "system"),
             (Stall::AgentKeepsFailing, "dy.agent.keeps-failing", "failing"),
             (Stall::OtherBuildKeepsComing, "dy.agent.other-build-returns", "another build"),
+            (Stall::AgentMismatch, "dy.agent.mismatch", "Reinstall Dyno"),
         ] {
             let cause = stall_problem(stall);
             assert_eq!(cause.code.as_deref(), Some(code));

@@ -378,6 +378,7 @@ pub fn look(
         lock,
         child,
         cpu,
+        app_updated: false,
     };
     (look, found, service_ms)
 }
@@ -711,6 +712,7 @@ mod tests {
             service,
             child: None,
             cpu: Cpu::NotRead,
+            app_updated: false,
         }
     }
 

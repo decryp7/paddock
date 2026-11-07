@@ -78,6 +78,10 @@ enum Marks {
     Reviewed,
 }
 
+/// An app's Rust sources that can emit a health cause code: ui's cause-codes.spec.ts scans `apps/**` against the chip's table, so a
+/// change here marks ui too (the app keeps its own halves). Same as `CAUSE_CODE_SOURCES` in scripts/affected.mjs.
+static CAUSE_CODE_SOURCES: LazyLock<Regex> = LazyLock::new(|| re(r"^apps/[^/]+/app/src-tauri/src/.*\.rs$"));
+
 /// Markdown that code or tests read, a declared contract.
 static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
     vec![
@@ -336,6 +340,9 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         };
         for p in &own {
             st.kind(Some(p), half);
+        }
+        if CAUSE_CODE_SOURCES.is_match(f) {
+            st.mark(Some("ui".to_string()), format!("ui cause-codes.spec.ts scans {f}")); // ui's own tests, not its dependents
         }
         if c.is_none() && own.iter().any(|p| p == "crates") {
             for (d, x) in graph.cargo.iter() {
@@ -653,6 +660,10 @@ mod tests {
         assert_eq!(plan(&["apps/dyno/CHANGELOG.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["apps/dyno/REVIEWED.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["icons/REVIEWED.md"])["conformance"], true);
+        let src = plan(&["apps/dyno/app/src-tauri/src/health.rs"]);
+        assert_eq!(src["ui"], true, "ui's cause-codes spec scans the apps' Rust sources");
+        assert!(src["kinds"]["dyno"].as_array().unwrap().contains(&json!("rust")));
+        assert_ne!(plan(&["apps/dyno/app/src-tauri/Cargo.toml"])["ui"], true);
         assert_eq!(plan(&["Mystery"])["all"], true);
     }
 

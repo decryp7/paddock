@@ -268,6 +268,12 @@ export const DOC_INPUTS = [
   { re: /^apps\/debrief\/docs\/testing\/quarantine\.md$/, why: 'scripts/ci/check-quarantine (from the import)' },
 ];
 
+/**
+ * An app's Rust sources that can emit a health cause code: ui's cause-codes.spec.ts scans `apps/**` for `Cause::code(...)` and checks
+ * them against the chip's table (service-status-text.ts), so a change here marks ui too (the app keeps its own halves).
+ */
+export const CAUSE_CODE_SOURCES = /^apps\/[^/]+\/app\/src-tauri\/src\/.*\.rs$/;
+
 /** Top-level folders and the projects that own them (apps/<name>/ is app:<name>). */
 const OWNERS = [
   [/^crates\//, ['crates']],
@@ -643,6 +649,9 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       mark('crates', `generated file ${f}`);
       const owners_ = crateDirsNaming(f, cargo);
       for (const d of owners_.length ? owners_ : [...cargo].filter(([, x]) => x.workspace === 'crates').map(([d]) => d)) changedCrates.add(d);
+    }
+    if (CAUSE_CODE_SOURCES.test(f)) {
+      mark('ui', `ui cause-codes.spec.ts scans ${f}`); // ui's own tests; not its dependents (the spec reads sources, not ui output)
     }
     // ui/ is one Angular workspace: a change anywhere in it can change every output built from it.
     if (own.includes('ui') && f.startsWith('ui/')) changedPkgs.add('ui');

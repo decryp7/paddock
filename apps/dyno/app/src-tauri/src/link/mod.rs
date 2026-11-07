@@ -140,6 +140,9 @@ pub enum Stall {
     AgentPaused,
     /// The app was updated while it ran and the agent is the new build, which it cannot speak to: nothing to retry, restart Dyno.
     AppUpdated,
+    /// The agent is the installed file of another protocol, yet this app was not updated while it ran (a half-done install, a stale
+    /// development binary): restarting does not help, reinstalling does.
+    AgentMismatch,
     /// Agents of another build keep coming back after being asked to exit (another install or its login service starts them).
     OtherBuildKeepsComing,
 }
