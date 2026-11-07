@@ -260,3 +260,29 @@ check = "C54"
 path = "apps/shell-demo/src-tauri/macos/agent.plist"
 reason = "shell demo: the heartbeat agent's plist (ProcessType Background, LowPriorityIO) as paddock-service renders it; follows the ADR 0020 helper"
 expires = "2026-12-31"
+
+# C99 (ADR 0057, rule 72): the apps whose manifests still name keyring move their secrets to paddock-secrets' files in
+# their own work package (ADR 0057 §3 waiver table); each waiver goes with that work.
+[[waiver]]
+check = "C99"
+path = "apps/debrief/app/src-tauri/Cargo.toml"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/app/src-tauri/Cargo.toml"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/app/src-tauri/Cargo.toml"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets"
+expires = "2027-01-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/dyno/crates/dyno-platform/tests/no_keychain_on_macos.rs"
+reason = "Dyno's own no-Keychain test names the security subcommands it forbids; ADR 0057 WP-2 deletes it once C99 has all its layers"
+expires = "2027-03-31"
