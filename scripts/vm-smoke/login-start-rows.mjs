@@ -51,7 +51,8 @@ export async function loginSwitchStep(p) {
       if (!p.apply) return true;
       const a = await p.apply();
       applied.push(`switch ${want}: ${a.ok ? `saved, the switch reads ${a.saved ?? 'unknown'} after Settings was reopened` : `not saved: ${a.detail}`}`);
-      return a.ok && (a.saved === undefined || a.saved === want);
+      // A reopened Settings that cannot be read ('unknown') is not a failed save: the OS entry decides. Only a saved value that reads the OTHER way is.
+      return a.ok && a.saved !== (want === 'on' ? 'off' : 'on');
     };
     let afterOff = null, afterOn = null, unsaved = null;
     if (switchBefore === 'on') {

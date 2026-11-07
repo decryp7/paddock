@@ -69,7 +69,9 @@ export async function loginJobsRow(d, c, { seenGuardMs = 20_000, endGuardMs = 30
 }
 
 async function restore(d, before, now, until, guard) {
-  if (before !== 'unknown' && now !== before) { await d.pressSwitch(); if (d.apply) await d.apply(); else if (d.save) await d.save(); await until(async () => (await d.readSwitch()) === before, guard); }
+  // An unreadable switch is read again before anything is pressed: a press on a guess can flip a switch that was already right.
+  if (now === 'unknown') { now = (await until(async () => { const v = await d.readSwitch(); return v !== 'unknown' ? v : null; }, guard)) ?? 'unknown'; }
+  if (before !== 'unknown' && now !== 'unknown' && now !== before) { await d.pressSwitch(); if (d.apply) await d.apply(); else if (d.save) await d.save(); await until(async () => (await d.readSwitch()) === before, guard); }
 }
 
 /**

@@ -137,6 +137,8 @@ export async function quitStopStep(g) {
   const t0 = g.now();
   for (let i = 0; i < 7; i++) { samples.push({ t: Math.round((g.now() - t0) / 1000), count: await g.count() }); if (i < 6) await g.sleep(10_000); }
   const reopened = await g.reopen().catch(() => null);
-  const rebooted = g.reboot ? await g.reboot().catch(() => null) : undefined;
-  return makeResult(title, judgeQuitStop({ samples, reopened, rebooted }), [JSON.stringify(samples)], g.reboot ? 'no Dyno process for 60 s; reopening and a reboot bring the agent back' : 'no Dyno process for 60 s; reopening brings the agent back');
+  let why = null;
+  const rebooted = g.reboot ? await g.reboot().catch((e) => { why = String(e.message ?? e); return null; }) : undefined;
+  const checks = judgeQuitStop({ samples, reopened, rebooted }).map((c) => (why && /reboot was not tried/.test(c.detail) ? { ...c, detail: `${c.detail}: ${why}` } : c));
+  return makeResult(title, checks, [JSON.stringify(samples), ...(g.rebootEvidence ? g.rebootEvidence() : [])], g.reboot ? 'no Dyno process for 60 s; reopening and a reboot bring the agent back' : 'no Dyno process for 60 s; reopening brings the agent back');
 }

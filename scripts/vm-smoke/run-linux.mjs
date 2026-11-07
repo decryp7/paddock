@@ -312,17 +312,24 @@ async function main(argv) {
     {
       const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-qs${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
       const count = async () => Number(g('ps -eo comm= | grep -cE "^dyno-(app|agent)$"').stdout.trim()) || 0;
+      const rebootEv = [];
       push(await quitStopStep({
         now: () => Date.now(), sleep,
         trigger: async () => { await startApp(); press('^File$', 'menu item'); await sleep(1000); if (!press('^Quit and stop measuring', 'menu item')) throw new Error('no "Quit and stop measuring" menu item under File (AT-SPI)'); await sleep(5000); },
         count, reopen: async () => { await startApp(); return count(); }, reboot: async () => {
           // The reboot half: after Quit and stop and a reopen, a real reboot must bring the agent back by itself (the service was stopped, not removed).
+          // Precondition (ER-33): Launch at login is on, or nothing is promised after a reboot.
+          const state = () => g('echo "autostart: $(ls ~/.config/autostart 2>/dev/null | tr "\\n" " ")"; echo "agent unit: $(systemctl --user -M admin@ is-enabled dyno-agent 2>&1) / $(systemctl --user -M admin@ is-active dyno-agent 2>&1)"; ps -eo pid=,etimes=,args= | grep -E "dyno-(app|agent)( |$)" | grep -v grep').stdout.trim();
+          const pre = state(); rebootEv.push('--- before the reboot', ...pre.split('\n'));
+          if (!/Dyno\.desktop/.test(pre)) throw new Error('Launch at login was off before the reboot (no ~/.config/autostart/Dyno.desktop): an earlier step left it off, so the reboot proves nothing');
           g('sudo systemctl reboot', 30_000); await sleep(40_000);
           for (let n = 0; n < 75 && g('true', 20_000).code !== 0; n++) await sleep(4000);
           for (let n = 0; n < 60 && !/gnome-shell/.test(g('pgrep -x gnome-shell || true').stdout); n++) await sleep(3000);
-          await sleep(45_000);
-          return count();
+          let c = 0; for (let n = 0; n < 30 && c === 0; n++) { await sleep(5000); c = await count(); }
+          rebootEv.push('--- after the reboot', ...state().split('\n'));
+          return c;
         },
+        rebootEvidence: () => rebootEv,
       }));
     }
     // Hung or paused visible page (watchdog design, crates/paddock-startup): the WebKit content process is stopped with SIGSTOP; the app log and AT-SPI show the question.

@@ -75,7 +75,8 @@ export function macLoginJobsDriver(gui) {
   const find = async () => (await gui.texts()).find((t) => SWITCH.test(t.text) && ['AXCheckBox', 'AXSwitch', 'AXButton', 'AXRadioButton', 'AXToggle'].includes(t.role));
   return {
     async readSwitch() { await gui.openSettingsSection('^Dyno$'); const c = await find(); return !c ? 'unknown' : c.value === '1' ? 'on' : c.value === '0' ? 'off' : 'unknown'; },
-    async pressSwitch() { const c = await find(); return c ? gui.press(gui.app, 'Start Dyno at login', c.role) : false; },
+    // The Jobs step closes Settings (openJobs): every Settings action opens the Dyno section first when the switch is not on screen.
+    async pressSwitch() { let c = await find(); if (!c) { await gui.openSettingsSection('^Dyno$'); c = await find(); } return c ? gui.press(gui.app, 'Start Dyno at login', c.role) : false; },
     async save() { return gui.press(gui.app, '^Save changes$', 'AXButton'); },
     async apply() {
       if (!(await gui.press(gui.app, '^Save changes$', 'AXButton'))) return { ok: false, detail: 'no "Save changes" button' };
@@ -90,9 +91,12 @@ export function macLoginJobsDriver(gui) {
       await gui.closeSettings?.(); await gui.ensureMainWindow();
       if (!(await gui.waitFor(() => gui.press(gui.app, '^Benchmarks$', 'AXLink'), 20_000)).ok) return false;
       if (!(await gui.waitFor(() => gui.press(gui.app, '^Sustained processor', 'AXRadioButton'), 15_000)).ok) return false;
-      if (!(await gui.press(gui.app, '^Run benchmarks$'))) return false;
+      if (!(await gui.press(gui.app, '^Run benchmarks$'))) return { ok: false, detail: 'no Run benchmarks button' };
+      const started = await gui.waitFor(async () => (await gui.texts()).some((t) => t.role === 'AXButton' && /Cancel$/.test(t.text)), 10_000);
+      const text = (await gui.texts()).map((t) => t.text).filter((x) => /Run benchmarks|Sustained|Cancel|Running|Pass \d/i.test(x)).slice(0, 10).join(' | ');
+      if (!started.ok) return { ok: false, detail: `the benchmark did not start within 10 s of Run benchmarks: ${text}` };
       await gui.waitFor(() => gui.press(gui.app, '^Processes$', 'AXLink'), 10_000);
-      return true;
+      return { ok: true, detail: `benchmark running: ${text}` };
     },
     async stopLongJob() { await gui.press(gui.app, '^Benchmarks$', 'AXLink'); await gui.press(gui.app, '^Cancel$', 'AXButton'); },
     async jobsText() { return (await gui.texts()).map((t) => t.text).filter((x) => /Start Dyno at login|Cancell?ed|Working|Cancel$/i.test(x)).join(' | '); },
@@ -105,7 +109,11 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
   const SW = '"Start Dyno at login" "check box|toggle button|switch"';
   return {
     async readSwitch() { const r = atspi(`state dyno ${SW}`); return r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; },
-    async pressSwitch() { return atspi(`press dyno ${SW}`).code === 0; },
+    async pressSwitch() {
+      if (atspi(`press dyno ${SW}`).code === 0) return true;
+      atspi('press dyno "^File$" "menu item"'); await new Promise((r) => setTimeout(r, 1000)); atspi('press dyno "^Settings…$" "menu item"'); await new Promise((r) => setTimeout(r, 4000)); atspi('press dyno "^Dyno$" "push button"'); await new Promise((r) => setTimeout(r, 1500));
+      return atspi(`press dyno ${SW}`).code === 0;
+    },
     async save() { return atspi('press dyno "^Save changes$" "push button"').code === 0; },
     async apply() {
       if (atspi('press dyno "^Save changes$" "push button"').code !== 0) return { ok: false, detail: 'no "Save changes" button' };
@@ -113,8 +121,9 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
       // Reopen Settings (File > Settings…, Dyno) so the switch shows the saved value, not the draft.
       atspi('press dyno "^Close$" "push button"'); atspi('press dyno "^File$" "menu item"'); await new Promise((r) => setTimeout(r, 1000));
       atspi('press dyno "^Settings…$" "menu item"'); await new Promise((r) => setTimeout(r, 4000)); atspi('press dyno "^Dyno$" "push button"'); await new Promise((r) => setTimeout(r, 1500));
-      const r = atspi(`state dyno ${SW}`); const v = r.code === 0 ? parseSwitchState(r.stdout) : 'unknown';
-      return { ok: true, saved: v, detail: 'saved' };
+      let v = 'unknown';
+      for (let i = 0; i < 8 && v === 'unknown'; i++) { const r = atspi(`state dyno ${SW}`); v = r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; if (v === 'unknown') { atspi('press dyno "^Dyno$" "push button"'); await new Promise((res) => setTimeout(res, 2000)); } }
+      return { ok: true, saved: v, detail: v === 'unknown' ? 'saved; the reopened Settings could not be read' : 'saved' };
     },
     async openJobs() { atspi('press dyno "^Close$" "push button"'); return atspi(`press dyno ${JSON.stringify(STATUS)} "push button|toggle button"`).code === 0 || /Jobs/.test(atspi('tree dyno 60').stdout); },
     async startLongJob() {
@@ -122,10 +131,15 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
       if (atspi('press dyno "^Benchmarks$" "link"').code !== 0) return false;
       let ok = false;
       for (let i = 0; i < 10 && !ok; i++) { ok = atspi('press dyno "^Sustained processor" "radio button|toggle button|push button"').code === 0; if (!ok) atspi('has dyno "^Benchmarks$"'); }
-      if (!ok) return false;
-      if (atspi('press dyno "Run benchmarks$" "push button"').code !== 0) return false;
+      const lines = () => atspi('tree dyno 80').stdout.split('\n').map((l) => l.trim()).filter((l) => /Run benchmarks|Sustained|Cancel|Running|Pass \d|Tick Yes|not|blocked/i.test(l)).slice(0, 12).join(' | ');
+      if (!ok) return { ok: false, detail: `no "Sustained processor" choice on the Benchmarks page: ${lines()}` };
+      if (atspi('press dyno "Run benchmarks$" "push button"').code !== 0) return { ok: false, detail: `no Run benchmarks button: ${lines()}` };
+      let started = false;
+      for (let i = 0; i < 10 && !started; i++) { await new Promise((r) => setTimeout(r, 1000)); started = /push button\s+.*Cancel/.test(atspi('tree dyno 80').stdout); }
+      const text = lines();
+      if (!started) return { ok: false, detail: `the benchmark did not start within 10 s of Run benchmarks: ${text}` };
       atspi('press dyno "^Processes$" "link"');
-      return true;
+      return { ok: true, detail: `benchmark running: ${text}` };
     },
     async stopLongJob() { atspi('press dyno "^Benchmarks$" "link"'); atspi('press dyno "^Cancel$" "push button"'); },
     async jobsText() { return atspi('tree dyno 80').stdout.split('\n').filter((l) => /Start Dyno at login|Cancell?ed|Working|Cancel/i.test(l)).map((l) => l.trim()).join(' | '); },

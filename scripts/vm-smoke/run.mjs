@@ -312,16 +312,24 @@ async function main(argv) {
         const readings = o.reboot ? [macRebootCheck({ waitReady }), macQuitStopRestart] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
         // Release rows of the power suite (rule 71 MCP, the lifecycle log) and the rows not driven yet, with their reasons.
         const bundle = `/Applications/${config.bundle}`;
+        let killNext = false;
         const macRows = async () => {
           const cfg = '$HOME/Library/Application Support/Dyno';
           const mg = makeMcpGuest({
-            os: 'macos', dyno: `${bundle}/Contents/MacOS/dyno`, sh: async (c) => { const r = await exec(c); return { code: r.code, stdout: r.stdout }; },
+            // launchd restarts a killed agent within about a second (the 0ad round: the call met a new agent), so the kill and the call run in ONE guest command: the agent is
+            // killed by pid, its death is waited on, and the call follows at once, before the supervisor's new agent answers.
+            os: 'macos', dyno: `${bundle}/Contents/MacOS/dyno`, sh: async (c) => {
+              const inline = killNext && /\bmcp\b/.test(c);
+              if (inline) killNext = false;
+              const r = await exec(inline ? `p=$(pgrep -x dyno-agent | head -1); echo "$p" > /tmp/dyno-killed.pid; [ -n "$p" ] && kill -9 $p; n=0; while kill -0 $p 2>/dev/null && [ $n -lt 200 ]; do n=$((n+1)); sleep 0.01; done; ${c}` : c);
+              return { code: r.code, stdout: r.stdout };
+            },
             password: pw,
             configDir: async () => ((await exec(`cd "${cfg}" 2>/dev/null && pwd`)).stdout.trim() || null),
             stopApp: async () => { await exec(`osascript -e 'quit app "Dyno"' ; pkill -x dyno-app; true`); await sleepMs(4000); },
             startApp: async () => { await exec(`open -a ${bundle}`); for (let i = 0; i < 30; i++) { if ((await exec(`${bundle}/Contents/MacOS/dyno-agent status >/dev/null 2>&1`)).code === 0) break; await sleepMs(4000); } await sleepMs(8000); },
             // The agent is supervised (launchd job net.decryptology.dyno.agent.ondemand restarts a killed one within seconds): take the job out first, or the "agent is gone" half cannot be seen.
-            killAgent: async () => { await exec('p=$(pgrep -x dyno-agent | head -1); echo "$p" > /tmp/dyno-killed.pid; [ -n "$p" ] && kill -9 $p; for n in 1 2 3 4 5 6; do kill -0 $p 2>/dev/null || break; sleep 0.5; done; true'); }, // by pid only: the login job stays loaded (the product's own state); launchd may start a new agent within seconds, so "dead" means the killed pid
+            killAgent: async () => { killNext = true; }, // by pid only, inline with the next call (above): the login job stays loaded (the product's own state); "dead" means the killed pid
             restoreAgent: async () => {},
             agentAlive: async () => (await exec('p=$(cat /tmp/dyno-killed.pid 2>/dev/null); [ -n "$p" ] && kill -0 $p 2>/dev/null')).code === 0,
             agentRestarted: async () => (await exec('p=$(cat /tmp/dyno-killed.pid 2>/dev/null); n=$(pgrep -x dyno-agent | head -1); [ -n "$n" ] && [ "$n" != "$p" ]')).code === 0,
@@ -339,7 +347,7 @@ async function main(argv) {
           const qs = await quitStopStep({
             now: () => Date.now(), sleep: sleepMs,
             trigger: async () => { await exec(`open -a ${bundle}`); await sleepMs(15_000); if (!(await gui.press(gui.app, '^Quit and stop measuring', 'AXMenuItem'))) throw new Error('no "Quit and stop measuring" menu item (AX)'); await sleepMs(5000); },
-            count, reopen: async () => { await exec(`open -a ${bundle}`); await sleepMs(30_000); return count(); }, reboot: async () => null, // the reboot is the restart suite's
+            count, reopen: async () => { await exec(`open -a ${bundle}`); await sleepMs(30_000); return count(); }, // the reboot half is the helper restart run's (macQuitStopRestart)
           });
           const back = (await exec('pgrep -x dyno-agent >/dev/null')).code === 0;
           const notice = (await exec(`log show --start "${t0}" --info --style compact --predicate 'eventMessage CONTAINS[c] "Background Items Added" OR eventMessage CONTAINS[c] "background item" AND eventMessage CONTAINS[c] "dyno"' 2>&1 | grep -c -i "background item"`)).stdout.trim();
