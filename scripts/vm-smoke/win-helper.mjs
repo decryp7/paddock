@@ -312,7 +312,7 @@ export async function trayTooltips(actor) {
     // Count first, before any icon is promoted: promoting moves icons into the taskbar and would change what is counted.
     const { trayRecord } = await import('./win-reboot.mjs');
     const rec = await trayRecord(actor);
-    checks.push(...judgeTrayCount({ metrics: rec.metrics, visible: rec.visible.length, overflow: rec.overflow.length, measured: rec.measured }));
+    checks.push(...judgeTrayCount({ metrics: rec.metrics, visible: rec.visible.length, overflow: rec.overflow.length, measured: rec.measured, registered: rec.registered }));
     evidence.push(`counted before promoting: ${rec.visible.length} visible, ${rec.overflow.length} overflow, ${rec.metrics.length} created (${rec.metrics.join(', ') || 'none logged'})`);
     ssh(`Get-ChildItem 'HKCU:\\Control Panel\\NotifyIconSettings' | ForEach-Object { $p = Get-ItemProperty $_.PSPath; if ($p.ExecutablePath -like '*dyno-app.exe') { Set-ItemProperty $_.PSPath IsPromoted 1 -Type DWord } }`);
     await sleep(2500);

@@ -148,3 +148,14 @@ test('first uninstall after boot: gone passes; a leftover passes only as the not
   assert.equal(judgeColdUninstall({ folder: 'yes', onlyUninstallExe: true, noteLogged: true, reinstallOk: null }).at(-1).kind, 'check');
   assert.ok(bad(judgeColdUninstall({ folder: 'yes', onlyUninstallExe: true, noteLogged: true, reinstallOk: true })).length === 1, 'the leftover itself is still reported');
 });
+
+test('Arm guest fallbacks: an unreadable notification area says what was read instead and stays not measured; the boot-time script lists its sources', async () => {
+  const c = judgeTrayCount({ metrics: ['CPU', 'Memory'], visible: 0, overflow: 0, measured: false, registered: 2 })[0];
+  assert.equal(c.ok, false);
+  assert.equal(c.kind, 'check');
+  assert.match(c.detail, /^not measured: .*2 icon\(s\) registered with the shell/);
+  const { parseBootTime, BOOT_TIME_PS } = await import('./win-reboot.mjs');
+  assert.deepEqual(parseBootTime('2026-11-07T12:00:00|wmic\r\n'), { time: '2026-11-07T12:00:00', source: 'wmic' });
+  assert.equal(parseBootTime(''), null);
+  for (const s of ['Get-CimInstance', 'Get-WmiObject', 'wmic os get lastbootuptime', 'System Up Time', 'systeminfo']) assert.ok(BOOT_TIME_PS.includes(s), s);
+});

@@ -33,10 +33,30 @@ async function setLaunchAtLogin(browser, on) {
   await sleep(2500);
 }
 
-/** The guest's LastBootUpTime as ISO "s" text, or null when it could not be read. */
+/**
+ * The guest's boot time as ISO "s" text, or null when no way could read it. The Windows 11 Arm guest answers `Get-CimInstance Win32_OperatingSystem` with
+ * nothing, so the PowerShell below tries, in order: CIM; the WMI cmdlet; `wmic os get lastbootuptime` (the CIM/WMI date string); the performance
+ * counter `System Up Time`; `systeminfo` "System Boot Time"). Event-log times are not used (they move with log clearing). It prints '<time>|<source>'; the first source that answers wins, so a working CIM stays what it was.
+ */
+export const BOOT_TIME_PS = `$ErrorActionPreference='SilentlyContinue'; $t=$null; $src='';
+try { $t=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime; if($t){$src='cim'} } catch {}
+if(-not $t){ try { $t=(Get-WmiObject Win32_OperatingSystem).ConvertToDateTime((Get-WmiObject Win32_OperatingSystem).LastBootUpTime); if($t){$src='wmi'} } catch {} }
+if(-not $t){ try { $w=(wmic os get lastbootuptime /value 2>$null | Out-String); if($w -match 'LastBootUpTime=(\\d{14})'){ $t=[datetime]::ParseExact($Matches[1],'yyyyMMddHHmmss',$null); $src='wmic' } } catch {} }
+if(-not $t){ try { $u=(Get-Counter '\\System\\System Up Time' -ErrorAction Stop).CounterSamples[0].CookedValue; if($u){ $t=(Get-Date).AddSeconds(-[double]$u); $src='counter' } } catch {} }
+if(-not $t){ try { $s=(systeminfo 2>$null | Select-String 'Boot Time|Systemstartzeit' | Select-Object -First 1).Line; if($s){ $t=[datetime]::Parse(($s -replace '^[^:]*:\\s*','').Trim()); $src='systeminfo' } } catch {} }
+if($t){ $t.ToString('s') + '|' + $src }`;
+
+/** Parses '<ISO s>|<source>' to { time, source } or null. The counter fallback has seconds-level jitter, so it is rounded to the minute only by the judge's "moved" test (a restart moves it by minutes). */
+export function parseBootTime(text) {
+  const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)\|(\w+)\s*$/m.exec(String(text ?? '').trim());
+  return m ? { time: m[1], source: m[2] } : null;
+}
+
+/** The guest's boot time as ISO "s" text, or null when it could not be read (the source is kept in \`lastBootSource\`). */
 export function bootTime() {
-  const t = ssh('(Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToString(\'s\')').trim();
-  return /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d$/.test(t) ? t : null;
+  const p = parseBootTime(ssh(BOOT_TIME_PS.replace(/\n/g, ' ')));
+  bootTime.lastSource = p?.source ?? null;
+  return p ? p.time : null;
 }
 
 /** What starts Dyno at logon: the Run key, the Startup folder, scheduled tasks and services; and what is running, with its start time against the logon time. */
@@ -80,7 +100,7 @@ export async function trayRecord(actor) {
   }
   const lines = trayLogLines(log);
   const buttons = [...new Set([...notificationAreaButtons(rows1), ...notificationAreaButtons(rows2)])];
-  return { promoted, visible, overflow, metrics, logFile: [...log.matchAll(/^@@ (.*)$/gm)].map((m) => m[1]).join(', ') || '(none)', lines, buttons, errors, measured: buttons.length > 0 };
+  return { promoted, visible, overflow, metrics, logFile: [...log.matchAll(/^@@ (.*)$/gm)].map((m) => m[1]).join(', ') || '(none)', lines, buttons, errors, measured: buttons.length > 0, registered: promoted.length };
 }
 
 /** The new crash and removal logging: Application log entries of source "Dyno helper", and the System service events for it. */
@@ -186,7 +206,7 @@ async function runRebootSteps(ctx, steps) {
     { ok: /On/.test(cardBefore), detail: `card: ${cardBefore.slice(0, 80)}` },
     { ok: true, info: true, detail: `Launch at login after install: ${launchDefault === 'true' ? 'ON' : launchDefault === 'false' ? 'OFF' : launchDefault}` },
     // Counted before any icon is promoted: with Dyno's window open (Settings) every icon the log says was created must be found, and no button of Dyno's own window counts.
-    ...judgeTrayCount({ metrics: trayBefore.metrics, visible: trayBefore.visible.length, overflow: trayBefore.overflow.length, measured: trayBefore.measured }),
+    ...judgeTrayCount({ metrics: trayBefore.metrics, visible: trayBefore.visible.length, overflow: trayBefore.overflow.length, measured: trayBefore.measured, registered: trayBefore.registered }),
   ], [before.qc, before.q, '--- helper.log tail', before.log, `card: ${cardBefore}`, ...eventsDump(), '--- tray before', ...fmtTray(trayBefore)].join('\n').split('\n'), `service RUNNING (${before.start}), card On`));
   // The 7521 death at app quit: read Processes through the helper, quit Dyno (File > Quit Dyno), and see whether the helper is still RUNNING 30 s later.
   try {
@@ -225,7 +245,7 @@ async function runRebootSteps(ctx, steps) {
   ], rec1.evidence, expectOn ? 'dyno-app started by itself after the boot with --hidden' : 'Dyno is off at logon as configured'));
   steps.push(result('Windows restart: tray icons after the restart (compared with before)', [
     { ok: true, info: true, detail: `before: ${trayBefore.visible.length} visible, ${trayBefore.overflow.length} overflow; after (no hand start): ${rec1.tray.visible.length} visible, ${rec1.tray.overflow.length} overflow` },
-    ...judgeTrayCount({ metrics: rec1.tray.metrics, visible: rec1.tray.visible.length, overflow: rec1.tray.overflow.length, measured: rec1.tray.measured, running: rec1.auto.running }),
+    ...judgeTrayCount({ metrics: rec1.tray.metrics, visible: rec1.tray.visible.length, overflow: rec1.tray.overflow.length, measured: rec1.tray.measured, registered: rec1.tray.registered, running: rec1.auto.running }),
   ], fmtTray(rec1.tray), 'every icon the app created is in the notification area'));
 
   // The helper after the restart, with no Repair. The CDP environment was set for the user BEFORE the restart, so an autostarted Dyno has its
@@ -284,7 +304,7 @@ async function runRebootSteps(ctx, steps) {
         ...judgeAutostart({ boot: rec2.auto.boot, procs: rec2.auto.rows, expectOn: true }),
         ...judgeRestartService({ bootBefore: rs2.bootBefore, bootAfter: rs2.bootAfter, samples: rs2.samples }),
       ], rec2.evidence, 'dyno-app started by itself after the boot with --hidden and the helper service ran'));
-      steps.push(result('Windows restart: tray icons after the restart (Launch at login ON)', judgeTrayCount({ metrics: rec2.tray.metrics, visible: rec2.tray.visible.length, overflow: rec2.tray.overflow.length, measured: rec2.tray.measured, running: rec2.auto.running }), fmtTray(rec2.tray), 'every icon the app created is in the notification area'));
+      steps.push(result('Windows restart: tray icons after the restart (Launch at login ON)', judgeTrayCount({ metrics: rec2.tray.metrics, visible: rec2.tray.visible.length, overflow: rec2.tray.overflow.length, measured: rec2.tray.measured, registered: rec2.tray.registered, running: rec2.auto.running }), fmtTray(rec2.tray), 'every icon the app created is in the notification area'));
     } else steps.push(result('Windows restart (Launch at login on): the guest did not come back', [{ ok: false, detail: 'no console session after the second restart' }]));
   }
   ssh(`[Environment]::SetEnvironmentVariable('${CDP_ENV}', $null, 'User')`);

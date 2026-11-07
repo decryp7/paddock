@@ -59,8 +59,10 @@ export function judgeRestartService({ bootBefore, bootAfter, samples }) {
  * `metrics` are the icons the app log says it created: none means the log could not be read, which is a broken check, not a product fail.
  * Pass and fail have their own text.
  */
-export function judgeTrayCount({ metrics, visible, overflow, measured = true, running = true }) {
-  if (!measured) return [chk(false, 'the notification area could not be read (no notification-area button at all): the tray was not measured', 'check')];
+export function judgeTrayCount({ metrics, visible, overflow, measured = true, running = true, registered = null }) {
+  // The fallback when UI Automation sees no notification-area button at all (the Windows 11 Arm guest): the shell's own registry list of icons
+  // (HKCU\Control Panel\NotifyIconSettings) proves only that icons were REGISTERED, not that they are on screen, so it is information and the row stays "not measured".
+  if (!measured) return [chk(false, `not measured: the notification area could not be read by UI Automation on this guest (no notification-area button at all)${registered === null ? '' : `; fallback read: ${registered} icon(s) registered with the shell in HKCU NotifyIconSettings for ${metrics.length} created (registered, not seen on screen)`}`, 'check')];
   if (!metrics.length) return [chk(false, 'the app log names no tray icon it created, so the number of icons to find is unknown (metrics = 0)', 'check')];
   if (!running) return [{ ok: true, info: true, detail: 'Dyno is not running, so no icons are expected: the tray is not measured here' }];
   const n = visible + overflow;
