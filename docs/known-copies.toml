@@ -42,12 +42,6 @@ paths = ["crates/paddock-service/src/parse.rs", "crates/paddock-service/src/plan
 status = "built"
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/service_repair.rs"]
-  owner = "pitwall"
-  delete_by = "pitwall-v1.2.0"
-  note = "Pitwall 1.0.x has its own parse_job without nested-block skipping. Pitwall 1.1 switches to paddock_service::parse; plan() and run_repair() stay a copy until 1.2."
-
-  [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src-tauri/src/service_repair.rs"]
   owner = "pitcrew"
   delete_by = "pitcrew-v1.1.0"
