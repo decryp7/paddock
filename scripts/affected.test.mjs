@@ -138,6 +138,12 @@ describe('the graph of this tree', () => {
     assert.deepEqual([rules.conformance, rules.tools, rules.docs, rules.apps], [true, true, false, []]);
   });
 
+  test("the UI's storage cases are read by Dyno's Rust test, so a change marks Dyno's Rust half too", () => {
+    const r = run('ui/projects/paddock-ui/format/src/storage-cases.json');
+    assert.ok(r.apps.includes('dyno') && r.ui, JSON.stringify(r.apps));
+    assert.ok(r.kinds.dyno.includes('rust'), JSON.stringify(r.kinds));
+  });
+
   test('global inputs mark everything; an app release workflow marks one app', () => {
     for (const f of ['rust-toolchain.toml', 'package.json', '.npmrc', 'tsconfig/base.json']) {
       const r = run(f);
