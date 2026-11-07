@@ -9,12 +9,18 @@
     Pop $0
 !macroend
 
+; `install` refuses a folder outside Program Files, a folder or program other accounts can change, and another copy's
+; registration (plan B6, ADR 0053); its own words say what to do, so they are shown, and logged in the details.
 !macro NSIS_HOOK_POSTINSTALL
-  nsExec::ExecToLog '"$INSTDIR\pitwall-server.exe" install'
+  Push $1 ; kept for the installer's own use
+  nsExec::ExecToStack '"$INSTDIR\pitwall-server.exe" install'
   Pop $0
+  Pop $1
+  DetailPrint "pitwall-server install: exit code $0: $1"
   StrCmp $0 "0" +3
     IfSilent +2
-      MessageBox MB_ICONEXCLAMATION|MB_OK "The Pitwall service could not be registered (code $0).$\r$\nOpen Pitwall, Settings, Service to try again."
+      MessageBox MB_ICONEXCLAMATION|MB_OK "The Pitwall service could not be registered (code $0).$\r$\n$1"
+  Pop $1
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL

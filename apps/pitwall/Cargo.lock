@@ -3900,6 +3900,7 @@ dependencies = [
  "paddock-env",
  "paddock-log",
  "paddock-proc",
+ "paddock-service",
  "pitwall-core",
  "pitwall-loopback",
  "reqwest 0.12.28",

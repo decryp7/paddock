@@ -593,5 +593,20 @@ mod capability_tests {
         assert!(shared["bundle"]["targets"].as_array().unwrap().iter().any(|t| t == "dmg"));
         let hooks = include_str!("../windows/installer-hooks.nsh");
         assert!(hooks.contains("pitwall-server.exe\" install") && hooks.contains("pitwall-server.exe\" uninstall"));
+        // The install verb refuses a folder outside Program Files, one users can write and another copy's registration
+        // (plan B6): the installer shows the program's own words, which say what to do, not only its exit code.
+        let post = hooks
+            .split("!macro NSIS_HOOK_POSTINSTALL")
+            .nth(1)
+            .and_then(|m| m.split("!macroend").next())
+            .unwrap();
+        assert!(
+            post.contains("nsExec::ExecToStack '\"$INSTDIR\\pitwall-server.exe\" install'"),
+            "{post}"
+        );
+        assert!(
+            post.contains("Pop $1") && post.contains("$1"),
+            "the refusal's words are shown: {post}"
+        );
     }
 }

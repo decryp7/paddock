@@ -13,6 +13,7 @@
 
 pub mod exec;
 pub mod login_path;
+pub mod placement;
 pub mod spec;
 #[cfg(unix)]
 pub mod systemd;

@@ -22,6 +22,8 @@ pitwall-core.workspace = true
 pitwall-loopback = { path = "../pitwall-loopback" }
 # Process memory as real memory per OS (physical footprint on macOS, PSS on Linux), never the resident size.
 paddock-proc = { path = "../../../../crates/paddock-proc" }
+# Where a LocalSystem service's program may be (plan B6): the folders Windows names and the protected-chain rule.
+paddock-service = { path = "../../../../crates/paddock-service" }
 # The family's log (ER-27, ER-22): one dated CLEF file per process in the app's log folder, redaction, panic hook, crash marker.
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }

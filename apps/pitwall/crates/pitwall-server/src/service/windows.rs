@@ -513,14 +513,26 @@ fn install() -> Result<(), String> {
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT | ServiceManagerAccess::CREATE_SERVICE)
         .map_err(|e| os_error("Installing the service", &e))?;
     let exe = std::env::current_exe().map_err(|e| format!("the program's own path cannot be found: {e}"))?;
+    let program = exe.to_string_lossy().into_owned();
+    // A LocalSystem service runs this program: only one no other account can replace (plan B6, ADR 0053 §1).
+    super::placement::check_program(
+        &program,
+        &paddock_service::privileged::OsKnownFolders,
+        &mut paddock_service::privileged::trust_real::RealTrust,
+    )
+    .map_err(|refusal| {
+        log(&format!("install refused: {refusal}"));
+        refusal.to_string()
+    })?;
+    let registration = super::placement::registration_for(&program);
     let info = ServiceInfo {
         name: OsString::from(WINDOWS_SERVICE_NAME),
         display_name: OsString::from(WINDOWS_DISPLAY_NAME),
         service_type: ServiceType::OWN_PROCESS,
         start_type: ServiceStartType::AutoStart,
         error_control: ServiceErrorControl::Normal,
-        executable_path: exe,
-        launch_arguments: vec![OsString::from("--service")],
+        executable_path: PathBuf::from(&registration.program),
+        launch_arguments: registration.args.iter().map(OsString::from).collect(),
         dependencies: vec![],
         account_name: None,
         account_password: None,
@@ -528,7 +540,16 @@ fn install() -> Result<(), String> {
     let service = match manager.create_service(&info, ServiceAccess::CHANGE_CONFIG | ServiceAccess::START) {
         Ok(s) => s,
         Err(e) if raw_code(&e) == Some(ERROR_SERVICE_EXISTS) => {
-            return Err("Pitwall's service is installed already; uninstall it first".into())
+            // Another copy's registration is refused, never moved (ADR 0053 §5, no migration before v1).
+            let registered = registered_program(&manager);
+            if let Err(refusal) = super::placement::check_existing(registered.as_deref(), &program) {
+                log(&format!(
+                    "install refused: the service is registered for another program; registered={} this={program}",
+                    registered.as_deref().unwrap_or("?")
+                ));
+                return Err(refusal.to_string());
+            }
+            return Err("Pitwall's service is installed already; uninstall it first".into());
         }
         Err(e) => return Err(os_error("Installing the service", &e)),
     };
@@ -559,6 +580,14 @@ fn install() -> Result<(), String> {
     service
         .start::<&std::ffi::OsStr>(&[])
         .map_err(|e| os_error("Starting the service", &e))
+}
+
+/// The program the registered service starts (its ImagePath's program), when it can be read.
+fn registered_program(manager: &ServiceManager) -> Option<String> {
+    let service = manager.open_service(WINDOWS_SERVICE_NAME, ServiceAccess::QUERY_CONFIG).ok()?;
+    let config = service.query_config().ok()?;
+    // The service manager holds the whole command line (`"<program>" --service`).
+    super::placement::program_of_image_path(&config.executable_path.to_string_lossy())
 }
 
 /// Stops and removes the service. Removing a service that is not installed succeeds.
