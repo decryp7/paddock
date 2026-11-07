@@ -89,6 +89,14 @@ pub enum IpcError {
         /// The limit.
         max: usize,
     },
+    /// The other side's answer (a reply, an item or a failure) is larger than this side's frame limit; only this call failed.
+    /// The fault is the other side's, not this side's request (IP1 item 1): contrast [`IpcError::TooLarge`].
+    ReplyTooLarge {
+        /// The frame's length in bytes.
+        len: usize,
+        /// This side's limit.
+        max: usize,
+    },
     /// The other side answered the call with a typed error.
     Remote(RemoteError),
     /// The two sides speak protocol versions that do not fit; the message says which side to update.
@@ -106,6 +114,46 @@ pub enum IpcError {
     },
 }
 
+/// What the other side did that the protocol forbids; the connection is closed and every call on it fails with
+/// [`IpcError::Protocol`] carrying this text (IP1 item 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ProtocolError {
+    /// A call arrived with the id of a call of the same side that is still running or waiting.
+    RepeatedCallId {
+        /// The repeated id.
+        id: u64,
+    },
+    /// More items than the credits this side granted.
+    ItemWithoutCredit {
+        /// Items received so far, the offending one included.
+        received: u64,
+        /// Credits granted.
+        granted: u64,
+    },
+    /// An item for a call that does not stream.
+    ItemForNonStreamingCall,
+}
+
+impl fmt::Display for ProtocolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ProtocolError::RepeatedCallId { id } => {
+                write!(f, "started call {id} while call {id} was still in progress")
+            }
+            ProtocolError::ItemWithoutCredit { received, granted } => {
+                write!(
+                    f,
+                    "sent more items than it was granted ({received} of {granted})"
+                )
+            }
+            ProtocolError::ItemForNonStreamingCall => {
+                f.write_str("sent an item for a call that does not stream")
+            }
+        }
+    }
+}
+
 impl IpcError {
     /// An [`IpcError::Io`].
     pub fn io(kind: io::ErrorKind, message: impl Into<String>) -> Self {
@@ -120,7 +168,10 @@ impl IpcError {
     pub fn is_process_failure(&self) -> bool {
         !matches!(
             self,
-            IpcError::Remote(_) | IpcError::Denied(_) | IpcError::TooLarge { .. }
+            IpcError::Remote(_)
+                | IpcError::Denied(_)
+                | IpcError::TooLarge { .. }
+                | IpcError::ReplyTooLarge { .. }
         )
     }
 }
@@ -135,6 +186,10 @@ impl fmt::Display for IpcError {
             IpcError::TooLarge { len, max } => write!(
                 f,
                 "a message of {len} bytes exceeds the limit of {max} bytes"
+            ),
+            IpcError::ReplyTooLarge { len, max } => write!(
+                f,
+                "its answer of {len} bytes exceeds the limit of {max} bytes"
             ),
             IpcError::Remote(r) => f.write_str(&r.message),
             IpcError::Auth(m) => write!(f, "authentication failed ({m})"),

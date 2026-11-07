@@ -554,6 +554,12 @@ impl Supervisor {
                 false,
             ),
             IpcError::Remote(r) => HostError::Remote(r),
+            // The plugin's answer did not fit our frame limit: its fault, as for a `TOO_LARGE` it reports itself.
+            IpcError::ReplyTooLarge { len, max } => self.faulted(
+                FaultKind::Garbled,
+                format!("plugin {id} sent an answer of {len} bytes; this side accepts {max}"),
+                false,
+            ),
             // Our own request did not fit a frame: the plugin did nothing wrong.
             IpcError::TooLarge { len, max } => HostError::Invalid(format!(
                 "the request is {len} bytes; a message to plugin {id} can have {max}"
@@ -942,6 +948,17 @@ impl<C: Contract> Remote<C> {
         request: &C::Request,
         timeout: Duration,
     ) -> Result<C::Reply, HostError> {
+        // A variant newer than the plugin's declared minor is refused here, before anything is sent: an older plugin
+        // could not decode it, and that would read as a fault of the plugin.
+        let needs = C::introduced_in(request);
+        if needs > self.minor {
+            return Err(HostError::Unavailable(format!(
+                "plugin {} speaks \"{}\" version {}, and this request needs version {needs}; update the plugin",
+                self.sup.id(),
+                C::NS,
+                self.minor
+            )));
+        }
         let body = paddock_ipc::wire::encode(request).map_err(HostError::Invalid)?;
         let req = PlatformRequest::Extension {
             ns: C::NS.into(),
@@ -1104,6 +1121,11 @@ mod tests {
             matches!(&garbled, HostError::Fault { kind: FaultKind::Garbled, message } if message.contains("(junk)")),
             "{garbled}"
         );
+        let reply = s.classify(IpcError::ReplyTooLarge { len: 10, max: 5 });
+        assert!(
+            matches!(&reply, HostError::Fault { kind: FaultKind::Garbled, message } if message.contains("an answer of 10 bytes")),
+            "{reply}"
+        );
         let too_large = s.classify(IpcError::Remote(RemoteError::new(codes::TOO_LARGE, "big")));
         assert!(matches!(
             too_large,
@@ -1112,7 +1134,7 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(q.status("net.example.p").total, 2);
+        assert_eq!(q.status("net.example.p").total, 3);
     }
 
     #[test]

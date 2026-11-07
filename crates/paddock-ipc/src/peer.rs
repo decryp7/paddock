@@ -12,9 +12,10 @@
 //! `tooLarge` failure the other side receives); a frame that breaks the protocol (garbled, a repeated handshake, more
 //! items than credits, a length beyond any limit) closes the connection and every call on it fails.
 
-use crate::error::{IpcError, RemoteError, codes, panic_message};
+use crate::error::{IpcError, ProtocolError, RemoteError, codes, panic_message};
 use crate::frame::{self, Frame, FrameError, FrameHead, FrameKind, FrameLimit};
 use crate::handshake::Connection;
+use crate::writeq::{Out, Push, WriteQueue};
 use paddock_jobs::CancelToken;
 use paddock_jobs::time::{Clock, SystemClock};
 use serde::Serialize;
@@ -88,6 +89,14 @@ pub struct PeerOptions {
     /// The most request bytes that wait in the call queue at once; a call that would exceed it is refused with
     /// [`codes::BUSY`] (default 16 MiB, the default frame limit, so one connection cannot park an unbounded amount).
     pub call_queue_bytes: usize,
+    /// Frames this side has queued for its writer thread; a full queue blocks the sender (IP1 item 2). Default 256.
+    pub write_queue: usize,
+    /// The bytes of those frames; one frame larger than this goes in when the queue is empty. Default 32 MiB, twice the
+    /// default frame limit, so a connection whose peer stops reading holds a bounded amount of memory.
+    pub write_queue_bytes: usize,
+    /// How long a sender waits for room in a full write queue, on [`PeerOptions::clock`], before its call fails with
+    /// [`IpcError::Timeout`] (the other side stopped reading). Default 30 s.
+    pub write_stall: Duration,
     /// How long a callee has to end a call after a cancel ([`CANCEL_GRACE`]).
     pub cancel_grace: Duration,
     /// Pushes waiting for the push callback; newer ones are dropped and counted when it falls behind.
@@ -104,6 +113,9 @@ impl fmt::Debug for PeerOptions {
             .field("max_concurrent_calls", &self.max_concurrent_calls)
             .field("call_queue", &self.call_queue)
             .field("call_queue_bytes", &self.call_queue_bytes)
+            .field("write_queue", &self.write_queue)
+            .field("write_queue_bytes", &self.write_queue_bytes)
+            .field("write_stall", &self.write_stall)
             .field("cancel_grace", &self.cancel_grace)
             .field("push_queue", &self.push_queue)
             .field("on_push", &self.on_push.is_some())
@@ -119,6 +131,9 @@ impl PeerOptions {
             max_concurrent_calls: 64,
             call_queue: 0,
             call_queue_bytes: 16 << 20,
+            write_queue: 256,
+            write_queue_bytes: 32 << 20,
+            write_stall: Duration::from_secs(30),
             cancel_grace: CANCEL_GRACE,
             push_queue: 64,
             clock: Arc::new(SystemClock),
@@ -170,17 +185,12 @@ struct ServedState {
     cancelled: bool,
 }
 
-enum Out {
-    Frame(Vec<u8>),
-    Shutdown,
-}
-
 struct Inner {
     id: u64,
     opts: PeerOptions,
     limit: FrameLimit,
     peer_pid: Option<u32>,
-    out: mpsc::Sender<Out>,
+    out: WriteQueue,
     closer: crate::endpoint::Closer,
     pending: Mutex<HashMap<u64, Pending>>,
     served: Mutex<HashMap<u64, Arc<Served>>>,
@@ -244,16 +254,21 @@ impl Peer {
         let mut reader = conn.stream;
         let mut writer = reader.try_clone()?;
         let closer = reader.closer()?;
-        let (out_tx, out_rx) = mpsc::channel();
         let (push_tx, push_rx) = mpsc::sync_channel::<Vec<u8>>(opts.push_queue.max(1));
         let on_push = opts.on_push.clone();
+        let out = WriteQueue::new(
+            opts.write_queue,
+            opts.write_queue_bytes,
+            opts.write_stall,
+            opts.clock.clone(),
+        );
         let peer = Peer {
             inner: Arc::new(Inner {
                 id: NEXT_PEER.fetch_add(1, Ordering::Relaxed),
                 opts,
                 limit: conn.limit,
                 peer_pid,
-                out: out_tx,
+                out,
                 closer,
                 pending: Mutex::new(HashMap::new()),
                 served: Mutex::new(HashMap::new()),
@@ -272,9 +287,7 @@ impl Peer {
             })?;
         }
         let w = peer.clone();
-        spawn("paddock-ipc-writer", move || {
-            w.write_loop(&mut writer, &out_rx)
-        })?;
+        spawn("paddock-ipc-writer", move || w.write_loop(&mut writer))?;
         let r = peer.clone();
         let pushes = r.inner.opts.on_push.is_some().then_some(push_tx);
         spawn("paddock-ipc-reader", move || {
@@ -342,7 +355,7 @@ impl Peer {
             "the connection to {} was closed by this side",
             self.label()
         )));
-        let _ = self.inner.out.send(Out::Shutdown);
+        self.inner.out.shutdown();
         self.inner.closer.close();
     }
 
@@ -380,10 +393,12 @@ impl Peer {
             return Err(self.closed_reason());
         }
         let bytes = frame::encode(f, self.inner.limit).map_err(IpcError::from)?;
-        self.inner
-            .out
-            .send(Out::Frame(bytes))
-            .map_err(|_| self.closed_reason())
+        match self.inner.out.push(bytes) {
+            Push::Queued => Ok(()),
+            Push::Closed => Err(self.closed_reason()),
+            // The writer has made no room for `write_stall`: the other side stopped reading. This call fails; nothing grew.
+            Push::Stalled => Err(IpcError::Timeout),
+        }
     }
 
     fn begin(&self, body: Vec<u8>, credit: u32) -> Result<(u64, mpsc::Receiver<Event>), IpcError> {
@@ -519,21 +534,16 @@ impl Peer {
         };
         if let Event::Item(_) = event {
             if !p.streams {
-                let e = IpcError::Protocol(format!(
-                    "{} sent an item for a call that does not stream",
-                    self.label()
-                ));
+                let e = self.protocol_error(ProtocolError::ItemForNonStreamingCall);
                 p.post(Event::Closed(e.clone()));
                 return Err(e);
             }
             p.received += 1;
             if p.received > p.granted {
-                return Err(IpcError::Protocol(format!(
-                    "{} sent more items than it was granted ({} of {})",
-                    self.label(),
-                    p.received,
-                    p.granted
-                )));
+                return Err(self.protocol_error(ProtocolError::ItemWithoutCredit {
+                    received: p.received,
+                    granted: p.granted,
+                }));
             }
         }
         p.post(event);
@@ -541,6 +551,11 @@ impl Peer {
             pending.remove(&id);
         }
         Ok(())
+    }
+
+    /// The connection-closing error for something the other side did that the protocol forbids.
+    fn protocol_error(&self, e: ProtocolError) -> IpcError {
+        IpcError::Protocol(format!("{} {e}", self.label()))
     }
 
     fn grant(&self, id: u64, n: u32) {
@@ -559,15 +574,27 @@ impl Peer {
         });
     }
 
-    fn serve_call(&self, handler: &Arc<dyn Handler>, id: u64, credit: u32, body: Vec<u8>) {
+    fn serve_call(
+        &self,
+        handler: &Arc<dyn Handler>,
+        id: u64,
+        credit: u32,
+        body: Vec<u8>,
+    ) -> Result<(), IpcError> {
         let opts = &self.inner.opts;
         let started_now = {
             let mut gate = lock(&self.inner.gate);
             let mut served = lock(&self.inner.served);
+            // Ids of one side's calls are unique while the call lives (running or waiting): a repeat is a protocol
+            // error, not a call to answer (the answer would be taken for the first call's).
+            if served.contains_key(&id) {
+                return Err(self.protocol_error(ProtocolError::RepeatedCallId { id }));
+            }
             if served.len() >= opts.max_concurrent_calls.saturating_add(opts.call_queue) {
                 drop(served);
                 drop(gate);
-                return self.refuse_call(id, "too many calls are running; try again");
+                self.refuse_call(id, "too many calls are running; try again");
+                return Ok(());
             }
             let call = Arc::new(Served {
                 state: Mutex::new(ServedState {
@@ -585,7 +612,8 @@ impl Peer {
                 served.remove(&id);
                 drop(served);
                 drop(gate);
-                return self.refuse_call(id, "too many calls are waiting; try again");
+                self.refuse_call(id, "too many calls are waiting; try again");
+                return Ok(());
             } else {
                 gate.queued_bytes += body.len();
                 gate.waiting.push_back((id, body.clone(), call));
@@ -593,7 +621,7 @@ impl Peer {
             }
         };
         let Some(first) = started_now else {
-            return;
+            return Ok(());
         };
         let (peer, handler) = (self.clone(), handler.clone());
         let started = spawn("paddock-ipc-call", move || {
@@ -608,6 +636,7 @@ impl Peer {
             lock(&self.inner.gate).running -= 1;
             self.refuse_call(id, &e.to_string());
         }
+        Ok(())
     }
 
     /// The next waiting call that is still wanted (the connection did not end it); frees the slot when there is none.
@@ -667,7 +696,8 @@ impl Peer {
 
     /// One frame over the limit was skipped: fail the call it belonged to, and nothing else.
     fn on_skipped(&self, len: usize, max: usize, head: Option<FrameHead>) -> Result<(), IpcError> {
-        let too_large = IpcError::TooLarge { len, max };
+        // An incoming frame over this side's limit is the other side's doing, never this side's request (IP1 item 1).
+        let too_large = IpcError::ReplyTooLarge { len, max };
         match head {
             Some(FrameHead {
                 kind: FrameKind::Call,
@@ -719,10 +749,7 @@ impl Peer {
         f: Frame,
     ) -> Result<(), IpcError> {
         match f {
-            Frame::Call { id, credit, body } => {
-                self.serve_call(handler, id, credit, body);
-                Ok(())
-            }
+            Frame::Call { id, credit, body } => self.serve_call(handler, id, credit, body),
             Frame::Reply { id, body } => self.deliver(id, Event::Reply(body), true),
             Frame::Item { id, body } => self.deliver(id, Event::Item(body), false),
             Frame::Fail { id, error } => self.deliver(id, Event::Fail(error), true),
@@ -756,19 +783,15 @@ impl Peer {
         }
     }
 
-    fn write_loop(&self, w: &mut impl Write, rx: &mpsc::Receiver<Out>) {
-        while let Ok(out) = rx.recv() {
-            match out {
-                Out::Frame(bytes) => {
-                    if let Err(e) = w.write_all(&bytes) {
-                        self.mark_closed(IpcError::Closed(format!(
-                            "the connection to {} broke ({e})",
-                            self.label()
-                        )));
-                        break;
-                    }
-                }
-                Out::Shutdown => break,
+    fn write_loop(&self, w: &mut impl Write) {
+        // `Out::Shutdown` ends the loop after everything queued before it.
+        while let Out::Frame(bytes) = self.inner.out.pop() {
+            if let Err(e) = w.write_all(&bytes) {
+                self.mark_closed(IpcError::Closed(format!(
+                    "the connection to {} broke ({e})",
+                    self.label()
+                )));
+                break;
             }
         }
         self.inner.closer.close();
@@ -800,7 +823,7 @@ impl Peer {
             }
         };
         self.mark_closed(why);
-        let _ = self.inner.out.send(Out::Shutdown);
+        self.inner.out.shutdown();
         self.inner.closer.close();
     }
 }

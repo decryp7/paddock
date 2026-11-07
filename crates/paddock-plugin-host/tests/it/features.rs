@@ -216,6 +216,40 @@ fn a_contract_is_called_through_a_guarded_proxy() {
     assert_eq!(s.status(), Status::Running);
 }
 
+/// IP1 item 4: a request variant newer than the minor the plugin declared is refused before it is sent, and is no fault.
+#[test]
+fn a_request_newer_than_the_plugins_minor_is_refused_before_sending() {
+    struct Ahead;
+    impl paddock_plugin_api::Contract for Ahead {
+        const NS: &'static str = "paddock.fixture.v1";
+        const MINOR: u16 = 3;
+        type Request = FixtureRequest;
+        type Reply = FixtureReply;
+        fn introduced_in(request: &FixtureRequest) -> u16 {
+            match request {
+                FixtureRequest::Twice(_) => 2,
+                _ => 0,
+            }
+        }
+    }
+    let rig = Rig::new();
+    let s = rig.supervisor("", Grants::none());
+    let r = s.remote::<Ahead>().unwrap();
+    let e = r.call(&FixtureRequest::Twice("ab".into())).unwrap_err();
+    assert!(
+        matches!(&e, HostError::Unavailable(m) if m.contains("needs version 2") && m.contains("update the plugin")),
+        "{e}"
+    );
+    // Nothing was sent: no process was started for it and the plugin is not blamed.
+    assert_eq!(s.status(), Status::Stopped);
+    assert_eq!(rig.quarantine.status(fixture::ID).total, 0);
+    // A request the plugin's minor covers still goes through.
+    assert_eq!(
+        r.call(&FixtureRequest::Add(2, 3)).unwrap(),
+        FixtureReply::Sum(5)
+    );
+}
+
 #[test]
 fn host_files_are_read_by_the_plugin_only_when_the_app_opened_them() {
     let rig = Rig::new();
