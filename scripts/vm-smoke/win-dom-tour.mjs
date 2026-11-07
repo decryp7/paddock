@@ -6,8 +6,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
+import { importScreenshotRules } from './screenshot-rules.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
 /** Windows's own firewall rule names (`@{MicrosoftWindows.Client.OOBE_1000...}`) are printed unchanged in the Firewall page's name column: not a Dyno raw identifier (friendly names come in 1.1.1). */
 const SCREENSHOT_OPTIONS = { allow: [/@\{[^}]+\}/] };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -51,7 +51,7 @@ async function openDialog(browser, menu, item) {
 /** Returns { checks, evidence }: one check per page or dialog. */
 export async function domTour(browser, { shotDir = null, log = () => {} } = {}) {
   let mod;
-  try { mod = await import(RULES); } catch (e) { return { checks: [{ ok: false, detail: `the shared screenshot rules could not be loaded: ${String(e.message).split('\n')[0]}` }], evidence: [] }; }
+  try { mod = await importScreenshotRules(); } catch (e) { return { checks: [{ ok: false, kind: 'check', detail: String(e.message) }], evidence: [] }; }
   const checks = [];
   const evidence = [];
   if (shotDir) mkdirSync(shotDir, { recursive: true });

@@ -177,11 +177,11 @@ PASS only with all seven runs present, not partial, passed, of the same CI run a
 ## Rule 71 and release rows (Dyno 1.1.0)
 
 - **MCP from outside the app** (`mcp-judges.mjs`, `mcp-guest.mjs`; guest only). Seeded where the product reads it, no flag: the versioned `mcp.json` in the app's
-  config folder (`enabled: true`) and ONE credential-store entry, service `Dyno`, account `mcp:keys`, holding `[{id, client, sha256, created_ms, revoked}]` (a key is
+  config folder (`enabled: true`) and the owner-only `mcp-keys.json` next to it (mode 600 on Unix, as the product demands; `{"version":1,"keys":[{id, client, sha256, created_ms, revoked}]}`; 1.1.0 keeps the list in a file, not the OS credential store, commit 3d03ede45), (a key is
   `pmk_` + 64 hex; only its SHA-256 is stored). The app reads both at start, so it is stopped, seeded and started. Then `DYNO_MCP_KEY=<key> dyno mcp` gets `initialize`,
   `tools/list` (the 10 tools; actions only when allowed) and `tools/call system_summary` (cpu 0 to 100, memory used below total, uptime above 0); the agent is killed and the
   call must be an error naming it; the app is quit and `dyno mcp` must say "isn't open" with exit 1 and `mcp-listener.json` gone or failing pid verification. The
-  per-OS credential commands (`security`, `secret-tool`, `cmdkey`) are unverified until a run shows the app accepting the key.
+  `writeKeysCommand` writes the file on every OS; no credential-store command is used any more.
 - **Quit and stop measuring**: Linux is driven (File menu over AT-SPI, 60 s of no Dyno process, reopen brings it back); the reboot half is not tried in that step, so
   the row stays "check broken" until it is. macOS and Windows: not driven (see below).
 - **Release rows** (`release-rows.mjs`): macOS reads `helper-lifecycle.log` as a standard user (`sudo -u nobody`), Linux lists `/var/log/dyno-helper` after the uninstall.
@@ -192,3 +192,22 @@ PASS only with all seven runs present, not partial, passed, of the same CI run a
 
 **The one command for the full round of a CI run:** `scripts/vm-smoke/chain-release.sh <ci run id>` (needs `GITEA_TOKEN` for the run's commit, or add
 `--expect-commit <12 hex>`; each VM takes the host lock).
+
+## Notes for the 1.1.0 rounds
+
+- **Checkout.** The screenshot rows load the shared rules (`ui/projects/paddock-e2e/src/screenshot-check.ts`), which need the `ui/` folder and the repository's
+  `node_modules`. Run the round from a FULL checkout (a sparse worktree must include `ui` and the root `package.json`) after `npm ci` at the repository root;
+  otherwise those rows say so (a broken check with that next step, `screenshot-rules.mjs`), not a bare "Cannot find module".
+- **Tart** always runs with `--no-audio`. The macOS "Idle action: waits while audio plays" row is its own step and is NOT MEASURED, with the reason: the guest has no
+  audio device and the host is never used to play a sound (ER-14).
+- **Quit.** `Quit Dyno (keeps measuring)` ends the app and keeps the agent; `Quit and stop measuring` ends both (its own row). The macOS Quit steps expect the agent
+  to be kept and end it by identity afterwards; Windows and Linux press the exact menu item and wait for the app to go (Windows: up to 15 s).
+- **Hidden start.** After a restart Dyno starts with `--hidden`: macOS (`MacGui.ensureMainWindow`), Windows and Linux reopen the running app to show its window before
+  the page and Settings rows.
+- **Removed in 1.1.0.** Backup health is gone: the Windows Backup versions reading is reported as `not applicable (removed in 1.1.0)`.
+- **Linux log folder.** The `/var/log/dyno-helper` row turns the helper on again and checks the unit and a listed log before `apt remove`; otherwise it is a broken
+  check. "Turn off, then remove" is not a row: the release notes promise nothing there.
+- **Windows Arm.** The boot time is read by CIM, then WMI, `wmic`, the up-time counter and `systeminfo`. The tray rows fall back to the registry list of registered
+  icons as information only: a notification area that UI Automation cannot read stays NOT MEASURED.
+- **Row 5a** (`login-jobs-row.mjs`, `login-jobs-drivers.mjs`): Start at login is changed in Settings; the Jobs list must show the job, Cancel must end it as Cancelled,
+  a second change must be accepted and the switch is put back. A change that ends before the list shows it is NOT MEASURED (a quiet guest answers at once).

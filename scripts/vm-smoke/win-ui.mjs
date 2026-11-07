@@ -5,12 +5,12 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Actor } from './win-act.mjs';
 import { connect, tunnel } from './win-cdp.mjs';
+import { importScreenshotRules } from './screenshot-rules.mjs';
 import { snapCheck } from './win-snap.mjs';
 import { domTour } from './win-dom-tour.mjs';
 import { trayCountdownStep, trayMenuStep } from './win-tray.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 /** Windows's own firewall rule names (`@{MicrosoftWindows.Client.OOBE_1000...}`) are printed unchanged in the Firewall page's name column: not a Dyno raw identifier (friendly names come in 1.1.1). */
 const SCREENSHOT_OPTIONS = { allow: [/@\{[^}]+\}/] };
@@ -24,7 +24,7 @@ const result = (title, checks, evidence = [], pass = '') => {
 /** The shared screenshot check (`screenshotProblems`: clipped text, raw identifiers, mock/debug strings, colour-only chips) on the real DOM of every Dyno window. */
 export async function domScreenCheck(browser, { open = [] } = {}) {
   let mod;
-  try { mod = await import(RULES); } catch (e) { return result('Windows: shared screenshot check on the real WebView2 DOM', [{ ok: false, detail: `the shared rules could not be loaded: ${String(e.message).split('\n')[0]}` }]); }
+  try { mod = await importScreenshotRules(); } catch (e) { return result('Windows: shared screenshot check on the real WebView2 DOM', [{ ok: false, kind: 'check', detail: String(e.message) }]); }
   const checks = [];
   for (const p of browser.contexts().flatMap((c) => c.pages())) {
     const name = (await p.title()) || p.url();

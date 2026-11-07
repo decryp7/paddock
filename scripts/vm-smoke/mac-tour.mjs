@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { menuBarFacts, judgeMenuBar } from './mac-menubar.mjs';
 
+import { importScreenshotRules } from './screenshot-rules.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
-const RULES = resolve(HERE, '..', '..', 'ui', 'projects', 'paddock-e2e', 'src', 'screenshot-check.ts');
 
 /** The shared rules, loaded lazily: they need the repo's node_modules (a dev checkout after `npm ci`). Returns null and why when not loadable. */
-export async function loadRules(path = RULES) {
-  try { return { rawTextProblems: (await import(path)).rawTextProblems }; } catch (e) { return { error: String(e.message ?? e).split('\n')[0] }; }
+export async function loadRules(path) {
+  try { return { rawTextProblems: (await importScreenshotRules(path)).rawTextProblems }; } catch (e) { return { error: String(e.message ?? e) }; }
 }
 
 export class MacTour {
@@ -29,7 +29,7 @@ export class MacTour {
     checks.push({ ok: seen.ok, detail: seen.ok ? `${label} shows its content (/${expect.source}/)` : `${label} never showed /${expect.source}/` });
     await this.gui.answerSystemPrompts();
     evidence.push(`screenshot: ${await this.gui.shot(label.replace(/\W+/g, '-').toLowerCase())}`);
-    if (this.rules.error) checks.push({ ok: false, detail: `the shared screenshot rules could not be loaded: ${this.rules.error}` });
+    if (this.rules.error) checks.push({ ok: false, kind: 'check', detail: `the shared screenshot rules could not be loaded: ${this.rules.error}` });
     else {
       const { texts, problems } = await this.gui.screenCheck(label, this.rules.rawTextProblems);
       checks.push({ ok: problems.length === 0, detail: problems.length ? problems.slice(0, 3).join('; ') : `${texts} visible texts pass the raw-text rules (no raw identifiers, null/NaN, mock or debug strings)` });
