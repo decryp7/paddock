@@ -18,3 +18,29 @@ had to settle. Rows marked **REVIEW** change behaviour and need a reviewer's opi
 | L10 | Constructors return values only | `Cut::counted`, `Cut::page` and the `Bounded` constructors panic when given a selection of another kind than the row's handle, or `from + shown` past the total. No user or I/O data can reach these: arguments are literals, registry rows, or counts the caller took from its own data; "nothing left out" returns `None`/complete | Illegal states stay unrepresentable; a programmer error is found by the first test that runs the call |
 | L11 | `Cut::maybe(row, of, shown, selection)` | `CutRow<Maybe>` handle (selection kind `Maybe` in the row) | Instance 12 needs an unknown total with a real selection |
 | L12 | Generated `core/generated/limits.ts` | Only `--features ts` declarations (`CutWire` is exported as `Cut`, `BoundedWire<T>` as `Bounded<T>`; counts are `number`); no file is written under `ui/` | The UI entry point is B2/2.3 |
+
+## Package split (coordinator decision, 2026-11-07)
+
+Package 1.4 + B1 is the crate and the testkit (this branch, `debrief/1.2-limits`). Its adoption pieces are their own
+package, **1.4b**, after IP1, on its own branch:
+
+- variants that keep `LimitExceeded` in `paddock-archive`, `paddock-ipc`, `paddock-plugin-host`, `paddock-jobs` and
+  `paddock-health` (`Cause` from it);
+- shared rows 51 to 62, each with a `limit_case!` (each crate owns its registry rows);
+- the conformance completeness check (`conformance/src/limits.mjs`, warning mode);
+- the `JobState` / job wire change with the regenerated TypeScript. Before v1 the wire changes directly: no shims, no
+  migration. `paddock-jobs` and the job wire are shared code that every app ships, so 1.4b updates every consumer in
+  the same change (rules 39 and 43) and runs every app's affected tests. It merges only after the Dyno tag.
+
+## IP1 deviations (branch `debrief/1.2-ip1`)
+
+| Q | Design said | Built | Why |
+|---|---|---|---|
+| I1 | "An oversized reply from a plugin is the plugin's fault (`Failure::Garbled`)" | New `IpcError::ReplyTooLarge { len, max }` (not process failure); `Peer::on_skipped` posts it for Reply, Item and Fail frames; the supervisor maps it to `FaultKind::Garbled` | `IpcError::TooLarge` is also the error of our own request being too large; one variant could not tell them apart |
+| I2 | `PeerOptions { write_queue, write_queue_bytes }` | Both, plus **`write_stall`** (default 30 s on the peer's clock). Defaults 256 frames, 32 MiB. A sender blocks while the queue is full and fails with `IpcError::Timeout` after `write_stall`; one frame over the byte bound is accepted into an empty queue | "blocks, then fails at the bound" needs a deadline; it is an option, not a constant, so tests drive it with a fake clock |
+| I3 | `ProtocolError { RepeatedCallId { id }, ItemWithoutCredit, .. }` | `ProtocolError { RepeatedCallId, ItemWithoutCredit { received, granted }, ItemForNonStreamingCall }`, `#[non_exhaustive]`; the connection closes with `IpcError::Protocol(text)`. A repeated id is detected while the first call is running or waiting only | Ids are allocated before the send, so they can arrive out of order; a strictly increasing rule would refuse legitimate calls, and remembering finished ids is unbounded |
+| I4 | `Contract::role` and `introduced_in` | Only `introduced_in` (default 0); `Remote::call_within` refuses with `HostError::Unavailable` before sending. `role` stays with 2.6b | Scope of IP1 item 4 |
+| I5 | `PeerCredentials` compared with the host's own uid on Unix | `PeerCredentials` (re-exported), `Authenticator::authenticate_as`, `Host::same_account_only()` (on in `launch()`; **off by default**). Another uid, or an unreadable uid, is refused before the hello is read | A system service accepts other accounts; a default-on rule would break Dyno's service |
+| I6 | "fuzz target for plugin request bodies" | `paddock-ipc/fuzz` target `plugin_request` (depends on `paddock-plugin-api`), and the nightly job `shared-fuzz` | `nightly.yml` is a shared integration point, so the job is in its own commit |
+| I7 | Re-export `codes` and `cancelled_error` | `paddock_plugin_api::codes`, `ExtCtx::cancelled_error()`. "An example plugin builds with `paddock-plugin-api` as its only platform dependency" is not proven by a separate example crate | Not built in this package |
+| I8 | README: "no app links `paddock-ipc` on `main` yet" | Dyno links it on `main` (by path); the row says so | The plan statement is wrong for Dyno |
