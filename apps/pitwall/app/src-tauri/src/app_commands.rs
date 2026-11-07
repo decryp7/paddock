@@ -20,7 +20,7 @@ fn internal(m: impl Into<String>) -> CommandError {
     CommandError::new(ErrorCode::Internal, m)
 }
 
-async fn compose_state(client: &SharedClient) -> ServiceInstall {
+pub(crate) async fn compose_state(client: &SharedClient) -> ServiceInstall {
     let os = {
         let client = client.clone();
         // The shared manager asks launchd and the server: blocking calls, off the runtime's threads.

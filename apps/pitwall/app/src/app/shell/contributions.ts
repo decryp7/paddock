@@ -11,6 +11,7 @@ import {
 } from '@decryp7/paddock-ui/shell';
 import { aboutContributions, defineAboutDialogs } from '@decryp7/paddock-ui/shell/about';
 import { defineConfirmDialog } from '@decryp7/paddock-ui/shell/confirm';
+import { defineDiagnosticsDialog, diagnosticsContributions } from '@decryp7/paddock-ui/shell/diagnostics';
 import { DIALOG_CONTRACTS } from '../generated/dialog-contracts';
 import type { ConsentAnswer } from '../features/service/service-consent';
 import type { QuitAnswer } from '../features/quit/quit-dialog';
@@ -86,7 +87,13 @@ export const CONFIRM_DIALOG = defineConfirmDialog({
   load: () => import('@decryp7/paddock-ui/shell/confirm/dialog').then((m) => m.PdConfirmDialog),
 });
 
-export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, CREATE_APP_DIALOG, KEY_SECRET_DIALOG, QUIT_DIALOG, CONSENT_DIALOG, ...ABOUT_DIALOGS] as const;
+/** Report a problem (Help menu, command palette): shows every file with its size before saving; its window boots the diagnostics providers. */
+export const REPORT_PROBLEM_DIALOG = defineDiagnosticsDialog({ providers: () => import('./diagnostics.providers').then((m) => m.DIAGNOSTICS_PROVIDERS) });
+
+export const DIALOGS = [CONFIRM_DIALOG, SETTINGS_DIALOG, CREATE_APP_DIALOG, KEY_SECRET_DIALOG, QUIT_DIALOG, CONSENT_DIALOG, ...ABOUT_DIALOGS, REPORT_PROBLEM_DIALOG] as const;
+
+/** Report a problem's command, Help menu item and the Logging settings page. */
+export const DIAGNOSTICS_CONTRIBUTIONS = diagnosticsContributions([]);
 
 /** About's commands, Help menu items and notice kind. */
 export const ABOUT_CONTRIBUTIONS = aboutContributions([]);

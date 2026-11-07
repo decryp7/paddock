@@ -32,6 +32,11 @@ paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Widget layouts (family ADR 0035): the popup's layout is stored and edited here; its catalogue and values are pitwall-core's.
 paddock-widgets = { path = "../../../../crates/paddock-widgets" }
+# Report a problem (plan B4): Pitwall's sections beside paddock-diag's, the app's folders and the log handle its Logging
+# section drives.
+paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
+paddock-env = { path = "../../../../crates/paddock-env" }
+paddock-log = { path = "../../../../crates/paddock-log" }
 getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -83,6 +88,8 @@ workspace = true
 # A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.
 socket2 = { version = "0.6", features = ["all"] }
 tempfile.workspace = true
+# The time of a report the tests make (paddock-diag takes a chrono time).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 # A held loopback port for "nothing answers there" (C39).
 paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tokio = { workspace = true, features = ["time", "sync", "rt", "rt-multi-thread", "macros", "net", "io-util", "test-util"] }
