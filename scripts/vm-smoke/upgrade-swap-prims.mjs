@@ -47,13 +47,14 @@ export function macSwapPrimitives({ guest, gui, check, share, bundle, beforeDmg 
       const out = [];
       await gui.ensureMainWindow().catch(() => {});
       const chip = await gui.waitFor(async () => (await gui.texts()).some((t) => /Dyno was updated\. Restart Dyno to finish/.test(t.text)), 60_000);
-      out.push(chip.ok ? chk(true, 'the chip "Dyno was updated. Restart Dyno to finish." is shown (the old app still runs)') : chk(false, 'the chip "Dyno was updated. Restart Dyno to finish." is not shown 60 s after the install'));
+      const seenTexts = async (re) => (await gui.texts()).map((t) => t.text).filter((t) => re.test(t)).slice(0, 12).join(' | ') || '(none)';
+      out.push(chip.ok ? chk(true, 'the chip "Dyno was updated. Restart Dyno to finish." is shown (the old app still runs)') : chk(false, `the chip "Dyno was updated. Restart Dyno to finish." is not shown 60 s after the install; texts about it: ${await seenTexts(/restart|updated|finish/i)}`));
       const log = (await exec(`cat "$HOME/Library/Logs/Dyno/"dyno*.log 2>/dev/null | grep -c "program files changed while it ran"`)).stdout.trim().split('\n').at(-1);
       out.push(chk(Number(log) > 0, Number(log) > 0 ? `the log line "Dyno's program files changed while it ran" is there (${log} time(s))` : 'the log line "Dyno\'s program files changed while it ran" is missing'));
       // The helper: another build of the same version reads "Update available"; "Update the helper" asks for the password once; then the installed helper is the bundled one.
       const nav = await gui.openSettingsSection('^Dyno$');
       const outdated = await gui.waitFor(async () => (await gui.texts()).some((t) => /Update available|Outdated|another build/i.test(t.text)), 30_000);
-      out.push(outdated.ok ? chk(true, 'the helper card reads "Update available" (the helper is another build)') : chk(false, `the helper card does not read "Update available" (${nav.ok ? 'Settings opened' : nav.detail})`));
+      out.push(outdated.ok ? chk(true, 'the helper card reads "Update available" (the helper is another build)') : chk(false, `the helper card does not read "Update available" (${nav.ok ? 'Settings opened' : nav.detail}); helper card texts: ${await seenTexts(/helper|administrator|outdated|update|build/i)}`));
       if (outdated.ok) {
         const pressed = await gui.press(gui.app, '^Update the helper$');
         out.push(chk(pressed, pressed ? '"Update the helper" pressed' : 'no "Update the helper" button on the card'));
