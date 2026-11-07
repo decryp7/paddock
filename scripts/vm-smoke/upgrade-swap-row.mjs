@@ -60,7 +60,7 @@ export async function upgradeSwapStep(p) {
     }
     const tookMs = p.now() - t0;
     const seen = new Map();
-    for (let i = 0; i < LOOP_SAMPLES; i++) { for (const x of await p.agentProcs()) if (x.startMs >= boundaryMs - 2000) seen.set(String(x.pid), x); // keyed by pid: a start time computed from `ps` elapsed time jitters by a second between looks if (i < LOOP_SAMPLES - 1) await p.sleep(10_000); }
+    for (let i = 0; i < LOOP_SAMPLES; i++) { for (const x of await p.agentProcs()) if (x.startMs >= boundaryMs - 2000) seen.set(String(x.pid), x); /* keyed by pid: a start time computed from ps elapsed time jitters by a second between looks */ if (i < LOOP_SAMPLES - 1) await p.sleep(10_000); }
     const extra = p.extraChecks ? await p.extraChecks({ boundaryMs }) : [];
     ctx = { ...old, oldAgentBuild16, expectedBuild16, agentBuild, tookMs, agentStarts: [...seen.keys()], extra };
   } catch (e) {
