@@ -236,6 +236,12 @@ pub fn centre() -> HelperCentre<Box<dyn HelperTransport>> {
     let bundled = bundled_helper(host, &agent_exe);
     let supported = unsupported(host, &bundled, bundled.is_file(), std::env::var_os("APPIMAGE").is_some());
     let installed_path = paths.binary.clone();
+    // The bundled helper's build, hashed once (the agent restarts when its app is replaced, so it cannot go stale).
+    let bundled_for_build = bundled.clone();
+    let bundled_build: crate::helper_link::BundledBuild = Arc::new({
+        let cache = std::sync::OnceLock::new();
+        move || cache.get_or_init(|| crate::build_id::file_build_id(&bundled_for_build)).clone()
+    });
     let transport = transport();
     let owner = current_owner(host, &SystemRunner);
     let installer = OsInstaller {
@@ -245,7 +251,7 @@ pub fn centre() -> HelperCentre<Box<dyn HelperTransport>> {
         owner,
     };
     HelperCentre::new(
-        HelperLink::new(Box::new(transport) as Box<dyn HelperTransport>, Arc::new(SystemClock)),
+        HelperLink::new(Box::new(transport) as Box<dyn HelperTransport>, Arc::new(SystemClock)).with_bundled_build(bundled_build),
         host,
         supported,
         env!("CARGO_PKG_VERSION"),

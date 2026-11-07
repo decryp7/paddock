@@ -472,6 +472,7 @@ mod tests {
                 tag: dyno_core::wake::WakeTag::parse("t").unwrap(),
             },
             K::ListWakes => HelperRequest::ListWakes,
+            K::Build => HelperRequest::Build,
             K::WolState => HelperRequest::WolState {
                 ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
             },

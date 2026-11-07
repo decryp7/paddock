@@ -124,7 +124,12 @@ pub struct HelperLink<T: HelperTransport> {
     faults: std::sync::atomic::AtomicU64,
     /// The state last logged at info, so a poll that finds the same state logs at debug (one line per change, not per poll).
     last_state: std::sync::Mutex<Option<HelperState>>,
+    /// The build id of the helper program that ships with this Dyno, when it can be read. Without it builds are not compared.
+    bundled_build: Option<BundledBuild>,
 }
+
+/// Reads the bundled helper's build id (the caller caches it: it hashes a file).
+pub type BundledBuild = Arc<dyn Fn() -> Option<String> + Send + Sync>;
 
 fn to_platform(e: TransportError) -> PlatformError {
     match e {
@@ -153,6 +158,30 @@ impl<T: HelperTransport> HelperLink<T> {
             clock,
             faults: std::sync::atomic::AtomicU64::new(0),
             last_state: std::sync::Mutex::new(None),
+            bundled_build: None,
+        }
+    }
+
+    /// Compares the installed helper's build with the bundled one: a helper of another build of the same version, or one that
+    /// cannot answer the build request, is reported as outdated.
+    pub fn with_bundled_build(mut self, bundled: BundledBuild) -> Self {
+        self.bundled_build = Some(bundled);
+        self
+    }
+
+    /// The build id the helper reports, or `None` when it cannot answer (a helper older than the request). Not counted as a fault:
+    /// an old helper answering this one request with an error is not unreachable.
+    fn installed_build(&self, wait: Wait) -> Option<String> {
+        let out = match wait.max() {
+            None => self.transport.call(HelperRequest::Build),
+            max => self.transport.call_within(HelperRequest::Build, max),
+        };
+        match out {
+            Ok(HelperReply::Build(id)) => Some(id),
+            other => {
+                log::info!(Why = format!("{other:?}").chars().take(200).collect::<String>().as_str(); "Helper does not report a build");
+                None
+            }
         }
     }
 
@@ -215,7 +244,7 @@ impl<T: HelperTransport> HelperLink<T> {
                     Ok(HelperReply::Entries(e)) => e,
                     _ => Vec::new(),
                 };
-                Probe::Answered(info, recent)
+                self.judge(wait, info, recent)
             }
             Ok(_) => Probe::Silent("it answered with the wrong kind of reply".into()),
             Err(TransportError::Absent) => Probe::Absent,
@@ -237,6 +266,37 @@ impl<T: HelperTransport> HelperLink<T> {
             *last = Some(status.state);
         }
         status
+    }
+
+    /// `Answered`, or `AnsweredOtherBuild` when the helper is an API and version this Dyno accepts but not the build it ships.
+    fn judge(&self, wait: Wait, info: dyno_core::helper_wire::HelperInfo, recent: Vec<dyno_core::helper_wire::AuditEntry>) -> Probe {
+        let acceptable = info.api == dyno_core::helper_wire::HELPER_API
+            && dyno_core::helper_wire::version_at_least(&info.version, dyno_core::helper_wire::MIN_HELPER_VERSION);
+        let Some(bundled_of) = self.bundled_build.as_ref().filter(|_| acceptable) else {
+            return Probe::Answered(info, recent);
+        };
+        let bundled = bundled_of();
+        let installed = self.installed_build(wait);
+        let verdict = dyno_core::helper_wire::judge_build(installed.as_deref(), bundled.as_deref());
+        let (installed_text, bundled_text) = (installed.as_deref().unwrap_or("none"), bundled.as_deref().unwrap_or("unreadable"));
+        if verdict == dyno_core::helper_wire::BuildVerdict::Same {
+            log::debug!(Installed = installed_text, Bundled = bundled_text; "Helper build checked: same");
+        } else {
+            log::info!(
+                Installed = installed_text, Bundled = bundled_text, Version = info.version.as_str(),
+                Verdict = format!("{verdict:?}").as_str();
+                "Helper build checked"
+            );
+        }
+        match (verdict, bundled) {
+            (dyno_core::helper_wire::BuildVerdict::Other, Some(bundled)) => Probe::AnsweredOtherBuild {
+                info,
+                recent,
+                installed,
+                bundled,
+            },
+            _ => Probe::Answered(info, recent),
+        }
     }
 
     /// Sets the wake `tag` at `at_utc` (seconds since 1970): the helper's own caps and refusals come back as the error.
@@ -520,6 +580,67 @@ mod tests {
                 tools: vec![],
             },
         )
+    }
+
+    #[test]
+    fn a_helper_of_another_build_or_one_that_cannot_name_its_build_is_outdated() {
+        let w = HelperHost::Linux;
+        type Answers = Vec<Result<HelperReply, TransportError>>;
+        let head = || -> Answers { vec![Ok(about(MIN_HELPER_VERSION, HELPER_API)), Ok(HelperReply::Entries(vec![]))] };
+        let with = |tail: Option<Result<HelperReply, TransportError>>| -> Answers {
+            let mut a = head();
+            a.extend(tail);
+            a
+        };
+        let unknown_request = || TransportError::Remote {
+            code: codes::UNSUPPORTED.into(),
+            message: "unreadable request".into(),
+        };
+        // (answers, the bundled build, the state, whether the helper was asked for its build)
+        let cases: Vec<(Answers, Option<&str>, HelperState, bool)> = vec![
+            (
+                with(Some(Ok(HelperReply::Build("aaaa".into())))),
+                Some("aaaa"),
+                HelperState::Ready,
+                true,
+            ),
+            (
+                with(Some(Ok(HelperReply::Build("aaaa".into())))),
+                Some("bbbb"),
+                HelperState::Outdated,
+                true,
+            ),
+            (with(Some(Err(unknown_request()))), Some("bbbb"), HelperState::Outdated, true),
+            (
+                with(Some(Err(TransportError::Silent("closed".into())))),
+                Some("bbbb"),
+                HelperState::Outdated,
+                true,
+            ),
+            (with(Some(Ok(HelperReply::Bye))), Some("bbbb"), HelperState::Outdated, true),
+            // The bundled program cannot be read: nothing to compare, the helper is taken as it is.
+            (with(Some(Ok(HelperReply::Build("aaaa".into())))), None, HelperState::Ready, true),
+            (with(Some(Err(unknown_request()))), None, HelperState::Ready, true),
+            // An old version or API is outdated by itself and is not asked for its build.
+            (
+                vec![Ok(about("1.0.0", HELPER_API)), Ok(HelperReply::Entries(vec![]))],
+                Some("bbbb"),
+                HelperState::Outdated,
+                false,
+            ),
+        ];
+        for (answers, bundled, want, asked) in cases {
+            let bundled = bundled.map(str::to_string);
+            let l = link(answers).with_bundled_build(Arc::new(move || bundled.clone()));
+            assert_eq!(l.status(w, Ok(()), "1.1.0").state, want, "{want:?}");
+            let seen = l.transport.seen.lock().unwrap().clone();
+            assert_eq!(seen.contains(&HelperRequest::Build), asked, "{seen:?}");
+            assert_eq!(l.faults(), 0, "a helper that cannot name its build is not an unreachable one");
+        }
+        // Without a bundled program to compare with (a test rig, a build without a helper) the build is never asked.
+        let l = link(head());
+        assert_eq!(l.status(w, Ok(()), "1.1.0").state, HelperState::Ready);
+        assert!(!l.transport.seen.lock().unwrap().contains(&HelperRequest::Build));
     }
 
     #[test]

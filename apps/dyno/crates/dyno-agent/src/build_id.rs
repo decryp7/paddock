@@ -6,48 +6,12 @@
 //! module owns the "my file was replaced" check ([`BinaryWatch`]): an agent whose file changed or vanished exits so its
 //! supervisor (launchd, systemd --user, the app) starts the new one. Nothing here kills a process.
 
-use std::io::Read;
 use std::path::Path;
-use std::sync::OnceLock;
 
-/// Longest file hashed (a bound on an unbounded input; the agent is a few tens of MiB).
-const MAX_HASHED: u64 = 1 << 30;
-/// Hex characters kept from the digest.
-const ID_LEN: usize = 16;
+pub use dyno_platform::build_id::{file_build_id, own_build_id};
+
 /// Separates the version from the build id in a build key.
 const SEP: char = '#';
-
-/// The build id of the program file at `path`, or `None` when it cannot be read (or is over the bound).
-pub fn file_build_id(path: &Path) -> Option<String> {
-    use sha2::{Digest, Sha256};
-    let mut file = std::fs::File::open(path).ok()?;
-    if file.metadata().ok()?.len() > MAX_HASHED {
-        return None;
-    }
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1 << 16];
-    let mut total = 0u64;
-    loop {
-        let n = file.read(&mut buf).ok()?;
-        if n == 0 {
-            break;
-        }
-        total += n as u64;
-        if total > MAX_HASHED {
-            return None;
-        }
-        hasher.update(&buf[..n]);
-    }
-    let hex: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    Some(hex[..ID_LEN].to_string())
-}
-
-/// The build id of the running program's own file, read once.
-pub fn own_build_id() -> String {
-    static OWN: OnceLock<String> = OnceLock::new();
-    OWN.get_or_init(|| std::env::current_exe().ok().and_then(|p| file_build_id(&p)).unwrap_or_default())
-        .clone()
-}
 
 /// The key the app compares an agent against: the version, plus the build id when the app could read the agent file it
 /// would start. An empty id gives the version alone, which accepts any build of that version (the app cannot judge).
@@ -236,7 +200,6 @@ mod tests {
         let (s2, id2) = (FileStamp::of(&p), file_build_id(&p).unwrap());
         assert_ne!(s1, s2, "the replaced file is told apart");
         assert_ne!(id1, id2);
-        assert_eq!(id1.len(), ID_LEN);
         assert_eq!(file_build_id(&dir.path().join("none")), None);
     }
 
