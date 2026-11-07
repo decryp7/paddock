@@ -8,6 +8,7 @@ import { Actor } from './win-act.mjs';
 import { retryOnClosed } from './reconnect.mjs';
 import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog, notificationAreaButtons, trayLogLines } from './win-tray-icons.mjs';
 import { makeResult } from './verdict.mjs';
+import { quitStopStep } from './mcp-judges.mjs';
 import { judgeAutostart, judgeRestartService, judgeTrayCount, parseProcs, serviceState } from './win-judges.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -311,7 +312,52 @@ async function runRebootSteps(ctx, steps) {
       steps.push(result('Windows restart: tray icons after the restart (Launch at login ON)', judgeTrayCount({ metrics: rec2.tray.metrics, visible: rec2.tray.visible.length, overflow: rec2.tray.overflow.length, measured: rec2.tray.measured, registered: rec2.tray.registered, running: rec2.auto.running }), fmtTray(rec2.tray), 'every icon the app created is in the notification area'));
     } else steps.push(result('Windows restart (Launch at login on): the guest did not come back', [{ ok: false, detail: 'no console session after the second restart' }]));
   }
+  // Rule 71: Quit and stop measuring with its reboot half (the release row): File > Quit and stop measuring over the DevTools port, 60 s with no Dyno process, reopen,
+  // then a real restart: the Run-key entry must bring the agent back (Quit and stop does not remove the start at login). Polled up to 150 s after the console session.
+  try { steps.push(await quitStopWithRestart(ctx)); } catch (e) { steps.push(result('Rule 71: Quit and stop measuring stops the agent and it comes back', [{ ok: false, kind: 'check', detail: `the step broke: ${String(e.message).split('\n')[0]}` }])); }
   ssh(`[Environment]::SetEnvironmentVariable('${CDP_ENV}', $null, 'User')`);
   // The first uninstall after this boot (fix/uninstall-cold-leftover): the guest has just restarted.
   { const { coldUninstallStep } = await import('./win-machine.mjs'); steps.push(await coldUninstallStep()); }
+}
+
+const DYNO_COUNT = '(Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Measure-Object).Count';
+const AGENT_COUNT = '(Get-Process dyno-agent -ErrorAction SilentlyContinue | Measure-Object).Count';
+
+/** Quit and stop measuring, then reopen, then a real restart (`restartGuest`); the agent count after the restart, polled while Windows runs its Run-key entries. */
+async function quitStopWithRestart(ctx) {
+  const count = async () => Number(ssh(DYNO_COUNT).trim().split('\n').at(-1)) || 0;
+  const r = await quitStopStep({
+    now: () => Date.now(), sleep,
+    trigger: async () => {
+      // Dyno runs here (with its DevTools port: the user environment carries it); make sure of it, then show its window.
+      ctx.launchDyno(); await sleep(20_000);
+      const t = tunnel();
+      try {
+        const browser = await connect();
+        const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+        if (!main) throw new Error('no Dyno main window over the DevTools port');
+        const clicked = await main.evaluate(async () => {
+          const items = () => [...document.querySelectorAll('[role=menuitem]')];
+          if (!items().some((e) => e.textContent.trim().startsWith('Quit and stop'))) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File')?.click(); await new Promise((r) => setTimeout(r, 600)); }
+          const it = items().find((e) => e.textContent.trim().startsWith('Quit and stop'));
+          if (!it) return false;
+          it.click(); return true;
+        }).catch(() => true); // the page goes away with the app
+        if (!clicked) throw new Error('no "Quit and stop measuring" item in the File menu');
+        await browser.close().catch(() => {});
+      } finally { t.close(); }
+    },
+    count,
+    reopen: async () => { ctx.launchDyno(); for (let i = 0; i < 10; i++) { await sleep(5000); if (Number(ssh(AGENT_COUNT).trim().split('\n').at(-1)) > 0) break; } return Number(ssh(AGENT_COUNT).trim().split('\n').at(-1)) || 0; },
+    reboot: async () => {
+      const rs = await restartGuest(ctx);
+      if (!rs.up) return null;
+      let n = 0;
+      for (let i = 0; i < 30 && n === 0; i++) { n = Number(ssh(AGENT_COUNT).trim().split('\n').at(-1)) || 0; if (!n) await sleep(5000); }
+      ctx.log(`quit-stop restart: boot ${rs.bootBefore} -> ${rs.bootAfter}; dyno-agent processes after the restart: ${n}`);
+      return rs.bootBefore && rs.bootAfter && rs.bootBefore === rs.bootAfter ? null : n;
+    },
+  });
+  r.evidence = [...(r.evidence ?? []), '--- after the restart', autoStartRecord().procs || '(no Dyno process)'];
+  return r;
 }

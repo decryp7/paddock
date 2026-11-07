@@ -55,11 +55,27 @@ test('the step runs the four calls in order against a fake guest; an unseeded ke
   assert.equal(parseResponses('garbage\n{"id":2}\n').size, 1);
   assert.equal(callPayload({ result: { isError: true } }), null);
 });
-test('both rows are required steps of every OS release run', () => {
-  for (const os of ['windows', 'linux', 'macos']) {
-    const ids = requiredSteps({ os, suite: 'power', ui: true, reboot: false, release: true }).map((r) => r.id);
-    assert.ok(ids.includes('mcp') && ids.includes('quit-stop'), os);
-  }
+test('both rows are required on every OS: MCP in the UI/power run, Quit and stop (with its reboot half) in the run that restarts the guest', () => {
+  const ids = (o) => requiredSteps({ release: true, ...o }).map((r) => r.id);
+  assert.ok(ids({ os: 'linux' }).includes('mcp') && ids({ os: 'linux' }).includes('quit-stop'));
+  assert.ok(ids({ os: 'windows', ui: true }).includes('mcp'));
+  assert.ok(ids({ os: 'windows', reboot: true }).includes('quit-stop'));
+  assert.ok(ids({ os: 'macos', suite: 'power' }).includes('mcp'));
+  assert.ok(ids({ os: 'macos', suite: 'helper', reboot: true }).includes('quit-stop'));
+  // the run without a restart reports only its part, which is never the release row
+  assert.ok(!ids({ os: 'windows', ui: true }).includes('quit-stop') && !ids({ os: 'macos', suite: 'power' }).includes('quit-stop'));
+});
+test('Quit and stop without a reboot primitive is the run\'s part only: its own title, no reboot check, never the release row', async () => {
+  let t = 0;
+  const g = { now: () => t, sleep: async (ms) => { t += ms; }, trigger: async () => {}, count: async () => 0, reopen: async () => 1 };
+  const part = await quitStopStep(g);
+  assert.equal(part.status, 'pass', part.summary);
+  assert.doesNotMatch(part.title, /^Rule 71: Quit and stop measuring/);
+  assert.ok(!part.checks.some((c) => /reboot was not tried/.test(c.detail)));
+  t = 0;
+  const full = await quitStopStep({ ...g, reboot: async () => 2 });
+  assert.match(full.title, /^Rule 71: Quit and stop measuring/);
+  assert.equal(full.status, 'pass');
 });
 
 test('dead state: a dyno CLI that cannot run (exit 127) is a broken check, not a product failure', async () => {

@@ -96,7 +96,7 @@ export function judgeQuitStop({ samples, reopened, rebooted }) {
     chk(span >= 60 && samples.length >= 3, `observed ${samples.length} samples over ${span} s (60 s needed)`, span >= 60 && samples.length >= 3 ? undefined : 'check'),
     chk(alive.length === 0, alive.length ? `a Dyno process was running ${alive[0].t} s after Quit and stop (${alive[0].count})` : 'no Dyno process for the whole window'),
     reopened === null ? chk(false, 'reopening was not tried', 'check') : chk(reopened > 0, reopened > 0 ? 'reopening Dyno brought the agent back' : 'reopening Dyno did not bring the agent back'),
-    rebooted === null ? chk(false, 'the reboot was not tried', 'check') : chk(rebooted > 0, rebooted > 0 ? 'a reboot brought the agent back (the service was not removed)' : 'after a reboot the agent did not come back'),
+    ...(rebooted === undefined ? [] : [rebooted === null ? chk(false, 'the reboot was not tried', 'check') : chk(rebooted > 0, rebooted > 0 ? 'a reboot brought the agent back (the service was not removed)' : 'after a reboot the agent did not come back')]),
   ];
 }
 
@@ -124,14 +124,19 @@ export async function mcpStep(g) {
   return makeResult(title, checks, [], 'ten tools listed, a live system_summary, an error with the agent dead, "isn\'t open" after Quit');
 }
 
-/** The Quit-and-stop step; `g`: trigger() (a menu click over AX/VNC), count() Dyno processes, sleep(ms), reopen(), reboot(). */
+export const QUIT_STOP_TITLE = 'Rule 71: Quit and stop measuring stops the agent and it comes back';
+export const QUIT_STOP_PART_TITLE = 'Rule 71 (part, no restart in this run): Quit and stop measuring, 60 s with no Dyno process, then reopen';
+/**
+ * The Quit-and-stop step; `g`: trigger() (a menu click over AX/VNC), count() Dyno processes, sleep(ms), reopen(), reboot(). Without `reboot` (a run that does not restart
+ * the guest) the step is only that run's part, under its own title: the release row, with the reboot half, is the restart run's.
+ */
 export async function quitStopStep(g) {
-  const title = 'Rule 71: Quit and stop measuring stops the agent and it comes back';
+  const title = g.reboot ? QUIT_STOP_TITLE : QUIT_STOP_PART_TITLE;
   try { await g.trigger(); } catch (e) { return makeResult(title, [chk(false, `Quit and stop measuring could not be triggered: ${e.message}`, 'check')]); }
   const samples = [];
   const t0 = g.now();
   for (let i = 0; i < 7; i++) { samples.push({ t: Math.round((g.now() - t0) / 1000), count: await g.count() }); if (i < 6) await g.sleep(10_000); }
   const reopened = await g.reopen().catch(() => null);
-  const rebooted = await g.reboot().catch(() => null);
-  return makeResult(title, judgeQuitStop({ samples, reopened, rebooted }), [JSON.stringify(samples)], 'no Dyno process for 60 s; reopening and a reboot bring the agent back');
+  const rebooted = g.reboot ? await g.reboot().catch(() => null) : undefined;
+  return makeResult(title, judgeQuitStop({ samples, reopened, rebooted }), [JSON.stringify(samples)], g.reboot ? 'no Dyno process for 60 s; reopening and a reboot bring the agent back' : 'no Dyno process for 60 s; reopening brings the agent back');
 }

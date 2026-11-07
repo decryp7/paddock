@@ -284,7 +284,31 @@ async function main(argv) {
         const { macHelperLogStep } = await import('./mac-helper-log.mjs');
         const tour = new MacTour(guest, gui, await loadRules(), { log, check });
         const waitReady = async () => { for (let i = 0; i < 75; i++) { if ((await tart(['exec', vm, 'true'], { timeoutMs: 20_000 })).code === 0 && (await guest.exec('/usr/local/bin/axdrive windows | grep -c Dock')).stdout.trim() !== '0') return true; await sleepMs(4000); } return false; };
-        const readings = o.reboot ? [macRebootCheck({ waitReady })] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
+        // Rule 71 Quit and stop measuring with its reboot half (the release row) in the restart run: menu item over AX, 60 s with no Dyno process, reopen, then a real
+        // restart; the login item must bring the agent back (polled up to 150 s after the guest is ready).
+        const bundleR = `/Applications/${config.bundle}`;
+        const macQuitStopRestart = async () => {
+          const count = async () => Number((await exec('ps -axo comm= | grep -cE "dyno-(app|agent)$"')).stdout.trim()) || 0;
+          return quitStopStep({
+            now: () => Date.now(), sleep: sleepMs,
+            trigger: async () => { await exec(`open -a ${bundleR}`); await sleepMs(15_000); if (!(await gui.press(gui.app, '^Quit and stop measuring', 'AXMenuItem'))) throw new Error('no "Quit and stop measuring" menu item (AX)'); await sleepMs(5000); },
+            count,
+            reopen: async () => { await exec(`open -a ${bundleR}`); for (let i = 0; i < 10; i++) { await sleepMs(5000); if ((await exec('pgrep -x dyno-agent >/dev/null')).code === 0) break; } return Number((await exec('pgrep -x dyno-agent | wc -l')).stdout.trim()) || 0; },
+            reboot: async () => {
+              const boot0 = (await exec('sysctl -n kern.boottime')).stdout.trim();
+              await exec('(sleep 2; sudo /sbin/reboot) >/dev/null 2>&1 &', { timeoutMs: 30_000 });
+              await sleepMs(40_000);
+              let up = false;
+              for (let i = 0; i < 80 && !up; i++) { up = (await waitReady()) && (await exec('sysctl -n kern.boottime')).stdout.trim() !== boot0; if (!up) await sleepMs(4000); }
+              if (!up) return null;
+              let n = 0;
+              for (let i = 0; i < 30 && n === 0; i++) { n = Number((await exec('pgrep -x dyno-agent | wc -l')).stdout.trim()) || 0; if (!n) await sleepMs(5000); }
+              log(`quit-stop restart: boot ${boot0.replace(/\s+/g, ' ')} -> restarted; dyno-agent processes after it: ${n}`);
+              return n;
+            },
+          });
+        };
+        const readings = o.reboot ? [macRebootCheck({ waitReady }), macQuitStopRestart] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
         // Release rows of the power suite (rule 71 MCP, the lifecycle log) and the rows not driven yet, with their reasons.
         const bundle = `/Applications/${config.bundle}`;
         const macRows = async () => {
