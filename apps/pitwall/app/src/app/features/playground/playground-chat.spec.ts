@@ -38,7 +38,10 @@ describe('PlaygroundChat', () => {
     const options = Array.from(document.querySelectorAll<HTMLElement>('mat-option'));
     const gemma = options.find((o) => o.textContent?.includes('Gemma 4 12B'))!;
     expect(gemma.getAttribute('aria-disabled')).toBe('true');
-    expect(gemma.textContent).toContain("Can't use tools");
+    expect(gemma.textContent).toContain(" · Can't use tools");
+    // The reason in full sits once inside the open list, as the group's label, never under the field.
+    expect(document.querySelector('[data-testid=chat-model-note]')?.textContent).toContain('chat template has no tool calls');
+    expect(el.querySelector('mat-hint')).toBeNull();
     options.find((o) => o.textContent?.includes('Qwen3.5 9B'))!.click();
     await settle(fixture);
     expect((await backend.chatModels()).selected).toBe('qwen3.5-9b-q4_k_m');
@@ -46,6 +49,11 @@ describe('PlaygroundChat', () => {
     await backend.setAppKey('dyno', 'pmk_good');
     await until(fixture, () => !!el.querySelector('[data-testid=chat-apps]')?.textContent?.includes('Dyno'));
     expect(el.querySelector('[data-testid=chat-apps]')?.textContent).toContain('Tools from Dyno (6)');
+    // The empty chat offers "Connected apps…" only while nothing is connected.
+    expect(el.querySelector('[data-testid=assistant-empty-action]')).toBeNull();
+    await backend.forgetApp('dyno');
+    await until(fixture, () => !!el.querySelector('[data-testid=assistant-empty-action]'));
+    expect(el.querySelector('[data-testid=assistant-empty-action]')?.textContent?.trim()).toBe('Connected apps…');
   });
 
   it('says when no model can use tools, and shows a failure with Try again', async () => {

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatIconModule } from '@angular/material/icon';
-import { confirm } from '@decryp7/paddock-ui/shell/confirm';
+import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import type { CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
@@ -139,13 +139,20 @@ export class ConnectedAppsPage {
 
   /** Forget asks first, naming what goes: the key, the connection and the always-allowed tools. */
   protected async forget(app: ConnectedApp): Promise<void> {
-    const allowed = app.remembered === 0 ? '' : ` and ${app.remembered === 1 ? 'the tool' : `the ${app.remembered} tools`} you always allowed`;
-    const ok = await confirm(this.dialogs, {
-      heading: `Forget ${app.title}?`,
-      message: `Pitwall removes ${app.title}'s key, its connection${allowed}. The chat can't use ${app.title}'s tools until you paste a new key.`,
-      confirm: { label: `Forget ${app.title}`, destructive: true },
-    });
-    if (!ok) return;
+    const what =
+      app.remembered === 0
+        ? `${app.title}'s key and its connection`
+        : `${app.title}'s key, its connection and ${app.remembered === 1 ? 'the tool' : `the ${app.remembered} tools`} you always allowed`;
+    const outcome = await this.dialogs.open(CONFIRM_DIALOG_ID, {
+      // The window is titled by the page it belongs to; the question is its heading.
+      title: 'Connected apps',
+      inputs: {
+        heading: `Forget ${app.title}?`,
+        message: `Pitwall removes ${what}. The chat can't use ${app.title}'s tools until you paste a new key.`,
+        confirm: { label: `Forget ${app.title}`, destructive: true },
+      },
+    }).closed;
+    if (outcome.kind !== 'answered') return;
     await this.act(() => this.backend.forgetApp(app.id));
   }
 }

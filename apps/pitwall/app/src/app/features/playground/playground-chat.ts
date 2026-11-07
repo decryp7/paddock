@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
 import { MatButton } from '@angular/material/button';
-import { MatFormField, MatHint, MatLabel } from '@angular/material/form-field';
-import { MatOption, MatSelect } from '@angular/material/select';
+import { MatFormField, MatLabel } from '@angular/material/form-field';
+import { MatOptgroup, MatOption, MatSelect } from '@angular/material/select';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
 import { AssistantBackend, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
 import type { ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
@@ -18,7 +18,7 @@ import { createChatBackend } from './chat-backend';
  */
 @Component({
   selector: 'pw-playground-chat',
-  imports: [PdAssistant, MatFormField, MatLabel, MatHint, MatSelect, MatOption, MatButton],
+  imports: [PdAssistant, MatFormField, MatLabel, MatSelect, MatOption, MatOptgroup, MatButton],
   providers: [{ provide: AssistantBackend, useFactory: createChatBackend }],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -26,13 +26,18 @@ import { createChatBackend } from './chat-backend';
       <mat-form-field class="model" subscriptSizing="dynamic">
         <mat-label>Model</mat-label>
         <mat-select data-testid="chat-model" panelClass="pw-chat-model-panel" [value]="picker()?.selected ?? null" [disabled]="!picker()" (selectionChange)="choose($event.value)">
-          @for (m of picker()?.models ?? []; track m.id) {
-            <mat-option [value]="m.id" [disabled]="m.disabled !== null"><span class="opt-name">{{ m.name }}</span>@if (m.disabled) { <span class="why">{{ m.disabled }}</span> }</mat-option>
+          @for (m of usable(); track m.id) {
+            <mat-option [value]="m.id">{{ m.name }}</mat-option>
+          }
+          @if (unusable().length) {
+            <!-- Why these can't be chosen is said once, inside the open list (not under the field, where it moved the bar). -->
+            <mat-optgroup [label]="picker()?.note ?? ''" data-testid="chat-model-note">
+              @for (m of unusable(); track m.id) {
+                <mat-option [value]="m.id" disabled>{{ m.name }}<span class="why"> · {{ m.disabled }}</span></mat-option>
+              }
+            </mat-optgroup>
           }
         </mat-select>
-        @if (picker()?.note; as note) {
-          <mat-hint data-testid="chat-model-note">{{ note }}</mat-hint>
-        }
       </mat-form-field>
       <p class="tools" data-testid="chat-apps" role="status">{{ appsLine() }}</p>
       <button type="button" matButton data-testid="chat-open-apps" (click)="openApps()">Connected apps…</button>
@@ -46,7 +51,7 @@ import { createChatBackend } from './chat-backend';
       class="assistant"
       actionsGate="per-call"
       emptyTitle="Chat with a local model"
-      emptyAction="Connected apps…"
+      [emptyAction]="anyConnected() ? null : 'Connected apps…'"
       [emptyHint]="emptyHint"
       [failedCause]="failedCause"
       (emptyActionClick)="openApps()"
@@ -63,7 +68,8 @@ import { createChatBackend } from './chat-backend';
     ::ng-deep .pw-chat-model-panel .mat-mdc-option { min-height: 44px; padding-block: var(--pd-space-1); }
     ::ng-deep .pw-chat-model-panel .mat-mdc-option.mdc-list-item--disabled { opacity: 1; }
     ::ng-deep .pw-chat-model-panel .mat-mdc-option.mdc-list-item--disabled .mdc-list-item__primary-text { opacity: 1; color: var(--pd-text-muted); }
-    ::ng-deep .pw-chat-model-panel .why { margin-left: var(--pd-space-2); color: var(--pd-text-muted); opacity: 1; }
+    ::ng-deep .pw-chat-model-panel .why { color: var(--pd-text-muted); opacity: 1; }
+    ::ng-deep .pw-chat-model-panel .mat-mdc-optgroup-label { opacity: 1; color: var(--pd-text-muted); font-size: var(--pd-text-label); white-space: normal; line-height: 1.4; padding-block: var(--pd-space-2); }
     .tools { margin: 0; flex: 1; min-width: 12ch; color: var(--pd-text-muted); font-size: var(--pd-text-label); }
     .problem { margin: 0; color: var(--pd-text); }
     .assistant { flex: 1; min-height: 0; border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); box-shadow: var(--pd-shadow-1); overflow: hidden; }
@@ -79,6 +85,13 @@ export class PlaygroundChat {
   protected readonly emptyHint = 'Ask a question. Apps you connect lend the model their tools, and every tool call shows here.';
   /** Pitwall is the engine: a failed answer is the model's, not a missing Pitwall. */
   protected readonly failedCause = 'Likely cause: the model stopped answering. Try again, or choose another model.';
+
+  /** Models the chat can use (Rust's order). */
+  protected readonly usable = computed(() => (this.picker()?.models ?? []).filter((m) => m.disabled === null));
+  /** Models listed but not choosable, with Rust's reason. */
+  protected readonly unusable = computed(() => (this.picker()?.models ?? []).filter((m) => m.disabled !== null));
+  /** Some app lends its tools now (the empty chat then needs no "Connected apps…"). */
+  protected readonly anyConnected = computed(() => (this.apps() ?? []).some((a) => a.connected));
 
   /** What the chat can use now, in words: the connected apps and how many tools they lend. */
   protected readonly appsLine = computed(() => {

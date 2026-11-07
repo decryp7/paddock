@@ -313,9 +313,9 @@ export class MemoryAssistantBackend extends AssistantBackend {
         finishCall('find', true, '2 things found', { citations: [{ text: 'item 7', target: 'record:7', title: 'Item 7' }] }, undefined, 'notAsked');
       }
     } else if (command === '/look') {
-      startCall('call_1', 'find', 'everything', false, false);
+      startCall('call_1', 'find', 'Find everything', false, false);
       const choice: ApprovalChoice | 'remembered' = this.lookRemembered ? 'remembered' : await (async () => {
-        this.emit(id, { type: 'approvalNeeded', callId: 'call_1', name: 'find', summary: 'everything', destructive: false, remember: true, input: { what: 'everything' } });
+        this.emit(id, { type: 'approvalNeeded', callId: 'call_1', name: 'find', summary: 'Find everything', destructive: false, remember: true, input: { what: 'everything' } });
         return ask('call_1', true);
       })();
       if (choice === 'deny') {

@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
-import { MatError, MatFormField, MatHint, MatLabel } from '@angular/material/form-field';
+import { MatFormField, MatHint, MatLabel } from '@angular/material/form-field';
 import { MatInput } from '@angular/material/input';
 import type { DialogAction, DialogContent } from '@decryp7/paddock-ui/shell/dialogs';
 
@@ -13,7 +13,7 @@ export const MCP_KEY_DIALOG_ID = 'pw.mcp-key';
  */
 @Component({
   selector: 'pw-mcp-key-dialog',
-  imports: [MatFormField, MatLabel, MatHint, MatError, MatInput],
+  imports: [MatFormField, MatLabel, MatHint, MatInput],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <p class="msg">In {{ app() }}, open Settings &gt; AI access, turn it on and choose Issue key. Name it "Pitwall", then paste the key here. {{ app() }} shows it only once.</p>

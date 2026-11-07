@@ -44,7 +44,7 @@ test.describe('connected apps and the chat model', () => {
     // Forget asks first, naming what goes.
     await dyno.getByRole('button', { name: 'Forget Dyno…' }).click();
     const ask = page.getByRole('alertdialog', { name: /Forget Dyno/ });
-    await expect(ask).toContainText("Dyno's key, its connection");
+    await expect(ask).toContainText("Pitwall removes Dyno's key and its connection.");
     await ask.getByRole('button', { name: 'Forget Dyno' }).click();
     await expect(dyno.getByTestId('connected-app-state')).toHaveText('Not set up');
     await expect(chat.getByTestId('chat-apps')).toHaveText('No app connected: the chat answers without tools.');
