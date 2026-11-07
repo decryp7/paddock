@@ -255,9 +255,10 @@ async function main(argv) {
 
     // 7. Quit: File > Quit ends the app and the agent.
     press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit Dyno( \\(keeps measuring\\))?$', 'menu item'); await sleep(8000);
+    // The helper is a system service that runs while it is on, independent of the app (coordinator 2026-11-07): it is not a leftover after Quit.
     // Quit: poll up to 40 s (as on macOS and Windows) for no dyno process; print what is left with its parent.
     let leftList = '';
-    for (let i = 0; i < 20; i++) { leftList = g('ps -eo pid=,ppid=,etimes=,args= | grep -E "dyno-(app|agent|helper)" | grep -v grep').stdout.trim(); if (!leftList) break; await sleep(2000); }
+    for (let i = 0; i < 20; i++) { leftList = g('ps -eo pid=,ppid=,etimes=,args= | grep -E "dyno-(app|agent)( |$)" | grep -v -e grep -e dyno-helper').stdout.trim(); if (!leftList) break; await sleep(2000); }
     // With the login service on, the supervised agent (`dyno-agent run` under systemd --user, unit active) is expected to survive Quit;
     // everything else of Dyno must be gone.
     const supervised = ses('systemctl --user is-active dyno-agent 2>&1').stdout.trim() === 'active';

@@ -320,7 +320,9 @@ export class Check {
   async logs() {
     const evidence = [];
     for (const l of this.config.logs ?? []) {
-      const r = await this.g.exec(`tail -n 40 ${sq(await this.path(l))} 2>&1`);
+      const abs = await this.path(l);
+      // A pattern with * is expanded by the guest shell (the app writes dated files, dyno.<date>.log); a plain path is quoted.
+      const r = await this.g.exec(abs.includes('*') ? `for f in ${abs.replace(/([ ()'"])/g, '\\$1')}; do echo "== $f"; tail -n 80 "$f"; done 2>&1` : `tail -n 40 ${sq(abs)} 2>&1`);
       evidence.push(`--- ${l}`, ...(r.stdout.trim() ? r.stdout.trimEnd().split('\n') : ['(empty or absent)']));
     }
     return { title: 'Logs at the end', status: 'info', summary: 'last 40 lines of each log, for reading', evidence };
