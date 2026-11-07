@@ -67,6 +67,7 @@ install, the waivers and the VM round. This list replaces it.
 | B0 | **Merge the Dyno rc into the 1.1 work now**, on `pitwall/1.1-merge-rc` (section 4): 28 conflicted files, generated files regenerated, a stale-revert check against both parents, the affected tests of the crates touched and of Dyno and Pitwall | shared | implementer, designer for `paddock-service` | 3–5 | |
 | B0b | Re-merge after T: the rc's last changes and `main` (one known conflict, `releasing.md`) | shared | implementer | 0.5–1 | T, B0 |
 | B1 | Service on ADR 0056's `Manager` on **macOS, Windows and Linux**: backend, service-only answer, `with_program`, data folder, `tracker()` and hold messages, the wiring contract on the simulator; on Windows the elevated child and the per-machine records in their own state file under the same type; the macOS 26 Repair test kept failing-first; `Copies-waived:` trailers as ADR 0056 says. Re-sized from 2.5–4: three backends, and Windows' elevated step is new to Pitwall's code | app | designer | 4–6 | B0 |
+| B1b | **The rest of B1:** Pitwall's service on the shared `Manager` on **Windows and Linux** (B1 did the StartWatch port and macOS): the Windows backend and the elevated child, the per-machine records in their own state file under the same record type, the Linux (systemd user) backend, hold messages and `tracker()` on all three, and the wiring contract on the simulator; `Copies-waived:` trailers as ADR 0056 says. B6's Program Files check in `pitwall-server install` is agent 1's: B1b reads `pitwall/1.1-b6` and does not edit that check | app | designer (agent 2) | 3–5 | B1 (merge), B6 read-only |
 | B2 | Offline remnants: the updater's Offline gate (`e52d0581f`, `00bd3e436`) reconciled with the family's "no Offline mode" (2026-11-03) in the merge; the CHANGELOG line and date corrected | shared + app | implementer | 0.5–1 | B0 |
 | B3 | Shell left-overs: Mod+Q with no window, the Settings footer for a page with its own save bar (a paddock-ui gap), the native tray opening `#/tray`, the pending-route queue as the shared change `1.1-wp2.md:245-248` describes (Dyno adopts it too; after the Spotter tag, section 3), `.changelog()`, the C4 diagrams | shared + app | designer | 1.5–3 | B0b; Spotter's tag for the shared part |
 | B4 | Report a problem on the shell's `paddock-diag`: Pitwall's sections, `pw_` and `pmk_` redaction, chats and attachments left out (test with a planted marker); found "nothing wired" in the 2026-11-05 bundle audit | app | implementer | 2–3 | B0 |
@@ -81,6 +82,18 @@ install, the waivers and the VM round. This list replaces it.
 | B11 | Release machinery: CHANGELOG and release notes (First launch, the 1.0.x reinstall by hand, ADR 0057's delete command), rule 25's pre-tag checks, the rule 54 dispatches, the tag | app | implementer | 1–2 | all |
 | B12 | **VM round** with the rule 71 rows of section 7, on macOS 26, Windows 11 and Ubuntu; Windows is its first real run | app | implementer, designer to judge | 5–8 | everything but B11 |
 | | **Base total** | | | **26.75–44.5** | |
+
+**Known test flake (found 2026-11-08, not fixed): `dyno-agent` `term` tests exit 143 under load.** In a full `cargo nextest run --workspace` of
+`apps/dyno` run while other builds ran, `dyno-agent::term the_agents_start_and_stop_are_in_its_own_dated_log_with_millisecond_counts`
+and `dyno-agent::term term_stops_a_running_agent_cleanly_and_removes_its_discovery_file` failed with "a clean stop is exit code 0, got
+ExitStatus(unix_wait_status(36608))", that is **exit code 143**; the same two passed 20 of 20 in isolation (`--stress-count 5`) and on
+`pitwall/1.1-merge-rc`, and the whole workspace passed on the rerun. They are run with nextest: the Dyno CI leg runs `nextest`
+(profile `ci`: `retries = 0`, `test-threads = "num-cpus"`, `slow-timeout` 30 s ×2; `apps/dyno/.config/nextest.toml`), and locally
+`cargo nextest` too, so a load like a CI runner with several jobs is the normal case. **Unconfirmed hypothesis (ER-28):** the tests wait
+for the discovery file, which `run` writes before it sets `RUNNING` (`cli.rs`, `RUNNING.store(true)` after "Agent running"), so a TERM
+that lands between the two reaches `OnSignal::EndNow`, which ends with `end_process(143)` instead of the clean stop. The fix is
+deterministic (wait on the condition "the agent is running", for example a ready line or a state the agent exposes, not on the file),
+not a retry and not a longer wait (ER-12); it belongs to Dyno's owner and is not part of B1b.
 
 The chat's packages are ADR 0023 revision 2's table: **32.5–51** (WP-7 re-sized to 6–9), of which the PoC part (WP-1, 2a,
 3a, 4a, 8, 9a, P) is 11–17. Independent code reviews of the landings: **3–5**.
