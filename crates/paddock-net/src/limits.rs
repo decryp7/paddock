@@ -58,6 +58,14 @@ mod tests {
     }
 
     #[test]
+    fn the_body_row_is_the_default_of_the_policy() {
+        assert_eq!(
+            BODY.default,
+            Quantity::Bytes(crate::Policy::default().max_body as u64)
+        );
+    }
+
+    #[test]
     fn a_lowered_policy_names_its_own_number_and_the_row_is_the_default() {
         assert_eq!(
             NetError::TooManyRedirects(3).limit().unwrap().limit,

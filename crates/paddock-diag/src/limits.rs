@@ -15,18 +15,18 @@ pub const FILES: LimitRow = LimitRow::stop(
 /// Bytes of one file in a report (4 MiB).
 pub const FILE_BYTES: LimitRow = LimitRow::stop(
     "diag.file_bytes",
-    Quantity::Bytes(4 << 20),
+    Quantity::Bytes(crate::MAX_FILE_BYTES as u64),
     Quantity::Bytes(1),
-    Quantity::Bytes(4 << 20),
+    Quantity::Bytes(crate::MAX_FILE_BYTES as u64),
     RowValue::Hard,
     Remedy::None,
 );
 /// Bytes of the whole report (16 MiB).
 pub const TOTAL_BYTES: LimitRow = LimitRow::stop(
     "diag.total_bytes",
-    Quantity::Bytes(16 << 20),
+    Quantity::Bytes(crate::MAX_TOTAL_BYTES as u64),
     Quantity::Bytes(1),
-    Quantity::Bytes(16 << 20),
+    Quantity::Bytes(crate::MAX_TOTAL_BYTES as u64),
     RowValue::Hard,
     Remedy::None,
 );
@@ -75,6 +75,19 @@ mod tests {
         too_many_files: "diag.files" => stop(got = files(crate::MAX_FILES, crate::MAX_FILES + 1), limit = Quantity::Count(crate::MAX_FILES as u64), setting = None),
         file_too_long: "diag.file_bytes" => stop(got = file_bytes(4 << 20, 5 << 20), limit = Quantity::Bytes(4 << 20), setting = None),
         report_too_long: "diag.total_bytes" => stop(got = total_bytes(16 << 20), limit = Quantity::Bytes(16 << 20), setting = None),
+    }
+
+    #[test]
+    fn each_row_is_the_constant_it_limits() {
+        assert_eq!(FILES.default, Quantity::Count(crate::MAX_FILES as u64));
+        assert_eq!(
+            FILE_BYTES.default,
+            Quantity::Bytes(crate::MAX_FILE_BYTES as u64)
+        );
+        assert_eq!(
+            TOTAL_BYTES.default,
+            Quantity::Bytes(crate::MAX_TOTAL_BYTES as u64)
+        );
     }
 
     #[test]

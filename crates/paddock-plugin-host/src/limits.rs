@@ -4,6 +4,7 @@
 //! given, the time a call has, the grace after a cancel and the time it has to start. Each constructor builds the
 //! [`LimitExceeded`] a layer above keeps ([`crate::error::HostError::Limit`]).
 
+use crate::config::{DEFAULT_CALL_TIMEOUT, DEFAULT_HANG_GRACE, DEFAULT_START_TIMEOUT};
 use paddock_limits::{
     LimitExceeded, LimitId, LimitRow, Quantity, Registry, Remedy, RowKind, RowValue, Scope, Unit,
 };
@@ -33,26 +34,27 @@ pub const MEMORY: LimitRow = row(
     Quantity::Bytes(crate::grants::MIN_MEMORY),
     Quantity::Bytes(crate::grants::MAX_MEMORY),
 );
-/// The time one call has before it is cancelled (30 s by default, the app's setting).
+/// The time one call has before it is cancelled (30 s by default, the app's setting). No maximum: the host takes any duration the
+/// app sets, so the row names none.
 pub const CALL_DEADLINE: LimitRow = row(
     "plugin.call_deadline",
-    Quantity::Millis(30_000),
+    millis_of(DEFAULT_CALL_TIMEOUT),
     Quantity::Millis(1),
-    Quantity::Millis(3_600_000),
+    Quantity::Millis(u64::MAX),
 );
-/// The time a plugin has to end a call after the cancel (5 s by default).
+/// The time a plugin has to end a call after the cancel (5 s by default). No maximum, like the call deadline.
 pub const HANG_GRACE: LimitRow = row(
     "plugin.hang_grace",
-    Quantity::Millis(5_000),
+    millis_of(DEFAULT_HANG_GRACE),
     Quantity::Millis(1),
-    Quantity::Millis(600_000),
+    Quantity::Millis(u64::MAX),
 );
-/// The time a plugin has to start and answer its first request (15 s by default).
+/// The time a plugin has to start and answer its first request (15 s by default). No maximum, like the call deadline.
 pub const START: LimitRow = row(
     "plugin.start",
-    Quantity::Millis(15_000),
+    millis_of(DEFAULT_START_TIMEOUT),
     Quantity::Millis(1),
-    Quantity::Millis(600_000),
+    Quantity::Millis(u64::MAX),
 );
 
 static ROWS: [LimitRow; 4] = [MEMORY, CALL_DEADLINE, HANG_GRACE, START];
@@ -70,8 +72,17 @@ pub fn registry_of(id: LimitId) -> Registry {
     }
 }
 
+const fn millis_of(d: Duration) -> Quantity {
+    let ms = d.as_millis();
+    Quantity::Millis(if ms > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ms as u64
+    })
+}
+
 fn millis(d: Duration) -> Quantity {
-    Quantity::Millis(u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+    millis_of(d)
 }
 
 /// The plugin used more memory than `limit` bytes (`used` when known).
@@ -126,6 +137,30 @@ mod tests {
             limit = Quantity::Millis(15_000),
             setting = None
         ),
+    }
+
+    #[test]
+    fn each_row_is_the_default_of_what_it_limits() {
+        use crate::HostConfig;
+        use paddock_guard::{Quarantine, QuarantinePolicy};
+        use paddock_jobs::time::{Clock, FakeClock};
+        use paddock_plugin_api::compat::HostInfo;
+        use std::sync::Arc;
+        let clock: Arc<dyn Clock> = Arc::new(FakeClock::new());
+        let quarantine = Arc::new(Quarantine::new(QuarantinePolicy::default(), clock.clone()));
+        let cfg = HostConfig::new(
+            HostInfo::new("TestApp"),
+            clock,
+            quarantine,
+            std::env::temp_dir(),
+        );
+        assert_eq!(CALL_DEADLINE.default, millis(cfg.call_timeout));
+        assert_eq!(HANG_GRACE.default, millis(cfg.hang_grace));
+        assert_eq!(START.default, millis(cfg.start_timeout));
+        assert_eq!(
+            MEMORY.default,
+            Quantity::Bytes(crate::grants::SandboxSpec::locked().memory_limit)
+        );
     }
 
     #[test]

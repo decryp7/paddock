@@ -34,7 +34,7 @@ pub mod services;
 pub mod status;
 pub mod supervisor;
 
-pub use config::HostConfig;
+pub use config::{DEFAULT_CALL_TIMEOUT, DEFAULT_HANG_GRACE, DEFAULT_START_TIMEOUT, HostConfig};
 pub use error::{FaultKind, HostError};
 pub use files::{FileError, HostFiles};
 pub use grants::{Grants, SandboxSpec, sandbox_for};

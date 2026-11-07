@@ -61,6 +61,16 @@ mod tests {
     }
 
     #[test]
+    fn each_row_is_the_default_of_the_policy() {
+        let p = QuarantinePolicy::default();
+        assert_eq!(FAILURES.default, Quantity::Count(u64::from(p.max)));
+        assert_eq!(
+            WINDOW.default,
+            Quantity::Millis(p.window.as_millis() as u64)
+        );
+    }
+
+    #[test]
     fn the_registry_is_well_formed() {
         REGISTRY.check().unwrap();
     }

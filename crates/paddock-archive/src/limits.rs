@@ -5,6 +5,10 @@
 //! and the job it ran in keeps it ([`paddock_jobs::JobError::Limit`]).
 
 use crate::ArchiveError;
+use crate::options::{
+    DEFAULT_MAX_DEPTH, DEFAULT_MAX_ENTRIES, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_PATH_LEN,
+    DEFAULT_MAX_RATIO, DEFAULT_MAX_TOTAL_BYTES,
+};
 use paddock_limits::{
     LimitExceeded, LimitId, LimitRow, Quantity, Registry, Remedy, RowKind, RowValue, Scope, Unit,
 };
@@ -32,42 +36,42 @@ const fn row(id: &'static str, unit: Unit, default: Quantity, max: Quantity) -> 
 pub const ENTRIES: LimitRow = row(
     "archive.entries",
     Unit::Count,
-    Quantity::Count(10_000),
+    Quantity::Count(DEFAULT_MAX_ENTRIES as u64),
     Quantity::Count(u64::MAX),
 );
 /// Bytes of one file.
 pub const FILE_BYTES: LimitRow = row(
     "archive.file_bytes",
     Unit::Bytes,
-    Quantity::Bytes(4 << 30),
+    Quantity::Bytes(DEFAULT_MAX_FILE_BYTES),
     Quantity::Bytes(u64::MAX),
 );
 /// Bytes of everything unpacked.
 pub const TOTAL_BYTES: LimitRow = row(
     "archive.total_bytes",
     Unit::Bytes,
-    Quantity::Bytes(8 << 30),
+    Quantity::Bytes(DEFAULT_MAX_TOTAL_BYTES),
     Quantity::Bytes(u64::MAX),
 );
 /// How much larger the output may be than the archive.
 pub const RATIO: LimitRow = row(
     "archive.ratio",
     Unit::Ratio,
-    Quantity::Ratio(200),
+    Quantity::Ratio(DEFAULT_MAX_RATIO as u32),
     Quantity::Ratio(u32::MAX),
 );
 /// Folders deep.
 pub const DEPTH: LimitRow = row(
     "archive.depth",
     Unit::Count,
-    Quantity::Count(32),
+    Quantity::Count(DEFAULT_MAX_DEPTH as u64),
     Quantity::Count(u64::MAX),
 );
 /// Characters of a whole path.
 pub const PATH_LENGTH: LimitRow = row(
     "archive.path_length",
     Unit::Count,
-    Quantity::Count(1024),
+    Quantity::Count(DEFAULT_MAX_PATH_LEN as u64),
     Quantity::Count(u64::MAX),
 );
 
@@ -126,6 +130,20 @@ mod tests {
         an_expansion_over_the_ratio: "archive.ratio" => stop(got = limit(ratio(200)), limit = Quantity::Ratio(200), setting = None),
         folders_too_deep: "archive.depth" => stop(got = limit(depth(32)), limit = Quantity::Count(32), setting = None),
         a_path_too_long: "archive.path_length" => stop(got = limit(path_length(1024)), limit = Quantity::Count(1024), setting = None),
+    }
+
+    #[test]
+    fn each_row_is_the_default_of_what_it_limits() {
+        let d = crate::Limits::default();
+        assert_eq!(ENTRIES.default, Quantity::Count(d.max_entries as u64));
+        assert_eq!(FILE_BYTES.default, Quantity::Bytes(d.max_file_bytes));
+        assert_eq!(TOTAL_BYTES.default, Quantity::Bytes(d.max_total_bytes));
+        assert_eq!(
+            RATIO.default,
+            Quantity::Ratio(u32::try_from(d.max_ratio).unwrap())
+        );
+        assert_eq!(DEPTH.default, Quantity::Count(d.max_depth as u64));
+        assert_eq!(PATH_LENGTH.default, Quantity::Count(d.max_path_len as u64));
     }
 
     #[test]

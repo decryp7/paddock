@@ -3,6 +3,15 @@
 
 use paddock_limits::{LimitExceeded, LimitRow, Quantity, Registry, Remedy, RowValue, Scope};
 
+const fn millis_of(d: std::time::Duration) -> Quantity {
+    let ms = d.as_millis();
+    Quantity::Millis(if ms > u64::MAX as u128 {
+        u64::MAX
+    } else {
+        ms as u64
+    })
+}
+
 /// Entries one scan reads (500,000).
 pub const ENTRIES: LimitRow = LimitRow::stop(
     "storage.walk_entries",
@@ -15,9 +24,9 @@ pub const ENTRIES: LimitRow = LimitRow::stop(
 /// Time one scan may take (10 s).
 pub const TIME: LimitRow = LimitRow::stop(
     "storage.walk_time",
-    Quantity::Millis(10_000),
+    millis_of(crate::walk::MAX_SCAN_TIME),
     Quantity::Millis(1),
-    Quantity::Millis(10_000),
+    millis_of(crate::walk::MAX_SCAN_TIME),
     RowValue::Hard,
     Remedy::Narrow,
 );
@@ -45,11 +54,7 @@ pub fn entries(limit: u64) -> LimitExceeded {
 /// The scan ran for `limit` and stopped.
 #[must_use]
 pub fn time(limit: std::time::Duration) -> LimitExceeded {
-    LimitExceeded::new(
-        TIME.id,
-        Quantity::Millis(u64::try_from(limit.as_millis()).unwrap_or(u64::MAX)),
-        Scope::Query,
-    )
+    LimitExceeded::new(TIME.id, millis_of(limit), Scope::Query)
 }
 
 /// The scan reached `limit` folders deep and stopped.
@@ -67,6 +72,19 @@ mod tests {
         entries_case: "storage.walk_entries" => stop(got = entries(crate::walk::MAX_ENTRIES), limit = Quantity::Count(crate::walk::MAX_ENTRIES), setting = None),
         time_case: "storage.walk_time" => stop(got = time(crate::walk::MAX_SCAN_TIME), limit = Quantity::Millis(10_000), setting = None),
         depth_case: "storage.walk_depth" => stop(got = depth(crate::walk::MAX_DEPTH), limit = Quantity::Count(crate::walk::MAX_DEPTH as u64), setting = None),
+    }
+
+    #[test]
+    fn each_row_is_the_constant_it_limits() {
+        assert_eq!(ENTRIES.default, Quantity::Count(crate::walk::MAX_ENTRIES));
+        assert_eq!(
+            TIME.default,
+            Quantity::Millis(crate::walk::MAX_SCAN_TIME.as_millis() as u64)
+        );
+        assert_eq!(
+            DEPTH.default,
+            Quantity::Count(crate::walk::MAX_DEPTH as u64)
+        );
     }
 
     #[test]
