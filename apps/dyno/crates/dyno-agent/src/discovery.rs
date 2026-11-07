@@ -67,6 +67,58 @@ impl paddock_proc::hint::Hint for Discovery {
     }
 }
 
+/// Why the discovery file was written again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Rewrite {
+    /// The file was gone, or unreadable.
+    Missing,
+    /// The file describes something else (another process, another build, another endpoint).
+    Other,
+}
+
+/// Makes the file at `path` describe `mine`, the live agent that holds the data folder's lock: when it is missing, damaged or names
+/// anything else, it is written again atomically by the same writer as at start (rule 53: only the lock holder writes it, and
+/// only about itself). Returns why it was written, or `None` when it already was right.
+///
+/// # Errors
+/// The write failed (the caller logs it and tries again at the next look).
+pub fn ensure_describes(path: &Path, mine: &Discovery) -> std::io::Result<Option<Rewrite>> {
+    let why = match Discovery::read(path) {
+        Some(d) if d == *mine => return Ok(None),
+        Some(_) => Rewrite::Other,
+        None => Rewrite::Missing,
+    };
+    mine.write(path)?;
+    Ok(Some(why))
+}
+
+/// The thread body: every look interval, while this agent holds the data folder's lock, makes sure `agent.json` still describes it
+/// (a harness, a cleanup tool or an installer may have deleted it, and nothing else would write it again: every new app would wait
+/// for an agent it cannot find). One warning per rewrite, with the reason.
+pub fn guard(shared: &crate::agent::Shared, path: std::path::PathBuf, mine: Discovery) {
+    while crate::build_id::wait_or_stop(shared, crate::build_id::watch_every()) {
+        match ensure_describes(&path, &mine) {
+            Ok(None) => {}
+            Ok(Some(why)) => {
+                // A stop that began meanwhile removes the file as the agent's last act; do not leave one behind it.
+                if shared.stopped() {
+                    Discovery::remove_if_mine(&path);
+                    return;
+                }
+                log::warn!(
+                    Reason = match why {
+                        Rewrite::Missing => "the discovery file was missing or unreadable",
+                        Rewrite::Other => "the discovery file named another process or build",
+                    },
+                    AgentPid = mine.pid;
+                    "Discovery file written again"
+                );
+            }
+            Err(e) => log::warn!(Why = e.to_string().as_str(); "Discovery file could not be written again; trying at the next look"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,6 +133,52 @@ mod tests {
             protocol: 1,
             build: String::new(),
         }
+    }
+
+    #[test]
+    fn the_file_is_written_again_when_it_is_missing_or_names_another_agent_and_left_alone_when_right() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("agent.json");
+        let mine = sample();
+        assert_eq!(ensure_describes(&path, &mine).unwrap(), Some(Rewrite::Missing), "no file");
+        assert_eq!(Discovery::read(&path), Some(mine.clone()));
+        assert_eq!(ensure_describes(&path, &mine).unwrap(), None, "a right file is not touched");
+        // (the file, why it is written again): another pid, another build, another endpoint, damage.
+        let table = [
+            (
+                Discovery {
+                    pid: mine.pid + 1,
+                    ..mine.clone()
+                },
+                Rewrite::Other,
+            ),
+            (
+                Discovery {
+                    build: "other".into(),
+                    ..mine.clone()
+                },
+                Rewrite::Other,
+            ),
+            (
+                Discovery {
+                    endpoint: "elsewhere".into(),
+                    ..mine.clone()
+                },
+                Rewrite::Other,
+            ),
+        ];
+        for (file, why) in table {
+            file.write(&path).unwrap();
+            assert_eq!(ensure_describes(&path, &mine).unwrap(), Some(why), "{file:?}");
+            assert_eq!(Discovery::read(&path), Some(mine.clone()));
+        }
+        std::fs::write(&path, b"{ not json").unwrap();
+        assert_eq!(
+            ensure_describes(&path, &mine).unwrap(),
+            Some(Rewrite::Missing),
+            "damaged counts as missing"
+        );
+        assert_eq!(Discovery::read(&path), Some(mine));
     }
 
     #[test]

@@ -1523,3 +1523,61 @@ fn asking_for_the_tool_offer_reads_the_disks_again_at_once_and_not_more_than_eve
     assert!(!dyno_agent::hardware::request_reread(&s, std::time::Duration::from_secs(30)));
     assert_eq!(reads.load(Ordering::SeqCst), before + 1);
 }
+
+/// Waits (a condition, with the family hang guard) until `agent.json` reads as `want`.
+fn wait_for_discovery(dirs: &Dirs, want: &dyno_agent::discovery::Discovery) {
+    let end = std::time::Instant::now() + Duration::from_secs(40);
+    while std::time::Instant::now() < end {
+        if dyno_agent::discovery::Discovery::read(&dirs.discovery()).as_ref() == Some(want) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!(
+        "agent.json was never written again: {:?}",
+        dyno_agent::discovery::Discovery::read(&dirs.discovery())
+    );
+}
+
+#[test]
+fn a_deleted_discovery_file_is_written_again_by_the_agent_that_holds_the_lock() {
+    let _ = captured(); // installs the log capture before the agent starts
+    dyno_agent::build_id::set_watch_every_for_tests(Duration::from_millis(40));
+    let h = Harness::start();
+    let mine = h.running.as_ref().unwrap().discovery.clone();
+    assert_eq!(dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).as_ref(), Some(&mine));
+    std::fs::remove_file(h.dirs.discovery()).unwrap();
+    wait_for_discovery(&h.dirs, &mine);
+    // The new file works: a client finds the agent by it.
+    let peer = h.client();
+    assert!(ask(&peer, Request::Settings).is_ok());
+    // The line follows the write: wait for it as a condition.
+    let end = std::time::Instant::now() + Duration::from_secs(40);
+    while !captured()
+        .iter()
+        .any(|l| l.contains("Discovery file written again") && l.contains("missing"))
+    {
+        assert!(std::time::Instant::now() < end, "the rewrite was not logged with its reason");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_discovery_file_naming_another_process_is_replaced_while_this_agent_holds_the_lock() {
+    dyno_agent::build_id::set_watch_every_for_tests(Duration::from_millis(40));
+    let h = Harness::start();
+    let mine = h.running.as_ref().unwrap().discovery.clone();
+    let other = dyno_agent::discovery::Discovery {
+        pid: mine.pid + 1,
+        build: "other".into(),
+        ..mine.clone()
+    };
+    other.write(&h.dirs.discovery()).unwrap();
+    wait_for_discovery(&h.dirs, &mine);
+    let dirs = h.dirs.clone();
+    drop(h);
+    assert!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).is_none(),
+        "a stopped agent leaves no file, and the guard does not write one behind it"
+    );
+}

@@ -373,6 +373,20 @@ impl Running {
                 .spawn(move || wakes::run(&s))
                 .map_err(|e| format!("could not start the scheduled-wake watcher: {e}"))?,
         );
+        // While this agent holds the data folder's lock, `agent.json` keeps describing it (it is written again when it was deleted).
+        if instance.is_some() {
+            let (s, mine) = (shared.clone(), discovery.clone());
+            let path = shared.dirs.discovery();
+            threads.push(
+                std::thread::Builder::new()
+                    .name("dyno-discovery-guard".into())
+                    .spawn(move || {
+                        dyno_platform::priority::lower_current_thread();
+                        discovery::guard(&s, path, mine)
+                    })
+                    .map_err(|e| format!("could not start the discovery file guard: {e}"))?,
+            );
+        }
         // An agent whose program file is replaced exits (code 0) so its supervisor starts the new build.
         if let Ok(exe) = std::env::current_exe() {
             let start = build_id::FileStamp::of(&exe);

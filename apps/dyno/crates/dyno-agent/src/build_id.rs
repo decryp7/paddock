@@ -113,21 +113,47 @@ impl BinaryWatch {
     }
 }
 
-/// How long between looks at the program file.
+/// How long between looks at the program file (and at the discovery file), unless a test shortens it.
 pub const WATCH_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+static EVERY_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The time between two looks: [`WATCH_EVERY`], or what [`set_watch_every_for_tests`] set.
+pub fn watch_every() -> std::time::Duration {
+    match EVERY_MS.load(std::sync::atomic::Ordering::Relaxed) {
+        0 => WATCH_EVERY,
+        ms => std::time::Duration::from_millis(ms),
+    }
+}
+
+/// Shortens the time between looks for the rest of this process (a test of the watchers; never called by the agent).
+#[doc(hidden)]
+pub fn set_watch_every_for_tests(every: std::time::Duration) {
+    EVERY_MS.store(
+        u64::try_from(every.as_millis()).unwrap_or(u64::MAX).max(1),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Waits `every` in slices of at most 500 ms, returning `false` as soon as the agent is asked to stop.
+pub fn wait_or_stop(shared: &crate::agent::Shared, every: std::time::Duration) -> bool {
+    let slice = every.min(std::time::Duration::from_millis(500));
+    let mut waited = std::time::Duration::ZERO;
+    while waited < every {
+        if shared.stopped() {
+            return false;
+        }
+        std::thread::sleep(slice);
+        waited += slice;
+    }
+    !shared.stopped()
+}
 
 /// The thread body: looks at the agent's own file every [`WATCH_EVERY`] and, once it was replaced, logs why and asks the
 /// agent to stop (exit code 0), so the supervisor starts the new file. Ends when the agent stops.
 pub fn run(shared: &crate::agent::Shared, path: std::path::PathBuf, start: Option<FileStamp>) {
     let mut watch = BinaryWatch::new(start);
-    let mut waited = std::time::Duration::ZERO;
-    while !shared.stopped() {
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        waited += std::time::Duration::from_millis(500);
-        if waited < WATCH_EVERY {
-            continue;
-        }
-        waited = std::time::Duration::ZERO;
+    while wait_or_stop(shared, watch_every()) {
         if watch.look(FileStamp::of(&path)) == Verdict::Replaced {
             log::warn!(
                 Reason = "the agent program file was replaced or removed while it ran",
