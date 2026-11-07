@@ -97,11 +97,12 @@ choice on Windows (a service) is the wrong one for Dyno.
 12. **Amendment 2026-10-31: the single route on macOS.** One Settings switch now means one main-app registration plus the
     existing agent service, and nothing is written under `~/Library/LaunchAgents`.
     - The app registers itself with `SMAppService.mainApp` (one "Dyno" row in Login Items); `tauri-plugin-autostart`
-      is kept for Linux and Windows only (`login_item::route_for`). The old route wrote `~/Library/LaunchAgents/Dyno.plist`
+      is kept for Linux and Windows only (since replaced there too: amendment of 2026-11-04, the per-user writers of
+      `paddock_service::login`). The old route wrote `~/Library/LaunchAgents/Dyno.plist`
       (label `Dyno`, a second row "dyno-app, Item from unidentified developer") with the path recorded at setup. On start
-      the app deletes that file only when it has exactly the plugin's shape (`login_item::is_legacy_plugin_plist`: label
+      the app deletes that file only when it has exactly the plugin's shape (`paddock_service::login::LegacyLaunchAgent::matches`, Dyno's `login::LEGACY_LAUNCH_AGENT`: label
       `Dyno`, the program `<folder>/Dyno.app/Contents/MacOS/dyno-app`, optionally `--hidden`, `RunAtLoad`, nothing else; never a link or another file). Because that file existed only when the switch was on, removing it also registers the new
-      main-app entry once (`login::migrate_legacy_login`), so the switch never says on with nothing registered.
+      main-app entry once (`LegacyLaunchAgent::migrate`), so the switch never says on with nothing registered.
     - Both registrations are refused (turning on only) when the executable is translocated (`/AppTranslocation/`) or under
       `/Volumes/`: the path would not exist after the next login. The message says to move Dyno to Applications.
     - A login start has no `--hidden` any more. The open-application Apple Event carries `keyAELaunchedAsLogInItem`
