@@ -163,6 +163,8 @@ export function orphansAfterQuit(procs, config, bundleDir, want = {}) {
     instancesOf(procs, spec, bundleDir)
       // Start at login on: the agent that launchd supervises (the login job, with this pid) is expected to survive Quit.
       .filter((p) => !(want.loginService === true && spec.loginJob && procs.jobs?.[spec.loginJob]?.pid === p.pid))
+      // Dyno 1.1.0: Quit Dyno (keeps measuring) ends the app and leaves the agent (its login job or the on-demand job); Quit and stop measuring ends both.
+      .filter((p) => !(want.agentKept === true && spec.role === 'helper'))
       .map((p) => ({ name: spec.name, pid: p.pid, ppid: p.ppid, etime: p.etime, orphan: p.ppid === 1 })));
 }
 

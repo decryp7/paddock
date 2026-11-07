@@ -153,13 +153,19 @@ export class Check {
     return { title, status: ok ? 'pass' : 'fail', summary: ok ? `one of each, peak ${JSON.stringify(whole.peak)}, no replacement or early duplicate` : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence: describeTree(procs, this.config, this.bundle) };
   }
 
+  /**
+   * Dyno 1.1.0 plain Quit (the app menu's "Quit Dyno (keeps measuring)", sent here as AppleScript `quit`): the app ends and the agent is KEPT
+   * (apps/dyno CHANGELOG 1.1.0, quit.rs). So the app must be gone, the agent may remain (one at most: the spec's `max` still holds through the
+   * distinct-count judge), and its discovery file stays with it. "Quit and stop measuring" is its own row (run.mjs, rule 71): both gone.
+   * The kept agent is then ended through `reset()` so the next step starts from a clean guest.
+   */
   async quit(title) {
     const name = this.config.quit.appleScriptName;
     const q = await this.g.exec(`osascript -e ${sq(`tell application "${name}" to quit`)}`, { timeoutMs: 30_000 });
-    const gone = await this.until(async () => orphansAfterQuit(await this.snapshot(), this.config, this.bundle, { loginService: this.loginOn === true }).length === 0, 40_000);
+    const gone = await this.until(async () => orphansAfterQuit(await this.snapshot(), this.config, this.bundle, { loginService: this.loginOn === true, agentKept: true }).length === 0, 40_000);
     const procs = await this.snapshot();
     const login = this.loginOn === true;
-    const left = orphansAfterQuit(procs, this.config, this.bundle, { loginService: login });
+    const left = orphansAfterQuit(procs, this.config, this.bundle, { loginService: login, agentKept: true });
     const checks = [
       { ok: q.code === 0, detail: q.code === 0 ? 'Quit sent (osascript)' : `Quit command failed (exit ${q.code}): ${q.stderr.trim().slice(0, 200)}` },
       { ok: gone.ok, detail: gone.ok ? `every process of the app ended ${(gone.tookMs / 1000).toFixed(0)} s after Quit` : 'processes of the app still running after the 40 s guard' },
@@ -168,19 +174,22 @@ export class Check {
     for (const spec of this.config.processes.filter((s) => s.parentJob)) {
       const lc = await this.g.exec(`launchctl print gui/$(id -u)/${spec.parentJob} >/dev/null 2>&1; echo $?`);
       const loaded = lc.stdout.trim() === '0';
-      checks.push({ ok: !loaded, detail: `launchd job ${spec.parentJob}: ${loaded ? 'STILL LOADED after Quit (ADR 0026: the job must be gone)' : 'gone after Quit'}` });
+      checks.push({ ok: true, info: true, detail: `launchd job ${spec.parentJob}: ${loaded ? 'still loaded after Quit Dyno (keeps measuring): the agent is kept, as 1.1.0 says' : 'not loaded after Quit'}` });
     }
     // Start at login on: the supervised agent survives Quit, so it is the one that must be there, and its discovery file stays with it.
     const survivors = login ? supervisedSurvivors(procs, this.config, this.bundle) : [];
     if (login) checks.push({ ok: survivors.length > 0, detail: survivors.length ? `the supervised agent survived Quit as expected: ${survivors.join(', ')}` : 'Start at login is on but launchd has no running agent for the login job after Quit' });
-    for (const f of login ? [] : (this.config.stateFiles ?? []).filter((x) => x.removedAfterQuit)) {
+    const kept = procs ? config_agentsLeft(procs, this.config, this.bundle) : 0;
+    for (const f of (this.config.stateFiles ?? []).filter((x) => x.removedAfterQuit)) {
       const c = await this.readFile(f.path);
-      checks.push({ ok: c == null, detail: `${f.path}: ${c == null ? 'removed' : 'still there after Quit'}` });
+      // The agent is kept, so its discovery file stays; with no agent left it must be gone.
+      checks.push({ ok: kept > 0 ? c != null || login : c == null, detail: `${f.path}: ${c == null ? 'removed' : 'present'} (${kept} agent(s) kept after Quit)` });
     }
     const evidence = describeTree(procs, this.config, this.bundle);
     const ok = checks.every((c) => c.ok);
-    if (!ok) await this.reset();
-    return { title, status: ok ? 'pass' : 'fail', summary: ok ? 'nothing the app started is left' : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence };
+    // The kept agent would make the next step start on a dirty guest: end it by identity (reset), unless the login service supervises it.
+    if (!ok || (kept > 0 && !login)) await this.reset();
+    return { title, status: ok ? 'pass' : 'fail', summary: ok ? 'the app is gone and the agent was kept (Quit Dyno keeps measuring)' : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence };
   }
 
   async install(stagedDmg) {
@@ -338,4 +347,9 @@ export async function runAll(check, { stagedDmg, manual }) {
   push(await check.logs());
   for (const m of manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
   return { steps, version: check.version };
+}
+
+/** How many agent (helper-role) processes are running in a snapshot. */
+function config_agentsLeft(procs, config, bundle) {
+  return config.processes.filter((s) => s.role === 'helper').reduce((n, s) => n + instancesOf(procs, s, bundle).length, 0);
 }

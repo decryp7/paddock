@@ -35,25 +35,37 @@ export async function domScreenCheck(browser, { open = [] } = {}) {
   return result('Windows: shared screenshot check on the real WebView2 DOM', checks, [], `${checks.length} window(s) clean`);
 }
 
-/** File > Exit (Ctrl+Q): every Dyno process must be gone. */
+/**
+ * Dyno 1.1.0 plain Quit: File > "Quit Dyno (keeps measuring)" (or "Quit Dyno" when no service keeps the agent; never "Quit and stop measuring", which has its
+ * own row, winQuitStop). The app must be gone; the agent may be kept (1.1.0 CHANGELOG, quit.rs), so it is reported, not judged. The processes are counted
+ * with a condition wait (up to 15 s), never one immediate count.
+ */
 export async function quitViaMenu(browser) {
   const main = browser.contexts().flatMap((c) => c.pages()).find((p) => /#\/dashboard|#\//.test(p.url()) && !p.url().includes('dialog?id='));
   const checks = [];
+  let label = null;
   const clicked = await main?.evaluate(async () => {
-    const items = () => [...document.querySelectorAll('[role=menuitem]')];
-    if (!items().some((e) => e.textContent.trim().startsWith('Exit'))) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File').click(); await new Promise((r) => setTimeout(r, 600)); }
-    items().find((e) => e.textContent.trim().startsWith('Exit')).click();
-    return true;
-  }).catch(() => true); // the page goes away with the app
-  checks.push({ ok: Boolean(clicked), detail: clicked ? 'File > Exit pressed' : 'no File > Exit item' });
-  let left = 'unknown';
-  for (let i = 0; i < 20; i++) {
-    left = ssh('(Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Measure-Object).Count');
-    if (left === '0') break;
+    const pick = () => [...document.querySelectorAll('[role=menuitem]')].find((e) => /^Quit Dyno( \(keeps measuring\))?$/.test(e.textContent.trim()));
+    if (!pick()) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File')?.click(); await new Promise((r) => setTimeout(r, 600)); }
+    const it = pick();
+    if (!it) return null;
+    const text = it.textContent.trim();
+    it.click();
+    return text;
+  }).catch(() => 'Quit Dyno'); // the page goes away with the app
+  label = clicked;
+  checks.push({ ok: Boolean(clicked), detail: clicked ? `File > "${clicked}" pressed` : 'no "Quit Dyno" / "Quit Dyno (keeps measuring)" item under File' });
+  const count = (names) => Number(ssh(`(Get-Process ${names} -ErrorAction SilentlyContinue | Measure-Object).Count`));
+  let app = NaN;
+  for (let i = 0; i < 8; i++) { // condition wait, up to 15 s
+    app = count('dyno-app');
+    if (app === 0) break;
     await sleep(2000);
   }
-  checks.push({ ok: left === '0', detail: left === '0' ? 'no dyno-app or dyno-agent process 40 s after Exit' : `${left} Dyno process(es) still running after Exit` });
-  return result('Windows: Quit (File > Exit) leaves nothing running', checks, [], 'File > Exit ended the app and the agent');
+  checks.push({ ok: app === 0, detail: app === 0 ? 'no dyno-app process within 15 s of Quit' : `${app} dyno-app process(es) still running 15 s after Quit` });
+  const agent = count('dyno-agent');
+  checks.push({ ok: true, info: true, detail: `${agent} dyno-agent process(es) after Quit (1.1.0: the agent may be kept; label "${label}")` });
+  return result('Windows: Quit Dyno (File menu) ends the app', checks, [], 'the app ended; the agent is reported');
 }
 
 export async function runUiPhase({ log = console.error, extra = [], after = [] } = {}) {

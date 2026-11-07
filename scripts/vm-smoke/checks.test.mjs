@@ -109,11 +109,11 @@ test('a second agent that arrives ten seconds after the first fails the cold sta
   assert.match(s.checks.find((c) => !c.ok).detail, /dyno-agent/);
 });
 
-test('an agent left running after Quit is reported as an orphan of launchd, and the check ends it by identity', async () => {
+test('1.1.0: an agent left running after Quit Dyno (keeps measuring) is expected and reported, and the check ends it by identity for the next step', async () => {
   const r = await run('orphan-agent');
   const q = byTitle(r, /Quit with a window open/);
-  assert.equal(q.status, 'fail');
-  assert.ok(q.checks.some((c) => /an orphan of launchd/.test(c.detail)), JSON.stringify(q.checks));
+  assert.equal(q.status, 'pass', q.summary);
+  assert.match(q.summary, /agent was kept/);
   assert.ok(r.calls.some((c) => /^\[ "\$\(ps -o lstart= -p \d+ \| sed -e 's\/ \*\$\/\/'\)" = '.*' \] && ps -p \d+ -o command= \| grep -qxF -- .* && kill -(TERM|KILL) \d+$/.test(c)), 'pid, start time and command line checked in the same guest command as the kill');
 });
 
@@ -213,13 +213,12 @@ test('the agent as the app\'s launchd job (ADR 0026): launchd is a legal parent 
   const good = await run('ondemand');
   assert.equal(good.start.status, 'pass', good.start.summary);
   assert.equal(good.quit.status, 'pass', good.quit.summary);
-  assert.ok(good.quit.checks.some((c) => /launchd job .* gone after Quit/.test(c.detail)));
+  assert.ok(good.quit.checks.some((c) => /launchd job .* (not loaded after Quit|still loaded after Quit Dyno)/.test(c.detail)));
   // Seeded faults: parent 1 with no job loaded, a job with another pid, and a job still loaded after Quit.
   const strayAgent = await run('ondemand-no-job');
   assert.equal(strayAgent.start.status, 'fail');
   assert.match(strayAgent.start.summary, /does not report job net\.decryptology\.dyno\.agent\.ondemand/);
   assert.equal((await run('ondemand-other-pid')).start.status, 'fail');
   const stays = await run('job-stays');
-  assert.equal(stays.quit.status, 'fail');
-  assert.match(stays.quit.summary, /STILL LOADED after Quit/);
+  assert.equal(stays.quit.status, 'pass', 'the job staying loaded is the kept agent of 1.1.0, not a fault');
 });

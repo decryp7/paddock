@@ -238,7 +238,7 @@ async function main(argv) {
     push(result('Admin helper Turn off removes it', checks, [...why.split('\n'), '$ sudo ls -la /var/lib/dyno-helper', ...folder.split('\n'), ...card], 'service and data removed'));
 
     // 7. Quit: File > Quit ends the app and the agent.
-    press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit$', 'menu item'); await sleep(8000);
+    press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit Dyno( \\(keeps measuring\\))?$', 'menu item'); await sleep(8000);
     // Quit: poll up to 40 s (as on macOS and Windows) for no dyno process; print what is left with its parent.
     let leftList = '';
     for (let i = 0; i < 20; i++) { leftList = g('ps -eo pid=,ppid=,etimes=,args= | grep -E "dyno-(app|agent|helper)" | grep -v grep').stdout.trim(); if (!leftList) break; await sleep(2000); }
