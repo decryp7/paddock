@@ -1408,9 +1408,9 @@ impl crate::port::Elevator for MarksInstalled {
         &mut self,
         program: &Path,
         args: &[&str],
-        timeout: Duration,
+        ceiling: Duration,
     ) -> Result<i32, RegisterError> {
-        let code = self.0.run_elevated(program, args, timeout)?;
+        let code = self.0.run_elevated(program, args, ceiling)?;
         if code == 0 && args == ["install"] {
             self.1.store(true, std::sync::atomic::Ordering::SeqCst);
         }

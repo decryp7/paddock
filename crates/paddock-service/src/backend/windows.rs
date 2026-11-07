@@ -31,8 +31,10 @@ use crate::verbs::Verb;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// How long an elevated `install`/`uninstall` may take (it stops and waits for the old service).
-pub const ELEVATED_TIMEOUT: Duration = Duration::from_secs(120);
+/// The backstop for an elevated `install`/`uninstall` (it stops and waits for the old service): the elevated program is
+/// waited for, and said to be still working in the log, until it ends or this ceiling comes; a program still running then
+/// is reported as such, not as failed (ER-19).
+pub const ELEVATED_CEILING: Duration = Duration::from_secs(15 * 60);
 
 /// The per-user `Run` value: Windows starts the agent at log-in in the user's session.
 pub struct WindowsRun {
@@ -526,7 +528,7 @@ impl ElevatedWindowsService {
     fn elevated(&mut self, verb: Verb) -> Result<Inspection, RegisterError> {
         match self
             .elevator
-            .run_elevated(&self.program, &[verb.word()], ELEVATED_TIMEOUT)?
+            .run_elevated(&self.program, &[verb.word()], ELEVATED_CEILING)?
         {
             0 => Ok(self.inner.inspect()),
             code => Err(RegisterError::Other(format!(
