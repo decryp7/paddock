@@ -1052,3 +1052,19 @@ fn distinct_ids_and_reuse_after_the_call_ended_are_not_errors() {
     );
     assert!(!p.is_closed());
 }
+
+/// IP1 item 2: when the writer dies (a write fails), nothing more is queued for it: later sends fail at once with the
+/// reason the connection closed, and do not wait for the stall.
+#[test]
+fn sends_after_the_writer_died_fail_at_once_with_the_close_reason() {
+    let (p, io) = raw(
+        Arc::new(NoCalls),
+        PeerOptions::new("the plugin"),
+        FrameLimit::default(),
+    );
+    drop(io);
+    assert!(p.wait_closed(Some(GUARD)));
+    let reason = p.closed().expect("closed");
+    assert_eq!(p.push(b"late".to_vec()).unwrap_err(), reason);
+    assert_eq!(p.call(b"late".to_vec(), T).unwrap_err(), reason);
+}

@@ -93,27 +93,18 @@ impl WriteQueue {
                     self.ready.notify_one();
                     return Push::Queued;
                 }
+                // No room, and the stall is over: the other side is not reading.
+                if deadline.passed() {
+                    return Push::Stalled;
+                }
                 let token = CancelToken::new();
                 s.waiters.push(token.clone());
                 token
             };
-            // Woken by the writer (the wait is cancelled) or by the stall passing (the wait ends).
-            let left = deadline.remaining().unwrap_or(Duration::MAX);
-            if !deadline.passed() && self.clock.wait(left, &token).is_err() {
-                continue;
-            }
-            if deadline.passed() {
-                // One more look: room may have appeared as the time ran out.
-                let s = lock(&self.state);
-                if s.closed {
-                    return Push::Closed;
-                }
-                let room = s.frames < self.max_frames
-                    && (s.frames == 0 || s.bytes.saturating_add(bytes.len()) <= self.max_bytes);
-                if !room {
-                    return Push::Stalled;
-                }
-            }
+            // Ends when the writer frees room (the token is cancelled) or the stall passes; either way look again.
+            let _ = self
+                .clock
+                .wait(deadline.remaining().unwrap_or(Duration::MAX), &token);
         }
     }
 

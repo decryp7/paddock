@@ -389,9 +389,6 @@ impl Peer {
     }
 
     fn send(&self, f: &Frame) -> Result<(), IpcError> {
-        if self.is_closed() {
-            return Err(self.closed_reason());
-        }
         let bytes = frame::encode(f, self.inner.limit).map_err(IpcError::from)?;
         match self.inner.out.push(bytes) {
             Push::Queued => Ok(()),
@@ -794,6 +791,8 @@ impl Peer {
                 break;
             }
         }
+        // However the loop ended, nothing more is accepted for a writer that is gone: later sends fail at once.
+        self.inner.out.shutdown();
         self.inner.closer.close();
     }
 
