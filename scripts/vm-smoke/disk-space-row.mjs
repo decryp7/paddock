@@ -86,10 +86,11 @@ export async function diskSpaceStep({ exec, sleep, now, adapter }) {
     const osAfterWrite = (await adapter.osFree(exec)).bytes;
     const t0 = now(); let afterWriteFree = NaN, writeSecs = NaN;
     for (;;) { afterWriteFree = freeOf(await read()); writeSecs = Math.round((now() - t0) / 1000); if (baselineFree - afterWriteFree >= WRITE_BYTES * 0.9 || now() - t0 >= REFRESH_WAIT_MS) break; await sleep(3000); }
+    const osAfterWait = (await adapter.osFree(exec)).bytes;
     await exec(adapter.deleteCmd);
     const t1 = now(); let afterDeleteFree = NaN, deleteSecs = NaN;
     for (;;) { afterDeleteFree = freeOf(await read()); deleteSecs = Math.round((now() - t1) / 1000); if (afterDeleteFree - afterWriteFree >= WRITE_BYTES * 0.9 || now() - t1 >= REFRESH_WAIT_MS) break; await sleep(3000); }
-    const checks = judgeDisk({ disks, volumeName, osFreeBytes: os.bytes, osSource: os.source, osAltFreeBytes: alt?.bytes, osAltSource: alt?.source, statusText, baselineFree, afterWriteFree, writeSecs, afterDeleteFree, deleteSecs, osBaseline: os.bytes, osAfterWrite });
+    const checks = judgeDisk({ disks, volumeName, osFreeBytes: os.bytes, osSource: os.source, osAltFreeBytes: alt?.bytes, osAltSource: alt?.source, statusText, baselineFree, afterWriteFree, writeSecs, afterDeleteFree, deleteSecs, osBaseline: os.bytes, osAfterWrite: Math.min(osAfterWrite, Number.isFinite(osAfterWait) ? osAfterWait : osAfterWrite) });
     return makeResult(TITLE_DISK, checks, [`OS: ${os.source} ${os.bytes}`, `status: ${statusText.split('\n').filter((l) => /^\s*Disk/.test(l)).join(' | ')}`], 'the disk figures match the OS, use decimal units and follow a 1 GB write and delete within 60 s');
   } catch (e) {
     await exec(adapter.deleteCmd).catch(() => {});
