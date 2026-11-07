@@ -9,8 +9,8 @@ describe('the jobs wire model', () => {
   it('decodes every snapshot shape Rust wrote (round trip)', () => {
     const jobs = parseJobSnapshots(JOB_SNAPSHOT_FIXTURES);
     expect(jobs).toHaveLength(JOB_SNAPSHOT_FIXTURES.length);
-    expect(jobs.map((j) => j.state)).toEqual(['queued', 'running', 'running', 'running', 'done', 'failed', 'cancelled', 'cancelled']);
-    const [queued, finding, download, writing, , failed, user, deadline] = jobs;
+    expect(jobs.map((j) => j.state)).toEqual(['queued', 'running', 'running', 'running', 'done', 'failed', 'cancelled', 'cancelled', 'failed']);
+    const [queued, finding, download, writing, , failed, user, deadline, limited] = jobs;
     expect(queued?.subject).toBe('3 folders');
     expect(finding).toMatchObject({ state: 'running', phase: { id: 'find', label: 'Finding files', unit: 'items', total: null, done: 12345 } });
     expect(download).toMatchObject({ state: 'running', phase: { unit: 'bytes', total: 118 * 1024 * 1024 } });
@@ -19,8 +19,14 @@ describe('the jobs wire model', () => {
     expect(failed).toMatchObject({ state: 'failed', message: 'The folder is not readable' });
     expect(user).toMatchObject({ reason: 'user' });
     expect(deadline).toMatchObject({ reason: 'deadline' });
+    // The limit as Rust serialises it (paddock-limits' LimitExceeded), not a hand-written literal.
+    expect(limited).toMatchObject({
+      state: 'failed',
+      message: 'The archive is refused',
+      limit: { id: 'archive.entries', limit: { kind: 'count', n: 10000 }, reached: { kind: 'count', n: 12345 }, scope: 'file' },
+    });
     expect(jobs.filter(isActiveJob).map((j) => j.id)).toEqual([1, 2, 3, 4]);
-    expect(jobs.filter(isFinishedJob).map((j) => j.id)).toEqual([5, 6, 7, 8]);
+    expect(jobs.filter(isFinishedJob).map((j) => j.id)).toEqual([5, 6, 7, 8, 9]);
   });
 
   const good = { id: 1, kind: 'scan', title: 'Scan', seq: 1, elapsedMs: 0, cancellable: true, state: 'queued' };
@@ -70,7 +76,9 @@ describe('the jobs wire model', () => {
     expect(parseJobSnapshot({ ...good, state: 'failed', message: 'no', limit })).toMatchObject({ message: 'no', limit });
     const noReached = { ...limit, reached: null };
     expect(parseJobSnapshot({ ...good, state: 'failed', message: 'no', limit: noReached })).toMatchObject({ limit: noReached });
-    for (const bad of [{ ...limit, id: 5 }, { ...limit, scope: 'galaxy' }, { ...limit, limit: { kind: 'furlongs', n: 1 } }, { ...limit, reached: 7 }, 'x']) {
+    for (const bad of [{ ...limit, id: 5 }, { ...limit, scope: 'galaxy' }, { ...limit, limit: { kind: 'furlongs', n: 1 } }, { ...limit, reached: 7 },
+      // Rust refuses a reached value in another unit than the limit, and a percent over 100: so does the parser.
+      { ...limit, reached: { kind: 'bytes', n: 9 } }, { ...limit, limit: { kind: 'percent', n: 101 }, reached: null }, { ...limit, limit: { kind: 'percent', n: 50 }, reached: { kind: 'percent', n: 101 } }, 'x']) {
       const parsed = parseJobSnapshot({ ...good, state: 'failed', message: 'no', limit: bad });
       expect(parsed).toMatchObject({ state: 'failed', message: 'no' });
       expect(parsed).not.toHaveProperty('limit');

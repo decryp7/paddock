@@ -69,9 +69,10 @@ const SCOPES = ['file', 'source', 'import', 'plugin', 'query', 'process'];
 function quantity(v: unknown): SuQuantity | null {
   if (typeof v !== 'object' || v === null) return null;
   const q = v as Record<string, unknown>;
-  return typeof q['kind'] === 'string' && QUANTITY_KINDS.includes(q['kind']) && typeof q['n'] === 'number'
-    ? ({ kind: q['kind'], n: q['n'] } as SuQuantity)
-    : null;
+  if (typeof q['kind'] !== 'string' || !QUANTITY_KINDS.includes(q['kind']) || typeof q['n'] !== 'number') return null;
+  // As `paddock_limits::Quantity` allows: a percent is at most 100.
+  if (q['kind'] === 'percent' && q['n'] > 100) return null;
+  return { kind: q['kind'], n: q['n'] } as SuQuantity;
 }
 
 /** The `limit` of a failed job, or null when absent or malformed. */
@@ -82,6 +83,8 @@ function limitExceeded(v: unknown): SuLimitExceeded | null {
   const reached = l['reached'] === null || l['reached'] === undefined ? null : quantity(l['reached']);
   if (typeof l['id'] !== 'string' || limit === null || typeof l['scope'] !== 'string' || !SCOPES.includes(l['scope'])) return null;
   if (l['reached'] != null && reached === null) return null;
+  // A reached value is in the limit's unit (Rust: `LimitExceeded::reaching` refuses another one).
+  if (reached !== null && reached.kind !== limit.kind) return null;
   return { id: l['id'], limit, reached, scope: l['scope'] as SuLimitExceeded['scope'] };
 }
 
