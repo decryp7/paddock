@@ -338,3 +338,19 @@ export function judgeNativeMenu({ control, controlIcon, attempts }) {
   else checks.push({ ...chk(false, `the app logged the right click ${attempts.filter((a) => a.logged).length} time(s) but no native menu window (class #32768) appeared within 6 s of either click; the screenshot after the click is saved`), ...(ctlSeen ? {} : { kind: 'check' }) });
   return checks;
 }
+
+/**
+ * The Jobs panel after an agent restart (1.1.0 rc 9d9c2c814: "The jobs could not be read" must not stay once the agent is back). The probe watches the page's text with a
+ * MutationObserver in the page itself, so a message that shows for a second is not missed; it is a positive control only if the message showed during the gap.
+ * @param {{panelOpen:boolean, shownBefore:boolean, agentBack:boolean, everShown:boolean, shownAfterBack:boolean|null, secondsToClear:number|null}} f
+ */
+export function judgeJobsRestart(f) {
+  const checks = [];
+  checks.push(chk(f.panelOpen, f.panelOpen ? 'the Jobs panel is open' : 'the Jobs panel could not be opened', 'check'));
+  if (!f.panelOpen) return checks;
+  checks.push(chk(!f.shownBefore, f.shownBefore ? 'precondition: the panel already said "The jobs could not be read" before the restart' : 'precondition: the panel reads the jobs before the restart', 'check'));
+  checks.push(chk(f.agentBack, f.agentBack ? 'the agent came back (a new process answers dyno status)' : 'the agent did not come back within 90 s', 'check'));
+  checks.push(chk(f.everShown, f.everShown ? 'control: the panel showed "The jobs could not be read" while the agent was gone (the probe sees the message)' : 'control: the panel never showed "The jobs could not be read" during the gap, so the recovery is not shown by this run', 'check'));
+  if (f.agentBack && f.everShown) checks.push(chk(f.shownAfterBack === false, f.shownAfterBack === false ? `the message was gone ${f.secondsToClear} s after the agent was back` : 'the panel still says "The jobs could not be read" 60 s after the agent is back'));
+  return checks;
+}

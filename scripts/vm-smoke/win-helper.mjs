@@ -11,7 +11,7 @@ import { makeResult } from './verdict.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep } from './mcp-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
-import { parseConsent, judgeConsentAfterAnswer, installEvents, installOutcomeSince, attemptProbe, judgeControl, judgeExploitPrecondition, judgeInstallOutcome, judgeRefusal, judgeServed, judgeTrayCount, judgeWear } from './win-judges.mjs';
+import { judgeJobsRestart, parseConsent, judgeConsentAfterAnswer, installEvents, installOutcomeSince, attemptProbe, judgeControl, judgeExploitPrecondition, judgeInstallOutcome, judgeRefusal, judgeServed, judgeTrayCount, judgeWear } from './win-judges.mjs';
 
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
@@ -385,6 +385,33 @@ export async function winMcpStep() {
 /** The release rows the Windows suite cannot drive yet, as not-measured steps with their reasons. */
 export const winUndrivenRows = () => [['winReinstall'], ['winFirstUninstall'], ['hungPage'], ['secondUser'], ['killInstaller'], ['installAgain']].map(([k]) => notDriven(ROW_TITLES[k], NOT_DRIVEN[k]));
 
+/**
+ * The Jobs panel across an agent restart: the agent is ended, the app starts a new one, and "The jobs could not be read" must be gone from the open panel once it answers.
+ * The page's own MutationObserver notes whether the message ever showed (the control) and whether it is there now.
+ */
+export async function jobsAfterAgentRestart(browser) {
+  const title = 'Windows: the Jobs panel after an agent restart no longer says "The jobs could not be read"';
+  const p = mainPage(browser);
+  const d = windowsLoginJobsDriver(browser, { openSettings, mainPage });
+  const panelOpen = await d.openJobs();
+  if (!p || !panelOpen) return result(title, judgeJobsRestart({ panelOpen: false }), []);
+  const probe = () => p.evaluate(() => /jobs could not be read/i.test(document.body.innerText)).catch(() => null);
+  await p.evaluate(() => { window.__jobsSeen = false; const f = () => { if (/jobs could not be read/i.test(document.body.innerText)) window.__jobsSeen = true; }; window.__jobsObs?.disconnect(); window.__jobsObs = new MutationObserver(f); window.__jobsObs.observe(document.body, { subtree: true, childList: true, characterData: true }); f(); });
+  const shownBefore = (await probe()) === true;
+  const oldPid = ssh('(Get-Process dyno-agent -ErrorAction SilentlyContinue | Select-Object -First 1).Id', { admin: true }).trim().split('\n').at(-1);
+  const killed = ssh('Get-Process dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; "killed"', { admin: true });
+  let agentBack = false;
+  for (let i = 0; i < 45 && !agentBack; i++) { await sleep(2000); const pid = ssh('(Get-Process dyno-agent -ErrorAction SilentlyContinue | Select-Object -First 1).Id', { admin: true }).trim().split('\n').at(-1); agentBack = /^\d+$/.test(pid) && pid !== oldPid && /^\s*\S/.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" status 2>&1 | Select-Object -First 1')) && /Cpu|CPU|Memory/i.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" status 2>&1 | Out-String')); }
+  const backAt = Date.now();
+  const everShown = await p.evaluate(() => window.__jobsSeen === true).catch(() => false);
+  await d.openJobs();
+  let shownAfterBack = null; let secondsToClear = null;
+  for (let i = 0; i < 30; i++) { shownAfterBack = await probe(); if (shownAfterBack === false) { secondsToClear = Math.round((Date.now() - backAt) / 1000); break; } await sleep(2000); }
+  const r = result(title, judgeJobsRestart({ panelOpen, shownBefore, agentBack, everShown, shownAfterBack, secondsToClear }), [`old agent pid ${oldPid || '?'}; ${killed.trim() || 'kill gave no answer'}`, `message ever shown during the gap: ${everShown}; shown now: ${shownAfterBack}`], 'the message showed while the agent was gone and cleared once it was back');
+  await p.evaluate(() => window.__jobsObs?.disconnect()).catch(() => {});
+  return r;
+}
+
 export const helperStepTable = [
   ['helper-on', async ({ browser }) => {
     const planted = plantJunction();
@@ -407,6 +434,7 @@ export const helperStepTable = [
       witness: async () => ssh(APP_LOG_PS).split('\n').filter((l) => /Run value|start at login|launch at login/i.test(l)).slice(-12), readEntry: async () => { const c = ssh(RUN).trim().split('\n').at(-1); return { present: Boolean(c), command: c, count: c ? 1 : 0 }; } });
   }],
   // Row 5a: the Start at login change in the Jobs list (login-jobs-row.mjs). The raw `wbadmin` evidence step is gone with Backup health (removed in 1.1.0).
+  ['jobs-restart', ({ browser }) => jobsAfterAgentRestart(browser)],
   ['login-jobs', async ({ browser }) => loginJobsRow(windowsLoginJobsDriver(browser, { openSettings, mainPage }), { now: () => Date.now(), sleep })],
   // Release row: disk space (Dyno's figure against Explorer's, decimal units, refresh within 60 s of a 1 GB write)
   ['disk-space', async () => { const adapter = windowsAdapter({ ssh }); return diskSpaceStep({ exec: async (c) => ({ code: 0, stdout: ssh(c, { ms: 280_000 }) }), sleep, now: () => Date.now(), adapter }); }],

@@ -4,6 +4,7 @@
 export const WIN_ROWS = {
   'tray-menu': { aliases: ['10', '11', 'tray'], phase: 'ui', manifest: ['tray-menu', 'tray-countdown'] },
   'login-jobs': { aliases: ['20', '5a'], phase: 'ui', manifest: ['login-jobs'] },
+  'jobs-restart': { aliases: ['jobs-agent'], phase: 'ui', manifest: ['jobs-restart'] },
   'disk-space': { aliases: ['21'], phase: 'ui', manifest: ['disk-space'] },
   exploit: { aliases: ['16'], phase: 'ui', needs: ['helper'], manifest: ['exploit'] },
   scoping: { aliases: ['29', 'd6'], phase: 'ui', needs: ['helper'], manifest: ['scoping'] },

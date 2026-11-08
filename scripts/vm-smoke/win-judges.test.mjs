@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseMenuWatch, judgeNativeMenu, parseConsent, judgeConsentAfterAnswer, killWatcherScript, killWatcherOutcome, installOutcomeSince, installEvents, judgeColdUninstall, coldUninstallAccepted, rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, parseTrayDiagnosis, serviceState, triState } from "./win-judges.mjs";
+import { judgeJobsRestart, parseMenuWatch, judgeNativeMenu, parseConsent, judgeConsentAfterAnswer, killWatcherScript, killWatcherOutcome, installOutcomeSince, installEvents, judgeColdUninstall, coldUninstallAccepted, rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, parseTrayDiagnosis, serviceState, triState } from "./win-judges.mjs";
 import { makeResult } from './verdict.mjs';
 
 const BOOT = '2026-11-05T10:00:00';
@@ -246,4 +246,14 @@ test('a seen control and a logged right click with no menu is a product failure'
 test('a click the app did not log is the probe\'s', () => {
   const r = judgeNativeMenu({ control: parseMenuWatch(SEEN), controlIcon: true, attempts: [{ logged: false, watch: parseMenuWatch('NONE 6000') }] });
   assert.equal(r.filter((c) => !c.ok)[0].kind, 'check');
+});
+
+test('jobs after an agent restart: only a message seen in the gap and gone afterwards passes', () => {
+  const base = { panelOpen: true, shownBefore: false, agentBack: true, everShown: true, shownAfterBack: false, secondsToClear: 3 };
+  assert.ok(judgeJobsRestart(base).every((c) => c.ok));
+  const stuck = judgeJobsRestart({ ...base, shownAfterBack: true }).filter((c) => !c.ok);
+  assert.equal(stuck.length, 1);
+  assert.equal(stuck[0].kind, undefined, 'a message that stays is a product failure');
+  const blind = judgeJobsRestart({ ...base, everShown: false, shownAfterBack: false }).filter((c) => !c.ok);
+  assert.equal(blind[0].kind, 'check', 'no message in the gap: the control failed, not a pass');
 });
