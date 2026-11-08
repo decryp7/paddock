@@ -89,8 +89,8 @@ test.describe('WP-4b screenshots', () => {
         });
       }
 
-      test('a very short pane at 900 x 600', async ({ page }) => {
-        await page.setViewportSize({ width: 900, height: 600 });
+      test('a very short pane at 900 x 640', async ({ page }) => {
+        await page.setViewportSize({ width: 900, height: 640 });
         const pane = await chat(page);
         await pane.getByTestId('assistant-file-input').setInputFiles([notes, code]);
         await pane.getByTestId('assistant-file-input').setInputFiles(photo);

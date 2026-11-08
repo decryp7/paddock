@@ -126,7 +126,7 @@ test.describe('chat composer', () => {
   });
 
   test('in a very short pane the log keeps a floor of about two lines and the question and Send stay in the pane (review 3 P2-3)', async ({ page }) => {
-    await page.setViewportSize({ width: 900, height: 600 });
+    await page.setViewportSize({ width: 900, height: 640 });
     const chat = await chatWithFile(page);
     await chat.getByTestId('assistant-file-input').setInputFiles(photo);
     await expect(chat.getByTestId('assistant-failure')).toBeVisible();
@@ -137,6 +137,7 @@ test.describe('chat composer', () => {
     for (const id of ['assistant-input', 'assistant-send']) {
       const b = (await chat.getByTestId(id).boundingBox())!;
       expect(b.y + b.height, id).toBeLessThanOrEqual(pane.y + pane.height);
+      expect(b.y + b.height, `${id} on screen`).toBeLessThanOrEqual(640);
     }
   });
 
