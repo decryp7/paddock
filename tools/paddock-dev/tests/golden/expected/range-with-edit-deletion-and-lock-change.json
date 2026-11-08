@@ -4,6 +4,7 @@
  "ui": true,
  "eslint": false,
  "conformance": false,
+ "c99": true,
  "tools": false,
  "icons": false,
  "ciImage": false,
@@ -46,6 +47,10 @@
   ],
   "app:z": [
    "npm apps/z/app/src-tauri"
+  ],
+  "c99": [
+   "C99 reads crates/a/src/lib.rs",
+   "C99 reads crates/a/src/removed.rs"
   ],
   "crates": [
    "crates/a/src/lib.rs",

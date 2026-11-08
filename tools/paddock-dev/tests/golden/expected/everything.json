@@ -4,6 +4,7 @@
  "ui": true,
  "eslint": true,
  "conformance": true,
+ "c99": true,
  "tools": true,
  "icons": true,
  "ciImage": true,
@@ -37,6 +38,9 @@
    "everything (no base)"
   ],
   "app:z": [
+   "everything (no base)"
+  ],
+  "c99": [
    "everything (no base)"
   ],
   "ci-image": [

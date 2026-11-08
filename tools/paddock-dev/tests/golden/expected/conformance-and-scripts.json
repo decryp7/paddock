@@ -4,6 +4,7 @@
  "ui": true,
  "eslint": false,
  "conformance": true,
+ "c99": true,
  "tools": true,
  "icons": false,
  "ciImage": false,
@@ -38,6 +39,9 @@
   ],
   "app:z": [
    "conformance conformance/src/a.mjs"
+  ],
+  "c99": [
+   "C99 reads conformance/src/a.mjs"
   ],
   "conformance": [
    "conformance/src/a.mjs"

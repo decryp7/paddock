@@ -4,6 +4,7 @@
  "ui": false,
  "eslint": false,
  "conformance": false,
+ "c99": true,
  "tools": false,
  "icons": false,
  "ciImage": false,
@@ -21,6 +22,9 @@
  "why": {
   "app:x": [
    "apps/x/app/src/main.ts"
+  ],
+  "c99": [
+   "C99 reads apps/x/app/src/main.ts"
   ]
  }
 }
