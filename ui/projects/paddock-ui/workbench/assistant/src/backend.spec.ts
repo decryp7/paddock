@@ -27,8 +27,8 @@ function fakeIpc(answers: Record<string, unknown>) {
 }
 
 describe('the generated commands', () => {
-  it('are the seven the backend calls', () => {
-    expect(Object.keys(ASSISTANT_COMMANDS).sort()).toEqual(['assistant_approve_tool', 'assistant_conversations', 'assistant_delete', 'assistant_info', 'assistant_load', 'assistant_send', 'assistant_stop']);
+  it('are the eight the backend calls', () => {
+    expect(Object.keys(ASSISTANT_COMMANDS).sort()).toEqual(['assistant_approve_tool', 'assistant_context', 'assistant_conversations', 'assistant_delete', 'assistant_info', 'assistant_load', 'assistant_send', 'assistant_stop']);
   });
 });
 
@@ -44,6 +44,7 @@ describe('TauriAssistantBackend', () => {
       assistant_stop: true,
       assistant_delete: null,
       assistant_approve_tool: null,
+      assistant_context: { usedTokens: 900, limitTokens: 4096, exact: true, level: 'ok' },
     });
     const b = new TauriAssistantBackend(ipc);
     expect(await b.info()).toEqual(info);
@@ -53,7 +54,9 @@ describe('TauriAssistantBackend', () => {
     expect(await b.stop('c1')).toBe(true);
     await b.delete('c1');
     await b.approve('c1', 'call_1', 'alwaysAllow');
-    expect(calls.map((c) => c[0])).toEqual(['assistant_info', 'assistant_conversations', 'assistant_load', 'assistant_send', 'assistant_stop', 'assistant_delete', 'assistant_approve_tool']);
+    expect(await b.context(null)).toEqual({ usedTokens: 900, limitTokens: 4096, exact: true, level: 'ok' });
+    expect(calls.map((c) => c[0])).toEqual(['assistant_info', 'assistant_conversations', 'assistant_load', 'assistant_send', 'assistant_stop', 'assistant_delete', 'assistant_approve_tool', 'assistant_context']);
+    expect(calls[7]?.[1]).toEqual({ conversationId: null });
     expect(calls[3]?.[1]).toEqual({ request: { text: 'q', context: [], allowWrite: false } });
     expect(calls[6]?.[1]).toEqual({ conversationId: 'c1', callId: 'call_1', choice: 'alwaysAllow' });
     for (const [command] of calls) expect(Object.keys(ASSISTANT_COMMANDS)).toContain(command);

@@ -216,6 +216,26 @@ tools: Array<ToolInfo>,
  */
 hasWrite: boolean, };
 
+export type ContextLevel = "unknown" | "ok" | "high" | "full";
+
+export type ContextUse = { 
+/**
+ * Tokens the next question carries before its own text.
+ */
+usedTokens: number, 
+/**
+ * Tokens the model holds (prompt plus answer); 0 when unknown.
+ */
+limitTokens: number, 
+/**
+ * `used_tokens` is the engine's own count, not an estimate.
+ */
+exact: boolean, 
+/**
+ * How full that is.
+ */
+level: ContextLevel, };
+
 export type Attachment = { "kind": "image", 
 /**
  * SHA-256 of the prepared file, lowercase hex.
@@ -546,4 +566,4 @@ needsAi?: AiState, });
 export const ASSISTANT_EVENT = 'paddock://assistant';
 
 /** The limits the engine enforces (the composer shows them; the engine checks again). */
-export const ASSISTANT_LIMITS = { userChars: 8000, contextItems: 8, contextChars: 4000, conversations: 50, messages: 400 } as const;
+export const ASSISTANT_LIMITS = { userChars: 8000, contextItems: 8, contextChars: 4000, conversations: 50, messages: 400, attachments: 16 } as const;

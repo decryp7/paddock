@@ -24,6 +24,7 @@
 //! ```
 
 pub mod approval;
+pub mod context;
 pub mod conversation;
 pub mod event;
 #[cfg(test)]
@@ -39,6 +40,7 @@ pub mod tool;
 pub mod types;
 
 pub use approval::{Approval, ApprovalChoice, ApprovalPolicy, CallInfo, DefaultPolicy, Verdict};
+pub use context::{ContextLevel, ContextUse, HIGH_PERCENT, context_level, estimate_tokens};
 pub use conversation::{
     ContextItem, Conversation, ConversationStore, ConversationSummary, Conversations,
     MAX_CITATIONS, MAX_CONTEXT_CHARS, MAX_CONTEXT_ITEMS, MAX_CONVERSATIONS, MAX_DATA_BYTES,

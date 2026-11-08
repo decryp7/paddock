@@ -3,6 +3,8 @@ import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect
 import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore, type ActionsGate } from './assistant.store';
+import { AssistantAttachments, attachmentChip, type AttachmentChip, type AttachSource } from './composer-ports';
+import type { Attachment, ContextUse } from '../generated/assistant';
 import { chipText, conversationTitle, waitingPhase, type TurnPart, type TurnView } from './chat-model';
 import type { ProviderPhase } from '../generated/assistant';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
@@ -94,6 +96,17 @@ const SCROLL_STICK_PX = 24;
                 }
               </ul>
             }
+            @if (turn.attachments.length) {
+              <ul class="attached" [attr.aria-label]="t.files" data-testid="assistant-turn-files">
+                @for (a of turn.attachments; track a.sha256) {
+                  @let chip = chipOf(a);
+                  <li class="chip static file" data-testid="assistant-turn-file" [attr.title]="chipTitle(chip)">
+                    <pd-glyph [name]="glyphOf(a)" [size]="14" />
+                    <span class="chip-label">{{ chip.label }}</span>
+                  </li>
+                }
+              </ul>
+            }
           </div>
           <div class="answer" data-testid="assistant-answer">
             @for (part of turn.parts; track $index) {
@@ -108,6 +121,8 @@ const SCROLL_STICK_PX = 24;
             @if (turn.running && turn.parts.at(-1)?.kind === 'text') {
               <span class="pulse" aria-hidden="true" data-testid="assistant-streaming"><i></i><i></i><i></i></span>
             }
+            <!-- TODO(ADR 0023 WP-4b, Debrief 1.2 package 2.6c): "Still working" after a quiet spell, from paddock-jobs::patience
+                 (ADR 0031). It lands only once 2.6c has created that crate; no stall judgement of our own here (rule 55). -->
             @if (phaseOf(turn); as phase) {
               <p class="hint phase" role="status" data-testid="assistant-phase"><span class="pulse" aria-hidden="true"><i></i><i></i><i></i></span> {{ phaseText(phase) }}</p>
             } @else if (turn.running && !turn.parts.length) {
@@ -189,7 +204,45 @@ const SCROLL_STICK_PX = 24;
       <p class="error" role="alert" data-testid="assistant-failure">{{ failure }} <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm" (click)="store.dismissFailure()">{{ t.dismiss }}</button></p>
     }
 
-    <form class="composer" (submit)="$event.preventDefault(); submit()">
+    @if (store.context()?.level === 'full') {
+      <div class="ctx-full" role="status" data-testid="assistant-context-full">
+        <pd-status-glyph status="warning" [size]="14" />
+        <span>{{ t.contextFull }}</span>
+        <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-context-new" [disabled]="store.busy()" (click)="store.newConversation()">{{ t.newChat }}</button>
+      </div>
+    }
+
+    <form
+      class="composer"
+      [class.dropping]="dropping()"
+      data-testid="assistant-composer"
+      (submit)="$event.preventDefault(); submit()"
+      (dragover)="dragOver($event)"
+      (dragleave)="dragLeave($event)"
+      (drop)="dropped($event)"
+    >
+      @if (dropping()) {
+        <p class="drop-hint" aria-hidden="true">{{ t.dropHere }}</p>
+      }
+      @if (store.attached().length || store.attaching()) {
+        <ul class="chips" [attr.aria-label]="t.files" data-testid="assistant-files">
+          @for (chip of store.attached(); track chip.attachment.sha256) {
+            <li class="chip file" data-testid="assistant-file" [attr.title]="chipTitle(chip)">
+              <pd-glyph [name]="glyphOf(chip.attachment)" [size]="14" />
+              <span class="chip-label">{{ chip.label }}</span>
+              @if (chip.detail) {
+                <span class="chip-detail">{{ chip.detail }}</span>
+              }
+              <button type="button" class="chip-x" data-testid="assistant-file-remove" [attr.aria-label]="removeLabel(chip.label)" [attr.title]="t.removeFile" (click)="detach(chip)">
+                <pd-glyph name="close" [size]="12" />
+              </button>
+            </li>
+          }
+          @if (store.attaching()) {
+            <li class="chip static busy" role="status" data-testid="assistant-attaching"><span class="pulse" aria-hidden="true"><i></i><i></i><i></i></span> {{ t.attaching }}</li>
+          }
+        </ul>
+      }
       @if (store.chips().length) {
         <ul class="chips" [attr.aria-label]="t.context" data-testid="assistant-chips">
           @for (chip of store.chips(); track chip.id) {
@@ -216,8 +269,48 @@ const SCROLL_STICK_PX = 24;
         [attr.maxlength]="store.limit()"
         (input)="store.setDraft($any($event.target).value)"
         (keydown)="key($event)"
+        (paste)="pasted($event)"
       ></textarea>
       <div class="send-row">
+        @if (store.canAttach()) {
+          <input #picker type="file" hidden multiple data-testid="assistant-file-input" [attr.accept]="store.attachRules()?.accept ?? null" (change)="picked($event)" />
+          <button type="button" class="pd-btn pd-btn--ghost pd-btn--sm compose-btn" data-testid="assistant-attach" [disabled]="blocked() || !store.roomToAttach()" [attr.aria-label]="t.attach" [attr.title]="store.attachRules()?.hint ?? t.attach" (click)="picker.click()">
+            <pd-glyph name="paperclip" [size]="16" />
+          </button>
+        }
+        @if (store.canSpeak()) {
+          <button
+            type="button"
+            class="pd-btn pd-btn--ghost pd-btn--sm compose-btn mic"
+            data-testid="assistant-mic"
+            [class.recording]="store.speech().kind === 'recording'"
+            [disabled]="blocked() || store.speech().kind === 'transcribing'"
+            [attr.aria-pressed]="store.speech().kind === 'recording'"
+            [attr.aria-label]="store.speech().kind === 'recording' ? t.micStop : t.mic"
+            [attr.title]="store.speech().kind === 'recording' ? t.micStop : t.micHint"
+            (click)="store.toggleSpeech()"
+          >
+            <pd-glyph [name]="store.speech().kind === 'recording' ? 'stop' : 'mic'" [size]="16" />
+          </button>
+        }
+        @switch (store.speech().kind) {
+          @case ('recording') {
+            <span class="speech rec" role="status" data-testid="assistant-recording"><i class="rec-dot" aria-hidden="true"></i>{{ recordingText() }}</span>
+          }
+          @case ('transcribing') {
+            <span class="speech" role="status" data-testid="assistant-transcribing"><span class="pulse" aria-hidden="true"><i></i><i></i><i></i></span> {{ t.transcribing }}</span>
+          }
+          @default {
+            @if (store.context(); as used) {
+              <span class="ctx" [attr.data-level]="used.level" data-testid="assistant-context" [attr.title]="meterTitle(used)">
+                @if (used.limitTokens > 0) {
+                  <span class="ctx-bar" aria-hidden="true"><span class="ctx-fill" [style.width.%]="fillPercent(used)"></span></span>
+                }
+                <span class="ctx-text">{{ meterText(used) }}</span>
+              </span>
+            }
+          }
+        }
         @if (store.hasWriteTools() && store.actionsGate() === 'tick') {
           <label class="allow" [attr.title]="t.allowHint">
             <input type="checkbox" data-testid="assistant-allow-actions" [checked]="store.allowWrite()" [disabled]="store.busy() || blocked()" (change)="store.setAllowWrite($any($event.target).checked)" />
@@ -309,6 +402,33 @@ const SCROLL_STICK_PX = 24;
     .input:focus-visible { outline: 2px solid var(--pd-focus-ring); outline-offset: 0; }
     .send-row { display: flex; align-items: center; gap: var(--pd-space-2); flex-wrap: wrap; }
     .allow { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
+    .chip.file { cursor: default; padding-right: 2px; }
+    .chip.static.file { padding-right: var(--pd-space-2); }
+    .chip-detail { color: var(--pd-text-muted); white-space: nowrap; }
+    .chip-x { all: unset; display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: var(--pd-radius-pill); color: var(--pd-text-muted); cursor: pointer; }
+    .chip-x:hover { background: var(--pd-hover); color: var(--pd-text); }
+    .chip-x:focus-visible { outline: 2px solid var(--pd-focus-ring); }
+    .chip.busy { color: var(--pd-text-muted); gap: var(--pd-space-2); }
+    .composer { position: relative; }
+    .composer.dropping { background: var(--pd-accent-tint); box-shadow: inset 0 0 0 2px var(--pd-accent); }
+    .drop-hint { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; color: var(--pd-accent); font-weight: var(--pd-weight-semibold); pointer-events: none; z-index: 1; }
+    .composer.dropping > :not(.drop-hint) { opacity: 0.25; }
+    .compose-btn { min-width: 28px; padding-inline: var(--pd-space-1); }
+    .mic.recording { color: var(--pd-danger); }
+    .speech { display: inline-flex; align-items: center; gap: var(--pd-space-2); font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    .speech.rec { color: var(--pd-text); }
+    .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--pd-danger); animation: pd-pulse 1.2s ease-in-out infinite; }
+    .ctx { display: inline-flex; align-items: center; gap: var(--pd-space-2); min-width: 0; font-size: var(--pd-text-label); color: var(--pd-text-muted); font-variant-numeric: tabular-nums; }
+    .ctx-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ctx-bar { flex: none; width: 48px; height: 4px; border-radius: 2px; background: var(--pd-hairline); overflow: hidden; }
+    .ctx-fill { display: block; height: 100%; background: var(--pd-text-muted); border-radius: inherit; }
+    .ctx[data-level='high'] { color: var(--pd-text); }
+    .ctx[data-level='high'] .ctx-fill { background: var(--pd-warning); }
+    .ctx[data-level='full'] { color: var(--pd-danger); }
+    .ctx[data-level='full'] .ctx-fill { background: var(--pd-danger); }
+    .ctx-full { display: flex; align-items: center; gap: var(--pd-space-2); margin: 0 var(--pd-space-3); padding: var(--pd-space-2) var(--pd-space-3); border: 1px solid var(--pd-warning); background: var(--pd-warning-tint); border-radius: var(--pd-radius-card); }
+    .ctx-full span { flex: 1; min-width: 0; }
+    @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
     @container (max-width: 360px) { .log { padding: var(--pd-space-2); } .user { max-width: 100%; } }
   `,
 })
@@ -321,6 +441,9 @@ export class PdAssistant {
   private readonly inputEl = viewChild<ElementRef<HTMLTextAreaElement>>('input');
   private readonly undoButton = viewChild<ElementRef<HTMLButtonElement>>('undoButton');
   private readonly declineButton = viewChild<ElementRef<HTMLButtonElement>>('declineButton');
+  private readonly attachments = inject(AssistantAttachments, { optional: true });
+  /** Files are being dragged over the composer (its drop highlight). */
+  protected readonly dropping = signal(false);
   private readonly injector = inject(Injector);
   /** The turn whose error details are open (-1: none). */
   protected readonly details = signal(-1);
@@ -393,6 +516,16 @@ export class PdAssistant {
     hideDetails: $localize`:@@pd.wb.assistant.turn-failed.hide:Hide details`,
     answerReady: $localize`:@@pd.wb.assistant.answer-ready:Answer ready`,
     failed: $localize`:@@pd.wb.assistant.answer-failed:The answer failed.`,
+    files: $localize`:@@pd.wb.assistant.files:Attached files`,
+    attach: $localize`:@@pd.wb.assistant.attach:Attach files`,
+    attaching: $localize`:@@pd.wb.assistant.attaching:Attaching…`,
+    removeFile: $localize`:@@pd.wb.assistant.attach.remove:Remove from this question`,
+    dropHere: $localize`:@@pd.wb.assistant.attach.drop:Drop files to attach them`,
+    mic: $localize`:@@pd.wb.assistant.mic:Speak your question`,
+    micHint: $localize`:@@pd.wb.assistant.mic.hint:Speak your question (press again to stop; Escape cancels)`,
+    micStop: $localize`:@@pd.wb.assistant.mic.stop:Stop recording`,
+    transcribing: $localize`:@@pd.wb.assistant.transcribing:Writing down what you said…`,
+    contextFull: $localize`:@@pd.wb.assistant.context.full-note:This chat fills what the model can read. Start a new chat to go on.`,
   };
 
   /** The user is at (within 24 px of) the bottom of the log: new text keeps it there. */
@@ -442,7 +575,9 @@ export class PdAssistant {
       const el = this.log()?.nativeElement;
       if (!el || typeof ResizeObserver === 'undefined') return;
       const watch = new ResizeObserver(() => {
-        if (this.pinned) el.scrollTop = el.scrollHeight;
+        // An empty conversation has nothing to follow: its empty state stays whole from the top when the composer grows
+        // (files attached on a short window).
+        if (this.pinned && this.store.turns().length) el.scrollTop = el.scrollHeight;
       });
       watch.observe(el);
       onCleanup(() => watch.disconnect());
@@ -574,13 +709,119 @@ export class PdAssistant {
 
   /** Enter sends, Shift+Enter adds a line (not while an input method composes), Escape stops. */
   protected key(e: KeyboardEvent): void {
-    if (e.key === 'Escape' && this.store.busy()) {
+    if (e.key === 'Escape' && this.store.speech().kind === 'recording') {
+      e.preventDefault();
+      void this.store.cancelSpeech();
+    } else if (e.key === 'Escape' && this.store.busy()) {
       e.preventDefault();
       void this.store.stop();
     } else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       if (!this.blocked()) this.submit();
     }
+  }
+
+  /** An attachment's chip as the host names it (a reopened conversation's too). */
+  protected chipOf(a: Attachment): AttachmentChip {
+    return this.attachments?.chipOf(a) ?? attachmentChip(a);
+  }
+
+  protected glyphOf(a: Attachment): string {
+    return a.kind === 'file' ? 'file-text' : a.kind === 'audio' ? 'mic' : 'file';
+  }
+
+  protected chipTitle(chip: AttachmentChip): string {
+    return chip.detail ? `${chip.label} (${chip.detail})` : chip.label;
+  }
+
+  protected removeLabel(name: string): string {
+    return $localize`:@@pd.wb.assistant.attach.remove-named:Remove ${name}:name:`;
+  }
+
+  /** Takes a file off the next question; the focus goes back to the question (the chip and its button are gone). */
+  protected detach(chip: AttachmentChip): void {
+    this.store.detach(chip.attachment.sha256);
+    this.focusInput();
+  }
+
+  private sources(files: FileList | null | undefined): AttachSource[] {
+    return Array.from(files ?? []).map((f) => ({ name: f.name, type: f.type, size: f.size, bytes: async () => new Uint8Array(await f.arrayBuffer()) }));
+  }
+
+  /** The picker's files go to the engine; the picker is emptied so the same file can be chosen again. */
+  protected picked(e: Event): void {
+    const input = e.target as HTMLInputElement;
+    const files = this.sources(input.files);
+    input.value = '';
+    void this.store.attach(files);
+  }
+
+  /** Pasted files are attached (pasted text stays text). */
+  protected pasted(e: ClipboardEvent): void {
+    if (!this.store.canAttach() || this.blocked()) return;
+    const files = this.sources(e.clipboardData?.files);
+    if (!files.length) return;
+    e.preventDefault();
+    void this.store.attach(files);
+  }
+
+  private carriesFiles(e: DragEvent): boolean {
+    return this.store.canAttach() && !this.blocked() && Array.from(e.dataTransfer?.types ?? []).includes('Files');
+  }
+
+  protected dragOver(e: DragEvent): void {
+    if (!this.carriesFiles(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    this.dropping.set(true);
+  }
+
+  protected dragLeave(e: DragEvent): void {
+    // Leaving for a child of the composer is not leaving it.
+    const to = e.relatedTarget as Node | null;
+    if (!to || !(e.currentTarget as Node).contains(to)) this.dropping.set(false);
+  }
+
+  protected dropped(e: DragEvent): void {
+    this.dropping.set(false);
+    if (!this.carriesFiles(e)) return;
+    e.preventDefault();
+    void this.store.attach(this.sources(e.dataTransfer?.files));
+  }
+
+  /** "Recording 0:07": the engine's elapsed time, in minutes and seconds. */
+  protected recordingText(): string {
+    const s = this.store.speech();
+    const total = s.kind === 'recording' ? Math.floor(s.elapsedMs / 1000) : 0;
+    const time = `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+    return $localize`:@@pd.wb.assistant.recording:Recording ${time}:time:`;
+  }
+
+  /** A token count as people read it: 950, 1.2k, 32k. */
+  protected tokens(n: number): string {
+    if (n < 1000) return String(n);
+    const k = n / 1000;
+    return `${k < 10 ? k.toFixed(1).replace(/\.0$/, '') : Math.round(k)}k`;
+  }
+
+  protected fillPercent(used: ContextUse): number {
+    return used.limitTokens > 0 ? Math.min(100, (used.usedTokens / used.limitTokens) * 100) : 0;
+  }
+
+  /** The meter's words: the engine's count (or "about" for its estimate) out of the model's window. */
+  protected meterText(used: ContextUse): string {
+    const n = this.tokens(used.usedTokens);
+    if (used.limitTokens <= 0) return used.exact ? $localize`:@@pd.wb.assistant.context.tokens:${n}:n: tokens` : $localize`:@@pd.wb.assistant.context.about-tokens:About ${n}:n: tokens`;
+    const of = this.tokens(used.limitTokens);
+    return used.exact ? $localize`:@@pd.wb.assistant.context.of:${n}:n: of ${of}:of: tokens` : $localize`:@@pd.wb.assistant.context.about-of:About ${n}:n: of ${of}:of: tokens`;
+  }
+
+  /** The meter's tooltip: what the count is, and what its level means. */
+  protected meterTitle(used: ContextUse): string {
+    const base = $localize`:@@pd.wb.assistant.context.title:What the next question carries before its own text: the conversation the model reads and the tools' definitions.`;
+    if (used.level === 'high') return `${base} ${$localize`:@@pd.wb.assistant.context.high:Close to what the model can read.`}`;
+    if (used.level === 'full') return `${base} ${this.t.contextFull}`;
+    return base;
   }
 
   /** Moves the keyboard focus to the question (the command `pd.wb.assistant.focus`). */

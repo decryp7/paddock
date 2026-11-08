@@ -65,6 +65,7 @@ fn the_table_lists_the_commands_and_each_has_a_handler() {
         "assistant_load",
         "assistant_delete",
         "assistant_info",
+        "assistant_context",
     ] {
         assert!(names.contains(&n), "{n}");
     }
@@ -126,6 +127,14 @@ fn a_question_returns_at_once_and_the_answer_arrives_as_events_in_every_window()
         (info["provider"].as_str(), info["hasWrite"].as_bool()),
         (Some("Scripted"), Some(false))
     );
+    // The composer's meter (ADR 0023 WP-4b): the engine's own count after the turn, an estimate for a new chat.
+    let used = invoke(&main, "assistant_context", json!({"conversationId": id})).unwrap();
+    assert_eq!(
+        used,
+        json!({"usedTokens": 15, "limitTokens": 8192, "exact": true, "level": "ok"})
+    );
+    let fresh = invoke(&main, "assistant_context", json!({"conversationId": null})).unwrap();
+    assert_eq!(fresh["exact"], json!(false));
     assert_eq!(
         invoke(&main, "assistant_stop", json!({"conversationId": id})).unwrap(),
         json!(false)

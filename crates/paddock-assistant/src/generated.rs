@@ -10,7 +10,7 @@ use crate::conversation::*;
 use crate::event::*;
 use crate::service::{AssistantInfo, MAX_USER_CHARS, SendAck, SendRequest};
 use crate::tool::ToolInfo;
-use crate::types::{Role, ToolCall, Usage};
+use crate::types::{MAX_ATTACHMENTS, Role, ToolCall, Usage};
 use paddock_commands::testing::{WriteMode, sync_generated};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -46,6 +46,8 @@ fn types() -> String {
         ConversationSummary::decl(),
         ToolInfo::decl(),
         AssistantInfo::decl(),
+        crate::context::ContextLevel::decl(),
+        crate::context::ContextUse::decl(),
         crate::types::Attachment::decl(),
         SendRequest::decl(),
         SendAck::decl(),
@@ -64,7 +66,7 @@ import type {{ AiState }} from '@decryp7/paddock-ui/shell/pitwall';\n\n\
 /** Every window hears it while a run goes on; the payload is an `Envelope`. */\n\
 export const ASSISTANT_EVENT = '{EVENT}';\n\n\
 /** The limits the engine enforces (the composer shows them; the engine checks again). */\n\
-export const ASSISTANT_LIMITS = {{ userChars: {MAX_USER_CHARS}, contextItems: {MAX_CONTEXT_ITEMS}, contextChars: {MAX_CONTEXT_CHARS}, conversations: {MAX_CONVERSATIONS}, messages: {MAX_MESSAGES} }} as const;\n"
+export const ASSISTANT_LIMITS = {{ userChars: {MAX_USER_CHARS}, contextItems: {MAX_CONTEXT_ITEMS}, contextChars: {MAX_CONTEXT_CHARS}, conversations: {MAX_CONVERSATIONS}, messages: {MAX_MESSAGES}, attachments: {MAX_ATTACHMENTS} }} as const;\n"
     )
 }
 

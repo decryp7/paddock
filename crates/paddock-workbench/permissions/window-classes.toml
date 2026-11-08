@@ -9,6 +9,7 @@ identifier = "main"
 description = "Every workbench command a top-level window (`main`, `w-<n>`) may call."
 permissions = [
   "allow-assistant-approve-tool",
+  "allow-assistant-context",
   "allow-assistant-conversations",
   "allow-assistant-delete",
   "allow-assistant-info",
@@ -33,6 +34,7 @@ identifier = "popout"
 description = "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call."
 permissions = [
   "allow-assistant-approve-tool",
+  "allow-assistant-context",
   "allow-assistant-conversations",
   "allow-assistant-delete",
   "allow-assistant-info",

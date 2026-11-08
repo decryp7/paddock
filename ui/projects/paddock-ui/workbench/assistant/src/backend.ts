@@ -5,6 +5,7 @@ import {
   type ApprovalChoice,
   type AssistantEvent,
   type AssistantInfo,
+  type ContextUse,
   type Conversation,
   type ConversationSummary,
   type Envelope,
@@ -12,7 +13,7 @@ import {
   type SendRequest,
   type StoredMessage,
 } from '../generated/assistant';
-import { parseConversation, parseEnvelope, parseInfo, parseSummaries } from './wire';
+import { parseContext, parseConversation, parseEnvelope, parseInfo, parseSummaries } from './wire';
 
 /** Stops listening. */
 export type Unlisten = () => void;
@@ -46,6 +47,14 @@ export abstract class AssistantBackend {
   abstract approve(id: string, callId: string, choice: ApprovalChoice): Promise<void>;
   /** Every event until the returned function is called. */
   abstract listen(handler: (event: Envelope) => void): Promise<Unlisten>;
+  /**
+   * How full the model's context is for a conversation (`null`: a new one), as the engine measures it (ADR 0023 WP-4b, the
+   * composer's meter). `null` when this backend does not measure: the pane then shows no meter.
+   */
+  context(id: string | null): Promise<ContextUse | null> {
+    void id;
+    return Promise.resolve(null);
+  }
 }
 
 /** The backend over Tauri. Payloads are parsed at this edge. */
@@ -88,6 +97,10 @@ export class TauriAssistantBackend extends AssistantBackend {
     await this.ipc.invoke<unknown>('assistant_approve_tool', { conversationId: id, callId, choice });
   }
 
+  override async context(id: string | null): Promise<ContextUse | null> {
+    return parseContext(await this.ipc.invoke<unknown>('assistant_context', { conversationId: id }));
+  }
+
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
     return this.ipc.listen(ASSISTANT_EVENT, (payload) => {
       const e = parseEnvelope(payload);
@@ -104,6 +117,8 @@ export interface MemoryAssistantOptions {
   readonly info?: AssistantInfo;
   /** Conversations to start with. */
   readonly conversations?: readonly Conversation[];
+  /** The model's window for the context meter (default 8192 tokens; 0: unknown). */
+  readonly contextTokens?: number;
   /** A question is refused with this message. */
   readonly sendError?: string;
 }
@@ -207,7 +222,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
     const text = request.text.trim();
     let id = request.conversationId ?? null;
     const now = 1_700_000_000_000 + this.counter * 1000;
-    const user = { role: 'user' as const, text, context: request.context, atMs: now };
+    const user = { role: 'user' as const, text, context: request.context, ...(request.attachments?.length ? { attachments: request.attachments } : {}), atMs: now };
     if (id && this.store.has(id)) {
       const c = this.store.get(id) as Conversation;
       this.store.set(id, { ...c, messages: [...c.messages, user], updatedMs: now });
@@ -239,6 +254,15 @@ export class MemoryAssistantBackend extends AssistantBackend {
     this.approvals.push([callId, choice]);
     run.decision(choice);
     return Promise.resolve();
+  }
+
+  /** A plausible meter for the demo (about four characters a token over the conversation); the engine's rule is Rust's. */
+  override context(id: string | null): Promise<ContextUse | null> {
+    const limit = this.options.contextTokens ?? 8192;
+    const c = id ? this.store.get(id) : undefined;
+    const used = 40 + Math.ceil((c?.messages ?? []).reduce((n, m) => n + m.text.length, 0) / 4);
+    const level = limit === 0 ? 'unknown' : used >= limit ? 'full' : used * 100 >= limit * 80 ? 'high' : 'ok';
+    return Promise.resolve({ usedTokens: used, limitTokens: limit, exact: c !== undefined, level });
   }
 
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {

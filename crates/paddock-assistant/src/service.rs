@@ -2,15 +2,16 @@
 //! once (rule 10) and a run reports through [`EventSink`].
 
 use crate::approval::{ApprovalChoice, ApprovalPolicy, DefaultPolicy};
+use crate::context::{ContextUse, estimate_tokens};
 use crate::conversation::{
     ContextItem, Conversation, ConversationStore, ConversationSummary, Conversations,
     MAX_CONTEXT_CHARS, MAX_CONTEXT_ITEMS, SaveError, StoredError, StoredMessage,
 };
 use crate::event::{AssistantEvent, EndReason, Envelope, ErrorKind, EventSink};
-use crate::provider::{LlmProvider, ProviderError};
+use crate::provider::{LlmProvider, ProviderError, ProviderPhase};
 use crate::run::{Budgets, Gate, Hooks, Refused, Turn, run_turn};
 use crate::tool::{ToolInfo, Tools};
-use crate::types::{Attachment, Cancel, MAX_ATTACHMENTS, Role};
+use crate::types::{Attachment, Cancel, ChatRequest, ChatResponse, MAX_ATTACHMENTS, Role};
 use paddock_health::Clock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -22,6 +23,8 @@ use std::time::UNIX_EPOCH;
 pub const MAX_USER_CHARS: usize = 8000;
 /// Most runs at once over all conversations.
 pub const MAX_RUNS: usize = 4;
+/// Most conversations whose last measured context the assistant remembers (past it they are estimated again).
+pub const MAX_MEASURED: usize = 1024;
 
 /// What the app tells the assistant about itself.
 #[derive(Clone)]
@@ -166,6 +169,8 @@ pub struct Assistant {
     clock: Arc<dyn Clock>,
     cfg: AssistantConfig,
     runs: Mutex<HashMap<String, Arc<Run>>>,
+    /// Each conversation's context as the engine counted it on the last model call of this session (prompt plus answer).
+    measured: Mutex<HashMap<String, u64>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -208,6 +213,7 @@ impl Assistant {
             clock,
             cfg,
             runs: Mutex::default(),
+            measured: Mutex::default(),
         })
     }
 
@@ -248,6 +254,50 @@ impl Assistant {
         self.store.summaries()
     }
 
+    /// How full the model's context is for the conversation `id` (none, or one that does not exist: a new chat), for the
+    /// composer's meter (ADR 0023 WP-4b). After a turn of this session it is the engine's count of the last model call
+    /// (prompt plus answer); otherwise an estimate over the system prompt, every tool offered (an action's definition is
+    /// sent once the user may allow it) and the history the model would read.
+    pub fn context(&self, id: Option<&str>) -> ContextUse {
+        let limit = self.provider.context_length() as u64;
+        if let Some(used) = id.and_then(|id| lock(&self.measured).get(id).copied()) {
+            return ContextUse::new(used, limit, true);
+        }
+        let tools: usize = self
+            .tools()
+            .offered(true)
+            .iter()
+            .map(|t| {
+                t.name.len() + t.description.chars().count() + t.input_schema.to_string().len()
+            })
+            .sum();
+        let history: usize = id.map_or(0, |id| {
+            self.store
+                .history(id, self.cfg.history_chars)
+                .iter()
+                .map(|m| m.content.chars().count())
+                .sum()
+        });
+        let chars = self.cfg.system.chars().count() + tools + history;
+        ContextUse::new(estimate_tokens(chars), limit, false)
+    }
+
+    fn remember_measure(&self, id: &str, used: Option<u64>) {
+        let mut measured = lock(&self.measured);
+        match used {
+            Some(used) => {
+                if measured.len() >= MAX_MEASURED && !measured.contains_key(id) {
+                    // Bounded (rule: bounded resources): the others fall back to estimates.
+                    measured.clear();
+                }
+                measured.insert(id.to_string(), used);
+            }
+            None => {
+                measured.remove(id);
+            }
+        }
+    }
+
     /// One conversation.
     pub fn load(&self, id: &str) -> Result<Conversation, AssistantError> {
         self.store.get(id).ok_or(AssistantError::NotFound)
@@ -256,6 +306,7 @@ impl Assistant {
     /// Deletes a conversation (stopping its run first).
     pub fn delete(&self, id: &str) -> Result<(), AssistantError> {
         self.stop(id);
+        lock(&self.measured).remove(id);
         match self.store.delete(id) {
             Ok(true) => Ok(()),
             Ok(false) => Err(AssistantError::NotFound),
@@ -442,8 +493,12 @@ impl Assistant {
                     .collect()
             })
             .unwrap_or_default();
+        let measuring = Measuring {
+            inner: self.provider.as_ref(),
+            last: Mutex::new(None),
+        };
         let turn = Turn {
-            provider: self.provider.as_ref(),
+            provider: &measuring,
             tools: offer.tools,
             policy: self.cfg.policy.as_ref(),
             taken_ids,
@@ -489,6 +544,8 @@ impl Assistant {
             Ok(end) => end.end,
             Err(_) => EndReason::Failed,
         };
+        let last = lock(&measuring.last).take();
+        self.remember_measure(id, last);
         settle(&mut kept, ended, error, end_message, self.now_ms());
         if let Some(Err(e)) = self.store.append(id, kept)
             && !told
@@ -517,6 +574,52 @@ impl Assistant {
                 needs_ai: None,
             }),
         }
+    }
+}
+
+/// The provider of one turn, keeping the engine's count of its last call (prompt plus answer) for the context meter. A call
+/// without a reported usage leaves no count, so the meter estimates instead of showing a stale number.
+struct Measuring<'a> {
+    inner: &'a dyn LlmProvider,
+    last: Mutex<Option<u64>>,
+}
+
+impl Measuring<'_> {
+    fn note(&self, result: &Result<ChatResponse, ProviderError>) {
+        if let Ok(r) = result {
+            *lock(&self.last) = r.usage.filter(|u| u.total() > 0).map(|u| u.total());
+        }
+    }
+}
+
+impl LlmProvider for Measuring<'_> {
+    fn id(&self) -> &str {
+        self.inner.id()
+    }
+    fn display_name(&self) -> String {
+        self.inner.display_name()
+    }
+    fn context_length(&self) -> usize {
+        self.inner.context_length()
+    }
+    fn chat(
+        &self,
+        req: &ChatRequest,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<ChatResponse, ProviderError> {
+        let result = self.inner.chat(req, on_delta);
+        self.note(&result);
+        result
+    }
+    fn chat_phased(
+        &self,
+        req: &ChatRequest,
+        on_delta: &mut dyn FnMut(&str),
+        on_phase: &mut dyn FnMut(ProviderPhase),
+    ) -> Result<ChatResponse, ProviderError> {
+        let result = self.inner.chat_phased(req, on_delta, on_phase);
+        self.note(&result);
+        result
     }
 }
 

@@ -1,6 +1,7 @@
 // Generated from `paddock_workbench::COMMANDS` by its tests. Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-workbench --all-features --lib generated.
 pub const COMMAND_NAMES: &[&str] = &[
     "assistant_approve_tool",
+    "assistant_context",
     "assistant_conversations",
     "assistant_delete",
     "assistant_info",
