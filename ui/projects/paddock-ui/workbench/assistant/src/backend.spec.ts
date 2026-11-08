@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ASSISTANT_COMMANDS } from '../generated/assistant-commands';
-import { ASSISTANT_EVENT, type AssistantInfo, type Envelope } from '../generated/assistant';
+import { ASSISTANT_EVENT, type AssistantInfo, type Attachment, type Envelope } from '../generated/assistant';
 import { FIXTURE_CONVERSATION, FIXTURE_EVENTS } from '../generated/assistant-fixtures';
 import { DEMO_ANSWER, MemoryAssistantBackend, TauriAssistantBackend, type AssistantIpc } from './backend';
 
@@ -96,6 +96,21 @@ describe('MemoryAssistantBackend', () => {
     const ack = await b.send({ ...(conversationId ? { conversationId } : {}), text, context: [], allowWrite });
     return { events, ack };
   }
+
+  it("measures like the engine: the window less a 1024-token answer reserve, files at about four bytes a token (review 2 P2-F)", async () => {
+    const file = (sha: string, name: string): Attachment => ({ kind: 'file', sha256: sha.repeat(64), name });
+    const bytes = new Map([['a'.repeat(64), 4000]]);
+    const b = new MemoryAssistantBackend({ attachmentTokens: (a) => Math.ceil((bytes.get(a.sha256) ?? 0) / 4) });
+    // A new chat: about 40 tokens of system prompt and tools, in 8192 less the reserve.
+    expect(await b.context(null)).toEqual({ usedTokens: 40, limitTokens: 7168, reserveTokens: 1024, exact: false, level: 'ok' });
+    expect((await b.context(null, [file('a', 'notes.txt')]))?.usedTokens).toBe(1040);
+    // Without a size hook a file counts a plausible 250 tokens; a window of 0 is unknown and keeps no room.
+    expect((await new MemoryAssistantBackend().context(null, [file('b', 'x.txt')]))?.usedTokens).toBe(290);
+    expect(await new MemoryAssistantBackend({ contextTokens: 0 }).context(null)).toMatchObject({ limitTokens: 0, level: 'unknown' });
+    // A small window still keeps at least one token of room (as the engine does) and is full past it.
+    expect(await new MemoryAssistantBackend({ contextTokens: 1074 }).context(null)).toMatchObject({ limitTokens: 50, level: 'high' });
+    expect(await new MemoryAssistantBackend({ contextTokens: 1000 }).context(null)).toMatchObject({ limitTokens: 1, level: 'full' });
+  });
 
   it('streams a canned answer word by word and keeps the conversation', async () => {
     const b = new MemoryAssistantBackend();

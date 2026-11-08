@@ -21,6 +21,8 @@ export class MemoryAssistantAttachments extends AssistantAttachments {
   readonly added: string[] = [];
   /** Every file taken off a question, by name. */
   readonly removed: string[] = [];
+  /** The size of each file taken, by its digest (the memory engine's size source; files are at most 256 KiB, 16 a question). */
+  private readonly sizes = new Map<string, number>();
 
   constructor(private readonly limits: Partial<AttachRules> = {}) {
     super();
@@ -52,7 +54,16 @@ export class MemoryAssistantAttachments extends AssistantAttachments {
     const text = new TextDecoder().decode(bytes);
     const lines = text.split('\n').filter((l, i, all) => l || i < all.length - 1).length;
     const size = bytes.length < 1024 ? `${bytes.length} B` : `${Math.round(bytes.length / 1024)} KB`;
-    return { attachment: { kind: 'file', sha256: fakeSha(file.name + text), name: file.name }, label: file.name, detail: `${size} · ${lines} ${lines === 1 ? 'line' : 'lines'}` };
+    const sha256 = fakeSha(file.name + text);
+    this.sizes.set(sha256, bytes.length);
+    return { attachment: { kind: 'file', sha256, name: file.name }, label: file.name, detail: `${size} · ${lines} ${lines === 1 ? 'line' : 'lines'}` };
+  }
+
+  /** About how many tokens a file this port took takes: four bytes a token, as the engine estimates (for
+   *  `MemoryAssistantOptions.attachmentTokens`); a plausible 250 for one it does not know. */
+  tokensOf(attachment: Attachment): number {
+    const bytes = this.sizes.get(attachment.sha256);
+    return bytes === undefined ? 250 : Math.ceil(bytes / 4);
   }
 }
 

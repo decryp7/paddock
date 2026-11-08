@@ -65,12 +65,13 @@
   }
 
   // Disabled drops the fill (outline + subtle text), so it never looks like an enabled grey primary (review X50 P2-12); its
-  // outline is the faint border-strong, not the control border of an enabled secondary button (WP-4b review P2-19).
+  // outline is the faint border-strong, not the control border of an enabled secondary button (WP-4b review P2-19), and both
+  // are dimmed to 70 % so it reads as off next to enabled secondary buttons on a dark pane too (WP-4b review 2).
   &:disabled,
   &[aria-disabled='true'] {
-    border-color: var(--pd-border-strong);
+    border-color: color-mix(in srgb, var(--pd-border-strong) 70%, transparent);
     background: transparent;
-    color: var(--pd-text-subtle);
+    color: color-mix(in srgb, var(--pd-text-subtle) 70%, transparent);
     opacity: 1;
   }
 }

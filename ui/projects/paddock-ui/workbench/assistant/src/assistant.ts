@@ -1,5 +1,5 @@
 import { NgComponentOutlet } from '@angular/common';
-import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, DestroyRef, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
 import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore, type ActionsGate } from './assistant.store';
@@ -9,6 +9,9 @@ import { chipText, conversationTitle, waitingPhase, type TurnPart, type TurnView
 import type { ProviderPhase } from '../generated/assistant';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
+
+/** A window this short folds the composer's files tray to two rows (review 2 P2-A; the styles use the same height). */
+const SHORT_WINDOW = '(max-height: 760px)';
 
 /** How close to the bottom (px) the user must be for the log to follow the streaming text. */
 const SCROLL_STICK_PX = 24;
@@ -208,11 +211,13 @@ const SCROLL_STICK_PX = 24;
       </div>
     }
 
-    @if (store.context()?.level === 'full') {
+    @if (store.fullBy(); as by) {
       <div class="banner full" role="status" data-testid="assistant-context-full">
         <pd-status-glyph class="banner-glyph" status="error" [size]="16" />
-        <span class="banner-text">{{ t.contextFull }}</span>
-        <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-context-new" [disabled]="store.busy()" (click)="store.newConversation()">{{ t.startNewChat }}</button>
+        <span class="banner-text">{{ fullNote() }}</span>
+        @if (by === 'chat' && store.activeId()) {
+          <button type="button" class="pd-btn pd-btn--sm" data-testid="assistant-context-new" [disabled]="store.busy()" (click)="store.newConversation()">{{ t.startNewChat }}</button>
+        }
       </div>
     }
 
@@ -226,10 +231,35 @@ const SCROLL_STICK_PX = 24;
       (drop)="dropped($event)"
     >
       @if (dropping()) {
-        <p class="drop-hint" aria-hidden="true">{{ t.dropHere }}</p>
+        <p class="drop-hint" aria-hidden="true"><span class="drop-label">{{ t.dropHere }}</span></p>
       }
       @if (store.attached().length || store.attaching()) {
-        <ul class="chips files-tray" [attr.aria-label]="t.files" data-testid="assistant-files">
+        <ul
+          #tray
+          id="pd-assistant-files"
+          class="chips files-tray"
+          [class.folded]="short() && !filesOpen()"
+          [class.open]="short() && filesOpen()"
+          [attr.aria-label]="t.files"
+          data-testid="assistant-files"
+        >
+          @if (short() && (trayOverflows() || filesOpen())) {
+            <li class="summary-item">
+              <button
+                type="button"
+                class="chip summary"
+                data-testid="assistant-files-summary"
+                aria-controls="pd-assistant-files"
+                [attr.aria-expanded]="filesOpen()"
+                [attr.title]="filesOpen() ? t.foldFiles : t.showFiles"
+                (click)="filesOpen.set(!filesOpen())"
+              >
+                <pd-glyph name="file" [size]="14" />
+                <span class="chip-label">{{ filesCount() }}</span>
+                <pd-glyph class="summary-chev" [class.up]="filesOpen()" name="chevron-down" [size]="14" />
+              </button>
+            </li>
+          }
           @for (chip of store.attached(); track chip.attachment.sha256) {
             <li class="chip file" data-testid="assistant-file" [attr.title]="chipTitle(chip)">
               <pd-glyph [name]="glyphOf(chip.attachment)" [size]="14" />
@@ -265,7 +295,7 @@ const SCROLL_STICK_PX = 24;
       <textarea
         #input
         class="input"
-        rows="3"
+        [rows]="short() ? 2 : 3"
         data-testid="assistant-input"
         [attr.aria-label]="t.question"
         [disabled]="blocked()"
@@ -341,7 +371,7 @@ const SCROLL_STICK_PX = 24;
             <pd-glyph name="stop" [size]="14" /> {{ t.stop }}
           </button>
         } @else {
-          <button type="submit" class="pd-btn" [class.pd-btn--primary]="!blocked()" data-testid="assistant-send" [disabled]="!store.canSend() || blocked()" [attr.title]="store.full() ? t.contextFull : null">
+          <button type="submit" class="pd-btn" [class.pd-btn--primary]="!blocked()" data-testid="assistant-send" [disabled]="!store.canSend() || blocked()" [attr.title]="store.full() ? fullNote() : null">
             <pd-glyph name="play" [size]="14" /> {{ t.send }}
           </button>
         }
@@ -426,6 +456,25 @@ const SCROLL_STICK_PX = 24;
     .chip.file { cursor: default; padding-right: 2px; }
     /* Many files wrap into rows; past about three rows the tray scrolls, so the question box and the log keep their room. */
     .files-tray { max-height: 92px; overflow-y: auto; padding-block: 1px; }
+    /*
+     * A short window (under about 760 px) folds the tray to two rows (24 px chips, a 4 px gap, 1 px padding each side) behind
+     * an "N files" chip that opens it, the question box to two lines and a refusal to a tighter banner, and the empty state
+     * gives up its icon (review 2 P2-A). The log takes 120 px before anything else grows; in a pane too short for that and the
+     * composer, the log gives way first, so the question and Send are never cut off.
+     */
+    .files-tray.folded { max-height: 54px; overflow: hidden; }
+    .summary { font-weight: var(--pd-weight-medium); background: var(--pd-surface-1); }
+    .summary:hover { background: var(--pd-hover); }
+    .summary-chev { transition: transform var(--pd-duration-fast, 120ms); }
+    .summary-chev.up { transform: rotate(180deg); }
+    .log { flex: 1 1 120px; }
+    @media (max-height: 760px) {
+      .empty-state { gap: 0; }
+      .empty-icon { display: none; }
+      .log { padding-block: var(--pd-space-2); }
+      .banner { padding-block: var(--pd-space-1); }
+    }
+    @media (prefers-reduced-motion: reduce) { .summary-chev { transition: none; } }
     .chip.static.file { padding-right: var(--pd-space-2); }
     .chip-detail { color: var(--pd-text-muted); white-space: nowrap; }
     .chip-x { all: unset; display: inline-grid; place-items: center; width: 24px; height: 24px; margin-block: -1px; border-radius: var(--pd-radius-pill); color: var(--pd-text-muted); cursor: pointer; }
@@ -436,6 +485,8 @@ const SCROLL_STICK_PX = 24;
     .composer.dropping { background: var(--pd-accent-tint); box-shadow: inset 0 0 0 2px var(--pd-accent); border-radius: inherit; }
     .drop-hint { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; color: var(--pd-accent); font-weight: var(--pd-weight-semibold); pointer-events: none; z-index: 1; }
     .composer.dropping > :not(.drop-hint) { opacity: 0.25; }
+    /* The words sit on the pane's surface, so the faded question box's edge never runs through them. */
+    .drop-label { padding: var(--pd-space-1) var(--pd-space-3); border-radius: var(--pd-radius-pill); background: var(--pd-surface-1); box-shadow: inset 0 0 0 1px var(--pd-accent); }
     .compose-btn { min-width: 28px; padding-inline: var(--pd-space-1); }
     /* Pressed while recording (a red tint, unlike a hover); back to a plain ghost button the moment recording stops. */
     .mic.recording, .mic.recording:hover { color: var(--pd-danger); background: var(--pd-danger-tint); }
@@ -551,10 +602,21 @@ export class PdAssistant {
     micStop: $localize`:@@pd.wb.assistant.mic.stop:Stop recording`,
     transcribing: $localize`:@@pd.wb.assistant.transcribing:Writing down what you said…`,
     contextFull: $localize`:@@pd.wb.assistant.context.full-note:This chat fills what the model can read.`,
+    filesTooLong: $localize`:@@pd.wb.assistant.context.files-too-long:These files are too long for the model. Remove a file.`,
+    showFiles: $localize`:@@pd.wb.assistant.files.show:Show all attached files`,
+    foldFiles: $localize`:@@pd.wb.assistant.files.fold:Show fewer attached files`,
     closeToLimit: $localize`:@@pd.wb.assistant.context.close:close to the limit`,
     startNewChat: $localize`:@@pd.wb.assistant.context.start-new:Start a new chat`,
     contextUsed: $localize`:@@pd.wb.assistant.context.label:Context used`,
   };
+
+  /** The window is short (under about 760 px tall): the files tray folds to two rows behind its "N files" chip. */
+  protected readonly short = signal(false);
+  /** The folded files tray holds more than its two rows (measured after it renders). */
+  protected readonly trayOverflows = signal(false);
+  /** The user opened the folded files tray; it folds again when the files go (sent or removed). */
+  protected readonly filesOpen = linkedSignal({ source: () => this.store.attached().length === 0, computation: () => false });
+  private readonly tray = viewChild<ElementRef<HTMLElement>>('tray');
 
   /** The user is at (within 24 px of) the bottom of the log: new text keeps it there. */
   private pinned = true;
@@ -573,6 +635,28 @@ export class PdAssistant {
   });
 
   constructor() {
+    // A short window folds the files tray (DOM only: the media query is not a signal).
+    if (typeof matchMedia === 'function') {
+      const query = matchMedia(SHORT_WINDOW);
+      this.short.set(query.matches);
+      const change = (e: MediaQueryListEvent): void => this.short.set(e.matches);
+      query.addEventListener('change', change);
+      inject(DestroyRef).onDestroy(() => query.removeEventListener('change', change));
+    }
+    // effect-state: whether the folded tray overflows is a measurement of the rendered DOM (wrapping), not derivable state.
+    effect((onCleanup) => {
+      this.store.attached();
+      this.store.attaching();
+      const folded = this.short() && !this.filesOpen();
+      const el = this.tray()?.nativeElement;
+      if (!el || !folded) return;
+      const measure = (): void => this.trayOverflows.set(el.scrollHeight > el.clientHeight + 1);
+      afterNextRender(measure, { injector: this.injector });
+      if (typeof ResizeObserver === 'undefined') return;
+      const watch = new ResizeObserver(measure);
+      watch.observe(el);
+      onCleanup(() => watch.disconnect());
+    });
     // The host's gate reaches the store, which sends it with each question (an input, not derived state of the store).
     effect(() => this.store.setActionsGate(this.actionsGate()));
     // Tells the host which conversation is open (an output: outside the signal graph).
@@ -865,8 +949,19 @@ export class PdAssistant {
     const base = $localize`:@@pd.wb.assistant.context.title:What the next question carries before its own text: the conversation the model reads and the tools' definitions.`;
     if (used.level === 'high') return `${base} ${$localize`:@@pd.wb.assistant.context.high:Close to what the model can read.`}`;
     if (used.reserveTokens > 0) return `${base} ${$localize`:@@pd.wb.assistant.context.reserve:${this.tokens(used.reserveTokens)}:n: more are kept for the answer.`}`;
-    if (used.level === 'full') return `${base} ${this.t.contextFull}`;
+    if (used.level === 'full') return `${base} ${this.fullNote()}`;
     return base;
+  }
+
+  /** The folded tray's summary: how many files the next question carries. */
+  protected filesCount(): string {
+    const n = this.store.attached().length;
+    return n === 1 ? $localize`:@@pd.wb.assistant.files.one:1 file` : $localize`:@@pd.wb.assistant.files.many:${n}:count: files`;
+  }
+
+  /** Why nothing more can be sent: the chat is too long, or the files waiting in the composer are (review 2 P2-C). */
+  protected fullNote(): string {
+    return this.store.fullBy() === 'files' ? this.t.filesTooLong : this.t.contextFull;
   }
 
   /** Moves the keyboard focus to the question (the command `pd.wb.assistant.focus`). */
