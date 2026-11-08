@@ -16,7 +16,9 @@
 ; and nothing else ($R6 and $R7 also by the test harness's log lines). The
 ; template's pages use $R0 to $R7 but do not run inside a section; its CheckIfAppIsRunning uses $R0 to $R3. $PaddockHaveSetup (1 or 0) says whether paddock-setup.exe was available to this run.
 ;
-; $PaddockTrusted (1 or 0) says whether the uninstaller may use the contents of $INSTDIR; with 0 no step runs a program of it.
+; $PaddockTrusted (1 or 0) says whether this run may use the contents of $INSTDIR. An uninstaller that does not trust its folder ends
+; in PADDOCK_INSTALLING (the first macro of PREUNINSTALL) with level 44 and "use Settings > Apps", before any app step and before the
+; template deletes anything.
 ;
 ; Where paddock-setup.exe runs from: the installer extracts its embedded copy to $PLUGINSDIR; the uninstaller cannot `File`, so
 ; it copies the installed one to $PLUGINSDIR. Both run it from there, never from $INSTDIR: stop-all then never has to end its own
@@ -47,7 +49,7 @@
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
-!define PADDOCK_INCLUDE_VERSION "5"
+!define PADDOCK_INCLUDE_VERSION "6"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
 !ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
   VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
@@ -79,6 +81,7 @@
 !define PADDOCK_LEVEL_BAD_DIR 41
 !define PADDOCK_LEVEL_STILL_RUNNING 42
 !define PADDOCK_LEVEL_TOOL_FAILED 43
+!define PADDOCK_LEVEL_UNTRUSTED 44
 
 !define PADDOCK_SETUP "$PLUGINSDIR\paddock-setup.exe"
 
@@ -215,6 +218,9 @@ Var PaddockTrusted
       ; Nothing of this folder is copied or run: it is not the folder the installer registered, or not directly under Program Files.
       DetailPrint "NOTE $INSTDIR is not the install folder registered by the installer: nothing in it is run"
       !insertmacro _PADDOCK_TEST_LOG "NOTE untrusted uninstall folder: nothing in it is run"
+      ; And nothing is deleted: the uninstaller ends here, before any step of the app and before the template's own deletions (so the
+      ; template never removes the registered uninstall key of the real install on behalf of a copied uninstaller).
+      !insertmacro PADDOCK_ABORT "This is not the installed copy of ${PRODUCTNAME}. Use Settings > Apps to uninstall ${PRODUCTNAME}." ${PADDOCK_LEVEL_UNTRUSTED} ""
     ${EndIf}
   !endif
   ${If} $PaddockHaveSetup == 1

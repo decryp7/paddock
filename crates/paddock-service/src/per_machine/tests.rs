@@ -452,3 +452,33 @@ fn the_uninstaller_decides_trust_before_it_copies_anything_of_its_folder() {
         "the decision runs nothing"
     );
 }
+
+/// Review P2-2 of B6b: an uninstaller that does not trust its folder ends at once (level 44, "use Settings > Apps") in the include's
+/// first macro of PREUNINSTALL, before any step of the app and before the template deletes anything, so a copied uninstaller can no
+/// longer remove the registered uninstall key of the real install.
+#[test]
+fn an_untrusted_uninstaller_ends_before_it_deletes_anything() {
+    let t = canonical_include();
+    let lines: Vec<&str> = t.lines().map(str::trim_end).collect();
+    assert!(lines.contains(&"!define PADDOCK_LEVEL_UNTRUSTED 44"));
+    let installing = t
+        .find("!macro PADDOCK_INSTALLING")
+        .expect("the macro exists");
+    let body = &t[installing..installing + t[installing..].find("!macroend").unwrap()];
+    let untrusted = body
+        .find("${Else}\n      ; Nothing of this folder")
+        .expect("the untrusted branch");
+    let branch = &body[untrusted..];
+    let abort = branch
+        .find("PADDOCK_ABORT")
+        .expect("it ends the uninstaller");
+    assert!(
+        branch[abort..].contains("PADDOCK_LEVEL_UNTRUSTED")
+            && branch.contains("Use Settings > Apps"),
+        "{branch}"
+    );
+    assert!(
+        !branch[..abort].contains("Delete") && !branch[..abort].contains("RMDir"),
+        "{branch}"
+    );
+}

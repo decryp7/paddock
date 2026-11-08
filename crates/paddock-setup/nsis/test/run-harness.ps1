@@ -131,20 +131,33 @@ Check 'H no setup: the uninstaller reached its last step' ($null -eq $u.Why) $u.
 Check 'H no setup: a real uninstall removes the folder (removed, or removed after retries)' ((-not (Test-Path $h)) -and $u.Outcome -in 'removed', 'removed-after-retries') "outcome $($u.Outcome); left: $((Get-ChildItem $h -Force -Name -ErrorAction SilentlyContinue) -join ',')"
 Remove-Item $key -ErrorAction SilentlyContinue
 
-# P: a copied uninstaller (P1-1 of the B6b review). The attacker's folder holds a copy of uninstall.exe, a planted paddock-setup.exe
-# (the logging stub: it exits 0 and would "accept" anything) and a planted service program. Run elevated, nothing of that folder may
-# run: not the tool, not the service verb. The folder is not the one HKLM registers (and not under the root).
+# P: a copied uninstaller (P1-1 of the B6b review, P2-2 of its re-review). The attacker's folder holds a copy of uninstall.exe, a
+# planted paddock-setup.exe (the logging stub: it exits 0 and would "accept" anything) and a planted service program. Run elevated,
+# nothing of that folder may run (not the tool, not the service verb), the uninstaller ends with level 44 before it deletes anything,
+# and the real install keeps its HKLM key and its updates folder. The folder is not the one HKLM registers (and not under the root).
 $p = Join-Path $base 'p'
 $r = Run $installer "/S /D=$p" @{}
+New-Item -ItemType Directory -Force "$p\updates" | Out-Null; 'x' | Set-Content "$p\updates\setup.log"
 $planted = Join-Path $Root 'planted'
 Remove-Item -Recurse -Force $planted -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $planted | Out-Null
 Copy-Item "$p\uninstall.exe", "$p\paddock-setup.exe", "$p\harness-server.exe" $planted
-$u = UninstallWait $planted
-Check 'P copied uninstaller reached its last step' ($null -eq $u.Why) $u.Why
-Check 'P copied uninstaller: the planted tool never ran' (-not ($u.Lines -match '^(hold-installing|check-dir|same-folder|stop-all|clean-run|clean-staging|guard)')) ($u.Lines -join '|')
-Check 'P copied uninstaller: the planted service program never ran' (-not ($u.Lines -match '^SERVER')) ($u.Lines -join '|')
-Check 'P copied uninstaller: says it trusts nothing there' ($u.Lines -match '^NOTE untrusted uninstall folder') ($u.Lines -join '|')
+# In place (the uninstaller does not copy itself): the exit code is the uninstaller's own.
+$r = Run "$planted\uninstall.exe" "/S _?=$planted" @{}
+Check 'P copied uninstaller (in place): ends with level 44' ($r.Code -eq 44) "code $($r.Code)"
+Check 'P copied uninstaller (in place): the planted tool never ran' (-not ($r.Lines -match '^(hold-installing|check-dir|same-folder|stop-all|clean-run|clean-staging|guard)')) ($r.Lines -join '|')
+Check 'P copied uninstaller (in place): the planted service program never ran' (-not ($r.Lines -match '^SERVER')) ($r.Lines -join '|')
+Check 'P copied uninstaller (in place): says it trusts nothing there' ($r.Lines -match '^NOTE untrusted uninstall folder') ($r.Lines -join '|')
+# As a user starts it: the uninstaller copies itself and the copy runs; the line is the copy's refusal.
+Remove-Item $log -ErrorAction SilentlyContinue
+[Environment]::SetEnvironmentVariable('PADDOCK_STUB_LOG', $log)
+$null = Start-Process -FilePath "$planted\uninstall.exe" -ArgumentList '/S' -PassThru
+$why = WaitUntil { (Test-Path $log) -and (@(Get-Content $log -ErrorAction SilentlyContinue) -match '^ABORT level 44').Count -gt 0 } 'the copied uninstaller to refuse (level 44)' 90
+[Environment]::SetEnvironmentVariable('PADDOCK_STUB_LOG', $null)
+$lines = @(Get-Content $log -ErrorAction SilentlyContinue)
+Check 'P copied uninstaller (copy): refused at level 44' ($null -eq $why) $why
+Check 'P copied uninstaller (copy): nothing of the folder ran' (-not ($lines -match '^(hold-installing|check-dir|same-folder|stop-all|clean-run|clean-staging|guard|SERVER)')) ($lines -join '|')
+Check 'P the real install keeps its HKLM key, its updates folder and its files' (((Test-Path $key) -or (Test-Path $key32)) -and (Test-Path "$p\updates\setup.log") -and (Test-Path "$p\harness.txt")) "key $((Test-Path $key) -or (Test-Path $key32)); updates $(Test-Path "$p\updates\setup.log")"
 Remove-Item -Recurse -Force $planted -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
 Remove-Item $key, $key32 -ErrorAction SilentlyContinue
