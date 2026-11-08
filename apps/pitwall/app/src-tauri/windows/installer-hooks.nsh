@@ -12,7 +12,7 @@
 
 ; Takes the service out before its program is replaced. The installer's PREINSTALL has passed PADDOCK_CHECK_DIR (Program Files,
 ; owned and protected by administrators), so the program is run from a checked folder and a failed removal aborts the install
-; (level PADDOCK_LEVEL_TOOL_FAILED): a service that is still registered must not be left to restart the server between this step
+; (level PADDOCK_LEVEL_TOOL_FAILED) only while the service is still registered (`sc query`; 1060 means gone): a service that is still registered must not be left to restart the server between this step
 ; and the programs being ended (VM row PW-1). An uninstaller has no abort (it must stay usable), and its folder is not checked
 ; by anyone yet: the include decides in NSIS alone whether it trusts $INSTDIR (the folder the installer registered, directly
 ; under Program Files; `$PaddockTrusted`) before it copies or runs anything of it. Then PADDOCK_DIR_ACCEPTED asks `check-dir`, and
@@ -47,7 +47,14 @@
       Pop $0
       DetailPrint "pitwall-server uninstall: exit code $0"
       ${If} $0 != 0
-        !insertmacro PADDOCK_ABORT "The Pitwall service could not be removed (code $0), so Pitwall cannot be updated safely. Remove the service in Windows Services or restart the PC, then run this installer again." ${PADDOCK_LEVEL_TOOL_FAILED} ""
+        ; The verb failed (a corrupt or older program, error 1072 "marked for delete"): only a service that is still registered stops
+        ; the install. 1060 from `sc query` is "does not exist": nothing is left to restart the server, so the install goes on.
+        nsExec::ExecToLog '"$SYSDIR\sc.exe" query Pitwall'
+        Pop $1
+        DetailPrint "sc query Pitwall: exit code $1"
+        ${If} $1 != 1060
+          !insertmacro PADDOCK_ABORT "The Pitwall service could not be removed (code $0), so Pitwall cannot be updated safely. Remove the service in Windows Services, restart the PC, or uninstall Pitwall first, then run this installer again." ${PADDOCK_LEVEL_TOOL_FAILED} ""
+        ${EndIf}
       ${EndIf}
     ${EndIf}
   !endif

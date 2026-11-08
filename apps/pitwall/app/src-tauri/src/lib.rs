@@ -709,6 +709,16 @@ mod capability_tests {
         // The installer aborts when the service cannot be removed (it must not be left to restart the server); the uninstaller, which
         // cannot abort, removes it with sc.exe only when the include trusts the folder and paddock-setup.exe is missing.
         assert!(unreg.contains("PADDOCK_LEVEL_TOOL_FAILED"), "{unreg}");
+        // It aborts only while the service is still registered: `sc query` answering 1060 (does not exist) lets the install go on.
+        let (_, installer) = unreg.split_once("!else").expect("an installer branch");
+        let query = installer
+            .find("sc.exe\" query Pitwall")
+            .expect("the installer asks sc query after a failed removal");
+        assert!(
+            query < installer.find("PADDOCK_ABORT").unwrap() && installer.contains("1060"),
+            "{installer}"
+        );
+        assert!(installer.contains("or uninstall Pitwall first"), "{installer}");
         assert!(
             unreg.contains("$PaddockTrusted == 1") && unreg.contains("sc.exe\" delete Pitwall"),
             "{unreg}"

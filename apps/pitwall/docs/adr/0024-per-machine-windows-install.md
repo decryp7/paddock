@@ -43,6 +43,7 @@ it can see the thing):
 | PW-4 | `uninstall` fails with error 1072 (the service is marked for delete while a handle is open, e.g. Services open): the installer aborts with level 43 and its words; running it again after the handle is closed succeeds | Services (`services.msc`) open on the Pitwall service; the probe shows the mark for delete |
 | PW-5 | Upgrade from 1.0.x: the 1.0.x uninstaller runs before any 1.1 hook (it may sit in a folder the user could write). What does it run, and from where? | A 1.0.x install; the folder's ACL read first |
 | PW-6 | Paddock-setup.exe deleted from a trusted install folder, then Uninstall: the service is removed with `sc.exe` and the user is told | `paddock-setup.exe` absent; HKLM names the folder |
+| PW-7 | A corrupt or truncated `pitwall-server.exe` in the install folder (the verb exits non-zero) while the service is registered, then while it is not: the first aborts with level 43 and "uninstall Pitwall first"; the second continues (`sc query` answers 1060) | The server program damaged by hand; `sc query Pitwall` shows the registration state before each run |
 
 ## Notes and family follow-ups
 
