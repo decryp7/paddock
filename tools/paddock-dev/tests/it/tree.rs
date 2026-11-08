@@ -719,7 +719,7 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
     let ci = std::fs::read_to_string(root().join(".gitea/workflows/ci.yml")).unwrap();
     let wf = paddock_dev::plan_gitea::workflow_jobs(&ci).unwrap();
     let plan_job = &wf.jobs.iter().find(|(k, _)| k == "plan").unwrap().1;
-    let declared = regex::Regex::new(r"(?m)^ {6}([a-z_]+): \$\{\{ steps\.plan\.outputs\.([a-z_]+) \}\}").unwrap();
+    let declared = regex::Regex::new(r"(?m)^ {6}([a-z0-9_]+): \$\{\{ steps\.plan\.outputs\.([a-z0-9_]+) \}\}").unwrap();
     let written: Vec<String> = paddock_dev::plan_ci::ci_outputs(&json!({}), &[], None)
         .into_iter()
         .map(|(k, _)| k)
@@ -733,7 +733,7 @@ fn ci_yml_wires_the_plan_job_outputs_and_the_commits_job_asks_for_its_range() {
         assert!(written.contains(step), "dev plan --ci writes {step}");
     }
     let names: Vec<&String> = declared.iter().map(|(n, _)| n).collect();
-    for c in regex::Regex::new(r"needs\.plan\.outputs\.([a-z_]+)").unwrap().captures_iter(&ci) {
+    for c in regex::Regex::new(r"needs\.plan\.outputs\.([a-z0-9_]+)").unwrap().captures_iter(&ci) {
         assert!(
             names.iter().any(|n| **n == c[1]),
             "ci.yml uses needs.plan.outputs.{}, which the plan job does not declare",
