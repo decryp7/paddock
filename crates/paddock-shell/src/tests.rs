@@ -165,15 +165,27 @@ fn building_a_shell_registers_the_shared_limit_registries() {
 fn every_limit_registry_the_shell_links_is_registered() {
     let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let out = std::process::Command::new(env!("CARGO"))
-        .args(["metadata", "--format-version", "1", "--offline", "--manifest-path"])
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--offline",
+            "--manifest-path",
+        ])
         .arg(manifest.join("Cargo.toml"))
         .output()
         .expect("cargo metadata runs");
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let meta: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     let nodes = meta["resolve"]["nodes"].as_array().unwrap();
     let find = |id: &str| nodes.iter().find(|n| n["id"] == id).unwrap();
-    let root = meta["resolve"]["root"].as_str().expect("a package, not a virtual workspace");
+    let root = meta["resolve"]["root"]
+        .as_str()
+        .expect("a package, not a virtual workspace");
     let mut seen = std::collections::BTreeSet::new();
     let mut todo = vec![root.to_owned()];
     while let Some(id) = todo.pop() {
@@ -181,7 +193,11 @@ fn every_limit_registry_the_shell_links_is_registered() {
             continue;
         }
         for dep in find(&id)["deps"].as_array().unwrap() {
-            let normal = dep["dep_kinds"].as_array().unwrap().iter().any(|k| k["kind"].is_null());
+            let normal = dep["dep_kinds"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k["kind"].is_null());
             if normal {
                 todo.push(dep["pkg"].as_str().unwrap().to_owned());
             }
@@ -194,7 +210,10 @@ fn every_limit_registry_the_shell_links_is_registered() {
         if !seen.contains(pkg["id"].as_str().unwrap()) {
             continue;
         }
-        let dir = std::path::Path::new(pkg["manifest_path"].as_str().unwrap()).parent().unwrap().to_owned();
+        let dir = std::path::Path::new(pkg["manifest_path"].as_str().unwrap())
+            .parent()
+            .unwrap()
+            .to_owned();
         let name = pkg["name"].as_str().unwrap().replace('-', "_");
         for module in ["limits", "limit_rows"] {
             let file = dir.join("src").join(format!("{module}.rs"));
@@ -206,6 +225,12 @@ fn every_limit_registry_the_shell_links_is_registered() {
             }
         }
     }
-    assert!(found >= 4, "the scan found only {found} registries: it cannot see the graph");
-    assert!(missing.is_empty(), "register_shared_limits misses: {missing:?}");
+    assert!(
+        found >= 4,
+        "the scan found only {found} registries: it cannot see the graph"
+    );
+    assert!(
+        missing.is_empty(),
+        "register_shared_limits misses: {missing:?}"
+    );
 }
