@@ -164,6 +164,29 @@ $r = Run $installer "/S /D=$d" @{ PADDOCK_STUB_EXIT_STOP_ALL = '5' }
 Check 'D2 tool failure exit 43' ($r.Code -eq 43) "code $($r.Code)"
 
 Remove-Item $key -ErrorAction SilentlyContinue
+# M: Windows Security removed paddock-setup.exe (ADR 0053, the Dyno 1.1.0 false detection): the installer must end with level 44 and never
+# report a success. The stub removes itself (a rename, allowed while it runs) or the installed copy after the named command.
+$m = Join-Path $base 'm'
+$r = Run $installer "/S /D=$m" @{ PADDOCK_STUB_REMOVE_AFTER = 'check-dir'; PADDOCK_STUB_REMOVE_PATH = 'self' }
+Check 'M1 extracted tool gone before guard: exit 44' ($r.Code -eq 44) "code $($r.Code)"
+Check 'M1 says what to do' ($r.Lines -match 'ABORT level 44: Windows Security removed paddock-setup.exe') ($r.Lines -join '|')
+Check 'M1 no later call reached the tool' (-not ($r.Lines -match '^(guard|stop-all|clean-run|clean-staging)')) ($r.Lines -join '|')
+Check 'M1 no install was registered' (-not (Test-Path $key)) 'uninstall key exists'
+$r = Run $installer "/S /D=$m" @{ PADDOCK_STUB_REMOVE_AFTER = 'stop-all'; PADDOCK_STUB_REMOVE_PATH = 'self' }
+Check 'M2 extracted tool gone before the POSTINSTALL calls: exit 44' ($r.Code -eq 44) "code $($r.Code)"
+Check 'M2 reports the abort, not a success' (($r.Lines -match 'ABORT level 44') -and -not ($r.Lines -match '^clean-staging')) ($r.Lines -join '|')
+$r = Run $installer "/S /D=$m" @{ PADDOCK_STUB_REMOVE_AFTER = 'clean-run'; PADDOCK_STUB_REMOVE_PATH = "$m\paddock-setup.exe" }
+Check 'M3 installed copy gone after it was written: exit 44' ($r.Code -eq 44) "code $($r.Code)"
+Check 'M3 reports the abort' ($r.Lines -match 'ABORT level 44: Windows Security removed paddock-setup.exe') ($r.Lines -join '|')
+Remove-Item $key -ErrorAction SilentlyContinue
+# M4: the uninstaller's copy removed after its first call: it says so, skips the steps that need the tool and still uninstalls
+$r = Run $installer "/S /D=$m" @{}
+Check 'M4 clean install for the uninstaller case' ($r.Code -eq 0) "code $($r.Code)"
+$r = Run "$m\uninstall.exe" "/S _?=$m" @{ PADDOCK_STUB_EXIT_SAME_FOLDER = '1'; PADDOCK_STUB_REMOVE_AFTER = 'same-folder'; PADDOCK_STUB_REMOVE_PATH = 'self' }
+Check 'M4 uninstall exit 0' ($r.Code -eq 0) "code $($r.Code)"
+Check 'M4 says Windows Security may have removed it' ($r.Lines -match '^NOTE paddock-setup.exe is missing \(before a call\).*Windows Security') ($r.Lines -join '|')
+Check 'M4 no call reached the missing program' (-not ($r.Lines -match '^(stop-all|clean-run)')) ($r.Lines -join '|')
+Remove-Item $key -ErrorAction SilentlyContinue
 # U: the post-uninstall retry (PADDOCK_FINISH_UNINSTALL)
 foreach ($c in @(
   @{ Name = 'U0 no lock'; Lock = 0 },

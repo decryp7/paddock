@@ -316,6 +316,7 @@ fn refusals_have_their_own_exit_levels_and_note_into_the_protected_log() {
         ("BAD_DIR", 41),
         ("STILL_RUNNING", 42),
         ("TOOL_FAILED", 43),
+        ("TOOL_MISSING", 44),
     ] {
         let want = format!("!define PADDOCK_LEVEL_{name} {n}");
         assert!(
@@ -388,4 +389,81 @@ fn the_uninstall_finish_retries_without_recursion_or_reboot_flags() {
     ] {
         assert!(body.contains(outcome), "{outcome}");
     }
+}
+
+/// Windows Security can delete the unsigned paddock-setup.exe after the installer wrote it. The installer must then end with its own
+/// level and the guidance, never with a success; the uninstaller keeps its graceful skip.
+#[test]
+fn a_removed_paddock_setup_ends_the_install_with_guidance_never_a_success() {
+    let t = canonical_include();
+    let body_of = |name: &str| -> String {
+        let start = t
+            .find(&format!("!macro {name}"))
+            .unwrap_or_else(|| panic!("{name} exists"));
+        let end = t[start..].find("!macroend").unwrap() + start;
+        t[start..end].to_string()
+    };
+    // The levels are distinct.
+    let levels: Vec<&str> = t
+        .lines()
+        .filter(|l| l.starts_with("!define PADDOCK_LEVEL_"))
+        .collect();
+    let mut numbers: Vec<&str> = levels
+        .iter()
+        .map(|l| l.split_whitespace().last().unwrap())
+        .collect();
+    numbers.sort_unstable();
+    numbers.dedup();
+    assert_eq!(
+        numbers.len(),
+        levels.len(),
+        "every level has its own number: {levels:?}"
+    );
+    // The message names Windows Security and what to do.
+    assert!(t.contains("Windows Security removed paddock-setup.exe, a part of ${PRODUCTNAME}, as a false detection."));
+    assert!(t.contains("Open Windows Security > Protection history, restore it or allow it, then run the installer again."));
+    // Every call through the tool checks that it is still there, before and after.
+    let run = body_of("_PADDOCK_RUN");
+    let check = r#"${AndIfNot} ${FileExists} "${PADDOCK_SETUP}""#;
+    assert!(
+        run.matches(check).count() >= 2,
+        "_PADDOCK_RUN checks before and after the call"
+    );
+    assert!(
+        run.find(check).unwrap() < run.find("nsExec::ExecToLog").unwrap(),
+        "the first check is before the call"
+    );
+    // The guard calls nsExec itself, and the extraction is checked once.
+    assert!(
+        body_of("PADDOCK_GUARD_PER_USER").contains("${FileExists} \"${PADDOCK_SETUP}\""),
+        "the guard checks too"
+    );
+    assert!(
+        body_of("PADDOCK_INSTALLING").contains("after extraction"),
+        "the extraction is checked"
+    );
+    // The abort in the installer is the new level; the uninstaller only skips.
+    let gone = body_of("_PADDOCK_TOOL_GONE");
+    assert!(
+        gone.contains("PADDOCK_ABORT \"${PADDOCK_REMOVED_MSG}\" ${PADDOCK_LEVEL_TOOL_MISSING}")
+    );
+    assert!(gone.contains("!ifndef __UNINSTALL__") && gone.contains("StrCpy $PaddockHaveSetup 0"));
+    assert!(
+        gone.contains("_PADDOCK_TEST_LOG") && gone.contains("DetailPrint"),
+        "logged to the details and the test log"
+    );
+    // POSTINSTALL verifies the installed copy after writing it and again as the last step.
+    let setup = body_of("PADDOCK_INSTALL_SETUP");
+    assert!(
+        setup.find("File \"/oname=$INSTDIR").unwrap()
+            < setup.find("_PADDOCK_CHECK_INSTALLED").unwrap()
+    );
+    assert!(body_of("PADDOCK_FINISH_INSTALL").contains("_PADDOCK_CHECK_INSTALLED"));
+    let installed = body_of("_PADDOCK_CHECK_INSTALLED");
+    assert!(
+        installed.contains(r#"${FileExists} "$INSTDIR\paddock-setup.exe""#)
+            && installed.contains("PADDOCK_LEVEL_TOOL_MISSING")
+    );
+    // The uninstaller's notes name Windows Security too.
+    assert!(t.matches("Windows Security").count() >= 5);
 }
