@@ -105,8 +105,8 @@ host=$(printf '%s\n' "$vv" | sed -n 's/^host: //p')
 # What else changes the compiled code: the environment variables RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_*,
 # CARGO_PROFILE_* and CARGO_TARGET_* (not the build folder, the job count or the compiler, which the `-vV` lines already name)
 # when they are not empty, sorted as lines, then one `config-file <digest>` line per config file above that has anything to say about
-# the code: its text with carriage returns, comment and blank lines and the `target-dir` and `build-dir` keys dropped (the build
-# folder the build-folder action writes to the git-ignored ci.toml is not part of the compiled code, so a runner with that file
+# the code: its text with carriage returns, comment and blank lines and the keys `target-dir`, `build-dir`, `jobs` and `rustc-wrapper`
+# dropped (ADR 0022 R0b item: the build folder the build-folder action writes to the git-ignored ci.toml, the job count and sccache are not part of the compiled code, so a runner with that file
 # and one without hash alike), the digest being git's blob id of what is left; a file that is then only section headers adds no
 # line. A config file can hold registry tokens, so it is streamed into git and only its digest is ever held in a variable (which
 # `sh -x` would print). The same reduction is `config_code_text` in the tool's input_hash.rs.

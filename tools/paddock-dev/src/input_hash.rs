@@ -82,7 +82,7 @@ pub fn flag_lines(vars: &[(String, String)], config_digests: &[String]) -> Strin
 }
 
 /// What a config says about the compiled code, as the wrapper's `config_code` reduces it: carriage returns, comment and blank
-/// lines and the `target-dir` and `build-dir` keys dropped (the build folder the build-folder action writes to the git-ignored
+/// lines and the keys `target-dir`, `build-dir`, `jobs` and `rustc-wrapper` dropped (the build folder the build-folder action writes to the git-ignored
 /// `ci.toml` is not part of the code, so a runner with that file and one without hash alike). `None` when only section headers
 /// are left: such a file adds no line to the hash.
 pub fn config_code_text(text: &str) -> Option<String> {
@@ -95,7 +95,7 @@ pub fn config_code_text(text: &str) -> Option<String> {
             if t.is_empty() || t.starts_with('#') {
                 return false;
             }
-            let folder_key = ["target-dir", "build-dir"]
+            let folder_key = ["target-dir", "build-dir", "jobs", "rustc-wrapper"]
                 .iter()
                 .any(|k| t.strip_prefix(k).is_some_and(|r| r.trim_start_matches(blank).starts_with('=')));
             !folder_key
@@ -375,6 +375,15 @@ mod tests {
             config_code_text("[[bin]]\n").as_deref(),
             Some("[[bin]]\n"),
             "a table array is content, as in the wrapper"
+        );
+        assert_eq!(
+            config_code_text("[build]\njobs = 4\nrustc-wrapper = \"sccache\"\n"),
+            None,
+            "job count and sccache"
+        );
+        assert_eq!(
+            config_code_text("[build]\njobs-extra = 4\n").as_deref(),
+            Some("[build]\njobs-extra = 4\n")
         );
         assert_eq!(config_code_text(""), None);
     }
