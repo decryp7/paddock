@@ -1,0 +1,70 @@
+# Publishes the paddock-dev binary for every runner kind CI uses to the Gitea generic package `paddock-dev` (ADR 0022 section 3.3,
+# R0b), keyed by the input hash, so a CI job's ./dev downloads it instead of compiling the tool (about 100 s cold). Runs on a push
+# to main that changes the tool's inputs (tools/paddock-dev/inputs.txt, checked by a test), nightly (a new stable compiler changes
+# the hash without a commit) and by hand, also from a branch. A runner that already finds its file under the hash ends at once.
+#
+# Needs the Gitea secret DEV_TOOL_PUBLISH_TOKEN (a token with write:package; the only workflow that gets it). Without it the job
+# token is tried; a refusal is reported with what to create. The consumer side is the `dev` wrapper.
+
+name: dev-tool
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - dev
+      - tools/paddock-dev/**
+      - crates/Cargo.toml
+      - crates/paddock-cli/**
+      - crates/paddock-proc/**
+      - crates/paddock-repo-graph/**
+      - crates/paddock-slots/**
+      - crates/paddock-workspace-hack/**
+      - .cargo/config.toml
+      - conformance/ci/dev-tool-publish.sh
+      - .gitea/workflows/dev-tool.yml
+  schedule:
+    - cron: '35 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: dev-tool-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Git bash on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
+          echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      - uses: ./.gitea/actions/build-jobs
+
+      - uses: ./.gitea/actions/job-tmpdir
+
+      - uses: ./.gitea/actions/setup-rust
+
+      - name: Build and publish the tool for this runner
+        env:
+          PUBLISH_TOKEN: ${{ secrets.DEV_TOOL_PUBLISH_TOKEN || github.token }}
+        run: bash conformance/ci/dev-tool-publish.sh
+
+      - uses: ./.gitea/actions/job-tmpdir
+        if: always()
+        with:
+          mode: remove
