@@ -1,6 +1,7 @@
 import { createContext, loadConfig } from './context.mjs';
 import { error } from './finding.mjs';
 import { checks } from './checks/index.mjs';
+import { inScope } from './util/scope.mjs';
 import { pathMatches } from './util/fs.mjs';
 import { applyWaivers, parseWaivers } from './util/waivers.mjs';
 
@@ -26,7 +27,7 @@ export async function runChecks({ root, app, only = null, options = {}, registry
 
   const waiverText = ctx.read('paddock.waivers.toml');
   const parsed = waiverText ? parseWaivers(waiverText) : { waivers: [], problems: [] };
-  const applied = applyWaivers({ findings, ...parsed, now: ctx.now, pathMatches, checksRun: selected.map((c) => c.id) });
+  const applied = applyWaivers({ findings, ...parsed, now: ctx.now, pathMatches, checksRun: selected.map((c) => c.id), skipUnused: (w) => !inScope(options.scope, w.path) });
   findings = applied.findings;
   return {
     app: config.app,

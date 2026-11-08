@@ -30,10 +30,10 @@ const EXACT_PATH_CHECKS = new Set(['C99']);
 /**
  * Splits findings into kept and waived, and adds findings for bad waivers: a waiver without a reason or a valid date is
  * W002, one past its date is W001 (and waives nothing). With `checksRun`, a live waiver for one of those checks that
- * waived no finding is a W003 warning (the finding was fixed: delete the waiver). A finding with `unwaivable: true` (a check
+ * waived no finding is a W003 warning (the finding was fixed: delete the waiver). `skipUnused(waiver)` drops the W003 for a waiver the run could not have used (a scoped run). A finding with `unwaivable: true` (a check
  * that could not run, "check broken" or "not measured") is never waived.
  */
-export function applyWaivers({ findings, waivers, problems = [], now = new Date(), file = 'paddock.waivers.toml', pathMatches, checksRun = null }) {
+export function applyWaivers({ findings, waivers, problems = [], now = new Date(), file = 'paddock.waivers.toml', pathMatches, checksRun = null, skipUnused = () => false }) {
   const today = now.toISOString().slice(0, 10);
   const extra = problems.map((p) => ({ check: 'W002', severity: 'error', rule: 5, file, line: 1, message: `waiver file: ${p}`, fix: 'Fix the line.' }));
   const live = [];
@@ -63,7 +63,7 @@ export function applyWaivers({ findings, waivers, problems = [], now = new Date(
   }
   if (checksRun) {
     for (const w of live) {
-      if (used.has(w) || !checksRun.includes(w.check)) continue;
+      if (used.has(w) || !checksRun.includes(w.check) || skipUnused(w)) continue;
       extra.push({
         check: 'W003', severity: 'warn', file, line: w.line, rule: 5,
         message: `waiver for ${w.check} ${w.path} waives nothing`,

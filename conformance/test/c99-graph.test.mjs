@@ -247,6 +247,27 @@ test('C99 --scope: a release of one app is judged on that app and crates/ only, 
   assert.equal(parseArgs(['--app', 'x', '--scope', 'apps/y']).scope, 'apps/y');
 });
 
+test('C99 --scope reads the UI the app ships (ui/projects/<app>, paddock-ui) but not another app\'s, and skips the W003 of waivers outside the scope', async (t) => {
+  const bad = "run('security dump-keychain');\n";
+  const files = {
+    'paddock.ci.json': CI, 'clippy.toml': '', 'Cargo.lock': '#', 'Cargo.toml': '[package]\nname = "x"\nversion = "0.1.0"\n', 'src/lib.rs': '',
+    'apps/mine/Cargo.toml': '[package]\nname = "mine"\nversion = "0.1.0"\n', 'apps/mine/src/lib.rs': '', 'apps/other/Cargo.toml': '[package]\nname = "other"\nversion = "0.1.0"\n', 'apps/other/src/lib.rs': '',
+    'ui/projects/mine/src/a.ts': bad, 'ui/projects/paddock-ui/src/b.ts': bad, 'ui/projects/other/src/c.ts': bad,
+  };
+  const root = makeApp(files);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const run = (scope, extra = {}) => findingsOf('C99', root, { options: { scope, graph: 'off', ...extra } });
+  assert.deepEqual((await run('apps/mine')).map((f) => f.file).sort(), ['ui/projects/mine/src/a.ts', 'ui/projects/paddock-ui/src/b.ts']);
+  assert.equal((await run(undefined)).filter((f) => f.file.startsWith('ui/')).length, 3, 'repo-wide: all three');
+  // W003: a waiver outside the scope is not reported as unused; one inside the scope that waives nothing still is.
+  const waived = makeApp({ ...files, 'paddock.waivers.toml': waiver('apps/other/Cargo.toml') + waiver('apps/mine/Cargo.toml') });
+  t.after(() => rmSync(waived, { recursive: true, force: true }));
+  const w = await findingsOf('C99', waived, { options: { scope: 'apps/mine', graph: 'off' } });
+  assert.deepEqual(w.filter((f) => f.check === 'W003').map((f) => f.message), ['waiver for C99 apps/mine/Cargo.toml waives nothing']);
+  const all = await findingsOf('C99', waived, { options: { graph: 'off' } });
+  assert.equal(all.filter((f) => f.check === 'W003').length, 2, 'unscoped: both are reported');
+});
+
 // The whole path with a real cargo and no network: path dependencies.
 const hasCargo = spawnSync('cargo', ['--version']).status === 0;
 const skipCargo = hasCargo ? false : 'cargo is not installed here: run the conformance tests where cargo is (CI image)';
