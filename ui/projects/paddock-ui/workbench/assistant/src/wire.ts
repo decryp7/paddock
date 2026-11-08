@@ -31,7 +31,7 @@ export function citationsOf(data: unknown): AssistantCitation[] {
   return out;
 }
 
-const EVENT_TYPES = new Set(['started', 'delta', 'toolStarted', 'approvalNeeded', 'toolFinished', 'notice', 'done', 'error']);
+const EVENT_TYPES = new Set(['started', 'phase', 'delta', 'toolStarted', 'approvalNeeded', 'toolFinished', 'notice', 'done', 'error']);
 
 /** An event as the engine sends it, or `null` when it is not one (parse, don't validate: the edge). */
 export function parseEnvelope(raw: unknown): Envelope | null {
