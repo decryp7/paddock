@@ -459,7 +459,13 @@ async function main(argv) {
             // rule 53: continue only the process whose pid AND start time are the ones that were stopped
             cont: async ({ pid, start }) => { await exec(`[ "$(ps -o lstart= -p ${pid} | sed 's/^ *//')" = '${start}' ] && kill -CONT ${pid}; echo "state after CONT: $(ps -o stat= -p ${pid})" >> /tmp/jobs-stopped.log`); },
             guestClock: async () => (await exec('date +%T')).stdout.trim(),
-          }, { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) });
+          }, { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }, { clearMaxMs: 40_000 });
+          { // the app and agent logs, copied next to the report, and the lines about the link and the Jobs read
+            const files = (await exec('ls -1 "$HOME/Library/Logs/Dyno"/*.log 2>/dev/null')).stdout.trim().split('\n').filter(Boolean);
+            const saved = []; for (const f of files) { const d = await fetch(f); if (d) saved.push(d); }
+            const lg = (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -i -E "link phase|connected|handshake|agent|jobs|timeout|timed out|reconnect|retry" | tail -n 120 | cut -c1-330')).stdout;
+            stopStep.evidence = [...(stopStep.evidence ?? []), `logs copied: ${saved.join(', ')}`, `app log lines (link, agent, jobs, retry):\n${lg}`];
+          }
           // Measurement (not a release row): is the Jobs list's Cancel a real button? Start a benchmark, dump the AX tree around it, end it.
           await exec(`open -a ${bundle}`); await sleepMs(15_000);
           let meas;
