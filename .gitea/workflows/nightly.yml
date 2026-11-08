@@ -38,10 +38,10 @@ jobs:
     needs: [gate]
     if: ${{ needs.gate.outputs.run == 'true' }}
     uses: ./.gitea/workflows/ci.yml
-    secrets:
-      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     with:
       webkit: true
+    secrets:
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   # ADR 0026 §3 (D4): every command a dialog contract declares was sent by some run, or is listed as unexercised with a
   # reason, and every dialog opened. It needs the union of the runs, so it runs here only, never in affected-only CI.

@@ -51,10 +51,10 @@ jobs:
       - id: plan
         uses: ./.gitea/actions/plan
         with:
-          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
           app: pitcrew
           tag-pattern: pitcrew-v*
           nightly-marker: "false"
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   # A tag is gated by exactly Pitcrew's legs of ci.yml (all of them, both halves, on the tagged commit).
   gates:
@@ -62,10 +62,10 @@ jobs:
     needs: [plan]
     if: ${{ needs.plan.outputs.run == 'true' && (startsWith(github.ref, 'refs/tags/pitcrew-v') || github.event.inputs.gates == 'true') }}
     uses: ./.gitea/workflows/ci.yml
-    secrets:
-      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
     with:
       app: pitcrew
+    secrets:
+      BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   # Installers for a manual run: they need only the plan, never `gates`.
   # Gitea 28.2 skips a reusable-workflow job whose need was skipped, whatever its `if` says (125 of 133 green release runs
