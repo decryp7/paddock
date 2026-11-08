@@ -17,6 +17,53 @@ pub const FRAME_PIXELS: u64 = 1_400_000;
 /// Longest frame file read.
 const MAX_FRAME_BYTES: u64 = 24 << 20;
 
+/// Most describe runs kept for the rolling rate.
+pub const RATE_RUNS: usize = 5;
+
+/// How long this machine's recent describe runs took per frame (seconds per frame, newest last, at most
+/// [`RATE_RUNS`]). The estimate in the confirmation comes only from this measured history: with none, there is none.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct RateHistory {
+    #[serde(default)]
+    runs: Vec<f32>,
+}
+
+impl RateHistory {
+    /// Reads a saved history; a missing or damaged file is an empty history (never an error).
+    pub fn parse(text: &str) -> RateHistory {
+        let mut h: RateHistory = serde_json::from_str(text).unwrap_or_default();
+        h.runs.retain(|r| r.is_finite() && *r > 0.0);
+        let extra = h.runs.len().saturating_sub(RATE_RUNS);
+        h.runs.drain(..extra);
+        h
+    }
+
+    /// Notes a finished run: `frames` described in `secs` seconds. A run of no frames or no time says nothing.
+    pub fn record(&mut self, frames: usize, secs: f32) {
+        if frames == 0 || !secs.is_finite() || secs <= 0.0 {
+            return;
+        }
+        self.runs.push(secs / frames as f32);
+        let extra = self.runs.len().saturating_sub(RATE_RUNS);
+        self.runs.drain(..extra);
+    }
+
+    /// The mean seconds per frame of the kept runs, if there are any.
+    pub fn per_frame(&self) -> Option<f32> {
+        (!self.runs.is_empty()).then(|| self.runs.iter().sum::<f32>() / self.runs.len() as f32)
+    }
+}
+
+/// The cost of describing `frames` frames: the count, and a time only when `rate` has measured runs. Pure; the engine's
+/// answer for the confirmation before a bulk describe (rule 46).
+pub fn describe_plan(frames: usize, rate: &RateHistory) -> crate::api::DescribePlan {
+    let n = u32::try_from(frames).unwrap_or(u32::MAX);
+    crate::api::DescribePlan {
+        frames: n,
+        estimate_seconds: rate.per_frame().map(|p| (p * n as f32).round().min(u32::MAX as f32) as u32),
+    }
+}
+
 /// `1:02:03.400` / `02:03.400` style time of a video position.
 pub fn video_time(ms: u64) -> String {
     let (h, m, s, milli) = (ms / 3_600_000, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000);
@@ -112,6 +159,35 @@ pub fn explain_range<P: LlmProvider>(a: &Assistant<P>, images: &[ImageInput], vi
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_plan_has_a_time_only_from_measured_runs() {
+        let none = RateHistory::default();
+        let p = describe_plan(30, &none);
+        assert_eq!((p.frames, p.estimate_seconds), (30, None));
+        let mut h = RateHistory::default();
+        h.record(10, 50.0);
+        h.record(10, 70.0);
+        assert_eq!(h.per_frame(), Some(6.0));
+        assert_eq!(describe_plan(30, &h).estimate_seconds, Some(180));
+        assert_eq!(describe_plan(usize::MAX, &h).frames, u32::MAX);
+    }
+
+    #[test]
+    fn the_history_keeps_recent_runs_and_ignores_nonsense() {
+        let mut h = RateHistory::default();
+        h.record(0, 5.0);
+        h.record(5, 0.0);
+        h.record(5, f32::NAN);
+        assert_eq!(h.per_frame(), None);
+        for _ in 0..RATE_RUNS {
+            h.record(1, 100.0);
+        }
+        h.record(1, 2.0);
+        assert!(h.per_frame().unwrap() < 100.0 && h.per_frame().unwrap() > 2.0);
+        assert_eq!(RateHistory::parse("not json"), RateHistory::default());
+        assert_eq!(RateHistory::parse(r#"{"runs":[-1,0,3.0]}"#).per_frame(), Some(3.0));
+    }
+
     use super::*;
     use crate::error::AiUnavailable;
     use debrief_ai::assistant::AssistantConfig;

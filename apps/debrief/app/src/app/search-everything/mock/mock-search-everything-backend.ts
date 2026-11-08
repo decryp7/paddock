@@ -87,7 +87,7 @@ const squashed = (t: string) => words(t).join('');
 
 /** The mock's way of matching, best first (the engine's `How`, simplified). */
 type MockVia = ValueMatch['via'];
-const VIA_SCORE: Record<MockVia, number> = { userAlias: 1.3, exact: 1, segmented: 0.95, parts: 0.85, alias: 0.8, prefix: 0.7, fuzzy: 0.55 };
+const VIA_SCORE: Record<MockVia, number> = { userAlias: 1.3, exact: 1, segmented: 0.95, parts: 0.85, alias: 0.8, prefix: 0.7, abbreviation: 0.6, fuzzy: 0.55 };
 
 /** The other mock backends the search reads, resolved when a search needs them (so a missing one fails only its kind). */
 export interface MockSearchSources {

@@ -36,6 +36,9 @@ const NON_LITERAL: Readonly<Record<string, readonly string[]>> = {
   'paddock-service/src/status.rs|format!("service.{code}")': [],
   'paddock-service/src/status.rs|code': ['service.switchedOff', 'service.needsApproval'],
   'paddock-pitwall/src/health.rs|code': ['pitwall.notInstalled', 'pitwall.notRunning', 'pitwall.incompatible', 'pitwall.needsPairing', 'pitwall.paused', 'pitwall.noModel', 'pitwall.unavailable'],
+  // `Cause::from_limit`: the code is `limit.<id>` for any LimitId. Its words are the limit's own (LimitNotice, plan 2.3, one message per
+  // LimitId), not a chip-table entry, so no table words are required for it.
+  'paddock-health/src/limit_cause.rs|format!("limit.{}", limit.id)': [],
   // Passes a notice's own code on: the codes are the callers' (their own `.code(` calls).
   'paddock-health/src/notify/health.rs|code.clone()': [],
 };

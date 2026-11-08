@@ -41,6 +41,14 @@ pub struct HostConfig {
     pub child_env: Vec<(String, String)>,
 }
 
+/// The time one call has unless the app sets another (30 s): [`HostConfig::call_timeout`] and the row `plugin.call_deadline`.
+pub const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(30);
+/// The time a plugin has to end a call after the cancel unless the app sets another (5 s): [`HostConfig::hang_grace`] and the row
+/// `plugin.hang_grace`.
+pub const DEFAULT_HANG_GRACE: Duration = Duration::from_secs(5);
+/// The time a plugin has to start unless the app sets another (15 s): [`HostConfig::start_timeout`] and the row `plugin.start`.
+pub const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(15);
+
 impl HostConfig {
     /// Defaults: restart with 1 s doubling to 60 s (reset after five healthy minutes), 30 s calls, a 5 s hang grace, 15 s to
     /// start, 2 s to stop, 16 MiB frames.
@@ -59,9 +67,9 @@ impl HostConfig {
                 Duration::from_secs(60),
                 Duration::from_secs(300),
             ),
-            call_timeout: Duration::from_secs(30),
-            hang_grace: Duration::from_secs(5),
-            start_timeout: Duration::from_secs(15),
+            call_timeout: DEFAULT_CALL_TIMEOUT,
+            hang_grace: DEFAULT_HANG_GRACE,
+            start_timeout: DEFAULT_START_TIMEOUT,
             stop_grace: Duration::from_secs(2),
             max_frame: FrameLimit::default(),
             outputs_dir: outputs_dir.into(),

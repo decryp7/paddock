@@ -938,9 +938,10 @@ export interface ValueMatch {
   count: number;
   /**
    * How the value matched: `userAlias` (you said so), `exact`, `segmented` (the same name written differently or run
-   * together), `parts`, `prefix`, `alias` (suggested by the local model, AI-generated) or `fuzzy` (typos).
+   * together), `parts`, `prefix`, `alias` (suggested by the local model, AI-generated), `abbreviation` (the letters of
+   * the name's words: `gfxbldr` for `graphic builder`) or `fuzzy` (typos).
    */
-  via: 'userAlias' | 'exact' | 'segmented' | 'parts' | 'prefix' | 'alias' | 'fuzzy';
+  via: 'userAlias' | 'exact' | 'segmented' | 'parts' | 'prefix' | 'alias' | 'abbreviation' | 'fuzzy';
   /** What an entity is (`executable`, `library`, `file`, `path`, `host`, `ip`, `url`, `exception`, `errorCode`, `guid`). */
   kind?: string;
   /** First and last time an entity was seen (epoch ms). */

@@ -62,6 +62,7 @@ mod notes;
 mod notification_centre;
 mod notify;
 mod opener;
+mod ordering;
 mod panel_windows;
 mod parsers;
 mod paste;
@@ -261,6 +262,7 @@ command_table! {
     Mutation [WINDOW] => video::commands::video_add_frame,
     Mutation [WINDOW] => video::commands::video_include,
     Mutation [WINDOW] => video::commands::video_remove,
+    Query [WINDOW] => video::commands::video_describe_plan,
     Mutation [WINDOW] => video::commands::video_describe,
     Mutation [WINDOW] => video::commands::video_read_clock,
     Query [WINDOW] => video::commands::video_explain,

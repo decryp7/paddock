@@ -126,7 +126,8 @@ impl DuckStore {
             let target = crate::sql::lit(&copy.to_string_lossy())
                 .ok_or_else(|| StoreError::Io("the project folder's path cannot be used".into()))?;
             conn.execute_batch(&format!(
-                "ATTACH {target} AS debrief_export; COPY FROM DATABASE {} TO debrief_export; DETACH debrief_export;",
+                "ATTACH {target} AS debrief_export (STORAGE_VERSION '{}'); COPY FROM DATABASE {} TO debrief_export; DETACH debrief_export;",
+                crate::STORAGE_VERSION,
                 crate::sql::ident(&current)
             ))
             .map_err(engine)?;

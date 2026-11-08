@@ -1,10 +1,9 @@
 //! Human-name matching in the shell (ADR 0053): each window holds the [`Names`] of its workspace, rebuilt when the
-//! entity catalogue is built, and persisted (user corrections and AI aliases saved by earlier versions) in the
-//! configuration folder. There is no background AI job any more (ADR 0070, rule 46: no LLM for large jobs); the
-//! aliases already in the book still load and match.
+//! entity catalogue is built, and persisted (user corrections and old AI aliases) in the configuration folder.
 //!
 //! Thin by design: grouping, matching, ranking and questions are the engine's (`debrief_core::names`); this module
-//! owns the files and the commands.
+//! owns the files and the commands. No model is asked here: names are never sent to a model unless the user starts
+//! it (rule 46).
 //!
 //! Commands (all validated here, the engine validates again): `names_accept`, `names_reject`, `names_undo`,
 //! `names_remove_alias`; `find_values` (in `search_everything`) answers through [`WindowNames::search`].
@@ -14,7 +13,7 @@ use crate::windows::{CurrentWindow, WindowState, Windows};
 use crate::CmdResult;
 use debrief_core::find::Resolved;
 use debrief_core::names::book::{NameBook, UserFact, MAX_TERM_CHARS};
-use debrief_core::names::{NameSettings, Names};
+use debrief_core::names::Names;
 use debrief_core::ports::Store;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -77,7 +76,7 @@ impl WindowNames {
         &self.0.names
     }
 
-    /// Writes the book (user corrections and AI aliases). A failure is logged: the session keeps working.
+    /// Writes the book (user corrections and old AI aliases). A failure is logged: the session keeps working.
     pub fn save(&self) {
         let Some(file) = &self.0.file else { return };
         if let Some(dir) = file.parent() {
@@ -89,14 +88,6 @@ impl WindowNames {
         if let Err(e) = self.0.names.read(|b, _| b.save(file)) {
             log::warn!("the name book cannot be saved: {e}");
         }
-    }
-
-    /// Applies the Settings switches.
-    pub fn apply_settings(&self, ai_aliases: bool) {
-        self.0.names.set_settings(NameSettings {
-            ai_aliases,
-            ..self.0.names.settings()
-        });
     }
 
     /// Rebuilds the table when the workspace changed since the last build and its catalogue is built.
@@ -113,10 +104,8 @@ impl WindowNames {
         Freshness::Rebuilt
     }
 
-    /// The layer for the assistant: up to date, with the Settings switches applied.
+    /// The layer for the assistant, up to date.
     pub fn for_assistant(&self, store: Option<&dyn Store>) -> Arc<Names> {
-        // The aliases saved by earlier versions still match (nothing writes new ones any more).
-        self.apply_settings(true);
         if let Some(s) = store {
             self.ensure_fresh(s);
         }
@@ -125,8 +114,6 @@ impl WindowNames {
 
     /// The values and entities the words refer to (see [`Names::search`]).
     pub fn search(&self, store: &dyn Store, text: &str, limit: usize) -> CmdResult<(Resolved, Freshness)> {
-        // The aliases saved by earlier versions still match (nothing writes new ones any more).
-        self.apply_settings(true);
         let fresh = self.ensure_fresh(store);
         let found = self
             .0
@@ -160,7 +147,7 @@ pub fn watch_catalogue<R: Runtime>(app: &AppHandle<R>, label: &str, poll: Durati
     }
 }
 
-/// An import finished in `label`: its names are matched once the catalogue is ready.
+/// An import finished in `label`: its name table is rebuilt once the catalogue is ready.
 pub fn after_import<R: Runtime>(app: &AppHandle<R>, label: &str) {
     watch_catalogue(app, label, WATCH_POLL, WATCH_MAX);
 }
@@ -287,7 +274,7 @@ mod tests {
     use debrief_core::names::group::NameGroup;
 
     fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-names-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("debrief-it-names-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         d
     }

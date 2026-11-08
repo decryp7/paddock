@@ -57,17 +57,12 @@ test('a cross build keeps --target and its own folder', () => {
   assert.equal(plan.binaries[0].file, 'debrief-plugins-aarch64-pc-windows-msvc.exe');
 });
 
-test('universal macOS builds both architectures with --target, like tauri build does, for lipo', () => {
-  const plan = sidecarPlan({ target: 'universal-apple-darwin', host: 'aarch64-apple-darwin', profile: 'release', targetDir });
-  assert.deepEqual(plan.builds, [
-    ['build', ...select, '--target', 'aarch64-apple-darwin', '--release'],
-    ['build', ...select, '--target', 'x86_64-apple-darwin', '--release'],
-  ]);
-  assert.equal(plan.binaries[0].file, 'debrief-plugins-universal-apple-darwin');
-  assert.deepEqual(plan.binaries[0].built, [
-    join(targetDir, 'aarch64-apple-darwin', 'release', 'debrief-plugins'),
-    join(targetDir, 'x86_64-apple-darwin', 'release', 'debrief-plugins'),
-  ]);
+test('Intel and universal macOS targets are refused: DuckDB 2.x is Apple silicon only here', () => {
+  for (const target of ['universal-apple-darwin', 'x86_64-apple-darwin']) {
+    assert.throws(() => sidecarPlan({ target, host: 'aarch64-apple-darwin', profile: 'release', targetDir }), /Apple silicon/);
+  }
+  const plan = sidecarPlan({ target: 'aarch64-apple-darwin', host: 'aarch64-apple-darwin', profile: 'release', targetDir });
+  assert.deepEqual(plan.builds, [['build', ...select, '--release']]);
 });
 
 test('an unknown host never drops --target', () => {
@@ -78,7 +73,7 @@ test('an unknown host never drops --target', () => {
 test('the store worker ships the prebuilt libduckdb of its platform', () => {
   assert.equal(libduckdbFile('x86_64-pc-windows-msvc'), 'duckdb.dll');
   assert.equal(libduckdbFile('x86_64-unknown-linux-gnu'), 'libduckdb.so');
-  assert.equal(libduckdbFile('universal-apple-darwin'), 'libduckdb.dylib');
+  assert.equal(libduckdbFile('aarch64-apple-darwin'), 'libduckdb.dylib');
 });
 
 test('a bundled dylib is re-signed ad hoc on macOS only', () => {

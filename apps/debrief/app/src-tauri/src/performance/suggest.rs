@@ -75,7 +75,8 @@ pub fn suggest(env: &Environment, current: &PerformanceSettings) -> PerformanceS
         // A spinning disk reads one file at a time best; elsewhere the import memory decides.
         parse_threads: if hdd { usable.min(4) } else { 0 },
         query_threads: if tight { 2 } else { (usable / 2).clamp(2, 8) },
-        index_threads: if env.cores >= 8 { 2 } else { 1 },
+        // Auto: the usable cores within the import memory (tuning::index_threads); a tight machine keeps one.
+        index_writer_threads: u32::from(tight),
         leave_cores_free: leave,
         duck_memory_limit_mb: 0,
         max_spill_mb: match env.disk_free_mb {
@@ -165,7 +166,7 @@ mod tests {
         }
     }
 
-    /// (store cap, import, query, plugin, at once, parse, query threads, index threads, cores free, max spill, flush)
+    /// (store cap, import, query, plugin, at once, parse, query threads, index threads (0 Auto), cores free, max spill, flush)
     type Expected = (u32, u32, u32, u32, bool, u32, u32, u32, u32, u32, u32);
 
     fn summary(s: &PerformanceSettings) -> Expected {
@@ -177,7 +178,7 @@ mod tests {
             s.return_memory_at_once,
             s.parse_threads,
             s.query_threads,
-            s.index_threads,
+            s.index_writer_threads,
             s.leave_cores_free,
             s.max_spill_mb,
             s.allocator_flush_mb,
@@ -197,19 +198,19 @@ mod tests {
         };
         let table: [(&str, Environment, Expected); 5] = [
             // 8 GB, 4 cores: 6 GB to share (the AI model lives in Pitwall, not here).
-            ("8 GB / 4 cores", env(8, 4), (1536, 576, 236, 1536, false, 0, 2, 1, 1, 0, 32)),
+            ("8 GB / 4 cores", env(8, 4), (1536, 576, 236, 1536, false, 0, 2, 0, 1, 0, 32)),
             // 16 GB, 8 cores: 12 GB to share.
-            ("16 GB / 8 cores", env(16, 8), (3072, 1152, 450, 3072, false, 0, 3, 2, 1, 0, 32)),
+            ("16 GB / 8 cores", env(16, 8), (3072, 1152, 450, 3072, false, 0, 3, 0, 1, 0, 32)),
             // 32 GB, 16 cores, a spinning disk with 10 GB free: 4 parse threads, spilling capped.
             (
                 "32 GB / 16 cores, HDD",
                 hdd_short,
-                (6144, 2304, 900, 4096, false, 4, 7, 2, 2, 2560, 32),
+                (6144, 2304, 900, 4096, false, 4, 7, 0, 2, 2560, 32),
             ),
             // 64 GB: the store worker's suggestion stops at 8 GB.
-            ("64 GB / 32 cores", env(64, 32), (8192, 3072, 1200, 4096, false, 0, 8, 2, 2, 0, 32)),
+            ("64 GB / 32 cores", env(64, 32), (8192, 3072, 1200, 4096, false, 0, 8, 0, 2, 0, 32)),
             // 16 GB but only 4 GB free now: sized by what is free.
-            ("16 GB, 4 GB free", busy, (1024, 384, 236, 1024, false, 0, 3, 2, 1, 0, 32)),
+            ("16 GB, 4 GB free", busy, (1024, 384, 236, 1024, false, 0, 3, 0, 1, 0, 32)),
         ];
         for (name, e, expected) in table {
             let s = suggest(&e, &PerformanceSettings::default());

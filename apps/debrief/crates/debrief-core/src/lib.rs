@@ -63,6 +63,7 @@ pub mod svg;
 pub mod template;
 #[cfg(test)]
 pub(crate) mod test_dirs;
+pub mod text_format;
 pub mod threads;
 pub mod tiles;
 pub mod timestamp_issue;

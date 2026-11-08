@@ -17,19 +17,19 @@ repository = "https://dev.decryptology.net/decryp7/debrief"
 # `default-features = false` here can't turn the defaults back on in a member.
 [workspace.dependencies]
 anyhow = "1.0"
-# Arrow 58: the version duckdb-rs 1.10506 (DuckDB 1.5.6) links, so event batches reach the store without a
+# Arrow 60: the version duckdb-rs 1.20000 (DuckDB 2.0.0) links, so event batches reach the store without a
 # conversion; `arrow-ipc` carries batches between the store worker and Debrief (ADR 0014 6c).
-arrow-array = { version = "58", default-features = false }
-arrow-buffer = { version = "58", default-features = false }
-arrow-ipc = { version = "58", default-features = false }
-arrow-schema = { version = "58", default-features = false }
+arrow-array = { version = "60", default-features = false }
+arrow-buffer = { version = "60", default-features = false }
+arrow-ipc = { version = "60", default-features = false }
+arrow-schema = { version = "60", default-features = false }
 base64 = "0.23"
 bytes = "1"
 chrono = "0.4.45"
 csv = "1.4"
-# DuckDB 1.5.6 (MIT), pinned to the prebuilt library the fetch script verifies; never `bundled` (several GB of RAM
+# DuckDB 2.0.0 (MIT), pinned to the prebuilt library the fetch script verifies; never `bundled` (several GB of RAM
 # to compile).
-duckdb = { version = "=1.10506.1", default-features = false }
+duckdb = { version = "=1.20000.0", default-features = false }
 ctrlc = "3"
 flate2 = "1.1"
 getrandom = "0.4"
@@ -39,7 +39,7 @@ libc = "0.2"
 log = "0.4"
 memory-stats = "1.2"
 # Event segments of the store: zstd Parquet (Apache-2.0), the Arrow version of duckdb-rs.
-parquet = { version = "58", default-features = false }
+parquet = { version = "60", default-features = false }
 # The global allocator of the binaries that parse and analyse (MIT), v3 (user decision 2026-10-21): through
 # `debrief-alloc`, which also tunes it; measurements in ADR 0014's performance notes.
 mimalloc = { version = "0.1", default-features = false }
@@ -57,6 +57,7 @@ serde_json = "1.0"
 sha2 = "0.11"
 sysinfo = { version = "0.39", default-features = false }
 tantivy = { version = "0.27", default-features = false }
+tar = { version = "0.4", default-features = false }
 tempfile = "3"
 thiserror = "2.0"
 tokio = { version = "1", default-features = false }

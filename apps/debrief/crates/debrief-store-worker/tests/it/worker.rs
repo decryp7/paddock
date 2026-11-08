@@ -247,13 +247,25 @@ fn imports_and_queries_within(mode: MemoryMode, import_budget_mb: u64) {
     while !store.index_status().unwrap().ready && indexed.elapsed() < Duration::from_secs(600) {
         std::thread::sleep(Duration::from_millis(50));
     }
+    // The names catalogue is built in the background after the index (one source per turn: about 100 s for 20
+    // copies on CI's class of machine). Idle means that work is done too: measured while it still ran, idle and the
+    // query peak were a snapshot of how far it had got (and hid what it left behind).
+    let catalogued = Instant::now();
+    while !store.catalogue(&Default::default()).unwrap().built {
+        assert!(
+            catalogued.elapsed() < Duration::from_secs(600),
+            "the catalogue was not built within 600 s"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let catalogue_s = catalogued.elapsed().as_secs_f64();
     let index_peak = sampler.take_mb();
     std::thread::sleep(Duration::from_millis(300));
     let idle = rss_of(pid) >> 20;
     sampler.take_mb();
     // Printed before the queries, so a failing query still reports the import.
     eprintln!(
-        "worker: import {} events in {elapsed:.2} s ({:.0}/s); peak RSS importing {import_peak} MB, indexing {index_peak} MB, idle {idle} MB",
+        "worker: import {} events in {elapsed:.2} s ({:.0}/s); peak RSS importing {import_peak} MB, indexing and cataloguing ({catalogue_s:.1} s) {index_peak} MB, idle {idle} MB",
         report.events,
         report.events as f64 / elapsed
     );

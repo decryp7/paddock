@@ -190,12 +190,19 @@ describe('RedactedCopyDialog', () => {
     const previewFn = vi.fn(async (o: { detectors?: string[] }) => preview(o.detectors?.length ?? 0));
     const { fixture } = await setup({ preview: previewFn });
     previewFn.mockClear();
-    box(fixture, '[data-detector=ipv4]').click();
-    box(fixture, '[data-detector=brand-new]').click();
-    box(fixture, '[data-mode=drop]').click();
-    await settle(fixture);
-    expect(previewFn).not.toHaveBeenCalled();
-    await wait();
+    // The debounce runs on a fake clock: a real 200 ms window raced the test's own settling and failed when the machine was busy.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      box(fixture, '[data-detector=ipv4]').click();
+      box(fixture, '[data-detector=brand-new]').click();
+      box(fixture, '[data-mode=drop]').click();
+      await vi.advanceTimersByTimeAsync(PREVIEW_DEBOUNCE_MS - 1);
+      expect(previewFn).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(previewFn).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
     await settle(fixture);
     expect(previewFn).toHaveBeenCalledTimes(1);
     expect(previewFn).toHaveBeenCalledWith({ detectors: ['email', 'ipv4', 'brand-new'], rules: ['order-ref'], mode: 'drop' });

@@ -45,6 +45,10 @@ on:
       image:
         type: string
         default: dev.decryptology.net/decryp7/garage:ubuntu-24.04-20261023-r5
+      timeout-minutes:
+        description: A shard that runs longer than this is stopped (its targets, the build and the cache restore included).
+        type: number
+        default: 120
 
 env:
   CARGO_TERM_COLOR: always
@@ -53,6 +57,7 @@ jobs:
   fuzz:
     name: fuzz (shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     container:
       image: ${{ inputs.image }}
     strategy:
@@ -80,8 +85,17 @@ jobs:
             ~/.cargo/git
             ~/.cargo/bin/cargo-fuzz
             ${{ inputs.fuzz-dir }}/target
-          key: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir), 'Cargo.lock') }}
-          restore-keys: fuzz-shard${{ matrix.shard }}-${{ runner.os }}-${{ inputs.toolchain }}-
+          key: fuzz-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir), 'Cargo.lock') }}
+          restore-keys: fuzz-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ runner.os }}-${{ inputs.toolchain }}-
+
+      # The corpus grows with every night: restored from the newest earlier one for the same fuzz dir and lock file and saved
+      # under a key of its own (a cache is never overwritten under the same key). libFuzzer writes the inputs it finds to the
+      # FIRST folder it is given, so `corpus/<target>` comes first on the command line; `work/<target>` is only extra input.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ inputs.fuzz-dir }}/corpus
+          key: fuzz-corpus-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir)) }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-shard${{ matrix.shard }}-${{ inputs.fuzz-dir }}-${{ hashFiles(format('{0}/Cargo.lock', inputs.fuzz-dir)) }}-
 
       - name: Install cargo-fuzz
         run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
@@ -103,7 +117,7 @@ jobs:
           for target in $TARGETS; do
             echo "::group::$target"
             mkdir -p "work/$target" "corpus/$target"
-            if ! cargo fuzz run "$target" "work/$target" "corpus/$target" -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 -max_len="$MAX_LEN" -timeout=20; then
+            if ! cargo fuzz run "$target" "corpus/$target" "work/$target" -- -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 -max_len="$MAX_LEN" -timeout=20; then
               failed+=("$target")
             fi
             echo "::endgroup::"
@@ -112,6 +126,28 @@ jobs:
             echo "::error::Crashed: ${failed[*]} (reproducers in the crashes-shard artifact)"
             exit 1
           fi
+
+      # What ran, in the job summary (ER-27): the targets, the time each had and how large each corpus is.
+      - name: Summary
+        if: always()
+        shell: bash
+        env:
+          TARGETS: ${{ matrix.targets }}
+          SECONDS_PER_TARGET: ${{ inputs.seconds }}
+          FUZZ_DIR: ${{ inputs.fuzz-dir }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          {
+            echo "### fuzz shard ${{ matrix.shard }}: $OUTCOME"
+            echo ""
+            echo "| target | seconds | corpus files | crashes |"
+            echo "|---|---|---|---|"
+            for target in $TARGETS; do
+              files=$(find "$FUZZ_DIR/corpus/$target" -type f 2>/dev/null | wc -l | tr -d ' ')
+              crashes=$(find "$FUZZ_DIR/artifacts/$target" -type f 2>/dev/null | wc -l | tr -d ' ')
+              echo "| $target | $SECONDS_PER_TARGET | $files | $crashes |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
       # One artifact per shard: the reproducers of every target that crashed, in artifacts/<target>/.
       - name: Upload crashes

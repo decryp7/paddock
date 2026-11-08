@@ -14,6 +14,7 @@
 
 mod crash;
 mod guard;
+pub mod limits;
 mod quarantine;
 
 pub use crash::{Crashed, catch, panic_message};

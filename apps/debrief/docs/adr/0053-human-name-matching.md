@@ -61,3 +61,30 @@ default) times segmentation, grouping, resolution and the alias job at 50,000 na
   JSON file that tolerates a missing or corrupt file.
 - The word list is small; a name made of words it lacks stays whole until the workspace shows the words separated.
 - The assistant's tools return `why`, `spellings`, `evidence` and `ask_the_user`, and are told to relay them.
+
+## Amendment (2026-10-28): no model unless the user asks
+
+Paddock rule 46 (no LLM for large jobs) and the research note
+[2026-10-28-llm-use-and-names](../research/2026-10-28-llm-use-and-names.md) change layer 2:
+
+- **The automatic alias job is removed.** Nothing asks a model for names after an import or a name-table rebuild; the
+  `name_aliases` setting, the job's `Polite` wait and the background request priority are gone (no settings migration:
+  the unknown key in an old settings file is ignored). Opening logs never loads or runs a model.
+- **Old AI aliases still load.** Entries a 1.1 model already wrote stay in the book, labelled AI-generated and
+  removable (`names_remove_alias`). `debrief_core::names::alias_job` and `LocalAliasModel` remain for the user-started
+  "Suggest names with AI" (at most 16 names, one interactive request, a review list; plan package N5).
+- **Layer 2 becomes "known names"**: abbreviation rule (N2), names a log carries itself and a shipped names pack
+  (N3, N4); the AI is a reviewed suggestion, never a background job. The paragraph "Layer 2, optional AI aliases"
+  above describes 1.1 and is superseded by this amendment as each package lands.
+- **The abbreviation rule (layer 1, `How::Abbreviation`, `names::abbreviation`).** The query without separators splits
+  in order into one piece per word of a name of two or more words; each piece starts with its word's first letter and
+  is a subsequence of the word. There is no list of conventional abbreviations in the code (`gfx` for graphic, `xfer`
+  for transfer): a convention that is not letters of its word is data, and may come through the names pack (N3) for
+  gaps measured on real imports. The query must be at least four characters and
+  shorter than the name, so a typo or the name itself never takes this way. It ranks below a prefix or an alias and
+  above a typo, says "abbreviation: letters of graphic builder", and ties between two names are a question like any
+  other. Evaluated in `names_eval.rs` on the invented set of this ADR: 22 of 24 abbreviations top-1 with no model
+  (the misses are `gfxbldr`, `gfx` not being letters of `graphic`, and `lickchk`, whose `k` sits inside `lic|kchk`; 23
+  of 24 while the rule still had its four-entry table), no false suggestion, none of the 18 negatives matched, and
+  still 22 of 24 with 2,000 distractor names in the book. The evaluation asserts this without layer 2 now; synonyms
+  still need an alias or the user.

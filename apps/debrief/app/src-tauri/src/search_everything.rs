@@ -145,10 +145,10 @@ pub(crate) async fn search_with<R: Runtime>(
 
 /// The values and entities the logs hold that the search box's words refer to (`CompanyA.Graphic.Builder.exe` for
 /// "graphic builder"), best first, each with how and why it matched, its spellings and evidence, and a clarifying
-/// question when two things match equally. Rebuilds the window's name table when its catalogue is ready and starts
-/// nothing else changes.
+/// question when two things match equally. Rebuilds the window's name table when its catalogue is ready; nothing else
+/// changes.
 #[tauri::command]
-pub async fn find_values(state: CurrentWindow, request: FindValuesRequest) -> CmdResult<Resolved> {
+pub async fn find_values<R: Runtime>(_app: AppHandle<R>, state: CurrentWindow, request: FindValuesRequest) -> CmdResult<Resolved> {
     if request.text.chars().count() > search_all::MAX_TEXT_CHARS {
         return Err(CmdError::new(
             ErrorCode::Invalid,
@@ -157,7 +157,7 @@ pub async fn find_values(state: CurrentWindow, request: FindValuesRequest) -> Cm
     }
     let store = state.engine.store()?;
     let win = state.arc().clone();
-    let (found, _fresh) = crate::sync::blocking("find values", move || {
+    let (found, _) = crate::sync::blocking("find values", move || {
         win.names.search(store.as_ref(), &request.text, request.limit)
     })
     .await?;
@@ -236,6 +236,7 @@ mod tests {
         let app = test_app(None);
         let ask = |text: &str| {
             block(find_values(
+                app.handle().clone(),
                 main_window(&app),
                 FindValuesRequest {
                     text: text.into(),
