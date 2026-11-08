@@ -174,7 +174,7 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState, { settle = (ms) =>
       atspi('press dyno "^Close$" "push button"');
       if (atspi('press dyno "^Benchmarks$" "link"').code !== 0) return false;
       let ok = false;
-      for (let i = 0; i < 10 && !ok; i++) { ok = atspi('press dyno "^Sustained processor" "radio button|toggle button|push button"').code === 0; if (!ok) atspi('has dyno "^Benchmarks$"'); }
+      for (let i = 0; i < 12 && !ok; i++) { ok = atspi('press dyno "^Sustained processor" "radio button|toggle button|push button"').code === 0; if (!ok) { await new Promise((r) => setTimeout(r, 2000)); if (i % 4 === 3) atspi('press dyno "^Benchmarks$" "link"'); } } // the page appears a little after the link is pressed under Rosetta: wait on it, never spin
       const lines = () => atspi('tree dyno 80').stdout.split('\n').map((l) => l.trim()).filter((l) => /Run benchmarks|Sustained|Cancel|Running|Pass \d|Tick Yes|not|blocked/i.test(l)).slice(0, 12).join(' | ');
       if (!ok) return { ok: false, detail: `no "Sustained processor" choice on the Benchmarks page: ${lines()}` };
       if (atspi('press dyno "Run benchmarks$" "push button"').code !== 0) return { ok: false, detail: `no Run benchmarks button: ${lines()}` };
