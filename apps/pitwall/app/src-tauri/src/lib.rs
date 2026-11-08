@@ -193,11 +193,12 @@ pub enum Place {
 /// The client of the server, the tray's facts and the popup's widgets, for `place`. A test's client never falls back to the
 /// well-known port (a Pitwall installed on the machine may be using it, ER-14), or is `server` when the test gives one.
 fn state(place: &Place) -> (SharedClient, SharedModel, popup::SharedPopup) {
-    let (data_dir, store): (std::path::PathBuf, Box<dyn credentials::KeyStore>) = match place {
-        Place::Installed => (app_state::data_dir().unwrap_or_default(), Box::new(credentials::OsKeyStore)),
-        Place::Test { dir, .. } => (dir.clone(), Box::new(credentials::NoKeyStore)),
+    let data_dir = match place {
+        Place::Installed => app_state::data_dir().unwrap_or_default(),
+        Place::Test { dir, .. } => dir.clone(),
     };
-    let keys = Arc::new(credentials::StoredAdminKey::new(store, data_dir.join("admin.key")));
+    // The server's admin.key is the key's only store (ADR 0057 WP-4): the app keeps no copy.
+    let keys = Arc::new(credentials::StoredAdminKey::new(data_dir.join("admin.key")));
     let client: SharedClient = match place {
         Place::Test { server: Some(server), .. } => server.clone(),
         Place::Test { server: None, .. } => Arc::new(server_client::LoopbackClient::new(data_dir.clone(), keys).discovery_port_only()),

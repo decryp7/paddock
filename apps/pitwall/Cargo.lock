@@ -10,9 +10,9 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aes"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35f0f96ce78e38c3dc6d8948aa8163d06385be74000f3c7a95bf1eef35d3ea32"
+checksum = "fc0fc36d7440d015b45468ba08a21e80e056ebbd014c611c6298bb7503e04bd1"
 dependencies = [
  "cipher",
  "cpubits",
@@ -2202,9 +2202,9 @@ dependencies = [
 
 [[package]]
 name = "inout"
-version = "0.2.5"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b5cf4372d022092674a83b8febf5865f7a573cc0c5baec5e49c879b6a20978f"
+checksum = "3a580c13f0ffc335ef42dd3f6b1a41b726051c5e1656d9a3aa6fddb3c5dfbbf9"
 dependencies = [
  "block-padding",
  "hybrid-array",
@@ -3416,9 +3416,12 @@ name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
  "keyring",
+ "libc",
+ "log",
  "paddock-env",
  "paddock-proc",
  "paddock-workspace-hack",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 
@@ -3827,7 +3830,6 @@ version = "1.1.0"
 dependencies = [
  "chrono",
  "getrandom 0.3.4",
- "keyring",
  "log",
  "objc2",
  "objc2-foundation",
@@ -3876,10 +3878,10 @@ dependencies = [
 name = "pitwall-cli"
 version = "1.1.0"
 dependencies = [
- "keyring",
  "log",
  "paddock-env",
  "paddock-log",
+ "paddock-secrets",
  "paddock-testkit",
  "pitwall-core",
  "pitwall-loopback",
@@ -3936,6 +3938,7 @@ dependencies = [
  "paddock-env",
  "paddock-log",
  "paddock-proc",
+ "paddock-secrets",
  "paddock-service",
  "pitwall-core",
  "pitwall-loopback",

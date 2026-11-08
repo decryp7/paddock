@@ -102,6 +102,33 @@ describe('the graph of this tree', () => {
     assert.ok(!run('apps/shell-demo/README.md').conformance);
   });
 
+  test('every input of conformance C99 plans the c99 job (ADR 0057 §3.4), and a docs-only or unrelated change does not', () => {
+    for (const f of [
+      'apps/debrief/Cargo.lock',
+      'apps/debrief/Cargo.toml',
+      'apps/dyno/crates/dyno-core/Cargo.toml',
+      'apps/dyno/crates/dyno-core/src/lib.rs',
+      'apps/shell-demo/src-tauri/Cargo.lock',
+      'crates/paddock-secrets/Cargo.toml',
+      'crates/Cargo.lock',
+      'apps/shell-demo/src-tauri/src/main.m',
+      'apps/debrief/app/src/app/a.ts',
+      'ui/projects/paddock-ui/src/public-api.ts',
+      'apps/shell-demo/src-tauri/capabilities/dialog.json',
+      'apps/debrief/paddock.ci.json',
+      'conformance/src/checks/C99-no-keychain.mjs',
+      'conformance/src/util/keychain-graph.mjs',
+      'conformance/bin/paddock-conformance.mjs',
+      'paddock.waivers.toml',
+      '.cargo/config.toml',
+    ]) {
+      const r = run(f);
+      assert.ok(r.c99, f);
+    }
+    for (const f of ['docs/benchmarks.md', 'README.md', 'apps/debrief/README.md', 'conformance/test/c99-graph.test.mjs', 'apps/debrief/app/src/styles.scss']) assert.ok(!run(f).c99, f);
+    assert.equal(onlyApp(run('crates/Cargo.lock'), 'debrief').c99, false);
+  });
+
   test("a per-machine app's Tauri config, per-machine.json and installer files run C91 and the shared crates' sync test", () => {
     for (const f of [
       'apps/dyno/app/src-tauri/tauri.conf.json',
@@ -415,14 +442,14 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
   test('ci.yml wires the plan job outputs: every needs.plan.outputs.X is declared, and every declared output is one --ci writes', () => {
     const ci = readFileSync(join(ROOT, CI_FILE), 'utf8');
     const planJob = workflowJobs(ci).jobs.get('plan');
-    const declared = [...planJob.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.plan\.outputs\.([a-z_]+) \}\}/gm)];
+    const declared = [...planJob.matchAll(/^ {6}([a-z0-9_]+): \${{ steps\.plan\.outputs\.([a-z0-9_]+) }}/gm)];
     const written = Object.keys(ciOutputs({ paddockDev: false }, []));
     for (const [, name, step] of declared) {
       assert.equal(name, step, `output ${name} reads steps.plan.outputs.${step}`);
       assert.ok(written.includes(step), `--ci writes ${step}`);
     }
     const names = declared.map((d) => d[1]);
-    for (const [, used] of ci.matchAll(/needs\.plan\.outputs\.([a-z_]+)/g)) assert.ok(names.includes(used), `ci.yml uses needs.plan.outputs.${used}, which the plan job does not declare`);
+    for (const [, used] of ci.matchAll(/needs\.plan\.outputs\.([a-z0-9_]+)/g)) assert.ok(names.includes(used), `ci.yml uses needs.plan.outputs.${used}, which the plan job does not declare`);
     for (const w of written) assert.ok(names.includes(w), `--ci writes ${w}, which the plan job does not declare`);
     assert.equal(ciOutputs({}, []).any_app, false);
     assert.equal(ciOutputs({}, [{ app: 'x' }]).any_app, true);

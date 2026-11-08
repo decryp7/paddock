@@ -2,7 +2,7 @@
 //! Nothing here touches the environment, the file system or the network.
 //!
 //! Global flags may stand anywhere on the line. A key is never an argument: the admin key comes from
-//! `PITWALL_ADMIN_KEY`, `--key-file <path>` or the OS credential store, and chat uses `PITWALL_API_KEY`.
+//! `PITWALL_ADMIN_KEY`, `--key-file <path>` or the server's `admin.key`, and chat uses `PITWALL_API_KEY`.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -168,8 +168,9 @@ Options:
   -h, --help                   This text
   -V, --version                The version
 
-Keys: the admin key comes from PITWALL_ADMIN_KEY, --key-file or the OS credential store (the same entry the
-Pitwall window uses); chat uses a per-app key from PITWALL_API_KEY. Keys are never command-line arguments.
+Keys: the admin key comes from PITWALL_ADMIN_KEY, --key-file or the server's admin.key in the Pitwall data
+folder (the file the Pitwall window reads); chat uses a per-app key from PITWALL_API_KEY. Keys are never
+command-line arguments.
 
 Exit codes: 0 ok, 1 error, 2 usage, 3 server not running, 4 refused (not enough memory, busy).
 "

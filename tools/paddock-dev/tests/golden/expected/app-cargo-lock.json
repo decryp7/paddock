@@ -4,6 +4,7 @@
  "ui": false,
  "eslint": false,
  "conformance": false,
+ "c99": true,
  "tools": false,
  "icons": false,
  "ciImage": false,
@@ -25,6 +26,9 @@
  "why": {
   "app:z": [
    "apps/z/app/src-tauri/Cargo.lock"
+  ],
+  "c99": [
+   "C99 reads apps/z/app/src-tauri/Cargo.lock"
   ]
  }
 }

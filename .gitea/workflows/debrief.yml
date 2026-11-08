@@ -1050,10 +1050,25 @@ jobs:
         with:
           mode: release
 
+  # Conformance C99 (ADR 0057 §3.4, rule 72): the shared keychain action, scoped to Debrief and crates/ (ER-31); the release
+  # waits for it. Tags and manual runs only; ci.yml's c99 job covers pull requests, main and the nightly.
+  keychain:
+    name: C99 (no Keychain in a macOS build)
+    if: startsWith(github.ref, 'refs/tags/debrief-v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.gitea/actions/keychain
+        with:
+          scope: apps/debrief
+
   release:
     name: release
     if: needs.plan.outputs.run == 'true' && startsWith(github.ref, 'refs/tags/debrief-v')
-    needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e]
+    needs: [plan, bundle, tauri-smoke, rust-lint, rust-test, rust-test-macos, plugin-sdk, licences, frontend, e2e, keychain]
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2

@@ -7,7 +7,8 @@
 //! - [`VersionedFile`]: a JSON state file with a `version`: atomic writes with fsync and a `.bak`, missing or damaged gives
 //!   defaults (the damaged file is kept as `.corrupt-<time>`, a valid `.bak` is used), a newer version is refused and left
 //!   untouched, older versions go through a migration chain once.
-//! - [`write_atomic`]: the atomic replace under it, for files that are not JSON state.
+//! - [`write_atomic`]: the atomic replace under it, for files that are not JSON state; [`write_atomic_created`] where
+//!   the caller creates the temporary file (an owner-only, unshared file for a secret on Windows).
 //!
 //! Tests use temporary folders only and never read or write the user's real folders.
 
@@ -18,7 +19,7 @@ mod error;
 mod versioned;
 
 pub use app::AppId;
-pub use atomic::write_atomic;
+pub use atomic::{write_atomic, write_atomic_created};
 pub use dirs::{AppDirs, MapVars, Os, PORTABLE_FLAG, ProcessVars, Source, Vars};
 pub use error::{EnvError, Result};
 pub use versioned::{

@@ -2846,9 +2846,12 @@ dependencies = [
 name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
+ "libc",
+ "log",
  "paddock-env",
  "paddock-proc",
  "paddock-workspace-hack",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

@@ -29,8 +29,8 @@ tokio = { workspace = true, features = ["rt", "macros", "time", "io-util", "io-s
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }
 log = { version = "0.4", features = ["kv"] }
-# The OS credential store holds the app's copy of the admin key (the same entry the Pitwall window uses).
-keyring = "4.2"
+# The server's admin.key, read as an owner-only secret file (ADR 0057 WP-4: no OS credential store).
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 
 [dev-dependencies]
 # A socket bound but not listening refuses connections on Linux and Windows (not macOS): "nothing listens" with the port held.

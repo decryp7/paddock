@@ -1,16 +1,13 @@
-//! The app's copy of the server's admin key. The server owns the key (`<data dir>/admin.key`, owner-only); the app
-//! keeps a copy in the OS credential store (Windows Credential Manager, macOS Keychain, Secret Service on Linux) so a
-//! later start does not depend on reading the file, and falls back to the file when the store is unavailable (no
-//! Secret Service in a container, a locked keychain). The key is never logged and never part of an error message
-//! (adapted from Pitcrew's credentials module).
+//! The server's admin key as the app reads it. The server owns the key and `<data dir>/admin.key` is its only store, on
+//! every OS (ADR 0057 WP-4, rule 72): an owner-only file read through `paddock-secrets`, which refuses a file others can
+//! read, a link, another user's file and anything that is not a regular file. The app keeps no copy of its own: 1.0.x kept
+//! one in the OS credential store, which an ad-hoc signed update cannot read on macOS without a password dialog. The key is
+//! never logged and never part of an error message.
 
+use paddock_secrets::SecretFile;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-/// The credential service name.
-pub const SERVICE: &str = "Pitwall";
-/// The credential's account name.
-pub const ACCOUNT: &str = "admin key";
 /// Longest key accepted.
 pub const MAX_KEY_LEN: usize = 256;
 
@@ -25,73 +22,45 @@ pub fn parse_key(raw: &str) -> Option<String> {
 pub trait AdminKeys: Send + Sync {
     /// The key to use now (cached).
     fn current(&self) -> Option<String>;
-    /// Reads the key again from its source of truth (the server's file) and updates the cache and the store. Called
-    /// once after an `Unauthorized` answer.
+    /// Reads the key again from the server's file and updates the cache. Called once after an `Unauthorized` answer.
     fn refresh(&self) -> Option<String>;
 }
 
-/// A place the app's copy lives.
-pub trait KeyStore: Send + Sync {
-    /// The stored key.
-    fn get(&self) -> Option<String>;
-    /// Stores the key.
-    fn set(&self, key: &str) -> Result<(), String>;
-}
-
-/// The OS credential store.
-pub struct OsKeyStore;
-
-fn entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, ACCOUNT).map_err(|e| format!("the credential store is not available: {e}"))
-}
-
-impl KeyStore for OsKeyStore {
-    fn get(&self) -> Option<String> {
-        entry().ok()?.get_password().ok().and_then(|k| parse_key(&k))
-    }
-
-    fn set(&self, key: &str) -> Result<(), String> {
-        entry()?.set_password(key).map_err(|e| format!("the key could not be stored: {e}"))
-    }
-}
-
-/// No credential store: the app's copy is only the server's `admin.key` (a test's start, which must not reach the user's
-/// keychain, ER-14). Storing is a no-op.
-pub struct NoKeyStore;
-
-impl KeyStore for NoKeyStore {
-    fn get(&self) -> Option<String> {
-        None
-    }
-
-    fn set(&self, _: &str) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-/// The key from the OS store with the server's `admin.key` as fallback and as the source of truth on refresh.
+/// The key from the server's `admin.key`, cached until a refresh.
 pub struct StoredAdminKey {
-    store: Box<dyn KeyStore>,
-    file: PathBuf,
+    file: SecretFile,
     cached: Mutex<Option<String>>,
+    /// The last refusal logged, so a file that stays untrusted is logged once, not on every request.
+    last_problem: Mutex<Option<String>>,
 }
 
 impl StoredAdminKey {
-    /// Keys in `store`, falling back to `file`.
-    pub fn new(store: Box<dyn KeyStore>, file: PathBuf) -> StoredAdminKey {
+    /// The key in `file` (the server's `<data dir>/admin.key`).
+    pub fn new(file: PathBuf) -> StoredAdminKey {
         StoredAdminKey {
-            store,
-            file,
+            file: SecretFile::new(file),
             cached: Mutex::new(None),
+            last_problem: Mutex::new(None),
         }
     }
 
     fn read_file(&self) -> Option<String> {
-        std::fs::metadata(&self.file)
-            .ok()
-            .filter(|m| m.len() as usize <= MAX_KEY_LEN * 2)
-            .and_then(|_| std::fs::read_to_string(&self.file).ok())
-            .and_then(|t| parse_key(&t))
+        let read = self.file.read();
+        let problem = match &read {
+            Ok(Some(k)) if parse_key(k.expose()).is_none() => Some("it does not hold a key".to_string()),
+            Err(e) => Some(e.to_string()),
+            _ => None,
+        };
+        let mut last = self.last_problem.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(why) = problem.as_ref().filter(|p| last.as_ref() != Some(*p)) {
+            log::warn!(
+                target: "pitwall",
+                "the admin key in {} is not used: {why}. Restart Pitwall's server (it writes a new key) or fix the file",
+                self.file.path().display()
+            );
+        }
+        *last = problem;
+        read.ok().flatten().and_then(|k| parse_key(k.expose()))
     }
 
     fn remember(&self, key: Option<String>) -> Option<String> {
@@ -105,26 +74,12 @@ impl AdminKeys for StoredAdminKey {
         if let Some(k) = self.cached.lock().unwrap_or_else(|p| p.into_inner()).clone() {
             return Some(k);
         }
-        if let Some(k) = self.store.get() {
-            return self.remember(Some(k));
-        }
-        let from_file = self.read_file();
-        if let Some(k) = &from_file {
-            // Best effort: a store that refuses leaves the file as the source.
-            let _ = self.store.set(k);
-        }
-        self.remember(from_file)
+        let key = self.read_file();
+        self.remember(key)
     }
 
     fn refresh(&self) -> Option<String> {
-        let from_file = self.read_file();
-        if let Some(k) = &from_file {
-            if self.store.get().as_deref() != Some(k.as_str()) {
-                let _ = self.store.set(k);
-            }
-        }
-        // No file (the server is gone or never ran): the stored copy is all there is.
-        let key = from_file.or_else(|| self.store.get());
+        let key = self.read_file();
         self.remember(key)
     }
 }
@@ -151,22 +106,11 @@ impl AdminKeys for StaticKeys {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+    use std::path::Path;
 
-    #[derive(Default, Clone)]
-    struct MemStore(Arc<Mutex<Option<String>>>, bool);
-
-    impl KeyStore for MemStore {
-        fn get(&self) -> Option<String> {
-            self.0.lock().unwrap().clone()
-        }
-        fn set(&self, key: &str) -> Result<(), String> {
-            if self.1 {
-                return Err("locked".into());
-            }
-            *self.0.lock().unwrap() = Some(key.to_string());
-            Ok(())
-        }
+    /// The key file as the server writes it: owner-only (0600 on Unix, an owner-only DACL on Windows).
+    fn server_writes(file: &Path, key: &str) {
+        SecretFile::new(file).write(&paddock_secrets::Secret::new(key).unwrap()).unwrap();
     }
 
     #[test]
@@ -180,57 +124,53 @@ mod tests {
     }
 
     #[test]
-    fn the_file_is_the_fallback_and_is_copied_into_the_store() {
+    fn the_file_is_the_only_source_and_a_refresh_reads_it_again() {
         let d = tempfile::tempdir().unwrap();
         let file = d.path().join("admin.key");
-        std::fs::write(&file, "from-file\n").unwrap();
-        let store = MemStore::default();
-        let keys = StoredAdminKey::new(Box::new(store.clone()), file);
-        assert_eq!(keys.current().as_deref(), Some("from-file"));
-        assert_eq!(store.get().as_deref(), Some("from-file"), "the store now has its copy");
-    }
-
-    #[test]
-    fn the_store_wins_over_the_file_until_a_refresh() {
-        let d = tempfile::tempdir().unwrap();
-        let file = d.path().join("admin.key");
-        std::fs::write(&file, "new-key").unwrap();
-        let store = MemStore::default();
-        store.set("old-key").unwrap();
-        let keys = StoredAdminKey::new(Box::new(store.clone()), file);
-        assert_eq!(keys.current().as_deref(), Some("old-key"));
-        // The server made a new key: a refresh trusts the file and updates the store and the cache.
-        assert_eq!(keys.refresh().as_deref(), Some("new-key"));
-        assert_eq!(store.get().as_deref(), Some("new-key"));
-        assert_eq!(keys.current().as_deref(), Some("new-key"));
-    }
-
-    #[test]
-    fn a_locked_store_or_a_missing_file_degrades_quietly() {
-        let d = tempfile::tempdir().unwrap();
-        let file = d.path().join("admin.key");
-        std::fs::write(&file, "k1").unwrap();
-        let locked = MemStore(Arc::default(), true);
-        let keys = StoredAdminKey::new(Box::new(locked), file.clone());
-        assert_eq!(keys.current().as_deref(), Some("k1"), "works without a store");
+        let keys = StoredAdminKey::new(file.clone());
+        assert_eq!(keys.current(), None, "no server has run yet");
+        server_writes(&file, "pw_first");
+        assert_eq!(keys.current().as_deref(), Some("pw_first"));
+        // The server made a new key: the cache holds the old one until a refresh, which trusts the file.
+        server_writes(&file, "pw_second");
+        assert_eq!(keys.current().as_deref(), Some("pw_first"));
+        assert_eq!(keys.refresh().as_deref(), Some("pw_second"));
+        assert_eq!(keys.current().as_deref(), Some("pw_second"));
         std::fs::remove_file(&file).unwrap();
-        assert_eq!(keys.refresh(), None, "no file and no store copy: no key");
-        let store = MemStore::default();
-        store.set("kept").unwrap();
-        let only_store = StoredAdminKey::new(Box::new(store), d.path().join("none"));
-        assert_eq!(only_store.refresh().as_deref(), Some("kept"));
+        assert_eq!(keys.refresh(), None, "no file: no key, there is no other copy");
     }
 
     #[test]
     fn a_damaged_key_file_is_ignored() {
         let d = tempfile::tempdir().unwrap();
         let file = d.path().join("admin.key");
-        std::fs::write(&file, "bad key with spaces").unwrap();
-        let keys = StoredAdminKey::new(Box::new(MemStore::default()), file.clone());
+        server_writes(&file, "bad key with spaces");
+        let keys = StoredAdminKey::new(file.clone());
         assert_eq!(keys.current(), None);
-        std::fs::write(&file, "x".repeat(MAX_KEY_LEN * 3)).unwrap();
+        assert_eq!(keys.refresh(), None, "the same problem is logged once");
+        server_writes(&file, &"x".repeat(MAX_KEY_LEN * 3));
         assert_eq!(keys.refresh(), None);
         assert_eq!(StaticKeys::new("s").current().as_deref(), Some("s"));
         assert_eq!(StaticKeys::new("s").refresh().as_deref(), Some("s"));
+    }
+
+    /// A key others could read, or a link planted in its place, is not used (ADR 0057: the file is the only store).
+    #[cfg(unix)]
+    #[test]
+    fn a_key_file_others_can_read_or_a_link_is_refused() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let file = d.path().join("admin.key");
+        server_writes(&file, "pw_key");
+        let keys = StoredAdminKey::new(file.clone());
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(keys.current(), None, "readable by others: refused");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(keys.refresh().as_deref(), Some("pw_key"));
+        let outside = d.path().join("outside");
+        server_writes(&outside, "pw_planted");
+        std::fs::remove_file(&file).unwrap();
+        std::os::unix::fs::symlink(&outside, &file).unwrap();
+        assert_eq!(keys.refresh(), None, "a link is never followed");
     }
 }

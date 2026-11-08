@@ -20,6 +20,17 @@ export function permissionSummary(p: AppPermissions): string[] {
   return out;
 }
 
+/**
+ * What approving a re-pair does (ADR 0057 §4), named by the app Pitwall has (its stored name and id, not the requester's
+ * words), or null for a plain pairing, which keeps the app's other keys.
+ */
+export function rePairNote(r: PairingRequest): string | null {
+  if (!r.rePair) return null;
+  const old = r.replaces;
+  if (!old) return `Pitwall has no app "${r.appId}" yet: approving only adds it.`;
+  return old.keys === 1 ? `Approving revokes the 1 key of ${old.appName} (${old.appId}).` : `Approving revokes all ${old.keys} keys of ${old.appName} (${old.appId}).`;
+}
+
 /** A pending pairing request: the code to match, what it asks for, and Approve / Deny. */
 @Component({
   selector: 'pw-pairing-card',
@@ -32,6 +43,9 @@ export function permissionSummary(p: AppPermissions): string[] {
         <p class="title"><b>{{ request().appName }}</b> wants to use Pitwall</p>
         <p class="sub">Check that it shows the same code. Asked {{ when(request().requestedAt, now()) }}.</p>
         <p class="perms" aria-label="Requested permissions">{{ perms(request().permissions).join(' · ') }}</p>
+        @if (repair(request()); as note) {
+          <p class="repair">{{ note }}</p>
+        }
       </div>
       <div class="code" aria-label="Pairing code">
         <span class="code-label">Code</span>
@@ -83,6 +97,10 @@ export function permissionSummary(p: AppPermissions): string[] {
       font-size: var(--pd-text-label);
       color: var(--pd-text-muted);
     }
+    .repair {
+      margin: var(--pd-space-1) 0 0;
+      font-size: var(--pd-text-label);
+    }
     .code {
       display: flex;
       flex-direction: column;
@@ -116,6 +134,7 @@ export class PairingCard {
   protected readonly code = groupCode;
   protected readonly perms = permissionSummary;
   protected readonly when = ago;
+  protected readonly repair = rePairNote;
   protected busy(): boolean {
     return this.live.isBusy()(`pairing:${this.request().id}`);
   }

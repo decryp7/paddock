@@ -56,6 +56,10 @@ on:
         description: The Cargo workspace folder whose .cargo/config.toml includes ci.toml; the build folder is set there (build-folder action).
         type: string
         required: true
+      app-folder:
+        description: "The app's folder (apps/<app>) that the C99 keychain job judges with crates/. Empty: derived from cargo-dir (the action keeps its first two segments), which is right for every app whose workspace is apps/<app> or below it."
+        type: string
+        default: ""
       tag-prefix:
         description: "The app's tag prefix with the dash (pitcrew-): tags are <prefix>v1.2.3. Empty: plain v* tags."
         type: string
@@ -336,10 +340,33 @@ jobs:
         with:
           mode: release
 
+  # Conformance C99 (ADR 0057 §3.4, rule 72): a release never ships a build that can reach the macOS Keychain. The shared
+  # keychain action, scoped to this app's folder and crates/ (ER-31); tags and manual runs only (ci.yml's c99 job covers the
+  # rest). The release waits for it.
+  keychain:
+    name: C99 (no Keychain in a macOS build)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    container:
+      image: dev.decryptology.net/decryp7/paddock-ci:v2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: decryp7/paddock
+          ref: ${{ inputs.paddock-ref }}
+          path: .paddock
+
+      - uses: ./.paddock/.gitea/actions/keychain
+        with:
+          scope: ${{ inputs.app-folder || inputs.cargo-dir }}
+          paddock: .paddock
+
   release:
     name: release
     if: startsWith(github.ref, format('refs/tags/{0}v', inputs.tag-prefix))
-    needs: [bundle]
+    needs: [bundle, keychain]
     runs-on: ubuntu-latest
     permissions:
       contents: write

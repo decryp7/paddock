@@ -17,7 +17,7 @@ import { ItemsMenu, MoreButton, RowMenu, type MenuItem } from '../../shared/ui/m
 import { Panel } from '../../shared/ui/panel';
 import { moveRowFocus } from '../../shared/ui/row-nav';
 import { limitsShort, limitsText } from '../dashboard/apps-card';
-import { groupCode, permissionSummary } from '../dashboard/pairing-card';
+import { groupCode, permissionSummary, rePairNote } from '../dashboard/pairing-card';
 import { AppsStore } from './apps.store';
 import { CREATE_APP_DIALOG_ID } from './create-app-dialog';
 import { KEY_SECRET_DIALOG_ID } from './key-secret-dialog';
@@ -50,6 +50,9 @@ import { PermissionsEditor } from './permissions-editor';
                 <div class="pmain">
                   <p><b>{{ p.appName }}</b>{{ ' ' }}<span class="faint">asked {{ when(p.requestedAt, now()) }}</span></p>
                   <p class="perms" aria-label="Requested permissions">{{ summary(p.permissions).join(' · ') }}</p>
+                  @if (repair(p); as note) {
+                    <p class="perms">{{ note }}</p>
+                  }
                 </div>
                 <div class="code" [attr.aria-label]="'Pairing code ' + p.code"><span class="mono">{{ code(p.code) }}</span></div>
                 <div class="pact">
@@ -432,6 +435,7 @@ export class AppsPage implements OnInit {
   protected readonly dur = duration;
   protected readonly code = groupCode;
   protected readonly summary = permissionSummary;
+  protected readonly repair = rePairNote;
   protected readonly limits = limitsText;
   protected readonly limitsShort = limitsShort;
   protected readonly rateText = cacheHitRateText;

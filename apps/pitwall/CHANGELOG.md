@@ -33,6 +33,19 @@ arrive in the app as usual.
   uninstall closes Pitwall for every signed-in user. Updates install through one Windows administrator prompt; "install when
   Pitwall quits" is gone on Windows. Start at log-in is always the user's own entry, never the machine-wide one.
 
+**The admin key is no longer in the OS credential store.** Pitwall 1.0.x kept a copy of its admin key in the macOS
+Keychain (Windows Credential Manager, Secret Service on Linux). 1.1.0 and the `pitwall` command line read only the
+server's `admin.key` in the data folder, which already held the key, so nothing changes for you and no password dialog
+appears. 1.1.0 never reads or deletes the old item. To remove it by hand, on macOS run in Terminal:
+
+```sh
+security delete-generic-password -s "Pitwall" -a "admin key"
+```
+
+On Windows, delete the generic credential `admin key.Pitwall` in Credential Manager (Windows Credentials), or run
+`cmdkey /delete:"admin key.Pitwall"`. On Linux, `secret-tool clear service Pitwall username "admin key"`. Removing it is
+optional: nothing reads it.
+
 ### Added
 
 - Report a problem (Help menu, command palette): a diagnostics zip you review file by file and save where you choose;
@@ -46,6 +59,18 @@ arrive in the app as usual.
   unknown), Cancel in every phase, "Stop waiting" when Cancel did not take effect, and no time limit in the window: a job
   that is still running is still working.
 - The memory footprint of the app and the engines is read through the shared process crate.
+
+### Security
+
+- The admin key lives only in `admin.key` in the data folder, on every OS (ADR 0057, rule 72: no Pitwall process uses the
+  macOS Keychain). The file is owner-only from its first byte: on macOS and Linux mode 0600 in a 0700 data folder, on
+  Windows a protected access list that grants only you. A key file others could read, a link in its place or another
+  user's file is not trusted: the server replaces the key and logs why. The key is plain text in that file: other users
+  cannot read it, but any program running as you can, as with `~/.netrc` (see the user guide, "Your data").
+- An app that pairs again after losing its key can send `"rePair": true`; approving such a request revokes that app's
+  keys, so the key it lost does not stay valid. Pitwall shows the app it has under that name and how many keys go
+  ("Approving revokes all 3 keys of Debrief (debrief)"). A pairing without the flag (a second machine under the same
+  name) keeps the other keys. An approval that cannot be saved now says so instead of looking done.
 
 ### Fixed
 

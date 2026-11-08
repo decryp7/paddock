@@ -30,6 +30,8 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 # The family's log (ER-27, ER-22): one dated CLEF file per process in the app's log folder, redaction, panic hook, crash marker.
 paddock-log = { path = "../../../../crates/paddock-log" }
 paddock-env = { path = "../../../../crates/paddock-env" }
+# The admin key's owner-only file (ADR 0057 WP-4): the one shared secret-file mechanism, never the OS credential store.
+paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio", "query", "matched-path"] }
 bytes = "1"
 flate2 = "1"

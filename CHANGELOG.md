@@ -35,6 +35,24 @@ Conventional Commits; one semver tag for the whole repo.
 - Fixed: tool-call ids are unique over a conversation. The prompted protocol numbers calls per answer, so a second tool round reused `call_1` and its card overwrote the first round's; an empty or repeated id now becomes the first free `call_<n>`.
 - Breaking (before v1): `Assistant::approve` and the `assistant_approve_tool` command take a `choice` (`ApprovalChoice`) instead of `approved: bool`; `AssistantBackend.approve` of `@decryp7/paddock-ui/workbench/assistant` takes the choice too; `Gate::decide` returns `Result<(), Refused>`; `Decision` is `Chosen(ApprovalChoice)`, `Cancelled` or `TimedOut`. New `AssistantError::NotOffered` (an `invalid` command error) for Always allow on a card that did not offer it.
 
+### `paddock-secrets`: one owner-only secret file at a chosen path; links, pipes and loose Windows DACLs refused
+- New `SecretFile::new(path)` with `read`, `write` and `delete`: one secret in a file the app names (Pitwall's `admin.key`,
+  ADR 0057 WP-4). `FileSecrets` is now a folder of these, so both share one implementation.
+- Reads open the file with `O_NOFOLLOW | O_NONBLOCK` and check the open handle: a symbolic link, a pipe or any other
+  non-regular file is refused (before, `fs::metadata` followed a link and a planted pipe would block the read). On
+  Windows a reparse point is refused, and so is a file whose DACL grants anyone besides its owner, the user, SYSTEM and
+  Administrators (`InsecureFile`).
+- Writes on Windows create the temporary file with a protected DACL for the user running the process and no sharing,
+  so no other principal can open it at any point (before, the file inherited the folder's access list). A folder where
+  others may create or change files is refused, and on read the owner and DACL come from the open handle: an owner other
+  than the user, SYSTEM or Administrators is refused (a key planted by another user).
+- Unix reads also refuse a file with more than one name (a hard link) and a folder whose owner cannot be checked;
+  tightening a folder to 0700 is logged.
+- Breaking (before v1): a secrets folder that group or others can read (not only write), such as 0750 or 0755, is now
+  made 0700 when it is ours.
+- `paddock-env`: new `write_atomic_created(path, bytes, create)`, where the caller creates the temporary file; a failed
+  creation replaces nothing and leaves no temporary file.
+
 ### `@decryp7/paddock-ui`: the status chip has words for Dyno's update and agent-mismatch causes
 - `service-status-text.ts`: `dy.setup.updated` is now `dy.update.restart` ("updated: restart to finish"); new `dy.agent.other-build-returns` ("another build keeps starting") and `dy.agent.mismatch` ("needs a reinstall"). The planner marks ui when an app's `src-tauri/src/**/*.rs` changes, since `cause-codes.spec.ts` scans those sources against the table.
 

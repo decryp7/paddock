@@ -56,13 +56,20 @@ Data folder: **`$XDG_DATA_HOME/pitwall`**, else **`~/.local/share/pitwall`** (`P
 |---|---|
 | `settings.toml` | Settings (with a backup copy) |
 | `apps.json` | Apps and the hashes of their keys |
-| `admin.key` | The secret the window uses (mode 0600) |
+| `admin.key` | The secret the window uses (mode 0600; the data folder is made 0700, and the log says so when it tightens it) |
 | `discovery.json` | pid, port and base URL while the server runs |
 | `models/<owner>/<repo>/` | Downloaded GGUF models |
 | `engines/<build>/` | Installed `llama-server` builds (`cpu`, `vulkan`, `cuda-12`, `cuda-13`, ...) |
 | `partial/` | Unfinished downloads |
 | `packs/` | Your model catalog packs |
 | `logs/` | Service logs, no prompts or responses |
+
+**In a container.** The data folder holds `admin.key`, so it must belong to the user the server runs as: the server makes
+it 0700 and refuses a data folder or `admin.key` owned by another user (a volume mounted with another uid, or `root`
+from the image). Run the container as the owner of the volume (`--user "$(id -u):$(id -g)"`), or point `PITWALL_HOME` at a
+folder that user owns. A refused key is logged with the path and the reason; the server then keeps its new key in memory
+only, and the window cannot connect until the folder is fixed.
+
 
 ## llama.cpp and GPUs
 

@@ -270,6 +270,39 @@ async fn pairing_flow_gives_the_key_once() {
     assert_eq!(r.status, 403);
 }
 
+/// ADR 0057 §4 over the wire: `"rePair": true` on the request, shown to the user, and the older key revoked on approval.
+#[tokio::test]
+async fn a_re_pair_over_the_wire_replaces_the_apps_older_key() {
+    let h = harness(false).await;
+    let perms = json!({"models": null, "maxPriority": "interactive", "tools": true, "extendedApis": true, "limits": {}});
+    let mut keys = vec![];
+    for body in [json!({"name": "Debrief"}), json!({"name": "Debrief", "rePair": true})] {
+        let r = h.call("POST", "/x/v1/pair", None, Some(body.clone()), &[]).await;
+        assert_eq!(r.status, 202, "{}", r.body);
+        let pid = r.json()["pairingId"].as_str().unwrap().to_string();
+        let shown = h.rpc("pairings", json!({})).await.json();
+        assert_eq!(
+            shown[0]["rePair"],
+            body.get("rePair").cloned().unwrap_or(json!(false)),
+            "the request shows the flag"
+        );
+        h.rpc("approve_pairing", json!({"id": pid, "permissions": perms})).await;
+        let got = h.call("GET", &format!("/x/v1/pair/{pid}"), None, None, &[]).await.json();
+        keys.push(got["key"].as_str().unwrap().to_string());
+    }
+    assert_eq!(
+        h.call("GET", "/v1/models", Some(&keys[0]), None, &[]).await.status,
+        401,
+        "the older key is revoked"
+    );
+    assert_eq!(h.call("GET", "/v1/models", Some(&keys[1]), None, &[]).await.status, 200);
+    let r = h
+        .call("POST", "/x/v1/pair", None, Some(json!({"name": "Debrief", "rePair": "yes"})), &[])
+        .await;
+    assert_eq!(r.status, 400, "{}", r.body);
+    assert!(r.body.contains("rePair"), "{}", r.body);
+}
+
 #[tokio::test]
 async fn engine_failures_are_reported_not_fatal() {
     let h = harness(true).await;

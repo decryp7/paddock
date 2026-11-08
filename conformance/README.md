@@ -52,6 +52,7 @@ Exit status: 0 no unwaived error, 1 findings, 2 usage. `GITHUB_STEP_SUMMARY` rec
 | C43 | a sticky table header stays above its rows: a header or footer row (`position: sticky` with `top`, `bottom`, `inset-block-*` or an `inset` shorthand) sets a z-index of at least 3 (`--pd-z-table-header`), a sticky column's header cell at least 4 (`--pd-z-table-corner`), and a sticky column in the same app sits below the lowest header (`--pd-z-table-sticky-column` 2); a sticky element that is not a table row says `/* conformance: not-a-header */` (ADR 0027) | |
 | C32 | the translation catalogs are current: `paddock-i18n build --check --no-extract` over the app's `paddock-i18n.json` (every catalog equals its sources, every runtime JSON equals its catalog); a missing config warns | `npm ci` (the app's installed `@decryp7/paddock-ui`) |
 | C33 | every window is checked with axe: an e2e spec runs axe, and every dialog of `dialog-contracts.json` is covered (`axeEveryDialog`, or the id in a spec that runs axe; `a11y.skip` names the exceptions with a reason). Warns when no spec walks a keyboard-only flow or tests the app's accent with `accentProblems` | |
+| C99 | no shipped process uses the macOS Keychain (rule 72, ADR 0057 §3). Layers 1 and 2 scan manifests and sources; layers 3 and 4 probe the macOS dependency graph (`cargo tree` on both Apple triples, `--all-features`) of every workspace a `paddock.ci.json` names and of `crates/`, and read the dependencies' sources for the SecItem/SecKeychain symbols; layer 5 is the Clippy preset (C13). Every graph finding has its own path `<dir>/Cargo.lock#<key>` so a waiver names exactly it. "Check broken" and "not measured" are unwaivable errors; an unreviewed prebuilt binary is an error (`#bin:<name>@<version>`); a workspace with no clippy.toml (the demos) is a warning "Clippy on macOS: not measured". `--no-graph` skips layers 3 and 4 for offline local runs (a warning says so; CI never uses it). | |
 
 ## Sync (X27, X43)
 
@@ -100,7 +101,7 @@ reason = "mock data of the parser registry, not the app version"
 expires = "2026-12-01"
 ```
 
-A waiver past its date, or without a reason or date, is an error itself (W001, W002); a live waiver for a check that ran and waived nothing is a warning (W003: the finding is gone, delete the waiver). No silent skips.
+A waiver past its date, or without a reason or date, is an error itself (W001, W002); a C99 waiver with a `*` in its path is too (W004: it names one exact path, `Cargo.lock#<key>` as the finding prints it, and never covers "check broken" or "not measured"); a live waiver for a check that ran and waived nothing is a warning (W003: the finding is gone, delete the waiver). No silent skips.
 
 ## CI scripts (`ci/`) and the shared actions
 

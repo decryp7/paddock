@@ -23,7 +23,10 @@ CLI that adds no server surface.
   resumable) and polls `downloads` for progress.
 - **Keys never travel on the command line.** The admin key comes from `--key-file`, `PITWALL_ADMIN_KEY`, the OS credential
   store (the entry the window keeps) or `admin.key`, in that order; the app key from `PITWALL_API_KEY`. `--key` is refused
-  with an explanation. Keys are never printed except a just-created secret, once, alone on stdout.
+  with an explanation. Keys are never printed except a just-created secret, once, alone on stdout. Amended 2026-11-08 by family ADR 0057
+  (WP-4): there is no OS credential store step any more; after `--key-file` and `PITWALL_ADMIN_KEY` the CLI reads
+  `admin.key` through `paddock_secrets::SecretFile` and reports an untrusted file with its reason, and `keyring` is no
+  longer a dependency.
 - **Hand-rolled parsing, no clap.** The grammar is small and the exit code for a bad command line must be 2 with a message that
   says what to fix; a parser of about 200 lines that is a pure function is easier to keep exact than configuring a framework,
   and it adds no dependency. (`keyring` is the only new dependency, already used by the app.)

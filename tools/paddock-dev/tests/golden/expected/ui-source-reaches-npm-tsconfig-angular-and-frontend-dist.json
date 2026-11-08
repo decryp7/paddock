@@ -4,6 +4,7 @@
  "ui": true,
  "eslint": false,
  "conformance": false,
+ "c99": true,
  "tools": false,
  "icons": false,
  "ciImage": false,
@@ -36,6 +37,9 @@
   ],
   "app:z": [
    "npm apps/z/app/src-tauri"
+  ],
+  "c99": [
+   "C99 reads ui/projects/lib/src/a.ts"
   ],
   "ui": [
    "ui/projects/lib/src/a.ts"

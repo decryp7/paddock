@@ -39,7 +39,10 @@ priority, tools, extended APIs (default on), requests per minute (sliding window
 requests (ADR 0005). Refusals are 403 (permission) or 429 (rate or budget) with a message saying what to change.
 
 **Admin key.** Pitwall's own window uses a separate key: a random `pw_` secret created on first start in `admin.key` in the
-data folder (mode 0600 on Unix; the per-user folder on Windows) and read by the local app. Only the admin principal may use
+data folder and read by the local app. Amended 2026-11-08 by family ADR 0057 (WP-4): the file is the key's only store on
+every OS, written through `paddock_secrets::SecretFile` (0600 from the first byte in a 0700 folder on Unix, a protected
+owner-only DACL on Windows; a loose file, a link or another user's file is replaced), and neither the app nor the CLI keeps
+a copy in the OS credential store. Only the admin principal may use
 `/mgmt/v1`; app keys get 403 there. Apps never see it.
 
 **Outbound and processes.** Only `egress.rs` has an HTTP client (HTTPS only, no proxy, no credentials in URLs, every redirect

@@ -44,7 +44,8 @@ paddock-widgets = { path = "../../../../crates/paddock-widgets" }
 paddock-mcp = { path = "../../../../crates/paddock-mcp" }
 # "Open Dyno" (ADR 0023 Decision 7): the family's hand-off starts the app.
 paddock-siblings = { path = "../../../../crates/paddock-siblings" }
-# The pasted MCP keys (ADR 0023 Decision 7): an owner-only file on macOS, the OS store elsewhere (the target section below).
+# The pasted MCP keys (ADR 0023 Decision 7): an owner-only file on macOS, the OS store elsewhere (the target section below); the
+# server's admin.key is an owner-only secret file too (ADR 0057 WP-4, rule 72: no Keychain).
 paddock-secrets = { path = "../../../../crates/paddock-secrets" }
 # Report a problem (plan B4): Pitwall's sections beside paddock-diag's, the app's folders and the log handle its Logging
 # section drives.
@@ -80,9 +81,6 @@ tauri-plugin-single-instance = "2"
 # updater artifacts (the installers themselves). "rustls-tls" with the platform verifier trusts the OS certificate
 # store. The updater is the only outbound HTTP in the shell, and only when the user asks for an update check.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls", "system-proxy"] }
-# The OS credential store (Windows Credential Manager, macOS Keychain, Secret Service) for the app's copy of the
-# admin key; admin.key is the fallback.
-keyring = "4.2"
 
 [features]
 # The Playground's chat (ADR 0023), temporary until ADR 0049's switches: on for the internal proof-of-concept build
