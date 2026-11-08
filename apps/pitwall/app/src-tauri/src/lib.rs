@@ -23,6 +23,7 @@ pub mod report;
 pub mod server_client;
 pub mod service_install;
 pub mod service_manager;
+pub mod start_at_login;
 pub mod tray;
 pub mod tray_model;
 pub mod update_hooks;
@@ -249,14 +250,73 @@ fn updater<R: Runtime>(
         .homepage("https://dev.decryptology.net/decryp7/paddock")
         .build_info(option_env!("PADDOCK_BUILD_COMMIT"), option_env!("PADDOCK_BUILD_DATE"));
     match test_dir {
-        None => b
-            .service_hooks(Arc::new(update_hooks::PitwallService::new(client)))
-            .installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(
-                app.clone(),
-                key.unwrap_or_default(),
-            ))),
+        None => install_with(
+            b.service_hooks(Arc::new(update_hooks::PitwallService::new(client))),
+            app,
+            key.unwrap_or_default(),
+        ),
         Some(dir) => b.dirs(dir.join("config"), dir.join("cache")).background(false).no_install(),
     }
+}
+
+/// Windows installs per machine (ADR 0053): Install hands the verified download to `paddock-setup.exe apply-update` in the
+/// install folder, elevated through one Windows prompt; nothing installs when Pitwall quits. At start the updater waits,
+/// bounded, for another user's installer. Other systems install through `tauri-plugin-updater`.
+#[cfg(windows)]
+fn install_with<R: Runtime>(
+    b: paddock_updater::tauri::UpdatesBuilder,
+    app: &AppHandle<R>,
+    _key: &str,
+) -> paddock_updater::tauri::UpdatesBuilder {
+    use paddock_updater::InstallScope;
+    let dir = paddock_setup::wiring::install_dir();
+    // No hand-off (and so no way to install from the app) unless the folder passes the Program Files rule: the elevated program is
+    // never found through a relative name or a folder an ordinary user can change.
+    let handoff = handoff_for(
+        dir.clone(),
+        Arc::new(paddock_updater::tauri::ShellElevator),
+        Arc::new(paddock_setup::wiring::SetupFacts),
+    );
+    let b = adopt_handoff(b, handoff);
+    b.install_scope(InstallScope::PerMachine, dir, Some(paddock_updater::tauri::is_administrator()))
+        .installer_lock(Arc::new(paddock_setup::wiring::SetupLock::new(&app.config().identifier)))
+}
+
+/// The per-machine hand-off for `dir`, the folder of the running program, when `contract` accepts it (the elevator and the contract
+/// are injected, so the decision is tested without a Windows machine).
+#[cfg(any(windows, test))]
+fn handoff_for(
+    dir: Option<std::path::PathBuf>,
+    elevator: Arc<dyn paddock_updater::Elevator>,
+    contract: Arc<dyn paddock_updater::SetupContract>,
+) -> Result<Arc<dyn paddock_updater::Installer>, String> {
+    let dir = dir.ok_or_else(|| "the folder of the running program is unknown".to_string())?;
+    paddock_updater::ElevatedHandoff::new(dir, elevator, contract).map(|h| Arc::new(h) as Arc<dyn paddock_updater::Installer>)
+}
+
+/// The updater with the per-machine hand-off when there is one; a copy without it (no install folder, or one outside Program
+/// Files) only notifies: it says so with `no_install`, which the updater requires of a builder without an installer.
+#[cfg(any(windows, test))]
+fn adopt_handoff(
+    b: paddock_updater::tauri::UpdatesBuilder,
+    handoff: Result<Arc<dyn paddock_updater::Installer>, String>,
+) -> paddock_updater::tauri::UpdatesBuilder {
+    match handoff {
+        Ok(h) => b.installer(h),
+        Err(why) => {
+            log::info!("updates cannot be installed from this copy, they are only offered: {why}");
+            b.no_install()
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn install_with<R: Runtime>(
+    b: paddock_updater::tauri::UpdatesBuilder,
+    app: &AppHandle<R>,
+    key: &str,
+) -> paddock_updater::tauri::UpdatesBuilder {
+    b.installer(Arc::new(paddock_updater::tauri::PluginInstaller::new(app.clone(), key)))
 }
 
 /// The window layer: the main window from `tauri.conf.json` (`"create": false`); closing it destroys the webview and
@@ -425,12 +485,13 @@ pub fn run() {
     // start with `--hidden` changes nothing).
     #[cfg(all(not(debug_assertions), any(target_os = "macos", windows, target_os = "linux")))]
     let builder = builder.plugin(tauri_plugin_single_instance::init(paddock_window::tauri::second_instance));
-    let builder = builder
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            Some(vec![paddock_window::launch::HIDDEN_FLAG]),
-        ))
-        .plugin(tauri_plugin_updater::Builder::new().build());
+    // Start at log-in is the per-user `Run` value on Windows ([`start_at_login`]); the plugin is for the other systems.
+    #[cfg(not(windows))]
+    let builder = builder.plugin(tauri_plugin_autostart::init(
+        tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+        Some(vec![paddock_window::launch::HIDDEN_FLAG]),
+    ));
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     let builder = app(builder, shell(Place::Installed), launch, tray::native()).invoke_handler(invoke_handler());
     // A web content process termination hook exists on macOS and iOS only (Tauri 2 has none for WebView2 or WebKitGTK).
     #[cfg(any(target_os = "macos", target_os = "ios"))]
@@ -596,18 +657,118 @@ mod capability_tests {
         assert!(hooks.contains("pitwall-server.exe\" install") && hooks.contains("pitwall-server.exe\" uninstall"));
         // The install verb refuses a folder outside Program Files, one users can write and another copy's registration
         // (plan B6): the installer shows the program's own words, which say what to do, not only its exit code.
-        let post = hooks
-            .split("!macro NSIS_HOOK_POSTINSTALL")
-            .nth(1)
-            .and_then(|m| m.split("!macroend").next())
-            .unwrap();
+        let post = hook_body(hooks, "NSIS_HOOK_POSTINSTALL");
         assert!(
-            post.contains("nsExec::ExecToStack '\"$INSTDIR\\pitwall-server.exe\" install'"),
+            post.contains("PADDOCK_INSTALL_SETUP") && post.contains("_PITWALL_REGISTER_SERVICE"),
             "{post}"
         );
+        let register = macro_body(hooks, "_PITWALL_REGISTER_SERVICE");
         assert!(
-            post.contains("Pop $1") && post.contains("$1") && post.contains("pitwall-server.exe\" check-install'"),
-            "the refusal's words are shown: {post}"
+            register.contains("nsExec::ExecToStack '\"$INSTDIR\\pitwall-server.exe\" install'"),
+            "{register}"
         );
+        assert!(
+            register.contains("Pop $1") && register.contains("$1") && register.contains("pitwall-server.exe\" check-install'"),
+            "the refusal's words are shown: {register}"
+        );
+    }
+
+    fn macro_body<'a>(hooks: &'a str, name: &str) -> &'a str {
+        hooks
+            .split(&format!("!macro {name}"))
+            .nth(1)
+            .and_then(|m| m.split("!macroend").next())
+            .unwrap_or_else(|| panic!("no macro {name}"))
+    }
+
+    fn hook_body<'a>(hooks: &'a str, name: &str) -> &'a str {
+        macro_body(hooks, name)
+    }
+
+    /// Plan B6b, the security review of B6 (P2-4): the installer never runs a program of the install folder before the folder
+    /// is checked. In the installer `check-dir` (and the per-user guard) come before the service's `uninstall`, and both come
+    /// before any program is ended; in the uninstaller the service step asks `check-dir` itself.
+    #[test]
+    fn the_installer_checks_the_folder_before_it_runs_any_program_of_it() {
+        let hooks = include_str!("../windows/installer-hooks.nsh");
+        let pre = hook_body(hooks, "NSIS_HOOK_PREINSTALL");
+        let at = |m: &str| pre.find(m).unwrap_or_else(|| panic!("PREINSTALL does not call {m}: {pre}"));
+        assert!(at("PADDOCK_INSTALLING") < at("PADDOCK_CHECK_DIR"));
+        assert!(at("PADDOCK_CHECK_DIR") < at("PADDOCK_GUARD_PER_USER"));
+        assert!(at("PADDOCK_GUARD_PER_USER") < at("_PITWALL_UNREGISTER_SERVICE"));
+        assert!(at("_PITWALL_UNREGISTER_SERVICE") < at("PADDOCK_STOP_ALL"));
+        assert!(
+            !pre.contains("pitwall-server.exe"),
+            "PREINSTALL runs the server program only through the guarded macro: {pre}"
+        );
+        let unreg = macro_body(hooks, "_PITWALL_UNREGISTER_SERVICE");
+        assert!(!unreg.contains("_PADDOCK_"), "only the include's public macros: {unreg}");
+        let check = unreg.find("PADDOCK_DIR_ACCEPTED").expect("the uninstaller asks check-dir");
+        let run = unreg.find("pitwall-server.exe\" uninstall").expect("the verb runs");
+        assert!(check < run, "{unreg}");
+        // The installer aborts when the service cannot be removed (it must not be left to restart the server); the uninstaller, which
+        // cannot abort, removes it with sc.exe only when the include trusts the folder and paddock-setup.exe is missing.
+        assert!(unreg.contains("PADDOCK_LEVEL_TOOL_FAILED"), "{unreg}");
+        assert!(
+            unreg.contains("$PaddockTrusted == 1") && unreg.contains("sc.exe\" delete Pitwall"),
+            "{unreg}"
+        );
+        let pre_un = hook_body(hooks, "NSIS_HOOK_PREUNINSTALL");
+        assert!(!pre_un.contains("pitwall-server.exe"), "{pre_un}");
+        assert!(pre_un.contains("_PITWALL_UNREGISTER_SERVICE"));
+    }
+
+    /// Off Windows the update is installed by the plugin (the per-machine hand-off exists on Windows only).
+    #[cfg(not(windows))]
+    #[test]
+    fn off_windows_updates_install_through_the_plugin() {
+        let app = tauri::test::mock_app();
+        let b = crate::updater(
+            app.handle(),
+            None,
+            std::sync::Arc::new(crate::server_client::fake::FakeServer::new()),
+        );
+        assert!(b.has_installer());
+    }
+
+    struct Contract(Result<(), String>);
+    impl paddock_updater::SetupContract for Contract {
+        fn check_install_dir(&self, _dir: &str) -> Result<(), String> {
+            self.0.clone()
+        }
+        fn check_download(&self, _path: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn sentence(&self, _code: i32) -> Option<String> {
+            None
+        }
+    }
+
+    struct NoElevator;
+    impl paddock_updater::Elevator for NoElevator {
+        fn run(&self, _p: &std::path::Path, _a: &[String], _t: std::time::Duration) -> paddock_updater::ElevatedOutcome {
+            paddock_updater::ElevatedOutcome::Failed("not in this test".into())
+        }
+    }
+
+    /// The hand-off exists only for a folder the contract accepts; an unknown folder or a refused one leaves updates offered only.
+    #[test]
+    fn the_hand_off_exists_only_for_a_folder_the_contract_accepts() {
+        use std::sync::Arc;
+        let dir = Some(std::path::PathBuf::from(r"C:\Program Files\Pitwall"));
+        let ok = crate::handoff_for(dir.clone(), Arc::new(NoElevator), Arc::new(Contract(Ok(()))));
+        assert!(ok.is_ok());
+        let refused = crate::handoff_for(dir, Arc::new(NoElevator), Arc::new(Contract(Err("Users can change it".into()))));
+        assert!(refused.err().unwrap().contains("Users can change it"));
+        let unknown = crate::handoff_for(None, Arc::new(NoElevator), Arc::new(Contract(Ok(()))));
+        assert!(unknown.is_err());
+        let b = crate::adopt_handoff(paddock_updater::tauri::UpdatesBuilder::new("Pitwall"), ok);
+        assert!(b.has_installer());
+    }
+
+    #[test]
+    fn a_copy_without_a_hand_off_only_offers_updates() {
+        let b = crate::adopt_handoff(paddock_updater::tauri::UpdatesBuilder::new("Pitwall"), Err("no folder".into()));
+        assert!(!b.has_installer());
     }
 }

@@ -90,7 +90,7 @@ adr = "0034"
   note = "MacosLauncher::LaunchAgent: translocated path and an unidentified Login Items row (Dyno F1/F3), no restore detection (B3)."
 
   [[mechanism.copy]]
-  paths = ["apps/pitwall/app/src-tauri/src/lib.rs", "apps/pitwall/app/src-tauri/src/app_commands.rs"]
+  paths = ["apps/pitwall/app/src-tauri/src/lib.rs", "apps/pitwall/app/src-tauri/src/start_at_login.rs"]
   symbols = ["text:tauri_plugin_autostart"]
   kind = "wiring"
   owner = "pitwall"
@@ -950,3 +950,30 @@ status = "planned"
   owner = "dyno"
   delete_by = "dyno-v1.1.1"
   note = "The pattern is copied from RAW_TEXT_RULES of the VM harness's screenshot check, which is on test/dyno-release-vm-checks-v2 and not yet on this line. Import it from there once it lands."
+
+# =====================================================================================================================
+# Per-machine Windows install (family ADR 0053)
+# =====================================================================================================================
+
+[[mechanism]]
+id = "per-machine-updater-wiring"
+title = "The updater's per-machine hand-off wired into an app (install_with, adopt_handoff)"
+canonical = "paddock-setup"
+paths = ["crates/paddock-setup/src/wiring.rs"]
+status = "planned"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/app/src-tauri/src/lib.rs"]
+  symbols = ["item:install_with", "item:adopt_handoff"]
+  kind = "wiring"
+  owner = "dyno"
+  delete_by = "dyno-v1.2.0"
+  note = "paddock-updater's tauri adapter cannot depend on paddock-setup (paddock-setup depends on the updater for the signature check), so each app builds ElevatedHandoff from paddock_setup::wiring itself (the contract, the lock and the folder are shared there). Follow-up: a builder step in paddock-setup behind a feature that links the adapter, so an app calls one function; Pitcrew is the third member and takes that route, not a third copy."
+
+  [[mechanism.copy]]
+  paths = ["apps/pitwall/app/src-tauri/src/lib.rs"]
+  symbols = ["item:install_with", "item:adopt_handoff"]
+  kind = "wiring"
+  owner = "pitwall"
+  delete_by = "pitwall-v1.2.0"
+  note = "The same wiring as Dyno's (B6b). Follow-up as in Dyno's note."

@@ -1,0 +1,14 @@
+{
+  "$comment": "Per-machine installer facts for Pitwall (family ADR 0053 section 2.1 and 3). stopExclusions: programs of the bundle that stop-all must not end (none: the installer removes the service's registration first, then ends the server and the app in every session). survivesForcedEnd: the adoption's statement that every program in the stop list survives a forced end without losing more than its last unfinished write; each entry names what was checked.",
+  "stopExclusions": [],
+  "survivesForcedEnd": [
+    {
+      "image": "pitwall-app.exe",
+      "why": "The app window keeps its own state in app-state.json, written to a .new file and renamed (app/src-tauri/src/app_state.rs, AppState::save); a forced end leaves the old file whole. Its jobs (model load, benchmark, service install) are requests to the server or the service verbs, which finish or fail on their own."
+    },
+    {
+      "image": "pitwall-server.exe",
+      "why": "Every file the server owns (settings, presets, usage, metrics, benchmarks, engine pins, the app records, the admin key, the discovery file) is written through paths::write_atomic, a temporary file and a rename that keeps a backup (crates/pitwall-server/src/paths.rs); the response cache is SQLite in WAL mode with synchronous NORMAL (crates/pitwall-server/src/cache_db.rs), which loses at most the last unflushed transactions and stays consistent. A model download writes a .part file that is verified and then renamed (crates/pitwall-server/src/library.rs), so a forced end leaves a partial file that is never loaded, and the next download starts again. A running model process belongs to the server and ends with it."
+    }
+  ]
+}

@@ -3447,6 +3447,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "paddock-setup"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "paddock-proc",
+ "paddock-service",
+ "paddock-updater",
+ "paddock-workspace-hack",
+ "semver",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "paddock-shell"
 version = "0.3.0"
 dependencies = [
@@ -3799,6 +3813,7 @@ dependencies = [
  "chrono",
  "getrandom 0.3.4",
  "keyring",
+ "log",
  "objc2",
  "objc2-foundation",
  "objc2-service-management",
@@ -3812,6 +3827,7 @@ dependencies = [
  "paddock-menu",
  "paddock-proc",
  "paddock-service",
+ "paddock-setup",
  "paddock-shell",
  "paddock-startup",
  "paddock-testkit",

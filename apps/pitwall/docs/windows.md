@@ -12,8 +12,17 @@ so it keeps serving with the window closed. The service (LocalSystem) is a super
 
 - Run the **NSIS installer** (`Pitwall_<version>_x64-setup.exe`). Builds are **unsigned** until the signing secrets exist
   ([releasing](releasing.md)), so Windows SmartScreen says "Windows protected your PC": choose **More info > Run anyway**.
-- Installing the service needs administrator approval (the standard UAC prompt); the app never asks for a password itself and
-  runs unelevated.
+- Pitwall installs **once for every user of the PC**, into `C:\Program Files\Pitwall`, and the installer refuses any other
+  folder (family ADR 0053, [ADR 0024](adr/0024-per-machine-windows-install.md)). Installing needs administrator approval (the
+  standard UAC prompt), which also registers the service; the app never asks for a password itself and runs unelevated.
+- A copy installed for one user only (an older layout) is not migrated: the installer refuses to install over it and says to
+  uninstall it first. An update or uninstall closes Pitwall for every signed-in user and does not start it again in their
+  sessions; the setup log is `Program Files\Pitwall\updates\setup.log`.
+- **Updates** run from the app: Install asks Windows for administrator permission once and hands the verified download to
+  `paddock-setup.exe` in the install folder. There is no "install when Pitwall quits" on Windows, and a standard user needs an
+  administrator to update.
+- **Start at log-in** is the per-user `Run` value `Pitwall` (HKCU), always, so every user decides for themselves; it is not
+  written while Pitwall runs as administrator.
 - **Requirements:** Windows 10 or 11, x64 (the engine catalog also lists Windows arm64 builds, which nobody has tried); WebView2 for the window (the
   installer bootstraps it).
 
@@ -59,7 +68,8 @@ Keys that apps hold are in **Windows Credential Manager**.
 
 ## Uninstall
 
-Use **Settings > Apps** (or the uninstaller) to remove Pitwall, which also removes the `Pitwall` service. Your data in
+Use **Settings > Apps** (or the uninstaller) to remove Pitwall, which closes it for every user, removes the `Pitwall` service and
+every user's start-at-log-in value. Your data in
 `%APPDATA%\Pitwall` (models, keys, settings) is kept; delete the folder to remove it, and remove the Pitwall entries in
 Credential Manager.
 

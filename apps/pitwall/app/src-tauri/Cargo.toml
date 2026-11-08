@@ -56,8 +56,11 @@ paddock-commands = { path = "../../../../crates/paddock-commands", features = ["
 paddock-dialogs = { path = "../../../../crates/paddock-dialogs", features = ["tauri"] }
 paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
 paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }
+# The per-machine hand-off's contract (which download `apply-update` accepts, its exit codes' sentences) and the installer lock
+# (ADR 0053 section 4), as `paddock_setup::wiring`; `paddock-updater` cannot depend on it, so the app wires it in.
+paddock-setup = { path = "../../../../crates/paddock-setup" }
+log = { version = "0.4", features = ["kv"] }
 paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
-tauri-plugin-autostart = "2"
 # A second launch focuses the running app instead of starting another one (release builds; see window::second_launch).
 tauri-plugin-single-instance = "2"
 # >= 2.12 fixes GHSA-j38x-g3m3-95fr (downgrade through the unsigned manifest version). No "zip": Pitwall publishes v2
@@ -67,6 +70,11 @@ tauri-plugin-updater = { version = "2.14", default-features = false, features = 
 # The OS credential store (Windows Credential Manager, macOS Keychain, Secret Service) for the app's copy of the
 # admin key; admin.key is the fallback.
 keyring = "4.2"
+
+# Start at log-in on the other systems: the macOS launch agent and the Linux autostart file. Windows uses the per-user Run value
+# (`start_at_login`, ADR 0053 section 6).
+[target.'cfg(not(windows))'.dependencies]
+tauri-plugin-autostart = "2"
 
 [target.'cfg(windows)'.dependencies]
 # The taskbar's light/dark setting (for the tray icon), read only.

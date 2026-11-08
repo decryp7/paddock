@@ -100,6 +100,30 @@ pub fn server_exe() -> Result<PathBuf, CommandError> {
     server_exe_in(dir)
 }
 
+/// What the user is told when the app is not in a folder the elevated service verbs may run from.
+pub const ONLY_FROM_PROGRAM_FILES: &str = "Pitwall's service can only be changed from Pitwall installed in Program Files";
+
+/// Runs `then` only when `program_dir` (the folder of the server program) is one the elevated verbs may run from: a direct child of
+/// Program Files, no link above it, owned and protected by administrators (`check-dir`'s rule, over `facts`). Otherwise nothing
+/// runs, not the unelevated `check-install` and not the prompt (plan B6b, review P1-2: the verbs trust the program they are about
+/// to run, so the folder is checked first, for Remove as well as Install and Repair).
+pub fn from_protected_folder<T>(
+    facts: &dyn paddock_setup::checkdir::DirFacts,
+    program_dir: &Path,
+    then: impl FnOnce() -> Result<T, CommandError>,
+) -> Result<T, CommandError> {
+    match paddock_setup::wiring::install_dir_ok(facts, &program_dir.to_string_lossy()) {
+        Ok(()) => then(),
+        Err(why) => {
+            log::warn!(
+                "the service is not changed: {} is not an accepted install folder: {why}",
+                program_dir.display()
+            );
+            Err(CommandError::new(ErrorCode::Forbidden, ONLY_FROM_PROGRAM_FILES))
+        }
+    }
+}
+
 /// What the OS says about the registration.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct OsState {
@@ -237,27 +261,46 @@ mod imp {
         Ok(())
     }
 
+    /// On Windows every elevated verb (and the unelevated check before it) runs only from a checked folder.
+    #[cfg(windows)]
+    fn checked<T>(then: impl FnOnce() -> Result<T, CommandError>) -> Result<T, CommandError> {
+        let exe = server_exe()?;
+        let dir = exe
+            .parent()
+            .ok_or_else(|| CommandError::new(ErrorCode::Internal, "the app's folder cannot be found"))?;
+        super::from_protected_folder(&paddock_setup::native::RealDirs, dir, then)
+    }
+
+    #[cfg(not(windows))]
+    fn checked<T>(then: impl FnOnce() -> Result<T, CommandError>) -> Result<T, CommandError> {
+        then()
+    }
+
     /// Registers the service (replacing what is there) and waits for it to answer; the OS asks the user where it must.
     pub fn install(client: &SharedClient) -> Result<(), CommandError> {
-        check_install_first()?;
-        let cancel = AtomicBool::new(false);
-        manager(client, Timings::default())?
-            .install(&cancel)
-            .map(drop)
-            .map_err(command_error)
+        checked(|| {
+            check_install_first()?;
+            let cancel = AtomicBool::new(false);
+            manager(client, Timings::default())?
+                .install(&cancel)
+                .map(drop)
+                .map_err(command_error)
+        })
     }
 
     /// Stops and removes the service.
     pub fn uninstall(client: &SharedClient) -> Result<(), CommandError> {
-        manager(client, Timings::default())?.uninstall().map_err(command_error)
+        checked(|| manager(client, Timings::default())?.uninstall().map_err(command_error))
     }
 
     /// The Repair the user pressed, as a job body: runs on the calling (blocking) thread; `cancel` is asked between steps
     /// and while waiting. Refused when the user switched the item off in Login Items, and while another repair works.
     pub fn repair_blocking(client: &SharedClient, cancel: &AtomicBool) -> Result<RepairOutcome, CommandError> {
-        // On Windows a repair is the elevated `install` again: the same check first, in its own words.
-        check_install_first()?;
-        manager(client, Timings::default())?.repair(cancel).map_err(command_error)
+        // On Windows a repair is the elevated `install` again: the folder check, then the same check first, in its own words.
+        checked(|| {
+            check_install_first()?;
+            manager(client, Timings::default())?.repair(cancel).map_err(command_error)
+        })
     }
 
     /// The check at every start (rule 24): replaces a stale registration while the service is down and once after every
@@ -275,6 +318,88 @@ pub use crate::service_manager::repair_step;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use paddock_setup::checkdir::{DirFacts, DirInspect};
+
+    struct Facts {
+        canonical: &'static str,
+        protection: Result<(), String>,
+    }
+
+    impl DirFacts for Facts {
+        fn program_files(&self) -> Vec<String> {
+            vec![r"C:\Program Files".into()]
+        }
+        fn inspect(&self, _dir: &str) -> Result<DirInspect, String> {
+            Ok(DirInspect {
+                canonical: self.canonical.into(),
+                exists: true,
+                reparse_component: false,
+                owner_sid: Some("S-1-5-32-544".into()),
+            })
+        }
+        fn protection(&self, _i: &DirInspect) -> Result<(), String> {
+            self.protection.clone()
+        }
+    }
+
+    /// Review P1-2 of B6b: a refused folder runs nothing of what `then` stands for (the unelevated check-install, the elevator,
+    /// the manager), for Install, Repair and Remove alike; an accepted folder runs it once.
+    #[test]
+    fn a_refused_folder_runs_neither_the_check_nor_the_elevated_verb() {
+        let accepted = Facts {
+            canonical: r"C:\Program Files\Pitwall",
+            protection: Ok(()),
+        };
+        let ran = std::cell::Cell::new(0);
+        let out = from_protected_folder(&accepted, Path::new(r"C:\Program Files\Pitwall"), || {
+            ran.set(ran.get() + 1);
+            Ok(7)
+        });
+        assert_eq!(out.unwrap(), 7);
+        assert_eq!(ran.get(), 1);
+
+        let refused = [
+            (
+                Facts {
+                    canonical: r"C:\Users\Ann\Pitwall",
+                    protection: Ok(()),
+                },
+                r"C:\Users\Ann\Pitwall",
+            ),
+            (
+                Facts {
+                    canonical: r"C:\Program Files\Pitwall",
+                    protection: Err("Users can change it".into()),
+                },
+                r"C:\Program Files\Pitwall",
+            ),
+            (
+                Facts {
+                    canonical: r"C:\Program Files\Pitwall",
+                    protection: Ok(()),
+                },
+                "Pitwall",
+            ),
+            (
+                Facts {
+                    canonical: r"C:\Program Files\Pitwall",
+                    protection: Ok(()),
+                },
+                "",
+            ),
+        ];
+        for (facts, dir) in refused {
+            ran.set(0);
+            let e = from_protected_folder(&facts, Path::new(dir), || {
+                ran.set(ran.get() + 1);
+                Ok(())
+            })
+            .unwrap_err();
+            assert_eq!(ran.get(), 0, "`{dir}`: nothing ran");
+            assert_eq!(e.code, ErrorCode::Forbidden);
+            assert_eq!(e.message, ONLY_FROM_PROGRAM_FILES);
+        }
+    }
 
     #[test]
     fn a_refusal_is_shown_in_its_own_words_bounded_with_a_plain_fallback() {
