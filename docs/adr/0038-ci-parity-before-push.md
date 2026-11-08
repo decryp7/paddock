@@ -1,8 +1,8 @@
 # 38. CI parity before push: `./dev check --pre-push` runs CI's own plan for the changed code
 
 - Status: Accepted (2026-11-03), by the user, who approved this redesign on 2026-11-03, after the independent review
-  approved it (round 1 and a delta re-review, 2026-11-03). Amendment of 2026-11-08 (proposed, waits for an independent
-  review and the user): the per-commit gate before landing (`./dev check --commits`), at the end of this file.
+  approved it (round 1 and a delta re-review, 2026-11-03). Amended 2026-11-08 (accepted: user-approved redesign and
+  independent review): the per-commit gate before landing (`./dev check --commits`), at the end of this file.
 - Date: 2026-11-03
 - Related: ER-7, ER-9, ER-10 / rules 3 and 4 (affected tests, fix locally first, push once), ER-21 / rule 40, ER-24 /
   rule 41 (machine load, `heavy`), rule 50 (CI economy), rule 55 (ADR 0034, copies); ADR 0014 §6 (affected CI), ADR 0021
@@ -209,12 +209,12 @@ CI.
 
 ## Amendment 2026-11-08: every commit of a landing passes its fast gate (`./dev check --commits`)
 
-- Status: Proposed (2026-11-08), revision 2. The user decided on 2026-11-08 to do all ER-21 redesigns now; the
-  coordinator asked for this pattern to be written as an amendment here, because it is `./dev check` run once per commit.
-  Revision 1 (`69ef3c161`) was reviewed independently with ADR 0060: CHANGES NEEDED, its P1 here being the cost on one
-  Mac (worktrees per branch, merges of `main`, budgets over the per-commit limit, `prepare` missing, no `heavy`, an
-  unmeasured range cap). Revision 2 answers it and the P2s; it waits for the delta review and the user. Its sibling, ADR
-  0060 (every check runs somewhere), is the other half of the same CI-hygiene batch.
+- Status: Accepted (2026-11-08), revision 3. The user approved the ER-21 redesigns on 2026-11-08 ("do all redesigns
+  now"); the coordinator asked for this pattern to be written as an amendment here, because it is `./dev check` run once
+  per commit. Independent review with ADR 0060: revision 1 (`69ef3c161`) CHANGES NEEDED (the cost on one Mac); revision 2
+  (`16657fcc2`) fixed it, and the delta review raised the nightly backstop (a fixed window, an overstated invariant);
+  revision 3 answers that and its P2s. Its sibling, ADR 0060 (every check runs somewhere), is the other half of the same
+  CI-hygiene batch.
 - Related: ER-4 (only complete work is committed; half-done commits break bisecting), ER-21 / rule 40, ER-24 / rule 41
   (machine load, `heavy`), ER-31 (d) (landing is a merge, never a squash), ER-33 / rule 71 (`not measured` is not a pass),
   rule 50's pre-landing commit lint (the integrator lints `origin/main..<branch>` before landing; on
@@ -243,8 +243,11 @@ Four branches had commits that are red on their own on one day, each found by a 
 ADR 0038's pre-push gate and CI's branch run all look at the head. Landing by merge (ER-31 (d), no squash) puts every
 intermediate commit on `main`'s history, where `git bisect`, a revert or a cherry-pick onto a release line reaches it.
 
-**Invariant.** Every commit in `origin/main..<branch>` passes the fast gate (the `commit` phase below) of the projects
-its own change reaches, before the branch lands.
+**Invariant.** Before a branch lands, every commit in `origin/main..<branch>` passes the fast gate (the `commit` phase
+below) of the projects its own change reaches, with the app compiles a shared-crate commit reaches checked for the
+changed apps plus a sample (A1); and every commit that lands is checked in full, without sampling or stamps, by the
+nightly audit within N nights of landing, N set from the Linux runner's measured capacity (A3, WP-B5). Until it has been
+checked in full, a sampled-out app compile is `not measured`, not green.
 
 ### A1. A `commit` phase in every project contract
 
@@ -283,7 +286,13 @@ raising the limit:
   every reached app is compiled, without the reach limit, as an extra step allowed past the per-commit limit only
   through its own bound (`reach_last_max`, 25 minutes).
 - The report marks apps left out by the sample as `not measured (sampled)` for that commit, and the trailer counts them
-  (A3). The nightly audit (A3) runs without sampling, so a red intermediate commit that the sample missed is still found.
+  (A3). The nightly audit (A3) runs without sampling, so a red intermediate commit that the sample missed is still found,
+  within its backlog bound.
+- **macOS-only code in a sampled-out app** (`target_os = "macos"` code paths) is unchecked at that commit until the
+  head's gate, and the Linux nightly audit cannot compile it. So the gate runs the sampled-out compiles afterwards on the
+  Mac, in an idle window: when a pool worktree is free and `heavy` reports spare capacity, it works through the
+  sampled-out (commit, app) pairs of recent landings, newest first, and records them under the same stamps; a pair still
+  unchecked when the audit has passed its commit is reported in the audit's summary as `macOS not measured`.
 
 The budgets are targets until WP-B5 measures them on the four instances and records the numbers in `docs/benchmarks.md`
 (rule 48); a project whose measured `commit` phase exceeds its budget narrows the phase in its contract (for example,
@@ -298,7 +307,10 @@ related tests only) rather than raising the budget.
    the same mechanism as `./dev ci slot` (`paddock-slots`: a held lease, released when the holder ends; rule 53). Any
    branch can use any free worktree; each keeps its per-app `CARGO_TARGET_DIR`s and `node_modules` between runs, so disk
    use is bounded by the pool size (ER-24 sets it: about 5 on this Mac) and builds stay incremental across branches,
-   which share most of their tree with `main`. Never the author's checkout (rule 2).
+   which share most of their tree with `main`. Never the author's checkout (rule 2). **Disk budget:** each pool worktree's
+   build folders stay under a cap (`gate_max_gb`, 40 GB to start, set from WP-B5's measurement), kept by the existing
+   prune mechanism (`tools/prune-build-folder`, the one the `prune-build-folder` action runs on CI hosts), run after each
+   gate; a pool worktree unused for 14 days is removed (`git worktree remove`) and re-created on demand.
 3. **Base.** The `commit` phase runs first at the merge base for the projects the whole range reaches. A project that is
    red there is reported as "red on main" and the gate stops with exit 4 (refused): the branch is not to blame, and main
    is fixed first, or the integrator passes `--base-red-ok <project>`, which the trailer records.
@@ -322,7 +334,7 @@ related tests only) rather than raising the budget.
    trees.
 8. **Report.** One table: commit, subject, projects, result, duration, sampled-out apps; the first red commit with its
    failing line and the exact command to re-run it at that commit. On success it prints the trailer for the landing
-   merge: `Commit-gate: <n>/<n> green <tip abbrev>; sampled <k>`.
+   merge: `Commit-gate: <n> commits green, <k> app compiles not measured (sampled), tip <tip abbrev>`.
 
 A red intermediate commit is fixed by recomposing the branch under a new name (as `c99b`, `c99c` were), with the fix
 folded into the commit that needs it; never by force-pushing a reviewed branch, and never by squashing at landing.
@@ -337,15 +349,24 @@ folded into the commit that needs it; never by force-pushing a reviewed branch, 
   lands a branch, and checks the trailer against the history: `<n>` must equal `git rev-list --count M^1..M^2` and the
   tip must be `M^2`. The result itself is the tool's claim, not proven by CI, but a landing without the gate, or with the
   gate run on a different range, becomes visible.
-- **Nightly audit:** a job in `nightly.yml` runs `./dev check --commits --no-stamps --no-sample <M>^1..<M>` for every
-  merge `M` on `main`'s first-parent line of the last 24 hours. It ignores stamps (it is the independent check of the
-  landing's claim), runs without the reach sample, and fails with one `::error::` per red commit naming the commit, the
-  project and the line. It is bounded to 60 commits a night, newest landings first; commits beyond the bound are
-  reported `not measured`, and **a night with any `not measured` commit is red**, so a bound that is too small shows.
+- **C23** also checks the trailer's form, `<n> commits green, <k> app compiles not measured (sampled), tip <abbrev>`.
+- **Nightly audit, from a watermark.** A job in `nightly.yml` keeps a watermark: the last first-parent merge of `main`
+  it has audited, saved in the CI cache store under a fixed key (and printed in the job summary, so a lost cache can be
+  restored by hand; with no watermark it starts from the newest tag's merge). Each night it walks the first-parent
+  merges after the watermark, oldest first, and runs `./dev check --commits --no-stamps --no-sample <M>^1..<M>` for each.
+  It ignores stamps (it is the independent check of the landing's claim) and the reach sample. It stops at a nightly
+  commit bound (60 to start, set from WP-B5's measured capacity of the Linux runner), advances the watermark past the
+  last merge it finished, and **carries the rest over** to the next night. The job is red with one `::error::` per red
+  commit (commit, project, line), and **red while the backlog is above zero**, with the backlog's size and oldest landing
+  in the summary, so a capacity shortfall shows as a red nightly instead of silently unchecked commits.
 - **macOS and Linux.** The `commit` phase is the same on both. The landing gate runs on the developer Mac (where the
   integrator works); the nightly audit runs on the Linux runner, so between them each commit is checked once on each
   OS. A commit that the audit finds red only on Linux cannot be fixed on `main`'s history (no rewrites); it is fixed
   forward, and the audit's report names it so a later bisect can `git bisect skip` it.
+- **The bisect-skip trade-off.** A red commit that reaches `main` stays in its history: `git bisect skip` steps over it,
+  but if the change being hunted is in that commit or next to it, bisect can only narrow it to the skipped span, and it
+  says so. The landing gate makes that rare; the audit makes it known (a list of known-red commits in its summary, fed to
+  the bisect scripts as skips); neither can undo it.
 - `git bisect` scripts keep bisecting every commit; `--first-parent` is not a substitute (A7).
 
 ### A4. Parallelism and cost (rule 51)
@@ -356,7 +377,7 @@ folded into the commit that needs it; never by force-pushing a reviewed branch, 
   one commit, projects share `heavy`'s slots.
 - **Cheaper.** A commit runs only its own plan, not the head's; a merge of `main` runs only the branch side and the
   resolutions; a commit that touches only docs runs the docs line; a shared-crate commit compiles reached apps within the
-  reach limit instead of testing them; prepare runs only when its inputs changed; a stamp skips an unchanged tree; the
+  reach limit instead of testing them (the rest later, in idle windows); prepare runs only when its inputs changed; a stamp skips an unchanged tree; the
   base run is shared by the whole range; the pool keeps build folders warm across branches. The usual landing (3 to 47
   commits, ADR 0042) should cost about the head gate plus one incremental build and the narrowed tests per commit;
   WP-B5 measures it before anyone quotes a number or the range limit is enforced.
@@ -369,12 +390,12 @@ folded into the commit that needs it; never by force-pushing a reviewed branch, 
 | WP-B1 | the `commit` phase, `commitBudget`, `reach_max` and `reach_last_max` in the contract schema; values for every app contract and for the root contracts (created where §1 has not yet moved the job; only the phase is filled until WP-4 moves the job); the contract test that every contract declares them and that the worst commit fits under the per-commit limit | 2 |
 | WP-B2 | `./dev check --commits`: range walk, the leased worktree pool, prepare with change detection, per-commit plan including the merge-of-`main` rule and the reach sample, base run, limits (the range limit warning only), `heavy`, report, `--resume`; the stamp store with the full key if §5's WP-6 has not built it (shared, one implementation) | 4 |
 | WP-B3 | the trailers: printed by the tool; C23 requires one on a landing merge and checks count and tip; the rule 50 (pre-landing commit lint) text and the `integrate` skill | 1 |
-| WP-B4 | the nightly audit job (`--no-stamps --no-sample`, red on `not measured`) | 1 |
-| WP-B5 | replay the instances: the gate must fail at `617825f1e`, `143175a11` and `483162cff` and pass on the recomposed branches; for b6b, whose red commit the log does not name, the replay runs the gate over `pitwall/1.1-b6b`'s range and records which commit it finds (or that it finds none, and why). Measure the per-project budgets, prepare times, typical ranges and the pool's disk use; record them in `docs/benchmarks.md`; set the enforced range limit from them | 1.5 |
-| **Total (new work)** | | **9.5** |
+| WP-B4 | the nightly audit job (`--no-stamps --no-sample`) with its watermark, carry-over and red-while-backlog, the known-red list for bisect; the idle-window macOS compiles of sampled-out apps | 1.5 |
+| WP-B5 | replay the instances: the gate must fail at `617825f1e`, `143175a11` and `483162cff` and pass on the recomposed branches; for b6b, whose red commit the log does not name, the replay runs the gate over `pitwall/1.1-b6b`'s range and records which commit it finds (or that it finds none, and why). Measure the per-project budgets, prepare times, typical ranges, the pool's disk use and the Linux runner's nightly capacity (commits per night at the audit's settings); record them in `docs/benchmarks.md`; set the enforced range limit, `gate_max_gb`, the nightly commit bound and N from them | 1.5 |
+| **Total (new work)** | | **10** |
 
 Revision 1 estimated 7.5 days; the worktree pool, prepare, the merge-of-`main` rule, the reach rule with its test and the
-stricter trailer check add 2.
+stricter trailer check added 2 in revision 2; the audit's watermark and carry-over add 0.5 in revision 3.
 
 Order: WP-B1 needs §1's WP-1; WP-B2 after WP-B1; WP-B3 and WP-B4 after WP-B2; WP-B5 last. Until WP-B2 exists the
 integrator can approximate it by hand (checking out each commit of the range in a separate worktree and running the
@@ -387,7 +408,7 @@ affected tests), which is what found the four instances.
 | `./dev check --commits` at landing | every commit of the landing range | `617825f1e`, `143175a11`, `483162cff`; the b6b commit once WP-B5 names it |
 | C23 landing trailer | every merge into `main` on the first-parent line: the trailer present, its count and tip equal to `M^1..M^2` | every landing merge (no trailer exists yet) |
 | Contract budget test | every contract's `commitBudget`, `prepare` and reach settings against the per-commit limit | today's budgets without the reach rule (1,080 s > 900 s) |
-| Nightly audit | every commit landed in the last 24 hours, without stamps or sampling | any red intermediate commit that escaped the landing gate or its sample |
+| Nightly audit | every commit landed after its watermark, without stamps or sampling; red while the backlog is above zero | any red intermediate commit that escaped the landing gate or its sample, within N nights |
 
 ### A7. Alternatives considered
 
