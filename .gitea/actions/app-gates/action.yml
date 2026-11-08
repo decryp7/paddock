@@ -147,6 +147,8 @@ runs:
     - name: Host Rust checks (${{ inputs.app }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.host-rust-checks != '' && inputs.rust == 'true' && runner.os != 'Linux' }}
       shell: bash
+      # The stable checkout path of a host leg (stable-workspace), like the Rust step: sccache keys a compile on its working folder.
+      working-directory: ${{ env.PADDOCK_WORKSPACE || github.workspace }}
       env:
         COMMANDS: ${{ inputs.host-rust-checks }}
       run: bash "${{ github.action_path }}/../../../conformance/ci/run-commands.sh"

@@ -1166,6 +1166,15 @@ test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no tem
   }
 });
 
+test('app-gates: every step that builds or checks Rust on a host leg runs from the stable workspace (the Rust step and hostRustChecks)', () => {
+  const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
+  const steps = gates.split(/\n    - name: /).slice(1);
+  // A step that runs cargo itself, or the host's command list, must use the stable checkout path (sccache keys on the working folder).
+  const hostSteps = steps.filter((st) => /\bcargo (fmt|clippy|nextest|test|deny)\b/.test(st) || /inputs\.host-rust-checks/.test(st.split('run:')[0]));
+  assert.ok(hostSteps.length >= 2, 'the Rust step and the host checks step were found');
+  for (const st of hostSteps) assert.match(st, /working-directory: \$\{\{ env\.PADDOCK_WORKSPACE \|\| github\.workspace \}\}/, st.split('\n')[0]);
+});
+
 test("app-gates runs every command list through run-commands.sh, which names the failing command and its exit code, stops there and keeps a cd", () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.doesNotMatch(gates, /bash -euo pipefail -c "\$COMMANDS"/, 'no anonymous bash -c over a command list');
