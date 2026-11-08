@@ -1,0 +1,6 @@
+exit 1
+exit-strict 1
+error cases/headings/wiki/one.md:8: broken link: two.md has no heading #empty
+error cases/headings/wiki/one.md:8: broken link: two.md has no heading #hash-inside
+error cases/headings/wiki/one.md:8: broken link: two.md has no heading #setext
+error cases/headings/wiki/one.md:8: broken link: two.md has no heading #seven

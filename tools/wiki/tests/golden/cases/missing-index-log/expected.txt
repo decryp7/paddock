@@ -1,0 +1,6 @@
+exit 1
+exit-strict 1
+error cases/missing-index-log/wiki/index.md: missing index.md
+error cases/missing-index-log/wiki/log.md: missing log.md
+error cases/missing-index-log/wiki/one.md: not listed in index.md
+error cases/missing-index-log/wiki/two.md: not listed in index.md

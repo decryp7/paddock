@@ -1,0 +1,39 @@
+# `wiki`: the LLM-wiki tool (lint, log, new) for any project's docs/wiki. Its own Cargo workspace and lockfile (ADR 0014's
+# third kind, `tools/<tool>/`). Named by concept, not by project: the package is `paddock-wiki` (the registry namespace), the
+# binary is `wiki`. Install with `cargo install --path tools/wiki --locked`.
+[workspace]
+resolver = "3"
+members = ["."]
+
+[package]
+name = "paddock-wiki"
+version = "0.1.0"
+description = "The LLM-wiki tool: lint a project wiki, append a log line, create a page"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://dev.decryptology.net/decryp7/paddock"
+publish = false
+
+[[bin]]
+name = "wiki"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+paddock-cli = { path = "../../crates/paddock-cli" }
+paddock-proc = { path = "../../crates/paddock-proc" }
+
+[dev-dependencies]
+tempfile = "3"
+paddock-testkit = { path = "../../crates/paddock-testkit" }
+
+[lints.rust]
+unsafe_code = "deny"
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"

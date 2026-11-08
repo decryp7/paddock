@@ -1,0 +1,7 @@
+{
+  "wiki": "docs/wiki",
+  "rules": ["docs/rules.md", "origin/main:docs/rules.md"],
+  "ruleBranches": ["origin/docs/*:docs/rules.md"],
+  "citeByLine": ["merge-steward"],
+  "er": "../engineering-rules/RULES.md"
+}

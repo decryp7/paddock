@@ -1,0 +1,8 @@
+exit 1
+exit-strict 1
+error cases/dates/wiki/five.md: orphan: no other page links to it
+error cases/dates/wiki/four.md: orphan: no other page links to it
+error cases/dates/wiki/four.md:1: verified 2026-11-01 is in the future
+error cases/dates/wiki/three.md: orphan: no other page links to it
+warning cases/dates/wiki/five.md:1: stale: verified 2025-01-01, 668 days ago (limit 30)
+warning cases/dates/wiki/two.md:1: stale: verified 2026-09-30, 31 days ago (limit 30)

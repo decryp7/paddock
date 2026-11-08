@@ -160,6 +160,14 @@ describe('the graph of this tree', () => {
     assert.ok(r.kinds.dyno.includes('rust'), JSON.stringify(r.kinds));
   });
 
+  test('a wiki change runs the tools job, where the wiki lint runs (ER-30); so does its settings file', () => {
+    const w = run('docs/wiki/index.md', 'docs/wiki/ci-and-runners.md');
+    assert.deepEqual([w.tools, w.docs, w.crates, w.ui, w.all, w.apps], [true, false, false, false, false, []]);
+    const s = run('wiki-lint.json');
+    assert.deepEqual([s.tools, s.all, s.crates, s.apps], [true, false, false, []]);
+    assert.ok(!run('docs/adr/0014-monorepo-under-paddock.md').tools);
+  });
+
   test('global inputs mark everything; an app release workflow marks one app', () => {
     for (const f of ['rust-toolchain.toml', 'package.json', '.npmrc', 'tsconfig/base.json']) {
       const r = run(f);
@@ -962,7 +970,7 @@ describe('contracts', () => {
     const undeclared = [...read].filter((f) => !DOC_INPUTS.some((d) => d.re.test(f)));
     assert.deepEqual(undeclared, []);
     // Read through join(): the rules and blocks that conformance sync, the release notes and new-app read.
-    for (const f of ['docs/rules.md', 'docs/blocks/first-launch.md', 'docs/blocks/readme-skeleton.md']) assert.ok(DOC_INPUTS.some((d) => d.re.test(f)), f);
+    for (const f of ['docs/rules.md', 'docs/blocks/first-launch.md', 'docs/blocks/readme-skeleton.md', 'docs/wiki/index.md']) assert.ok(DOC_INPUTS.some((d) => d.re.test(f)), f);
   });
 
   test('CODEOWNERS is in Gitea form (Go regular expressions, dots escaped) and owns every top-level path', () => {

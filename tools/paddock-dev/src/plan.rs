@@ -111,6 +111,7 @@ static DOC_INPUTS: LazyLock<Vec<(Regex, Marks)>> = LazyLock::new(|| {
         ),
         (re(r"^docs/rules\.md$"), Marks::Projects(&["conformance", "tools"])),
         (re(r"^docs/blocks/"), Marks::Projects(&["conformance", "tools"])),
+        (re(r"^docs/wiki/"), Marks::Projects(&["tools"])),
         (re(r"^apps/(shell-demo|workbench-demo)/README\.md$"), Marks::Projects(&["tools"])),
         (re(r"(^|/)REVIEWED\.md$"), Marks::Reviewed),
         (
@@ -136,6 +137,7 @@ static OWNERS: LazyLock<Vec<(Regex, &'static [&'static str])>> = LazyLock::new(|
         (re(r"^icons/"), &["icons"]),
         (re(r"^ci-image/"), &["ci-image", "ui"]),
         (re(r"^(renovate/|renovate\.json$|CODEOWNERS$|AGENTS\.md$)"), &["tools"]),
+        (re(r"^wiki-lint\.json$"), &["tools"]),
     ]
 });
 
@@ -683,6 +685,11 @@ mod tests {
         assert_eq!(w["apps"], json!(["dyno"]));
         assert_eq!(plan(&["docs/rules.md"])["conformance"], true);
         assert_eq!(plan(&["docs/rules.md"])["docs"], false);
+        // the project wiki is linted by tools/wiki on every wiki change (ER-30), as is its settings file
+        for f in ["docs/wiki/index.md", "wiki-lint.json"] {
+            let p = plan(&[f]);
+            assert_eq!((&p["tools"], &p["docs"], &p["crates"], &p["all"]), (&json!(true), &json!(false), &json!(false), &json!(false)), "{f}");
+        }
         assert_eq!(plan(&["apps/dyno/CHANGELOG.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["apps/dyno/REVIEWED.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["icons/REVIEWED.md"])["conformance"], true);

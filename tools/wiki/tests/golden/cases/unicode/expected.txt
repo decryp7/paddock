@@ -1,0 +1,9 @@
+exit 1
+exit-strict 1
+error cases/unicode/wiki/bom.md: orphan: no other page links to it
+error cases/unicode/wiki/bom.md:1: front matter needs `verified: YYYY-MM-DD` (a real date)
+error cases/unicode/wiki/bom.md:1: front matter needs a non-empty `sources:` list
+error cases/unicode/wiki/nbsp.md: orphan: no other page links to it
+error cases/unicode/wiki/one.md:10: broken link: two.md has no heading #rocket-launch
+error cases/unicode/wiki/one.md:11: bullet names no source (add a link or `src: ...`)
+error cases/unicode/wiki/one.md:9: broken link: two.md has no heading #uberblick
