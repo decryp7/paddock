@@ -122,31 +122,31 @@ describe('TauriJobsBackend', () => {
     const seen: JobsSnapshot[] = [];
     await b.onChange((s) => seen.push(s));
     const h = must(handlers[0]);
-    h({ version: 1, order: [], changed: [], paused: [] });
-    for (const bad of [null, 'junk', 7, {}, { jobs: [], paused: [] }, { version: 2, order: 1, changed: [], paused: [] }]) h(bad);
-    expect(seen).toEqual([{ jobs: [], paused: [] }]);
+    h({ version: 1, order: [], changed: [] });
+    for (const bad of [null, 'junk', 7, {}, { jobs: [] }, { version: 2, order: 1, changed: [] }]) h(bad);
+    expect(seen).toEqual([{ jobs: [] }]);
   });
 
   it('rebuilds the snapshot from versioned deltas and asks again after a gap', async () => {
     const job = (id: number, title: string) => ({ id, title, state: 'running' }) as never;
     const calls: string[] = [];
-    const call = (async (cmd: string) => (calls.push(cmd), { jobs: [job(9, 'listed')], paused: [] })) as never;
+    const call = (async (cmd: string) => (calls.push(cmd), { jobs: [job(9, 'listed')] })) as never;
     let h: (p: unknown) => void = () => undefined;
     const b = new TauriJobsBackend(call, async (_e, handler) => ((h = handler), () => undefined));
     const seen: JobsSnapshot[] = [];
     await b.onChange((s) => seen.push(s));
-    h({ version: 1, order: [1, 2], changed: [job(1, 'a'), job(2, 'b')], paused: [] });
-    h({ version: 2, order: [2, 1], changed: [job(1, 'a2')], paused: [] });
-    h({ version: 3, order: [2], changed: [], paused: [] });
+    h({ version: 1, order: [1, 2], changed: [job(1, 'a'), job(2, 'b')] });
+    h({ version: 2, order: [2, 1], changed: [job(1, 'a2')] });
+    h({ version: 3, order: [2], changed: [] });
     expect(seen.map((s) => s.jobs.map((j) => j.title))).toEqual([['a', 'b'], ['b', 'a2'], ['b']]);
     // A missed version: the list is asked for again.
-    h({ version: 5, order: [2], changed: [], paused: [] });
+    h({ version: 5, order: [2], changed: [] });
     await vi.waitFor(() => expect(seen.at(-1)?.jobs.map((j) => j.title)).toEqual(['listed']));
     expect(calls).toEqual(['jobs_list']);
     // The next version applies on top of the list; a job it does not explain asks again.
-    h({ version: 6, order: [9, 2], changed: [job(2, 'b2')], paused: [] });
+    h({ version: 6, order: [9, 2], changed: [job(2, 'b2')] });
     expect(seen.at(-1)?.jobs.map((j) => j.title)).toEqual(['listed', 'b2']);
-    h({ version: 7, order: [3], changed: [], paused: [] });
+    h({ version: 7, order: [3], changed: [] });
     await vi.waitFor(() => expect(calls).toEqual(['jobs_list', 'jobs_list']));
   });
 });
@@ -664,7 +664,6 @@ describe('JobsStore', () => {
       jobInfo({ id: 4, kind: 'export', state: 'done' }),
       jobInfo({ id: 5, kind: 'import', state: 'failed' }),
     ],
-    paused: [{ kind: 'ai', reason: 'quarantined' }],
   });
 
   it('loads on init, listens for changes and applies them', async () => {
@@ -674,9 +673,8 @@ describe('JobsStore', () => {
     expect(fake.list).toHaveBeenCalledTimes(1);
     expect(store.loaded()).toBe(true);
     expect(store.jobs()).toHaveLength(5);
-    fake.push({ jobs: [jobInfo({ id: 9 })], paused: [] });
+    fake.push({ jobs: [jobInfo({ id: 9 })] });
     expect(store.jobs().map((j) => j.id)).toEqual([9]);
-    expect(store.paused()).toEqual([]);
   });
 
   it('splits running, queued and finished and counts active jobs of every kind', async () => {
@@ -686,7 +684,6 @@ describe('JobsStore', () => {
     expect(store.queued().map((j) => j.id)).toEqual([2, 3]);
     expect(store.finished().map((j) => j.id)).toEqual([4, 5]);
     expect(store.activeCount()).toBe(3);
-    expect(store.paused()).toEqual([{ kind: 'ai', reason: 'quarantined' }]);
   });
 
   it('filters by kind, toggles, dedupes and keeps the badge unfiltered', async () => {
@@ -712,7 +709,7 @@ describe('JobsStore', () => {
     expect(store.queuedTurn('c1')?.id).toBe(2);
     expect(store.queuedTurn('c2')?.id).toBe(3);
     expect(store.queuedTurn('nope')).toBeNull();
-    fake.push({ jobs: [jobInfo({ id: 2, state: 'running', source: { window: 'main', link: { type: 'chat', sessionId: 'c1' } } })], paused: [] });
+    fake.push({ jobs: [jobInfo({ id: 2, state: 'running', source: { window: 'main', link: { type: 'chat', sessionId: 'c1' } } })] });
     expect(store.queuedTurn('c1')).toBeNull();
   });
 
@@ -981,13 +978,13 @@ describe('JobsPersistence', () => {
     TestBed.inject(JobsPersistence);
     await settle();
     const baseline = fake.record.mock.calls.length;
-    store.apply({ jobs: [jobInfo({ id: 1 })], paused: [] });
+    store.apply({ jobs: [jobInfo({ id: 1 })] });
     await settle();
     expect(fake.record).toHaveBeenCalledTimes(baseline + 1);
-    store.apply({ jobs: [jobInfo({ id: 2, state: 'running' }), jobInfo({ id: 1 })], paused: [] });
+    store.apply({ jobs: [jobInfo({ id: 2, state: 'running' }), jobInfo({ id: 1 })] });
     await settle();
     expect(fake.record).toHaveBeenCalledTimes(baseline + 1);
-    store.apply({ jobs: [jobInfo({ id: 2, state: 'running' }), jobInfo({ id: 1, unseen: true })], paused: [] });
+    store.apply({ jobs: [jobInfo({ id: 2, state: 'running' }), jobInfo({ id: 1, unseen: true })] });
     await settle();
     expect(fake.record).toHaveBeenCalledTimes(baseline + 2);
   });
@@ -996,7 +993,7 @@ describe('JobsPersistence', () => {
     const { fake, store } = setupStore();
     const p = TestBed.inject(JobsPersistence);
     await settle();
-    fake.restore.mockResolvedValueOnce({ snapshot: { jobs: [jobInfo({ id: 3 })], paused: [] }, warning: 'damaged' });
+    fake.restore.mockResolvedValueOnce({ snapshot: { jobs: [jobInfo({ id: 3 })] }, warning: 'damaged' });
     fake.record.mockResolvedValue(saved);
     p.contribution.restore(saved);
     await settle();
@@ -1043,9 +1040,9 @@ describe('provide-jobs', () => {
     must(show).run(ctx);
     expect(ctx.last('showView')).toEqual(['jobs']);
     expect(must(clear).when?.(ctx)).toBe(false);
-    store.apply({ jobs: [jobInfo({ id: 1, state: 'running' })], paused: [] });
+    store.apply({ jobs: [jobInfo({ id: 1, state: 'running' })] });
     expect(must(clear).when?.(ctx)).toBe(false);
-    store.apply({ jobs: [jobInfo({ id: 1, state: 'failed' })], paused: [] });
+    store.apply({ jobs: [jobInfo({ id: 1, state: 'failed' })] });
     expect(must(clear).when?.(ctx)).toBe(true);
     must(clear).run(ctx);
     expect(fake.clearFinished).toHaveBeenCalled();

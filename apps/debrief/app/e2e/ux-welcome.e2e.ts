@@ -13,7 +13,7 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test('the activity bar offers the AI set-up before a model exists', async ({ page }) => {
+test('the activity bar offers the Pitwall connect step before Pitwall is paired', async ({ page }) => {
   await openAppWith(page, '?mockAi=setup&mockAiStepMs=5');
   await expect(page.locator('debrief-activity-bar [data-activity-id="ai-setup"]')).toBeVisible();
   await expect(page.locator('debrief-activity-bar [data-activity-id="ai"]')).toHaveCount(0);

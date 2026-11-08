@@ -291,7 +291,7 @@ describe('NotificationsPanel', () => {
     // Until the Jobs list is known every action stays offered.
     expect(f.nativeElement.querySelector('[data-testid=notice-primary-9]')).not.toBeNull();
     expect(f.nativeElement.querySelector('[data-testid=notice-cleared-9]')).toBeNull();
-    jobs.apply({ jobs: [{ id: 2 } as JobInfo], paused: [] });
+    jobs.apply({ jobs: [{ id: 2 } as JobInfo] });
     await render(f);
     expect(f.nativeElement.querySelector('[data-testid=notice-primary-9]')).toBeNull();
     expect(el(f, '[data-testid=notice-cleared-9]').textContent).toContain('cleared from Jobs');
@@ -299,7 +299,7 @@ describe('NotificationsPanel', () => {
     expect(el(f, '[data-testid=notice-primary-8]').textContent).toBe('Retry');
     expect(f.nativeElement.querySelector('[data-testid=notice-cleared-8]')).toBeNull();
     // Job 2 cleared too: Retry goes, "Show in Jobs" (no job of its own) stays.
-    jobs.apply({ jobs: [], paused: [] });
+    jobs.apply({ jobs: [] });
     await render(f);
     expect(f.nativeElement.querySelector('[data-testid=notice-primary-8]')).toBeNull();
     expect(el(f, '[data-testid=notice-cleared-8]')).toBeTruthy();

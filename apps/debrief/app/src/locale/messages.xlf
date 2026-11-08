@@ -14009,147 +14009,133 @@
         <source>Retry</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">41,42</context>
+          <context context-type="linenumber">35,36</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.dismissError" datatype="html">
         <source>Dismiss</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">42</context>
+          <context context-type="linenumber">36</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.empty.title" datatype="html">
         <source>No jobs</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">50</context>
+          <context context-type="linenumber">44</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.empty" datatype="html">
         <source>Long work such as imports, exports and downloads shows here while it runs.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">50</context>
+          <context context-type="linenumber">44</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.view.all" datatype="html">
         <source>All</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">154</context>
+          <context context-type="linenumber">148</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.view.running" datatype="html">
         <source>Running</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">155</context>
+          <context context-type="linenumber">149</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.view.failed" datatype="html">
         <source>Failed</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">156</context>
+          <context context-type="linenumber">150</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.running" datatype="html">
         <source>Running</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">169</context>
+          <context context-type="linenumber">163</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.queued" datatype="html">
         <source>Queued</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">170</context>
+          <context context-type="linenumber">164</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.finished" datatype="html">
         <source>Finished</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">171</context>
-        </context-group>
-      </trans-unit>
-      <trans-unit id="jobs.panel.pausedAi" datatype="html">
-        <source>AI requests are paused: <x id="reason" equiv-text="reason"/>. Waiting requests stay queued.</source>
-        <context-group purpose="location">
-          <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">207</context>
-        </context-group>
-      </trans-unit>
-      <trans-unit id="jobs.panel.paused" datatype="html">
-        <source><x id="kind" equiv-text="kindLabel(kind)"/> jobs are paused: <x id="reason" equiv-text="reason"/></source>
-        <context-group purpose="location">
-          <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">208</context>
+          <context context-type="linenumber">165</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.elapsed" datatype="html">
         <source><x id="time" equiv-text="formatDuration(j.elapsedMs)"/> elapsed</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">216</context>
+          <context context-type="linenumber">204</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.bytesOf" datatype="html">
         <source><x id="done" equiv-text="formatBytes(done)"/> of <x id="total" equiv-text="formatBytes(total)"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">231</context>
+          <context context-type="linenumber">219</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.progress" datatype="html">
         <source><x id="job" equiv-text="j.title"/> progress</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">239</context>
+          <context context-type="linenumber">227</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.source" datatype="html">
         <source>Started from <x id="source" equiv-text="l"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">243</context>
+          <context context-type="linenumber">231</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.moveUp" datatype="html">
         <source>Move <x id="job" equiv-text="j.title"/> up</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">247</context>
+          <context context-type="linenumber">235</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.moveDown" datatype="html">
         <source>Move <x id="job" equiv-text="j.title"/> down</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">247</context>
+          <context context-type="linenumber">235</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.cancelLabel" datatype="html">
         <source>Cancel <x id="job" equiv-text="j.title"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">251</context>
+          <context context-type="linenumber">239</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.retryLabel" datatype="html">
         <source>Retry <x id="job" equiv-text="j.title"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">255</context>
+          <context context-type="linenumber">243</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.panel.viewLabel" datatype="html">
         <source>View the result of <x id="job" equiv-text="j.title"/></source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/jobs/jobs-panel.ts</context>
-          <context context-type="linenumber">259</context>
+          <context context-type="linenumber">247</context>
         </context-group>
       </trans-unit>
       <trans-unit id="jobs.kind.ai" datatype="html">
@@ -41777,14 +41763,14 @@
         </context-group>
       </trans-unit>
       <trans-unit id="welcome.ai.text" datatype="html">
-        <source>Optional: an AI assistant that runs on this computer.</source>
+        <source>Optional: an AI assistant that runs on this computer, through Pitwall.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/welcome/welcome.ts</context>
           <context context-type="linenumber">78,79</context>
         </context-group>
       </trans-unit>
       <trans-unit id="welcome.ai.setup" datatype="html">
-        <source>Set it up</source>
+        <source>Connect to Pitwall</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/welcome/welcome.ts</context>
           <context context-type="linenumber">79,80</context>

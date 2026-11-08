@@ -502,7 +502,7 @@ describe('NoticeActions', () => {
   it('shows a job result with its title and result type through the JobViewer', async () => {
     const { run } = setup();
     const view = vi.spyOn(TestBed.inject(JobViewer), 'view').mockResolvedValue(null);
-    TestBed.inject(JobsStore).apply({ jobs: [{ id: 7, title: 'Export CSV', resultType: 'file' } as JobInfo], paused: [] });
+    TestBed.inject(JobsStore).apply({ jobs: [{ id: 7, title: 'Export CSV', resultType: 'file' } as JobInfo] });
     expect(await run({ type: 'viewJob', jobId: 7 })).toBeNull();
     expect(view).toHaveBeenLastCalledWith({ id: 7, title: 'Export CSV', resultType: 'file' });
     expect(await run({ type: 'reviewProposals', jobId: 7 })).toBeNull();
@@ -515,7 +515,7 @@ describe('NoticeActions', () => {
     // Before the list is loaded the action runs (the viewer reports its own failure).
     await run({ type: 'viewJob', jobId: 99 });
     expect(view).toHaveBeenLastCalledWith({ id: 99, title: '', resultType: null });
-    TestBed.inject(JobsStore).apply({ jobs: [{ id: 7, title: 'Export CSV', resultType: 'file' } as JobInfo], paused: [] });
+    TestBed.inject(JobsStore).apply({ jobs: [{ id: 7, title: 'Export CSV', resultType: 'file' } as JobInfo] });
     view.mockClear();
     for (const a of [{ type: 'viewJob', jobId: 99 }, { type: 'reviewProposals', jobId: 99 }, { type: 'retryJob', jobId: 99 }, { type: 'showInFolder', jobId: 99 }] as NoticeAction[]) {
       expect(await run(a)).toContain('cleared from Jobs');

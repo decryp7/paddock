@@ -26,7 +26,7 @@ describe('TauriBrowserBackend', () => {
     const job = (id: number, kind: string, state: string) => ({ id, kind, state });
     const call = (async (cmd: string, args?: unknown) => {
       calls.push([cmd, args]);
-      return cmd === 'jobs_list' ? { jobs: [job(1, 'research', 'running'), job(2, 'research', 'done'), job(3, 'import', 'running')], paused: [] } : undefined;
+      return cmd === 'jobs_list' ? { jobs: [job(1, 'research', 'running'), job(2, 'research', 'done'), job(3, 'import', 'running')] } : undefined;
     }) as never;
     const b = new TauriBrowserBackend(call, async () => () => undefined);
     expect(await b.researchStop()).toBe(1);

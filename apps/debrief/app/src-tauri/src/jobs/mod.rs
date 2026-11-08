@@ -77,7 +77,7 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
 type Sent = std::collections::HashMap<String, (u64, JobsSnapshot)>;
 
 /// What `debrief://jobs` carries: the window's jobs as a change of the last event (version `version`, the one
-/// before is `version - 1`): the jobs in their order by id, those new or changed in full, the paused queues.
+/// before is `version - 1`): the jobs in their order by id, those new or changed in full.
 /// A window that missed a version asks for the list again (`jobs_list`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -85,7 +85,6 @@ pub struct JobsDelta {
     pub version: u64,
     pub order: Vec<JobId>,
     pub changed: Vec<queue::JobInfo>,
-    pub paused: Vec<queue::PausedKind>,
 }
 
 /// The change from `prev` to `next` as version `version`; `None` when nothing changed (nothing is sent).
@@ -103,7 +102,6 @@ pub fn delta(prev: Option<&JobsSnapshot>, next: &JobsSnapshot, version: u64) -> 
         version,
         order: next.jobs.iter().map(|j| j.id).collect(),
         changed,
-        paused: next.paused.clone(),
     })
 }
 

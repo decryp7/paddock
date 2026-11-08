@@ -62,3 +62,28 @@ test('Settings → AI offers to connect to a running Pitwall', async ({ page }, 
   await settings.getByTestId('ai-pitwall-connect').click();
   await expect(settings.getByTestId('ai-engine-status')).toContainText('Engine: Pitwall 1.0.4', { timeout: 10_000 });
 });
+
+test('with no Pitwall at all, every AI entry point leads to Connect to Pitwall and none is a dead button', async ({ page }) => {
+  await openAppWith(page, '?mockPitwall=absent&mockAi=setup&mockAiStepMs=5');
+  // The activity bar offers the connect step, not the chat.
+  await expect(page.locator('debrief-activity-bar [data-activity-id="ai-setup"]')).toBeVisible();
+  await expect(page.locator('debrief-activity-bar [data-activity-id="ai"]')).toHaveCount(0);
+  // Ask AI on the query bar is not a dead button: it leads to the connect path.
+  await page.keyboard.press('ControlOrMeta+f');
+  await page.getByTestId('ai-ask-query').click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Ask AI to write a query' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  // The palette entry opens Settings at the AI section, which says Pitwall is not found and offers no connect button.
+  await runCommand(page, 'Connect to Pitwall');
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  await expect(settings).toBeVisible();
+  await expect(settings.getByTestId('ai-settings-status')).toBeVisible();
+  await expect(settings.getByTestId('ai-pitwall-connect')).toHaveCount(0);
+  // The welcome page offers the same path.
+  await page.keyboard.press('Escape');
+  await runCommand(page, 'Close workspace');
+  await expect(page.getByTestId('welcome-ai-offer')).toContainText('Pitwall');
+  await page.getByTestId('welcome-ai-setup').click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+});

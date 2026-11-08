@@ -127,7 +127,7 @@ export class MockJobs implements JobsBackend {
       return { ...e.info, elapsedMs, etaMs, position, movable: e.info.kind === 'ai' && e.info.state === 'queued', cancellable: e.info.cancellable && (e.info.state === 'queued' || e.info.state === 'running'), retryable: e.info.retryable && ['failed', 'cancelled', 'interrupted'].includes(e.info.state) };
     };
     const running = active.filter((e) => this.visible(e, now)).sort((a, b) => Number(a.info.state !== 'running') - Number(b.info.state !== 'running'));
-    return { jobs: [...running, ...finished].map(view), paused: [] };
+    return { jobs: [...running, ...finished].map(view) };
   }
 
   private emit(): void {

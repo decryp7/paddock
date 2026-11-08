@@ -63,7 +63,6 @@ export const JobsStore = signalStore(
       finished: computed(() => filtered().filter((j) => !isActive(j))),
       /** Running and queued jobs of every kind (the badge). */
       activeCount: computed(() => store.snapshot().jobs.filter(isActive).length),
-      paused: computed(() => store.snapshot().paused),
     };
   }),
   withMethods((store, backend = inject(JobsBackend)) => {

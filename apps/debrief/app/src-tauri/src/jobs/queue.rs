@@ -4,12 +4,11 @@
 //! - One FIFO queue per [`JobKind`]; at most [`JobKind::limit`] run at once (imports: per window).
 //! - At most [`QUEUE_CAP`] jobs wait per kind; more are refused with a message.
 //! - Queued AI jobs can be moved up and down.
-//! - A paused kind (the AI after its worker was quarantined) keeps its queue but starts nothing.
 //! - Finished jobs go to the history (the last [`HISTORY_CAP`]); quick ones that never showed are dropped.
 
 use super::model::{IllegalTransition, Job, JobEvent, JobId, JobKind, JobLink, JobProgress, JobResult, JobSource, JobSpec, JobState};
 use serde::Serialize;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::VecDeque;
 
 /// A job appears in the pane once it has existed this long: quick work never flickers in.
 pub const VISIBLE_AFTER_MS: i64 = 2_000;
@@ -95,14 +94,6 @@ pub struct Finished {
     pub kept: bool,
 }
 
-/// A paused queue, for the pane ("AI paused: … Reset AI").
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PausedKind {
-    pub kind: JobKind,
-    pub reason: String,
-}
-
 /// A job as the pane shows it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -133,12 +124,11 @@ pub struct JobInfo {
     pub retry_of: Option<JobId>,
 }
 
-/// Everything the pane needs: the visible jobs and the paused queues.
+/// Everything the pane needs: the visible jobs.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobsSnapshot {
     pub jobs: Vec<JobInfo>,
-    pub paused: Vec<PausedKind>,
 }
 
 fn clean(s: &str, max: usize) -> String {
@@ -221,7 +211,6 @@ pub struct JobQueue {
     /// Finished jobs, oldest first.
     history: VecDeque<Job>,
     next_id: u64,
-    paused: BTreeMap<JobKind, String>,
 }
 
 impl JobQueue {
@@ -231,7 +220,6 @@ impl JobQueue {
             active: Vec::new(),
             history: VecDeque::new(),
             next_id: 1,
-            paused: BTreeMap::new(),
         }
     }
 
@@ -294,15 +282,11 @@ impl JobQueue {
             .count()
     }
 
-    /// The queued jobs that may start now, in order: FIFO per kind, within each kind's limit, none of a
-    /// paused kind.
+    /// The queued jobs that may start now, in order: FIFO per kind, within each kind's limit.
     pub fn startable(&self) -> Vec<JobId> {
         let mut chosen: Vec<(JobKind, Option<&str>)> = Vec::new();
         let mut out = Vec::new();
         for j in self.active.iter().filter(|j| j.state() == JobState::Queued) {
-            if self.paused.contains_key(&j.kind) {
-                continue;
-            }
             let window = if j.kind.per_window() { j.window() } else { None };
             let already = chosen.iter().filter(|(k, w)| *k == j.kind && *w == window).count();
             if self.running(j.kind, window) + already < j.kind.limit(self.cores) {
@@ -408,24 +392,6 @@ impl JobQueue {
         let o = other.ok_or(QueueError::NotMovable)?;
         self.active.swap(i, o);
         Ok(())
-    }
-
-    /// Stops starting jobs of `kind` (its queue is kept). Nothing pauses a queue since ADR 0070; the wire still carries
-    /// the (empty) list for the pane.
-    #[cfg(test)]
-    pub fn pause(&mut self, kind: JobKind, reason: &str) {
-        self.paused.insert(kind, clean(reason, MAX_MESSAGE));
-    }
-
-    /// Lets a paused kind start jobs again. False when it was not paused.
-    #[cfg(test)]
-    pub fn resume(&mut self, kind: JobKind) -> bool {
-        self.paused.remove(&kind).is_some()
-    }
-
-    #[cfg(test)]
-    pub fn paused(&self, kind: JobKind) -> Option<&str> {
-        self.paused.get(&kind).map(String::as_str)
     }
 
     /// Ends every queued and running job as interrupted (Debrief is closing). Returns them.
@@ -554,14 +520,6 @@ impl JobQueue {
         jobs.extend(self.history.iter().rev().filter(mine).map(|j| self.info(j, now)));
         JobsSnapshot {
             jobs,
-            paused: self
-                .paused
-                .iter()
-                .map(|(kind, reason)| PausedKind {
-                    kind: *kind,
-                    reason: reason.clone(),
-                })
-                .collect(),
         }
     }
 
@@ -720,27 +678,6 @@ mod tests {
         assert!(matches!(q.start(a, 0), Err(QueueError::Unknown(_))));
         q.start(b, 600).unwrap();
         assert!(matches!(q.start(b, 0), Err(QueueError::Illegal(_))));
-    }
-
-    #[test]
-    fn a_paused_kind_keeps_its_queue_and_starts_nothing() {
-        let mut q = JobQueue::new(4);
-        let a = q.submit(ai("a"), 0).unwrap();
-        let x = q.submit(JobSpec::new(JobKind::Analysis, "x"), 0).unwrap();
-        q.pause(JobKind::Ai, "The AI worker crashed repeatedly");
-        assert_eq!(q.startable(), vec![x], "other kinds go on");
-        assert_eq!(q.paused(JobKind::Ai), Some("The AI worker crashed repeatedly"));
-        let snap = q.snapshot(Some("main"), 0);
-        assert_eq!(
-            snap.paused,
-            vec![PausedKind {
-                kind: JobKind::Ai,
-                reason: "The AI worker crashed repeatedly".into()
-            }]
-        );
-        assert!(q.resume(JobKind::Ai));
-        assert!(!q.resume(JobKind::Ai));
-        assert_eq!(q.startable(), vec![a, x]);
     }
 
     #[test]
