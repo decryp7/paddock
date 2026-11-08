@@ -1499,3 +1499,11 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## A test that kept every vCPU of the Windows test VM busy cut its SSH and left nothing to clean up with (2026-11-09)
+
+To provoke a rare close race in paddock-ipc, an agent started one busy process per core (4 of 4) in the Paddock Windows 11
+test VM over SSH, with the cleanup in the same PowerShell session. sshd stopped answering at once, the session dropped, and
+the cleanup could not run; the VM was later powered off by someone else. The same series without the extra load had
+already reproduced the race (1 in 2,000 runs). Rule of thumb: in the test VM, load at most cores minus one, run the load
+from a scheduled task with its own time limit (not from the SSH session), and stop it by the process ids it recorded.
