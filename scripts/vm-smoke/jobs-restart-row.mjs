@@ -18,6 +18,11 @@ export async function jobsRestartStep(d, c, { settleMs = 60_000, agentWaitMs = 6
   const before = await d.jobsText();
   ev.push(`panel before the kill: ${before || '(no job lines)'}`);
   if (BAD.test(before)) return stop([chk(false, 'precondition NOT met: the panel already says "could not be read" before the kill', 'check')]);
+  if (d.startJob) { // the stricter case: a job is in flight when the agent dies
+    const sj = await d.startJob();
+    ev.push(`job started before the kill: ${sj ? 'yes' : 'no'}; panel: ${await d.jobsText()}`);
+    if (!sj) return stop([chk(false, 'precondition NOT met: no job could be started before the kill', 'check')]);
+  }
   if (!(await d.killAgent())) return stop([chk(false, 'precondition NOT met: the agent was not killed (no pid found)', 'check')]);
   await d.relaunchApp();
   const t0 = c.now();
@@ -32,6 +37,7 @@ export async function jobsRestartStep(d, c, { settleMs = 60_000, agentWaitMs = 6
     if (BAD.test(last)) { sawBad = true; clearSince = null; } else { clearSince ??= c.now(); if (c.now() - clearSince >= stepMs) { recovered = true; break; } }
     await c.sleep(stepMs);
   }
+  if (d.diag) ev.push(...(await d.diag())); // always: the evidence of a pass is what a later failure is compared with
   ev.push(`panel after the agent is back: ${last || '(no job lines)'}${sawBad ? ' (the message showed for a while and then cleared)' : ''}`);
   return stop([
     chk(true, 'the agent was killed, the app relaunched and a live agent is back'),

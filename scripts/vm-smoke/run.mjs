@@ -422,6 +422,14 @@ async function main(argv) {
           const ld = macLoginJobsDriver(gui);
           return jobsRestartStep({
             openJobs: () => ld.openJobs(), jobsText: () => ld.jobsText(),
+            startJob: async () => { if ((await ld.readSwitch()) === 'unknown' || !(await ld.pressSwitch())) return false; if (ld.save) await ld.save(); else await gui.press(gui.app, '^Save changes$', 'AXButton'); await ld.openJobs(); for (let i = 0; i < 20; i++) { if (/Start Dyno at login/.test(await ld.jobsText())) return true; await sleepMs(500); } return false; },
+            diag: async () => {
+              const files = (await exec('ls -1 "$HOME/Library/Logs/Dyno"/*.log 2>/dev/null')).stdout.trim().split('\n').filter(Boolean);
+              const saved = []; for (const f of files) { const d = await fetch(f); if (d) saved.push(d); }
+              const lg = (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -i -E "job|agent|connect|ipc|socket|invoke|error|warn" | tail -n 120')).stdout;
+              const tx = (await gui.texts()).map((t) => `${t.role}: ${t.text}`).slice(0, 80).join('\n');
+              return [`app logs copied next to the report: ${saved.join(', ')}`, `guest clock now: ${(await exec('date +"%F %T"')).stdout.trim()}`, `app log (job, agent, connect, error lines, last 120):\n${lg}`, `panel texts at the end:\n${tx}`, `agent: ${(await exec('pgrep -lf dyno-agent; cat "$HOME/Library/Application Support/Dyno/agent.json" 2>&1 | head -c 400')).stdout}`];
+            },
             killAgent: async () => (await exec('p=$(pgrep -x dyno-agent | head -1); [ -n "$p" ] && echo "$p" > /tmp/dyno-killed-jobs.pid && kill -9 $p')).code === 0,
             relaunchApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; pkill -x dyno-app; true`); await sleepMs(4000); await exec(`open -a ${bundle}`); await sleepMs(8000); },
             // a NEW live agent: running, and not the pid that was killed
