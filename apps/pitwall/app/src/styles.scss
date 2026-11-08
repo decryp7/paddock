@@ -11,6 +11,12 @@
   box-sizing: border-box;
 }
 
+/* The only --pw-* property (tokens.test.mjs: declared once, here): the height of the fade at the bottom of the Playground's model
+   list (playground-chat.ts). No shared token fits (_tokens.scss has no fade or mask token). */
+:root {
+  --pw-fade: 32px;
+}
+
 html,
 body {
   margin: 0;

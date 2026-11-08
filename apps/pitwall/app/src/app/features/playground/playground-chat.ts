@@ -87,7 +87,6 @@ import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend'
      * last row is the fade's height, so scrolled to the end the last row is clear of it.
      */
     ::ng-deep div.mat-mdc-select-panel.pw-chat-model-panel {
-      --pw-fade: 32px;
       max-height: 286px;
       padding-bottom: var(--pw-fade);
       mask-image: linear-gradient(to bottom, #000 calc(100% - var(--pw-fade)), transparent);
