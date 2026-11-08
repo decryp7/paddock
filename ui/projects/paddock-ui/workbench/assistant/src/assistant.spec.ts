@@ -414,7 +414,16 @@ describe('PdAssistant', () => {
       const { r } = await open();
       await settle(r.fixture);
       const log = r.one('[data-testid=assistant-log]');
-      let top = 800;
+      // An empty conversation: the composer grows (files attached) and the empty state stays whole from the top (WP-4b review).
+      let top = 0;
+      Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 400 });
+      Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
+      Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => void (top = v) });
+      for (const cb of fired) cb([], {} as ResizeObserver);
+      expect(top).toBe(0);
+      const box = await type(r, 'hello');
+      await press(r, box, { key: 'Enter' });
+      top = 800;
       Object.defineProperty(log, 'scrollHeight', { configurable: true, get: () => 1000 });
       Object.defineProperty(log, 'clientHeight', { configurable: true, get: () => 200 });
       Object.defineProperty(log, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => void (top = v) });

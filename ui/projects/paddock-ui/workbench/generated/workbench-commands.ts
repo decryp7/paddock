@@ -3,6 +3,7 @@
 /** Every command of the table: its kind, the window classes that may call it and its largest request in bytes. */
 export const WORKBENCH_COMMANDS = {
   assistant_approve_tool: { kind: 'mutation', windows: ['main', 'popout'], limit: 262144 },
+  assistant_context: { kind: 'query', windows: ['main', 'popout'], limit: 262144 },
   assistant_conversations: { kind: 'query', windows: ['main', 'popout'], limit: 262144 },
   assistant_delete: { kind: 'mutation', windows: ['main', 'popout'], limit: 262144 },
   assistant_info: { kind: 'query', windows: ['main', 'popout'], limit: 262144 },

@@ -4,6 +4,14 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-assistant` and `workbench/assistant`: the composer's attachments, push-to-talk and context meter (ADR 0023 WP-4b)
+- `Assistant::context(conversation_id)` and the command `assistant_context`: how full the model's context is (`ContextUse`: tokens used, the model's window, whether the count is the engine's own or an estimate, and a `ContextLevel` of `unknown`, `ok`, `high` from 80 %, `full`). After a turn of this session the count is the engine's for the last model call (prompt plus answer, tool definitions included); otherwise about four characters per token over the system prompt, the tools offered and the history the model reads. `context_level`, `estimate_tokens`, `HIGH_PERCENT`. Additive; the TypeScript and `paddock-workbench`'s command list and permissions are regenerated. `ASSISTANT_LIMITS.attachments` (16).
+- `AssistantBackend.context(id)` (default: `null`, no meter), implemented by `TauriAssistantBackend` and `MemoryAssistantBackend`; `parseContext`.
+- Two optional ports beside `AssistantBackend`: `AssistantAttachments` (`rules`, `add`, `chipOf`; new types `AttachSource`, `AttachRules`, `AttachmentChip`, `attachmentChip`) gives `<pd-assistant>` an attach button, paste and drop, the file chips of the next question (removable) and of each sent question; `AssistantSpeech` (`start`, `finish`, `cancel`, `listen` with `SpeechState`) gives it a push-to-talk button whose transcript lands in the question, with the engine's elapsed time, and Escape to throw a recording away. Without them nothing changes. `MemoryAssistantAttachments` and `MemoryAssistantSpeech` for demos and tests.
+- `<pd-assistant>` shows the meter in the composer ("About 1.2k of 8.2k tokens", amber from `high`, red at `full` with a note and New conversation).
+- Fixed: the pane dropped the engine's `phase` events at the wire edge (`parseEnvelope`), so a real app never showed "Loading the model…"; only the memory backend did.
+- New glyphs `paperclip` and `mic`.
+
 ### `paddock-assistant` and `workbench/assistant`: "Don't save this chat" (ADR 0023 Decision 3, WP-3b)
 - `SendRequest.save` (optional, default `true`): whether the conversation a question starts is saved. It reaches the port as the new `Conversations::create_saved(first, save)`, whose default calls `create`, so a store that keeps every conversation one way is unchanged. Additive; the TypeScript is regenerated.
 - `ConversationStore::adopt` takes a conversation in with its id (a chat moved between saved and unsaved); it refuses an id it holds and a conversation without a question.
