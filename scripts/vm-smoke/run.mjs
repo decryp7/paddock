@@ -422,7 +422,13 @@ async function main(argv) {
           const ld = macLoginJobsDriver(gui);
           return jobsRestartStep({
             openJobs: () => ld.openJobs(), jobsText: () => ld.jobsText(),
-            startJob: async () => { const st = await ld.startLongJob(); if (!(st === true || st?.ok === true)) return false; await ld.openJobs(); for (let i = 0; i < 20; i++) { if (/Running benchmarks/.test(await ld.jobsText())) return true; await sleepMs(500); } return false; }, // a benchmark lasts, so the job is certainly in flight at the kill
+            startJob: async () => {
+              if (process.env.JOBS_RESTART_JOB === 'login') { // the 07:03 shape: the Start at login change (service setup) in flight
+                if ((await ld.readSwitch()) === 'unknown' || !(await ld.pressSwitch())) return false;
+                if (ld.save) await ld.save(); else await gui.press(gui.app, '^Save changes$', 'AXButton');
+                await ld.openJobs(); for (let i = 0; i < 20; i++) { if (/1 running: Start Dyno at login/.test(await ld.jobsText())) return true; await sleepMs(300); } return false;
+              }
+              const st = await ld.startLongJob(); if (!(st === true || st?.ok === true)) return false; await ld.openJobs(); for (let i = 0; i < 20; i++) { if (/Running benchmarks/.test(await ld.jobsText())) return true; await sleepMs(500); } return false; }, // a benchmark lasts, so the job is certainly in flight at the kill
             diag: async () => {
               const files = (await exec('ls -1 "$HOME/Library/Logs/Dyno"/*.log 2>/dev/null')).stdout.trim().split('\n').filter(Boolean);
               const saved = []; for (const f of files) { const d = await fetch(f); if (d) saved.push(d); }
@@ -434,7 +440,7 @@ async function main(argv) {
             relaunchApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; pkill -x dyno-app; true`); await sleepMs(4000); await exec(`open -a ${bundle}`); await sleepMs(8000); },
             // a NEW live agent: running, and not the pid that was killed
             agentUp: async () => (await exec('p=$(cat /tmp/dyno-killed-jobs.pid); n=$(pgrep -x dyno-agent | head -1); [ -n "$n" ] && [ "$n" != "$p" ] && "' + bundle + '/Contents/MacOS/dyno-agent" status >/dev/null 2>&1')).code === 0,
-          }, { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) });
+          }, { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }, { settleMs: 25_000 }); // the fix retries after 2/4/8 s, then every 15 s: clear within about 20 s
         };
         const rowFns = o.only ? [...(rowWanted(o.only, 'mac-reopen') || rowWanted(o.only, 'hung-page') || rowWanted(o.only, 'mac-lifecycle-log') ? [macRows] : []), ...(o.only.includes('login-jobs') ? [async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) })] : []), ...(o.only.includes('jobs-restart') ? [macJobsRestart] : []), ...(o.only.includes('disk-space') ? [async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) })] : [])] : o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
           macJobsRestart,

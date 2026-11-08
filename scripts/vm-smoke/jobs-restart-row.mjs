@@ -38,6 +38,7 @@ export async function jobsRestartStep(d, c, { settleMs = 60_000, agentWaitMs = 6
     await c.sleep(stepMs);
   }
   if (d.diag) ev.push(...(await d.diag())); // always: the evidence of a pass is what a later failure is compared with
+  ev.push(`seconds from the agent being back (and the panel opened) to a clear panel: ${recovered ? Math.round((clearSince - t1) / 1000) : 'never within ' + settleMs / 1000}`);
   ev.push(`panel after the agent is back: ${last || '(no job lines)'}${sawBad ? ' (the message showed for a while and then cleared)' : ''}`);
   return stop([
     chk(true, 'the agent was killed, the app relaunched and a live agent is back'),
