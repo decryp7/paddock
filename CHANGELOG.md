@@ -6,7 +6,7 @@ Conventional Commits; one semver tag for the whole repo.
 
 ### `@decryp7/paddock-ui`: the Jobs list drops a stale "The jobs could not be read"
 
-- Fixed: after one failed first read (an app starting while its agent restarts) the Jobs panel kept the error heading for good, even while it listed live jobs from later events. A job event that arrives while the list is in error now starts a background re-read (`JobsStore`): it shows the jobs the failed read missed and clears the error when it succeeds. The error stays up (no flashing alert) until then; at most one re-read runs at a time, and after a failed one the next waits `stillWorkingAfterMs`. A read that finishes after a newer one is dropped. Retry still reads at once.
+- Fixed: after one failed first read (an app starting while its agent restarts) the Jobs panel kept the error heading for good, even while it listed live jobs from later events. While the list is in error, `JobsStore` now re-reads it by itself (no job event needed, for an agent that comes back with nothing running): after 2 s, 4 s and 8 s, then every 15 s (`JOBS_RETRY_BACKOFF_MS`, `JOBS_RETRY_STEADY_MS`, on the injected `JOBS_CLOCK`, which gains `after`). A job event also starts a re-read. A re-read shows the jobs the failed read missed and clears the error when it succeeds, which also stops the retrying; Retry reads at once and restarts the delays; destroying the store cancels the timer. The error stays up (no flashing alert) until a read succeeds; at most one re-read runs at a time, after a failed one an event-started re-read waits `stillWorkingAfterMs`, and a read that finishes after a newer one is dropped.
 
 ### `paddock-bench`: `SampleSummary` has the mean, standard deviation and CV
 
