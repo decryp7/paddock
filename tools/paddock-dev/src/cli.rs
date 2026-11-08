@@ -1,4 +1,4 @@
-use crate::{input_hash, plan, slots, wait};
+use crate::{gates, input_hash, plan, slots, wait};
 use clap::{Args, Parser, Subcommand};
 use paddock_cli::{CliError, Exit, Format, Report, finish};
 use std::io::Write;
@@ -30,6 +30,11 @@ enum Command {
     },
     /// Wait, with a limit, for a plock job, a process, a line in a file or a CI run. Use it instead of `pgrep -f` loops.
     Wait(wait::WaitArgs),
+    /// C100 and the gate register (ADR 0060): is every check run somewhere?
+    Gates {
+        #[command(subcommand)]
+        command: GatesCommand,
+    },
     /// The project graph.
     Graph {
         #[command(subcommand)]
@@ -65,6 +70,19 @@ enum SlotCommand {
     /// The detached holder that `acquire` starts. Not for people.
     #[command(hide = true)]
     Hold(slots::HoldArgs),
+}
+
+#[derive(Subcommand)]
+enum GatesCommand {
+    /// Print the CI model: every command CI can run, with its folder, levels and status (for debugging C100).
+    Model(GatesRootArgs),
+}
+
+#[derive(Args)]
+struct GatesRootArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -134,6 +152,9 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
             SlotCommand::Hold(a) => slots::hold(&a),
         },
         Command::Wait(a) => wait::command(&a),
+        Command::Gates {
+            command: GatesCommand::Model(a),
+        } => gates::command::model(a.root.as_deref()),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {
