@@ -25,7 +25,10 @@ export async function scopingStep() {
   const built = ssh(`Add-Type -TypeDefinition '${probeSrc}' -OutputAssembly "C:\\Users\\paddock-test\\owner-secret-probe.exe" -OutputType ConsoleApplication -ErrorAction Stop 2>&1 | Out-String; (Get-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe").VersionInfo.FileDescription; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -WindowStyle Hidden; Start-Sleep 2; (Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Measure-Object).Count`);
   evidence.push(`probe built and started (FileDescription, running count): ${built.trim().replace(/\s+/g, ' ').slice(0, 200)}`);
   await sleep(4000);
-  const ownerView = ssh(`& "${dyno}\\dyno.exe" top --by cpu -n 100 --json 2>&1 | Out-String`);
+  // Polled (the sampler lists a new process after a tick or two), up to 30 s; the whole view is kept as evidence.
+  let ownerView = '';
+  for (let i = 0; i < 7 && !/owner-secret-probe/i.test(ownerView); i++) { if (i) await sleep(5000); ownerView = ssh(`& "${dyno}\\dyno.exe" top --by cpu -n 100 --json 2>&1 | Out-String`); }
+  evidence.push(`--- owner's top view (full): ${ownerView.replace(/\s+/g, ' ').slice(0, 2500)}`);
   checks.push({ ok: /owner-secret-probe/i.test(ownerView), kind: /owner-secret-probe/i.test(ownerView) ? undefined : 'check', detail: /owner-secret-probe/i.test(ownerView) ? 'positive control: the owner sees its own probe process' : 'positive control failed: the owner does not see its own probe process in `dyno top`' });
   // The second account.
   ssh('$p = [Console]::In.ReadLine(); net user paddock-user2 $p /add /y | Out-Null; net localgroup Users paddock-user2 /add 2>$null | Out-Null', { admin: true, input: `${pw}\n` });

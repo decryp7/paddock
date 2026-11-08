@@ -232,7 +232,8 @@ async function main(argv) {
     // The reading driver (helper-readings.mjs linuxDriver): room for wide tables (minWidth: sidebar collapsed, window widened with xdotool when the session allows it) and
     // a text polled until the row's expectations show (bounded 30 s), never a fixed delay.
     const treeText = () => atspi('tree dyno 60 text', 60_000).stdout.split(/\n\s*frame\s+Settings\b/)[0].split('\n').map((l) => l.replace(/^\s*\S+(\s\S+)?\s\s/, '')).join(' ');
-    const resize = (w) => { const r = ses(`command -v xdotool >/dev/null || sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xdotool >/dev/null 2>&1; for id in $(xdotool search --onlyvisible --class dyno 2>/dev/null); do xdotool windowsize $id ${w} 900 2>&1; done; echo resized`, 180_000); log(`resize the Dyno window to ${w} px: ${r.stdout.trim().split('\n').at(-1)}`); };
+    // No package is installed for it (an apt run in the guest holds the dpkg lock that the swap row needs later): xdotool only when the image has it.
+    const resize = (w) => { const r = ses(`if command -v xdotool >/dev/null; then for id in $(xdotool search --onlyvisible --class dyno 2>/dev/null); do xdotool windowsize $id ${w} 900 2>&1; done; echo resized; else echo "no xdotool in the image: window size unchanged"; fi`, 60_000); log(`resize the Dyno window to ${w} px: ${r.stdout.trim().split('\n').at(-1)}`); };
     const driver = { ...linuxDriver({ press, tree: treeText, resize, sleep, now: () => Date.now() }),
       // Controls: `nft-rule` loads one known rule (tcp dport 59999) into a table of its own, so the firewall page has something to show; cleanup removes the table.
       async prepare(key) {
@@ -367,7 +368,7 @@ async function main(argv) {
         sh('bash', ['-c', `cat ${JSON.stringify(deb)} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/Dyno.deb'`], 600_000);
         const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-swap${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
         g('sudo apt-get remove -y -qq dyno >/dev/null 2>&1; pkill -x dyno-app; pkill -x dyno-agent; true', 300_000);
-        push(await upgradeSwapStep(linuxSwapPrimitives({ exec: async (c) => ses(c), sleep, now: () => Date.now(), oldDeb: '/tmp/DynoOld.deb', newDeb: '/tmp/Dyno.deb', startApp })).catch((e) => swapNotDriven(String(e.message ?? e))));
+        push(await upgradeSwapStep(linuxSwapPrimitives({ exec: async (c, o) => ses(c, o?.timeoutMs ?? 120_000), sleep, now: () => Date.now(), oldDeb: '/tmp/DynoOld.deb', newDeb: '/tmp/Dyno.deb', startApp })).catch((e) => swapNotDriven(String(e.message ?? e))));
       }
     }
     steps.push({ title: 'Real sleep, audio wait, scheduled wake on Linux hardware (manual)', status: 'manual', summary: 'The VM has no sleep state or sound device; the rows stay on the hardware checklist. Rosetta needs `MemoryDenyWriteExecute=no` in a drop-in for dyno-helper.service in this guest (the JIT needs W+X pages); that is an emulation workaround, not a product setting.' });

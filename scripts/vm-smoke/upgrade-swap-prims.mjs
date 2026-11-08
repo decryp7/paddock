@@ -108,7 +108,9 @@ export function linuxSwapPrimitives({ exec, sleep, now, oldDeb, newDeb, startApp
   const data = '"$HOME/.local/share/dyno"';
   const dpkg = async (flags, deb) => {
     // The exit code of dpkg itself (not of a pipe after it) and its whole output: a failed install must never read as a swap that did not happen.
-    const r = await exec(`sudo DEBIAN_FRONTEND=noninteractive dpkg -i ${flags} ${sq(deb)} > /tmp/dpkg-swap.out 2>&1; rc=$?; echo "rc=$rc"; tail -n 25 /tmp/dpkg-swap.out`);
+    // The guest's own apt jobs (apt-daily after a reboot) can hold the dpkg lock (0ad round 2: "dpkg frontend lock was locked by another process"): wait for it, bounded at
+    // 5 minutes, and say who held it.
+    const r = await exec(`h=""; for n in $(seq 60); do h=$(sudo fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null | tr -s ' '); [ -z "$h" ] && break; sleep 5; done; [ -n "$h" ] && echo "lock still held by: $(ps -o pid=,args= -p $(echo $h | tr ' ' ',') 2>/dev/null)"; sudo DEBIAN_FRONTEND=noninteractive dpkg -i ${flags} ${sq(deb)} > /tmp/dpkg-swap.out 2>&1; rc=$?; echo "rc=$rc"; tail -n 25 /tmp/dpkg-swap.out`, { timeoutMs: 600_000 });
     const rc = /rc=(\d+)/.exec(r.stdout)?.[1];
     if (rc !== '0') throw new Error(`dpkg -i ${deb} failed (rc=${rc ?? 'unknown'}): ${r.stdout.replace(/rc=\d+\n?/, '').trim().slice(-600)}`);
     return r.stdout;

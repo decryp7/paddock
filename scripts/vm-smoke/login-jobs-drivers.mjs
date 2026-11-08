@@ -56,7 +56,17 @@ export function windowsLoginJobsDriver(browser, { openSettings, mainPage }) {
       let started = false;
       for (let i = 0; i < 20 && !started; i++) { await new Promise((r) => setTimeout(r, 500)); started = (await card.getByRole('button', { name: /Cancel$/ }).count().catch(() => 0)) > 0; }
       const text = await cardText();
-      if (!started) return { ok: false, detail: `the benchmark did not start within 10 s of Run benchmarks; the Run card says: ${text}` };
+      if (!started) {
+        // Why not: any dialog or alert the click opened, and the END of the card (its status lines), not only its start.
+        const why = await p.evaluate(() => {
+          const t = (e) => (e?.innerText ?? '').replace(/\s+/g, ' ').trim();
+          const dialogs = [...document.querySelectorAll('[role=dialog],[role=alertdialog],[role=alert],[role=status]')].map(t).filter(Boolean).join(' | ');
+          const card = t(document.querySelector('section[aria-label="Run benchmarks"]'));
+          const run = [...document.querySelectorAll('button')].find((b) => /Run benchmarks/.test(b.textContent));
+          return `dialogs/alerts: ${dialogs.slice(0, 300) || 'none'}; Run button disabled=${run ? run.disabled : 'absent'}; card end: ${card.slice(-300)}`;
+        }).catch((e) => `page unreadable: ${e.message}`);
+        return { ok: false, detail: `the benchmark did not start within 10 s of Run benchmarks; ${why}` };
+      }
       await p.getByRole('link', { name: /^Processes$/ }).first().click().catch(() => {});
       return { ok: true, detail: `benchmark running: ${text}` };
     },

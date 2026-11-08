@@ -69,7 +69,10 @@ export function autoStartRecord() {
   const tasks = ssh(`schtasks /query /fo csv /nh 2>$null | Select-String -Pattern 'Dyno' | ForEach-Object { $_.Line }`, { admin: true });
   const logon = ssh(`(Get-Process -Name explorer -ErrorAction SilentlyContinue | Sort-Object StartTime | Select-Object -First 1).StartTime.ToString('s')`);
   // dyno-app and dyno-agent with their command lines (--hidden shows how the app was started) and the boot time (what "started at logon" is measured from).
-  const procs = ssh(`Get-CimInstance Win32_Process -Filter "Name='dyno-app.exe' OR Name='dyno-agent.exe'" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name -replace '\\.exe$','') pid=$($_.ProcessId) started=$($_.CreationDate.ToString('s')) cmd=$($_.CommandLine)" }`);
+  // Read by the administrator: this guest refuses CIM to the standard user and answers with nothing, which read as "nothing started" on the 7d06 and 0ad rounds while the
+  // app log showed the autostart (08:18:50, --hidden). A count by Get-Process (no CIM) is kept beside it as a cross-check.
+  const procs = ssh(`Get-CimInstance Win32_Process -Filter "Name='dyno-app.exe' OR Name='dyno-agent.exe'" -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name -replace '\\.exe$','') pid=$($_.ProcessId) started=$($_.CreationDate.ToString('s')) cmd=$($_.CommandLine)" }`, { admin: true });
+  const plain = ssh('(Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + " " + $_.Id }) -join ", "').trim();
   const boot = bootTime();
   const rows = parseProcs(procs);
   // The control for "nothing started": did Windows start ANY Run-key program at this logon, and is the Dyno value approved (StartupApproved\Run byte 0: 02/06 on, 03/07 off)?
@@ -77,7 +80,7 @@ export function autoStartRecord() {
   const approvedRaw = ssh("$v = (Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run' -ErrorAction SilentlyContinue).Dyno; if ($v) { '{0:X2}' -f $v[0] } else { 'none' }").trim().split('\n').at(-1);
   const approved = /^0[37]$/.test(approvedRaw) ? 'disabled' : 'enabled';
   // `running` is the APP started after the boot, never the agent alone (the agent is what the helper service keeps up).
-  return { run, startup, tasks, logon, procs, boot, rows, control: { othersStarted: others, approved, approvedRaw }, running: rows.some((r) => r.name === 'dyno-app' && boot !== null && r.started > boot) };
+  return { run, startup, tasks, logon, procs, plain, boot, rows, control: { othersStarted: others, approved, approvedRaw }, running: rows.some((r) => r.name === 'dyno-app' && boot !== null && r.started > boot) };
 }
 
 /**
@@ -144,7 +147,9 @@ async function cardState(browser) {
 async function restartGuest(ctx) {
   ctx.log('restarting the guest (a real OS restart)');
   const bootBefore = bootTime();
-  ssh(`[Environment]::SetEnvironmentVariable('${CDP_ENV}', '--remote-debugging-port=9222', 'User')`);
+  // No user-wide DevTools variable: every WebView2 program would get it and the first (the Widgets board) takes the port (0ad round 2). Dyno is restarted with the port in
+  // its own environment after the autostart has been recorded.
+  ssh(`[Environment]::SetEnvironmentVariable('${CDP_ENV}', $null, 'User')`);
   ssh('Set-ItemProperty "HKLM:\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon" AutoAdminLogon 1; shutdown /r /t 3', { admin: true, ms: 60_000 });
   await sleep(20_000);
   const samples = [];
@@ -181,7 +186,7 @@ async function afterRestartRecord(actor, label) {
   // An autostarted app builds its tray icons a little after it starts: poll up to 60 s when it is running and nothing shows yet.
   for (let i = 0; i < 6 && auto.running && (!tray.measured || tray.visible.length + tray.overflow.length === 0); i++) { await sleep(10_000); tray = await trayRecord(actor); }
   await actor.send('quit', 5000).catch(() => {});
-  const evidence = [`control: Run-key programs started at this logon: ${auto.control.othersStarted.join(', ') || 'none'}; StartupApproved\\Run "Dyno" first byte: ${auto.control.approvedRaw}`, `logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'}`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, `--- actor: ${actorUp === null ? 'did NOT answer after 8 starts' : `answered after ${actorUp + 1} start(s)`}`, '--- tray', ...fmtTray(tray)];
+  const evidence = [`control: Run-key programs started at this logon: ${auto.control.othersStarted.join(', ') || 'none'}; StartupApproved\\Run "Dyno" first byte: ${auto.control.approvedRaw}`, `logon (explorer started): ${auto.logon}`, `running without a hand start: ${auto.procs || 'nothing'} (Get-Process: ${auto.plain || 'none'})`, '--- Run key', auto.run, `--- Startup folder: ${auto.startup || '(empty)'}`, `--- scheduled tasks naming Dyno: ${auto.tasks || '(none)'}`, `--- actor: ${actorUp === null ? 'did NOT answer after 8 starts' : `answered after ${actorUp + 1} start(s)`}`, '--- tray', ...fmtTray(tray)];
   return { auto, tray, evidence };
 }
 
@@ -260,19 +265,15 @@ async function runRebootSteps(ctx, steps) {
 
   // The helper after the restart, with no Repair. The CDP environment was set for the user BEFORE the restart, so an autostarted Dyno has its
   // DevTools port and is the instance that is read; only when nothing started Dyno is it started by hand, as a user would reopen it.
-  if (!rec1.auto.running) {
-    ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3');
-    ctx.launchDyno();
-    await sleep(25_000);
-  } else {
-    // After a restart Dyno starts with --hidden (tray only). The Settings and page rows need the main window: a second start of dyno-app hands over to the
-    // running instance, which shows its window (the way a click on the tray icon or the Start menu entry does). Waited on the window, not on a fixed delay.
-    ctx.launchDyno();
-    for (let i = 0; i < 15; i++) {
-      await sleep(2000);
-      if (ssh('(Get-Process dyno-app -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Measure-Object).Count').trim() !== '0') break;
-    }
+  // The autostarted instance has no DevTools port (and must not: see restartGuest). After it was recorded, Dyno is reopened with the port in its own environment, as a person
+  // reopens it; the helper rows below read that instance. Waited on the window, not on a fixed delay.
+  ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3');
+  ctx.launchDyno();
+  for (let i = 0; i < 20; i++) {
+    await sleep(2000);
+    if (ssh('(Get-Process dyno-app -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Measure-Object).Count').trim() !== '0') break;
   }
+  await sleep(5000);
   t = tunnel();
   let card = 'no window';
   let readingText = '';
@@ -334,7 +335,8 @@ async function quitStopWithRestart(ctx) {
   const r = await quitStopStep({
     now: () => Date.now(), sleep,
     trigger: async () => {
-      // Dyno runs here (with its DevTools port: the user environment carries it); make sure of it, then show its window.
+      // A fresh Dyno with its DevTools port (the instance before may be one without it).
+      ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep 3');
       ctx.launchDyno(); await sleep(20_000);
       const t = tunnel();
       try {

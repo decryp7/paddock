@@ -206,6 +206,8 @@ export async function pollText(read, want, { sleep, now, everyMs = 3000, limitMs
 export function linuxDriver({ press, tree, resize = () => {}, sleep, now, labels = LINUX_LABELS }) {
   return {
     async openPage(page, tab, reading = {}) {
+      // The Settings window (left open by the helper and login rows) is closed first, as the macOS driver does: the page is read from the main window alone.
+      press('^Close$', 'push button');
       if (reading.minWidth) { press('^Collapse sidebar', 'push button|toggle button'); resize(reading.minWidth + 100); await sleep(800); }
       const okp = press(`^${labels[page]}$`, 'link');
       if (okp && reading.showAll) { await sleep(1500); press('^All$', 'radio button|page tab|push button|toggle button'); await sleep(1500); }

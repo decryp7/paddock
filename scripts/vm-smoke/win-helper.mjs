@@ -65,6 +65,15 @@ export async function answerUac(label, { vnc = new Vnc(), seenSec = 90, goneSec 
   vnc.key('ctrl-a'); vnc.key('bsp'); vnc.type(pw); vnc.key('enter');
   let gone = false;
   for (let i = 0; i < goneSec / 3 && !gone; i++) { await sleep(1500); gone = !prompt(); }
+  if (!gone) {
+    // Still a consent.exe after the answer (0ad round 2: the install had ended 0, so the first answer took): a SECOND prompt. It is photographed, named in the result and
+    // answered once, so the row can go on; whether a second prompt belongs there is for the reader to judge from the screenshot.
+    const second = evidenceFile(`win-uac-${label}-second`);
+    const shot2 = vnc.capture(second).code === 0 ? `screenshot ${second}` : 'VNC capture failed';
+    vnc.key('ctrl-a'); vnc.key('bsp'); vnc.type(pw); vnc.key('enter');
+    for (let i = 0; i < goneSec / 3 && !gone; i++) { await sleep(1500); gone = !prompt(); }
+    return { ok: gone, second: true, detail: gone ? `${label}: the UAC prompt was answered (${shot}); a SECOND UAC prompt followed (${shot2}) and was answered too` : `${label}: a UAC prompt was still there after two answers (${shot}; ${shot2})` };
+  }
   return { ok: gone, detail: gone ? `${label}: the UAC prompt appeared (${shot}) and was answered over VNC` : `${label}: the UAC prompt was still there ${goneSec} s after the answer (${shot})` };
 }
 
