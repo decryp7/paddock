@@ -171,7 +171,6 @@ pub struct Link {
     pub line: usize,
 }
 
-/// Is `s` fenced-code opening/closing: `^\s*```.
 /// A step counter for the tests (feature `step-count`, enabled by the crate's own dev-dependency): the bytes every forward search
 /// of the scanners below looked at. A scan that restarts from the same place for each opening bracket makes the count grow with the
 /// square of the input, so a test asserts it grows in step with the input, with no clock involved (ER-12).
@@ -209,6 +208,7 @@ macro_rules! scan {
     }};
 }
 
+/// Is `s` fenced-code opening/closing: `^\s*```.
 fn is_fence(s: &str) -> bool {
     s.trim_start_matches(is_ws).starts_with("```")
 }
