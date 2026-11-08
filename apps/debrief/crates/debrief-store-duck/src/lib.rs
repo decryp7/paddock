@@ -739,6 +739,14 @@ impl Inner {
         let t2 = t0.elapsed();
         let maintenance_notices = self.maintain(&conn, Some(progress));
         self.bump_version(&conn)?;
+        // The grid's field list and instance key are prepared here, inside the job (progress, off the UI thread), so the
+        // first page after the import does not count the new sources itself (WP-1: 1.3 s at 56M events).
+        progress.set_stage(Some("Preparing the field list"));
+        let prepared = std::time::Instant::now();
+        match self.derived(&conn) {
+            Ok(_) => log::debug!("import: field list and instance key prepared in {:?}", prepared.elapsed()),
+            Err(e) => log::warn!("the field list could not be prepared after the import (the first page computes it): {e}"),
+        }
         log::debug!("import: parse {t1:?} finish {t2:?} maintained {:?}", t0.elapsed());
         let mut report = ImportReport {
             notices: maintenance_notices,

@@ -138,3 +138,17 @@ fn a_removed_sources_counts_are_dropped() {
         "after forgetting every event the sources are counted again"
     );
 }
+
+/// The import job prepares the instance key's counts itself, so the first page after it counts nothing (WP-1: the
+/// first page after an import took 1.3 s at 56M events).
+#[test]
+fn the_import_prepares_the_instance_key_before_the_first_page() {
+    let dir = Dir::new("key-prepared");
+    let store = DuckStore::create(&dir.0, Profile::default_profile(), PluginRegistry::new()).unwrap();
+    store.open(&samples()).unwrap().wait().unwrap();
+    let after_import = lock(&store.inner.presence).scans();
+    assert!(after_import > 0, "the import counted the sources before any page asked");
+    let conn = store.inner.conn().unwrap();
+    store.inner.ctx(&conn).unwrap();
+    assert_eq!(lock(&store.inner.presence).scans(), after_import, "the first page counted nothing");
+}

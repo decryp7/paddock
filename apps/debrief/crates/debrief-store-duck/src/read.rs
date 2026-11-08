@@ -296,7 +296,7 @@ impl Inner {
     }
 
     /// The field list and default instance key of the current events (cached per generation).
-    fn derived(&self, conn: &Connection) -> StoreResult<Arc<Derived>> {
+    pub(crate) fn derived(&self, conn: &Connection) -> StoreResult<Arc<Derived>> {
         let generation = self.generation.load(std::sync::atomic::Ordering::SeqCst);
         if let Some((g, d)) = crate::lock(&self.derived).as_ref() {
             if *g == generation {
@@ -357,7 +357,13 @@ impl Inner {
         // Keys with more values than a segment lists: counted exactly in one statement while the store is
         // small, else estimated (the segments' estimates summed: high-cardinality values rarely repeat
         // across segments).
-        let total = count(conn, "SELECT count(*) FROM events")?;
+        // The events' total from the sources' own counts: `count(*)` over the segments cost 190 ms at 56M events and is
+        // only compared with a threshold here.
+        let total: usize = conn
+            .query_row("SELECT coalesce(sum(events), 0)::UBIGINT FROM sources WHERE ready", [], |r| {
+                r.get::<_, u64>(0)
+            })
+            .map_err(engine)? as usize;
         let mut exact: HashMap<String, u64> = HashMap::new();
         if (total as u64) < self.preaggregate_above.load(std::sync::atomic::Ordering::Relaxed) {
             let fields = self.fields(conn)?;
