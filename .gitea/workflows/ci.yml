@@ -40,7 +40,6 @@ on:
         default: ""
     secrets:
       BUILD_INPUTS_TOKEN:
-        description: "Read token of the private package store, for ./dev's prebuilt download (ADR 0022 R0b); callers pass `secrets: inherit`."
         required: false
 
 concurrency:
