@@ -27,6 +27,10 @@ pub struct Record {
     pub whats_new_seen: Option<String>,
     /// The last version whose services were registered successfully (rule 24: once per version change).
     pub services_version: Option<String>,
+    /// A per-machine update handed to the elevated installer and not yet seen to finish (ADR 0053 section 4.1 step 2): the
+    /// new version clears it at its first start; an older version that finds it settles it (waits for the installer, then
+    /// shows the failure).
+    pub handoff: Option<Handoff>,
 }
 
 impl Default for Record {
@@ -37,8 +41,16 @@ impl Default for Record {
             failed_install: None,
             whats_new_seen: None,
             services_version: None,
+            handoff: None,
         }
     }
+}
+
+/// The hand-off record: which version was handed to the installer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Handoff {
+    pub version: String,
 }
 
 /// An install that failed when the app quit.
@@ -47,19 +59,34 @@ impl Default for Record {
 pub struct FailedInstall {
     pub version: String,
     pub detail: String,
+    /// `declined` or `notInstalled` for a per-machine hand-off (shown with their own texts); none for the rest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 impl FailedInstall {
     pub fn of(version: &str, e: &UpdateError) -> FailedInstall {
+        let (kind, detail) = match e {
+            UpdateError::Declined => (Some("declined"), String::new()),
+            UpdateError::NotInstalled { reason } => (Some("notInstalled"), reason.clone()),
+            other => (None, other.detail().unwrap_or_else(|| other.message())),
+        };
         FailedInstall {
             version: clip(version),
-            detail: clip(&e.detail().unwrap_or_else(|| e.message())),
+            detail: clip(&detail),
+            kind: kind.map(String::from),
         }
     }
 
     pub fn error(&self) -> UpdateError {
-        UpdateError::InstallFailed {
-            detail: format!("version {}: {}", self.version, self.detail),
+        match self.kind.as_deref() {
+            Some("declined") => UpdateError::Declined,
+            Some("notInstalled") => UpdateError::NotInstalled {
+                reason: self.detail.clone(),
+            },
+            _ => UpdateError::InstallFailed {
+                detail: format!("version {}: {}", self.version, self.detail),
+            },
         }
     }
 }

@@ -11,7 +11,7 @@ use std::path::Path;
 /// Every benchmark unit's name starts with this.
 pub const UNIT_PREFIX: &str = "dyno-bench-";
 /// What a run records when there is no user manager and the child runs inside the agent's cgroup.
-pub const LIMITED_NOTE: &str = "limited: nice 10, memory limit 256 MiB (no systemd user manager); the numbers are low confidence";
+pub const LIMITED_NOTE: &str = "This computer has no systemd user session, so the test ran at a lower priority with a 256 MiB memory cap and its numbers are less certain. Sign in to a normal desktop session, or turn on systemd user services, and run again for full-confidence numbers.";
 /// The longest run id used in a unit name.
 const MAX_ID: usize = 64;
 

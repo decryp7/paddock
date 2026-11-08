@@ -67,6 +67,12 @@ pub fn guid_for_tray_id(tray_id: &str) -> Option<u128> {
     tray_id.strip_prefix("dyno-").filter(|i| !i.is_empty()).map(guid_for)
 }
 
+/// The provider the patched `tray-icon` asks on macOS with the tray id (`dyno-<item>`): the autosave name for Dyno's own icons,
+/// given to the status item before it connects to the menu bar.
+pub fn autosave_name_for_tray_id(tray_id: &str) -> Option<String> {
+    tray_id.strip_prefix("dyno-").filter(|i| !i.is_empty()).map(autosave_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +141,8 @@ mod tests {
         assert_eq!(guid_for_tray_id("dyno-"), None);
         assert_eq!(guid_for_tray_id("other-cpu-1"), None);
         assert_eq!(guid_for_tray_id("main"), None);
+        assert_eq!(autosave_name_for_tray_id("dyno-cpu-1"), Some(autosave_name("cpu-1")));
+        assert_eq!(autosave_name_for_tray_id("dyno-"), None);
+        assert_eq!(autosave_name_for_tray_id("main"), None);
     }
 }

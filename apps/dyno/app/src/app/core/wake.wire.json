@@ -1,0 +1,242 @@
+{
+  "repeats": [
+    "once",
+    "daily",
+    {
+      "days": {
+        "mask": 96
+      }
+    }
+  ],
+  "requests": [
+    "powerWakes",
+    {
+      "powerSetWake": {
+        "entry": {
+          "enabled": false,
+          "id": 1,
+          "job": "softwareInventory",
+          "minuteOfDay": 420,
+          "name": "Morning inventory",
+          "repeat": "once",
+          "stayAwakeMinutes": null,
+          "wakeDevices": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "powerCancelWake": {
+        "id": 1
+      }
+    }
+  ],
+  "views": {
+    "armedAgent": {
+      "route": {
+        "agent": {
+          "cantTell": [
+            "Allow wake timers: Dyno can't tell."
+          ],
+          "note": "Windows wakes the computer for a timer that Dyno sets."
+        }
+      },
+      "rows": [
+        {
+          "entry": {
+            "enabled": true,
+            "id": 1,
+            "job": "softwareInventory",
+            "lastRun": {
+              "at": 1700000000000,
+              "summary": "staying awake 30 min; started its job"
+            },
+            "minuteOfDay": 420,
+            "name": "Morning inventory",
+            "nextAt": 1700050000000,
+            "repeat": {
+              "days": {
+                "mask": 31
+              }
+            },
+            "stayAwakeMinutes": 30,
+            "wakeDevices": [
+              2
+            ]
+          },
+          "state": {
+            "armed": {
+              "route": "agent"
+            }
+          }
+        }
+      ]
+    },
+    "armedHelper": {
+      "route": "helperReady",
+      "rows": [
+        {
+          "entry": {
+            "enabled": true,
+            "id": 1,
+            "job": "softwareInventory",
+            "lastRun": {
+              "at": 1700000000000,
+              "summary": "staying awake 30 min; started its job"
+            },
+            "minuteOfDay": 420,
+            "name": "Morning inventory",
+            "nextAt": 1700050000000,
+            "repeat": {
+              "days": {
+                "mask": 31
+              }
+            },
+            "stayAwakeMinutes": 30,
+            "wakeDevices": [
+              2
+            ]
+          },
+          "state": {
+            "armed": {
+              "route": "helper"
+            }
+          }
+        }
+      ]
+    },
+    "empty": {
+      "route": "helperReady",
+      "rows": []
+    },
+    "failed": {
+      "route": {
+        "unavailable": {
+          "reason": "This build has no helper."
+        }
+      },
+      "rows": [
+        {
+          "entry": {
+            "enabled": true,
+            "id": 1,
+            "job": "softwareInventory",
+            "lastRun": {
+              "at": 1700000000000,
+              "summary": "staying awake 30 min; started its job"
+            },
+            "minuteOfDay": 420,
+            "name": "Morning inventory",
+            "nextAt": 1700050000000,
+            "repeat": {
+              "days": {
+                "mask": 31
+              }
+            },
+            "stayAwakeMinutes": 30,
+            "wakeDevices": [
+              2
+            ]
+          },
+          "state": {
+            "failed": {
+              "why": "The helper refused."
+            }
+          }
+        }
+      ]
+    },
+    "needsHelper": {
+      "route": {
+        "needsHelper": {
+          "reason": "Administrator readings are off."
+        }
+      },
+      "rows": [
+        {
+          "entry": {
+            "enabled": true,
+            "id": 1,
+            "job": "softwareInventory",
+            "lastRun": {
+              "at": 1700000000000,
+              "summary": "staying awake 30 min; started its job"
+            },
+            "minuteOfDay": 420,
+            "name": "Morning inventory",
+            "nextAt": 1700050000000,
+            "repeat": {
+              "days": {
+                "mask": 31
+              }
+            },
+            "stayAwakeMinutes": 30,
+            "wakeDevices": [
+              2
+            ]
+          },
+          "state": "needsHelper"
+        }
+      ]
+    },
+    "off": {
+      "route": "helperReady",
+      "rows": [
+        {
+          "entry": {
+            "enabled": true,
+            "id": 1,
+            "job": "softwareInventory",
+            "lastRun": {
+              "at": 1700000000000,
+              "summary": "staying awake 30 min; started its job"
+            },
+            "minuteOfDay": 420,
+            "name": "Morning inventory",
+            "nextAt": 1700050000000,
+            "repeat": {
+              "days": {
+                "mask": 31
+              }
+            },
+            "stayAwakeMinutes": 30,
+            "wakeDevices": [
+              2
+            ]
+          },
+          "state": "off"
+        }
+      ]
+    },
+    "paused": {
+      "route": "helperReady",
+      "rows": [
+        {
+          "entry": {
+            "enabled": true,
+            "id": 1,
+            "job": "softwareInventory",
+            "lastRun": {
+              "at": 1700000000000,
+              "summary": "staying awake 30 min; started its job"
+            },
+            "minuteOfDay": 420,
+            "name": "Morning inventory",
+            "nextAt": 1700050000000,
+            "repeat": {
+              "days": {
+                "mask": 31
+              }
+            },
+            "stayAwakeMinutes": 30,
+            "wakeDevices": [
+              2
+            ]
+          },
+          "state": "paused"
+        }
+      ]
+    }
+  }
+}

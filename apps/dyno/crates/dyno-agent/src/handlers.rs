@@ -21,6 +21,10 @@ use std::sync::Arc;
 
 type Answer = Result<Reply, AgentError>;
 
+fn bad_edit(e: dyno_core::intel_lists::EditError) -> AgentError {
+    bad(e.to_string())
+}
+
 fn bad(msg: impl Into<String>) -> AgentError {
     AgentError::new(ErrorCode::BadRequest, msg)
 }
@@ -46,14 +50,11 @@ pub fn handle(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
 /// Starts a benchmark run after validating the request; the load recorded is the machine's as of the click.
 fn start_benchmark(
     shared: &Arc<Shared>,
-    kinds: &[dyno_core::bench::BenchKind],
-    label: &str,
-    group: Option<&str>,
+    plan: Result<dyno_core::bench::RunPlan, String>,
     phase: Option<dyno_core::bench::BenchPhase>,
-    disk_mib: Option<u32>,
     allow_battery: bool,
 ) -> Answer {
-    let plan = dyno_core::bench::plan(kinds, disk_mib, label, group).map_err(bad)?;
+    let plan = plan.map_err(bad)?;
     let load = {
         let core = lock(&shared.core);
         core.recent
@@ -85,7 +86,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             if !p.is_absolute() {
                 return Err(bad("Give the full path of the file."));
             }
-            Ok(Reply::Lockers(lock(&shared.ports.locks).lockers(p)?))
+            Ok(Reply::Lockers(lock(&shared.ports.locks).lockers_with_more(p)?))
         }
         Request::OpenLocation { target } => {
             let exe = lock(&shared.core)
@@ -135,19 +136,41 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             // must never put an old layout back.
             let mut incoming = (*settings).normalised();
             incoming.dashboard = core.settings.dashboard.clone();
+            incoming.dashboard_v1 = core.settings.dashboard_v1.clone();
             incoming.menu_bar = core.settings.menu_bar.clone();
             incoming.popover = core.settings.popover.clone();
+            // What the timed actions did (last day run, done) is the agent's own: a window's copy never rewinds it.
+            for e in &mut incoming.power.timed.entries {
+                if let Some(cur) = core
+                    .settings
+                    .power
+                    .timed
+                    .entries
+                    .iter()
+                    .find(|c| c.id == e.id && c.at_minute == e.at_minute && c.repeat == e.repeat)
+                {
+                    (e.last_day, e.done) = (cur.last_day, cur.done);
+                }
+            }
             core.settings = incoming;
             let alarm_config = core.settings.alarms;
             core.alarms.set_config(alarm_config);
             shared.disk.set_limits(core.settings.disk.limits());
             shared.disk.set_read_threads(core.settings.disk.read_threads);
+            shared.disk.set_space_refresh(core.settings.disk.space_refresh_secs);
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
             // After the core lock is released: switching saved maps off waits for the cache writer (a save in progress can take
             // seconds), and the sampler takes the core lock every tick.
             shared.disk.apply_saved_maps(s.disk.saved_maps);
+            shared.power.configure_idle(shared);
+            if !s.power.keep_awake.enabled {
+                // Turning the feature off ends a hold already taken (and clears a notice).
+                shared.power.stop(shared);
+            }
+            // Turning scheduled wake on or off sets or clears the OS wakes now.
+            shared.wakes.sync_all(shared);
             shared.wake_sampler();
             Ok(Reply::Settings(Box::new(s)))
         }
@@ -172,6 +195,63 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         Request::Plugins => Ok(Reply::Plugins(plugins(shared))),
         Request::Network { query } => shared.network.snapshot(shared, query).map(|s| Reply::Network(Box::new(s))),
         Request::ResolveHosts { addresses } => shared.network.resolve(&addresses).map(Reply::HostNames),
+        Request::Firewall => shared.firewall.view().map(|v| Reply::Firewall(Box::new(v))),
+        Request::IntelStatus => Ok(Reply::Intel(Box::new(shared.intel.status()))),
+        Request::IntelEdit { edit } => {
+            let outcome = shared.intel.edit(edit.clone()).map_err(bad_edit)?;
+            if crate::intel_centre::needs_rebuild(&edit, &outcome) {
+                // A rebuild already running covers a second edit shortly after (the job reads the lists when it starts).
+                let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::RebuildIntel);
+            }
+            if let dyno_core::intel_lists::IntelEdit::AddList {
+                source: dyno_core::intel_lists::NewSource::Url { .. },
+                ..
+            } = &edit
+            {
+                if let dyno_core::intel_lists::EditOutcome::Added { id } = &outcome {
+                    // A new subscription fetches at once (the user just asked for it).
+                    let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::UpdateList { id: id.clone() });
+                }
+            }
+            Ok(Reply::IntelEdited(Box::new(outcome)))
+        }
+        Request::GeoSummary => {
+            if shared.intel.wants_geo() {
+                let _ = shared.jobs.start(shared, dyno_core::jobs::JobSpec::UpdateGeo);
+            }
+            let rows = shared.network.remote_rows(shared)?;
+            let mut summary = shared.intel.geo_summary(&rows, 0);
+            let home = shared.intel.home();
+            summary.home_country = home.country;
+            summary.home_source = home.source;
+            Ok(Reply::Geo(Box::new(summary)))
+        }
+        Request::RemoveTool => match crate::tool_own_copy::remove(&shared.dirs.tools()) {
+            Ok(()) => {
+                // The wear reading was made with the tool: read again now, not at the next slow cycle (hours away).
+                // Off the request (ER-17): the answer does not wait for smartctl.
+                let shared = Arc::clone(shared);
+                std::thread::Builder::new()
+                    .name("dyno-wear-reread".into())
+                    .spawn(move || crate::hardware::slow_cycle(&shared))
+                    .map_err(|e| AgentError::new(ErrorCode::Internal, format!("The reading could not be refreshed ({}).", e.kind())))?;
+                Ok(Reply::Ok)
+            }
+            Err(e) => Err(AgentError::new(
+                ErrorCode::Internal,
+                format!(
+                    "The tool could not be removed ({}). Close anything using it and try again.",
+                    e.kind()
+                ),
+            )),
+        },
+        Request::ToolOffer => {
+            let offer = crate::tool_download::offer(shared);
+            // Asking again ("Check again", or opening Settings) also reads the disks again, so a tool installed by hand is
+            // picked up now and not at the next slow cycle (hours away); at most once in 30 s.
+            crate::hardware::request_reread(shared, std::time::Duration::from_secs(30));
+            Ok(Reply::ToolOffer(Box::new(offer)))
+        }
         Request::LookupIp { ip, template } => {
             let settings = match template {
                 Some(t) => dyno_core::ip_lookup::IpLookupSettings {
@@ -203,7 +283,25 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             phase,
             disk_mib,
             allow_battery,
-        } => start_benchmark(shared, &kinds, &label, group.as_deref(), phase, disk_mib, allow_battery),
+            disk_volumes,
+            allow_network_drives,
+            disk_folders,
+            gpu_adapter,
+            sustained_minutes,
+            sustained_write_gib,
+        } => start_benchmark(
+            shared,
+            dyno_core::bench::plan(&kinds, disk_mib, &label, group.as_deref())
+                .and_then(|p| p.with_drives(&disk_volumes, allow_network_drives))
+                .and_then(|p| p.with_folders(&disk_folders))
+                .map(|mut p| {
+                    p.gpu_adapter = gpu_adapter;
+                    p
+                })
+                .and_then(|p| p.with_sustained(sustained_minutes, sustained_write_gib)),
+            phase,
+            allow_battery,
+        ),
         Request::CancelBenchmark => {
             shared.bench.cancel();
             Ok(Reply::Ok)
@@ -222,6 +320,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             ))))
         }
         Request::Inventory => Ok(Reply::Inventory(Box::new(crate::inventory::get(shared)))),
+        Request::HelperStatus => Ok(Reply::HelperStatus(Box::new(shared.helper.status()))),
         Request::Issues { query } => crate::issues::overview(shared, query).map(|o| Reply::Issues(Box::new(o))),
         Request::StartJob { spec } => shared.jobs.start(shared, spec).map(|s| Reply::Job(Box::new(s))),
         Request::Jobs => Ok(Reply::Jobs(shared.jobs.statuses())),
@@ -289,15 +388,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             .map_err(internal)?
             .map(|s| Reply::RecorderSnapshot(Box::new(s)))
             .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That capture no longer exists.")),
-        Request::DiagnosticsPreview => {
-            let bundle = crate::diagnostics::collect(shared).map_err(internal)?;
-            Ok(Reply::DiagnosticsPreview(Box::new(dyno_core::diagnostics::preview(&bundle))))
-        }
-        Request::SaveDiagnostics { path } => {
-            let dest = dyno_core::diagnostics::validate_destination(&path).map_err(|e| bad(e.to_string()))?;
-            let bundle = crate::diagnostics::collect(shared).map_err(internal)?;
-            crate::diagnostics::write_zip(&dest, &bundle).map(Reply::DiagnosticsSaved)
-        }
+        Request::DiagnosticsFiles => Ok(Reply::DiagnosticsFiles(Box::new(crate::diagnostics::collect(shared)))),
         Request::AlarmHistory { alarm_id, limit } => Ok(Reply::AlarmChanges(
             lock(&shared.core).store.alarm_events(alarm_id, limit).map_err(internal)?,
         )),
@@ -308,6 +399,38 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             startup.refresh();
             Ok(Reply::Startup(startup.list()?))
         }
+        Request::PowerState => Ok(Reply::Power(Box::new(shared.power.view()))),
+        Request::PowerKeepAwake { spec } => {
+            let enabled = lock(&shared.core).settings.power.keep_awake.enabled;
+            shared
+                .power
+                .start(shared, spec, enabled)
+                .map(|v| Reply::Power(Box::new(v)))
+                .map_err(bad)
+        }
+        Request::EnergyReport { days } => shared
+            .power
+            .energy(shared, days)
+            .map(|r| Reply::Energy(Box::new(r)))
+            .map_err(internal),
+        Request::PowerIdleCancel => Ok(Reply::Power(Box::new(shared.power.idle_cancel(shared)))),
+        Request::PowerIdleSnooze { minutes } => Ok(Reply::Power(Box::new(shared.power.idle_snooze(shared, minutes)))),
+        Request::PowerStopKeepAwake => Ok(Reply::Power(Box::new(shared.power.stop(shared)))),
+        Request::WolDevices => shared.wol.view(shared).map(|v| Reply::Wol(Box::new(v))),
+        Request::WolCandidates => shared.wol.candidates(shared).map(Reply::WolCandidates),
+        Request::WolSave { device } => shared.wol.save(shared, device).map(|v| Reply::Wol(Box::new(v))),
+        Request::WolRemove { id } => shared.wol.remove(shared, id).map(|v| Reply::Wol(Box::new(v))),
+        Request::WolWake { id, test } => {
+            shared.wol.check_wake(shared, id)?;
+            shared
+                .jobs
+                .start(shared, dyno_core::jobs::JobSpec::WolWake { id, test })
+                .map(|s| Reply::Job(Box::new(s)))
+        }
+        Request::PowerWakes => shared.wakes.view(shared).map(|v| Reply::PowerWakes(Box::new(v))),
+        Request::PowerSetWake { entry } => shared.wakes.set(shared, entry).map(|v| Reply::PowerWakes(Box::new(v))),
+        Request::PowerCancelWake { id } => shared.wakes.cancel(shared, id).map(|v| Reply::PowerWakes(Box::new(v))),
+        Request::WolReadiness => Ok(Reply::WolReadiness(Box::new(shared.wol.readiness()))),
         Request::Shutdown => {
             log::info!("Shutdown requested by a client");
             shared.request_stop();
@@ -334,33 +457,44 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         r @ (Request::SearchSeed { .. } | Request::WebSearch { .. } | Request::VirusTotalUrl { .. } | Request::StartupOverview { .. }) => {
             crate::handlers_search::handle(shared, r)
         }
-        r @ (Request::Changes { .. }
-        | Request::GpuProcesses
-        | Request::SaveInventoryReport { .. }
-        | Request::Maintenance
-        | Request::Backup) => crate::extras::handle(shared, r),
+        r @ (Request::Changes { .. } | Request::GpuProcesses | Request::SaveInventoryReport { .. } | Request::Maintenance) => {
+            crate::extras::handle(shared, r)
+        }
         Request::WidgetLayout { surface } => Ok(Reply::WidgetLayout(Box::new(dyno_core::widgets::layout_view(
             &lock(&shared.core).settings,
             surface,
         )))),
-        Request::EditWidgetLayout { edit } => edit_widget_layout(shared, edit),
+        Request::EditWidgetLayout { edit, base_revision } => edit_widget_layout(shared, edit, base_revision),
         Request::PopoverValues { placements } => {
             crate::popover::values(shared, &placements).map(|v| Reply::PopoverValues(dyno_core::widgets::JsonOnLink(v)))
         }
         Request::WeeklyReport { weeks_ago } => weekly_report(shared, weeks_ago).map(|r| Reply::Report(Box::new(r))),
+        Request::BenchEstimate { request } => Ok(Reply::BenchEstimate(dyno_core::bench::estimate::estimate_run(
+            &dyno_core::bench::estimate::standard(),
+            &request,
+        ))),
+        Request::BenchGpuAdapters => shared
+            .bench
+            .gpu_adapters()
+            .map(Reply::GpuAdapters)
+            .map_err(|e| AgentError::new(ErrorCode::Unsupported, e)),
+        Request::SaveBenchmarks { path, format, ids } => save_benchmarks(shared, &path, format, &ids).map(Reply::ReportSaved),
         Request::SaveReport { path, format, weeks_ago } => save_report(shared, &path, format, weeks_ago).map(Reply::ReportSaved),
     }
 }
 
 /// Applies a layout edit, saves the settings and tells every app which surface changed. A refused edit changes nothing and
 /// answers why.
-fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdit) -> Answer {
+fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdit, base_revision: Option<u64>) -> Answer {
     let surface = edit.surface();
     let mut core = lock(&shared.core);
-    let view = dyno_core::widgets::edit_layout(&mut core.settings, edit).map_err(|e| bad(e.to_string()))?;
+    let view = dyno_core::widgets::edit_layout(&mut core.settings, edit, base_revision).map_err(|e| match e {
+        paddock_widgets::WidgetError::Stale => AgentError::new(ErrorCode::Stale, e.to_string()),
+        e => bad(e.to_string()),
+    })?;
     core.save_settings(&shared.dirs);
     drop(core);
-    shared.broadcast(&Message::WidgetLayoutChanged(surface));
+    shared.broadcast_layout(&surface);
     Ok(Reply::WidgetLayout(Box::new(view)))
 }
 
@@ -623,6 +757,42 @@ fn weekly_report(shared: &Shared, weeks_ago: u32) -> Result<WeeklyReport, AgentE
 const MAX_HARDWARE_EPISODES: u32 = 500;
 
 /// Writes the report to the path the user chose in the save dialog (Markdown or HTML).
+/// Writes the chosen benchmark runs as JSON or CSV. The path was chosen in the OS dialog and is checked again here.
+fn save_benchmarks(
+    shared: &Shared,
+    path: &str,
+    format: dyno_core::bench::export::ExportFormat,
+    ids: &[String],
+) -> Result<SavedReport, AgentError> {
+    use dyno_core::bench::export;
+    let dest = export::validate_destination(path, format).map_err(bad)?;
+    if !dest.parent().is_some_and(Path::is_dir) {
+        return Err(bad("The folder to save the results in does not exist."));
+    }
+    if ids.len() > export::MAX_EXPORT_RUNS {
+        return Err(bad(format!("Export at most {} runs at once.", export::MAX_EXPORT_RUNS)));
+    }
+    let runs: Vec<dyno_core::bench::BenchRun> = ids.iter().filter_map(|id| shared.bench.run(id)).collect();
+    if runs.is_empty() {
+        return Err(AgentError::new(ErrorCode::NotFound, "None of those runs exists any more."));
+    }
+    let refs: Vec<&dyno_core::bench::BenchRun> = runs.iter().collect();
+    let text = export::export(&refs, format);
+    std::fs::write(&dest, text.as_bytes()).map_err(|e| {
+        let code = if e.kind() == std::io::ErrorKind::PermissionDenied {
+            ErrorCode::AccessDenied
+        } else {
+            ErrorCode::Internal
+        };
+        AgentError::new(code, format!("Dyno could not write the results ({e}). Choose another folder."))
+    })?;
+    log::info!("dyno-agent: exported {} benchmark runs as {}", runs.len(), format.extension());
+    Ok(SavedReport {
+        path: dest.to_string_lossy().into_owned(),
+        bytes: text.len() as u64,
+    })
+}
+
 fn save_report(shared: &Shared, path: &str, format: ReportFormat, weeks_ago: u32) -> Result<SavedReport, AgentError> {
     let dest = report::validate_destination(path, format).map_err(bad)?;
     if !dest.parent().is_some_and(Path::is_dir) {

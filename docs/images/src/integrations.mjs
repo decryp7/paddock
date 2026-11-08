@@ -96,7 +96,7 @@ function app(d, id, x, y, w, h, opts, planned = false, bottom = false) {
     ['code', CODEBASE_TOOL, 'MCP server, read-only', 'Code graph, review, search.'],
     ['dbmcp', 'Debrief', 'MCP server, read-only', 'Logs and analysis; first.'],
     ['sigmcp', 'Sighter', 'MCP server, acts', 'This PC or one over RDP.'],
-    ['dynomcp', 'Dyno', 'MCP server, opt-in', 'Settings > AI access; reading tools in 1.2.'],
+    ['dynomcp', 'Dyno', 'MCP server, opt-in', '8 reading + 2 power tools, 2 actions.'],
     ['recmcp', 'Recce', 'MCP server, read-only', 'Search with citations.'],
   ];
   const SH = Math.max(...servers.map(([, name, tech, desc]) => d.fit(MW, { name, tech, desc })));

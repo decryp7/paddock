@@ -1,5 +1,6 @@
-// Kept for the package's public API: sizes are formatted by the one formatter of `@decryp7/paddock-ui/format`.
-export { formatBytes } from '@decryp7/paddock-ui/format';
+// Kept for the package's public API: sizes are formatted by the one formatter of `@decryp7/paddock-ui/format`. A download or a
+// file is storage: decimal steps, like the operating systems show it.
+export { formatStorage } from '@decryp7/paddock-ui/format';
 
 /**
  * The operating system and architecture as a person says them ("macOS (Apple silicon)", "Windows (64-bit)"). The engine

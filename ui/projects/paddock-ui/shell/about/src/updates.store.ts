@@ -106,6 +106,12 @@ export const UpdatesStore = signalStore(
       },
       check: () => step(() => backend.check()),
       download: () => step(() => backend.download()),
+      /** After a failed per-machine hand-off: looks for the update again and, when it is there, downloads it (the verified
+       * download is not kept across the restart); the Install button comes back when it is ready. */
+      async installAgain(): Promise<boolean> {
+        if (!(await step(() => backend.check()))) return false;
+        return store.phase()?.kind === 'available' ? step(() => backend.download()) : false;
+      },
       cancel: () => step(() => backend.cancel()),
       installOnQuit: (enabled: boolean) => step(() => backend.installOnQuit(enabled)),
       restart: () => step(() => backend.restart()),

@@ -1,4 +1,4 @@
-import type { Alarm, AlarmChange, AlarmFilter, AlarmStats, BundlePreview, RecorderSample, RecorderSnapshot, RecorderSnapshotInfo } from '../api.types';
+import type { Alarm, AlarmChange, AlarmFilter, AlarmStats, RecorderSample, RecorderSnapshot, RecorderSnapshotInfo } from '../api.types';
 import { clamp, wobble } from './noise';
 
 const MIN = 60_000;
@@ -111,19 +111,15 @@ export function demoSnapshot(info: RecorderSnapshotInfo): RecorderSnapshot {
   return { version: 1, at: info.at, reason: info.reason, samples: recorderSamples(info.at, info.samples) };
 }
 
-export function demoBundlePreview(): BundlePreview {
-  const files = [
-    { path: 'README.txt', description: 'What this is', bytes: 520 },
-    { path: 'system/inventory.json', description: 'Operating system, processor, memory slots and disks', bytes: 4_812 },
-    { path: 'settings.json', description: "Dyno's settings", bytes: 2_240 },
-    { path: 'alarms/open.json', description: 'Alarms', bytes: 6_100 },
-    { path: 'alarms/stats.json', description: 'Alarm statistics', bytes: 840 },
-    { path: 'alarms/history.json', description: 'Recent alarm changes', bytes: 18_400 },
-    { path: 'network/sockets.json', description: 'Listening ports and connections (addresses redacted)', bytes: 9_300 },
-    { path: 'activity.json', description: 'What Dyno recorded recently', bytes: 11_900 },
-    { path: 'alerts.json', description: 'Recent alerts', bytes: 3_100 },
-    { path: 'recorder/last-10-minutes.json', description: 'The last ten minutes at one-second resolution', bytes: 412_000 },
-    { path: 'manifest.json', description: 'Every file and what was removed', bytes: 1_900 },
-  ];
-  return { files, totalBytes: files.reduce((a, f) => a + f.bytes, 0), redactions: { homePaths: 12, profilePaths: 3, machineNames: 5, userNames: 9, emails: 0, ipAddresses: 41 } };
+/** The demo alarms followed by copies with other ids and titles, up to `total` (`?rows=many`: a list taller than the window). */
+export function manyAlarms(base: Alarm[], total: number): Alarm[] {
+  const first = base[0];
+  if (!first) return base;
+  const extra = Array.from({ length: Math.max(0, total - base.length) }, (_, i): Alarm => ({
+    ...first,
+    id: 100 + i,
+    key: `${first.key}:copy-${i}`,
+    title: `Sample alarm ${i + 1}`,
+  }));
+  return [...base, ...extra];
 }

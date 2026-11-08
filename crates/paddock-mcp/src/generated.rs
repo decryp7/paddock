@@ -5,6 +5,7 @@ use crate::audit::Outcome;
 use crate::control::{
     AuditRow, ErrorCode, IssuedKey, KeyInfo, McpError, McpEvent, McpSettings, McpView, ToolInfo,
 };
+use crate::listener::ListenerView;
 use paddock_commands::testing::{self, WriteMode};
 use std::path::{Path, PathBuf};
 use ts_rs::TS;
@@ -24,6 +25,7 @@ fn generated_files() -> Vec<(&'static str, String)> {
         McpSettings::decl(),
         ToolInfo::decl(),
         KeyInfo::decl(),
+        ListenerView::decl(),
         McpView::decl(),
         IssuedKey::decl(),
         AuditRow::decl(),

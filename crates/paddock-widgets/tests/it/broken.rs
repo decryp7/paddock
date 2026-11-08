@@ -1,7 +1,7 @@
 //! Catalogues that are wrong in one way each: `check_catalogue` names the problem; reading still never panics.
 
 use paddock_widgets::{
-    Catalogue, KindSpec, Placement, Preset, Refresh, Surface, assign_ids, builtin_presets,
+    Catalogue, KindSpec, Placement, Preset, Refresh, Surface, assign_spans, builtin_presets,
     check_catalogue,
 };
 
@@ -29,7 +29,7 @@ const fn spec(
         title,
         summary: "s",
         icon: "i",
-        spans,
+        size: spans,
         max_instances,
         refresh: Refresh::Live,
     }
@@ -41,6 +41,7 @@ macro_rules! broken {
         impl Catalogue for $name {
             type SurfaceId = TestSurface;
             type Widget = Gadget;
+            type Place = paddock_widgets::Span;
             const SURFACE_ID: TestSurface = TestSurface::Popover;
             const SURFACE: Surface = Surface {
                 noun: "popup",
@@ -73,13 +74,14 @@ static NEVER: [KindSpec<GadgetKind>; 1] = [spec(GadgetKind::Clock, "Clock", &[1]
 static CLOCK: [KindSpec<GadgetKind>; 1] = [spec(GadgetKind::Clock, "Clock", &[1], 1)];
 
 fn two_clocks() -> Vec<Placement<Gadget>> {
-    assign_ids([(1, Gadget::Clock), (1, Gadget::Clock)])
+    assign_spans([(1, Gadget::Clock), (1, Gadget::Clock)])
 }
 
 struct NoNoun;
 impl Catalogue for NoNoun {
     type SurfaceId = TestSurface;
     type Widget = Gadget;
+    type Place = paddock_widgets::Span;
     const SURFACE_ID: TestSurface = TestSurface::Popover;
     const SURFACE: Surface = Surface {
         noun: "",
@@ -99,6 +101,7 @@ macro_rules! surfaced {
         impl Catalogue for $name {
             type SurfaceId = TestSurface;
             type Widget = Gadget;
+            type Place = paddock_widgets::Span;
             const SURFACE_ID: TestSurface = TestSurface::Popover;
             const SURFACE: Surface = $surface;
             fn kinds() -> &'static [KindSpec<GadgetKind>] {
@@ -115,7 +118,7 @@ macro_rules! surfaced {
 }
 
 fn one_clock() -> Vec<Placement<Gadget>> {
-    assign_ids([(1, Gadget::Clock)])
+    assign_spans([(1, Gadget::Clock)])
 }
 
 fn preset(id: &str, name: &str, placements: Vec<Placement<Gadget>>) -> Preset<Gadget> {
@@ -258,9 +261,9 @@ fn each_problem_is_named() {
     assert_eq!(message::<NoKinds>(), "the catalogue has no kinds");
     assert!(message::<Twice>().contains("listed twice"));
     assert!(message::<NoTitle>().contains("needs a title"));
-    assert!(message::<NoSpans>().contains("needs spans between 1 and 2"));
-    assert!(message::<ZeroSpan>().contains("needs spans"));
-    assert!(message::<WideSpan>().contains("needs spans"));
+    assert!(message::<NoSpans>().contains("needs a size rule inside the 2 columns"));
+    assert!(message::<ZeroSpan>().contains("needs a size rule"));
+    assert!(message::<WideSpan>().contains("needs a size rule"));
     assert!(message::<Never>().contains("max_instances is 0"));
     assert!(message::<BadDefaults>().contains("defaults"));
     assert!(message::<TooFewDefaults>().contains("defaults"));
@@ -279,7 +282,7 @@ fn a_kind_without_spans_cannot_be_added() {
         },
     )
     .expect_err("refused");
-    assert!(matches!(error, paddock_widgets::WidgetError::Invalid(m) if m.contains("no width")));
+    assert!(matches!(error, paddock_widgets::WidgetError::Invalid(m) if m.contains("no size")));
 }
 
 #[test]
@@ -293,8 +296,8 @@ fn builtin_presets_drop_invalid_placements_and_are_marked() {
 /// A catalogue that uses the trait's defaults: no clamping, no presets.
 mod minimal {
     use paddock_widgets::{
-        Catalogue, Edit, KindSpec, Layout, Placement, Refresh, Surface, Widget, apply, assign_ids,
-        builtin_presets, check_catalogue, read,
+        Catalogue, Edit, KindSpec, Layout, Placement, Refresh, Surface, Widget, apply,
+        assign_spans, builtin_presets, check_catalogue, read,
     };
     use serde::{Deserialize, Serialize};
     use serde_json::json;
@@ -326,7 +329,7 @@ mod minimal {
         title: "Lamp",
         summary: "A lamp",
         icon: "lamp",
-        spans: &[1],
+        size: &[1],
         max_instances: 2,
         refresh: Refresh::OnChange,
     }];
@@ -336,6 +339,7 @@ mod minimal {
     impl Catalogue for Lamps {
         type SurfaceId = u8;
         type Widget = Lamp;
+        type Place = paddock_widgets::Span;
         const SURFACE_ID: u8 = 7;
         const SURFACE: Surface = Surface {
             noun: "menu bar",
@@ -351,7 +355,7 @@ mod minimal {
             &KINDS
         }
         fn defaults() -> Vec<Placement<Lamp>> {
-            assign_ids([(1, Lamp::Lamp)])
+            assign_spans([(1, Lamp::Lamp)])
         }
     }
 

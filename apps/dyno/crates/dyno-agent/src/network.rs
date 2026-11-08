@@ -3,12 +3,14 @@
 //! activity entries. Observe-only: nothing here closes a connection or touches a firewall.
 
 use crate::agent::{lock, now, Shared};
+use crate::helper_readers::holders::SocketOwnerStep;
 use dyno_core::activity::ActivityKind;
-use dyno_core::network::{build, NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
+use dyno_core::network::{NetEvent, NetworkQuery, NetworkSnapshot, SocketRow, Tracker};
 use dyno_core::network_names::{clean_name, parse_addresses, HostName};
-use dyno_core::network_traffic::{TrafficRow, TrafficTracker};
+use dyno_core::network_traffic::{OthersTraffic, TrafficRow, TrafficTracker};
 use dyno_core::ports::{NetworkSockets, PlatformError, ProcessTraffic, ReverseDns};
 use dyno_core::protocol::{AgentError, ErrorCode};
+use dyno_core::read_via::ReadVia;
 use std::collections::{HashMap, VecDeque};
 use std::net::IpAddr;
 use std::sync::mpsc;
@@ -36,12 +38,23 @@ const RESOLVE_DEADLINE: Duration = Duration::from_secs(3);
 struct State {
     tracker: Tracker,
     cache: Option<(Instant, Vec<SocketRow>)>,
+    /// Who read the owners of the cached rows (Linux: the helper fills those the kernel hides).
+    owners_via: ReadVia,
+}
+
+/// What one traffic read left behind.
+struct TrafficCache {
+    at: Instant,
+    rows: Vec<TrafficRow>,
+    note: Option<String>,
+    via: ReadVia,
+    others: Option<OthersTraffic>,
 }
 
 struct Traffic {
     tracker: TrafficTracker,
-    /// The last read: when, rows, and why there are none.
-    cache: Option<(Instant, Vec<TrafficRow>, Option<String>)>,
+    /// The last read: when, rows, why there are none, who read them and what other accounts moved.
+    cache: Option<TrafficCache>,
     refreshing: bool,
 }
 
@@ -53,6 +66,8 @@ pub struct NetCentre {
     dns: Arc<dyn ReverseDns>,
     traffic_source: Arc<dyn ProcessTraffic>,
     state: Mutex<State>,
+    /// The helper's map of hidden socket owners (Linux); none where the OS names every owner itself.
+    owners: Option<Mutex<SocketOwnerStep>>,
     traffic: Arc<Mutex<Traffic>>,
     names: Names,
 }
@@ -78,7 +93,9 @@ impl NetCentre {
             state: Mutex::new(State {
                 tracker: Tracker::new(),
                 cache: None,
+                owners_via: ReadVia::Local,
             }),
+            owners: None,
             traffic: Arc::new(Mutex::new(Traffic {
                 tracker: TrafficTracker::new(),
                 cache: None,
@@ -86,6 +103,12 @@ impl NetCentre {
             })),
             names: Arc::default(),
         }
+    }
+
+    /// The same centre with the helper filling the owners the kernel hides from this account (Linux).
+    pub fn with_owners(mut self, step: SocketOwnerStep) -> NetCentre {
+        self.owners = Some(Mutex::new(step));
+        self
     }
 
     /// Reads the rows (from the cache when fresh), learns them and returns them with the events they imply.
@@ -97,9 +120,26 @@ impl NetCentre {
             }
         }
         let rows = self.sockets.sockets().map_err(|e| AgentError::new(error_code(&e), e.to_string()))?;
+        let rows = self.with_owners_filled(rows, &mut s);
         let events = s.tracker.update(now(), &rows, processes);
         s.cache = Some((Instant::now(), rows.clone()));
         Ok((rows, events))
+    }
+
+    /// A person pressed "Try again": the helper is asked at the next look, and the cached rows are not reused.
+    fn retry_owners(&self) {
+        if let Some(step) = &self.owners {
+            lock(step).retry_now();
+        }
+        lock(&self.state).cache = None;
+    }
+
+    /// `rows` with the hidden owners filled in by the helper; records where they came from in `state`.
+    fn with_owners_filled(&self, rows: Vec<SocketRow>, state: &mut State) -> Vec<SocketRow> {
+        let Some(step) = &self.owners else { return rows };
+        let (rows, via) = lock(step).fill(rows, Instant::now());
+        state.owners_via = via;
+        rows
     }
 
     /// Established connections per process id, for the program baseline. A refused read (a cut-down list on macOS
@@ -133,9 +173,9 @@ impl NetCentre {
 
     /// Bytes per second per program, or why there are none. The OS tool can take seconds (macOS `nettop`), so this
     /// never waits for it: it returns the last read and starts a refresh in the background when that is stale.
-    fn traffic(&self) -> (Vec<TrafficRow>, Option<String>) {
+    fn traffic(&self) -> (Vec<TrafficRow>, Option<String>, ReadVia, Option<OthersTraffic>) {
         let mut t = lock(&self.traffic);
-        let stale = t.cache.as_ref().is_none_or(|(at, ..)| at.elapsed() >= TRAFFIC_EVERY);
+        let stale = t.cache.as_ref().is_none_or(|c| c.at.elapsed() >= TRAFFIC_EVERY);
         if stale && !t.refreshing {
             t.refreshing = true;
             let (source, state) = (self.traffic_source.clone(), self.traffic.clone());
@@ -146,22 +186,55 @@ impl NetCentre {
             });
         }
         match &t.cache {
-            Some((_, rows, note)) => (rows.clone(), note.clone()),
-            None => (Vec::new(), Some("Reading traffic per program…".into())),
+            Some(c) => (c.rows.clone(), c.note.clone(), c.via.clone(), c.others),
+            None => (Vec::new(), Some("Reading traffic per program…".into()), ReadVia::Local, None),
         }
     }
 
     /// The page's snapshot for `query`.
     pub fn snapshot(&self, shared: &Shared, query: NetworkQuery) -> Result<NetworkSnapshot, AgentError> {
         let processes = lock(&shared.core).latest.processes.clone();
+        if query.retry_helper {
+            self.retry_owners();
+        }
         let (rows, events) = self.look(&processes)?;
         record(shared, &events);
         let mut snapshot = {
             let s = lock(&self.state);
-            build(now(), &rows, &processes, &query.normalised(), &s.tracker)
+            let geo = shared.intel.geo();
+            dyno_core::network::build_with_geo(
+                now(),
+                &rows,
+                &processes,
+                &query.normalised(),
+                &s.tracker,
+                geo.is_on().then_some(&*geo as &dyn dyno_core::geo::GeoLookup),
+                Some(&|ip: &IpAddr| shared.intel.flagged_by(ip)),
+            )
         };
-        (snapshot.traffic, snapshot.traffic_note) = self.traffic();
+        snapshot.owners_via = lock(&self.state).owners_via.clone();
+        (
+            snapshot.traffic,
+            snapshot.traffic_note,
+            snapshot.traffic_via,
+            snapshot.traffic_others,
+        ) = self.traffic();
         Ok(snapshot)
+    }
+
+    /// The remote address and program name of every connected socket now, for the map: every row, before any page cap.
+    pub fn remote_rows(&self, shared: &Shared) -> Result<Vec<(IpAddr, String)>, AgentError> {
+        let processes = lock(&shared.core).latest.processes.clone();
+        let (rows, _) = self.look(&processes)?;
+        let names: HashMap<u32, &str> = processes.iter().map(|p| (p.pid, p.name.as_str())).collect();
+        Ok(rows
+            .iter()
+            .filter_map(|r| {
+                let (ip, _) = r.remote?;
+                let name = r.pid.and_then(|p| names.get(&p).copied()).unwrap_or("Unknown program");
+                Some((ip, name.to_string()))
+            })
+            .collect())
     }
 
     /// One background look (for the slow loop).
@@ -238,16 +311,22 @@ impl NetCentre {
     }
 }
 
-/// Reads the counters once and stores the rates (or the reason there are none).
+/// Reads the counters once and stores the rates (or the reason there are none) with who read them.
 fn refresh_traffic(source: &dyn ProcessTraffic, state: &Mutex<Traffic>) {
-    let read = source.counters();
+    let read = source.read();
     let mut t = lock(state);
-    let (rows, note) = match read {
-        Ok(counters) => (t.tracker.update(now(), &counters), None),
-        Err(PlatformError::Unsupported(why)) => (Vec::new(), Some(why)),
-        Err(e) => (Vec::new(), Some(format!("Traffic per program could not be read ({e})."))),
+    let (rows, note, others) = match read.answer {
+        Ok(a) => (t.tracker.update(now(), &a.counters), None, a.others),
+        Err(PlatformError::Unsupported(why)) => (Vec::new(), Some(why), None),
+        Err(e) => (Vec::new(), Some(format!("Traffic per program could not be read ({e}).")), None),
     };
-    t.cache = Some((Instant::now(), rows, note));
+    t.cache = Some(TrafficCache {
+        at: Instant::now(),
+        rows,
+        note,
+        via: read.via,
+        others,
+    });
     t.refreshing = false;
 }
 
@@ -324,6 +403,7 @@ mod tests {
             remote: None,
             state: SocketState::Listen,
             pid: Some(1),
+            inode: None,
         }
     }
 
@@ -407,7 +487,81 @@ mod tests {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        c.traffic()
+        let (rows, note, ..) = c.traffic();
+        (rows, note)
+    }
+
+    /// A traffic port that says who read the counters and what the other accounts moved (the helper's scoped answer).
+    struct Sourced;
+    impl ProcessTraffic for Sourced {
+        fn counters(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, PlatformError> {
+            Ok(Vec::new())
+        }
+        fn read(&self) -> dyno_core::network_traffic::TrafficRead {
+            dyno_core::network_traffic::TrafficRead {
+                answer: Ok(dyno_core::network_traffic::TrafficAnswer {
+                    counters: Vec::new(),
+                    others: Some(OthersTraffic {
+                        programs: 3,
+                        bytes_in: 7,
+                        bytes_out: 8,
+                    }),
+                }),
+                via: ReadVia::Helper,
+            }
+        }
+    }
+
+    #[test]
+    fn the_snapshot_carries_who_read_the_traffic_and_the_total_of_the_others() {
+        let state = Mutex::new(Traffic {
+            tracker: TrafficTracker::new(),
+            cache: None,
+            refreshing: true,
+        });
+        refresh_traffic(&Sourced, &state);
+        let t = lock(&state);
+        let c = t.cache.as_ref().unwrap();
+        assert_eq!(c.via, ReadVia::Helper);
+        assert_eq!(
+            c.others,
+            Some(OthersTraffic {
+                programs: 3,
+                bytes_in: 7,
+                bytes_out: 8
+            })
+        );
+        assert!(c.note.is_none() && !t.refreshing);
+    }
+
+    #[test]
+    fn a_refused_read_keeps_the_reason_and_what_to_do() {
+        struct Refused;
+        impl ProcessTraffic for Refused {
+            fn counters(&self) -> Result<Vec<dyno_core::network_traffic::TrafficCounter>, PlatformError> {
+                Err(PlatformError::Unsupported(
+                    "Traffic per program needs administrator rights on Windows.".into(),
+                ))
+            }
+            fn read(&self) -> dyno_core::network_traffic::TrafficRead {
+                dyno_core::network_traffic::TrafficRead {
+                    answer: self
+                        .counters()
+                        .map(|counters| dyno_core::network_traffic::TrafficAnswer { counters, others: None }),
+                    via: ReadVia::needs_admin("Traffic per program needs administrator rights on Windows."),
+                }
+            }
+        }
+        let state = Mutex::new(Traffic {
+            tracker: TrafficTracker::new(),
+            cache: None,
+            refreshing: true,
+        });
+        refresh_traffic(&Refused, &state);
+        let t = lock(&state);
+        let c = t.cache.as_ref().unwrap();
+        assert!(c.note.as_deref().unwrap().contains("administrator rights"));
+        assert!(matches!(c.via, ReadVia::NeedsHelper { .. }));
     }
 
     #[test]

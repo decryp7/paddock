@@ -20,6 +20,8 @@ const TUNING: Tuning = Tuning {
     note_after: 3,
     service_recheck: 2,
     idle_rechecks: 2,
+    pending_recheck: 1,
+    pending_max: u32::MAX,
     connected_for: 2,
     ticks_per_second: 1,
     cpu_every: 2,
@@ -93,6 +95,12 @@ struct World {
     asked_other: bool,
     stale_hint: bool,
     supervises: bool,
+    /// A registration is under way (ADR 0056): the job is absent or not yet answering, and the service's agent will come.
+    pending: bool,
+    /// The registration never ends (a stuck flag): only the longest wait gets the app out of it.
+    pending_sticks: bool,
+    /// A registration may begin later (an update replaces the job, the switch is turned on): once.
+    may_begin_pending: bool,
     works: bool,
     installed: bool,
     /// The generation the executor holds (it tags the launcher's child view with it).
@@ -125,6 +133,9 @@ impl World {
             asked_other: false,
             stale_hint: false,
             supervises: false,
+            pending: false,
+            may_begin_pending: false,
+            pending_sticks: false,
             works: false,
             installed: false,
             held: None,
@@ -157,6 +168,7 @@ impl World {
             version: "1".into(),
             protocol: 1,
             same_build,
+            of_disk_file: false,
         };
         if matches!(self.own, Proc::Ready | Proc::Exiting) {
             Some(seen(self.own_pid(), self.own_started_ms, true))
@@ -269,9 +281,11 @@ impl World {
                     service: (service && needs_service).then_some(ServiceState {
                         installed: self.installed,
                         supervises: self.supervises,
+                        pending: self.pending,
                     }),
                     child: self.child_view(),
                     cpu: Cpu::Unavailable,
+                    app_updated: false,
                 };
                 self.truth.push((seq, self.other != Other::None));
                 if self.truth.len() > 6 {
@@ -285,6 +299,9 @@ impl World {
                 }
                 if self.own.alive() || self.jobs.iter().any(|j| matches!(j, Job::Launch(..))) {
                     self.violation = Some("a second own agent was launched while the first was still held");
+                }
+                if self.m.service().pending && !self.m.gave_up_on_pending() {
+                    self.violation = Some("launched an agent of its own while a registration of the service was pending");
                 }
                 if self.deciding_held && !anyway {
                     self.violation = Some("launched on a look that did not see the agent holding the data folder");
@@ -362,7 +379,11 @@ impl World {
             let l = w.looks.remove(i);
             let label = format!("a look (seq {}) arrives", l.seq);
             w.deciding_held = w.truth.iter().find(|(s, _)| *s == l.seq).is_some_and(|(_, held)| *held);
+            let was_connected = matches!(w.m.phase(), Phase::Connected { .. });
             w.feed(Event::Looked(l));
+            if was_connected && matches!(w.m.phase(), Phase::Ending { .. } | Phase::TakingBack { .. }) && w.m.service().pending {
+                w.violation = Some("an agent was retired while a registration of the service was pending");
+            }
             w.deciding_held = false;
             v.push((label, w));
         }
@@ -471,6 +492,44 @@ impl World {
             let mut w = self.clone();
             w.other = Other::Ready;
             v.push(("the service starts its agent".into(), w));
+        }
+        if self.pending && !self.pending_sticks {
+            // The registration's three ends, and the OS loading the job before it ends (the job runs, the agent is late).
+            let mut w = self.clone();
+            w.pending = false;
+            w.installed = true;
+            w.supervises = true;
+            w.works = true;
+            v.push(("the registration ends with the service".into(), w));
+            let mut w = self.clone();
+            w.pending = false;
+            w.installed = false;
+            w.supervises = false;
+            w.works = false;
+            v.push(("the registration ends with no service".into(), w));
+            let mut w = self.clone();
+            w.pending = false;
+            w.installed = true;
+            w.supervises = false;
+            w.works = false;
+            v.push(("the registration ends with a job the OS refuses".into(), w));
+            if !self.supervises {
+                let mut w = self.clone();
+                w.installed = true;
+                w.supervises = true;
+                v.push(("the OS loads the job (its agent is not up yet)".into(), w));
+            }
+        }
+        if self.may_begin_pending {
+            // An update or the switch: the old job is removed first, so the job is absent while the registration is pending.
+            let mut w = self.clone();
+            w.may_begin_pending = false;
+            w.pending = true;
+            w.installed = false;
+            w.supervises = false;
+            w.works = false;
+            w.feed(Event::ServiceChanged);
+            v.push(("a registration begins".into(), w));
         }
         if self.budget.ticks > 0 {
             let mut w = self.clone();
@@ -613,6 +672,53 @@ fn scenarios(mutant: Mutant, budget: Budget, bound: Bound) -> Vec<(&'static str,
             }),
         ),
         (
+            "a registration is pending, then ends with the service, with no service or with a refused job",
+            mk(&|w| {
+                w.pending = true;
+                w.budget.add = 0;
+                w.budget.removal = 0;
+                w.budget.ticks = 3;
+            }),
+        ),
+        (
+            "a registration stays pending past the longest wait",
+            mk(&|w| {
+                w.m = Supervisor::tuned(Tuning { pending_max: 2, ..TUNING }, mutant);
+                w.pending = true;
+                w.pending_sticks = true;
+                w.budget.add = 0;
+                w.budget.removal = 0;
+                w.budget.retry = 0;
+                w.budget.quit = 0;
+                w.budget.ticks = 5;
+            }),
+        ),
+        (
+            "a registration begins while the app's own agent runs",
+            mk(&|w| {
+                w.may_begin_pending = true;
+                w.budget.add = 0;
+                w.budget.removal = 0;
+                w.budget.retry = 0;
+                w.budget.quit = 0;
+                w.budget.ticks = 3;
+            }),
+        ),
+        (
+            "an update replaces the job while the service's agent answers",
+            mk(&|w| {
+                w.supervises = true;
+                w.works = true;
+                w.installed = true;
+                w.other = Other::Ready;
+                w.may_begin_pending = true;
+                w.budget.add = 0;
+                w.budget.removal = 0;
+                w.budget.retry = 0;
+                w.budget.ticks = 3;
+            }),
+        ),
+        (
             "the login switch is turned on while the app runs",
             mk(&|w| {
                 w.budget.removal = 0;
@@ -658,6 +764,7 @@ impl Bound {
 fn ci_ticks(name: &str) -> u8 {
     match name {
         "no agent, no service"
+        | "a registration is pending, then ends with the service, with no service or with a refused job"
         | "an agent of another build"
         | "the service starts nothing, Retry and Quit interleaved with the fallback" => 3,
         _ => 2,
@@ -855,5 +962,92 @@ fn a_login_service_that_starts_nothing_ends_with_an_agent_of_the_apps_own_withou
     assert!(
         r.violation.is_some_and(|v| v.what == "reached"),
         "the app never started its own agent beside a broken service"
+    );
+}
+
+#[test]
+fn a_registration_that_ends_with_no_service_ends_with_an_agent_of_the_apps_own_without_retry() {
+    // Reachability, not safety: never waiting forever with no agent. Pending, then nothing registered: the app starts its own.
+    let budget = Budget {
+        ticks: 6,
+        retry: 0,
+        quit: 0,
+        removal: 0,
+        add: 0,
+    };
+    let mut w = base(Mutant::None, budget);
+    w.pending = true;
+    w.feed(Event::Begin);
+    let r = explore(
+        w,
+        MAX_STATES,
+        key_of,
+        |w| w.successors(),
+        |w| (!w.pending && !w.supervises && w.m.snapshot().started_by_this_app()).then(|| "reached".to_string()),
+    );
+    assert!(
+        r.violation.is_some_and(|v| v.what == "reached"),
+        "the app never fell back after the registration ended with no service"
+    );
+}
+
+#[test]
+fn a_registration_that_ends_with_the_service_ends_with_a_connection_to_the_services_agent_and_never_an_agent_of_the_apps_own() {
+    let budget = Budget {
+        ticks: 6,
+        retry: 0,
+        quit: 0,
+        removal: 0,
+        add: 0,
+    };
+    let mut w = base(Mutant::None, budget);
+    w.pending = true;
+    w.feed(Event::Begin);
+    let r = explore(
+        w,
+        MAX_STATES,
+        key_of,
+        |w| w.successors(),
+        |w| {
+            w.violation
+                .map(str::to_string)
+                .or_else(|| (w.works && matches!(w.m.phase(), Phase::Connected { owner: Owner::Other, .. })).then(|| "reached".to_string()))
+        },
+    );
+    assert!(
+        r.violation.is_some_and(|v| v.what == "reached"),
+        "no interleaving connects to the service's agent after its registration ends"
+    );
+}
+
+#[test]
+fn a_registration_that_never_ends_ends_with_an_agent_of_the_apps_own_after_the_longest_wait() {
+    // Reachability: the stuck flag is given up on, so the link never waits forever with no agent.
+    let budget = Budget {
+        ticks: 8,
+        retry: 0,
+        quit: 0,
+        removal: 0,
+        add: 0,
+    };
+    let mut w = base(Mutant::None, budget);
+    w.m = Supervisor::tuned(Tuning { pending_max: 2, ..TUNING }, Mutant::None);
+    w.pending = true;
+    w.pending_sticks = true;
+    w.feed(Event::Begin);
+    let r = explore(
+        w,
+        MAX_STATES,
+        key_of,
+        |w| w.successors(),
+        |w| {
+            w.violation
+                .map(str::to_string)
+                .or_else(|| w.m.snapshot().started_by_this_app().then(|| "reached".to_string()))
+        },
+    );
+    assert!(
+        r.violation.is_some_and(|v| v.what == "reached"),
+        "the app waited forever for a registration that never ended"
     );
 }

@@ -165,6 +165,11 @@ impl Server {
         }
     }
 
+    /// The program's name and version, as `initialize` reports them.
+    pub fn server_info(&self) -> (String, String) {
+        (self.info.name.clone(), self.info.version.clone())
+    }
+
     /// How to use this server, for the model (shown in `initialize`).
     pub fn with_instructions(mut self, text: &str) -> Server {
         self.instructions = Some(text.into());

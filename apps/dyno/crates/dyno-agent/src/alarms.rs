@@ -13,6 +13,11 @@ const TICK_EVERY_MS: i64 = 30_000;
 /// Most alarms loaded at start.
 const LOAD_LIMIT: u32 = 5_000;
 
+/// Rules of checks that no longer exist (Backup health, removed in 1.1.0): their saved alarms and mutes are dropped on load.
+fn is_removed(rule: &str) -> bool {
+    rule == "alert:backup"
+}
+
 /// The alarm engine with its store.
 pub struct AlarmCentre {
     engine: AlarmEngine,
@@ -22,8 +27,23 @@ pub struct AlarmCentre {
 impl AlarmCentre {
     /// Restores the open alarms and muted rules from `store`.
     pub fn load(store: &Store, config: AlarmConfig, zone: Zone) -> AlarmCentre {
-        let alarms = store.alarms(LOAD_LIMIT).unwrap_or_default();
-        let muted = store.muted_rules().unwrap_or_default();
+        let (alarms, gone): (Vec<_>, Vec<_>) = store
+            .alarms(LOAD_LIMIT)
+            .unwrap_or_default()
+            .into_iter()
+            .partition(|a| !is_removed(&a.rule));
+        for a in &gone {
+            if let Err(e) = store.delete_alarm(a.id) {
+                log::error!("dyno-agent: could not drop the alarm of a removed check ({}): {e}", a.rule);
+            }
+        }
+        let mut muted = store.muted_rules().unwrap_or_default();
+        if muted.iter().any(|r| is_removed(r)) {
+            muted.retain(|r| !is_removed(r));
+            if let Err(e) = store.set_muted_rules(&muted) {
+                log::error!("dyno-agent: could not drop the mutes of a removed check: {e}");
+            }
+        }
         AlarmCentre {
             engine: AlarmEngine::restore(config, zone, alarms, muted),
             last_tick: Timestamp(0),
@@ -100,5 +120,47 @@ impl AlarmCentre {
     /// Whether the alarm exists.
     pub fn exists(&self, id: u64) -> bool {
         self.engine.alarm(id).is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dyno_core::alarms::AlarmEvent;
+    use dyno_core::health::Severity;
+
+    fn raise(rule: &str) -> AlarmEvent {
+        AlarmEvent::Raise {
+            rule: rule.into(),
+            key: format!("{rule}:x"),
+            severity: Severity::Warning,
+            title: "t".into(),
+            detail: String::new(),
+            value: None,
+            metric: None,
+            ttl_ms: None,
+            at: Timestamp(1),
+        }
+    }
+
+    #[test]
+    fn alarms_and_mutes_of_the_removed_backup_check_are_dropped_on_load() {
+        let s = Store::memory().unwrap();
+        let mut e = AlarmEngine::new(AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
+        for c in [raise("alert:backup"), raise("alert:lowDisk")]
+            .into_iter()
+            .flat_map(|ev| e.apply(ev))
+        {
+            s.put_alarm(&c.alarm).unwrap();
+        }
+        s.set_muted_rules(&["alert:backup".into(), "alert:lowDisk".into()]).unwrap();
+        let c = AlarmCentre::load(&s, AlarmConfig::default(), dyno_core::time::FixedZone::shared(0));
+        assert_eq!(
+            c.engine.alarms().iter().map(|a| a.rule.as_str()).collect::<Vec<_>>(),
+            ["alert:lowDisk"]
+        );
+        assert_eq!(c.engine.muted_rules(), ["alert:lowDisk"]);
+        assert_eq!(s.alarms(10).unwrap().len(), 1);
+        assert_eq!(s.muted_rules().unwrap(), ["alert:lowDisk"]);
     }
 }

@@ -136,37 +136,104 @@ pub fn parse_ip(text: &str) -> Result<IpAddr, LookupError> {
     }
 }
 
-fn public_v4(a: Ipv4Addr) -> bool {
+/// What kind of address this is. Only [`AddressClass::Public`] is looked up, located on the map or matched against a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AddressClass {
+    /// Known to the public internet.
+    Public,
+    /// This computer (loopback, unspecified).
+    Loopback,
+    /// RFC 1918 and unique-local addresses.
+    Private,
+    /// Link-local.
+    LinkLocal,
+    /// Carrier-grade NAT (`100.64.0.0/10`).
+    Cgnat,
+    /// Multicast and broadcast.
+    Multicast,
+    /// Documentation, benchmarking (`198.18.0.0/15`, also the fake-IP range of proxy tools), IETF protocol assignments
+    /// (`192.0.0.0/24`), 6to4 (`2002::/16`), Teredo (`2001::/32`), discard-only (`100::/64`).
+    Special,
+    /// Reserved (`240.0.0.0/4`, `0.0.0.0/8`).
+    Reserved,
+}
+
+fn classify_v4(a: Ipv4Addr) -> AddressClass {
     let o = a.octets();
-    !(a.is_private()
-        || a.is_loopback()
-        || a.is_link_local()
-        || a.is_unspecified()
-        || a.is_broadcast()
-        || a.is_multicast()
-        || a.is_documentation()
-        || (o[0] == 100 && (o[1] & 0xC0) == 64) // 100.64.0.0/10, carrier-grade NAT
-        || o[0] == 0
-        || o[0] >= 240) // reserved
-}
-
-fn public_v6(a: Ipv6Addr) -> bool {
-    let s = a.segments();
-    !(a.is_loopback()
-        || a.is_unspecified()
-        || a.is_multicast()
-        || (s[0] & 0xFE00) == 0xFC00 // fc00::/7 unique local
-        || (s[0] & 0xFFC0) == 0xFE80 // fe80::/10 link-local
-        || (s[0] == 0x2001 && s[1] == 0x0DB8)) // documentation
-}
-
-/// Whether an address is one the public internet knows: private, loopback, link-local, CGNAT, multicast, reserved and
-/// documentation ranges are not.
-pub fn is_public(ip: &IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(a) => public_v4(*a),
-        IpAddr::V6(a) => public_v6(*a),
+    if a.is_loopback() || a.is_unspecified() {
+        AddressClass::Loopback
+    } else if a.is_private() {
+        AddressClass::Private
+    } else if a.is_link_local() {
+        AddressClass::LinkLocal
+    } else if o[0] == 100 && (o[1] & 0xC0) == 64 {
+        AddressClass::Cgnat
+    } else if a.is_multicast() || a.is_broadcast() {
+        AddressClass::Multicast
+    } else if a.is_documentation() || (o[0] == 198 && (o[1] & 0xFE) == 18) || (o[0] == 192 && o[1] == 0 && o[2] == 0) {
+        AddressClass::Special
+    } else if o[0] == 0 || o[0] >= 240 {
+        AddressClass::Reserved
+    } else {
+        AddressClass::Public
     }
+}
+
+fn classify_v6(a: Ipv6Addr) -> AddressClass {
+    let s = a.segments();
+    if a.is_loopback() || a.is_unspecified() {
+        AddressClass::Loopback
+    } else if (s[0] & 0xFE00) == 0xFC00 {
+        AddressClass::Private
+    } else if (s[0] & 0xFFC0) == 0xFE80 {
+        AddressClass::LinkLocal
+    } else if a.is_multicast() {
+        AddressClass::Multicast
+    } else if (s[0] == 0x2001 && s[1] == 0x0DB8) // documentation
+        || s[0] == 0x2002 // 6to4
+        || (s[0] == 0x2001 && s[1] == 0) // Teredo
+        || (s[0] == 0x0100 && s[1] == 0 && s[2] == 0 && s[3] == 0)
+    // discard-only
+    {
+        AddressClass::Special
+    } else {
+        AddressClass::Public
+    }
+}
+
+/// The IPv4 address inside a NAT64 address (`64:ff9b::/96`), which is matched and located as that address.
+pub fn nat64_embedded(a: &Ipv6Addr) -> Option<Ipv4Addr> {
+    let s = a.segments();
+    if s[..6] == [0x64, 0xFF9B, 0, 0, 0, 0] {
+        let o = a.octets();
+        Some(Ipv4Addr::new(o[12], o[13], o[14], o[15]))
+    } else {
+        None
+    }
+}
+
+/// Unwraps an IPv4-mapped (`::ffff:a.b.c.d`) or NAT64 IPv6 address to the IPv4 address inside; any other address is returned
+/// as it is.
+pub fn unwrapped(ip: &IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V6(a) => a.to_ipv4_mapped().or_else(|| nat64_embedded(a)).map_or(*ip, IpAddr::V4),
+        v4 => *v4,
+    }
+}
+
+/// The class of `ip` after unwrapping IPv4-mapped and NAT64 forms.
+pub fn classify(ip: &IpAddr) -> AddressClass {
+    match unwrapped(ip) {
+        IpAddr::V4(a) => classify_v4(a),
+        IpAddr::V6(a) => classify_v6(a),
+    }
+}
+
+/// Whether an address is one the public internet knows: private, loopback, link-local, CGNAT, multicast, reserved, benchmarking,
+/// documentation and the other special-purpose ranges are not. A NAT64 address is judged by the IPv4 address inside it.
+pub fn is_public(ip: &IpAddr) -> bool {
+    classify(ip) == AddressClass::Public
 }
 
 /// The lookup URL for `ip` from `template`: the canonical address (IPv6 compressed, no zone) substituted, encoded.
@@ -244,6 +311,56 @@ impl IpLookupSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn special_purpose_ranges_are_never_public() {
+        for ip in [
+            "198.18.0.1",
+            "198.19.255.254",
+            "192.0.0.8",
+            "2002::1",
+            "2002:c000:204::1",
+            "2001::1",
+            "100::1",
+            "100::ffff",
+            "64:ff9b::a00:1",
+            "64:ff9b::c612:1",
+        ] {
+            let ip: IpAddr = ip.parse().unwrap();
+            assert!(!is_public(&ip), "{ip}");
+        }
+        for ip in [
+            "198.17.255.255",
+            "198.20.0.0",
+            "192.0.1.1",
+            "2001:1::1",
+            "2003::1",
+            "100:0:0:1::1",
+            "8.8.8.8",
+        ] {
+            let ip: IpAddr = ip.parse().unwrap();
+            assert!(is_public(&ip), "{ip}");
+        }
+    }
+
+    #[test]
+    fn nat64_is_judged_by_the_address_inside() {
+        let a: IpAddr = "64:ff9b::cb00:7107".parse().unwrap(); // 203.0.113.7, documentation
+        assert_eq!(unwrapped(&a), "203.0.113.7".parse::<IpAddr>().unwrap());
+        assert_eq!(classify(&a), AddressClass::Special);
+        let b: IpAddr = "64:ff9b::808:808".parse().unwrap();
+        assert_eq!(unwrapped(&b), "8.8.8.8".parse::<IpAddr>().unwrap());
+        assert!(is_public(&b));
+        let mapped: IpAddr = "::ffff:10.0.0.1".parse().unwrap();
+        assert_eq!(classify(&mapped), AddressClass::Private);
+    }
+
+    #[test]
+    fn look_up_refuses_special_ranges() {
+        let s = IpLookupSettings::default();
+        assert_eq!(s.url("198.18.0.5"), Err(LookupError::NotPublic));
+        assert_eq!(s.url("2002::1"), Err(LookupError::NotPublic));
+    }
 
     fn t(s: &str) -> Result<Template, LookupError> {
         Template::parse(s, "ip")

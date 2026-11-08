@@ -227,6 +227,7 @@ fn build(g: &Group<'_>, proto: Proto, gen_limit: u64) -> Result<PcbSocket, Left>
             remote: connected.then_some((faddr, fport)),
             state,
             pid: owner,
+            inode: None,
         },
         via_pid: via,
     })
@@ -372,7 +373,8 @@ mod tests {
                 local_port: 49152,
                 remote: Some((ip("198.51.100.7"), 443)),
                 state: SocketState::Established,
-                pid: Some(4242)
+                pid: Some(4242),
+                inode: None,
             }
         );
         assert_eq!((r[1].state, r[1].local, r[1].remote), (SocketState::Listen, ip("127.0.0.1"), None));
@@ -423,6 +425,7 @@ mod tests {
                     remote: None,
                     state: SocketState::Listen,
                     pid: Some(pid),
+                    inode: None,
                 },
                 via_pid: None,
             }],

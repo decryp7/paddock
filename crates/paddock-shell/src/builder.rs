@@ -104,6 +104,7 @@ pub struct Builder<R: Runtime> {
     in_memory: bool,
     native_menu: bool,
     menu_quit: Option<Arc<MenuQuit<R>>>,
+    menu_actions: Vec<(String, Arc<MenuQuit<R>>)>,
     setup: Vec<AppSetup<R>>,
     tray: Option<TraySetup<R>>,
     launch: Option<LaunchArgs>,
@@ -135,6 +136,7 @@ impl<R: Runtime> Builder<R> {
             in_memory: false,
             native_menu: true,
             menu_quit: None,
+            menu_actions: Vec::new(),
             setup: Vec::new(),
             tray: None,
             launch: None,
@@ -375,6 +377,17 @@ impl<R: Runtime> Builder<R> {
         f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
     ) -> Self {
         self.menu_quit = Some(Arc::new(f));
+        self
+    }
+
+    /// An app's own menu item (`id`) that does its work with no window open: its action runs instead of the window coming
+    /// back. Quit stays [`Builder::menu_quit_without_window`].
+    pub fn menu_action_without_window(
+        mut self,
+        id: &str,
+        f: impl Fn(&AppHandle<R>) + Send + Sync + 'static,
+    ) -> Self {
+        self.menu_actions.push((id.to_string(), Arc::new(f)));
         self
     }
 
@@ -736,8 +749,9 @@ impl<R: Runtime> Builder<R> {
         // never replaces a handler the app set itself.
         if let Some(menu) = app.try_state::<paddock_menu::tauri::NativeMenu<R>>() {
             let quit = self.menu_quit;
+            let actions = self.menu_actions;
             menu.on_no_window_by_default(move |app, id| {
-                menu_without_window(app, id, quit.as_deref())
+                menu_without_window_with(app, id, quit.as_deref(), &actions, |app| app.exit(0))
             });
         }
         Ok(())
@@ -747,8 +761,23 @@ impl<R: Runtime> Builder<R> {
 /// A click on a menu item with no window open (the last one was closed to the tray): Quit quits (`quit`, else the
 /// shell's), any other item brings the main window back as a Dock click does. The item itself is not forwarded to the
 /// new window: it is not listening yet, so the click would be lost; the person chooses again.
+#[cfg(test)]
 fn menu_without_window<R: Runtime>(app: &AppHandle<R>, id: &str, quit: Option<&MenuQuit<R>>) {
     menu_without_window_using(app, id, quit, |app| app.exit(0));
+}
+
+/// [`menu_without_window_using`] after the app's own actions: an item the app registered runs its action.
+fn menu_without_window_with<R: Runtime>(
+    app: &AppHandle<R>,
+    id: &str,
+    quit: Option<&MenuQuit<R>>,
+    actions: &[(String, Arc<MenuQuit<R>>)],
+    exit: impl FnOnce(&AppHandle<R>),
+) {
+    match actions.iter().find(|(a, _)| a == id) {
+        Some((_, f)) => f(app),
+        None => menu_without_window_using(app, id, quit, exit),
+    }
 }
 
 /// [`menu_without_window`] with the exit of an app without a window layer given (the mock runtime cannot exit).

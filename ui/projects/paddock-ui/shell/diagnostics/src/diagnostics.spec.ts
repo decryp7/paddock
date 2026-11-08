@@ -8,7 +8,7 @@ import { DIAGNOSTICS_COMMANDS } from '../generated/diagnostics-commands';
 import { DiagnosticsBackend, MemoryDiagnosticsBackend, TauriDiagnosticsBackend, type DiagnosticsIpc } from './backend';
 import { DiagnosticsStore, redactionSummary } from './diagnostics.store';
 import { DIAGNOSTICS_DIALOG_COMMANDS, DIAGNOSTICS_DIALOG_ID, LOGGING_SETTINGS_PAGE, defineDiagnosticsDialog, diagnosticsContributions } from './diagnostics.contributions';
-import { formatBytes, truncateMiddle } from './format';
+import { formatStorage, truncateMiddle } from './format';
 import { provideShellDiagnostics } from './provide-diagnostics';
 import { PdReportProblemDialog } from './report-problem-dialog';
 import { DIAGNOSTICS_STYLES } from './styles';
@@ -84,11 +84,11 @@ describe('the wire', () => {
   });
 
   it('formats sizes and cuts long paths in the middle', () => {
-    expect(formatBytes(12)).toBe('12 bytes');
-    expect(formatBytes(1_500)).toBe('1.5 KB');
-    expect(formatBytes(182_400)).toBe('182 KB');
-    expect(formatBytes(41_000_000)).toBe('41 MB');
-    expect(formatBytes(2_000_000_000)).toBe('2 GB');
+    expect(formatStorage(12)).toBe('12 bytes');
+    expect(formatStorage(1_500)).toBe('1.5 KB');
+    expect(formatStorage(182_400)).toBe('182 KB');
+    expect(formatStorage(41_000_000)).toBe('41 MB');
+    expect(formatStorage(2_000_000_000)).toBe('2 GB');
     expect(truncateMiddle('short.zip', 20)).toBe('short.zip');
     const long = '/Users/someone/Library/Application Support/Demo/reports/demo-diagnostics-20261024-103000.zip';
     const cut = truncateMiddle(long, 40);
@@ -318,6 +318,15 @@ describe('the Report a Problem dialog', () => {
     expect(el.querySelector('table')?.querySelectorAll('th[scope="col"]')).toHaveLength(3);
     expect((el.querySelector('[data-testid="dialog-action-save"]') as HTMLButtonElement).disabled).toBe(false);
     expect(el.querySelector('[data-testid="diag-removed"]')).not.toBeNull();
+  });
+
+  it('warns that issue reports are public and lists what is not in the report and what may remain', async () => {
+    const { el } = await open();
+    expect(text(el.querySelector('[data-testid="diag-public"]') as HTMLElement)).toBe('Issue reports are public. Look through the zip first.');
+    const notIn = text(el.querySelector('[data-testid="diag-not-in"]') as HTMLElement);
+    expect(notIn).toContain('Not in the report');
+    expect(notIn).toContain('File names outside your home folder may remain');
+    expect(el.querySelectorAll('[data-testid="diag-not-in"] li')).toHaveLength(3);
   });
 
   it('styles every class its template uses (the Size column stays on one line, long cells break)', async () => {

@@ -4,7 +4,7 @@ import { MatProgressBar } from '@angular/material/progress-bar';
 import { MatTooltip } from '@angular/material/tooltip';
 import { PdPathText } from '@decryp7/paddock-ui';
 import { PdGlyph } from '@decryp7/paddock-ui/icons';
-import { formatBytes } from '@decryp7/paddock-ui/format';
+import { formatStorage } from '@decryp7/paddock-ui/format';
 import { PdCell, PdMiddleText, PdTable, type PdColumn, type PdRowAction, type PdRowActionEvent } from '@decryp7/paddock-ui/table';
 import { answerOf } from '@decryp7/paddock-ui/shell';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
@@ -212,13 +212,13 @@ export class PdStoragePage {
   protected readonly treeColumns: readonly PdColumn<TreeRow>[] = [
     { key: 'group', header: $localize`:@@pd.storage.col-group:Folder`, value: (r) => r.group, hidden: true },
     { key: 'name', header: $localize`:@@pd.storage.col-item:Item`, value: (r) => r.name, required: true, width: 'minmax(0, 3fr)' },
-    { key: 'bytes', header: $localize`:@@pd.storage.col-size:Size`, value: (r) => r.bytes, text: (r) => formatBytes(r.bytes), align: 'end', width: 'minmax(64px, 96px)' },
+    { key: 'bytes', header: $localize`:@@pd.storage.col-size:Size`, value: (r) => r.bytes, text: (r) => formatStorage(r.bytes), align: 'end', width: 'minmax(64px, 96px)' },
     { key: 'share', header: $localize`:@@pd.storage.col-share:Share`, value: (r) => r.share, text: (r) => `${r.share}%`, align: 'end', width: '72px', hideBelow: 420 },
   ];
   /** The group heading's own size and share: the folder's, so its rows add up to it. */
   protected readonly treeSummary = (rows: readonly TreeRow[]): Readonly<Record<string, string>> => {
     const g = this.treeData().groups[rows[0]?.group ?? ''];
-    return g ? { bytes: formatBytes(g.bytes), share: `${g.share}%` } : {};
+    return g ? { bytes: formatStorage(g.bytes), share: `${g.share}%` } : {};
   };
   protected readonly itemsCount = (shown: number, total: number): string =>
     shown === total ? $localize`:@@pd.storage.items:${total}:total: items` : $localize`:@@pd.storage.items-of:${shown}:shown: of ${total}:total: items`;
@@ -242,7 +242,7 @@ export class PdStoragePage {
   protected readonly categorySummary = (rows: readonly StorageCategory[]): Readonly<Record<string, string>> => {
     const bytes = rows.reduce((n, c) => n + c.bytes, 0);
     const capped = rows.some((c) => c.capped);
-    return { size: capped ? `≥ ${floorBytes(bytes)}` : formatBytes(bytes) };
+    return { size: capped ? `≥ ${floorBytes(bytes)}` : formatStorage(bytes) };
   };
   protected readonly categoryActions = (c: StorageCategory): readonly PdRowAction[] => {
     const busy = !!this.store.working();
@@ -289,23 +289,23 @@ export class PdStoragePage {
   }
 
   protected sizeText(c: StorageCategory): string {
-    return c.capped ? `≥ ${floorBytes(c.bytes)}` : formatBytes(c.bytes);
+    return c.capped ? `≥ ${floorBytes(c.bytes)}` : formatStorage(c.bytes);
   }
 
   protected exact(c: StorageCategory): string {
     const files = c.files;
-    const base = $localize`:@@pd.storage.exact:${files}:files: files, ${formatBytes(c.clearableBytes)}:clearable: can be cleared`;
+    const base = $localize`:@@pd.storage.exact:${files}:files: files, ${formatStorage(c.clearableBytes)}:clearable: can be cleared`;
     return c.capped ? `${this.t.atLeast} ${base}` : base;
   }
 
   protected totalText(bytes: number, capped: boolean): string {
-    const size = capped ? floorBytes(bytes) : formatBytes(bytes);
+    const size = capped ? floorBytes(bytes) : formatStorage(bytes);
     return capped ? $localize`:@@pd.storage.total-least:The app keeps at least ${size}:size: on this computer.` : $localize`:@@pd.storage.total:The app keeps ${size}:size: on this computer.`;
   }
 
   protected cacheLabel(): string {
     const bytes = this.store.cache().bytes;
-    return bytes > 0 ? $localize`:@@pd.storage.clear-cache-size:Clear cache (${formatBytes(bytes)}:size:)…` : $localize`:@@pd.storage.clear-cache:Clear cache`;
+    return bytes > 0 ? $localize`:@@pd.storage.clear-cache-size:Clear cache (${formatStorage(bytes)}:size:)…` : $localize`:@@pd.storage.clear-cache:Clear cache`;
   }
 
   protected clearLabel(c: StorageCategory): string {
@@ -314,11 +314,11 @@ export class PdStoragePage {
   }
 
   protected freed(bytes: number): string {
-    return $localize`:@@pd.storage.freed:Cleared. ${formatBytes(bytes)}:size: freed.`;
+    return $localize`:@@pd.storage.freed:Cleared. ${formatStorage(bytes)}:size: freed.`;
   }
 
   protected stopped(bytes: number): string {
-    return $localize`:@@pd.storage.stopped:Stopped. ${formatBytes(bytes)}:size: freed so far; the rest was left as it was.`;
+    return $localize`:@@pd.storage.stopped:Stopped. ${formatStorage(bytes)}:size: freed so far; the rest was left as it was.`;
   }
 
   protected skippedText(n: number): string {

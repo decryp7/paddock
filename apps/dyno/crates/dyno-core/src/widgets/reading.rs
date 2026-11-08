@@ -133,6 +133,10 @@ pub fn read_metric(metric: &Metric, update: &LiveUpdate, thresholds: &Thresholds
         },
         Metric::NetworkDown => rate_reading(s.network_totals().0, thresholds),
         Metric::NetworkUp => rate_reading(s.network_totals().1, thresholds),
+        Metric::NetworkBoth => {
+            let (down, up) = s.network_totals();
+            rate_reading(down + up, thresholds)
+        }
         Metric::GpuLoad => match s.gpu.value() {
             Some(g) => percent_reading(f64::from(g.utilization), thresholds),
             None => unavailable("No GPU load is reported here."),
@@ -179,7 +183,7 @@ pub fn read_metric(metric: &Metric, update: &LiveUpdate, thresholds: &Thresholds
 /// widget showing the counter, when several do). A counter no dashboard widget shows keeps the default tone.
 pub fn with_dashboard_thresholds(
     readings: Vec<crate::counters::CounterReading>,
-    layout: &[paddock_widgets::Placement<super::DashboardWidget>],
+    layout: &[paddock_widgets::Placement<super::DashboardWidget, paddock_widgets::Cells>],
 ) -> Vec<crate::counters::CounterReading> {
     let key = |p: &str| {
         p.parse::<crate::counters::CounterPath>()
@@ -240,6 +244,7 @@ mod tests {
             processes: None,
             groups: None,
             other_users: None,
+            via: Default::default(),
         }
     }
 
@@ -378,7 +383,12 @@ mod tests {
             warning: Some(50.0),
             critical: Some(80.0),
         };
-        let layout = paddock_widgets::assign_ids([(6, w)]);
+        let layout = paddock_widgets::assign_ids([(
+            paddock_widgets::Cells {
+                rect: paddock_widgets::Rect::new(0, 0, 6, 6),
+            },
+            w,
+        )]);
         let out = with_dashboard_thresholds(
             vec![reading(r"\Processor(_Total)\% Processor Time"), reading(r"\Other\Counter")],
             &layout,

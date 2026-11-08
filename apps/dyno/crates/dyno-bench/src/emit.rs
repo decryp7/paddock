@@ -11,6 +11,10 @@ use std::time::Duration;
 pub trait Progress: Sync {
     /// The measurement reached this phase.
     fn report(&self, p: PhaseProgress);
+    /// One second of a sustained run: the work done in it.
+    fn sample(&self, _secs: u32, _throughput: f64) {}
+    /// A fact about how the measurement was made.
+    fn note(&self, _text: &str) {}
 }
 
 /// Reports nothing (unit tests of the kernels).
@@ -40,6 +44,16 @@ impl<W: Write + Send> Emitter<W> {
 }
 
 impl<W: Write + Send> Progress for Emitter<W> {
+    fn sample(&self, secs: u32, throughput: f64) {
+        let _ = self.emit(&Line::Sample { secs, throughput });
+    }
+
+    fn note(&self, text: &str) {
+        let _ = self.emit(&Line::Note {
+            text: text.chars().take(dyno_core::bench::wire::MAX_NOTE).collect(),
+        });
+    }
+
     fn report(&self, p: PhaseProgress) {
         // A closed pipe is noticed by the heartbeat, which ends the process.
         let _ = self.emit(&Line::Progress(p));

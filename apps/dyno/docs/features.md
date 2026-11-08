@@ -1,7 +1,6 @@
 # Features
 
-What Dyno does, and honestly how far each feature is. Dyno 1.0.0 only watches: it never changes your machine, and the
-features that did are dropped ([ADR 0021](adr/0021-monitoring-only.md), listed in the [roadmap](roadmap.md#dropped)).
+What Dyno does, and honestly how far each feature is. Taming, cleanup and tuning are dropped ([ADR 0021](adr/0021-monitoring-only.md), listed in the [roadmap](roadmap.md#dropped)).
 **Built** means the code exists and is tested; **Engine only** means the agent and core implement it and the protocol
 exposes it but the UI screen is still a placeholder; **Planned** means it is not in the code (see [roadmap.md](roadmap.md)
 for the work package). Screenshots are in `docs/screenshots`; each is shown here as a light and dark pair that follows your colour scheme.
@@ -13,13 +12,14 @@ for the work package). Screenshots are in `docs/screenshots`; each is shown here
 - [Processes](#processes)
 - [Why is it slow?](#why-is-it-slow)
 - [Extras](#extras)
-- [Backup health](#backup-health)
 - [Health and startup](#health-and-startup)
 - [Throttling, hardware life and what is normal](#throttling-hardware-life-and-what-is-normal)
 - [Disk map](#disk-map)
 - [Alerts and reports](#alerts-and-reports)
 - [Tray, window and settings](#tray-window-and-settings)
-- [Read-only by design](#read-only-by-design)
+- [Power](#power)
+- [AI access](#ai-access)
+- [What Dyno writes](#what-dyno-writes)
 - [Extensibility](#extensibility)
 - [Later](#later)
 - [Platforms](#platforms)
@@ -170,21 +170,8 @@ saying why, never an empty screen.
 - **Files**: large and duplicate files in a folder you choose. Duplicates are matched by SHA-256 after size and the first 64 KiB.
   View only: Dyno lists them and opens their location; it removes nothing.
 - **Inventory**: the installed software next to the hardware; **Export report** saves Markdown or JSON where you choose.
-- **Maintenance**: windows (days and times) when Dyno's heavier background work may run: reading the OS logs, backup checks and
+- **Maintenance**: windows (days and times) when Dyno's heavier background work may run: reading the OS logs and
   change recording. A click always runs.
-
-## Backup health
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="screenshots/backup-dark.png">
-  <img alt="Backup health" src="screenshots/backup-light.png">
-</picture>
-
-**Built** (WP-14), on the **Backup health** page and in Settings. Dyno checks that backups ran, never runs or manages one: Time Machine
-(`tmutil`), Windows Backup and File History (their event logs, `wbadmin`), restic and Borg (`snapshots` / `list`, with the repository
-variables your login shell exports, never passwords); Duplicati is detected but cannot be read yet. Tools are found through your login
-shell's `PATH` (so Homebrew installs work from a background service) and an optional folder per tool. A backup older than the limit
-(48 hours by default) is one plain alarm per tool, cleared when a new backup appears. No tool found is a normal state.
 
 ## Health and startup
 
@@ -194,7 +181,7 @@ shell's `PATH` (so Homebrew installs work from a background service) and an opti
 </picture>
 
 **Built** (view only). `Health` returns a score and grade with reasons (no fix buttons). `StartupEntries` lists what starts at
-login (Windows: not wired yet; macOS: launch agents, and login items once the privileged helper can read them (Dyno 1.1; until then the page says they need administrator rights); Linux: autostart and user units), with a filter that hides
+login (Windows: not wired yet; macOS: launch agents, and login items through the privileged helper (Dyno 1.1.0; without it the page says they need administrator rights); Linux: autostart and user units), with a filter that hides
 the operating system's entries and signed apps. Dyno does not enable or disable an entry.
 
 ## Throttling, hardware life and what is normal
@@ -212,6 +199,13 @@ the operating system's entries and signed apps. Dyno does not enable or disable 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="screenshots/benchmarks-dark.png">
   <img alt="Benchmarks" src="screenshots/benchmarks-light.png">
+</picture>
+
+**Benchmarks** (ADR 0030) run only on a click, as a job with phases, a Cancel that always works, and no timeout. *Quick* and *Full* presets, a *Sustained processor* run (2 to 20 minutes, with clock and temperature beside the throughput, stopped by Dyno if the processor stays close to its critical temperature) and *Custom*. The picker shows about how long the run takes and the most it writes to each drive. The disk test writes one scratch file per chosen drive with the file system's cache bypassed, removes it whatever happens, and never writes more than the amount shown. Results show the median with the spread of the repetitions and mark an unsteady metric in words; no single score.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="screenshots/benchmarks-running-dark.png">
+  <img alt="A sustained processor run in progress, with its Cancel button" src="screenshots/benchmarks-running-light.png">
 </picture>
 
 **Built** ([WP-23](roadmap.md#wp-23-throttling-detector), [WP-24](roadmap.md#wp-24-disk-and-battery-life-forecasts),
@@ -295,7 +289,7 @@ file-system events; the Windows change journal once the helper exists).
   <img alt="The weekly report" src="screenshots/reports-light.png">
 </picture>
 
-**Built.** Alarms (low disk, overheating, crash loops, throttling, stale backups) notify and follow an ISA-18.2 style lifecycle
+**Built.** Alarms (low disk, overheating, crash loops, throttling) notify and follow an ISA-18.2 style lifecycle
 ([ADR 0013](adr/0013-alarms-lifecycle.md)); acknowledging, muting and notes are Dyno's own data and change nothing else. `WeeklyReport { weeksAgo }` builds the report for any of the last 52 weeks from stored data, in the engine:
 health score and its trend, CPU and memory, the busiest apps, free space and the disk-full forecast per disk, the week's alerts
 as issues, and what changed (installs, updates and startup entries seen). A week with nothing in it is a valid
@@ -324,8 +318,7 @@ read. [WP-12](roadmap.md#wp-12-performance-counters-browser).
 
 ## Command line
 
-The `dyno` command speaks the agent's own local protocol (ADR 0014) and is read-only: `status`, `why-slow`, `top`, `alarms`,
-`snapshot` and `counters`, as text or `--json`. It ships in the installers. A `dyno` built for another protocol version than
+The `dyno` command speaks the agent's own local protocol (ADR 0014): `status`, `why-slow`, `top`, `alarms`, `snapshot` and `counters` read, as text or `--json`; `awake`, `idle`, `wake` and `wake-schedule` ask the agent to act; `mcp` serves MCP to a host while Dyno is open. It ships in the installers. A `dyno` built for another protocol version than
 the running Dyno refuses with a message. [cli.md](cli.md). [WP-27](roadmap.md#wp-27-dyno-cli).
 
 ## Tray, window and settings
@@ -362,12 +355,33 @@ retention, launch at login, alert settings; the theme, accent and density are th
 Dyno's own Copy menu, no browser keys.
 
 
-## Read-only by design
+## Power
 
-**Built.** Dyno does not end, suspend, cap, delete, move or tune anything ([ADR 0021](adr/0021-monitoring-only.md)). Dyno 1.0
-has no privileged helper: the agent runs with your own rights, and a figure the OS withholds says *Unavailable* with the reason
-(user guide, [Running with your own rights](user-guide.md#running-with-your-own-rights)). Elevation (a
-read-only helper and starting as administrator at login) is planned for 1.1 (ADR 0022). Tests act only on processes and folders they create.
+**Built** (1.1.0, [ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). The Power page (tabs Keep awake, Sleep and shut down, Schedule, Wake devices), the tray menu and the commands `dyno awake`, `dyno idle`, `dyno wake`
+and `dyno wake-schedule`.
+
+- **Keep awake:** hold the computer awake for 30 minutes, 1, 2 or 4 hours, until a time of day, until you stop it,
+  while a program runs, or while the computer is busy (up to 7 days with `dyno awake on --for`). The hold ends if Dyno restarts.
+- **Idle and timed actions:** sleep, hibernate (Windows and Linux) or shut down after the computer has been truly idle for a
+  while, or at a time of day, by the OS's normal path and never forced. Off by default; a countdown with Cancel comes first.
+- **Scheduled wakes:** wake this computer at a time you choose, keep it awake for a while, wake chosen computers and run one
+  fixed task. Off until you turn it on in Settings; on macOS and Linux the administrator helper sets the wake.
+- **Wake-on-LAN:** save other computers and wake them, or test whether one wakes; a check of this computer says whether it can
+  be woken. Their passwords are kept by your system's credential store.
+
+## AI access
+
+**Built** (1.1.0, family [ADR 0007](../../../docs/adr/0007-mcp-servers-across-the-family.md) and ADR 0032 decision D7). **Settings > AI access**, off by default, lets a program on this
+computer that speaks MCP read eight reading tools (a system summary, CPU and memory, disks with drive health, the top
+programs, a network summary, alarms, the history of one metric, sensors) and two power readings (power state, saved
+computers). Two actions, waking a saved computer and keeping this one awake for up to 12 hours, stay hidden until you allow
+each by name. Dyno listens on this computer only, while it runs and a key exists; `dyno mcp` bridges a client that starts
+commands. Sleep, shut down, timed actions and scheduled wakes are never tools. Pitwall 1.1 is planned as a client.
+
+## What Dyno writes
+
+**Built.** Dyno keeps its own data. Taming, cleanup and tuning are dropped ([ADR 0021](adr/0021-monitoring-only.md)); keep awake, Wake-on-LAN, scheduled wakes and sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time run as you set them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). The agent runs with your own rights, and a figure the OS withholds says *Unavailable* with the reason
+(user guide, [Running with your own rights](user-guide.md#running-with-your-own-rights)). An optional administrator helper, turned on in Settings, reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log (ADR 0027). Tests act only on processes and folders they create.
 
 ## Extensibility
 

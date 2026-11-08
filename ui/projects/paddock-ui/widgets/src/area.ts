@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, contentChildren, input, output, ViewEncapsulation } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { PdGlyph, PdStatusGlyph, type PdStatus } from '@decryp7/paddock-ui/icons';
-import type { CatalogueInfo, KindInfo, Placement, PlacementId, PlacementState, SurfaceNotice, SurfaceValues, Tone, WidgetState } from '../generated/widgets';
+import type { CatalogueInfo, KindInfo, Placement as GenericPlacement, PlacementId, Span, PlacementState, SurfaceNotice, SurfaceValues, Tone, WidgetState } from '../generated/widgets';
 import { PdWidgetFrame } from './frame';
 import { defaultKindOf, PdWidget } from './widget';
 
+type Placement<W> = GenericPlacement<W, Span>;
 const TONE_STATUS: Record<Tone, PdStatus> = { info: 'info', warning: 'warning', danger: 'error' };
 
 /**
@@ -90,7 +91,9 @@ export class PdWidgetArea<W = unknown, V = unknown, A = unknown, K extends strin
   /** Right-aligned head text of a fresh placement ("3 volumes"). */
   readonly meta = input<((id: PlacementId, state: WidgetState<V, A>) => string | null) | null>(null);
   /** The app's per-kind templates, declared as content. */
+  /* v8 ignore start: the compiler generates this query's accessor; the specs read the query through its consumers */
   readonly widgets = contentChildren<PdWidget<V>>(PdWidget);
+  /* v8 ignore stop */
   /** Templates declared elsewhere (one set can serve a popup and the chooser's preview); a content template of the same kind wins. */
   readonly templates = input<readonly PdWidget<V>[]>([]);
   /** The app's action from a widget's state or the notice. */

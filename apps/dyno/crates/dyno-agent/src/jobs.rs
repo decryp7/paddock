@@ -73,7 +73,7 @@ impl JobCentre {
     }
 
     /// Starts `spec` in the background and answers its status at once. Work that is already running answers the running
-    /// job; a search, log read or backup check while another of its kind runs is refused (`Busy`), because the person has to
+    /// job; a search or log read while another of its kind runs is refused (`Busy`), because the person has to
     /// choose which to keep.
     pub fn start(&self, shared: &Arc<Shared>, spec: JobSpec) -> Result<WireSnapshot, AgentError> {
         let spec = validated(spec)?;
@@ -86,7 +86,8 @@ impl JobCentre {
                     .status(id)
                     .ok_or_else(|| AgentError::new(ErrorCode::Internal, "The job vanished."));
             }
-            if spec.kind() != JobKind::FileHash && book.active.iter().any(|(_, s)| s.kind() == spec.kind()) {
+            // A file hash and a wake are per item: several may run at once (two computers woken together).
+            if !matches!(spec.kind(), JobKind::FileHash | JobKind::WolWake) && book.active.iter().any(|(_, s)| s.kind() == spec.kind()) {
                 return Err(AgentError::new(
                     ErrorCode::Busy,
                     format!("{} is already running; wait for it or cancel it.", spec.kind().title()),
@@ -94,7 +95,7 @@ impl JobCentre {
             }
             let ctx = self
                 .registry
-                .register(spec.kind().slug(), spec.kind().title(), subject(&spec).as_deref());
+                .register(spec.kind().slug(), &title_of(&spec), subject_of(shared, &spec).as_deref());
             book.active.push((ctx.id().0, spec.clone()));
             ctx
         };
@@ -190,6 +191,22 @@ fn validated(spec: JobSpec) -> Result<JobSpec, AgentError> {
     }
 }
 
+/// The title a job shows: a test wake says so.
+fn title_of(spec: &JobSpec) -> String {
+    match spec {
+        JobSpec::WolWake { test: true, .. } => "Testing a wake".into(),
+        other => other.kind().title().into(),
+    }
+}
+
+/// What a job is about: for a wake, the computer's name (the person's own word for it; never logged).
+fn subject_of(shared: &Shared, spec: &JobSpec) -> Option<String> {
+    match spec {
+        JobSpec::WolWake { id, .. } => shared.wol.name_of(shared, *id),
+        other => subject(other),
+    }
+}
+
 fn subject(spec: &JobSpec) -> Option<String> {
     match spec {
         JobSpec::FindFiles { query } => Some(query.folder.clone()),
@@ -197,6 +214,7 @@ fn subject(spec: &JobSpec) -> Option<String> {
         JobSpec::FileHash {
             source: dyno_core::weblinks::HashSource::Path(p),
         } => Some(p.clone()),
+        JobSpec::UpdateList { id } => Some(id.clone()),
         _ => None,
     }
 }
@@ -257,10 +275,7 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
                 .map(|o| JobOutput::Issues(Box::new(o)))
                 .map_err(|e| JobError::Failed(e.message))
         }
-        JobSpec::RefreshBackup => {
-            let report = crate::extras::backup_check::refresh(shared, ctx)?;
-            Ok(JobOutput::Backup(Box::new(report)))
-        }
+        JobSpec::WolWake { id, test } => shared.wol.run(shared, ctx, id, test).map(|o| JobOutput::Wol(Box::new(o))),
         JobSpec::FileHash { source } => {
             let path = crate::handlers_search::hash_path(shared, source).map_err(|e| JobError::Failed(e.message))?;
             shared.hasher.hash_job(ctx, &path).map(JobOutput::FileHash).map_err(|e| match e {
@@ -269,8 +284,7 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
             })
         }
         JobSpec::SleepBlockers => tool_step(ctx, "sleep", "Asking the system what keeps it awake", || {
-            let x = &shared.extras;
-            dyno_platform::extras::sleep_report(x.tools().as_ref(), x.os())
+            shared.extras.sleep_report()
         })
         .map(|r| JobOutput::Sleep(Box::new(r))),
         JobSpec::BootAnalysis => tool_step(ctx, "boot", "Reading the boot history", || crate::extras::boot_report(shared))?
@@ -278,10 +292,25 @@ fn execute(shared: &Arc<Shared>, ctx: &JobContext, spec: JobSpec) -> Result<JobO
             .map_err(|e| JobError::Failed(e.message)),
         JobSpec::AppUsage => tool_step(ctx, "usage", "Reading network and energy use", || crate::extras::app_usage(shared))
             .map(|r| JobOutput::AppUsage(Box::new(r))),
+        JobSpec::Helper { action } => shared.helper.run(ctx, action).map(|s| JobOutput::Helper(Box::new(s))),
+        JobSpec::InstallTool { tool } => crate::tool_download::install(shared, ctx, tool).map(|s| JobOutput::Tool(Box::new(s))),
         JobSpec::SoftwareInventory => tool_step(ctx, "software", "Listing installed software", || {
             crate::extras::software_for_page(shared)
         })
         .map(|r| JobOutput::Software(Box::new(r))),
+        JobSpec::UpdateList { id } => {
+            shared.intel.update_list(ctx, &id)?;
+            Ok(JobOutput::Intel(Box::new(shared.intel.status())))
+        }
+        JobSpec::UpdateGeo => {
+            shared.intel.update_geo(ctx)?;
+            shared.intel.find_home(ctx);
+            Ok(JobOutput::Intel(Box::new(shared.intel.status())))
+        }
+        JobSpec::RebuildIntel => {
+            shared.intel.rebuild(ctx)?;
+            Ok(JobOutput::Intel(Box::new(shared.intel.status())))
+        }
     }
 }
 

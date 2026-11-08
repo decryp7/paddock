@@ -19,6 +19,20 @@ export function setupFresh(search: string = globalThis.location?.search ?? ''): 
   return new URLSearchParams(search).get('setup') === 'fresh';
 }
 
+/**
+ * `?setup-step=manual`: the engine's steps wait until the test calls `window.__sdSetupStep()` (one step per call), so a test
+ * sees a step working for as long as it wants instead of racing or waiting on a 500 ms timer.
+ */
+function manualSteps(search: string = globalThis.location?.search ?? ''): boolean {
+  return new URLSearchParams(search).get('setup-step') === 'manual';
+}
+
+const queued: (() => void)[] = [];
+function queueStep(step: () => void): void {
+  queued.push(step);
+  (globalThis as { __sdSetupStep?: () => void }).__sdSetupStep = () => queued.shift()?.();
+}
+
 function remembered(): boolean {
   try {
     return globalThis.localStorage?.getItem(SHOWN_KEY) === '1';
@@ -56,7 +70,7 @@ export function demoSetupBackend(): SetupBackend {
   memory ??= new DemoSetupBackend({
     finished: !fresh || remembered(),
     outcomes: { service: setupOutcome(), login: setupOutcome(), notifications: setupOutcome(), pitwall: setupOutcome() },
-    schedule: (step) => void setTimeout(step, 500),
+    schedule: manualSteps() ? queueStep : (step) => void setTimeout(step, 500),
   });
   return memory;
 }

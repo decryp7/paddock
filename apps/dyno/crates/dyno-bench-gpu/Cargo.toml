@@ -1,0 +1,29 @@
+[package]
+name = "dyno-bench-gpu"
+description = "Dyno's GPU benchmark runner: wgpu compute and graphics throughput, in its own process so the graphics stack stays out of dyno-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "dyno-bench-gpu"
+path = "src/main.rs"
+
+[dependencies]
+dyno-core.workspace = true
+# The output lines, heartbeat, repetition driver and clock the CPU runner uses (ER-22: one copy).
+dyno-bench.workspace = true
+paddock-bench = { path = "../../../../crates/paddock-bench" }
+serde_json.workspace = true
+# Metal on macOS, DX12 (then Vulkan) on Windows, Vulkan on Linux; no GL backend, no web (MIT OR Apache-2.0; ADR 0030 D2).
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "wgsl", "metal", "dx12", "vulkan"] }
+pollster = "0.4"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

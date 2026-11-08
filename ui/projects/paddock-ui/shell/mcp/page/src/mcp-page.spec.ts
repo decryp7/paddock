@@ -177,6 +177,17 @@ describe('the AI access page', () => {
     expect(text(p.el)).toContain('No client has called a tool yet.');
   });
 
+  it('says why the saved keys are not in use, with the next step, while no client can connect', async () => {
+    const why = 'The AI access key list could not be read (not valid JSON). No client can connect until a new key is issued.';
+    const p = await open({ keysProblem: why });
+    expect(text(p.q('mcp-keys-problem')!)).toContain('The saved keys are not in use');
+    expect(text(p.q('mcp-keys-problem')!)).toContain(why);
+  });
+
+  it('shows no key problem when the saved keys are fine', async () => {
+    expect((await open()).q('mcp-keys-problem')).toBeNull();
+  });
+
   it('shows a failed first ask as an inline error with Retry', async () => {
     const p = await open({ getFailures: 1 });
     expect(p.q('mcp-error')).not.toBeNull();

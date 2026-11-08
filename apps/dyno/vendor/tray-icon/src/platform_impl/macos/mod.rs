@@ -53,6 +53,11 @@ impl TrayIcon {
     ) -> crate::Result<(Retained<NSStatusItem>, Retained<TrayTarget>)> {
         let ns_status_item =
             NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
+        // Paddock patch: the autosave name before anything else touches the item, so ControlCenter sees one stable identity
+        // (it logged `Host id changed from ...Item-0... to ...menubar.<n>` when the name came after the first draw).
+        if let Some(name) = crate::AUTOSAVE_NAME_PROVIDER.get().and_then(|provider| provider(&id.0)) {
+            ns_status_item.setAutosaveName(Some(&NSString::from_str(&name)));
+        }
 
         set_icon_for_ns_status_item_button(
             &ns_status_item,

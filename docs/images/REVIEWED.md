@@ -13,13 +13,12 @@ One row per image under `docs/images` that passed an independent review. A chang
 | src/icons/sighter.svg | ab71dc5d8983205f54a7f231a115a591b413b44004aaf8d7308cb2b12a73bc9e | small-icons poster review (Opus) | 2026-11-03 |
 | src/icons/spotter.svg | bb7619dff9eae64b84759fa336724dab6e71c1a8237c61b2815f8b22f48adadf | small-icons poster review (Opus) | 2026-11-03 |
 | src/icons/recce-placeholder.svg | 927fe52447104f6b7d0af72fdd53e2c96ff5cd90c217e80862a24f4bfb7ba415 | placeholder review only, not a final icon (Opus) | 2026-11-04 |
-| src/icons/scrutineer-placeholder.svg | 0009a2de15fe1b2feaeff80fb7ec58b3d8ad9c958240dd78d74798fdb42a25af | placeholder review only, not a final icon (Opus) | 2026-11-04 |
-| paddock-ecosystem.svg | e862b089796d733f184ea7d462e1101f9a7c4b422c77d547dea144e88fd5c78b | independent family-diagrams review 2 (Opus) | 2026-11-04 |
-| paddock-ecosystem-light.png | d92fe0d807d7f719cdc47356fcf6757a22c2b3eff2f097d10b383d3561b46b4e | independent family-diagrams review 2 (Opus) | 2026-11-04 |
-| paddock-ecosystem-dark.png | 55edf0ea57a047067766eb7225f512e8c108a1079ae039682bb7ef202f30992e | independent family-diagrams review 2 (Opus) | 2026-11-04 |
-| paddock-integrations.svg | 21b8a96956a1bfbfc59d16b31def0f84d39d5a886c229252ca46e665a7bb4c01 | independent family-diagrams review 2 (Opus) | 2026-11-04 |
-| paddock-integrations-light.png | a9a7c6fa2b5cb0769a4a3dbd9cba7484e5d8d68cb5e700e620dd5494ede5ad80 | independent family-diagrams review 2 (Opus) | 2026-11-04 |
-| paddock-integrations-dark.png | 38cb6fd50409e9661baabd55b9b0259dee2bd3c3116ad305258a03f0b726a20d | independent family-diagrams review 2 (Opus) | 2026-11-04 |
+| paddock-ecosystem.svg | bbf5ff4ba5feb82df4ec99a6bb862c0098be45990b4b35f25a6e49f75ff0c21d | independent hero review, tool removed (Opus) | 2026-11-05 |
+| paddock-ecosystem-light.png | 66869804ad6c9f9bcc98d63b29711e92f00110708ef8689e1716f62b6d974a61 | independent hero review, tool removed (Opus) | 2026-11-05 |
+| paddock-ecosystem-dark.png | 386413ffae94a92e0a65d6984407592c27c2b473391dcfbe2ec0ac90be4df59c | independent hero review, tool removed (Opus) | 2026-11-05 |
+| paddock-integrations.svg | 169abd9ab0c3625ec6114e1fdde8640b1ffcc33e8ca9e739eb3af188a6d25252 | independent family-diagrams review 2 (Opus) | 2026-11-04 |
+| paddock-integrations-light.png | b166f32d342293adca4e077987722c8ff54a9024d4d8a9b0efffd682b63d935b | independent family-diagrams review 2 (Opus) | 2026-11-04 |
+| paddock-integrations-dark.png | cb959d0238a9f17c2575d761d911ed44d9e6fa8ae334f09668b089ce893f63a6 | independent family-diagrams review 2 (Opus) | 2026-11-04 |
 | paddock-handoffs.svg | 63c551718d2222fd0778e9df07e3c2475182fc496cfa4fc2ca15db22fd784cf5 | independent review 3 (Opus) | 2026-10-25 |
 | paddock-handoffs-light.png | e754dcb5f269d48595318fbf95414dc71ba47aa7bd93f3752d9a5a5568c3b76a | independent review 3 (Opus) | 2026-10-25 |
 | paddock-handoffs-dark.png | ce5abde7675081a91948e6a60acdc07fb4f84360e190c0d11a6683fdd1283784 | independent review 3 (Opus) | 2026-10-25 |

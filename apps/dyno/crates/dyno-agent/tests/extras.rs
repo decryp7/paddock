@@ -1,12 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! The extras (WP-13), backup health (WP-14) end to end over the fake platform: scripted tools
-//! (no real `tmutil`, `pmset` or `restic` is run), a real IPC connection and a SQLite file in a temp folder.
+//! The extras (WP-13) end to end over the fake platform: scripted tools
+//! (no real `pmset` or `powercfg` is run), a real IPC connection and a SQLite file in a temp folder.
 
 use dyno_agent::cli::{ask, ask_within, connect, run_job};
 use dyno_agent::paths::Dirs;
 use dyno_agent::Running;
-use dyno_core::backup::{BackupState, BackupTool};
 use dyno_core::extras::changes::{ChangeKind, ChangesQuery};
 use dyno_core::extras::files::{FinderMode, FinderQuery, FinderResult};
 use dyno_core::jobs::{JobOutput, JobSpec};
@@ -14,7 +13,7 @@ use dyno_core::ports::PlatformError;
 use dyno_core::protocol::{Message, Reply, Request};
 use dyno_core::time::{Timestamp, HOUR};
 use dyno_platform::fake::{process, Fake};
-use dyno_platform::issues::ToolRunner;
+use dyno_platform::runner::ToolRunner;
 use paddock_ipc::BodyPeer;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -38,29 +37,37 @@ impl Tools {
 }
 
 impl ToolRunner for Tools {
-    fn run(&self, program: &str, args: &[String], _timeout: Duration) -> Result<String, PlatformError> {
-        let key = format!(
-            "{} {}",
-            program.rsplit('/').next().unwrap_or(program),
-            args.first().map(String::as_str).unwrap_or("")
-        );
-        self.calls.lock().unwrap().push(key.trim().to_string());
-        let mut answers = self.answers.lock().unwrap();
-        let bare = program.rsplit('/').next().unwrap_or(program).to_string();
-        let name = if answers.contains_key(key.trim()) {
-            key.trim().to_string()
-        } else {
-            bare
+    fn run_tool(&self, tool: &dyno_platform::runner::Tool, _timeout: Duration) -> Result<dyno_platform::runner::ToolOutput, PlatformError> {
+        let (program, args) = (tool.program.as_str(), &tool.args);
+        let answer: Result<String, PlatformError> = {
+            let key = format!(
+                "{} {}",
+                program.rsplit('/').next().unwrap_or(program),
+                args.first().map(String::as_str).unwrap_or("")
+            );
+            self.calls.lock().unwrap().push(key.trim().to_string());
+            let mut answers = self.answers.lock().unwrap();
+            let bare = program.rsplit('/').next().unwrap_or(program).to_string();
+            let name = if answers.contains_key(key.trim()) {
+                key.trim().to_string()
+            } else {
+                bare
+            };
+            let hit = answers.get_mut(&name);
+            match hit {
+                Some(v) if v.len() > 1 => v.remove(0),
+                Some(v) => v
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| Err(PlatformError::Failed("no scripted answer".into()))),
+                None => Err(PlatformError::Unsupported(format!("{program} is not available on this computer."))),
+            }
         };
-        let hit = answers.get_mut(&name);
-        match hit {
-            Some(v) if v.len() > 1 => v.remove(0),
-            Some(v) => v
-                .first()
-                .cloned()
-                .unwrap_or_else(|| Err(PlatformError::Failed("no scripted answer".into()))),
-            None => Err(PlatformError::Unsupported(format!("{program} is not available on this computer."))),
-        }
+        answer.map(|stdout| dyno_platform::runner::ToolOutput {
+            ok: true,
+            stdout,
+            error: String::new(),
+        })
     }
 }
 
@@ -241,105 +248,6 @@ fn the_finder_refuses_a_folder_that_is_not_there() {
     assert!(find(&peer, q).unwrap_err().contains("cannot be opened"));
 }
 
-fn backup_report(peer: &BodyPeer<Message>, refresh: bool) -> dyno_core::backup::BackupReport {
-    if refresh {
-        let JobOutput::Backup(r) = run_job(peer, JobSpec::RefreshBackup, Duration::from_secs(30)).unwrap() else {
-            panic!("backup")
-        };
-        return *r;
-    }
-    let Reply::Backup(mut r) = ask(peer, Request::Backup).unwrap() else {
-        panic!("backup")
-    };
-    for _ in 0..200 {
-        if !r.checking {
-            return *r;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-        let Reply::Backup(next) = ask(peer, Request::Backup).unwrap() else {
-            panic!("backup")
-        };
-        r = next;
-    }
-    panic!("the backup check never finished")
-}
-
-#[test]
-fn a_stale_backup_raises_an_alarm_and_a_fresh_one_clears_it() {
-    let h = Harness::start();
-    let s = h.shared();
-    s.extras.use_os("macos");
-    let old = "/Volumes/.timemachine/X/2026-01-01-000000.backup\n";
-    s.extras.use_backup_tools(Tools::with(vec![
-        ("tmutil destinationinfo", vec![ok("Name : Disk\n")]),
-        ("tmutil latestbackup", vec![ok(old)]),
-    ]));
-    let peer = h.client();
-    // The first request starts the check; it is read-only and finishes in the background.
-    let r = backup_report(&peer, false);
-    let tm = r.statuses.iter().find(|x| x.tool == BackupTool::TimeMachine).unwrap();
-    assert_eq!(tm.state, BackupState::Stale);
-    assert!(r.checked_at.is_some());
-    // Duplicati and the others are "cannot check"/errors from the scripted runner, never a failure of the request.
-    let Reply::Alarms(alarms) = ask(
-        &peer,
-        Request::Alarms {
-            filter: Default::default(),
-        },
-    )
-    .unwrap() else {
-        panic!("alarms")
-    };
-    assert!(
-        alarms.iter().any(|a| a.title.contains("Time Machine backup is out of date")),
-        "{alarms:?}"
-    );
-
-    // A fresh backup clears it.
-    let fresh = format!(
-        "/Volumes/.timemachine/X/{}.backup\n",
-        // Local time does not matter for "recent": the stale limit is 48 hours.
-        "2099-01-01-000000"
-    );
-    s.extras.use_backup_tools(Tools::with(vec![
-        ("tmutil destinationinfo", vec![ok("Name : Disk\n")]),
-        ("tmutil latestbackup", vec![ok(&fresh)]),
-    ]));
-    let r = backup_report(&peer, true);
-    assert_eq!(
-        r.statuses.iter().find(|x| x.tool == BackupTool::TimeMachine).unwrap().state,
-        BackupState::Healthy
-    );
-}
-
-#[test]
-fn background_alerts_can_be_switched_off() {
-    let h = Harness::start();
-    let s = h.shared();
-    s.extras.use_os("macos");
-    s.extras.use_backup_tools(Tools::with(vec![
-        ("tmutil destinationinfo", vec![ok("Name : Disk\n")]),
-        ("tmutil latestbackup", vec![ok("/x/2026-01-01-000000.backup\n")]),
-    ]));
-    let peer = h.client();
-    let Reply::Settings(mut settings) = ask(&peer, Request::Settings).unwrap() else {
-        panic!("settings")
-    };
-    settings.backup.alert_when_stale = false;
-    ask(&peer, Request::SaveSettings { settings }).unwrap();
-    backup_report(&peer, true);
-    let Reply::Alarms(alarms) = ask(
-        &peer,
-        Request::Alarms {
-            filter: Default::default(),
-        },
-    )
-    .unwrap() else {
-        panic!("alarms")
-    };
-    assert!(!alarms.iter().any(|a| a.title.contains("out of date")));
-}
-
 #[test]
 fn maintenance_windows_are_validated_and_reported() {
     let h = Harness::start();
@@ -374,15 +282,6 @@ fn maintenance_windows_are_validated_and_reported() {
         panic!("maintenance")
     };
     assert!(m.enabled);
-    // An invalid backup override is refused with the engine's words.
-    let Reply::Settings(mut settings) = ask(&peer, Request::Settings).unwrap() else {
-        panic!("settings")
-    };
-    settings.backup.overrides = vec![dyno_core::backup::ToolOverride {
-        tool: BackupTool::Restic,
-        dirs: vec!["relative".into()],
-    }];
-    assert!(ask(&peer, Request::SaveSettings { settings }).unwrap_err().contains("restic"));
 }
 
 #[test]

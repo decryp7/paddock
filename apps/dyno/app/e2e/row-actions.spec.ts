@@ -103,11 +103,6 @@ test.describe('row-action tooltips', () => {
     await checkCluster(page, issues, 'issues');
   });
 
-  test('backup health', async ({ page }) => {
-    await page.goto(url('/backup'));
-    await checkCluster(page, page.getByRole('grid', { name: 'Backup tools' }), 'backup health');
-  });
-
   test('maintenance windows', async ({ page }) => {
     await page.goto(url('/extras?tab=maintenance'));
     await checkCluster(page, page.getByRole('list', { name: 'Windows' }), 'maintenance windows');

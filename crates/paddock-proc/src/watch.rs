@@ -1,6 +1,14 @@
 //! Watching a capped child's memory (ADR 0031 §5 of Debrief): the pure [`MemoryWatch`] turns samples into verdicts (the
 //! peak, a warning at [`WARN_PERCENT`] of the cap with hysteresis, the stop over the cap) and the [`MemoryListener`]
 //! hears the events. The sampling thread is in `Supervised`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use std::sync::Arc;
 
@@ -56,7 +64,11 @@ impl MemoryListener {
     /// Tells the listener; a panicking listener never takes the watcher down.
     pub fn tell(&self, label: &str, event: MemoryEvent) {
         let f = self.0.clone();
-        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(label, event)));
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(label, event))).is_err() {
+            log::error!(
+                "a memory listener panicked while told about `{label}`; the watcher goes on"
+            );
+        }
     }
 }
 

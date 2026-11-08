@@ -11,7 +11,7 @@ use windows_sys::{
     core::GUID,
     s,
     Win32::{
-        Foundation::{FALSE, HWND, LPARAM, LRESULT, POINT, RECT, S_OK, TRUE, WPARAM},
+        Foundation::{GetLastError, FALSE, HWND, LPARAM, LRESULT, POINT, RECT, S_OK, TRUE, WPARAM},
         UI::{
             Shell::{
                 Shell_NotifyIconGetRect, Shell_NotifyIconW, NIF_GUID, NIF_ICON, NIF_MESSAGE,
@@ -66,6 +66,14 @@ struct TrayUserData {
     menu_on_left_click: bool,
     menu_on_right_click: bool,
     visible: bool,
+    /// Paddock patch: whether the shell accepted the last add (false when Explorer's notification area was not ready).
+    added: bool,
+    /// Paddock patch: how many times the shell announced `TaskbarCreated`, and the outcome of the last re-add.
+    restarts: u32,
+    last_restart: Option<crate::GuidStatus>,
+    /// Paddock patch: the steps of the add/recovery ladder with the `GetLastError` of each failed one (the first add, then each
+    /// `TaskbarCreated` re-add), for the app's log.
+    trace: String,
 }
 
 impl TrayUserData {
@@ -124,6 +132,10 @@ impl TrayIcon {
                 menu_on_left_click: attrs.menu_on_left_click,
                 menu_on_right_click: attrs.menu_on_right_click,
                 visible: true,
+                added: false,
+                restarts: 0,
+                last_restart: None,
+                trace: String::new(),
             };
 
             let hwnd = CreateWindowExW(
@@ -160,13 +172,23 @@ impl TrayIcon {
             // Paddock patch: see `register_with_guid_recovery`. The window's own copy must forget a GUID that was given up, or later
             // modifies and the re-add after `TaskbarCreated` would use it.
             let mut guid = guid;
-            let guid_status =
-                register_with_guid_recovery(hwnd, internal_id, &mut guid, &hicon, &attrs.tooltip, true);
-            if guid.is_none() && attrs.guid.is_some() {
-                let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
-                if !userdata.is_null() {
+            let mut trace = String::new();
+            let guid_status = register_with_guid_recovery(
+                hwnd,
+                internal_id,
+                &mut guid,
+                &hicon,
+                &attrs.tooltip,
+                true,
+                &mut trace,
+            );
+            let userdata = util::get_window_long(hwnd, GWL_USERDATA) as *mut TrayUserData;
+            if !userdata.is_null() {
+                note_trace(&mut (*userdata).trace, "first add", &trace);
+                if guid.is_none() && attrs.guid.is_some() {
                     (*userdata).guid = None;
                 }
+                (*userdata).added = guid_status != crate::GuidStatus::NotAdded;
             }
 
             if let Some(menu) = &attrs.menu {
@@ -185,6 +207,40 @@ impl TrayIcon {
 
     pub fn guid_status(&self) -> crate::GuidStatus {
         self.guid_status
+    }
+
+    /// Paddock patch: the steps of the add and recovery ladder, each with the `GetLastError` of a failed one (first add, then each
+    /// `TaskbarCreated` re-add), for the app's log.
+    pub fn recovery_trace(&self) -> String {
+        unsafe {
+            let userdata = util::get_window_long(self.hwnd, GWL_USERDATA) as *const TrayUserData;
+            if userdata.is_null() {
+                String::new()
+            } else {
+                (*userdata).trace.clone()
+            }
+        }
+    }
+
+    /// Paddock patch: whether the shell holds this icon now: the last add (the first, or the re-add after `TaskbarCreated`)
+    /// was accepted. False while Explorer's notification area was not ready, which nothing else reports.
+    pub fn is_added(&self) -> bool {
+        unsafe {
+            let userdata = util::get_window_long(self.hwnd, GWL_USERDATA) as *const TrayUserData;
+            !userdata.is_null() && (*userdata).added
+        }
+    }
+
+    /// Paddock patch: how many `TaskbarCreated` messages the icon saw and what the last re-add came to (for the app's log).
+    pub fn taskbar_restarts(&self) -> (u32, Option<crate::GuidStatus>) {
+        unsafe {
+            let userdata = util::get_window_long(self.hwnd, GWL_USERDATA) as *const TrayUserData;
+            if userdata.is_null() {
+                (0, None)
+            } else {
+                ((*userdata).restarts, (*userdata).last_restart)
+            }
+        }
     }
 
     pub fn set_icon(&mut self, icon: Option<Icon>) -> crate::Result<()> {
@@ -242,21 +298,9 @@ impl TrayIcon {
 
     pub fn set_tooltip<S: AsRef<str>>(&mut self, tooltip: Option<S>) -> crate::Result<()> {
         unsafe {
-            let mut nid = NOTIFYICONDATAW {
-                uFlags: NIF_TIP,
-                hWnd: self.hwnd,
-                uID: self.internal_id,
-                cbSize: size_of::<NOTIFYICONDATAW>() as u32,
-                ..std::mem::zeroed()
-            };
-            if let Some(tooltip) = &tooltip {
-                let tip = util::encode_wide(tooltip.as_ref());
-                #[allow(clippy::manual_memcpy)]
-                for i in 0..tip.len().min(128) {
-                    nid.szTip[i] = tip[i];
-                }
-            }
-
+            // Paddock patch: the modify names the icon the way it was added (by GUID when it has one); without NIF_GUID the shell
+            // finds no icon for (hWnd, uID) and refuses, and the tip stayed the one given at creation.
+            let nid = tooltip_nid(self.hwnd, self.internal_id, self.guid, tooltip.as_ref().map(|t| t.as_ref()));
             if Shell_NotifyIconW(NIM_MODIFY, &nid) == 0 {
                 return Err(crate::Error::OsError(std::io::Error::last_os_error()));
             }
@@ -382,16 +426,23 @@ unsafe extern "system" fn tray_proc(
             userdata.tooltip = *tooltip;
         }
         _ if msg == *S_U_TASKBAR_RESTART => {
-            remove_tray_icon(userdata.hwnd, userdata.internal_id, userdata.guid);
+            let mut trace = String::new();
+            trace_step(&mut trace, "delete", remove_tray_icon(userdata.hwnd, userdata.internal_id, userdata.guid));
             // Paddock patch: the same GUID recovery as the first add (a first add that failed because Explorer was not up gets here).
-            register_with_guid_recovery(
+            let status = register_with_guid_recovery(
                 userdata.hwnd,
                 userdata.internal_id,
                 &mut userdata.guid,
                 &userdata.icon.as_ref().map(|i| i.inner.as_raw_handle()),
                 &userdata.tooltip,
                 userdata.visible,
+                &mut trace,
             );
+            let label = format!("TaskbarCreated #{}", userdata.restarts + 1);
+            note_trace(&mut userdata.trace, &label, &trace);
+            userdata.added = status != crate::GuidStatus::NotAdded;
+            userdata.restarts += 1;
+            userdata.last_restart = Some(status);
         }
         WM_USER_SHOW_MENU_ON_LEFT_CLICK => {
             userdata.menu_on_left_click = wparam != 0;
@@ -591,21 +642,65 @@ unsafe fn register_with_guid_recovery(
     hicon: &Option<HICON>,
     tooltip: &Option<String>,
     visible: bool,
+    trace: &mut String,
 ) -> crate::GuidStatus {
-    if register_tray_icon(hwnd, id, *guid, hicon, tooltip, visible) {
+    let with_guid = if guid.is_some() { "add with GUID" } else { "add" };
+    let first = register_tray_icon(hwnd, id, *guid, hicon, tooltip, visible);
+    trace_step(trace, with_guid, add_result(first));
+    if first {
         return if guid.is_some() { crate::GuidStatus::Registered } else { crate::GuidStatus::NotRequested };
     }
     if guid.is_none() {
         return crate::GuidStatus::NotAdded;
     }
-    remove_tray_icon(hwnd, id, *guid);
-    if register_tray_icon(hwnd, id, *guid, hicon, tooltip, visible) {
+    trace_step(trace, "delete GUID registration", remove_tray_icon(hwnd, id, *guid));
+    let again = register_tray_icon(hwnd, id, *guid, hicon, tooltip, visible);
+    trace_step(trace, "add with GUID again", add_result(again));
+    if again {
         crate::GuidStatus::RegisteredAfterReclaim
-    } else if register_tray_icon(hwnd, id, None, hicon, tooltip, visible) {
-        *guid = None;
-        crate::GuidStatus::FellBackToNoGuid
     } else {
-        crate::GuidStatus::NotAdded
+        let bare = register_tray_icon(hwnd, id, None, hicon, tooltip, visible);
+        trace_step(trace, "add without GUID", add_result(bare));
+        if bare {
+            *guid = None;
+            crate::GuidStatus::FellBackToNoGuid
+        } else {
+            crate::GuidStatus::NotAdded
+        }
+    }
+}
+
+/// Paddock patch: the result of a `Shell_NotifyIconW` step for the trace: `None` when it worked, else `GetLastError()` read at once
+/// (the shell may leave 0: it only sometimes sets it).
+unsafe fn add_result(ok: bool) -> Option<u32> {
+    if ok { None } else { Some(GetLastError()) }
+}
+
+/// Appends one step to a trace: `name ok` or `name failed (GetLastError n)`.
+fn trace_step(trace: &mut String, name: &str, failed_with: Option<u32>) {
+    if !trace.is_empty() {
+        trace.push_str(", ");
+    }
+    trace.push_str(name);
+    match failed_with {
+        None => trace.push_str(" ok"),
+        Some(code) => trace.push_str(&format!(" failed (GetLastError {code})")),
+    }
+}
+
+/// Keeps the steps of one ladder under a label in the icon's trace, at most the last 700 bytes (the ladder runs again at every
+/// `TaskbarCreated`).
+fn note_trace(into: &mut String, label: &str, steps: &str) {
+    if !into.is_empty() {
+        into.push_str("; ");
+    }
+    into.push_str(label);
+    into.push_str(": ");
+    into.push_str(steps);
+    if into.len() > 700 {
+        let cut = into.len() - 700;
+        let cut = (cut..into.len()).find(|i| into.is_char_boundary(*i)).unwrap_or(into.len());
+        into.drain(..cut);
     }
 }
 
@@ -631,7 +726,7 @@ unsafe fn register_tray_icon(
         flags |= NIF_TIP;
         let tip = util::encode_wide(tooltip);
         #[allow(clippy::manual_memcpy)]
-        for i in 0..tip.len().min(128) {
+        for i in 0..tip.len().min(127) {
             sz_tip[i] = tip[i];
         }
     }
@@ -661,8 +756,32 @@ unsafe fn register_tray_icon(
     Shell_NotifyIconW(NIM_ADD, &mut nid as _) == TRUE
 }
 
+/// The `NIM_MODIFY` data that sets (or, with `None`, clears) the tip of an icon.
+///
+/// `szTip` holds 128 UTF-16 units including the terminating zero, so at most 127 of the text are kept; the last unit is never
+/// written, so the shell always finds the zero.
 #[inline]
-unsafe fn remove_tray_icon(hwnd: HWND, id: u32, guid: Option<GUID>) {
+unsafe fn tooltip_nid(hwnd: HWND, id: u32, guid: Option<GUID>, tooltip: Option<&str>) -> NOTIFYICONDATAW {
+    let mut nid = NOTIFYICONDATAW {
+        uFlags: NIF_TIP,
+        hWnd: hwnd,
+        uID: id,
+        cbSize: size_of::<NOTIFYICONDATAW>() as u32,
+        ..std::mem::zeroed()
+    };
+    if let Some(tooltip) = tooltip {
+        let tip = util::encode_wide(tooltip);
+        #[allow(clippy::manual_memcpy)]
+        for i in 0..tip.len().min(127) {
+            nid.szTip[i] = tip[i];
+        }
+    }
+    apply_guid(&mut nid, guid);
+    nid
+}
+
+#[inline]
+unsafe fn remove_tray_icon(hwnd: HWND, id: u32, guid: Option<GUID>) -> Option<u32> {
     let mut nid = NOTIFYICONDATAW {
         uFlags: NIF_ICON,
         hWnd: hwnd,
@@ -673,7 +792,12 @@ unsafe fn remove_tray_icon(hwnd: HWND, id: u32, guid: Option<GUID>) {
     apply_guid(&mut nid, guid);
 
     if Shell_NotifyIconW(NIM_DELETE, &nid) == FALSE {
+        // Paddock patch: the code is read first, before anything else can overwrite it.
+        let code = GetLastError();
         eprintln!("Error removing system tray icon");
+        Some(code)
+    } else {
+        None
     }
 }
 
@@ -725,5 +849,30 @@ impl From<RECT> for Rect {
                 rect.bottom.saturating_sub(rect.top) as u32,
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tooltip_tests {
+    use super::*;
+
+    // Failing first: the modify carried no NIF_GUID, so an icon added with a GUID never got its tip changed.
+    #[test]
+    fn a_tip_change_names_the_icon_by_its_guid() {
+        let guid = GUID::from_u128(0x1234);
+        let nid = unsafe { tooltip_nid(std::ptr::null_mut(), 7, Some(guid), Some("CPU 34%")) };
+        assert_ne!(nid.uFlags & NIF_GUID, 0);
+        assert_ne!(nid.uFlags & NIF_TIP, 0);
+        assert_eq!((nid.guidItem.data1, nid.guidItem.data2), (guid.data1, guid.data2));
+        let plain = unsafe { tooltip_nid(std::ptr::null_mut(), 7, None, Some("CPU 34%")) };
+        assert_eq!(plain.uFlags & NIF_GUID, 0);
+    }
+
+    #[test]
+    fn a_long_tip_keeps_127_units_and_its_terminating_zero() {
+        let long = "x".repeat(300);
+        let nid = unsafe { tooltip_nid(std::ptr::null_mut(), 7, None, Some(&long)) };
+        assert_eq!(nid.szTip[126], u16::from(b'x'));
+        assert_eq!(nid.szTip[127], 0);
     }
 }

@@ -12,6 +12,24 @@ class Host {
 }
 
 
+describe('the ECharts import', () => {
+  it('reads no module while a test runs, because a first read blocks the event loop past the test timeout', async () => {
+    const read: string[] = [];
+    const hooks = process.getBuiltinModule('node:module').registerHooks({
+      load: (url, context, next) => {
+        read.push(url);
+        return next(url, context);
+      },
+    });
+    try {
+      await import('./echarts-setup');
+    } finally {
+      hooks.deregister();
+    }
+    expect(read).toEqual([]);
+  });
+});
+
 describe('prefersReducedMotion', () => {
   afterEach(() => vi.unstubAllGlobals());
   it('follows the media query', () => {

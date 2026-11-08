@@ -133,7 +133,12 @@ pub(crate) mod tests {
         std::fs::write(&implicit, b"x").unwrap();
         assert_eq!(p.find_built(host), Some(implicit));
         // Another target never uses the host build.
-        assert_eq!(p.find_built("aarch64-unknown-linux-gnu"), None);
+        let other = if host == "aarch64-unknown-linux-gnu" {
+            "x86_64-unknown-linux-gnu"
+        } else {
+            "aarch64-unknown-linux-gnu"
+        };
+        assert_eq!(p.find_built(other), None);
         let explicit = p.built(host, true);
         std::fs::create_dir_all(explicit.parent().unwrap()).unwrap();
         std::fs::write(&explicit, b"y").unwrap();

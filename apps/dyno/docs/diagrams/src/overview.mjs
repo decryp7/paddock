@@ -48,21 +48,21 @@ function varrow(x, y1, y2, label) {
 }
 
 text(48, 64, 'Dyno', 'title');
-text(48, 94, 'Watches one PC, read-only: a per-user agent keeps the history, a window, tray and command line show it', 'sub');
-text(48, 118, 'Live and history, why slow, alarms, a disk map and benchmarks · never changes the machine · Windows, macOS and Linux', 'desc');
+text(48, 94, 'Watches one PC: a per-user agent keeps the history, a window, tray and command line show it', 'sub');
+text(48, 118, 'Live and history, why slow, alarms, a disk map and benchmarks · keep awake and Wake-on-LAN · Windows, macOS and Linux', 'desc');
 
 const AX = 48, AW = 304, BX = 472, BW = 416, CX = 1008, CW = 272, top = 160;
 const BH = 88, PITCH = 120, y = (i) => 208 + i * PITCH;
 const gh = (rows) => 48 + (rows - 1) * PITCH + BH + 24 - 8;
 group(AX, top, AW, gh(4), 'Dyno app and command line');
-group(BX, top, BW, gh(5), 'Dyno agent [one per user, started at login]');
-group(CX, top, CW, gh(5), 'Around the agent');
+group(BX, top, BW, gh(6), 'Dyno agent [one per user, started at login]');
+group(CX, top, CW, gh(6), 'Around the agent');
 
 // app
 box(AX + 24, y(0), AW - 48, BH, 'ui', 'Window', 'Angular 22: live and history, processes, why slow, alarms, disk map, counters, benchmarks.');
 box(AX + 24, y(1), AW - 48, BH, 'accent', 'Tauri shell', 'Commands; validates every request and speaks to the agent.');
 box(AX + 24, y(2), AW - 48, BH, 'accent', 'Tray', 'A live metric and a compact menu; stays when the window closes.');
-box(AX + 24, y(3), AW - 48, BH, 'accent', 'dyno command', 'status, why-slow, top, alarms, snapshot, counters. Reads only.');
+box(AX + 24, y(3), AW - 48, BH, 'accent', 'dyno command', 'Readings and power commands; mcp bridges to the app.');
 varrow(AX + 48, y(0) + BH, y(1), 'commands');
 varrow(AX + 48, y(1) + BH, y(2), 'status');
 // agent
@@ -72,6 +72,7 @@ box(bx, y(1), bw, BH, 'accent', 'IPC server and handlers', 'One thread per conne
 box(bx, y(2), bw, BH, 'accent', 'Plugin host', 'Starts sensor plugins on first use; a plugin that crashes is quarantined.');
 box(bx, y(3), bw, BH, 'accent', 'Benchmarks', 'Only on a click, one kind at a time, in a child process with a timeout.');
 box(bx, y(4), bw, BH, 'accent', 'History, alarms, recorder', 'SQLite rollups (min, average, max); alarms that notify; issues; ten-minute flight recorder.');
+box(bx, y(5), bw, BH, 'accent', 'Power', 'Keep awake; sleep, hibernate (Windows, Linux) or shut down on idle or at a set time; wakes; Wake-on-LAN.');
 // around
 const cx = CX + 24, cw = CW - 48;
 box(cx, y(0), cw, BH, 'accent', 'Platform adapters', 'Windows, macOS, Linux behind the core\'s ports.');
@@ -79,6 +80,7 @@ box(cx, y(1), cw, BH, 'process', 'Operating system', 'Counters, /proc and /sys, 
 box(cx, y(2), cw, BH, 'plugin', 'Plugins', 'Vendor sensors; out of process.');
 box(cx, y(3), cw, BH, 'process', 'dyno-bench', 'CPU, memory and disk tests.');
 box(cx, y(4), cw, BH, 'process', 'Data folder', 'Dyno\'s own data: dyno.db and JSON; never uploaded.');
+box(cx, y(5), cw, BH, 'accent', 'dyno-helper', 'Optional; admin readings, wakes, Windows disk tool.');
 varrow(cx + 24, y(0) + BH, y(1), 'reads');
 // horizontal arrows in the gutters
 const mid = (i) => y(i) + BH / 2;
@@ -94,9 +96,10 @@ arrow(bx + bw, mid(0), cx, 'samples');
 arrow(bx + bw, mid(2), cx, 'calls');
 arrow(bx + bw, mid(3), cx, 'spawns');
 arrow(bx + bw, mid(4), cx, 'writes');
+arrow(bx + bw, mid(5), cx, 'asks');
 
 // core bar
-const coreY = top + gh(5) + 40;
+const coreY = top + gh(6) + 40;
 out.push(`<rect x="48" y="${coreY}" width="1232" height="88" rx="6" class="n core"/>`);
 text(64, coreY + 28, 'dyno-core: pure Rust, no I/O, no clock', 'h');
 text(64, coreY + 52, 'Grouping, diagnosis, baselines, health reasons, alarms, issues, history tiers, protocol.', 't');
@@ -110,7 +113,7 @@ for (const [r, label, pl] of [['ui', 'Window'], ['accent', 'Dyno'], ['core', 'Pu
   lx += 40 + tw(label, 12) + 36;
 }
 out.splice(legAt, 0, `<rect x="48" y="${ly - 20}" width="${lx - 48 - 20}" height="40" rx="14" class="g"/>`);
-text(1280, ly + 4, 'Dyno · updated 2026-10-28', 'foot');
+text(1280, ly + 4, 'Dyno · updated 2026-11-06', 'foot');
 const H = ly + 48;
 
 const css = `
@@ -129,7 +132,7 @@ const css = `
     .e{stroke:var(--line);stroke-width:1.5;fill:none}.e.d{stroke-dasharray:6 4}.ah{fill:var(--line)}`;
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-labelledby="t d">
   <title id="t">Dyno architecture overview</title>
-  <desc id="d">Dyno only watches. The Dyno app (an Angular window and a tray in a Tauri shell) and the dyno command line talk over one local IPC to a per-user agent. The agent samples, answers requests, hosts sensor plugins, runs benchmarks in a child process on a click and keeps history, alarms, issues and a flight recorder in SQLite. Around the agent are the platform adapters for Windows, macOS and Linux, the operating system, out-of-process plugins, the benchmark process and the data folder. A pure Rust core holds every decision.</desc>
+  <desc id="d">The Dyno app (an Angular window and a tray in a Tauri shell) and the dyno command line talk over one local IPC to a per-user agent. The agent samples, answers requests, hosts sensor plugins, runs benchmarks in a child process on a click and keeps history, alarms, issues and a flight recorder in SQLite. Around the agent are the platform adapters for Windows, macOS and Linux, the operating system, out-of-process plugins, the benchmark process, the data folder and the optional administrator helper. The agent also keeps the computer awake, sleeps, hibernates or shuts it down as the owner set up, schedules wakes and wakes other computers. A pure Rust core holds every decision.</desc>
   <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" class="ah"/></marker></defs>
   <style>${css}
   </style>

@@ -60,16 +60,15 @@ describe('TauriBackend: request shapes', () => {
     ['gpuProcesses', (b) => b.gpuProcesses(), 'gpuProcesses'],
     ['startJob findFiles', (b) => started(b, { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } }), { startJob: { spec: { findFiles: { query: { folder: '/x', mode: 'both', minBytes: 5 } } } } }],
     ['startJob rescanIssues', (b) => started(b, { rescanIssues: { query: { days: 7 } } }), { startJob: { spec: { rescanIssues: { query: { days: 7 } } } } }],
-    ['startJob refreshBackup', (b) => started(b, 'refreshBackup'), { startJob: { spec: 'refreshBackup' } }],
-    ['startJob fileHash of a process', (b) => started(b, { fileHash: { source: { process: REF } } }), { startJob: { spec: { fileHash: { source: { process: REF } } } } }],
     ['startJob fileHash of a path', (b) => started(b, { fileHash: { source: { path: '/a/b' } } }), { startJob: { spec: { fileHash: { source: { path: '/a/b' } } } } }],
     ['startJob sleepBlockers', (b) => started(b, 'sleepBlockers'), { startJob: { spec: 'sleepBlockers' } }],
     ['startJob bootAnalysis', (b) => started(b, 'bootAnalysis'), { startJob: { spec: 'bootAnalysis' } }],
     ['startJob appUsage', (b) => started(b, 'appUsage'), { startJob: { spec: 'appUsage' } }],
     ['startJob softwareInventory', (b) => started(b, 'softwareInventory'), { startJob: { spec: 'softwareInventory' } }],
+    ['startJob helper turnOn', (b) => started(b, { helper: { action: 'turnOn' } }), { startJob: { spec: { helper: { action: 'turnOn' } } } }],
+    ['helperStatus', (b) => b.helperStatus(), 'helperStatus'],
     ['jobResult', (b) => b.jobResult(4), { jobResult: { id: 4 } }],
     ['maintenance', (b) => b.maintenance(), 'maintenance'],
-    ['backup', (b) => b.backup(), 'backup'],
     ['settings', (b) => b.settings(), 'settings'],
     ['saveSettings', (b) => b.saveSettings(SETTINGS), { saveSettings: { settings: SETTINGS } }],
     ['plugins', (b) => b.plugins(), 'plugins'],
@@ -107,6 +106,13 @@ describe('TauriBackend: request shapes', () => {
     expect(invoke).toHaveBeenCalledWith('save_inventory_report', { format: 'json' });
     await backend.pickFolder();
     expect(invoke).toHaveBeenLastCalledWith('pick_folder');
+  });
+
+  it('quit asks the engine whether the agent keeps measuring, and quit-and-stop is the engine’s own command', async () => {
+    const { backend, invoke } = fake();
+    await backend.quitKeepsMeasuring();
+    await backend.quitAndStopAgent();
+    expect(invoke.mock.calls).toEqual([['quit_keeps_measuring'], ['quit_and_stop_measuring']]);
   });
 
   it('the tray popover is the shell’s window: fit, close, show the main window and quit are the shell’s commands', async () => {
@@ -261,6 +267,7 @@ describe('TauriBackend: push channels', () => {
     ['onAgentStatus', EVENTS.agent],
     ['onDiskScan', EVENTS.diskScan],
     ['onDiskVolumes', EVENTS.diskVolumes],
+    ['onTrayAvailability', EVENTS.tray],
   ] as const)('%s listens to its own event', async (method, event) => {
     const { backend, emit, listen, stops } = fake();
     const l = vi.fn();
@@ -274,5 +281,28 @@ describe('TauriBackend: push channels', () => {
     expect(stops[0]).toHaveBeenCalled();
     emit(event, { id: 2 });
     expect(l).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('TauriBackend: the tray host', () => {
+  it('asks the app (not the agent) whether the desktop shows the tray icons, and the event is dyno://tray', async () => {
+    const { backend, invoke } = fake();
+    await backend.trayAvailability();
+    expect(invoke).toHaveBeenLastCalledWith('tray_availability');
+    expect(EVENTS.tray).toBe('dyno://tray');
+  });
+});
+
+describe('TauriBackend: widget layouts on the grid', () => {
+  it('sends the revision with an edit and asks the app, not the agent, for a preview', async () => {
+    const { backend, invoke } = fake();
+    const edit = { dashboard: 'undo' } as never;
+    await backend.editWidgetLayout(edit, 7);
+    expect(invoke).toHaveBeenLastCalledWith('edit_widget_layout', { edit, baseRevision: 7 });
+    await backend.editWidgetLayout(edit);
+    expect(invoke).toHaveBeenLastCalledWith('edit_widget_layout', { edit, baseRevision: null });
+    const request = { surface: 'dashboard', revision: 7, gesture: { toFirst: { id: 'cpu' } }, seq: 3 } as never;
+    await backend.previewWidgetLayout(request);
+    expect(invoke).toHaveBeenLastCalledWith('preview_widget_layout', { request });
   });
 });

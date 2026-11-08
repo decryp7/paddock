@@ -2621,6 +2621,7 @@ name = "paddock-diag"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "libc",
  "log",
  "paddock-commands",
  "paddock-dialogs",
@@ -2640,13 +2641,17 @@ dependencies = [
 name = "paddock-dialogs"
 version = "0.2.0"
 dependencies = [
+ "block2",
  "log",
+ "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "paddock-commands",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
  "tauri",
+ "windows",
 ]
 
 [[package]]
@@ -2743,7 +2748,7 @@ dependencies = [
  "paddock-env",
  "paddock-jobs",
  "paddock-log",
- "paddock-secrets",
+ "paddock-proc",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -2840,6 +2845,8 @@ dependencies = [
 name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
+ "paddock-env",
+ "paddock-proc",
  "paddock-workspace-hack",
  "zeroize",
 ]
@@ -2862,7 +2869,9 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
+ "thiserror 2.0.21",
  "windows",
  "windows-service",
 ]
@@ -2910,6 +2919,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-plugin",
 ]
@@ -3064,9 +3074,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
- "gio-sys",
- "glib-sys",
- "gobject-sys",
+ "gtk-sys",
  "http",
  "httparse",
  "idna",

@@ -5,7 +5,6 @@
 //! names, e-mail and IP addresses, GUIDs, MAC addresses and serial numbers are removed, and the person edits the result
 //! before anything is opened.
 
-use crate::diagnostics::{RedactionCounts, Redactor};
 use serde::{Deserialize, Serialize};
 
 /// The most characters a search text may have.
@@ -108,8 +107,8 @@ fn drop_identifiers(text: &str) -> (String, u32, u32, u32) {
 }
 
 /// The text a search starts from: `text` with private details removed, cut to the limit, plus what was removed.
-pub fn search_seed(text: &str, redactor: &Redactor) -> SearchSeed {
-    let (redacted, c) = redactor.apply(text);
+pub fn search_seed(text: &str, redact: &dyn Fn(&str) -> (String, Removed)) -> SearchSeed {
+    let (redacted, c) = redact(text);
     let (without_ids, guids, macs, serials) = drop_identifiers(&redacted);
     let cleaned: String = tidy(&without_ids).chars().take(MAX_QUERY_CHARS).collect();
     SearchSeed {
@@ -118,14 +117,30 @@ pub fn search_seed(text: &str, redactor: &Redactor) -> SearchSeed {
     }
 }
 
-fn removal_summary(c: &RedactionCounts, guids: u32, macs: u32, serials: u32) -> Vec<String> {
+/// What a redactor removed from a search seed, by kind (the agent maps `paddock_diag`'s counts onto this; the core names no
+/// redactor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Removed {
+    /// Home folders and profile paths.
+    pub home_paths: u32,
+    /// User names.
+    pub user_names: u32,
+    /// The machine's name.
+    pub machine_names: u32,
+    /// E-mail addresses.
+    pub emails: u32,
+    /// IP addresses.
+    pub ip_addresses: u32,
+}
+
+fn removal_summary(c: &Removed, guids: u32, macs: u32, serials: u32) -> Vec<String> {
     let mut out = Vec::new();
     let mut add = |n: u32, one: &str, many: &str| {
         if n > 0 {
             out.push(plural(n, one, many));
         }
     };
-    add(c.home_paths + c.profile_paths, "home folder", "home folders");
+    add(c.home_paths, "home folder", "home folders");
     add(c.user_names, "user name", "user names");
     add(c.machine_names, "computer name", "computer names");
     add(c.emails, "e-mail address", "e-mail addresses");
@@ -200,15 +215,30 @@ pub enum HashSource {
 mod tests {
     use super::*;
 
-    fn me() -> Redactor {
-        Redactor::new(&["alex".into()], &["/Users/alex".into()], &["alexs-mac".into()])
+    /// A stand-in redactor with the shape the agent gives: replaces what it knows and counts it.
+    fn me(text: &str) -> (String, Removed) {
+        let mut c = Removed::default();
+        let mut out = text.to_string();
+        for (needle, with, count) in [
+            ("/Users/alex/", "", &mut c.home_paths),
+            ("alexs-mac", "<machine>", &mut c.machine_names),
+            ("192.168.1.5", "<ip>", &mut c.ip_addresses),
+            ("bob@example.com", "<email>", &mut c.emails),
+            ("alex", "<user>", &mut c.user_names),
+        ] {
+            if out.contains(needle) {
+                *count += 1;
+                out = out.replace(needle, with);
+            }
+        }
+        (out, c)
     }
 
     #[test]
     fn a_seed_loses_private_details_and_says_what() {
         let s = search_seed(
             "Slack crashed at /Users/alex/Library/Slack/x.log for alex on alexs-mac 192.168.1.5 {123e4567-e89b-12d3-a456-426614174000} serial C02XYZ12 aa:bb:cc:dd:ee:ff bob@example.com",
-            &me(),
+            &me,
         );
         assert_eq!(s.text, "Slack crashed at Library/Slack/x.log for on");
         assert_eq!(
@@ -228,22 +258,15 @@ mod tests {
 
     #[test]
     fn plain_text_is_kept_and_nothing_is_reported() {
-        let s = search_seed("kernel_task high cpu", &me());
+        let s = search_seed("kernel_task high cpu", &me);
         assert_eq!(s.text, "kernel_task high cpu");
         assert!(s.removed.is_empty());
     }
 
     #[test]
-    fn a_profile_of_someone_else_is_removed_too() {
-        let s = search_seed("C:\\Users\\Dana\\AppData\\x.exe", &me());
-        assert!(!s.text.contains("Dana"));
-        assert_eq!(s.removed, vec!["1 home folder"]);
-    }
-
-    #[test]
     fn the_seed_is_cut_to_the_limit() {
         let long = "word ".repeat(200);
-        assert!(search_seed(&long, &me()).text.chars().count() <= MAX_QUERY_CHARS);
+        assert!(search_seed(&long, &me).text.chars().count() <= MAX_QUERY_CHARS);
     }
 
     #[test]
@@ -255,13 +278,13 @@ mod tests {
             "id serial ABC123",
             "id serial:ABC123",
         ] {
-            let s = search_seed(t, &me());
+            let s = search_seed(t, &me);
             assert_eq!(s.text, "id", "{t}");
             assert_eq!(s.removed, vec!["1 serial number"]);
         }
         // A word that merely starts like it stays.
-        assert_eq!(search_seed("serialize data", &me()).text, "serialize data");
-        assert_eq!(search_seed("a serial", &me()).text, "a");
+        assert_eq!(search_seed("serialize data", &me).text, "serialize data");
+        assert_eq!(search_seed("a serial", &me).text, "a");
     }
 
     #[test]

@@ -1,6 +1,7 @@
 # 16. Dialog window sizing contract
 
 - Status: Accepted (2026-10-27, by the user)
+- Amended by ADR 0043 (decisions 1, 5 and 6: a declared size mode per kind, one measure loop, the user's resize).
 - Date: 2026-10-27
 - Related: rule 17 (every dialog is a real OS window), rule 39, rule 40 (recurring bugs mean a missing design rule),
   rule 43; ADR 0009 (dialog kinds and declared contracts, which this amends for sizing), ADR 0011 (layout by declared

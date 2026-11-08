@@ -38,3 +38,62 @@ fn a_start_that_panics_is_named_as_one() {
             .unwrap_err();
     assert!(e.contains("panicked"), "{e}");
 }
+
+fn failed_start(b: Builder<tauri::test::MockRuntime>) -> String {
+    mock_builder()
+        .plugin(b.in_memory().native_menu(false).build())
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default()
+}
+
+/// A part whose set-up closure fails fails the app's start, and the message names that part (so a user's log shows
+/// which one), for every optional part.
+#[test]
+fn a_part_that_fails_to_set_up_is_named() {
+    let cases: Vec<(&str, Builder<tauri::test::MockRuntime>)> = vec![
+        (
+            "Report a problem",
+            Builder::new(identity()).diagnostics(|_| Err("no log folder".into())),
+        ),
+        (
+            "user files",
+            Builder::new(identity()).files(|_| Err("no folder".into())),
+        ),
+        (
+            "storage",
+            Builder::new(identity()).storage(|_| Err("no categories".into())),
+        ),
+        (
+            "the knowledge packs",
+            Builder::new(identity()).packs(|_| Err("no packs".into())),
+        ),
+        (
+            "the notification channels",
+            Builder::new(identity()).channels(|_, _| Err("no store".into())),
+        ),
+        (
+            "the AI access settings",
+            Builder::new(identity()).mcp(|_, _| Err("no keys".into())),
+        ),
+    ];
+    for (part, b) in cases {
+        let e = failed_start(b);
+        assert!(
+            e.contains("The shell could not set up") && e.contains(part),
+            "{part}: {e}"
+        );
+    }
+}
+
+/// The composition test of an app asks whether diagnostics were set up.
+#[test]
+fn diagnostics_installed_follows_the_diagnostics_call() {
+    assert!(!Builder::<tauri::test::MockRuntime>::new(identity()).diagnostics_installed());
+    assert!(
+        Builder::<tauri::test::MockRuntime>::new(identity())
+            .diagnostics(|_| Err("x".into()))
+            .diagnostics_installed()
+    );
+}

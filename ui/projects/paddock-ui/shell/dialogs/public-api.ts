@@ -12,7 +12,7 @@ export {
   dismissOf,
   modalityOf,
   resolveSize,
-  fitsContent,
+  sizeModeOf,
   growsOnly,
   raiseToKindMinimum,
   instanceKey,

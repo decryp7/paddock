@@ -1,6 +1,22 @@
-//! The native question through `tauri-plugin-dialog` (feature `dialog`): a warning message dialog owned by the stuck
-//! window, with custom button labels (macOS and Windows; the GTK backend shows Yes/No/Cancel or Ok/Cancel, which map to
-//! the same choices in order).
+//! The native question: on macOS and Linux a sheet or message dialog this crate shows itself (so it keeps the handle and can close it
+//! when the page recovers, without touching another dialog), on Windows and elsewhere a message dialog through `tauri-plugin-dialog`
+//! (rfd; on Windows found again by its class, owner and title). Custom button labels on every OS; the GTK and rfd Windows backends
+//! show Yes/No/Cancel or Ok/Cancel, which map to the same choices in order.
+
+#[cfg(target_os = "linux")]
+mod gtk;
+// Each OS uses part of it (the rest is pure, tested everywhere).
+#[allow(dead_code)]
+mod identity;
+#[cfg(target_os = "macos")]
+mod mac;
+#[cfg(windows)]
+mod win;
+
+#[cfg(target_os = "linux")]
+use gtk as own;
+#[cfg(target_os = "macos")]
+use mac as own;
 
 use super::Asker;
 use crate::{Choice, Prompt};
@@ -9,10 +25,14 @@ use tauri_plugin_dialog::{
     DialogExt, MessageDialogBuilder, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
 };
 
-/// Shows the watchdog's questions as native message dialogs. The app registers `tauri_plugin_dialog::init()`; without it
-/// the question is logged and the window keeps waiting.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct NativeAsker;
+/// Shows the watchdog's questions as native message dialogs. On Windows and other systems the app registers
+/// `tauri_plugin_dialog::init()`; without it the question is logged and the window keeps waiting.
+#[derive(Debug, Clone, Default)]
+pub struct NativeAsker {
+    /// The title of the question shown for each window (Windows finds the dialog by it).
+    #[cfg(windows)]
+    titles: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (u64, String)>>>,
+}
 
 /// The buttons of `prompt` as a message dialog's buttons (the first is the default).
 pub fn buttons(prompt: &Prompt) -> MessageDialogButtons {
@@ -59,9 +79,10 @@ pub fn message<R: Runtime>(
     })
 }
 
-impl<R: Runtime> Asker<R> for NativeAsker {
-    fn ask(
-        &self,
+impl NativeAsker {
+    /// The message dialog through the dialog plugin (Windows and systems this crate has no dialog of its own for).
+    #[cfg_attr(any(target_os = "macos", target_os = "linux"), allow(dead_code))]
+    fn ask_with_plugin<R: Runtime>(
         app: &AppHandle<R>,
         label: &str,
         prompt: Prompt,
@@ -76,6 +97,55 @@ impl<R: Runtime> Asker<R> for NativeAsker {
                 answer(Choice::Wait);
             }
         }
+    }
+}
+
+impl<R: Runtime> Asker<R> for NativeAsker {
+    fn ask(
+        &self,
+        app: &AppHandle<R>,
+        label: &str,
+        seq: u64,
+        prompt: Prompt,
+        answer: Box<dyn FnOnce(Choice) + Send>,
+    ) {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        own::show(app, label, seq, &prompt, answer);
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            #[cfg(windows)]
+            if let Ok(mut titles) = self.titles.lock() {
+                titles.insert(label.to_string(), (seq, prompt.title.clone()));
+            }
+            let _ = seq;
+            Self::ask_with_plugin(app, label, prompt, answer);
+        }
+    }
+
+    fn dismiss(&self, app: &AppHandle<R>, label: &str, seq: u64) -> bool {
+        #[cfg(target_os = "macos")]
+        let found = own::dismiss(app, label, seq);
+        #[cfg(target_os = "linux")]
+        let found = {
+            let _ = app;
+            own::dismiss(label, seq)
+        };
+        #[cfg(windows)]
+        let found = {
+            let title = self.titles.lock().ok().and_then(|t| {
+                t.get(label)
+                    .filter(|(s, _)| *s == seq)
+                    .map(|(_, t)| t.clone())
+            });
+            title.is_some_and(|title| win::dismiss(app, label, &title))
+        };
+        #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+        let found = {
+            let _ = (app, seq);
+            false
+        };
+        log::info!(Window = label, Seq = seq, Found = found; "Question {seq} dialog of window {label}: {}", if found { "asked to close" } else { "not found to close" });
+        found
     }
 }
 

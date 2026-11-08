@@ -18,7 +18,7 @@ import { EXTRAS_STYLES } from './extras-styles';
       @if (data(); as u) {
         @if (u.networkUnavailable; as why) { <p class="note" role="status"><dy-icon name="info" /><span><strong>Network traffic is not available:</strong> {{ why }}</span></p> }
         @if (u.energyUnavailable; as why) { <p class="note" role="status"><dy-icon name="info" /><span><strong>Energy impact is not available:</strong> {{ why }}</span></p> }
-        <pd-table [toolbar]="false" label="Network and energy per app" [rows]="rows()" [columns]="columns()" [rowKey]="appKey" [filterable]="false" [maxHeight]="620" [(sort)]="sort">
+        <pd-table [toolbar]="false" label="Network and energy per app" [rows]="rows()" [columns]="columns()" [rowKey]="appKey" [filterable]="false" height="window" [(sort)]="sort">
           <ng-template pdCell="app" let-a><span class="app"><span class="tile" aria-hidden="true" [style.background]="tile(a.app)">{{ initial(a.app) }}</span><span class="nm">{{ a.app }}</span></span></ng-template>
         </pd-table>
         <p class="faint muted">Traffic is counted since each app started. Energy impact is the system's own score right now; higher is more battery use.</p>

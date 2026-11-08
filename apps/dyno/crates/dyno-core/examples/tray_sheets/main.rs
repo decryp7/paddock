@@ -127,7 +127,7 @@ mod sheets {
                 },
             ),
             (
-                Kind::Network,
+                Kind::Network(dyno_core::tray::NetDir::Up),
                 Reading {
                     up: 1_240_000.0,
                     down: 24_300_000.0,
@@ -551,7 +551,7 @@ mod sheets {
                 State::Normal,
             ),
             (
-                Kind::Network,
+                Kind::Network(dyno_core::tray::NetDir::Up),
                 Reading {
                     up: 1_240_000.0,
                     down: 24_300_000.0,

@@ -15,3 +15,9 @@ export function byteAxis(maxBytes: number): { max: number; interval: number } {
   const top = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : 1;
   return niceAxis(top, 1024 ** Math.min(4, Math.max(0, Math.floor(Math.log(top) / Math.log(1024)))));
 }
+
+/** {@link niceAxis} for storage sizes: counted in the largest decimal unit (KB, MB, GB, TB) the maximum reaches, as `formatStorage` shows them. */
+export function storageAxis(maxBytes: number): { max: number; interval: number } {
+  const top = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : 1;
+  return niceAxis(top, 1000 ** Math.min(4, Math.max(0, Math.floor(Math.log10(top) / 3))));
+}

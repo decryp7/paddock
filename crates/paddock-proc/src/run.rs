@@ -1,5 +1,13 @@
 //! Running a program to completion with a timeout and an output cap. On a timeout, or when the output reaches the cap
 //! and the caller asked to stop there, the whole process tree is ended and reaped, so no helper is left behind.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::identity::ProcessId;
 use crate::tree::kill_tree;
@@ -180,10 +188,14 @@ fn drain(
                 c.truncated = true;
                 if stop_on_cap && !told {
                     told = true;
+                    // silent: the receiver is gone once the run has ended, and nothing waits for the event then
+                    #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
                     let _ = tx.send(Event::Cap);
                 }
             }
         }
+        // silent: the receiver is gone once the run has ended, and nothing waits for the event then
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = tx.send(Event::Drained);
     });
     cap
@@ -231,6 +243,8 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
     });
     let waiter = tx.clone();
     std::thread::spawn(move || {
+        // silent: the receiver is gone once the run has ended (the tree was killed), and nothing waits for the event then
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = waiter.send(Event::Exit(child.wait()));
     });
     drop(tx);
@@ -290,12 +304,153 @@ pub fn run_bounded(mut cmd: Command, limits: Limits) -> Result<Output, RunError>
         out.map(|c| take(&c)).unwrap_or_default(),
         err.map(|c| take(&c)).unwrap_or_default(),
     );
-    Ok(Output {
+    let output = Output {
         outcome,
         truncated: o.truncated || e.truncated,
         stdout: o.bytes,
         stderr: e.bytes,
-    })
+    };
+    log_tool_run(&name, cmd.get_args().count(), started.elapsed(), &output);
+    Ok(output)
+}
+
+/// The `tool.run` line (ER-27): the program's name (never its arguments, which can hold paths and secrets) and how many there were,
+/// how it ended (exit code, timeout or output cap), how long it took, and the last of its error output when it did not succeed. A run
+/// that succeeded is a debug line (tools run on every poll); one that did not is a warning.
+fn log_tool_run(name: &str, args: usize, took: Duration, output: &Output) {
+    let ms = u64::try_from(took.as_millis()).unwrap_or(u64::MAX);
+    let (how, tail) = describe_run(output);
+    if output.success() {
+        log::debug!(Tool = name, Args = args, Ms = ms, Exit = how.as_str(); "tool.run");
+    } else if first_failure(name, &how) {
+        log::warn!(Tool = name, Args = args, Ms = ms, Exit = how.as_str(), StderrTail = tail.as_str(); "tool.run failed");
+    } else {
+        // The same program failing the same way again (a poll every few seconds) is told once; the repeats are debug lines.
+        log::debug!(Tool = name, Args = args, Ms = ms, Exit = how.as_str(); "tool.run failed again");
+    }
+}
+
+/// Whether this program has not yet failed with this exit in this run of the process. Bounded: past [`MAX_FAILURE_KEYS`] distinct pairs
+/// every further failure counts as seen.
+fn first_failure(name: &str, how: &str) -> bool {
+    use std::collections::HashSet;
+    static SEEN: Mutex<Option<HashSet<(String, String)>>> = Mutex::new(None);
+    let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+    let set = seen.get_or_insert_with(HashSet::new);
+    if set.len() >= MAX_FAILURE_KEYS {
+        return false;
+    }
+    set.insert((name.to_string(), how.to_string()))
+}
+
+/// Most distinct (program, exit) failures remembered for [`first_failure`].
+const MAX_FAILURE_KEYS: usize = 256;
+
+/// `text` with anything that could be a user's path or file name replaced. Per line, from the first word that holds a `/` or a `\\`
+/// (quotes and punctuation stuck to it are part of the word) to the end of the line becomes `<path>`: a path may hold spaces, so
+/// there is no telling where it ends. The words before it keep the cause readable, and a trailing `: <phrase>` survives when the phrase
+/// is one of the OS's own error texts ([`ERRNO_PHRASES`]; a match against a fixed list, never free text). A remaining word that looks
+/// like a file name (a dot and a short extension) becomes `<file>`.
+fn scrub_paths(text: &str) -> String {
+    text.lines().map(scrub_line).collect::<Vec<_>>().join("\n")
+}
+
+/// The OS's error texts that may follow a removed path (no user content in any of them).
+const ERRNO_PHRASES: [&str; 14] = [
+    "Permission denied",
+    "Operation not permitted",
+    "No such file or directory",
+    "File exists",
+    "Is a directory",
+    "Not a directory",
+    "Directory not empty",
+    "Read-only file system",
+    "Device or resource busy",
+    "No space left on device",
+    "Input/output error",
+    "Too many open files",
+    "Access is denied",
+    "The system cannot find the path specified",
+];
+
+fn scrub_line(line: &str) -> String {
+    // The byte index where the first word holding a separator starts.
+    let mut cut = None;
+    let mut word_start = None;
+    for (i, c) in line.char_indices() {
+        if c.is_whitespace() {
+            word_start = None;
+            continue;
+        }
+        let start = *word_start.get_or_insert(i);
+        if c == '/' || c == '\\' {
+            cut = Some(start);
+            break;
+        }
+    }
+    let head = &line[..cut.unwrap_or(line.len())];
+    let words: Vec<String> = head
+        .split_whitespace()
+        .map(|w| {
+            if looks_like_file_name(w) {
+                "<file>".to_string()
+            } else {
+                w.to_string()
+            }
+        })
+        .collect();
+    let mut out = words.join(" ");
+    if let Some(at) = cut {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str("<path>");
+        let tail = line[at..].trim_end();
+        if let Some(phrase) = ERRNO_PHRASES
+            .iter()
+            .find(|p| tail.ends_with(&format!(": {p}")))
+        {
+            out.push_str(": ");
+            out.push_str(phrase);
+        }
+    }
+    out
+}
+
+/// A word with a dot inside and a short alphanumeric extension after the last one (`plan.docx`, `tax-return.pdf`), not a version number.
+fn looks_like_file_name(word: &str) -> bool {
+    let word =
+        word.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | ';' | ':' | '(' | ')' | '.'));
+    let Some((stem, ext)) = word.rsplit_once('.') else {
+        return false;
+    };
+    !stem.is_empty()
+        && (1..=5).contains(&ext.len())
+        && ext.chars().all(|c| c.is_ascii_alphanumeric())
+        && ext.chars().any(|c| c.is_ascii_alphabetic())
+        && stem.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+/// How a run ended in a word (`0`, `3`, `signal`, `timeout`, `output-cap`) and the last 200 characters of its error output.
+fn describe_run(output: &Output) -> (String, String) {
+    let how = match &output.outcome {
+        Outcome::Exited(s) => s
+            .code()
+            .map_or_else(|| "signal".to_string(), |c| c.to_string()),
+        Outcome::TimedOut => "timeout".into(),
+        Outcome::OutputCap => "output-cap".into(),
+    };
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let scrubbed = scrub_paths(stderr.trim());
+    let tail: String = scrubbed
+        .chars()
+        .rev()
+        .take(200)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    (how, tail)
 }
 
 #[cfg(test)]
@@ -311,6 +466,132 @@ mod tests {
     fn a_lowered_run_ends_like_any_other() {
         let o = run_bounded(child(Mode::Exit3), limits().lowered()).unwrap();
         assert!(matches!(o.outcome, Outcome::Exited(s) if s.code() == Some(3)));
+    }
+
+    #[test]
+    fn a_run_is_described_by_its_exit_and_the_tail_of_its_error_output() {
+        let o = run_bounded(child(Mode::Exit3), limits()).unwrap();
+        let (how, tail) = describe_run(&o);
+        assert_eq!(how, "3");
+        assert!(tail.chars().count() <= 200);
+        let long = Output {
+            outcome: Outcome::TimedOut,
+            stdout: vec![],
+            stderr: "e".repeat(1000).into_bytes(),
+            truncated: false,
+        };
+        let (how, tail) = describe_run(&long);
+        assert_eq!((how.as_str(), tail.chars().count()), ("timeout", 200));
+    }
+
+    #[test]
+    fn paths_in_the_error_output_never_reach_the_log() {
+        // Paths with spaces (the three the review found leaking), Windows, quoted, and a bare file name.
+        for (input, forbidden) in [
+            (
+                "cannot read /Users/sam/My Secret Plans/tax return.pdf",
+                ["Secret", "tax", "return", "sam"],
+            ),
+            (
+                "cannot read C:\\Users\\Bob Smith\\My Docs\\plan.docx: denied",
+                ["Bob", "Smith", "Docs", "plan"],
+            ),
+            (
+                "open \"/home/a b/c d.txt\" failed",
+                ["a b", "c d", "home", ".txt"],
+            ),
+            (
+                "error reading tax-return.pdf",
+                ["tax", "return", "pdf", "tax-return"],
+            ),
+        ] {
+            let out = scrub_paths(input);
+            for word in forbidden {
+                assert!(
+                    !out.contains(word),
+                    "{word} survived in {out:?} (from {input:?})"
+                );
+            }
+        }
+        // The cause stays readable.
+        assert!(
+            scrub_paths("smartctl: cannot read /dev/disk0").starts_with("smartctl: cannot read")
+        );
+        assert_eq!(
+            scrub_paths("exit 3\nsecond /x/y line"),
+            "exit 3\nsecond <path>"
+        );
+        let o = Output {
+            outcome: Outcome::TimedOut,
+            stdout: vec![],
+            stderr: b"failed on /Users/sam/My Secret.doc".to_vec(),
+            truncated: false,
+        };
+        let (_, tail) = describe_run(&o);
+        assert!(
+            !tail.contains("sam") && !tail.contains("Secret") && tail.contains("<path>"),
+            "{tail}"
+        );
+    }
+
+    #[test]
+    fn a_word_with_a_separator_starts_the_cut_whatever_surrounds_it() {
+        // The six the final review found passing through, and what must be left of them.
+        for (input, want) in [
+            (
+                "rm: cannot remove \u{2018}/home/sam/My Plans/x\u{2019}: Permission denied",
+                "rm: cannot remove <path>: Permission denied",
+            ),
+            ("cannot open `/Users/sam/secret'", "cannot open <path>"),
+            ("cannot read Documents/taxes/plan", "cannot read <path>"),
+            ("open ../../Users/sam/notes failed", "open <path>"),
+            ("files a,/Users/sam/x failed", "files <path>"),
+            ("%USERPROFILE%\\Docs\\plan failed", "<path>"),
+        ] {
+            let out = scrub_paths(input);
+            assert_eq!(out, want, "from {input:?}");
+            for word in ["sam", "taxes", "Plans", "secret", "notes", "Docs", "plan"] {
+                assert!(
+                    !out.contains(word) || want.contains(word),
+                    "{word} survived in {out:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_errno_phrase_after_a_path_is_kept_and_nothing_else_is() {
+        assert_eq!(
+            scrub_paths("smartctl: /dev/disk0: Operation not permitted"),
+            "smartctl: <path>: Operation not permitted"
+        );
+        assert_eq!(
+            scrub_paths("open /x/y: No such file or directory"),
+            "open <path>: No such file or directory"
+        );
+        // Free text after the path is not a phrase from the list: it goes with the path.
+        assert_eq!(scrub_paths("open /x/y: sam's secret plans"), "open <path>");
+        assert_eq!(
+            scrub_paths("open /x/y: Permission denied for sam"),
+            "open <path>"
+        );
+    }
+
+    #[test]
+    fn the_same_failure_of_the_same_program_is_told_once() {
+        assert!(first_failure("tool-a-for-the-test", "3"));
+        assert!(
+            !first_failure("tool-a-for-the-test", "3"),
+            "the repeat is not a warning"
+        );
+        assert!(
+            first_failure("tool-a-for-the-test", "4"),
+            "another exit is new"
+        );
+        assert!(
+            first_failure("tool-b-for-the-test", "3"),
+            "another program is new"
+        );
     }
 
     #[test]

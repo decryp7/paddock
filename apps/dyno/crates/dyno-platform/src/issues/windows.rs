@@ -207,6 +207,85 @@ impl IssueSource for WindowsEvents {
     }
 }
 
+/// The channel and XPath query for the entries one source wrote: events whose provider is `source` (the Application log), and the
+/// Service Control Manager's events about the service of that name (the System log). `source` must be a plain name (letters,
+/// digits, `-`, `_`): it goes into a query, so anything else is refused.
+pub fn source_queries(source: &str, ms: i64) -> Option<Vec<(&'static str, String)>> {
+    if source.is_empty() || !source.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+    let recent = format!("TimeCreated[timediff(@SystemTime) <= {}]", ms.max(1));
+    Some(vec![
+        ("Application", format!("*[System[Provider[@Name='{source}'] and {recent}]]")),
+        (
+            "System",
+            format!("*[System[Provider[@Name='Service Control Manager'] and {recent}] and EventData[Data='{source}']]"),
+        ),
+    ])
+}
+
+/// Event Log entries a source wrote, rendered as one line each (`time id provider level: message`), newest first, for a problem
+/// report. Reading the Application and System logs needs no rights beyond a standard user's. A channel that cannot be read gives
+/// a line saying why, never an error: the report explains the gap instead of hiding it.
+pub fn source_events(runner: &dyn ToolRunner, source: &str, hours: u32, max: u32) -> Vec<String> {
+    let ms = i64::from(hours.max(1)) * 3_600_000;
+    let Some(queries) = source_queries(source, ms) else {
+        return vec![format!("(not asked: \"{source}\" is not a plain source name)")];
+    };
+    let mut lines = Vec::new();
+    for (channel, query) in queries {
+        let args = vec![
+            "qe".to_string(),
+            channel.to_string(),
+            format!("/q:{query}"),
+            format!("/c:{max}"),
+            "/rd:true".into(),
+            "/f:RenderedXml".into(),
+        ];
+        match runner.run("wevtutil.exe", &args, timeout_for(hours)) {
+            Ok(text) => {
+                let found = render_source_events(&text);
+                if found.is_empty() {
+                    lines.push(format!("({channel}: no entries in the last {hours} hours)"));
+                }
+                lines.extend(found);
+            }
+            Err(e) => lines.push(format!("({channel}: could not be read: {e})")),
+        }
+    }
+    lines
+}
+
+/// One line per event of `wevtutil ... /f:RenderedXml` output, bounded: `2026-11-05T09:00:01Z id 7036 Service Control Manager
+/// Information: <message or data, at most 300 characters>`. Pure; a malformed event is skipped.
+pub fn render_source_events(text: &str) -> Vec<String> {
+    text.split("<Event ")
+        .skip(1)
+        .filter_map(|chunk| {
+            let xml = chunk.split("</Event>").next().unwrap_or(chunk);
+            let provider = attr(xml, "<Provider", "Name")?;
+            let id = element(xml, "EventID")?.trim().to_string();
+            let at = attr(xml, "<TimeCreated", "SystemTime").unwrap_or_default();
+            let level = element(xml, "Level").unwrap_or_default();
+            let level = match level.trim() {
+                "1" => "Critical",
+                "2" => "Error",
+                "3" => "Warning",
+                "4" | "0" => "Information",
+                other => other,
+            };
+            let message = element(xml, "Message").unwrap_or_default();
+            let body = if message.trim().is_empty() {
+                event_data(xml).join(", ")
+            } else {
+                message
+            };
+            let body: String = body.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(300).collect();
+            Some(format!("{at} id {id} {provider} {level}: {body}"))
+        })
+        .collect()
+}
+
 /// Every curated event in `wevtutil ... /f:RenderedXml` output. Pure; a malformed event is skipped.
 pub fn parse_events(text: &str) -> Vec<Issue> {
     text.split("<Event ")
@@ -416,6 +495,45 @@ Faulting module name: ntdll.dll &lt;x&gt;</Message></RenderingInfo></Event>"#;
         assert!(kinds.len() >= 8);
     }
 
+    const SERVICE_EVENT: &str = "<Event xmlns='http://schemas.microsoft.com/win/2004/08/events/event'><System><Provider Name='Service Control Manager'/><EventID Qualifiers='16384'>7034</EventID><Level>2</Level><TimeCreated SystemTime='2026-11-05T09:00:01.123Z'/></System><EventData><Data>DynoHelper</Data><Data>1</Data></EventData><RenderingInfo><Message>The DynoHelper service terminated unexpectedly.\n It has done this 1 time(s).</Message></RenderingInfo></Event>";
+
+    #[test]
+    fn a_sources_entries_are_asked_by_a_plain_name_only_and_rendered_one_line_each() {
+        assert!(source_queries("DynoHelper", 1000).is_some_and(|q| q.len() == 2 && q[0].1.contains("@Name='DynoHelper'")));
+        for bad in ["", "a'b", "x] or [y", "a b"] {
+            assert!(source_queries(bad, 1).is_none(), "{bad}");
+        }
+        let lines = render_source_events(SERVICE_EVENT);
+        assert_eq!(lines.len(), 1);
+        assert!(
+            lines[0].starts_with("2026-11-05T09:00:01.123Z id 7034 Service Control Manager Error: The DynoHelper service terminated"),
+            "{lines:?}"
+        );
+        assert!(!lines[0].contains('\n'));
+        assert!(render_source_events("garbage <Event ").is_empty());
+    }
+
+    #[test]
+    fn a_channel_that_cannot_be_read_is_a_line_not_an_error() {
+        let (reader, calls) = reader(vec![
+            Ok(SERVICE_EVENT.into()),
+            Err(PlatformError::Failed("Access is denied".into())),
+        ]);
+        drop(reader);
+        struct Shared(std::sync::Arc<Scripted>);
+        impl ToolRunner for Shared {
+            fn run_tool(&self, t: &crate::runner::Tool, d: std::time::Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+                self.0.run_tool(t, d)
+            }
+        }
+        let lines = source_events(&Shared(calls.clone()), "DynoHelper", 48, 50);
+        assert_eq!(calls.calls.lock().unwrap().len(), 2, "Application and System are both asked");
+        assert!(lines[0].contains("id 7034"), "{lines:?}");
+        assert!(lines.iter().any(|l| l.starts_with("(System: could not be read")), "{lines:?}");
+        let refused = source_events(&Shared(calls), "bad name", 1, 1);
+        assert!(refused[0].contains("not a plain source name"));
+    }
+
     #[test]
     fn entities_unescape() {
         assert_eq!(
@@ -431,8 +549,8 @@ Faulting module name: ntdll.dll &lt;x&gt;</Message></RenderingInfo></Event>"#;
         let s = std::sync::Arc::new(Scripted::new(answers));
         struct Shared(std::sync::Arc<Scripted>);
         impl ToolRunner for Shared {
-            fn run(&self, p: &str, a: &[String], t: std::time::Duration) -> Result<String, PlatformError> {
-                self.0.run(p, a, t)
+            fn run_tool(&self, tool: &crate::runner::Tool, t: std::time::Duration) -> Result<crate::runner::ToolOutput, PlatformError> {
+                self.0.run_tool(tool, t)
             }
         }
         (WindowsEvents::new(Box::new(Shared(s.clone()))), s)
