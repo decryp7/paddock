@@ -666,16 +666,22 @@ fn launch_on_a_free_port() -> pitwall_core::llama::Launch {
 async fn a_child_engine_that_exits_before_it_answers_is_reported_with_its_reason() {
     use pitwall_server::engines::Engine as _;
     let dir = tempfile::tempdir().unwrap();
+    let (polls, polled) = tokio::sync::watch::channel(0usize);
     let engine = common::ChildEngine {
         take_first_port: true,
+        polls: Some(polls),
         ..common::ChildEngine::new(common::runnable_server(dir.path()))
     };
-    let e = engine
-        .start(&launch_on_a_free_port())
+    let launch = launch_on_a_free_port();
+    let e = common::noticing_the_first_exit(&engine, polled, engine.start(&launch))
         .await
         .err()
         .expect("the port is held, so the child cannot listen");
-    assert!(e.to_string().contains("exited"), "{e}");
+    assert_eq!(*engine.outcomes.lock().unwrap(), [common::StartOutcome::Exited]);
+    assert!(
+        e.to_string().starts_with("the engine failed to start: the child engine exited ("),
+        "{e}"
+    );
     assert!(pitwall_server::serving::port_taken(&e), "not read as a taken port: {e}");
 }
 
@@ -684,14 +690,23 @@ async fn a_child_engine_that_exits_before_it_answers_is_reported_with_its_reason
 #[tokio::test]
 async fn a_load_whose_child_finds_its_port_taken_retries_on_a_fresh_port() {
     let dir = tempfile::tempdir().unwrap();
+    let (polls, polled) = tokio::sync::watch::channel(0usize);
     let engine = std::sync::Arc::new(common::ChildEngine {
         take_first_port: true,
+        polls: Some(polls),
         ..common::ChildEngine::new(common::runnable_server(dir.path()))
     });
     let ports = engine.ports.clone();
-    let h = common::harness_with(dir, false, Some(engine)).await;
+    let h = common::harness_with(dir, false, Some(engine.clone())).await;
     let id = pitwall_core::ids::ModelId::parse("tiny-q4_k_m").unwrap();
-    let (busy, cold) = h.st.serving.ensure(&id).await.unwrap_or_else(|e| panic!("{e:?}"));
+    let (busy, cold) = common::noticing_the_first_exit(&engine, polled, h.st.serving.ensure(&id))
+        .await
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    assert_eq!(
+        *engine.outcomes.lock().unwrap(),
+        [common::StartOutcome::Exited, common::StartOutcome::Healthy],
+        "the first start ended by the child's exit, the retry by health"
+    );
     assert!(cold.is_some());
     drop(busy);
     let ports = ports.lock().unwrap().clone();

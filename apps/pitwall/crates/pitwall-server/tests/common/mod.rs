@@ -476,8 +476,10 @@ pub struct ChildEngine {
     pub take_first_port: bool,
     /// The pause between two health polls.
     pub poll_every: Duration,
-    /// Counts the health polls of the current start, so a test can act after a given number of them.
+    /// Counts the health polls of all starts together, so a test can act after a given number of them.
     pub polls: Option<tokio::sync::watch::Sender<usize>>,
+    /// How each start ended, in order.
+    pub outcomes: Arc<std::sync::Mutex<Vec<StartOutcome>>>,
     /// The process ids started, so a test can check they ended.
     pub pids: Arc<std::sync::Mutex<Vec<u32>>>,
     /// The port of every start, in order.
@@ -494,23 +496,66 @@ impl ChildEngine {
             take_first_port: false,
             poll_every: Duration::from_millis(50),
             polls: None,
+            outcomes: Default::default(),
             pids: Default::default(),
             ports: Default::default(),
         }
     }
 }
 
-/// Holds `port` on 127.0.0.1 until dropped, closing every connection at once (so a health poll fails fast instead of
-/// waiting for an answer that never comes).
-async fn hold_port(port: u16) -> tokio::task::JoinHandle<()> {
-    let l = tokio::net::TcpListener::bind(("127.0.0.1", port))
-        .await
-        .expect("the probed port is free again");
-    tokio::spawn(async move {
+/// How one [`ChildEngine`] start ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartOutcome {
+    /// The child answered `/health` with 200.
+    Healthy,
+    /// The child exited before it answered.
+    Exited,
+    /// [`CHILD_HANG_GUARD`] ran out: neither of the above.
+    HangGuard,
+}
+
+/// Takes `port` on 127.0.0.1 until the handle is aborted, closing every connection at once (so a health poll fails
+/// fast instead of waiting for an answer that never comes). `None` when the bind fails: then someone else already has
+/// the port, which is the state the test wants anyway.
+async fn hold_port(port: u16) -> Option<tokio::task::JoinHandle<()>> {
+    let l = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.ok()?;
+    Some(tokio::spawn(async move {
         while let Ok((s, _)) = l.accept().await {
             drop(s);
         }
-    })
+    }))
+}
+
+/// Runs `fut` (a start or a load of `engine`, whose `polls` sender belongs to `polled`) and fails at once if the first
+/// child has ended but the double keeps polling it instead of reporting the exit: a missed exit would otherwise show
+/// only as a slow test ending in the hang guard. Allows a few polls for the child's end to be seen.
+pub async fn noticing_the_first_exit<F: std::future::Future>(
+    engine: &ChildEngine,
+    mut polled: tokio::sync::watch::Receiver<usize>,
+    fut: F,
+) -> F::Output {
+    const SLACK: usize = 5;
+    let (pids, outcomes) = (engine.pids.clone(), engine.outcomes.clone());
+    let watch = async move {
+        let seen = loop {
+            if polled.changed().await.is_err() {
+                return std::future::pending().await;
+            }
+            let first = pids.lock().unwrap().first().copied();
+            if first.is_some_and(|pid| !pitwall_server::system::pid_alive(pid)) {
+                break *polled.borrow();
+            }
+        };
+        let _ = polled.wait_for(|n| *n > seen + SLACK).await;
+        if outcomes.lock().unwrap().is_empty() {
+            panic!("the first child ended, yet the double polled it {SLACK} more times without reporting the exit");
+        }
+        std::future::pending::<()>().await
+    };
+    tokio::select! {
+        r = fut => r,
+        () = watch => unreachable!(),
+    }
 }
 
 impl Engine for ChildEngine {
@@ -531,7 +576,7 @@ impl Engine for ChildEngine {
             self.ports.lock().unwrap().push(l.port);
             let first = self.ports.lock().unwrap().len() == 1;
             let held = if self.take_first_port && first {
-                Some(hold_port(l.port).await)
+                hold_port(l.port).await
             } else {
                 None
             };
@@ -582,17 +627,16 @@ impl Engine for ChildEngine {
             let client = Client::new(port, None);
             let started = std::time::Instant::now();
             let mut next_note = Duration::from_secs(10);
-            if let Some(p) = &self.polls {
-                p.send_replace(0);
-            }
             let outcome = loop {
                 if let Ok(Some(status)) = child.try_wait() {
                     if let Some(r) = reader {
                         let _ = r.await;
                     }
+                    self.outcomes.lock().unwrap().push(StartOutcome::Exited);
                     break Err(EngineError::Start(format!("the child engine exited ({status}): {}", said(&tail))));
                 }
                 if let Ok((200, _)) = client.json("GET", "/health", None, Duration::from_secs(2)).await {
+                    self.outcomes.lock().unwrap().push(StartOutcome::Healthy);
                     break Ok(Running {
                         child: Some(child),
                         guard: None,
@@ -606,11 +650,13 @@ impl Engine for ChildEngine {
                 }
                 let waited = started.elapsed();
                 if waited >= CHILD_HANG_GUARD {
+                    // Deliberately without the child's output (it is in the test's stderr above): its words, such as a
+                    // bind error, must not make the product read a hang as a taken port.
+                    self.outcomes.lock().unwrap().push(StartOutcome::HangGuard);
                     break Err(EngineError::Start(format!(
-                        "hang guard: the child engine (pid {pid:?}, port {}) neither answered /health nor exited within {} s; it printed: {}",
+                        "hang guard: the child engine (pid {pid:?}, port {}) neither answered /health nor ended within {} s; its output is in the test's stderr",
                         l.port,
-                        CHILD_HANG_GUARD.as_secs(),
-                        said(&tail)
+                        CHILD_HANG_GUARD.as_secs()
                     )));
                 }
                 if waited >= next_note {
