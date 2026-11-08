@@ -381,6 +381,12 @@ fn stamp_problems(kind: &str, id: &str, s: &Stamp, today: Date, out: &mut Vec<Pr
             fix: "Fix the cause and remove the entry, or move the date with a `Gates-date:` trailer in the commit message.".into(),
         });
     }
+    if s.since > today {
+        out.push(Problem {
+            message: format!("[[{kind}]] {id}: since {} is in the future", s.since),
+            fix: "since is the day the entry was made; a later date would buy more than 60 days.".into(),
+        });
+    }
     if s.review_by.0 - s.since.0 > 60 {
         out.push(Problem {
             message: format!(
@@ -626,6 +632,13 @@ approved = "user"
         assert!(errs.iter().any(|e| e.contains("needs approved = \"user\"")), "{errs:?}");
         assert!(parse("not = toml = at all").1[0].contains("not valid TOML"));
         assert!(parse("version = 2").1[0].contains("version must be 1"));
+    }
+
+    #[test]
+    fn an_entry_made_in_the_future_is_a_problem() {
+        let (r, _) = parse(GOOD);
+        let p = check_dates(&r, Date::parse("2026-11-01").unwrap());
+        assert!(p.iter().any(|x| x.message.contains("is in the future")), "{p:?}");
     }
 
     #[test]

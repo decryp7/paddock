@@ -82,6 +82,8 @@ pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
     let started = std::time::Instant::now();
     let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
     let sources = edge::load_sources(&root).map_err(CliError::failure)?;
+    let planner = edge::NodePlanner::new(&root);
+    let history = edge::register_history(&root);
     let input = evaluate::Input {
         tree: &tree,
         sources: &sources,
@@ -89,10 +91,12 @@ pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
         conformance_commands: edge::conformance_json(&root, "commands").ok(),
         dev_commands: dev_command_paths(),
         register_text: std::fs::read_to_string(root.join("docs/gates.toml")).ok(),
-        base_register_text: edge::register_at(&root, &a.base),
-        history: edge::register_history(&root),
+        base_register_text: edge::base_register(&root, &a.base),
+        history: history.clone().unwrap_or_default(),
+        history_error: history.as_ref().err().cloned(),
         today: Date::today(),
         release_tag: a.release_tag.clone(),
+        planner: &planner,
         warn: a.warn,
         shallow: edge::is_shallow(&root),
     };
@@ -127,6 +131,7 @@ pub fn list(root: Option<&Path>, base: &str) -> Result<Report, CliError> {
     let root = repo_root(root)?;
     let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
     let sources = edge::load_sources(&root).map_err(CliError::failure)?;
+    let planner = edge::NodePlanner::new(&root);
     let input = evaluate::Input {
         tree: &tree,
         sources: &sources,
@@ -134,10 +139,12 @@ pub fn list(root: Option<&Path>, base: &str) -> Result<Report, CliError> {
         conformance_commands: None,
         dev_commands: dev_command_paths(),
         register_text: std::fs::read_to_string(root.join("docs/gates.toml")).ok(),
-        base_register_text: edge::register_at(&root, base),
+        base_register_text: edge::base_register(&root, base),
         history: Vec::new(),
+        history_error: None,
         today: Date::today(),
         release_tag: None,
+        planner: &planner,
         warn: true,
         shallow: false,
     };

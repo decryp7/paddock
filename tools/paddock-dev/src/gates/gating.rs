@@ -6,6 +6,7 @@ use super::checks::{Check, Kind, Needs, Scope};
 use super::ci::{CiModel, Level, Reach, Status};
 use super::shell;
 use super::tree::{Tree, glob_regex};
+use regex::Regex;
 use serde_json::Value as Json;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -28,6 +29,8 @@ pub struct Invocation {
     pub unresolved: bool,
     /// Path-like words of the command, resolved against its folder.
     pub paths: Vec<String>,
+    /// The planner outputs the line runs under (`needs.plan.outputs.X == 'true'`).
+    pub planned: BTreeSet<String>,
 }
 
 /// One `npm run` of a script, by workspace folder (`root` for the root package).
@@ -39,6 +42,8 @@ pub struct NpmRun {
     pub dir: String,
     /// The script name.
     pub script: String,
+    /// The planner outputs the line runs under.
+    pub planned: BTreeSet<String>,
 }
 
 /// The invocations of the model and what they expand to.
@@ -141,6 +146,7 @@ fn expand(
     idx: &mut Index,
     pk: &Packages,
     levels: &BTreeMap<Level, Status>,
+    planned: &BTreeSet<String>,
     text: &str,
     cwd: &str,
     env: &BTreeMap<String, String>,
@@ -161,6 +167,7 @@ fn expand(
         line,
         unresolved,
         paths: Vec::new(),
+        planned: planned.clone(),
     });
     if let Some(last) = idx.invocations.last_mut() {
         last.paths = token_paths_of(&last.text, &last.cwd);
@@ -179,6 +186,7 @@ fn expand(
         levels: levels.clone(),
         dir: dir.clone(),
         script: script.clone(),
+        planned: planned.clone(),
     });
     if depth >= 3 {
         return;
@@ -190,6 +198,7 @@ fn expand(
                 idx,
                 pk,
                 levels,
+                planned,
                 &c.text,
                 c.cwd.as_deref().unwrap_or(&pkg_dir),
                 &e,
@@ -212,6 +221,7 @@ pub fn index(model: &CiModel, tree: &dyn Tree) -> Index {
             &mut idx,
             &pk,
             &l.levels,
+            &l.planned,
             &l.text,
             l.cwd.as_deref().unwrap_or(""),
             &l.env,
@@ -241,9 +251,50 @@ pub struct Gating {
     pub harness: BTreeSet<String>,
     /// A per-app check that no app needs (no app has what it applies to): nothing to gate.
     pub not_applicable: bool,
+    /// The plan outputs the check's own files turn on (ADR 0060 section 2.4); `None`: not verified.
+    satisfied: Option<BTreeSet<String>>,
 }
 
+/// The plan job outputs the planner models (scripts/affected-marks.mjs). An output outside this list (an app workflow's `run`) is
+/// not verified.
+const KNOWN_OUTPUTS: &[&str] = &["crates", "ui", "eslint", "conformance", "tools", "icons", "paddock_dev", "any_app"];
+
+/// Levels at which a pull request or a push is planned from a diff; tags and the nightly run everything.
+const PLANNED_LEVELS: &[Level] = &[Level::Branch, Level::Main];
+
 impl Gating {
+    fn new(satisfied: &Option<BTreeSet<String>>) -> Gating {
+        Gating {
+            satisfied: satisfied.clone(),
+            ..Gating::default()
+        }
+    }
+
+    /// Adds the levels of a line that runs under the planner outputs `planned`: where the plan is made from a diff, the line is a
+    /// gate only if the check's own files turn those outputs on; otherwise it runs, but not when the check changes (conditional).
+    fn add_p(&mut self, levels: &BTreeMap<Level, Status>, planned: &BTreeSet<String>) {
+        let covered = planned
+            .iter()
+            .all(|x| !KNOWN_OUTPUTS.contains(&x.as_str()) || self.satisfied.as_ref().is_none_or(|s| s.contains(x)));
+        if covered {
+            return self.add(levels);
+        }
+        let lowered: BTreeMap<Level, Status> = levels
+            .iter()
+            .map(|(l, s)| {
+                (
+                    *l,
+                    if *s == Status::Gated && PLANNED_LEVELS.contains(l) {
+                        Status::Conditional
+                    } else {
+                        *s
+                    },
+                )
+            })
+            .collect();
+        self.add(&lowered);
+    }
+
     fn add(&mut self, levels: &BTreeMap<Level, Status>) {
         for (l, s) in levels {
             match s {
@@ -368,8 +419,8 @@ fn mentions(inv: &Invocation, needle: &str) -> bool {
     inv.text.contains(needle)
 }
 
-fn gate_conformance(check: &Check, idx: &Index, apps: &AppFacts) -> Gating {
-    let mut root = Gating::default();
+fn gate_conformance(check: &Check, idx: &Index, apps: &AppFacts, sat: &Option<BTreeSet<String>>) -> Gating {
+    let mut root = Gating::new(sat);
     let mut per_app: BTreeMap<String, Gating> = BTreeMap::new();
     for inv in &idx.invocations {
         let Some(run) = conformance_run(inv) else {
@@ -420,7 +471,7 @@ fn gate_conformance(check: &Check, idx: &Index, apps: &AppFacts) -> Gating {
         }
         (common.unwrap_or_default(), missing)
     };
-    let mut out = Gating::default();
+    let mut out = Gating::new(sat);
     match check.scope {
         Scope::Root => out.merge(root),
         Scope::Apps if applicable.is_empty() => out.not_applicable = true,
@@ -448,8 +499,8 @@ fn gate_conformance(check: &Check, idx: &Index, apps: &AppFacts) -> Gating {
     out.clean()
 }
 
-fn gate_dev(check: &Check, idx: &Index) -> Gating {
-    let mut out = Gating::default();
+fn gate_dev(check: &Check, idx: &Index, sat: &Option<BTreeSet<String>>) -> Gating {
+    let mut out = Gating::new(sat);
     let sub = super::checks::CHECKS.iter().find(|i| i.id == check.id).map_or("", |i| i.subcommand);
     for inv in &idx.invocations {
         let tokens: Vec<&str> = inv.text.split_whitespace().collect();
@@ -487,19 +538,26 @@ fn token_paths_of(text: &str, cwd: &str) -> Vec<String> {
         .collect()
 }
 
-fn gate_script(check: &Check, idx: &Index) -> Gating {
+fn gate_script(check: &Check, idx: &Index, sat: &Option<BTreeSet<String>>) -> Gating {
     let path = &check.id;
-    let mut out = Gating::default();
+    let mut out = Gating::new(sat);
     let name = path.rsplit('/').next().unwrap_or(path);
     for inv in &idx.invocations {
         let runs_tests = {
             let t: Vec<&str> = inv.text.split_whitespace().collect();
             t.first() == Some(&"node") && t.contains(&"--test")
         };
-        let mut hit = inv
-            .paths
-            .iter()
-            .any(|p| p == path || (p.contains('*') && glob_regex(p).is_match(path)));
+        // The script runs only when it is the command (`./x.sh`) or the program of `node`, `bash`, `sh`, `pwsh`, `eval`: a path in an
+        // `echo` or an `::error::` line is a mention, not a run.
+        let first = inv.text.split_whitespace().next().unwrap_or("");
+        let runner = ["node", "bash", "sh", "pwsh", "eval", "source", ".", "python3", "step"].contains(&first)
+            || first.starts_with("./")
+            || first.contains('/');
+        let mut hit = runner
+            && inv
+                .paths
+                .iter()
+                .any(|p| p == path || (p.contains('*') && glob_regex(p).is_match(path)));
         if !hit && runs_tests && path.ends_with(".test.mjs") {
             let dirs: Vec<String> = inv
                 .text
@@ -516,7 +574,7 @@ fn gate_script(check: &Check, idx: &Index) -> Gating {
             };
         }
         if hit && !inv.unresolved {
-            out.add(&inv.levels);
+            out.add_p(&inv.levels, &inv.planned);
         } else if inv.unresolved && mentions(inv, name) {
             out.unresolved.push(format!("{}:{}", inv.file, inv.line));
         }
@@ -526,11 +584,11 @@ fn gate_script(check: &Check, idx: &Index) -> Gating {
 
 /// `npm run s` is gated, and so is the command written out: CI that runs the script's own command in the package folder
 /// (`npx ng test` for `"test": "ng test"`) gates the script just the same.
-fn gate_npm(check: &Check, idx: &Index, tree: &dyn Tree) -> Gating {
-    let mut out = Gating::default();
+fn gate_npm(check: &Check, idx: &Index, tree: &dyn Tree, sat: &Option<BTreeSet<String>>) -> Gating {
+    let mut out = Gating::new(sat);
     for r in &idx.npm_runs {
         if format!("{}:{}", r.dir, r.script) == check.id {
-            out.add(&r.levels);
+            out.add_p(&r.levels, &r.planned);
         }
     }
     let (dir, script) = check.id.split_once(':').unwrap_or(("root", &check.id));
@@ -550,7 +608,7 @@ fn gate_npm(check: &Check, idx: &Index, tree: &dyn Tree) -> Gating {
         let folder = if dir == "root" { "" } else { dir };
         for inv in idx.invocations.iter().filter(|i| i.cwd == folder && !i.unresolved) {
             if inv.text.trim().trim_start_matches("npx ").trim().starts_with(&want) {
-                out.add(&inv.levels);
+                out.add_p(&inv.levels, &inv.planned);
             }
         }
     }
@@ -598,7 +656,7 @@ fn selects(text: &str, file: &str, name: &str) -> bool {
     let by_target = toks
         .windows(2)
         .any(|w| w[0] == "--test" && w[1].trim_matches(|c| c == '"' || c == '\'') == target);
-    by_target || text.contains(name)
+    by_target || Regex::new(&format!(r"\b{}\b", regex::escape(name))).is_ok_and(|r| r.is_match(text))
 }
 
 /// Whether a tool or harness file has a cargo/nextest/playwright line that selects the test (`--test <target>` or its name),
@@ -611,9 +669,15 @@ pub fn tool_runs(text: &str, file: &str, name: &str, ignored: bool) -> bool {
     })
 }
 
-fn gate_test(check: &Check, idx: &Index, tree: &dyn Tree, harness_files: &[(String, String, String)]) -> Gating {
+fn gate_test(
+    check: &Check,
+    idx: &Index,
+    tree: &dyn Tree,
+    harness_files: &[(String, String, String)],
+    sat: &Option<BTreeSet<String>>,
+) -> Gating {
     let (file, name) = check.id.split_once("::").unwrap_or((&check.id, ""));
-    let mut out = Gating::default();
+    let mut out = Gating::new(sat);
     if file.ends_with(".rs") {
         let ws = workspace_of(tree, file);
         for inv in &idx.invocations {
@@ -633,7 +697,7 @@ fn gate_test(check: &Check, idx: &Index, tree: &dyn Tree, harness_files: &[(Stri
                 _ => check.detail.as_ref().is_some_and(|v| inv.env.get(v).is_some_and(|x| !x.is_empty())),
             };
             if ok && !inv.unresolved {
-                out.add(&inv.levels);
+                out.add_p(&inv.levels, &inv.planned);
             }
         }
     } else {
@@ -658,7 +722,7 @@ fn gate_test(check: &Check, idx: &Index, tree: &dyn Tree, harness_files: &[(Stri
                 && (inv.cwd == pkg || pkg.starts_with(&format!("{}/", inv.cwd)) || inv.cwd.starts_with(&format!("{pkg}/")))
                 && !inv.unresolved
             {
-                out.add(&inv.levels);
+                out.add_p(&inv.levels, &inv.planned);
             }
         }
     }
@@ -692,16 +756,45 @@ pub struct Env<'a> {
     pub apps: &'a AppFacts,
     /// `(harness name, path, text)` of every file of every registered harness.
     pub harness_files: &'a [(String, String, String)],
+    /// The planner, for the "runs when planned" obligation.
+    pub planner: &'a dyn Planner,
+}
+
+/// What the planner turns on for a change of one file (ADR 0060 section 2.4).
+pub trait Planner {
+    /// Called once with every file that will be asked about, so that an implementation can answer them in one go.
+    fn prefetch(&self, _files: &[String]) {}
+    /// The plan job outputs a change of `file` alone turns on; `None` when the planner cannot answer.
+    fn marks(&self, file: &str) -> Option<BTreeSet<String>>;
+}
+
+/// The files whose planner marks decide whether a check's planned lines gate it: the check's own definition.
+pub fn check_inputs(check: &Check) -> Vec<String> {
+    match check.kind {
+        Kind::Action | Kind::Workflow => Vec::new(),
+        _ => check.file.clone().into_iter().collect(),
+    }
 }
 
 /// Whether, where and how a check is gated.
 pub fn gating(check: &Check, env: &Env) -> Gating {
+    let sat: Option<BTreeSet<String>> = check_inputs(check)
+        .iter()
+        .try_fold(None::<BTreeSet<String>>, |acc, f| {
+            let m = env.planner.marks(f)?;
+            Some(Some(match acc {
+                None => m,
+                Some(a) => a.intersection(&m).cloned().collect(),
+            }))
+        })
+        .flatten();
+    let sat = &sat;
     match check.kind {
-        Kind::Conformance => gate_conformance(check, env.index, env.apps),
-        Kind::DevCheck => gate_dev(check, env.index),
-        Kind::Script => gate_script(check, env.index),
-        Kind::NpmCheck => gate_npm(check, env.index, env.tree),
-        Kind::IgnoredTest | Kind::EnvGatedTest => gate_test(check, env.index, env.tree, env.harness_files),
+        Kind::Conformance => gate_conformance(check, env.index, env.apps, sat),
+        Kind::DevCheck => gate_dev(check, env.index, sat),
+        Kind::Script => gate_script(check, env.index, sat),
+        Kind::NpmCheck => gate_npm(check, env.index, env.tree, sat),
+        Kind::IgnoredTest | Kind::EnvGatedTest => gate_test(check, env.index, env.tree, env.harness_files, sat),
         Kind::Action => {
             let dir = format!(".gitea/actions/{}", check.id.trim_start_matches("action:"));
             gate_reach(&env.model.actions, &dir)
@@ -732,6 +825,14 @@ mod tests {
             report_only: false,
             needs: Needs::All,
             detail: None,
+        }
+    }
+
+    /// A planner that turns every output on for every file.
+    struct AllMarks;
+    impl Planner for AllMarks {
+        fn marks(&self, _: &str) -> Option<BTreeSet<String>> {
+            Some(KNOWN_OUTPUTS.iter().map(|s| s.to_string()).collect())
         }
     }
 
@@ -770,6 +871,7 @@ mod tests {
                 tree: &w.tree,
                 apps: &w.apps,
                 harness_files: &[],
+                planner: &AllMarks,
             },
         )
     }
@@ -839,6 +941,32 @@ mod tests {
             let got = !ask(&w, &check(Kind::Script, path)).gated.is_empty();
             assert_eq!(got, gated, "{path}");
         }
+    }
+
+    #[test]
+    fn a_path_in_an_echo_is_a_mention_not_a_run() {
+        let wf = "on:\n  pull_request:\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo \"::error::run scripts/check-x.mjs\"\n";
+        let w = world(&[(".gitea/workflows/ci.yml", wf)], &[], &[]);
+        assert!(ask(&w, &check(Kind::Script, "scripts/check-x.mjs")).gated.is_empty());
+        let run = wf.replace("echo \"::error::run scripts/check-x.mjs\"", "node scripts/check-x.mjs");
+        assert!(
+            !ask(
+                &world(&[(".gitea/workflows/ci.yml", &run)], &[], &[]),
+                &check(Kind::Script, "scripts/check-x.mjs")
+            )
+            .gated
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_test_name_filter_matches_whole_words() {
+        assert!(selects("cargo nextest run --run-ignored all slow_one", "a/tests/it.rs", "slow_one"));
+        assert!(!selects(
+            "cargo nextest run --run-ignored all slow_one_more",
+            "a/tests/it.rs",
+            "slow_one"
+        ));
     }
 
     #[test]
@@ -952,6 +1080,52 @@ mod tests {
             !ask(&world(&[(".gitea/workflows/ci.yml", &inline)], &[], &files), &c)
                 .gated
                 .is_empty()
+        );
+    }
+
+    /// A planner with fixed answers per file.
+    struct Marks(Vec<(&'static str, &'static [&'static str])>);
+    impl Planner for Marks {
+        fn marks(&self, file: &str) -> Option<BTreeSet<String>> {
+            Some(
+                self.0
+                    .iter()
+                    .find(|(f, _)| *f == file)
+                    .map(|(_, m)| m.iter().map(|s| s.to_string()).collect())
+                    .unwrap_or_default(),
+            )
+        }
+    }
+
+    #[test]
+    fn a_planned_line_gates_a_check_only_if_the_checks_own_file_turns_the_output_on() {
+        // ci.yml's conformance job runs under needs.plan.outputs.conformance; the script it runs is a check
+        let ci = "on:\n  pull_request:\njobs:\n  plan:\n    runs-on: ubuntu-latest\n    outputs:\n      conformance: ${{ steps.plan.outputs.conformance }}\n    steps:\n      - id: plan\n        run: node scripts/affected.mjs --ci\n  conformance:\n    needs: [plan]\n    if: ${{ needs.plan.outputs.conformance == 'true' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/check-x.mjs\n";
+        let w = world(&[(".gitea/workflows/ci.yml", ci)], &[], &[]);
+        let mut c = check(Kind::Script, "scripts/check-x.mjs");
+        c.file = Some("scripts/check-x.mjs".into());
+        let ask = |p: &dyn Planner| {
+            let index = index(&w.model, &w.tree);
+            gating(
+                &c,
+                &Env {
+                    model: &w.model,
+                    index: &index,
+                    tree: &w.tree,
+                    apps: &w.apps,
+                    harness_files: &[],
+                    planner: p,
+                },
+            )
+        };
+        // bad: a change to the script marks only tools, so the conformance job would not run it on that branch
+        let bad = ask(&Marks(vec![("scripts/check-x.mjs", &["tools"])]));
+        assert!(!bad.gated.contains(&Level::Branch) && !bad.gated.contains(&Level::Main));
+        assert_eq!(bad.conditional, BTreeSet::from([Level::Branch]));
+        // good: the planner turns conformance on for the script's file
+        assert_eq!(
+            ask(&Marks(vec![("scripts/check-x.mjs", &["conformance"])])).gated,
+            BTreeSet::from([Level::Branch])
         );
     }
 

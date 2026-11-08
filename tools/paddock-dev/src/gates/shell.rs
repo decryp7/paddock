@@ -92,7 +92,7 @@ pub fn strip_workspace(text: &str) -> String {
     out
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Sep {
     Start,
     And,
@@ -196,11 +196,48 @@ fn is_test(seg: &str) -> bool {
     seg.starts_with('[') || seg.starts_with("test ") || seg.starts_with("command -v") || seg.starts_with("grep ")
 }
 
+/// How the shell treats failures in the script being read (ADR 0060 §2.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Opts {
+    /// `set -o pipefail` is on from the start (`shell: bash` runs `bash -eo pipefail`, `run-commands.sh` sets it).
+    pub pipefail: bool,
+    /// Every line is checked on its own (`run-commands.sh` runs each in `( set -e; eval line )` and tests the status), so a
+    /// failure left of `&&` still fails the step; in a plain `bash -e` script it does not, unless it is the last line.
+    pub lines_checked: bool,
+}
+
+impl Opts {
+    /// A command list of `paddock.ci.json` (run-commands.sh) and anything else that is checked line by line.
+    pub const CHECKED: Opts = Opts {
+        pipefail: true,
+        lines_checked: true,
+    };
+}
+
+/// Whether the handler after `||` ends in a failure (`exit 1`, a bare `exit`, `false`, `return`): then the failure is not swallowed.
+fn handler_fails(handler: &str) -> bool {
+    let words: Vec<&str> = handler
+        .split(|c: char| c.is_whitespace() || c == ';' || c == '}' || c == '{')
+        .filter(|w| !w.is_empty())
+        .collect();
+    words.iter().enumerate().any(|(i, w)| match *w {
+        "exit" => words.get(i + 1).is_none_or(|n| *n != "0"),
+        "false" | "return" => true,
+        _ => false,
+    })
+}
+
+/// Reads a script as a command list (see [`Opts::CHECKED`]).
+pub fn commands(script: &str, start: Option<String>) -> Vec<Cmd> {
+    commands_with(script, start, Opts::CHECKED)
+}
+
 /// Reads a script (a `run:` block or a command list) into simple commands.
 ///
 /// `start` is the folder the script starts in. A `cd` holds for the commands after it, as in `run-commands.sh` and in a
 /// `run:` block; a `cd` inside `( … )` does not.
-pub fn commands(script: &str, start: Option<String>) -> Vec<Cmd> {
+pub fn commands_with(script: &str, start: Option<String>, opts: Opts) -> Vec<Cmd> {
+    let mut pipefail = opts.pipefail;
     let mut cwd = start;
     let mut out = Vec::new();
     let mut set_plus_e = false;
@@ -224,6 +261,11 @@ pub fn commands(script: &str, start: Option<String>) -> Vec<Cmd> {
     if let Some(p) = pending {
         physical.push(p);
     }
+    let last_idx = physical
+        .iter()
+        .rev()
+        .find(|(_, l)| !l.trim().is_empty() && !l.trim().starts_with('#'))
+        .map_or(0, |(i, _)| *i);
     for (idx, line) in physical {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -250,11 +292,16 @@ pub fn commands(script: &str, start: Option<String>) -> Vec<Cmd> {
         let saved = cwd.clone();
         let segs = split_simple(if subshell { &trimmed[1..trimmed.len() - 1] } else { trimmed });
         // A trailing `|| true`/`; true` makes every earlier command of the line report-only.
-        let tail_true = segs
-            .iter()
-            .any(|(sep, t)| matches!(sep, Sep::Or | Sep::Semi) && (t == "true" || t == ":" || t == "exit 0"));
+        // Any `|| handler` that does not end in a failure swallows what is left of it (`|| true`, `|| echo …`), and so does `; true`.
+        let tail_true = segs.iter().enumerate().any(|(i, (sep, t))| match sep {
+            Sep::Or => !handler_fails(&segs[i..].iter().map(|(_, s)| s.as_str()).collect::<Vec<_>>().join(" ; ")),
+            Sep::Semi => t == "true" || t == ":" || t == "exit 0",
+            _ => false,
+        });
+        let is_last_line = idx == last_idx;
         let mut test_before = false;
-        for (sep, seg) in &segs {
+        for (i, (sep, seg)) in segs.iter().enumerate() {
+            let next = segs.get(i + 1).map(|(s, _)| *s);
             let (text, kw_guard) = strip_keywords(seg);
             if text.is_empty() || text == "true" || text == ":" || text == "fi" || text == "done" || text == "esac" {
                 continue;
@@ -266,6 +313,9 @@ pub fn commands(script: &str, start: Option<String>) -> Vec<Cmd> {
             if text == "set +e" {
                 set_plus_e = true;
                 continue;
+            }
+            if text.starts_with("set ") && text.contains("pipefail") {
+                pipefail = !text.starts_with("set +o");
             }
             if text.starts_with("set ") && text.contains("-e") && !text.contains("+e") {
                 set_plus_e = false;
@@ -282,10 +332,14 @@ pub fn commands(script: &str, start: Option<String>) -> Vec<Cmd> {
                 text,
                 line: idx,
                 cwd: cwd.clone(),
-                report_only: set_plus_e || tail_true,
+                report_only: set_plus_e
+                    || tail_true
+                    // left of a pipe without pipefail: only the last command's status counts
+                    || (next == Some(Sep::Pipe) && !pipefail)
+                    // left of `&&` in a plain `bash -e` script: `set -e` ignores it unless the list is the last command
+                    || (next == Some(Sep::And) && !opts.lines_checked && !is_last_line),
                 conditional,
             });
-            if matches!(sep, Sep::Pipe) { /* both sides run */ }
         }
         if subshell {
             cwd = saved;
@@ -346,6 +400,52 @@ mod tests {
                 ("node e.mjs", false)
             ]
         );
+    }
+
+    fn flags(script: &str, o: Opts) -> Vec<(String, bool)> {
+        commands_with(script, Some(String::new()), o)
+            .into_iter()
+            .map(|c| (c.text, c.report_only))
+            .collect()
+    }
+
+    #[test]
+    fn a_handler_after_or_swallows_the_failure_unless_it_ends_in_one() {
+        let o = Opts::CHECKED;
+        // bad (swallowed): echo, a brace group without exit, `|| true`
+        assert_eq!(flags("node a.mjs || echo skipped", o)[0].1, true);
+        assert_eq!(flags("node a.mjs || { echo skipped; }", o)[0].1, true);
+        // good (fails the step): the handler exits non-zero, or a bare exit, or `false`
+        assert_eq!(flags("node a.mjs || { echo broken; exit 1; }", o)[0].1, false);
+        assert_eq!(flags("node a.mjs || exit", o)[0].1, false);
+        assert_eq!(flags("node a.mjs || false", o)[0].1, false);
+    }
+
+    #[test]
+    fn a_failure_left_of_and_is_ignored_by_bash_e_unless_the_list_is_last() {
+        let plain = Opts {
+            pipefail: true,
+            lines_checked: false,
+        };
+        // bad: not the last line
+        let f = flags("node a.mjs && echo ok\nnode b.mjs", plain);
+        assert_eq!(f[0], ("node a.mjs".to_string(), true));
+        // good: the last line, and run-commands.sh lines (each is checked)
+        assert_eq!(flags("node b.mjs\nnode a.mjs && echo ok", plain)[1].1, false);
+        assert_eq!(flags("node a.mjs && echo ok\nnode b.mjs", Opts::CHECKED)[0].1, false);
+    }
+
+    #[test]
+    fn the_left_of_a_pipe_counts_only_with_pipefail() {
+        let no = Opts {
+            pipefail: false,
+            lines_checked: true,
+        };
+        assert_eq!(flags("node a.mjs | tee log", no)[0].1, true);
+        assert_eq!(flags("node a.mjs | tee log", Opts::CHECKED)[0].1, false);
+        // set -o pipefail inside the script turns it on from there
+        let f = flags("node a.mjs | tee x\nset -eo pipefail\nnode b.mjs | tee y", no);
+        assert_eq!((f[0].1, f[1].1), (true, false));
     }
 
     #[test]

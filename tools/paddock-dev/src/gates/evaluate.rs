@@ -31,8 +31,12 @@ pub struct Input<'a> {
     pub today: Date,
     /// A release tag about to be made (`debrief-v1.3.0`).
     pub release_tag: Option<String>,
+    /// The planner, for the "runs when planned" obligation (ADR 0060 section 2.4).
+    pub planner: &'a dyn gating::Planner,
     /// `--warn`: every finding stays, the exit is clean.
     pub warn: bool,
+    /// Why the register's history could not be read (`git log` failed), if it could not.
+    pub history_error: Option<String>,
     /// The checkout is shallow: the register's history and the base are not all there (ER-33: not measured).
     pub shallow: bool,
 }
@@ -147,6 +151,16 @@ pub fn evaluate(input: &Input) -> Outcome {
     out.register_errors = reg_errors.len();
     let mut problems = register::check_dates(&reg, input.today);
     problems.extend(register::date_history(&input.history));
+    if let Some(why) = &input.history_error {
+        finding(
+            &mut out,
+            Some(REGISTER),
+            None,
+            "register",
+            format!("not measured: the register's history could not be read ({why}), so moved dates are unchecked"),
+            "Run `git log -- docs/gates.toml` and fix what it reports.",
+        );
+    }
     if input.shallow {
         finding(
             &mut out,
@@ -242,8 +256,27 @@ pub fn evaluate(input: &Input) -> Outcome {
         tree: input.tree,
         apps: &apps,
         harness_files: &harness_files,
+        planner: input.planner,
     };
 
+    let inputs: Vec<String> = all
+        .iter()
+        .flat_map(gating::check_inputs)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    input.planner.prefetch(&inputs);
+    if inputs.iter().any(|f| input.planner.marks(f).is_none()) {
+        finding(
+            &mut out,
+            Some("scripts/affected-marks.mjs"),
+            None,
+            "planner",
+            "not measured: the planner could not say which plan outputs a check's files turn on, so 'runs when planned' is unchecked"
+                .into(),
+            "Run `echo '[\"scripts/affected.mjs\"]' | node scripts/affected-marks.mjs` and fix what it reports.",
+        );
+    }
     let ids: BTreeSet<String> = all.iter().map(|c| c.id.clone()).collect();
     let measurement_globs: Vec<_> = reg.measurements.iter().map(|g| glob_regex(g)).collect();
     let bench = input
@@ -260,7 +293,8 @@ pub fn evaluate(input: &Input) -> Outcome {
         let ok = g.not_applicable
             || match want {
                 Some(l) => g.gated.contains(&l),
-                None => !g.gated.is_empty(),
+                // a manual run is not a gate: a check only a dispatch reaches runs when somebody remembers it
+                None => g.gated.iter().any(|l| *l != Level::Manual),
             };
         let loc = check.file.clone();
         let line = Some(check.line);
@@ -578,6 +612,16 @@ pub fn evaluate(input: &Input) -> Outcome {
         .as_deref()
         .and_then(|j| serde_json::from_str::<Vec<String>>(j).ok())
         .map(|v| v.into_iter().collect());
+    if input.conformance_commands.is_none() {
+        finding(
+            &mut out,
+            Some("conformance/src/cli.mjs"),
+            None,
+            "docs",
+            "not measured: `paddock-conformance commands --json` could not be read, so the commands docs name are unchecked".into(),
+            "Run `node conformance/bin/paddock-conformance.mjs commands --json` and fix what it reports (node must be on PATH).",
+        );
+    }
     let known = Known {
         tree: input.tree,
         check_ids: ids.iter().filter(|i| !i.contains(['/', ':'])).cloned().collect(),
@@ -659,6 +703,8 @@ mod tests {
             history: Vec::new(),
             today: Date::parse("2026-11-10").unwrap(),
             release_tag: None,
+            planner: &AllMarks,
+            history_error: None,
             warn: false,
             shallow: false,
         })
@@ -666,6 +712,19 @@ mod tests {
 
     fn messages(o: &Outcome) -> Vec<String> {
         o.findings.iter().map(|f| format!("{} {}", f.id, f.message)).collect()
+    }
+
+    /// Every file turns every output on.
+    struct AllMarks;
+    impl gating::Planner for AllMarks {
+        fn marks(&self, _: &str) -> Option<BTreeSet<String>> {
+            Some(
+                ["conformance", "any_app", "ui", "crates", "tools"]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect(),
+            )
+        }
     }
 
     const RUST_APP: &str = r#"{"cargo": "."}"#;

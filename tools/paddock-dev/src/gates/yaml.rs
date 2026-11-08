@@ -92,6 +92,14 @@ impl Builder {
         match self.stack.last_mut() {
             None => self.root = Some(node),
             Some(Frame::Seq(items, ..)) => items.push(node),
+            Some(Frame::Map(entries, pending, ..)) if pending.as_deref() == Some("<<") => {
+                *pending = None;
+                let _ = entries;
+                self.error = Some(format!(
+                    "line {}: a YAML merge key (`<<`), which this reader does not follow",
+                    node.line
+                ));
+            }
             Some(Frame::Map(entries, pending, ..)) => match pending.take() {
                 Some(key) => entries.push((key, node)),
                 None => match node.value {
@@ -175,6 +183,12 @@ mod tests {
         let block = b.items()[1].get("y").unwrap();
         assert_eq!(block.text(), Some("one\ntwo\n"));
         assert_eq!(block.line, 5, "the first content line of a block scalar");
+    }
+
+    #[test]
+    fn a_merge_key_is_an_error_not_a_silent_miss() {
+        let e = parse("base: &b {k: v}\nuse:\n  <<: *b\n  x: 1\n").unwrap_err();
+        assert!(e.contains("merge key"), "{e}");
     }
 
     #[test]

@@ -127,6 +127,7 @@ struct Step {
     env: Vec<(String, String)>,
     run: Option<(String, usize)>,
     wd: Option<String>,
+    shell: Option<String>,
     coe: Option<String>,
 }
 
@@ -139,10 +140,12 @@ struct Job {
     with: Vec<(String, String)>,
     env: Vec<(String, String)>,
     wd: Option<String>,
+    shell: Option<String>,
     matrix: Option<Matrix>,
     steps: Vec<Step>,
     coe: Option<String>,
     outputs: Vec<(String, String)>,
+    needs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -164,6 +167,7 @@ struct Workflow {
     call_inputs: BTreeMap<String, String>,
     env: Vec<(String, String)>,
     wd: Option<String>,
+    shell: Option<String>,
     jobs: Vec<Job>,
 }
 
@@ -195,6 +199,7 @@ fn parse_steps(node: Option<&Node>) -> Vec<Step> {
                 env: scalar_pairs(s.get("env")),
                 run: s.get("run").and_then(|r| r.text().map(|t| (t.to_string(), r.line))),
                 wd: s.get_text("working-directory").map(str::to_string),
+                shell: s.get_text("shell").map(str::to_string),
                 coe: s.get_text("continue-on-error").map(str::to_string),
             })
             .collect()
@@ -289,10 +294,16 @@ fn parse_workflow(path: &str, text: &str) -> Result<Workflow, String> {
                         .and_then(|d| d.get("run"))
                         .and_then(|r| r.get_text("working-directory"))
                         .map(str::to_string),
+                    shell: job
+                        .get("defaults")
+                        .and_then(|d| d.get("run"))
+                        .and_then(|r| r.get_text("shell"))
+                        .map(str::to_string),
                     matrix: job.get("strategy").and_then(|s| s.get("matrix")).map(parse_matrix),
                     steps: parse_steps(job.get("steps")),
                     coe: job.get_text("continue-on-error").map(str::to_string),
                     outputs: scalar_pairs(job.get("outputs")),
+                    needs: list_of_text(job.get("needs")),
                 })
                 .collect()
         })
@@ -309,6 +320,11 @@ fn parse_workflow(path: &str, text: &str) -> Result<Workflow, String> {
             .get("defaults")
             .and_then(|d| d.get("run"))
             .and_then(|r| r.get_text("working-directory"))
+            .map(str::to_string),
+        shell: doc
+            .get("defaults")
+            .and_then(|d| d.get("run"))
+            .and_then(|r| r.get_text("shell"))
             .map(str::to_string),
         jobs,
     })
@@ -640,6 +656,8 @@ struct Walker<'a> {
     action_reach: Reach,
     called: Reach,
     problems: Vec<(String, String)>,
+    /// `defaults.run.shell` of the job or workflow being walked.
+    default_shell: Option<String>,
 }
 
 type LineKey = (String, usize, String, Option<String>, Option<String>, String, Option<String>);
@@ -731,8 +749,10 @@ impl Walker<'_> {
             .map(|(k, v)| (k.clone(), expr::interpolate(v, &base_scope).text))
             .collect();
         Self::mark(&mut self.workflows, path, ctx.level, Self::status(acc, false, false, false));
+        // Jobs that do not run at this level; a job that needs one of them is skipped too, unless its `if:` says `always()`.
+        let mut skipped: BTreeSet<String> = BTreeSet::new();
         for job in &wf.jobs {
-            self.walk_job(&wf, job, ctx, inputs, &wf_env, acc, depth, &planners);
+            self.walk_job(&wf, job, ctx, inputs, &wf_env, acc, depth, &planners, &mut skipped);
         }
     }
 
@@ -747,7 +767,13 @@ impl Walker<'_> {
         outer: &Acc,
         depth: usize,
         planners: &Planners,
+        skipped: &mut BTreeSet<String>,
     ) {
+        let always = job.cond.as_deref().is_some_and(|c| c.contains("always()"));
+        if !always && job.needs.iter().any(|n| skipped.contains(n)) {
+            skipped.insert(job.id.clone());
+            return;
+        }
         // The matrix: every combination, or one empty one.
         let combos = self.combos(job, ctx);
         for combo in combos {
@@ -795,6 +821,7 @@ impl Walker<'_> {
                 acc.unresolved = true;
             }
             if !Self::cond(&mut acc, job.cond.as_deref(), &scope) {
+                skipped.insert(job.id.clone());
                 continue;
             }
             Self::coe(&mut acc, job.coe.as_deref(), &scope);
@@ -818,6 +845,7 @@ impl Walker<'_> {
                 self.walk_workflow(callee, ctx, &bound, &acc, depth + 1);
                 continue;
             }
+            self.default_shell = job.shell.clone().or_else(|| wf.shell.clone());
             let app = combo.as_ref().and_then(|c| c.get("app").cloned());
             let os = combo.as_ref().and_then(|c| c.get("os").cloned());
             let wd = wf.wd.as_deref().or(job.wd.as_deref());
@@ -961,7 +989,19 @@ impl Walker<'_> {
                 None => start.clone(),
             };
             let text = shell::strip_workspace(&i.text);
-            let cmds = shell::commands(&text, wd);
+            let pipefail = step
+                .shell
+                .as_deref()
+                .or(self.default_shell.as_deref())
+                .is_some_and(|sh| sh.starts_with("bash"));
+            let cmds = shell::commands_with(
+                &text,
+                wd,
+                shell::Opts {
+                    pipefail,
+                    lines_checked: false,
+                },
+            );
             for c in cmds {
                 self.emit(
                     file,
@@ -1209,6 +1249,7 @@ pub fn build(src: &Sources) -> CiModel {
                 action_reach: Reach::new(),
                 called: Reach::new(),
                 problems: Vec::new(),
+                default_shell: None,
             };
             let inputs: BTreeMap<String, Val> = ctx.inputs.iter().map(|(k, v)| (k.clone(), Val::Str(v.clone()))).collect();
             walker.walk_workflow(path, &ctx, &inputs, &Acc::default(), 0);
@@ -1377,7 +1418,8 @@ jobs:
     fn the_leg_keys_follow_affected_mjs() {
         // The model binds the matrix by name; a change to scripts/affected.mjs matrix() fails here until LEG_KEYS follows.
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/affected.mjs");
-        let Ok(text) = std::fs::read_to_string(&path) else { return };
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("the leg-key test needs scripts/affected.mjs ({}): {e}", path.display()));
         let from = text
             .find("const legs = oses.filter")
             .expect("matrix() changed shape: update gates::ci");
@@ -1420,6 +1462,18 @@ jobs:
     }
 
     #[test]
+    fn a_pipe_is_a_gate_only_under_bash_with_pipefail_and_swallowing_shapes_are_not() {
+        let wf = "on:\n  pull_request:\njobs:\n  c:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node a.mjs | tee log\n      - shell: bash\n        run: node b.mjs | tee log\n      - run: node c.mjs || echo skipped\n      - run: |\n          node d.mjs && echo ok\n          node e.mjs\n";
+        let m = build(&sources(&[(".gitea/workflows/ci.yml", wf)]));
+        let st = |n: &str| only(&m, n).levels[&Level::Branch];
+        assert_eq!(st("a.mjs"), Status::ReportOnly);
+        assert_eq!(st("b.mjs"), Status::Gated);
+        assert_eq!(st("c.mjs"), Status::ReportOnly);
+        assert_eq!(st("d.mjs"), Status::ReportOnly);
+        assert_eq!(st("e.mjs"), Status::Gated);
+    }
+
+    #[test]
     fn unresolvable_outputs_and_conditions_never_gate() {
         let wf = "on:\n  pull_request:\njobs:\n  a:\n    runs-on: ubuntu-latest\n    outputs:\n      cmd: ${{ steps.s.outputs.cmd }}\n    steps:\n      - id: s\n        run: echo\n  b:\n    needs: [a]\n    runs-on: ubuntu-latest\n    steps:\n      - run: ${{ needs.a.outputs.cmd }}\n      - if: ${{ vars.WITH_X == '1' }}\n        run: node vars.mjs\n      - if: failure()\n        run: node onfail.mjs\n";
         let m = build(&sources(&[(".gitea/workflows/ci.yml", wf)]));
@@ -1450,6 +1504,20 @@ jobs:
         let win = only(&m, "win.mjs");
         assert_eq!(win.os.as_deref(), Some("windows-latest"));
         assert_eq!(find(&m, "all.mjs").len(), 2);
+    }
+
+    #[test]
+    fn a_job_that_needs_a_skipped_job_is_skipped_unless_it_says_always() {
+        let wf = "on:\n  pull_request:\njobs:\n  nightly:\n    if: ${{ github.event_name == 'schedule' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: node n.mjs\n  after:\n    needs: [nightly]\n    runs-on: ubuntu-latest\n    steps:\n      - run: node after.mjs\n  later:\n    needs: [after]\n    runs-on: ubuntu-latest\n    steps:\n      - run: node later.mjs\n  verdict:\n    needs: [nightly]\n    if: ${{ always() }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: node verdict.mjs\n";
+        let m = build(&sources(&[(".gitea/workflows/ci.yml", wf)]));
+        assert!(find(&m, "n.mjs").is_empty());
+        assert!(find(&m, "after.mjs").is_empty(), "needs a job that does not run at this level");
+        assert!(find(&m, "later.mjs").is_empty(), "the skip follows the chain");
+        assert_eq!(
+            only(&m, "verdict.mjs").levels[&Level::Branch],
+            Status::Gated,
+            "always() runs after a skipped need"
+        );
     }
 
     #[test]
