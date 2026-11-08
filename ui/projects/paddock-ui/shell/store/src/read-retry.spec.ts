@@ -275,6 +275,46 @@ describe('withRequestStatus({ retry: true }): a failed read ends on its own (ADR
     });
   });
 
+  it('a Retry that fails while a timer re-read hangs still retries on its own', async () => {
+    const { backend, clock, store } = await failedFirst();
+    clock.advance(2_000);
+    expect(backend.reads).toHaveLength(2);
+    // Read 1 (the timer's) hangs; the user's Retry fails fast and arms the first delay again.
+    void store.load();
+    await failRead(backend, clock, 2);
+    clock.advance(2_000);
+    expect(backend.reads).toHaveLength(4);
+    // The hung read settles late: it is stale and changes nothing, and the retrying goes on.
+    backend.reads[1]?.reject(new Error('late'));
+    await failRead(backend, clock, 3);
+    expect(store.requestError()).toBe('still down');
+    clock.advance(4_000);
+    expect(backend.reads).toHaveLength(5);
+  });
+
+  it('re-arms when the timer finds the current re-read still running, so a hang cannot end the retrying', async () => {
+    const { backend, clock, store } = await failedFirst();
+    store.change();
+    expect(backend.reads).toHaveLength(2);
+    clock.advance(2_000);
+    expect(backend.reads).toHaveLength(2);
+    expect(clock.ticking).toBe(1);
+  });
+
+  it('drops an older quiet read when the whole state arrives while loaded', async () => {
+    const { backend } = bed();
+    const store = TestBed.inject(Probe);
+    backend.reads[0]?.resolve(['v1']);
+    await vi.waitFor(() => expect(store.requestStatus()).toBe('loaded'));
+    backend.quiet = true;
+    const older = store.load();
+    store.snapshot(['v3']);
+    backend.reads[1]?.resolve(['v2-older']);
+    expect(await older).toBe(false);
+    expect(store.items()).toEqual(['v3']);
+    expect(store.requestStatus()).toBe('loaded');
+  });
+
   it('drops a stale read that finishes after a newer one (Retry)', async () => {
     const { backend, store } = await failedFirst();
     store.change();

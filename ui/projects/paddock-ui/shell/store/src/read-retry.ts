@@ -107,7 +107,8 @@ export function readControl(store: StatusStore, clock: ReadRetryClock | null, de
       const spacing = spec.eventSpacingMs ?? READ_RETRY_EVENT_SPACING_MS;
       /** Counts reads; a read that finishes after a newer one started (or after `received`) is dropped. */
       let generation = 0;
-      let refreshing = false;
+      /** The generation of the re-read in flight, or null: only a re-read of the current generation blocks another. */
+      let refreshing: number | null = null;
       let lastRefreshFailedAt = Number.NEGATIVE_INFINITY;
       /** The pending self-retry, and how many were armed since the last success or `load`. */
       let cancelRetry: (() => void) | undefined;
@@ -155,12 +156,19 @@ export function readControl(store: StatusStore, clock: ReadRetryClock | null, de
 
       /**
        * The re-read of a store in error, started by an event (`own` false) or by the self-retry timer (`own` true: no
-       * event may ever come). The error stays up until a read succeeds; one read at a time; success stops the retrying.
+       * event may ever come). The error stays up until a read succeeds; one read of the current generation at a time
+       * (a stale one that still hangs blocks nothing); success stops the retrying. A timer that finds the current re-read
+       * still running arms the next delay, so a read that never settles cannot end the retrying.
        */
       const refresh = async (own: boolean): Promise<void> => {
-        if (destroyed || !clock || refreshing || (!own && clock.now() - lastRefreshFailedAt < spacing)) return;
-        refreshing = true;
+        if (destroyed || !clock) return;
+        if (refreshing === generation) {
+          if (own) armRetry();
+          return;
+        }
+        if (!own && clock.now() - lastRefreshFailedAt < spacing) return;
         const mine = ++generation;
+        refreshing = mine;
         try {
           const value = await spec.read();
           // Applied in a sync step of its own: the state is read fresh there, not across the await (rule 29).
@@ -176,7 +184,7 @@ export function readControl(store: StatusStore, clock: ReadRetryClock | null, de
             armRetry();
           }
         } finally {
-          refreshing = false;
+          if (refreshing === mine) refreshing = null;
         }
       };
 
@@ -202,8 +210,10 @@ export function readControl(store: StatusStore, clock: ReadRetryClock | null, de
           if (inError()) void refresh(false);
         },
         received(): void {
-          if (destroyed || store.requestStatus() === 'loaded') return;
+          if (destroyed) return;
+          // Always newer than a read still in flight (a quiet load while loaded, too): that read is dropped.
           generation++;
+          if (store.requestStatus() === 'loaded') return;
           stopRetrying();
           patchState(store, { requestStatus: 'loaded' });
         },
