@@ -1,6 +1,8 @@
 import { InjectionToken } from '@angular/core';
 import type {
   ChatModels,
+  ChatAttached,
+  ChatAttachRules,
   ChatStorage,
   OpenedApp,
   ConnectedApp,
@@ -231,6 +233,10 @@ export interface PitwallBackend {
   setChatSaved(conversationId: string, save: boolean): Promise<boolean>;
   /** Deletes every chat and attachment (ask first). */
   deleteAllChats(): Promise<ChatStorage>;
+  /** What the chat's composer may attach (ADR 0023 WP-4b). */
+  chatAttachRules(): Promise<ChatAttachRules>;
+  /** Hands a file to Rust, which checks it and keeps it until its question is sent; a refusal says why. */
+  chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached>;
   /** The app asks the open window to show the "When you quit" dialog. */
   onQuitAsk(handler: () => void): Unsubscribe;
   autostart(): Promise<boolean>;

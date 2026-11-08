@@ -1,10 +1,13 @@
 import { Injectable, inject, signal } from '@angular/core';
 import {
   AssistantBackend,
+  AssistantSpeech,
   MemoryAssistantBackend,
+  MemoryAssistantSpeech,
   TauriAssistantBackend,
   type ApprovalChoice,
   type AssistantInfo,
+  type ContextUse,
   type Conversation,
   type ConversationSummary,
   type Envelope,
@@ -12,9 +15,11 @@ import {
   type SendRequest,
   type Unlisten,
 } from '@decryp7/paddock-ui/workbench/assistant';
+import { openedWith } from '../../core/backend-factory';
 import { tauriIpc } from '../../shell/ipc';
 
 let browser: AssistantBackend | null = null;
+
 
 /**
  * Whether the Chat tab's next new chat is saved ("Don't save this chat", ADR 0023 Decision 3), and what each chat started
@@ -66,6 +71,9 @@ export class SavingAssistantBackend extends AssistantBackend {
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
     return this.inner.listen(handler);
   }
+  override context(id: string | null): Promise<ContextUse | null> {
+    return this.inner.context(id);
+  }
 }
 
 /**
@@ -78,8 +86,22 @@ export class SavingAssistantBackend extends AssistantBackend {
 export function createChatBackend(): SavingAssistantBackend {
   const saving = inject(ChatSaving);
   const ipc = tauriIpc();
-  const inner = ipc ? new TauriAssistantBackend(ipc) : (browser ??= new MemoryAssistantBackend());
+  // Browser build only: `?mock-context=<tokens>` gives the memory engine a small window, so screenshots and specs reach the
+  // meter's high and full levels.
+  const tokens = Number(new URLSearchParams(openedWith()).get('mock-context'));
+  const inner = ipc ? new TauriAssistantBackend(ipc) : (browser ??= new MemoryAssistantBackend(tokens > 0 ? { contextTokens: tokens } : {}));
   return new SavingAssistantBackend(inner, saving);
+}
+
+/**
+ * Speech input for the Chat tab: none yet in the app (ADR 0023 WP-7 brings capture and transcription). The browser build
+ * plays it with `?mock-speech` for screenshots and specs, through `globalThis.__pitwallSpeech` (its `tick` moves the clock).
+ */
+export function createChatSpeech(search: string = openedWith()): AssistantSpeech | null {
+  if (tauriIpc() || !new URLSearchParams(search).has('mock-speech')) return null;
+  const speech = new MemoryAssistantSpeech();
+  (globalThis as { __pitwallSpeech?: MemoryAssistantSpeech }).__pitwallSpeech = speech;
+  return speech;
 }
 
 /** Forgets the browser build's one chat engine (specs that start the page more than once). */

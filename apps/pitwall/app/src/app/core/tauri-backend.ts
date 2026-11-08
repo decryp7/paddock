@@ -2,6 +2,8 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type {
   ChatModels,
+  ChatAttached,
+  ChatAttachRules,
   ChatStorage,
   OpenedApp,
   ConnectedApp,
@@ -444,6 +446,13 @@ export class TauriBackend implements PitwallBackend {
   }
   deleteAllChats(): Promise<ChatStorage> {
     return this.run('delete_all_chats');
+  }
+  chatAttachRules(): Promise<ChatAttachRules> {
+    return this.run('chat_attach_rules');
+  }
+  chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
+    // Tauri carries a byte array as a JSON list of numbers; Rust bounds the request (2 MiB) and checks the file.
+    return this.run('chat_attach', { name, bytes: Array.from(bytes) });
   }
   onConnectedApps(handler: (apps: ConnectedApp[]) => void): Unsubscribe {
     let stopped = false;

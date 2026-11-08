@@ -14,6 +14,8 @@ export const APP_COMMANDS = {
   cancel_download: { kind: 'mutation', windows: ['main', 'popout', 'dialog', 'tray'], limit: 262144 },
   cancel_job: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   chat: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 9437184 },
+  chat_attach: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 2097152 },
+  chat_attach_rules: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   chat_cancel: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   chat_enabled: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   chat_models_list: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },

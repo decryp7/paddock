@@ -2,6 +2,8 @@ import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
   ChatModels,
+  ChatAttached,
+  ChatAttachRules,
   ChatStorage,
   OpenedApp,
   ConnectedApp,
@@ -118,7 +120,7 @@ const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
   'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
-  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats',
+  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -1508,6 +1510,33 @@ export class MockBackend implements PitwallBackend {
       this.unsavedChats.clear();
       this.chatStorage_ = { ...this.chatStorage_, chats: 0, bytes: 0, attachmentBytes: 0 };
       return clone({ ...this.chatStorage_, unsaved: 0 });
+    });
+  }
+
+  chatAttachRules(): Promise<ChatAttachRules> {
+    return this.reply('chatAttachRules', () => ({
+      maxFileBytes: 256 * 1024,
+      maxCount: 16,
+      accept: '.txt,.md,.csv,.json,.log,.rs,.ts,.py,text/*',
+      hint: 'Attach text or code files (UTF-8, up to 256 KiB each)',
+    }));
+  }
+
+  /** Plausible answers for the browser build; Rust's `chat_host::attach` is the reference. */
+  chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
+    return this.reply('chatAttach', () => {
+      const png = bytes[0] === 0x89 && bytes[1] === 0x50;
+      if (png) this.fail('badRequest', `"${name}" is an image. The chat can't attach images yet; attach text or code files.`);
+      let text: string;
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        this.fail('badRequest', `"${name}" isn't a text file. The chat attaches text and code files in UTF-8.`);
+      }
+      let h = 0;
+      for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) >>> 0;
+      const lines = text.split(/\r?\n/).filter((l, i, all) => l || i < all.length - 1).length;
+      return { attachment: { kind: 'file' as const, sha256: h.toString(16).padStart(8, '0').repeat(8), name }, bytes: bytes.length, lines };
     });
   }
 

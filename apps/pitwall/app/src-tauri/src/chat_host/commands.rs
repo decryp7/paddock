@@ -4,6 +4,7 @@
 //! of this build.
 
 use super::apps::{AppsError, ConnectedApp, ConnectedApps, Opened};
+use super::attach::{prepare, AttachRules, Attached};
 use super::chats::{ChatStorage, ChatStores, ChatsError};
 use super::models::{chat_models, ChatModels, Facts};
 use super::{ChatLog, PitwallPolicy, ToolNames};
@@ -61,14 +62,16 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
             .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
     };
     let policy = Arc::new(PitwallPolicy::new(Some(data_dir), names.clone(), now));
-    let provider = Arc::new(ServerChatProvider::new(client.clone(), runtime, ""));
+    let chats = Arc::new(ChatStores::new(data_dir, Arc::new(paddock_health::SystemClock)));
+    let files = chats.clone();
+    let provider =
+        Arc::new(ServerChatProvider::new(client.clone(), runtime, "").with_attachments(Arc::new(move |sha| files.attachment(sha))));
     let mut cfg = AssistantConfig::new("Pitwall", SYSTEM);
     cfg.budgets.max_wall = None;
     cfg.budgets.approval_wait = None;
     cfg.budgets.max_rounds = 8;
     cfg.budgets.max_tool_calls = 16;
     cfg.policy = policy.clone();
-    let chats = Arc::new(ChatStores::new(data_dir, Arc::new(paddock_health::SystemClock)));
     let assistant = Assistant::with_conversations(
         provider.clone(),
         Tools::none(),
@@ -279,4 +282,36 @@ pub async fn delete_all_chats<R: Runtime>(app: AppHandle<R>) -> Result<ChatStora
         Ok(c.chats.storage())
     })
     .await
+}
+
+/// What the composer may attach (its early check and the picker's filter; [`chat_attach`] decides).
+#[tauri::command]
+pub async fn chat_attach_rules<R: Runtime>(app: AppHandle<R>) -> Result<AttachRules, CommandError> {
+    chat_of(&app)?;
+    Ok(super::attach::rules())
+}
+
+/// Takes a file the user attached (picker, paste or drop): checked here (text or code in UTF-8, at most 256 KiB), then kept in
+/// memory until its question is sent (ADR 0023 WP-4b). A refusal says why and what to do.
+#[tauri::command]
+pub async fn chat_attach<R: Runtime>(app: AppHandle<R>, name: String, bytes: Vec<u8>) -> Result<Attached, CommandError> {
+    let chat = chat_of(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let file = prepare(&name, &bytes).map_err(|r| {
+            log::info!(target: "pitwall_chat", "attach: refused a file of {} bytes", bytes.len());
+            CommandError::new(ErrorCode::BadRequest, r.0)
+        })?;
+        let sha = chat.chats.stage_attachment(&file.text).map_err(chats_error)?;
+        log::info!(target: "pitwall_chat", "attach: took a text file of {} bytes, {} lines", file.text.len(), file.lines);
+        Ok(Attached {
+            attachment: paddock_assistant::Attachment::File {
+                sha256: sha,
+                name: file.name,
+            },
+            bytes: file.text.len(),
+            lines: file.lines,
+        })
+    })
+    .await
+    .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the attachment stopped unexpectedly: {e}")))?
 }
