@@ -824,6 +824,7 @@ test('app-gates tests last-packages apart on Linux only, and a host leg leaves t
   assert.match(gates, /step cargo clippy --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\}/, 'clippy: excluded on a host only');
   assert.match(gates, /step cargo test --workspace \$\{hostexclude\[@\]\+"\$\{hostexclude\[@\]\}"\} --doc/, 'doc tests: excluded on a host only');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /rust-checks: \$\{\{ matrix\.rust_checks \}\}/, 'ci.yml hands rustChecks to app-gates');
+  assert.match(read(join(WORKFLOWS, 'ci.yml')), /host-rust-checks: \$\{\{ matrix\.host_rust_checks \}\}/, 'ci.yml hands hostRustChecks to app-gates');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /notices: \$\{\{ matrix\.notices \}\}/, 'ci.yml hands the notices check to app-gates');
   assert.match(read(join(WORKFLOWS, 'ci.yml')), /last-packages: \$\{\{ matrix\.last_packages \}\}/, 'ci.yml hands the contract field to app-gates');
 });
@@ -1168,7 +1169,7 @@ test("a kit app's host-cleanup temp sweep is <app>-it- and is a prefix of no tem
 test("app-gates runs every command list through run-commands.sh, which names the failing command and its exit code, stops there and keeps a cd", () => {
   const gates = read(join(ACTIONS, 'app-gates', 'action.yml'));
   assert.doesNotMatch(gates, /bash -euo pipefail -c "\$COMMANDS"/, 'no anonymous bash -c over a command list');
-  assert.equal((gates.match(/conformance\/ci\/run-commands\.sh/g) ?? []).length, 5, 'prepare, checks, rust-checks, ui and e2e');
+  assert.equal((gates.match(/conformance\/ci\/run-commands\.sh/g) ?? []).length, 6, 'prepare, checks, rust-checks, host-rust-checks, ui and e2e');
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'paddock-run-commands-')));
   mkdirSync(join(dir, 'sub'));
   const run = (commands, env = {}) => spawnSync('bash', [join(PADDOCK, 'conformance', 'ci', 'run-commands.sh')], { cwd: dir, env: { PATH: '/usr/bin:/bin', COMMANDS: commands, ...env }, encoding: 'utf8' });

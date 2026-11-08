@@ -4,6 +4,13 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### CI contract: `hostRustChecks` (Dyno ADR 0033, WP-1b)
+
+- New field `hostRustChecks` in `paddock.ci.json` (`app-gates` input `host-rust-checks`, matrix key `host_rust_checks`): commands that run on the Windows and
+  macOS legs after the Rust step, only with the Rust half, for a check that needs a build the tests do not make (a non-test `cargo check`:
+  `nextest` and `clippy --all-targets` unify dev-dependency features in). Dyno uses it for `cargo check --locked --lib --bins` of the packages
+  that link `dyno-platform`, and runs the same line on Linux as `rustChecks`.
+
 ### `paddock-power`: the doubles exist only for tests (Dyno ADR 0033, D2)
 
 - `FakePower` and `FakeEvents` are behind `cfg(any(test, feature = "test-support"))`; a consumer enables `test-support` in `[dev-dependencies]` only.

@@ -33,6 +33,10 @@
     "cd apps/dyno",
     "cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper"
   ],
+  "hostRustChecks": [
+    "cd apps/dyno",
+    "cargo check --locked --lib --bins -p dyno-platform -p dyno-agent -p dyno-app -p dyno-helper"
+  ],
   "ui": [
     "npm run build -w ui",
     "cd apps/dyno/app",
