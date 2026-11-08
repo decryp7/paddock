@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { judgeColdUninstall, coldUninstallAccepted, rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, parseTrayDiagnosis, serviceState, triState } from "./win-judges.mjs";
+import { judgeJobsRestart, parseMenuWatch, judgeNativeMenu, parseConsent, judgeConsentAfterAnswer, killWatcherScript, killWatcherOutcome, installOutcomeSince, installEvents, judgeColdUninstall, coldUninstallAccepted, rightClicksInLog, judgeTrayClick, judgeInstallOutcome, attemptProbe, classifyAttempt, judgeAutostart, judgeControl, judgeExploitPrecondition, judgeRefusal, judgeRestartService, judgeServed, parseServed, judgeTrayCount, judgeUninstall, judgeWear, parseProcs, parseTrayDiagnosis, serviceState, triState } from "./win-judges.mjs";
 import { makeResult } from './verdict.mjs';
 
 const BOOT = '2026-11-05T10:00:00';
@@ -187,4 +187,73 @@ test('tray after restart: the app\'s own Shell_NotifyIcon diagnosis measures the
   // lines from before the boot do not count: no diagnosis after the boot stays not measured
   const old = judgeTrayCount({ metrics: ['CPU'], visible: 0, overflow: 0, measured: false, registered: 1, diagnosis: parseTrayDiagnosis(log, '2026-11-08T09:00:00') });
   assert.ok(old.every((c) => c.ok || c.kind === 'check'));
+});
+
+test('the install outcome is a new finished or failed line anywhere in the log, not in the last lines', () => {
+  const noise = Array.from({ length: 40 }, (_, i) => `${i} INFO Helper: processes answered items=166 more=false`).join('\n');
+  const before = installEvents('1 INFO Helper: InstallTool finished\n');
+  assert.equal(installOutcomeSince(before, `1 INFO Helper: InstallTool finished\n${noise}`), null, 'the earlier install is not this one');
+  assert.equal(installOutcomeSince(before, `1 INFO Helper: InstallTool finished\n2 INFO Helper: InstallTool finished\n${noise}`), 'finished');
+  assert.equal(installOutcomeSince(before, `1 INFO Helper: InstallTool finished\n3 WARN Helper: InstallTool failed Error=x\n${noise}`), 'failed');
+});
+
+test('the kill watcher polls the installer log for the part-way point and ends the installer there', () => {
+  const ps = killWatcherScript({ log: 'C:\\p\\setup_log.txt', out: 'C:\\p\\k.txt', maxSec: 90 });
+  assert.match(ps, /Start-Sleep -Milliseconds 100/);
+  assert.match(ps, /ReadWrite,Delete/, 'the log is open for writing by the installer: read it with a shared open');
+  assert.match(ps, /phase=stop-all end/);
+  assert.match(ps, /Stop-Process -Force/);
+  assert.match(ps, /AddSeconds\(90\)/);
+  assert.ok(ps.indexOf('TOO-LATE') < ps.indexOf('Stop-Process'), 'the late check comes first, so a finished install is never "killed"');
+});
+test('only a watcher that ended an installer process counts as a kill', () => {
+  assert.equal(killWatcherOutcome('KILLED setup:812,paddock-setup:900 at 2026-11-08T03:00:00Z').killed, true);
+  assert.equal(killWatcherOutcome('KILLED  at 2026-11-08T03:00:00Z').killed, false);
+  for (const t of ['TOO-LATE', 'NEVER', '']) assert.equal(killWatcherOutcome(t).killed, false);
+});
+
+test('a prompt after the answer is a second elevation only when it is another consent.exe', () => {
+  const first = parseConsent('pid=4100 start=2026-11-08T03:00:01 parent=800 cmd=consent.exe 7568 1 2');
+  assert.equal(first.length, 1);
+  assert.equal(judgeConsentAfterAnswer(first, first).second, false, 'same pid and start: the first prompt, still listed');
+  const second = parseConsent('pid=4200 start=2026-11-08T03:00:09 parent=800 cmd=consent.exe 9000 1 2');
+  assert.equal(judgeConsentAfterAnswer(first, second).second, true);
+  assert.equal(judgeConsentAfterAnswer([], second).second, false, 'with nothing to compare, no claim');
+  assert.equal(judgeConsentAfterAnswer(first, []).second, false);
+});
+
+const SEEN = 'SEEN 340\n--windows\n1234\tdyno-app\t100,200,300,400\n--items\nKeep awake\t150,220\nWake device\t150,250';
+test('the menu watch answer is parsed into windows and items', () => {
+  const w = parseMenuWatch(SEEN);
+  assert.deepEqual([w.seen, w.ms, w.windows.length, w.items.map((i) => i.name)], [true, 340, 1, ['Keep awake', 'Wake device']]);
+  assert.equal(parseMenuWatch('NONE 6000').seen, false);
+  assert.equal(parseMenuWatch('').valid, false);
+});
+test('a native menu row: without a seen control nothing about Dyno is a product verdict', () => {
+  const none = parseMenuWatch('NONE 6000');
+  const blind = judgeNativeMenu({ control: none, controlIcon: true, attempts: [{ logged: true, watch: none }, { logged: true, watch: none }] });
+  assert.ok(blind.filter((c) => !c.ok).every((c) => c.kind === 'check'), 'both broken checks');
+  const good = judgeNativeMenu({ control: parseMenuWatch(SEEN), controlIcon: true, attempts: [{ logged: true, watch: none }, { logged: true, watch: parseMenuWatch(SEEN) }] });
+  assert.ok(good.every((c) => c.ok));
+});
+test('a seen control and a logged right click with no menu is a product failure', () => {
+  const none = parseMenuWatch('NONE 6000');
+  const r = judgeNativeMenu({ control: parseMenuWatch(SEEN), controlIcon: true, attempts: [{ logged: true, watch: none }, { logged: true, watch: none }] });
+  const bad = r.filter((c) => !c.ok);
+  assert.equal(bad.length, 1);
+  assert.equal(bad[0].kind, undefined);
+});
+test('a click the app did not log is the probe\'s', () => {
+  const r = judgeNativeMenu({ control: parseMenuWatch(SEEN), controlIcon: true, attempts: [{ logged: false, watch: parseMenuWatch('NONE 6000') }] });
+  assert.equal(r.filter((c) => !c.ok)[0].kind, 'check');
+});
+
+test('jobs after an agent restart: only a message seen in the gap and gone afterwards passes', () => {
+  const base = { panelOpen: true, shownBefore: false, agentBack: true, everShown: true, shownAfterBack: false, secondsToClear: 3 };
+  assert.ok(judgeJobsRestart(base).every((c) => c.ok));
+  const stuck = judgeJobsRestart({ ...base, shownAfterBack: true }).filter((c) => !c.ok);
+  assert.equal(stuck.length, 1);
+  assert.equal(stuck[0].kind, undefined, 'a message that stays is a product failure');
+  const blind = judgeJobsRestart({ ...base, everShown: false, shownAfterBack: false }).filter((c) => !c.ok);
+  assert.equal(blind[0].kind, 'check', 'no message in the gap: the control failed, not a pass');
 });

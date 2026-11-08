@@ -253,3 +253,104 @@ export function judgeColdUninstall(f) {
 
 /** The fallback is a pass only when every check of it holds: gone, or (only uninstall.exe, noted, reinstall works). */
 export const coldUninstallAccepted = (f) => f.folder === 'no' || (f.folder === 'yes' && f.onlyUninstallExe === true && f.noteLogged && f.reinstallOk === true);
+
+/** How many "InstallTool finished" and "InstallTool failed" lines a helper.log text holds. */
+export const installEvents = (text) => ({ finished: (String(text).match(/InstallTool finished/g) ?? []).length, failed: (String(text).match(/InstallTool failed/g) ?? []).length });
+
+/**
+ * The outcome of the install this step started, from the WHOLE log counted before and now: a new "finished" or "failed" line. The old probe looked at the last 8 lines, and the
+ * helper's own "processes answered" lines (two every 5 s) pushed the finished line out before the next look (0ad round 2: "install: timeout" with smartctl.exe in place).
+ * @returns {'finished'|'failed'|null} null: nothing new yet
+ */
+export function installOutcomeSince(before, nowText) {
+  const n = installEvents(nowText);
+  if (n.failed > before.failed) return 'failed';
+  if (n.finished > before.finished) return 'finished';
+  return null;
+}
+
+/**
+ * The guest-side watcher of the kill-the-installer row. The host cannot time a kill (an SSH round trip and a UAC answer take longer than the install, 0ad round 2: "the installer
+ * ended before the kill"), so a script in the guest polls every 100 ms for the point the install is part-way (paddock-setup.exe's own log says `stop-all end`: the old files are
+ * stopped and the new ones are being copied, the uninstall entry is not written yet) and ends the installer there, at once. The log is read with a shared-write open (the installer holds it open while it runs; Get-Content found nothing in 0ad round 4: NEVER). It writes KILLED (with what it ended and the log lines
+ * it saw), TOO-LATE (the log reached `check-version` first) or NEVER (nothing within maxSec) to `out`. Run as SYSTEM, which may end the elevated installer.
+ */
+export function killWatcherScript({ log, out, maxSec = 150, point = 'phase=stop-all end', late = 'phase=check-version' }) {
+  return `$ErrorActionPreference='SilentlyContinue'; Remove-Item '${out}'; $end=(Get-Date).AddSeconds(${maxSec}); while((Get-Date) -lt $end){ $t=''; try { $fs=[IO.File]::Open('${log}','Open','Read','ReadWrite,Delete'); $sr=New-Object IO.StreamReader($fs); $t=$sr.ReadToEnd(); $sr.Close() } catch { }; ` +
+    `if($t -match '${late}'){ 'TOO-LATE' | Set-Content '${out}'; exit }; ` +
+    `if($t -match '${point}'){ $v=@(Get-Process setup,paddock-setup | Where-Object { $_.Id -ne $PID }); $names=($v | ForEach-Object { $_.ProcessName + ':' + $_.Id }) -join ','; $v | Stop-Process -Force; ('KILLED ' + $names + ' at ' + (Get-Date).ToString('o')) | Set-Content '${out}'; exit }; Start-Sleep -Milliseconds 100 }; ('NEVER exists=' + (Test-Path '${log}') + ' len=' + $t.Length + ' setup-processes=' + (@(Get-Process setup,paddock-setup).Count)) | Set-Content '${out}'`;
+}
+
+/** The watcher's answer to the `killed` fact: true only when it ended at least one installer process at the point; otherwise why not. */
+export function killWatcherOutcome(text) {
+  const t = String(text ?? '').trim();
+  const m = /^KILLED (\S*)/.exec(t);
+  if (m && m[1]) return { killed: true, detail: `the installer was ended part-way (${t})` };
+  if (m) return { killed: false, detail: `the point was reached but no installer process was running to end (${t})` };
+  if (/^TOO-LATE/.test(t)) return { killed: false, detail: 'the install had passed the kill point (check-version in setup.log) before the watcher acted' };
+  if (/^NEVER/.test(t)) return { killed: false, detail: `the installer never reached the kill point (no stop-all line in setup.log) within the watcher's time (${t})` };
+  return { killed: false, detail: `the watcher wrote no answer (${t || 'empty'})` };
+}
+
+/**
+ * `consent.exe` rows as the guest prints them (`pid=N start=ISO parent=N cmd=...`, one per process) to [{pid, start, parent, cmd}].
+ */
+export const parseConsent = (text) => String(text ?? '').split('\n').map((l) => /^pid=(\d+) start=(\S+) parent=(\d+)(?: cmd=(.*))?$/.exec(l.trim())).filter(Boolean).map((m) => ({ pid: Number(m[1]), start: m[2], parent: Number(m[3]), cmd: m[4] ?? '' }));
+
+/**
+ * Whether a prompt still up after the answer is a SECOND elevation or the first one lingering (0ad round 2 saw "the UAC prompt was still there 60 s after the answer" while the
+ * install ended 0). Same pid and start time as the answered prompt: the first one (the answer did not take, or consent.exe was slow to leave); another pid or start: a second elevation.
+ * @returns {{second: boolean, detail: string}}
+ */
+export function judgeConsentAfterAnswer(answered, later) {
+  const key = (c) => `${c.pid}@${c.start}`;
+  const was = new Set(answered.map(key));
+  if (!answered.length) return { second: false, detail: 'no consent.exe was listed when the prompt was answered, so a later one cannot be told from the first' };
+  const fresh = later.filter((c) => !was.has(key(c)));
+  if (fresh.length) return { second: true, detail: `a different consent.exe (${fresh.map((c) => `pid ${c.pid}, parent ${c.parent}, started ${c.start}`).join('; ')}) appeared after the answer: a second elevation` };
+  return { second: false, detail: later.length ? `the answered consent.exe (${answered.map((c) => `pid ${c.pid}`).join(', ')}) was still listed, no new one: the first prompt lingered` : 'no consent.exe after the answer' };
+}
+
+/** The actor's `rclickwatch` answer: `SEEN <ms>` / `NONE <ms>`, then `--windows` rows (handle, process, rect) and `--items` rows (name, centre). */
+export function parseMenuWatch(text) {
+  const t = String(text ?? '');
+  const head = /^(SEEN|NONE)\s+(\d+)/m.exec(t);
+  const part = (name, next) => { const i = t.indexOf(`--${name}`); if (i < 0) return ''; const j = next ? t.indexOf(`--${next}`, i) : -1; return t.slice(i + name.length + 2, j < 0 ? undefined : j).trim(); };
+  const windows = part('windows', 'items').split('\n').map((l) => l.split('\t')).filter((c) => c.length >= 3).map(([handle, proc, rect]) => ({ handle, proc, rect: rect.trim() }));
+  const items = part('items').split('\n').map((l) => l.split('\t')).filter((c) => c[0] && c[1]).map(([name, at]) => ({ name: name.trim(), at: at.trim().replace(',', ' ') }));
+  return { seen: head?.[1] === 'SEEN', ms: head ? Number(head[2]) : null, windows, items, valid: Boolean(head) };
+}
+
+/**
+ * The native tray menu rows (ER-33): the probe's own control (a menu of the harness's own notification icon) must be SEEN first, or nothing about Dyno is judged
+ * (check broken). With a seen control, Dyno's right click that the app logged but that opened no native menu in both tries is a product failure; a click the app did not log is
+ * the probe's.
+ * @param {{control: ReturnType<typeof parseMenuWatch>|null, controlIcon: boolean, attempts: {logged: boolean, watch: ReturnType<typeof parseMenuWatch>}[]}} f
+ */
+export function judgeNativeMenu({ control, controlIcon, attempts }) {
+  const checks = [];
+  const ctlSeen = Boolean(control?.seen && control.items.length > 0);
+  checks.push(chk(ctlSeen, ctlSeen ? `control: the probe sees the native menu of the harness's own notification icon (${control.items.map((i) => i.name).join(', ')}; first seen ${control.ms} ms after the click)` : !controlIcon ? 'control: the harness\'s own notification icon could not be found, so the probe was not shown to see a native tray menu' : `control: the probe did not see the native menu of the harness's own icon (${control?.seen ? 'a menu window, no items read' : 'no menu window'}), so it cannot judge Dyno's`, 'check'));
+  const seenAny = attempts.find((a) => a.watch.seen);
+  const logged = attempts.some((a) => a.logged);
+  if (!logged) checks.push(chk(false, 'the app logged no "tray click: Right Up" for any attempt: the right click did not reach the tray icon (the probe, not the product)', 'check'));
+  else if (seenAny) checks.push(chk(true, `the right click opened a native menu (first seen ${seenAny.watch.ms} ms after the click, ${seenAny.watch.items.length} item(s) read)`));
+  else checks.push({ ...chk(false, `the app logged the right click ${attempts.filter((a) => a.logged).length} time(s) but no native menu window (class #32768) appeared within 6 s of either click; the screenshot after the click is saved`), ...(ctlSeen ? {} : { kind: 'check' }) });
+  return checks;
+}
+
+/**
+ * The Jobs panel after an agent restart (1.1.0 rc 9d9c2c814: "The jobs could not be read" must not stay once the agent is back). The probe watches the page's text with a
+ * MutationObserver in the page itself, so a message that shows for a second is not missed; it is a positive control only if the message showed during the gap.
+ * @param {{panelOpen:boolean, shownBefore:boolean, agentBack:boolean, everShown:boolean, shownAfterBack:boolean|null, secondsToClear:number|null}} f
+ */
+export function judgeJobsRestart(f) {
+  const checks = [];
+  checks.push(chk(f.panelOpen, f.panelOpen ? 'the Jobs panel is open' : 'the Jobs panel could not be opened', 'check'));
+  if (!f.panelOpen) return checks;
+  checks.push(chk(!f.shownBefore, f.shownBefore ? 'precondition: the panel already said "The jobs could not be read" before the restart' : 'precondition: the panel reads the jobs before the restart', 'check'));
+  checks.push(chk(f.agentBack, f.agentBack ? 'the agent came back (a new process answers dyno status)' : 'the agent did not come back within 90 s', 'check'));
+  checks.push(chk(f.everShown, f.everShown ? 'control: the panel showed "The jobs could not be read" while the agent was gone (the probe sees the message)' : 'control: the panel never showed "The jobs could not be read" during the gap, so the recovery is not shown by this run', 'check'));
+  if (f.agentBack && f.everShown) checks.push(chk(f.shownAfterBack === false, f.shownAfterBack === false ? `the message was gone ${f.secondsToClear} s after the agent was back` : 'the panel still says "The jobs could not be read" 60 s after the agent is back'));
+  return checks;
+}

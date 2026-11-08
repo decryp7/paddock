@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { exitCodeOf, semverOf, judgeUninstall } from './win-machine.mjs';
+import { exitCodeOf, semverOf, judgeUninstall, RENDERERS_PS } from './win-machine.mjs';
 
 test('exitCodeOf reads the last EXIT line', () => {
   assert.equal(exitCodeOf('not newer\nEXIT=27\n'), 27);
@@ -16,4 +16,10 @@ test('judgeUninstall fails on a left folder and passes on a clean machine', () =
   const bad = judgeUninstall({ ...clean, folder: 'yes', folderFiles: 'dyno-app.exe', runUser: 'yes' });
   assert.equal(bad.filter((c) => !c.ok).length, 2);
   assert.ok(judgeUninstall({ ...clean, folder: 'unreadable' }).some((c) => !c.ok && c.kind === 'check'), 'a dead SSH is not "removed"');
+});
+test('the renderer filter follows the ancestry to dyno-app.exe, not a command line switch', () => {
+  assert.match(RENDERERS_PS, /--type=renderer/);
+  assert.match(RENDERERS_PS, /'dyno-app\.exe'/);
+  assert.match(RENDERERS_PS, /ParentProcessId/);
+  assert.doesNotMatch(RENDERERS_PS, /webview-exe-name|-match 'dyno'/);
 });

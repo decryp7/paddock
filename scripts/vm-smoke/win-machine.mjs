@@ -7,7 +7,7 @@ import { quitStopStep } from './mcp-judges.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { Actor } from './win-act.mjs';
 import { APP_LOG_PS } from './win-tray-icons.mjs';
-import { judgeColdUninstall, coldUninstallAccepted, judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
+import { killWatcherScript, killWatcherOutcome, judgeColdUninstall, coldUninstallAccepted, judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
 import { swapNotDriven } from './upgrade-swap-row.mjs';
 import { winSwapRow } from './win-swap.mjs';
@@ -60,8 +60,9 @@ export function setupExeFacts(label) {
 export function defenderEvidence() {
   const det = ssh("Get-MpThreatDetection -ErrorAction SilentlyContinue | ForEach-Object { '' + $_.InitialDetectionTime + ' threat ' + $_.ThreatID + ' action ' + $_.ActionSuccess + ' ' + ($_.Resources -join ',') }; 'END'", { admin: true });
   const ev = ssh("Get-WinEvent -FilterHashtable @{ LogName = 'Microsoft-Windows-Windows Defender/Operational'; Id = 1116,1117,1006 } -MaxEvents 20 -ErrorAction SilentlyContinue | ForEach-Object { $_.TimeCreated.ToString('s') + ' id=' + $_.Id + ': ' + (($_.Message -replace '\\s+',' ').Substring(0, [Math]::Min(400, $_.Message.Length))) }; 'END'", { admin: true });
+  const ver = ssh("$s = Get-MpComputerStatus; 'AMEngineVersion=' + $s.AMEngineVersion + ' AMProductVersion=' + $s.AMProductVersion + ' AntivirusSignatureVersion=' + $s.AntivirusSignatureVersion + ' signatures updated ' + $s.AntivirusSignatureLastUpdated", { admin: true }).trim();
   const lines = (t) => t.replace(/END\s*$/, '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
-  return ['--- Defender Get-MpThreatDetection', ...(/END\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), '--- Defender Operational 1116/1117/1006', ...(/END\s*$/.test(ev) ? (lines(ev).length ? lines(ev) : ['(no events)']) : ['(unreadable)'])];
+  return [`--- Defender versions: ${ver || '(unreadable)'}`, '--- Defender Get-MpThreatDetection', ...(/END\s*$/.test(det) ? (lines(det).length ? lines(det) : ['(no detections)']) : ['(unreadable)']), '--- Defender Operational 1116/1117/1006', ...(/END\s*$/.test(ev) ? (lines(ev).length ? lines(ev) : ['(no events)']) : ['(unreadable)'])];
 }
 
 export function sameVersionRefused() {
@@ -181,13 +182,17 @@ export async function installRows() {
   // 2. Uninstall, then kill the installer part-way.
   ssh(`Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Process '${PROG}\\uninstall.exe' -ArgumentList '/S' -Wait`, { admin: true, ms: 180_000 });
   for (let i = 0; i < 20 && facts().key !== 'no'; i++) await sleep(3000);
+  // The kill is made in the guest at a fixed point (killWatcherScript), not timed from here.
+  const WATCH = 'C:\\paddock-test\\vmcheck\\kill-watch';
+  ssh(`Remove-Item '${PROG}\\updates\\setup.log' -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force '${WATCH}' | Out-Null; Set-Content '${WATCH}\\w.ps1' '${killWatcherScript({ log: `${PROG}\\updates\\setup.log`, out: `${WATCH}\\k.txt` }).replace(/'/g, "''")}'; Remove-Item '${WATCH}\\k.txt' -ErrorAction SilentlyContinue; schtasks /create /tn DynoKillWatch /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /f /tr "powershell -NoProfile -ExecutionPolicy Bypass -File ${WATCH}\\w.ps1" | Out-Null; schtasks /run /tn DynoKillWatch | Out-Null`, { admin: true });
   startInstaller();
   const uacK = await answerUac('kill-installer');
-  await sleep(2500);
-  const killed = installerRunning();
-  ssh('Get-Process -Name setup -ErrorAction SilentlyContinue | Stop-Process -Force');
+  let watched = '';
+  for (let i = 0; i < 60 && !/^(KILLED|TOO-LATE|NEVER)/.test(watched.trim()); i++) { await sleep(3000); watched = ssh(`Get-Content '${WATCH}\\k.txt' -ErrorAction SilentlyContinue`, { admin: true }); }
+  const w = killWatcherOutcome(watched);
   await sleep(4000);
-  steps.push(result(ROW_TITLES.killInstaller, [{ ok: uacK.ok, detail: uacK.detail }, ...judgeKilledInstall({ killed, ...facts() })], [uacK.detail], 'the machine reads Not installed after the installer was killed'));
+  ssh('schtasks /delete /tn DynoKillWatch /f 2>$null | Out-Null', { admin: true });
+  steps.push(result(ROW_TITLES.killInstaller, [{ ok: uacK.ok, detail: uacK.detail }, { ok: w.killed, kind: w.killed ? undefined : 'check', detail: w.detail }, ...judgeKilledInstall({ killed: w.killed, ...facts() })], [uacK.detail, w.detail], 'the machine reads Not installed after the installer was killed'));
   // 3. Install again.
   ssh(`Remove-Item '${PROG}' -Recurse -Force -ErrorAction SilentlyContinue`, { admin: true });
   const b = await installOnce('install-again');
@@ -214,23 +219,44 @@ export async function coldUninstallStep() {
 export const notDrivenWinRows = () => [notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
 
 const NT = `Add-Type -Namespace N -Name P -MemberDefinition '[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h); [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr h);'; `;
-const renderers = `$ids = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -match '--type=renderer' -and $_.CommandLine -match 'dyno' } | ForEach-Object { $_.ProcessId }); `;
+/**
+ * The WebView2 renderers of dyno-app: msedgewebview2.exe processes of `--type=renderer` that have a dyno-app.exe among their ancestors (renderer, then the WebView2 browser
+ * process, then the app). Two earlier filters read the command line (the user-data folder, then `--webview-exe-name`) and found none in 0ad rounds 2 and 4: the ancestry is the one
+ * fact that does not depend on which switches Edge passes on.
+ */
+export const RENDERERS_PS = `$all = @(Get-CimInstance Win32_Process); $byId = @{}; foreach ($q in $all) { $byId[[int]$q.ProcessId] = $q }; function UnderDyno($p) { $c = $p; for ($i = 0; $i -lt 8 -and $c; $i++) { $c = $byId[[int]$c.ParentProcessId]; if ($c -and $c.Name -eq 'dyno-app.exe') { return $true } }; return $false }; $ids = @($all | Where-Object { $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -match '--type=renderer' -and (UnderDyno $_) } | ForEach-Object { $_.ProcessId }); `;
+/** What the guest has, for the evidence when no renderer is found: every WebView2 process with its parent, its type switch and its embedding program. */
+export const WEBVIEW_LISTING_PS = `Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | ForEach-Object { 'pid=' + $_.ProcessId + ' parent=' + $_.ParentProcessId + ' ' + (($_.CommandLine -split ' ' | Where-Object { $_ -match '^--(type|webview-exe-name)=' }) -join ' ') }`;
+const renderers = RENDERERS_PS;
 
 /** A hung or paused visible page on Windows: the WebView2 renderer of dyno-app is suspended (NtSuspendProcess, no debugger); the question is read from the window list. Keep Waiting cannot be pressed here (no button lookup in the actor), so the doubling stays a broken check. */
+// CIM (Win32_Process) answers "Access denied" to the standard user over SSH (a network logon): every process query of this row runs as the administrator key (0ad round 6).
 export async function winHung() {
   ssh('Set-Content C:\\paddock-test\\vmcheck\\launch-hung.ps1 \'Start-Process "$env:ProgramFiles\\Dyno\\dyno-app.exe"\'; schtasks /create /tn DynoHungLaunch /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -ExecutionPolicy Bypass -File C:\\paddock-test\\vmcheck\\launch-hung.ps1" | Out-Null; schtasks /run /tn DynoHungLaunch | Out-Null');
-  await sleep(30_000);
+  // Condition wait (up to 90 s) for the app and a WebView2 renderer under it, never a fixed sleep; when none comes, what the launch task did is the evidence.
+  let up = false;
+  for (let i = 0; i < 30 && !up; i++) { await sleep(3000); up = Number(ssh(`${NT}${renderers}$ids.Count`, { admin: true }).trim().split('\n').at(-1)) > 0; }
+  const launchDiag = up ? 'a WebView2 renderer of dyno-app was up' : `no renderer after 90 s; task: ${ssh("schtasks /query /tn DynoHungLaunch /v /fo list | Select-String 'Last Result|Status|Last Run'").replace(/\s*\n\s*/g, ' | ')}; script: ${ssh('Get-Content C:\\paddock-test\\vmcheck\\launch-hung.ps1 -ErrorAction SilentlyContinue')}; dyno processes: ${ssh("(Get-Process dyno* -ErrorAction SilentlyContinue | ForEach-Object { $_.Name + ':' + $_.Id }) -join ','")}`;
   const actor = new Actor(); actor.start(); await sleep(6000);
+  // The guest's clock against this host's, for dating log lines the polls missed.
+  const gMs = Number(ssh('[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()').trim().split('\n').at(-1)); const hMs = Date.now();
   const r = await hungPageStep({
+    clockOffsetMs: Number.isFinite(gMs) ? hMs - gMs : undefined,
+    // The guest's own local time (the app's log writes local time labelled Z) read right after the stop: log lines are dated against it, whatever the zone.
+    guestAtSuspend: async () => ssh("(Get-Date).ToString('yyyy-MM-ddTHH:mm:ss.fff') + 'Z'").trim().split('\\n').at(-1),
     now: () => Date.now() / 1000, sleep,
-    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error('no WebView2 renderer of dyno-app was found'); },
-    resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`); },
-    logLines: async () => ssh(APP_LOG_PS).split('\\n'),
+    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`, { admin: true }); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error(`no WebView2 renderer of dyno-app was found (dyno processes: ${ssh("Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^dyno' } | ForEach-Object { $_.Name + ' pid=' + $_.ProcessId + ' session=' + $_.SessionId + ' ' + $_.CommandLine }", { admin: true }).replace(/\s*\n\s*/g, ' | ').slice(0, 500) || 'none'}; WebView2 processes: ${ssh(WEBVIEW_LISTING_PS, { admin: true }).replace(/\s*\n\s*/g, ' | ').slice(0, 600) || 'none'})`); },
+    resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`, { admin: true }); },
+    // Only the watchdog's lines, filtered in the guest: reading the whole log three times over SSH took longer than the watchdog's questions come (0ad round 6: the line was in the log, the poll never returned it).
+    logLines: async () => ssh(`Get-ChildItem -Path "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | ForEach-Object { Select-String -Path $_.FullName -Pattern 'stopped responding','has not answered for a long time','Not-responding question','responds again' | ForEach-Object { $_.Line } }`, { ms: 120_000 }).split('\\n'),
     questions: async (phase) => { const n = (await actor.send('windows').catch(() => '')).split('\\n').filter((l) => /not responding|Keep Waiting/i.test(l)).length; return phase === 'open' && n === 0 ? null : n; },
+    // After the run: the whole filtered log once more, so a line the polls missed is named in the evidence.
+    finalLines: async () => ssh(`Get-ChildItem -Path "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | ForEach-Object { Select-String -Path $_.FullName -Pattern 'stopped responding','has not answered for a long time','Not-responding question','responds again' | ForEach-Object { $_.Line } }`, { ms: 120_000 }).split('\\n'),
     keepWaiting: async () => false, shot: async (name) => actor.shot(name),
   }, ROW_TITLES.hungPage);
   await actor.send('quit', 5000).catch(() => {});
   ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force');
+  r.evidence = [...(r.evidence ?? []), `launch: ${launchDiag}`];
   return r;
 }
 
@@ -243,11 +269,16 @@ export async function winQuitStop() {
     trigger: async () => {
       // The hidden-start row before this left a Dyno without the DevTools port running; a launch would hand over to it. Start a fresh one with the port.
       ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(4000);
-      launch(); await sleep(25_000);
+      launch();
       const t = tunnel();
       try {
-        const browser = await connect();
-        const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+        // Condition wait (up to 120 s) for the DevTools port and the app's main page, not a fixed 25 s (0ad round 7: no page yet on a loaded VM, "reading 'evaluate'" of undefined).
+        let browser = null; let main = null;
+        for (let i = 0; i < 40 && !main; i++) {
+          await sleep(3000);
+          try { browser = await connect(); main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id=') && p.url() !== 'about:blank') ?? null; } catch { main = null; }
+        }
+        if (!main) throw new Error('the app\'s main page did not appear on the DevTools port within 120 s');
         const clicked = await main.evaluate(async () => {
           const items = () => [...document.querySelectorAll('[role=menuitem]')];
           if (!items().some((e) => e.textContent.trim().startsWith('Quit and stop'))) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File')?.click(); await new Promise((r) => setTimeout(r, 600)); }
@@ -276,4 +307,12 @@ export async function winHiddenStart() {
   r.evidence = [...(r.evidence ?? []), `entry command: ${cmd}`];
   return r;
 }
+/** The `--only` rows that run after Quit (win-rows.mjs), each a function returning a step or steps. */
+export const afterRowFns = {
+  'hung-page': () => winHung(),
+  'install-rows': () => installRows(),
+  'upgrade-swap': () => winSwapRow({ oldStaged: process.env.PADDOCK_OLD_SETUP === '1' }),
+  'second-user': () => notDrivenWinRows(),
+};
+export const afterRowSteps = (ids) => ids.map((k) => afterRowFns[k]);
 export const afterQuitSteps = [() => sameVersionRefused(), () => winMcpStep(), () => uninstall(), () => installRows(), () => winSwapRow({ oldStaged: process.env.PADDOCK_OLD_SETUP === '1' }), () => notDrivenWinRows(), () => winHung(), () => winHiddenStart(), () => winQuitStop()];

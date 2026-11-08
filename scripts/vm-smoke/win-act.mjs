@@ -23,9 +23,16 @@ export class Actor {
     try {
       const safe = String(name).replace(/[^\w-]/g, '-');
       await this.send(`shot ${safe}`, 30_000);
+      return await this.fetch(safe);
+    } catch { return null; }
+  }
+
+  /** Copies a screenshot the actor already took (e.g. `rcw-open`, taken in the guest at the first sight of a menu) into the evidence folder. Returns the host file or null. */
+  async fetch(safe, label = safe) {
+    try {
       const b64 = run(`[Convert]::ToBase64String([IO.File]::ReadAllBytes('${DIR}\\${safe}.png'))`, 60_000);
       if (!/^[A-Za-z0-9+/=]{100,}$/.test(b64)) return null;
-      const file = evidenceFile(`win-actor-${safe}`);
+      const file = evidenceFile(`win-actor-${label}`);
       writeFileSync(file, Buffer.from(b64, 'base64'));
       return file;
     } catch { return null; }

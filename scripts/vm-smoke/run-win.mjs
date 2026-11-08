@@ -4,7 +4,9 @@
 // (a scheduled task in the paddock-test session), polls for its result file with a bounded wait, and writes the Markdown result in the
 // vm-smoke format. The VM is reverted and stopped at the end, also after a failure.
 //
-//   node scripts/vm-smoke/run-win.mjs --app dyno (--installer <setup.exe> | --run <ci run id>) [--out <dir>]
+//   node scripts/vm-smoke/run-win.mjs --app dyno (--installer <setup.exe> | --run <ci run id>) [--out <dir>] [--only <rows>]
+//   --only names whole release rows (win-rows.mjs: tray-menu, login-jobs, disk-space, exploit, scoping, hung-page, install-rows, upgrade-swap, second-user, restart-tray, or their
+//   row numbers, e.g. 10,11,16,21): one install, only those rows, a partial result. Needs --vnc. Without rows, --only is a win-suite.ps1 part (`start`).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,8 +16,9 @@ import { buildStep, classifyInstallFailure, expectedCommit } from './verdict.mjs
 import { requiredSteps } from './manifest.mjs';
 import { commitOfRun, finalizeRun, resultFolder, foundFromPs, psHasCommit, sha256File, withBuildStep } from './report.mjs';
 import { runUiPhase } from './win-ui.mjs';
-import { helperSteps, answerUac } from './win-helper.mjs';
-import { afterQuitSteps } from './win-machine.mjs';
+import { helperSteps, answerUac, rowSteps } from './win-helper.mjs';
+import { selectRows } from './win-rows.mjs';
+import { afterQuitSteps, afterRowSteps } from './win-machine.mjs';
 import { runRebootPhase } from './win-reboot.mjs';
 import { stripVnc, withVnc, fixDiskName, vmxCheck } from './vmx-edit.mjs';
 
@@ -44,6 +47,10 @@ export function parseArgs(argv) {
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Windows suite');
   if (!o.installer === !o.run) throw new Error('give exactly one of --installer <setup.exe> or --run <CI run id>');
   if (o.run && !/^\d+$/.test(o.run)) throw new Error('--run takes a number');
+  o.sel = selectRows(o.only); // throws on a mix of rows and a suite part
+  if (o.sel.reboot) o.reboot = true; // restart-tray is the restart phase (its steps all run; the verdict asks only for the tray row)
+  if (o.sel.rows.length && !o.vnc) throw new Error('--only rows need --vnc (the installs ask for an administrator)');
+  if (o.sel.oldInstaller && !o.oldInstaller) throw new Error('--only upgrade-swap needs --old-installer');
   return o;
 }
 
@@ -146,13 +153,15 @@ async function main(argv) {
     if (o.oldInstaller) { if (scp(resolve(o.oldInstaller), `paddock-test@${ip}:C:/paddock-test/vmcheck/setup-old.exe`).code !== 0) throw new Error('copying the older installer failed'); process.env.PADDOCK_OLD_SETUP = '1'; }
     if (existsSync(`${exe}.sig`)) scp(`${exe}.sig`, `paddock-test@${ip}:C:/paddock-test/vmcheck/setup.exe.sig`);
     if (scp(join(HERE, 'win-suite.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-suite.ps1`).code !== 0) throw new Error('copying win-suite.ps1 failed');
-    // A script that does not parse never starts (no run.log, no steps.json) and the poll below would wait 40 minutes: parse it in the guest first.
-    {
-      const parse = clean(ssh(`$e = $null; $t = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('${GUEST}\\win-suite.ps1', [ref]$t, [ref]$e); foreach ($x in $e) { "line $($x.Extent.StartLineNumber): $($x.Message)" }; 'PARSED'`, 60_000).stdout).trim();
-      if (parse !== 'PARSED') throw new Error(`win-suite.ps1 does not parse in the guest: ${parse.replace(/\s*PARSED$/, '').slice(0, 400)}`);
+    // The in-session actor and the menu control are staged for every run (not only --ui), and every script is parsed in the guest first: a script that does not parse never
+    // starts (no run.log, no steps.json) and a poll would wait 40 minutes.
+    for (const f of ['win-act.ps1', 'win-menu-control.ps1']) if (scp(join(HERE, f), `paddock-test@${ip}:C:/paddock-test/vmcheck/${f}`).code !== 0) throw new Error(`copying ${f} failed`);
+    for (const f of ['win-suite.ps1', 'win-act.ps1', 'win-menu-control.ps1']) {
+      const parse = clean(ssh(`$e = $null; $t = $null; [void][System.Management.Automation.Language.Parser]::ParseFile('${GUEST}\\${f}', [ref]$t, [ref]$e); foreach ($x in $e) { "line $($x.Extent.StartLineNumber): $($x.Message)" }; 'PARSED'`, 60_000).stdout).trim();
+      if (parse !== 'PARSED') throw new Error(`${f} does not parse in the guest: ${parse.replace(/\s*PARSED$/, '').slice(0, 400)}`);
     }
     log('running the suite in the interactive session (bounded 40 min)');
-    ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep || o.ui || o.reboot ? ' -KeepRunning' : ''}${o.only ? ` -Only ${o.only}` : o.reboot ? ' -Only start' : ''}'; schtasks /run /tn VmCheck`);
+    ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep || o.ui || o.reboot || o.sel.rows.length ? ' -KeepRunning' : ''}${o.sel.rows.length ? ` -Only ${o.sel.startPart}` : o.only ? ` -Only ${o.only}` : o.reboot ? ' -Only start' : ''}'; schtasks /run /tn VmCheck`);
     let done = false;
     const answered = new Set();
     const uacNotes = [];
@@ -189,6 +198,12 @@ async function main(argv) {
       process.env.PADDOCK_WIN_SHOTS = join(out, `${new Date().toISOString().replace(/[:.]/g, '-')}-win-dom-shots`);
       uiSteps = await runUiPhase({ log, extra: o.vnc ? helperSteps : [], after: o.vnc ? afterQuitSteps : [] });
     }
+    if (o.sel.rows.length && !o.sel.reboot && done && !blocked) {
+      scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
+      log(`rows: ${o.sel.rows.join(', ')}`);
+      const ids = o.sel.ui.filter((k) => k !== 'tray-menu');
+      uiSteps = await runUiPhase({ log, extra: rowSteps(ids, { helper: o.sel.helper }), after: afterRowSteps(o.sel.after), select: { snap: false, tour: false, tray: o.sel.ui.includes('tray-menu') } });
+    }
     if (o.reboot && done && !blocked) {
       scp(join(HERE, 'win-act.ps1'), `paddock-test@${ip}:C:/paddock-test/vmcheck/win-act.ps1`);
       const waitConsole = async (tries = 90) => { for (let i = 0; i < tries; i++) { if (vm(['ssh', 'if ((query user) -match "console\\s+\\d+\\s+Active") {exit 0} else {exit 1}'], 30_000).code === 0) return true; if (i < tries - 1) await sleep(4000); } return false; };
@@ -220,10 +235,12 @@ async function main(argv) {
     const started_ = new Date().toISOString();
     const appLogText = ssh(`Get-ChildItem "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | Sort-Object Name | Select-Object -Last 2 | ForEach-Object { "@@ $($_.FullName)"; Get-Content $_.FullName -Tail 600 }`, 90_000).stdout;
     const allSteps = withBuildStep(steps, buildStep({ expected, found: buildProbe }));
-    const required = requiredSteps({ os: 'windows', ui: Boolean(o.ui), reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
+    const required = o.sel.rows.length
+      ? requiredSteps({ os: 'windows', ui: true, release: false, partial: true }).filter((r) => ['install', 'build-binding'].includes(r.id) || o.sel.manifest.includes(r.id))
+      : requiredSteps({ os: 'windows', ui: Boolean(o.ui), reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
     const { file, exit } = finalizeRun({
-      out, started: started_, meta: { label: o.reboot && !o.ui ? 'windows-restart' : 'windows-ui', os: 'windows', run: o.run ?? null },
-      run: { app: 'Dyno', version: steps[0]?.evidence?.find((e) => /^version \d/.test(e))?.replace(/^version /, ''), installer: source, installerSha256: sha256File(exe), source, expectedCommit: expected, partial: o.partial, required, guest: `VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot ${SNAPSHOT}), interactive session, x64 installer under emulation`, started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps: allSteps },
+      out, started: started_, meta: { label: o.sel.rows.length ? 'windows-rows' : o.reboot && !o.ui ? 'windows-restart' : 'windows-ui', os: 'windows', run: o.run ?? null },
+      run: { app: 'Dyno', version: steps[0]?.evidence?.find((e) => /^version \d/.test(e))?.replace(/^version /, ''), installer: source, installerSha256: sha256File(exe), source, expectedCommit: expected, partial: o.partial || o.sel.rows.length > 0, required, guest: `VMware Fusion Windows 11 Arm (paddock-win11-test, snapshot ${SNAPSHOT}), interactive session, x64 installer under emulation`, started: started_, commit: sh('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD']).stdout.trim(), steps: allSteps },
     });
     mkdirSync(join(dirname(file), 'evidence'), { recursive: true });
     writeFileSync(join(dirname(file), 'evidence', `${started_.replace(/[:.]/g, '-')}-win-app-log.txt`), appLogText); // the app log of every run, pass or fail

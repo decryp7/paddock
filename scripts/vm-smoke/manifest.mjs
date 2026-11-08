@@ -60,7 +60,7 @@ const WIN_UI = [
   row('wp-sec', /^Windows: WP-SEC folder protection/), row('helper-acl', /^Windows: helper data folder is not writable/), row('exploit', /^Windows: exploit probe/),
   row('repeat-install', /^Windows: repeat install of the disk health tool/), row('disk-health', /^Windows: disk health install/), ...readings('windows'),
   row('scoping', /^Windows: D6 scoping/), row('served', /^Windows: the helper reports which readings it served/),
-  row('login-jobs', /^Row 5a:/), row('login-switch', /^Launch at login: on by default/), row('disk-space', /^Release row: disk space matches/), row('discovery', /^Release row: a deleted or foreign agent.json/), row('repair', /^Windows: Repair through the card/), row('helper-off', /^Windows: admin helper Turn off/),
+  row('login-jobs', /^Row 5a:/), row('jobs-restart', /^Windows: the Jobs panel after an agent restart/), row('login-switch', /^Launch at login: on by default/), row('disk-space', /^Release row: disk space matches/), row('discovery', /^Release row: a deleted or foreign agent.json/), row('repair', /^Windows: Repair through the card/), row('helper-off', /^Windows: admin helper Turn off/),
   row('upgrade-swap', /^Release row: installing the new build over a running older one/), row('quit-exit', /^Windows: Quit Dyno \(File menu\)/), row('login-hidden', /^Launch at login: the entry starts Dyno hidden/), row('same-version-refused', /^Windows: an update from the same version is refused/), row('uninstall', /^Windows: uninstall removes/),
 ];
 const WIN_REBOOT = [

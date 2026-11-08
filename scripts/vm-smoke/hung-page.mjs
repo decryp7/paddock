@@ -61,13 +61,23 @@ export function judgeHung(f) {
 export async function hungPageStep(g, title) {
   const events = [];
   const seen = new Set();
-  const poll = async () => { for (const l of await g.logLines()) { const k = eventOf(l); if (k && !seen.has(l)) { seen.add(l); events.push({ t: g.now(), kind: k }); } } };
+  let polls = 0, lastLines = [];
+  const poll = async () => { polls++; lastLines = await g.logLines(); for (const l of lastLines) { const k = eventOf(l); if (k && !seen.has(l)) { seen.add(l); events.push({ t: g.now(), kind: k }); } } };
   await poll(); // lines from before the stop are not this stop's
   events.length = 0;
   const suspendedAt = g.now();
-  try { await g.suspend(); } catch (e) { return makeResult(title, [chk(false, `the page process could not be stopped: ${e.message}`, 'check')]); }
+  let guestMark = null;
+  const toHost = (iso) => (g.guestAtSuspend && guestMark ? suspendedAt + (Date.parse(iso) - Date.parse(guestMark)) / 1000 : g.clockOffsetMs !== undefined ? (Date.parse(iso) + g.clockOffsetMs) / 1000 : null);
+  try { await g.suspend(); guestMark = g.guestAtSuspend ? (await g.guestAtSuspend()) : null; } catch (e) { return makeResult(title, [chk(false, `the page process could not be stopped: ${e.message}`, 'check')]); }
   let questionsWhileOpen = null, keepWaitingAt = null, secondAskAt = null, shot = null;
   for (let i = 0; i < 90 && !events.some((e) => e.kind === 'asked'); i++) { await g.sleep(3000); await poll(); }
+  // A question the polls did not return but the log holds (0ad round 7): dated by the log's own @t, moved to the host clock by the offset measured at the stop.
+  if (!events.some((e) => e.kind === 'asked') && g.finalLines) {
+    for (const l of await g.finalLines()) {
+      const m = /"@t":"([^"]+)"/.exec(l);
+      if (eventOf(l) === 'asked' && m && toHost(m[1]) !== null) { const t = toHost(m[1]); if (t >= suspendedAt - 5) { events.push({ t, kind: 'asked' }); break; } }
+    }
+  }
   if (events.some((e) => e.kind === 'asked')) {
     await g.sleep(2000);
     questionsWhileOpen = await g.questions('open');
@@ -81,5 +91,16 @@ export async function hungPageStep(g, title) {
   }
   let resumedAt = null, questionsAfterResume = null;
   try { await g.resume(); resumedAt = g.now(); for (let i = 0; i < 10 && !events.some((e) => e.kind === 'recovered' && e.t >= resumedAt); i++) { await g.sleep(3000); await poll(); } await g.sleep(2000); questionsAfterResume = await g.questions('resumed'); } catch { /* reported by the judge */ }
-  return makeResult(title, judgeHung({ suspendedAt, resumedAt, events, questionsWhileOpen, questionsAfterResume, keepWaitingAt, secondAskAt }), shot ? [`screenshot: ${shot}`] : [], 'one question about 60 s after the stop, Keep Waiting doubled the wait, it cleared on resume');
+  // Lines the polls did not return but the log holds are added here, dated by their own @t on the host clock, so a poll that misses lines cannot turn into a verdict about the app.
+  const all = g.finalLines ? await g.finalLines() : [];
+  for (const l of all) {
+    const m = /"@t":"([^"]+)"/.exec(l); const k = eventOf(l);
+    if (!k || !m || toHost(m[1]) === null) continue;
+    const t = toHost(m[1]);
+    if (t >= suspendedAt - 5 && !events.some((e) => e.kind === k && Math.abs(e.t - t) < 15)) events.push({ t, kind: k });
+  }
+  events.sort((a, b) => a.t - b.t);
+  const lateAsk = all.filter((l) => eventOf(l) === 'asked');
+  const diag = [`polls: ${polls}; last poll returned ${lastLines.length} line(s)`, ...(lateAsk.length && !events.some((e) => e.kind === 'asked') ? [`the log DOES hold an asking line the polls did not return: ${lateAsk[0].slice(0, 160)}`] : [])];
+  return makeResult(title, judgeHung({ suspendedAt, resumedAt, events, questionsWhileOpen, questionsAfterResume, keepWaitingAt, secondAskAt }), [...(shot ? [`screenshot: ${shot}`] : []), ...diag], 'one question about 60 s after the stop, Keep Waiting doubled the wait, it cleared on resume');
 }

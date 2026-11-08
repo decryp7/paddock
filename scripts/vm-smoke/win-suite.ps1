@@ -123,12 +123,38 @@ Finish $s 'one app, one agent under it, agent.json names it'
 # 3. Second launch while running: the same pids.
 $s = New-Step 'Second launch while running'
 $before = @(Procs | ForEach-Object { $_.ProcessId } | Sort-Object)
-Start-Process (Join-Path $prog 'dyno-app.exe'); Start-Sleep -Seconds 8
-$after = @(Procs | ForEach-Object { $_.ProcessId } | Sort-Object)
+Start-Process (Join-Path $prog 'dyno-app.exe')
+# The second process forwards to the running app and exits. A condition wait (up to 40 s, never one look after a fixed sleep): under load or while Defender scans, the duplicate
+# lingers for a while after it has forwarded (0ad round 4: pid 8264 logged "Second launch forwarded to the running instance" and was still listed 9 s later). What stays is the verdict.
+$after = @()
+$endW = (Get-Date).AddSeconds(40); $seenExtra = @{}
+while ((Get-Date) -lt $endW) {
+  Start-Sleep -Seconds 2
+  $now = @(Procs)
+  $after = @($now | ForEach-Object { $_.ProcessId } | Sort-Object)
+  foreach ($x in $now) { if ($before -notcontains $x.ProcessId -and -not $seenExtra[$x.ProcessId]) { $seenExtra[$x.ProcessId] = "pid $($x.ProcessId) parent $($x.ParentProcessId) $($x.Name) $($x.CommandLine) first seen $((Get-Date).ToString('o'))" } }
+  if (($before -join ',') -eq ($after -join ',') -and (Get-Date) -gt $endW.AddSeconds(-34)) { break }
+}
 Check $s ($before.Count -ge 2) "precondition: the app is running before the second launch ($($before.Count) Dyno process(es))"
 Check $s (($before -join ',') -eq ($after -join ',')) "processes before [$($before -join ',')] and after [$($after -join ',')]"
+foreach ($k in $seenExtra.Keys) { [void]$s.evidence.Add("extra process seen: $($seenExtra[$k]); still running at the end: $([bool](Get-Process -Id $k -ErrorAction SilentlyContinue))") }
 Finish $s 'single instance: no new process'
 
+# `start-tray` (the tray-menu rows of run-win --only): the same start, with the settings the tray menu needs seeded first: the one-minute idle rule (for the countdown line and its
+# Cancel and Snooze) and "Show Keep awake in the tray menu" (off by default, so the submenu is not in the menu unless it is switched on). The Wake submenu needs a saved computer: the host adds one.
+if ($Only -eq 'start-tray') {
+  Stop-All
+  $sfT = Join-Path $bin 'settings.json'
+  $dT = if (Test-Path $sfT) { Get-Content $sfT -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+  if (-not $dT.power) { $dT | Add-Member -NotePropertyName power -NotePropertyValue ([pscustomobject]@{}) -Force }
+  $ruleT = [pscustomobject]@{ enabled = $true; action = 'sleep'; afterSecs = 60; countdownSecs = 90; acOnly = $false; exceptions = [pscustomobject]@{ audio = $true; otherStayAwake = $false; fullScreen = $false; cpuPct = $null; diskBytesPerS = $null; netBytesPerS = $null; programs = @() } }
+  $dT.power | Add-Member -NotePropertyName idle -NotePropertyValue $ruleT -Force
+  $dT.power | Add-Member -NotePropertyName keepAwake -NotePropertyValue ([pscustomobject]@{ enabled = $true; trayItem = $true }) -Force
+  Write-Json $sfT $dT
+  Start-App -Cdp
+  [void](Ready)
+  'done' | Set-Content "$Out\done.txt"; exit 0
+}
 if ($Only -eq 'start') { 'done' | Set-Content "$Out\done.txt"; exit 0 }   # exploration: install and start only, the app stays up with the DevTools port
 
 # 4. Keep awake for 1 hour: powercfg /requests lists Dyno, then not.
@@ -168,6 +194,7 @@ $d = if (Test-Path $sf) { Get-Content $sf -Raw | ConvertFrom-Json } else { [pscu
 if (-not $d.power) { $d | Add-Member -NotePropertyName power -NotePropertyValue ([pscustomobject]@{}) -Force }
 $rule = [pscustomobject]@{ enabled = $true; action = 'sleep'; afterSecs = 60; countdownSecs = 90; acOnly = $false; exceptions = [pscustomobject]@{ audio = $true; otherStayAwake = $false; fullScreen = $false; cpuPct = $null; diskBytesPerS = $null; netBytesPerS = $null; programs = @() } }
 $d.power | Add-Member -NotePropertyName idle -NotePropertyValue $rule -Force
+$d.power | Add-Member -NotePropertyName keepAwake -NotePropertyValue ([pscustomobject]@{ enabled = $true; trayItem = $true }) -Force   # the tray menu's Keep awake submenu is off by default
 Write-Json $sf $d
 Start-App -Cdp; $r = Ready; Check $s ([bool]$r) 'Dyno started with the idle rule'
 [void]$s.evidence.Add('settings.json power section as written: ' + (Get-Content $sf -Raw | ConvertFrom-Json | Select-Object -ExpandProperty power | ConvertTo-Json -Depth 6 -Compress))
