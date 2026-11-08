@@ -54,8 +54,8 @@ fn real_wake_timer() -> Option<Arc<dyn dyno_core::wake::WakeScheduler>> {
 }
 
 /// A wake timer that only records (ER-14: a test never sets a real wake). Pending wakes are kept, soonest first.
-#[derive(Default)]
 #[cfg(any(test, feature = "test-support"))]
+#[derive(Default)]
 pub struct FakeWakeTimer {
     pending: std::sync::Mutex<Vec<dyno_core::wake::WakeEntry>>,
     /// When set, every schedule is refused with this message (the OS said no).
@@ -114,7 +114,8 @@ impl dyno_core::wol::WolClock for RealClock {
 }
 
 impl WolPorts {
-    /// This machine's own adapters. Only the real wiring of each OS uses it, never a test (ER-14).
+    /// This machine's own adapters. Only the real wiring of each OS uses it, and a test only builds it (the no-fake test of each OS
+    /// does): building it is inert, the stores are handles, and no test calls a port (ER-14).
     pub fn os(secrets_dir: &std::path::Path) -> WolPorts {
         let runner = || -> Box<dyn ToolRunner> { Box::new(SystemRunner) };
         WolPorts {

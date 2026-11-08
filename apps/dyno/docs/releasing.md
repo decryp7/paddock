@@ -110,7 +110,8 @@ In this order, on one commit:
 
 ## Cutting the release
 
-1. *Before tagging* is done on the commit to release.
+1. *Before tagging* is done on the commit to release. **Dyno 1.1.1 does not tag until WP-H of ADR 0033 (Health says what it could not
+   check) has landed**: without it the Health card still reads 100, Good while no Windows fact is read.
 2. Tag it, from `main`, and push the tag:
 
    ```sh

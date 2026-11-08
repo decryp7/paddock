@@ -177,10 +177,9 @@ impl Platform {
         ]);
         list
     }
-}
 
-impl Platform {
-    /// [`Platform::adapters`] as one line, `port=adapter, ...`, for the `Platform wired` log line (ER-27). Type names are not user content.
+    /// [`Platform::adapters`] as one line, `port=adapter, ...`, for the `Platform wired` log line (ER-27). Type names are not user content. It lists the platform as built, before the agent wraps
+    /// a port (a helper-backed reader, for example), so a port may be answered by a wrapper around the adapter named here.
     pub fn wired_line(&self) -> String {
         self.adapters()
             .iter()

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import type { CommandError, LockerList } from '../../core/api.types';
-import { errorHint } from '../../core/command-error';
+import { errorHint, isNotBuilt } from '../../core/command-error';
 import { Icon } from '../../shared/icon';
 import { ReadingSource } from '../../core/reading-source';
 import { ProcessesStore } from '../../state/processes.store';
@@ -20,7 +20,9 @@ import { MatInput } from '@angular/material/input';
         <mat-form-field class="grow"><input matInput name="path" [ngModel]="path()" (ngModelChange)="path.set($event)" placeholder="Path of the file or folder" aria-label="Path" autocomplete="off" spellcheck="false" /></mat-form-field>
         <button type="submit" matButton="filled" [disabled]="busy() || !path().trim()">Find</button>
       </form>
-      @if (error(); as e) {
+      @if (gap(); as g) {
+        <p class="gap" data-testid="lockers-not-read"><dy-icon name="info" /> {{ g.message }}</p>
+      } @else if (error(); as e) {
         <div class="err" role="alert"><dy-icon name="alert" /><span>{{ e.message }} @if (hint(); as h) {<small>{{ h }}</small>}</span></div>
       }
       @if (!results() && !error() && !busy()) {
@@ -51,6 +53,7 @@ import { MatInput } from '@angular/material/input';
     .lead { color: var(--text-2); }
     .find { display: flex; gap: var(--sp-2); }
     .grow { flex: 1; }
+    .gap { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-2); }
     .err { display: flex; gap: var(--sp-2); color: var(--bad); }
     .err small { display: block; color: var(--text-2); }
     .empty { color: var(--text-3); }
@@ -68,6 +71,7 @@ export class LockersDialog {
   protected readonly busy = signal(false);
   protected readonly results = signal<LockerList | null>(null);
   protected readonly error = signal<CommandError | null>(null);
+  protected readonly gap = computed(() => (isNotBuilt(this.error()) ? this.error() : null));
   protected readonly hint = computed(() => {
     const e = this.error();
     return e ? errorHint(e.code) : null;

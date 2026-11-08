@@ -69,6 +69,17 @@ describe('LockersDialog', () => {
       expect(el.querySelectorAll('li').length).toBeGreaterThan(0);
     });
   });
+  it('a reader Dyno does not have here is a neutral note, not an error with a hint', async () => {
+    const { f, el, backend } = setup(LockersDialog, undefined);
+    vi.spyOn(backend, 'lockers').mockRejectedValue({ code: 'unsupported', message: 'Dyno does not read which programs hold a file on Windows yet.' });
+    await typePath(f, el, 'C:\\x');
+    el.querySelector('form')!.dispatchEvent(new Event('submit'));
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelector('[data-testid=lockers-not-read]')?.textContent).toContain('on Windows yet');
+    });
+    expect(el.querySelector('[role=alert]')).toBeNull();
+  });
   it('says how many more programs hold the file when the helper counted them but did not name them', async () => {
     const backend = new MockBackend({ latencyMs: 0 });
     vi.spyOn(backend, 'lockers').mockResolvedValue({ lockers: [], notListed: 2, truncated: false });

@@ -666,6 +666,10 @@ in 1.1.1, it is a shared package with family ADR 0051 and its own estimate.
 - Test-only code moves behind a feature. Every test crate's `[dev-dependencies]` names `test-support` once. A test that
   forgets it fails to compile with "could not find `fake` in `dyno_platform`", which is quick to fix.
 - The agent's log names every adapter at start, so a support bundle shows what is wired.
+- **Follow-up (review P2-4, not in 1.1.1):** family doubles outside `paddock-power` are still public in Dyno's graph
+  (`paddock_jobs::FakeClock`, `paddock_service::fake_systemd::FakeSystemd`, `FakePort`, `paddock_net::FakeWire`, `paddock_health`'s
+  `FakeToaster`). Dyno uses them only under `cfg(test)`; gate them the D2 way, or extend the declaration scan to flag a non-test `use` of
+  a family `Fake*` path.
 - The macOS and Linux wiring is unchanged apart from the `NotReadHere` rename and the new test. macOS gains the Health "not
   checked" line for pending updates.
 - Cost: 16 to 21.5 agent-days in Dyno 1.1.1, one shared CI contract field, and one extra `cargo check` per leg (measured).
