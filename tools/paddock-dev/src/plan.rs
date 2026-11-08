@@ -108,6 +108,16 @@ enum Marks {
     Reviewed,
 }
 
+/// Whether `path` is documentation (it marks only the link check unless it is a declared input).
+pub fn is_docs(path: &str) -> bool {
+    DOCS.iter().any(|r| r.is_match(path))
+}
+
+/// Whether `path` is markdown that code or tests read, a declared contract (it marks its project, not the link check).
+pub fn is_declared_doc_input(path: &str) -> bool {
+    DOC_INPUTS.iter().any(|(r, _)| r.is_match(path))
+}
+
 /// The Rust sources that can emit a health cause code: ui's cause-codes.spec.ts reads every `.rs` file under `crates/` and `apps/`
 /// against the chip's table, skipping folders named target, node_modules, tests and benches and files named tests.rs. A change to one
 /// marks ui too (the owner keeps its own halves). Same as `isCauseCodeSource` in scripts/affected.mjs.
