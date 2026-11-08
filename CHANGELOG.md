@@ -140,10 +140,11 @@ Conventional Commits; one semver tag for the whole repo.
   replaces the handshake measure and the frame's own watch baseline. `data-fit-seq` and `data-size-mode` are set on `<html>`.
 
 ### Conformance C71: tests do not settle on real time
-- New check **C71** (ADR 0041, ER-12, rule 49), opt-in with `"timingLint": true` in `paddock.conformance.json` (the Paddock repo is on, and scans every app): errors on
+- New check **C71** (ADR 0041 §4, first slice; ER-12, rule 49), opt-in with `"timingLint": true` in `paddock.conformance.json` (the Paddock repo is on, and scans every app): errors on
   `waitForTimeout(`, a `setTimeout`/`sleep`/`delay` wait, a wait on `requestAnimationFrame` turns and a locator `.count()` used later to `.nth(..)` in spec, test and e2e
-  files, and on `thread::sleep` / `tokio::time::sleep` in Rust test code. A real backoff says `// conformance: real-wait — <why>`. The 654 sites that exist today are in
-  `conformance/baselines/C71.json` (file and hash of the line, expires 2027-04-30, may only shrink); `node conformance/bin/paddock-timing-baseline.mjs` lists them.
+  files, and on `thread::sleep` / `tokio::time::sleep` in the `#[cfg(test)]` items and test files of Rust. Exempt per call: `// conformance: hang-guard — <why>` naming a bound of at least 10 s,
+  a TypeScript call under `useTestClock()` / `frozenClock(`, a Rust call that takes a `FakeClock` / `ManualPace` / `TestSeams`. The known sites are in `conformance/baselines/C71.json`
+  (file and hash of the line; no expiry; the check errors on any entry the baseline at the merge base lacks); `node conformance/bin/paddock-timing-baseline.mjs` lists them, `--shrink` removes stale entries.
 
 
 ### `paddock-shell`: `files_*` commands always have their service

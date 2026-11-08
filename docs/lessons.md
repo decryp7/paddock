@@ -1484,5 +1484,8 @@ C71 (tests do not settle on real time, ADR 0041) found 654 sites on `main` the d
 `setTimeout` waits, 57 `sleep`/`wait(n)` helpers, 35 `waitForTimeout`, 30 `requestAnimationFrame` waits and 12 `.count()`-then-`.nth()`
 uses. They sit in `conformance/baselines/C71.json` as file plus a hash of the whitespace-collapsed line, so moving a line keeps it
 known, editing it makes it new, and a second copy of a known line is new too (a per-file count would let a new site hide behind
-a fixed old one). **Lesson:** when a check is added to a codebase with existing violations, make the allowance a shrink-only list keyed by
+a fixed old one). A shrink-only rule that only the baseline tool enforced was not enforced: the check itself now compares the file with
+the merge base's and errors on an added entry, and the baseline has no expiry (the migration is open-ended, ADR 0041 WP-6). A Rust "test code" scope of
+"everything after the first `#[cfg(test)]`" and a masker that kept string contents flagged 27 non-sites; scope the region to its item and blank strings.
+**Lesson:** when a check is added to a codebase with existing violations, make the allowance a shrink-only list keyed by
 what the line says, with a date, and say in the check's fix text how to waive a real case.

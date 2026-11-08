@@ -207,6 +207,25 @@ reproduction (ER-11) and a run without the cause green (rule 57). No retry turns
 | nextest and Playwright flaky-as-failure (ER-12) | every retried test | a test green only on its retry |
 | Tag checklist | once the hang-guard scaling (WP-2 and WP-5) is on `main`: the last Linux and Windows starved nightly of the app's tests has no open failure, or each is waived by the user; before that, the open failures are listed in the tag's checklist (D3). The macOS local run is advisory and not read | – |
 
+## Amendment 2026-11-08: C71 first slice
+
+What `conformance/src/checks/C71-test-timing.mjs` implements of §4 today, so the ADR and the check agree:
+
+- **Flagged:** `thread::sleep` and `tokio::time::sleep` in Rust test code (the `#[cfg(test)]` items and test files, not the rest of a
+  file); in TypeScript `waitForTimeout(`, a `setTimeout`/`sleep`/`delay` wait, `requestAnimationFrame` turns and a `.count()` used
+  later to index (the last two are additions to the table, from the lessons of 2026-10-28 and 11-02).
+- **Exemptions, per call, as the table says:** `// conformance: hang-guard — <why>` on the line or above, with a bound of at least
+  10 s named in the reason; a TypeScript call under `useTestClock()` or `frozenClock(` installed in an enclosing scope before it;
+  a Rust call that takes a `FakeClock`, `ManualPace` or `TestSeams`. The earlier `real-wait` waiver was not in this ADR and is gone.
+- **Ratchet:** the baseline has **no expiry** (WP-6 is open-ended); the check, not only the baseline tool, errors on any entry that
+  the baseline at the merge base (`origin/main`, or `PADDOCK_BASE_REF`) lacks, and says so when it cannot measure that.
+- **Not yet implemented (open work):** `Instant::now()`, `SystemTime::now()`, `recv_timeout(`, `wait_timeout(`, `Deadline::after(`;
+  `Date.now()`, `performance.now()`; `page.clock.install(` without `pauseAt`/`setFixedTime`/`frozenClock`; `vi.waitFor` under fake
+  timers; the live-status spread; C30's elapsed asserts and graces (C30 is not yet folded in or removed); `paddock-testkit` as
+  the one allowed owner (it is skipped by path); `scripts/vm-smoke/**` with `observe()`; the ESLint rule
+  `paddock/no-real-time-in-specs`; and wiring C71 into the `--only` list of ci.yml. Each of these adds sites, so each lands with its own
+  baseline decision by the user (the baseline may not grow without it).
+
 ## Rollout and order
 
 1. **WP-1:** rule 60, this ADR's lesson, AGENTS.md links; land `ci/flaky-is-red` and the rule 57-58 scripts
