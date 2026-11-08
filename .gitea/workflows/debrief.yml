@@ -98,7 +98,7 @@ jobs:
           GREEN: ${{ steps.green.outputs.cache-hit }}
           PLAN_TOKEN: ${{ github.token }}
         run: |
-          run=$(node scripts/affected.mjs --ci --app debrief)
+          run=$(./dev plan --ci --app debrief)
           if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
             run=false
             echo "::notice::main has not changed since the last green run ($SHA); skipping."

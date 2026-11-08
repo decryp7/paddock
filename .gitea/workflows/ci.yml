@@ -77,7 +77,7 @@ jobs:
           PLAN_BASE: ${{ github.event.inputs.base }}
           PLAN_APP: ${{ inputs.app }}
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
-        run: node scripts/affected.mjs --ci
+        run: ./dev plan --ci
 
   ui:
     needs: [plan]
@@ -566,7 +566,7 @@ jobs:
           PLAN_BASE: ${{ needs.plan.outputs.base }}
           INPUT_APP: ${{ inputs.app }}
         run: |
-          range="$(node scripts/affected.mjs --commit-range)"
+          range="$(./dev plan --commit-range)"
           echo "commit-lint range: $range"
           if [ "$range" = "skip" ]; then exit 0; fi
           node conformance/bin/paddock-conformance.mjs commit-lint --range "$range"

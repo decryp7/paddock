@@ -451,7 +451,7 @@ describe('.gitea changes are narrowed to the jobs they reach', () => {
     const job = workflowJobs(readFileSync(join(ROOT, CI_FILE), 'utf8')).jobs.get('commits');
     assert.ok(job, 'a commits job');
     assert.match(job, /needs: \[plan\]/);
-    assert.match(job, /node scripts\/affected\.mjs --commit-range/);
+    assert.match(job, /\.\/dev plan --commit-range/);
     assert.match(job, /fetch-depth: 0/);
     for (const v of ['EVENT', 'REF', 'BEFORE', 'SHA', 'BASE_REF', 'PLAN_BASE', 'INPUT_APP']) assert.match(job, new RegExp(`${v}: \\$\\{\\{`), v);
   });
@@ -980,7 +980,7 @@ describe('contracts', () => {
     for (const [name, app] of graph.apps) {
       if (!app.workflow) continue;
       assert.ok(existsSync(join(ROOT, '.gitea/workflows', app.workflow)), `${name}: ${app.workflow} exists`);
-      assert.match(readFileSync(join(ROOT, '.gitea/workflows', app.workflow), 'utf8'), new RegExp(`affected\\.mjs --ci --app ${name}`), `${app.workflow} asks the plan`);
+      assert.match(readFileSync(join(ROOT, '.gitea/workflows', app.workflow), 'utf8'), new RegExp(`\\./dev plan --ci --app ${name}`), `${app.workflow} asks the plan`);
       assert.ok(!matrix(affected([], graph, { all: true }), graph).some((l) => l.app === name), `${name} is no leg of ci.yml`);
     }
   });
