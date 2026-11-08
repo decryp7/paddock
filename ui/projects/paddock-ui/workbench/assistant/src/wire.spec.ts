@@ -1,11 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { FIXTURE_CONVERSATION, FIXTURE_EVENTS } from '../generated/assistant-fixtures';
-import { assistantMessage, citationsOf, MAX_CITATIONS, parseConversation, parseEnvelope, parseInfo, parseSummaries } from './wire';
+import { assistantMessage, citationsOf, MAX_CITATIONS, parseContext, parseConversation, parseEnvelope, parseInfo, parseSummaries } from './wire';
 
 describe('the wire', () => {
   it('accepts the engine fixtures (produced by the Rust code itself)', () => {
     for (const e of FIXTURE_EVENTS) expect(parseEnvelope(e)).toEqual(e);
     expect(parseConversation(FIXTURE_CONVERSATION)).toEqual(FIXTURE_CONVERSATION);
+  });
+
+  // Regression: the phase events (queued, loading the model, generating) were dropped at this edge, so the real app never showed
+  // "Loading the model…" (ER-18); only the memory backend, which skips the parse, did.
+  it('keeps the phase events of a cold start', () => {
+    const phase = { conversationId: 'c', seq: 2, type: 'phase', phase: { kind: 'loading', elapsedMs: 3000 } };
+    expect(parseEnvelope(phase)).toEqual(phase);
+  });
+
+  it('reads the context meter and refuses anything else (ADR 0023 WP-4b)', () => {
+    const good = { usedTokens: 1200, limitTokens: 7168, reserveTokens: 1024, exact: true, level: 'ok' };
+    expect(parseContext(good)).toEqual(good);
+    for (const bad of [null, 'x', {}, { ...good, usedTokens: '1' }, { ...good, level: 'huge' }, { ...good, exact: 1 }, { ...good, limitTokens: -1 }]) {
+      expect(parseContext(bad)).toBeNull();
+    }
   });
 
   it('refuses events that are not events', () => {

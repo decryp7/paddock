@@ -206,6 +206,7 @@ export function demoLocalModels(now: number): LocalModel[] {
     slots: 2,
     slotsCustom: false,
     loadedSlots: null,
+    contextPerSlot: 8192,
     fit: demoFit(p.sizeBytes),
     ...p,
   });

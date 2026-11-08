@@ -2,6 +2,8 @@ import { buildDownloadName } from '../shared/build-download';
 import type {
   AppDetail,
   ChatModels,
+  ChatAttached,
+  ChatAttachRules,
   ChatStorage,
   OpenedApp,
   ConnectedApp,
@@ -118,7 +120,7 @@ const APP_METHODS: ReadonlySet<string> = new Set([
   'serviceState', 'installService', 'uninstallService', 'repairService', 'declineService', 'openLoginItems',
   'autostart', 'setAutostart', 'quitApp', 'takeQuitAsk', 'chatEnabled',
   'connectedApps', 'setAppKey', 'connectApp', 'forgetApp', 'revokeToolApproval', 'openConnectedApp',
-  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats',
+  'chatStorage', 'setChatSaveNew', 'chatSaved', 'setChatSaved', 'deleteAllChats', 'chatAttachRules', 'chatAttach', 'chatDetach', 'chatRefreshWindow',
   // The popup's widgets are the app's own too (its layout is kept by the app; the values say "server not running" themselves).
   'popoverView', 'popoverValues', 'popoverHeader', 'popoverShape', 'editPopover',
 ]);
@@ -393,7 +395,7 @@ export class MockBackend implements PitwallBackend {
       const quant = /-(Q\d\w*|F16|BF16)(?:-|\.)/i.exec(d.name)?.[1] ?? null;
       const id = d.name.replace(/\.gguf$/i, '').toLowerCase();
       if (!this.library.some((m) => m.id === id)) {
-        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, fit: demoFit(d.bytesTotal) });
+        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, contextPerSlot: 8192, fit: demoFit(d.bytesTotal) });
       }
     } else {
       const engine = this.engineOfBuild(d.id.replace(/^eng-\d+-/, ''));
@@ -1511,6 +1513,66 @@ export class MockBackend implements PitwallBackend {
     });
   }
 
+  chatAttachRules(): Promise<ChatAttachRules> {
+    return this.reply('chatAttachRules', () => ({
+      maxFileBytes: 256 * 1024,
+      maxCount: 16,
+      accept: '.txt,.md,.csv,.json,.log,.rs,.ts,.py,text/*',
+      hint: 'Attach text or code files (UTF-8, up to 256 KiB each)',
+    }));
+  }
+
+  /** Plausible answers for the browser build; Rust's `chat_host::attach` is the reference. */
+  private attachGate: Promise<void> | null = null;
+  private attachOpen: (() => void) | null = null;
+
+  /** Screenshot and test hook: every file handed over waits until `releaseAttachments()`. */
+  holdAttachments(): void {
+    this.attachGate = new Promise((resolve) => (this.attachOpen = resolve));
+  }
+
+  releaseAttachments(): void {
+    this.attachOpen?.();
+    this.attachGate = null;
+  }
+
+  async chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached> {
+    if (this.attachGate) await this.attachGate;
+    return this.reply('chatAttach', () => {
+      const png = bytes[0] === 0x89 && bytes[1] === 0x50;
+      if (png) this.fail('badRequest', `"${name}" is an image. The chat can't attach images yet; attach text or code files.`);
+      let text: string;
+      try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      } catch {
+        this.fail('badRequest', `"${name}" isn't a text file. The chat attaches text and code files in UTF-8.`);
+      }
+      let h = 0;
+      for (let i = 0; i < text.length; i++) h = (Math.imul(h, 31) + text.charCodeAt(i)) >>> 0;
+      const lines = text.split(/\r?\n/).filter((l, i, all) => l || i < all.length - 1).length;
+      const sha256 = h.toString(16).padStart(8, '0').repeat(8);
+      // Bounded like Rust's staging: the oldest size goes first.
+      if (this.attachedBytes.size >= 1024) this.attachedBytes.delete(this.attachedBytes.keys().next().value as string);
+      this.attachedBytes.set(sha256, bytes.length);
+      return { attachment: { kind: 'file' as const, sha256, name }, bytes: bytes.length, lines };
+    });
+  }
+
+  /** Sizes of the files taken, by digest (the browser build's context meter counts them, as Rust does). */
+  private readonly attachedBytes = new Map<string, number>();
+
+  /** The size of a file `chatAttach` took (`undefined`: not known); browser build only. */
+  chatAttachedBytes(sha256: string): number | undefined {
+    return this.attachedBytes.get(sha256);
+  }
+
+  /** Files taken off a question (tests read it). */
+  readonly detached: string[] = [];
+
+  chatDetach(sha256: string): Promise<void> {
+    return this.reply('chatDetach', () => void this.detached.push(sha256));
+  }
+
   /** Demo and test hook: Dyno is not installed, so Open Dyno answers that. */
   dynoUninstalled(): void {
     this.dynoMissing = true;
@@ -1571,6 +1633,11 @@ export class MockBackend implements PitwallBackend {
 
   setChatModel(modelId: string): Promise<ChatModels> {
     return this.reply('setChatModel', () => this.picker(modelId));
+  }
+
+  /** The browser build's memory engine keeps its own window (`?mock-context`), so there is nothing to read again. */
+  chatRefreshWindow(): Promise<number> {
+    return this.reply('chatRefreshWindow', () => 8192);
   }
 
   /** The picker as Rust builds it (`chat_host::models`): tool models first, the others disabled with the reason. */

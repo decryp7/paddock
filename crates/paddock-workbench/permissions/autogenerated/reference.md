@@ -44,6 +44,32 @@ Denies the assistant_approve_tool command without any pre-configured scope.
 <tr>
 <td>
 
+`paddock-workbench:allow-assistant-context`
+
+</td>
+<td>
+
+Enables the assistant_context command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`paddock-workbench:deny-assistant-context`
+
+</td>
+<td>
+
+Denies the assistant_context command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 `paddock-workbench:allow-assistant-conversations`
 
 </td>

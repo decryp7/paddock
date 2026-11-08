@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-assistant-context"
+description = "Enables the assistant_context command without any pre-configured scope."
+commands.allow = ["assistant_context"]
+
+[[permission]]
+identifier = "deny-assistant-context"
+description = "Denies the assistant_context command without any pre-configured scope."
+commands.deny = ["assistant_context"]

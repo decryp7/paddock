@@ -5,6 +5,8 @@ import {
   type ApprovalChoice,
   type AssistantEvent,
   type AssistantInfo,
+  type Attachment,
+  type ContextUse,
   type Conversation,
   type ConversationSummary,
   type Envelope,
@@ -12,7 +14,7 @@ import {
   type SendRequest,
   type StoredMessage,
 } from '../generated/assistant';
-import { parseConversation, parseEnvelope, parseInfo, parseSummaries } from './wire';
+import { parseContext, parseConversation, parseEnvelope, parseInfo, parseSummaries } from './wire';
 
 /** Stops listening. */
 export type Unlisten = () => void;
@@ -46,6 +48,15 @@ export abstract class AssistantBackend {
   abstract approve(id: string, callId: string, choice: ApprovalChoice): Promise<void>;
   /** Every event until the returned function is called. */
   abstract listen(handler: (event: Envelope) => void): Promise<Unlisten>;
+  /**
+   * How full the model's context is for a conversation (`null`: a new one) with the files waiting in the composer, as the
+   * engine measures it (ADR 0023 WP-4b, the composer's meter). `null` when this backend does not measure: no meter then.
+   */
+  context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
+    void id;
+    void attachments;
+    return Promise.resolve(null);
+  }
 }
 
 /** The backend over Tauri. Payloads are parsed at this edge. */
@@ -88,6 +99,10 @@ export class TauriAssistantBackend extends AssistantBackend {
     await this.ipc.invoke<unknown>('assistant_approve_tool', { conversationId: id, callId, choice });
   }
 
+  override async context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
+    return parseContext(await this.ipc.invoke<unknown>('assistant_context', { conversationId: id, attachments: [...attachments] }));
+  }
+
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
     return this.ipc.listen(ASSISTANT_EVENT, (payload) => {
       const e = parseEnvelope(payload);
@@ -98,12 +113,19 @@ export class TauriAssistantBackend extends AssistantBackend {
 
 /** What the fake engine of [`MemoryAssistantBackend`] answers to a question. */
 export interface MemoryAssistantOptions {
-  /** The answer to a question (default: a short markdown answer, see `DEMO_ANSWER`); the slash inputs of the class doc run the demo tools. */
+  /** The answer to a plain question (default: a short markdown answer, see `DEMO_ANSWER`); the slash inputs of the class doc keep their scripts. */
   readonly reply?: (text: string) => string;
   /** The info (default: a read-only tool `find` and a writing tool `erase`). */
   readonly info?: AssistantInfo;
   /** Conversations to start with. */
   readonly conversations?: readonly Conversation[];
+  /** The model's window for the context meter (default 8192 tokens; 0: unknown). */
+  readonly contextTokens?: number;
+  /** The tokens kept for the answer, taken off the window (default 1024, the engine's `Budgets::max_answer_tokens`). */
+  readonly reserveTokens?: number;
+  /** About how many tokens a file takes (the engine's `attachment_tokens` hook: a host that keeps the bytes says about four
+   *  bytes a token); default a plausible 250 a file. */
+  readonly attachmentTokens?: (attachment: Attachment) => number;
   /** A question is refused with this message. */
   readonly sendError?: string;
 }
@@ -207,7 +229,7 @@ export class MemoryAssistantBackend extends AssistantBackend {
     const text = request.text.trim();
     let id = request.conversationId ?? null;
     const now = 1_700_000_000_000 + this.counter * 1000;
-    const user = { role: 'user' as const, text, context: request.context, atMs: now };
+    const user = { role: 'user' as const, text, context: request.context, ...(request.attachments?.length ? { attachments: request.attachments } : {}), atMs: now };
     if (id && this.store.has(id)) {
       const c = this.store.get(id) as Conversation;
       this.store.set(id, { ...c, messages: [...c.messages, user], updatedMs: now });
@@ -239,6 +261,23 @@ export class MemoryAssistantBackend extends AssistantBackend {
     this.approvals.push([callId, choice]);
     run.decision(choice);
     return Promise.resolve();
+  }
+
+  /**
+   * A plausible meter for the demo, measured as the engine does (Rust's `ContextUse::new` is the rule): about four characters a
+   * token over the conversation, files through `attachmentTokens`, and room for the conversation that is the window less the
+   * answer's reserve (at least one token; none for an unknown window).
+   */
+  override context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
+    const window = this.options.contextTokens ?? 8192;
+    const reserve = this.options.reserveTokens ?? 1024;
+    const limit = window === 0 ? 0 : Math.max(1, window - reserve);
+    const c = id ? this.store.get(id) : undefined;
+    const tokensOf = this.options.attachmentTokens ?? (() => 250);
+    const files = [...attachments, ...(c?.messages ?? []).flatMap((m) => m.attachments ?? [])].reduce((n, a) => n + tokensOf(a), 0);
+    const used = 40 + Math.ceil((c?.messages ?? []).reduce((n, m) => n + m.text.length, 0) / 4) + files;
+    const level = limit === 0 ? 'unknown' : used >= limit ? 'full' : used * 100 >= limit * 80 ? 'high' : 'ok';
+    return Promise.resolve({ usedTokens: used, limitTokens: limit, reserveTokens: reserve, exact: c !== undefined && !attachments.length, level });
   }
 
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
@@ -339,7 +378,8 @@ export class MemoryAssistantBackend extends AssistantBackend {
       this.emit(id, { type: 'phase', phase: { kind: 'loading', elapsedMs: 12_000 } });
       this.emit(id, { type: 'phase', phase: { kind: 'generating' } });
     }
-    const answer = this.options.reply
+    // A host's reply answers plain questions; the slash commands keep their scripts.
+    const answer = this.options.reply && !text.startsWith('/')
       ? this.options.reply(text)
       : command === '/tool'
         ? 'Found item 7 for you.'

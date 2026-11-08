@@ -14,6 +14,7 @@
 //!
 //! The folder is read on first use, not at start. Bodies are cached up to [`CACHE_BYTES`]; the rest is read from its file.
 
+use super::attach::KeptFile;
 use paddock_assistant::{
     conversation_title, history_of, Attachment, ChatMessage, Conversation, ConversationSummary, Conversations, SaveError, StoredMessage,
 };
@@ -458,6 +459,38 @@ impl SavedChats {
     /// An attachment's bytes by its SHA-256.
     pub fn attachment(&self, sha: &str) -> Option<Vec<u8>> {
         valid_sha(sha).then(|| std::fs::read(self.attachments().join(sha)).ok()).flatten()
+    }
+
+    /// An attachment's size in bytes, read from the file system without opening it.
+    pub fn attachment_len(&self, sha: &str) -> Option<u64> {
+        valid_sha(sha)
+            .then(|| std::fs::metadata(self.attachments().join(sha)).ok())
+            .flatten()
+            .map(|m| m.len())
+    }
+
+    /// An attachment's bytes when the file is at most `max` bytes: it is measured first and never read past the bound.
+    pub fn attachment_up_to(&self, sha: &str, max: usize) -> KeptFile {
+        use std::io::Read;
+        let Some(len) = self.attachment_len(sha) else {
+            return KeptFile::Gone;
+        };
+        if len > max as u64 {
+            return KeptFile::TooLarge;
+        }
+        let Ok(file) = std::fs::File::open(self.attachments().join(sha)) else {
+            return KeptFile::Gone;
+        };
+        let mut out = Vec::new();
+        // The bound holds even if the file grew since it was measured.
+        if file.take((max as u64).saturating_add(1)).read_to_end(&mut out).is_err() {
+            return KeptFile::Gone;
+        }
+        if out.len() <= max {
+            KeptFile::Bytes(out)
+        } else {
+            KeptFile::TooLarge
+        }
     }
 
     /// Removes the attachment files `gone` that no saved conversation refers to any more.

@@ -3,7 +3,7 @@
 //! - [`manage`] puts the app's [`Assistant`] in the app state; every event of a run goes to every window as [`EVENT`]
 //!   (`paddock://assistant`, an [`Envelope`](crate::Envelope)).
 //! - [`COMMANDS`] is the adapter's command table (`<area>_<verb>`, ADR 0012): `assistant_send`, `assistant_stop`,
-//!   `assistant_approve_tool`, `assistant_conversations`, `assistant_load`, `assistant_delete` and `assistant_info`. They are
+//!   `assistant_approve_tool`, `assistant_conversations`, `assistant_load`, `assistant_delete`, `assistant_info` and `assistant_context`. They are
 //!   async and return at once; the turn itself runs on its own worker thread and answers through events (rule 10), the file
 //!   work on the blocking pool. [`invoke_handler`] is their handler without a guard (for a shell plugin that folds
 //!   [`COMMANDS`] into its table); [`handler`] guards it; [`route`] puts it in front of the app's own.
@@ -18,9 +18,11 @@
 #![allow(clippy::result_large_err)]
 
 use crate::approval::ApprovalChoice;
+use crate::context::ContextUse;
 use crate::conversation::{Conversation, ConversationSummary};
 use crate::event::{EVENT as EVENT_NAME, Envelope, EventSink};
 use crate::service::{Assistant, AssistantError, AssistantInfo, SendAck, SendRequest};
+use crate::types::Attachment;
 use ::tauri::ipc::Invoke;
 use ::tauri::{AppHandle, Emitter, Manager, Runtime};
 use paddock_commands::CommandError;
@@ -169,6 +171,28 @@ pub async fn assistant_info<R: Runtime>(app: AppHandle<R>) -> Result<AssistantIn
     Ok(assistant_of(&app)?.info())
 }
 
+/// How full the model's context is for a conversation (none: a new chat) with the attachments waiting in the composer, for
+/// its meter (ADR 0023 WP-4b).
+#[::tauri::command]
+pub async fn assistant_context<R: Runtime>(
+    app: AppHandle<R>,
+    conversation_id: Option<String>,
+    attachments: Option<Vec<Attachment>>,
+) -> Result<ContextUse, CommandError> {
+    // The estimate reads the conversation's history (a saved store may read its file): off the command threads.
+    let pending = attachments.unwrap_or_default();
+    if pending.len() > crate::types::MAX_ATTACHMENTS {
+        return Err(CommandError::invalid(format!(
+            "A question can carry at most {} attachments.",
+            crate::types::MAX_ATTACHMENTS
+        )));
+    }
+    blocking(assistant_of(&app)?, move |a| {
+        Ok(a.context(conversation_id.as_deref(), &pending))
+    })
+    .await
+}
+
 paddock_commands::command_table! {
     /// The commands of the assistant adapter. Windows and pop-outs only: no dialog reads conversations.
     pub static COMMANDS, macro generated_handler;
@@ -179,6 +203,7 @@ paddock_commands::command_table! {
     Query [MAIN | POPOUT] => assistant_load,
     Mutation [MAIN | POPOUT] => assistant_delete,
     Query [MAIN | POPOUT] => assistant_info,
+    Query [MAIN | POPOUT] => assistant_context,
 }
 
 /// The invoke handler of [`COMMANDS`] without a guard (for a guard of the app's or the shell plugin's own).

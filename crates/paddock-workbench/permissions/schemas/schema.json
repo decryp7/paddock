@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the assistant_approve_tool command without any pre-configured scope."
         },
         {
+          "description": "Enables the assistant_context command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-assistant-context",
+          "markdownDescription": "Enables the assistant_context command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the assistant_context command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-assistant-context",
+          "markdownDescription": "Denies the assistant_context command without any pre-configured scope."
+        },
+        {
           "description": "Enables the assistant_conversations command without any pre-configured scope.",
           "type": "string",
           "const": "allow-assistant-conversations",
@@ -529,16 +541,16 @@
           "markdownDescription": "The main window's set: every workbench command a top-level window may call.\n#### This default permission set includes:\n\n- `main`"
         },
         {
-          "description": "Every workbench command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-drag-ghost-end`\n- `allow-drag-ghost-show`\n- `allow-drag-ghost-start`\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-pop-out`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`",
+          "description": "Every workbench command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-context`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-drag-ghost-end`\n- `allow-drag-ghost-show`\n- `allow-drag-ghost-start`\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-pop-out`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`",
           "type": "string",
           "const": "main",
-          "markdownDescription": "Every workbench command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-drag-ghost-end`\n- `allow-drag-ghost-show`\n- `allow-drag-ghost-start`\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-pop-out`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`"
+          "markdownDescription": "Every workbench command a top-level window (`main`, `w-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-context`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-drag-ghost-end`\n- `allow-drag-ghost-show`\n- `allow-drag-ghost-start`\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-pop-out`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`"
         },
         {
-          "description": "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-layout-get`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-keep-on-top`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`",
+          "description": "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-context`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-layout-get`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-keep-on-top`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`",
           "type": "string",
           "const": "popout",
-          "markdownDescription": "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-layout-get`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-keep-on-top`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`"
+          "markdownDescription": "Every workbench command a panel popped out of a window (`p-<host>-<n>`) may call.\n#### This permission set includes:\n\n- `allow-assistant-approve-tool`\n- `allow-assistant-context`\n- `allow-assistant-conversations`\n- `allow-assistant-delete`\n- `allow-assistant-info`\n- `allow-assistant-load`\n- `allow-assistant-send`\n- `allow-assistant-stop`\n- `allow-layout-get`\n- `allow-panel-dock-back`\n- `allow-panel-focus`\n- `allow-panel-keep-on-top`\n- `allow-panels-list`\n- `allow-pointer-button-down`\n- `allow-ui-sync-publish`"
         },
         {
           "description": "Every workbench command a dialog window (`d-<host>-<n>`) may call; the guard narrows it to the dialog's own contract.\n#### This permission set includes:\n\n- `allow-layout-get`\n- `allow-layout-set`\n- `allow-ui-sync-publish`",

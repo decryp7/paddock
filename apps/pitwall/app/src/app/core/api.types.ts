@@ -586,6 +586,8 @@ export interface LocalModel {
   slotsCustom: boolean;
   /** The slots it is loaded with now (null: not loaded). A different `slots` applies on the next load. */
   loadedSlots: number | null;
+  /** The context of one slot in tokens: what one request may hold (loaded, or as it will load). Null from an older server. */
+  contextPerSlot: number | null;
 }
 
 /** One row of the slots fit table: what `slots` parallel slots mean at the asked context per slot. */
@@ -1136,6 +1138,25 @@ export interface ChatStorage {
   attachmentBytes: number;
   /** Chats kept until Pitwall closes ("Don't save"). */
   unsaved: number;
+}
+
+/** What the chat's composer may attach (`chat_host::attach::AttachRules`, ADR 0023 WP-4b); Rust checks every file again. */
+export interface ChatAttachRules {
+  /** Largest file in bytes. */
+  maxFileBytes: number;
+  /** Most attachments one question carries. */
+  maxCount: number;
+  /** The file picker's filter. */
+  accept: string;
+  /** What can be attached, in a few words. */
+  hint: string;
+}
+
+/** A file the chat took (`chat_host::attach::Attached`): the reference the question carries, its size and lines. */
+export interface ChatAttached {
+  attachment: { kind: 'file'; sha256: string; name: string };
+  bytes: number;
+  lines: number;
 }
 
 /** One model of the Chat tab's picker (`chat_host::models::ChatModel`). */

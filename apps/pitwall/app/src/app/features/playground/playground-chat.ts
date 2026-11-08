@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, DestroyRef, inject, signal } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, computed, DestroyRef, ElementRef, inject, signal, viewChild } from '@angular/core';
 import { MatButton } from '@angular/material/button';
 import { MatFormField, MatLabel } from '@angular/material/form-field';
 import { MatOptgroup, MatOption, MatSelect } from '@angular/material/select';
@@ -6,11 +6,12 @@ import { MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, MatSlideToggle } from '@angular/mater
 import { CONFIRM_DIALOG_ID } from '@decryp7/paddock-ui/shell/confirm';
 import { DialogService } from '@decryp7/paddock-ui/shell/dialogs';
 import { OPEN_SETTINGS } from '@decryp7/paddock-ui/shell/notify';
-import { AssistantBackend, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
+import { ASSISTANT_SHORT_PANE_PX, AssistantAttachments, AssistantBackend, AssistantSpeech, PdAssistant } from '@decryp7/paddock-ui/workbench/assistant';
 import type { ChatModel, ChatModels, CommandError, ConnectedApp } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
-import { ChatSaving, createChatBackend } from './chat-backend';
+import { PitwallAttachments } from './chat-attachments';
+import { ChatSaving, createChatBackend, createChatSpeech } from './chat-backend';
 
 /**
  * The Playground's Chat tab: the family's assistant pane (`<pd-assistant>`: streamed answers, tool cards, approval cards,
@@ -25,6 +26,10 @@ import { ChatSaving, createChatBackend } from './chat-backend';
   providers: [
     ChatSaving,
     { provide: AssistantBackend, useFactory: createChatBackend },
+    // Text and code files (ADR 0023 Decision 4, WP-4b); Rust checks and keeps them.
+    { provide: AssistantAttachments, useClass: PitwallAttachments },
+    // Speech input: none in the app until WP-7 (null: the pane shows no microphone); the browser build can play it.
+    { provide: AssistantSpeech, useFactory: () => createChatSpeech() },
     // The switch moves only when the chat's state does (after "Delete the saved copy?" is answered), never on the click.
     { provide: MAT_SLIDE_TOGGLE_DEFAULT_OPTIONS, useValue: { disableToggleValue: true } },
   ],
@@ -61,7 +66,7 @@ import { ChatSaving, createChatBackend } from './chat-backend';
       class="assistant"
       actionsGate="per-call"
       emptyTitle="Chat with a local model"
-      [emptyAction]="anyConnected() ? null : 'Connected apps…'"
+      [emptyAction]="anyConnected() || short() ? null : 'Connected apps…'"
       [emptyHint]="emptyHint"
       [failedCause]="failedCause"
       (emptyActionClick)="openApps()"
@@ -131,6 +136,10 @@ export class PlaygroundChat {
     }
     return out;
   });
+  /** The chat pane is short (the pane's own fold height): the empty chat leaves "Connected apps…" to the bar above it, so the
+   *  log keeps its room (WP-4b reviews 2 and 3). */
+  protected readonly short = signal(false);
+  private readonly pane = viewChild(PdAssistant, { read: ElementRef<HTMLElement> });
   /** Some app lends its tools now (the empty chat then needs no "Connected apps…"). */
   protected readonly anyConnected = computed(() => (this.apps() ?? []).some((a) => a.connected));
 
@@ -154,7 +163,16 @@ export class PlaygroundChat {
     void this.load();
     // Settings is another window: a connect made there reaches this tab through Rust's event.
     const stop = this.backend.onConnectedApps((apps) => this.apps.set(apps));
-    inject(DestroyRef).onDestroy(stop);
+    const destroy = inject(DestroyRef);
+    destroy.onDestroy(stop);
+    // The pane's own height decides, as the pane's folding does (DOM only: a measurement, not a signal).
+    afterNextRender(() => {
+      const pane = this.pane()?.nativeElement;
+      if (!pane || typeof ResizeObserver === 'undefined') return;
+      const watch = new ResizeObserver(() => this.short.set(pane.clientHeight > 0 && pane.clientHeight < ASSISTANT_SHORT_PANE_PX));
+      watch.observe(pane);
+      destroy.onDestroy(() => watch.disconnect());
+    });
   }
 
   async load(): Promise<void> {

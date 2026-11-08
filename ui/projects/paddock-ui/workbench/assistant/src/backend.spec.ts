@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ASSISTANT_COMMANDS } from '../generated/assistant-commands';
-import { ASSISTANT_EVENT, type AssistantInfo, type Envelope } from '../generated/assistant';
+import { ASSISTANT_EVENT, type AssistantInfo, type Attachment, type Envelope } from '../generated/assistant';
 import { FIXTURE_CONVERSATION, FIXTURE_EVENTS } from '../generated/assistant-fixtures';
 import { DEMO_ANSWER, MemoryAssistantBackend, TauriAssistantBackend, type AssistantIpc } from './backend';
 
@@ -27,8 +27,8 @@ function fakeIpc(answers: Record<string, unknown>) {
 }
 
 describe('the generated commands', () => {
-  it('are the seven the backend calls', () => {
-    expect(Object.keys(ASSISTANT_COMMANDS).sort()).toEqual(['assistant_approve_tool', 'assistant_conversations', 'assistant_delete', 'assistant_info', 'assistant_load', 'assistant_send', 'assistant_stop']);
+  it('are the eight the backend calls', () => {
+    expect(Object.keys(ASSISTANT_COMMANDS).sort()).toEqual(['assistant_approve_tool', 'assistant_context', 'assistant_conversations', 'assistant_delete', 'assistant_info', 'assistant_load', 'assistant_send', 'assistant_stop']);
   });
 });
 
@@ -44,6 +44,7 @@ describe('TauriAssistantBackend', () => {
       assistant_stop: true,
       assistant_delete: null,
       assistant_approve_tool: null,
+      assistant_context: { usedTokens: 900, limitTokens: 3072, reserveTokens: 1024, exact: true, level: 'ok' },
     });
     const b = new TauriAssistantBackend(ipc);
     expect(await b.info()).toEqual(info);
@@ -53,7 +54,9 @@ describe('TauriAssistantBackend', () => {
     expect(await b.stop('c1')).toBe(true);
     await b.delete('c1');
     await b.approve('c1', 'call_1', 'alwaysAllow');
-    expect(calls.map((c) => c[0])).toEqual(['assistant_info', 'assistant_conversations', 'assistant_load', 'assistant_send', 'assistant_stop', 'assistant_delete', 'assistant_approve_tool']);
+    expect(await b.context(null)).toEqual({ usedTokens: 900, limitTokens: 3072, reserveTokens: 1024, exact: true, level: 'ok' });
+    expect(calls.map((c) => c[0])).toEqual(['assistant_info', 'assistant_conversations', 'assistant_load', 'assistant_send', 'assistant_stop', 'assistant_delete', 'assistant_approve_tool', 'assistant_context']);
+    expect(calls[7]?.[1]).toEqual({ conversationId: null, attachments: [] });
     expect(calls[3]?.[1]).toEqual({ request: { text: 'q', context: [], allowWrite: false } });
     expect(calls[6]?.[1]).toEqual({ conversationId: 'c1', callId: 'call_1', choice: 'alwaysAllow' });
     for (const [command] of calls) expect(Object.keys(ASSISTANT_COMMANDS)).toContain(command);
@@ -93,6 +96,21 @@ describe('MemoryAssistantBackend', () => {
     const ack = await b.send({ ...(conversationId ? { conversationId } : {}), text, context: [], allowWrite });
     return { events, ack };
   }
+
+  it("measures like the engine: the window less a 1024-token answer reserve, files at about four bytes a token (review 2 P2-F)", async () => {
+    const file = (sha: string, name: string): Attachment => ({ kind: 'file', sha256: sha.repeat(64), name });
+    const bytes = new Map([['a'.repeat(64), 4000]]);
+    const b = new MemoryAssistantBackend({ attachmentTokens: (a) => Math.ceil((bytes.get(a.sha256) ?? 0) / 4) });
+    // A new chat: about 40 tokens of system prompt and tools, in 8192 less the reserve.
+    expect(await b.context(null)).toEqual({ usedTokens: 40, limitTokens: 7168, reserveTokens: 1024, exact: false, level: 'ok' });
+    expect((await b.context(null, [file('a', 'notes.txt')]))?.usedTokens).toBe(1040);
+    // Without a size hook a file counts a plausible 250 tokens; a window of 0 is unknown and keeps no room.
+    expect((await new MemoryAssistantBackend().context(null, [file('b', 'x.txt')]))?.usedTokens).toBe(290);
+    expect(await new MemoryAssistantBackend({ contextTokens: 0 }).context(null)).toMatchObject({ limitTokens: 0, level: 'unknown' });
+    // A small window still keeps at least one token of room (as the engine does) and is full past it.
+    expect(await new MemoryAssistantBackend({ contextTokens: 1074 }).context(null)).toMatchObject({ limitTokens: 50, level: 'high' });
+    expect(await new MemoryAssistantBackend({ contextTokens: 1000 }).context(null)).toMatchObject({ limitTokens: 1, level: 'full' });
+  });
 
   it('streams a canned answer word by word and keeps the conversation', async () => {
     const b = new MemoryAssistantBackend();
@@ -177,6 +195,16 @@ describe('MemoryAssistantBackend', () => {
       { kind: 'generating' },
     ]);
     expect(cold.events.at(-1)).toMatchObject({ type: 'done', end: 'answered' });
+  });
+
+  it("answers plain questions with the host's reply and keeps the scripts of the slash commands", async () => {
+    const b = new MemoryAssistantBackend({ reply: (q) => `about ${q}` });
+    const plain = await ask(b, 'disks');
+    await settle();
+    expect((await b.load(plain.ack.conversationId)).messages.at(-1)?.text).toBe('about disks');
+    const tool = await ask(b, '/tool things');
+    await settle();
+    expect((await b.load(tool.ack.conversationId)).messages.at(-1)?.text).toBe('Found item 7 for you.');
   });
 
   it('can be held and stopped, and refuses a question on request', async () => {

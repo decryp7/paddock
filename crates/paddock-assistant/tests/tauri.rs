@@ -45,7 +45,8 @@ fn invoke(w: &WebviewWindow<MockRuntime>, cmd: &str, body: Value) -> Result<Valu
 }
 
 fn app_with(steps: Vec<Step>, tools: Vec<Arc<dyn AssistantTool>>) -> (App, Rig) {
-    let rig = rig_with(steps, tools, |_| {});
+    // The whole conversation is sent (as Pitwall does), so the meter after a turn is the engine's own count.
+    let rig = rig_cfg(steps, tools, |c| c.history_chars = usize::MAX);
     let app = mock_builder()
         .invoke_handler(route(handler(), |_invoke| false))
         .build(mock_context(noop_assets()))
@@ -65,6 +66,7 @@ fn the_table_lists_the_commands_and_each_has_a_handler() {
         "assistant_load",
         "assistant_delete",
         "assistant_info",
+        "assistant_context",
     ] {
         assert!(names.contains(&n), "{n}");
     }
@@ -125,6 +127,25 @@ fn a_question_returns_at_once_and_the_answer_arrives_as_events_in_every_window()
     assert_eq!(
         (info["provider"].as_str(), info["hasWrite"].as_bool()),
         (Some("Scripted"), Some(false))
+    );
+    // The composer's meter (ADR 0023 WP-4b): the engine's own count after the turn, an estimate for a new chat.
+    let used = invoke(&main, "assistant_context", json!({"conversationId": id})).unwrap();
+    assert_eq!(
+        used,
+        json!({"usedTokens": 15, "limitTokens": 7168, "reserveTokens": 1024, "exact": true, "level": "ok"})
+    );
+    let fresh = invoke(
+        &main,
+        "assistant_context",
+        json!({"conversationId": null, "attachments": []}),
+    )
+    .unwrap();
+    assert_eq!(fresh["exact"], json!(false));
+    let sha = "a".repeat(64);
+    let too_many = json!({"conversationId": null, "attachments": vec![json!({"kind": "file", "sha256": sha, "name": "a.txt"}); 17]});
+    assert!(
+        invoke(&main, "assistant_context", too_many).is_err(),
+        "bounded like a question"
     );
     assert_eq!(
         invoke(&main, "assistant_stop", json!({"conversationId": id})).unwrap(),

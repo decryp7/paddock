@@ -910,6 +910,10 @@ pub struct LocalModel {
     /// The slots it is loaded with now (`None`: not loaded); a change applies on the next load.
     #[serde(default)]
     pub loaded_slots: Option<u32>,
+    /// The context of one slot, in tokens: what one request may hold (the one it is loaded with, else the one it will be
+    /// loaded with). `None` from an older server.
+    #[serde(default)]
+    pub context_per_slot: Option<u32>,
     /// Fit now, at its context per slot and slots.
     pub fit: Fit,
 }

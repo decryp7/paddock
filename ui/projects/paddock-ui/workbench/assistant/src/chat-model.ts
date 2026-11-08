@@ -1,6 +1,6 @@
 /** Pure view model of a chat: turns built from stored messages and from the events of a running turn (Debrief's `chat-model`). */
 import type { AiState } from '@decryp7/paddock-ui/shell/pitwall';
-import type { Approval, AssistantEvent, Conversation, ContextItem, EndReason, ProviderPhase, Usage } from '../generated/assistant';
+import type { Approval, AssistantEvent, Attachment, Conversation, ContextItem, EndReason, ProviderPhase, Usage } from '../generated/assistant';
 import { citationsOf, type AssistantCitation } from './wire';
 
 /** What a tool call looked like, and how it ended. */
@@ -56,6 +56,8 @@ export type TurnPart = { readonly kind: 'text'; readonly text: string } | { read
 export interface TurnView {
   readonly user: string;
   readonly context: readonly ContextItem[];
+  /** What the question carried besides its text (files, images, clips), by reference. */
+  readonly attachments: readonly Attachment[];
   readonly parts: readonly TurnPart[];
   readonly citations: readonly AssistantCitation[];
   readonly notes: readonly string[];
@@ -70,8 +72,8 @@ export interface TurnView {
   readonly phase: ProviderPhase | null;
 }
 
-export function startTurn(user: string, context: readonly ContextItem[] = []): TurnView {
-  return { user, context, parts: [], citations: [], notes: [], error: null, end: null, message: null, running: true, usage: null, phase: null };
+export function startTurn(user: string, context: readonly ContextItem[] = [], attachments: readonly Attachment[] = []): TurnView {
+  return { user, context, attachments, parts: [], citations: [], notes: [], error: null, end: null, message: null, running: true, usage: null, phase: null };
 }
 
 /** The phase to show while a turn waits for its words (queued or loading the model); `null` when there is none to show. */
@@ -161,7 +163,7 @@ export function turnsOf(c: Conversation): TurnView[] {
   const inputs = new Map<string, unknown>();
   for (const m of c.messages) {
     if (m.role === 'user') {
-      turns.push({ ...startTurn(m.text, m.context ?? []), running: false });
+      turns.push({ ...startTurn(m.text, m.context ?? [], m.attachments ?? []), running: false });
       inputs.clear();
       continue;
     }
