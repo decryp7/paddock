@@ -1476,14 +1476,3 @@ Symptom: after replacing Dyno.app, an agent started on 5 Nov kept running and th
 Fix: the discovery file carries a build id (SHA-256 prefix of the agent file), the app compares it with the id of the agent file it would start, and the agent exits (code 0, logged) when its own file was replaced or removed on two looks 30 s apart; signals others send are `StoppedFromOutside`, no crash and no stability points. Logs: the connect line now carries the agent's version and build and the app's key. Class: identity by a label that releases share; compare content.
 
 - A test fake built from the real agent carries its self-healing (the discovery guard writes `agent.json` again at the 30 s watch): tests that tamper with a live agent's files must hold only the lock and start the agent when told (`SlowHolder`; CI run 7672, Dyno link test connected at 94 of 100 looks).
-
-## A rule that counts sites needs a baseline by text, not by count (2026-11-04, C71 and the screenshot check)
-
-C71 (tests do not settle on real time, ADR 0041) found 654 sites on `main` the day it ran: 339 Rust sleeps in test code, 181
-`setTimeout` waits, 57 `sleep`/`wait(n)` helpers, 35 `waitForTimeout`, 30 `requestAnimationFrame` waits and 12 `.count()`-then-`.nth()`
-uses. They sit in `conformance/baselines/C71.json` as file plus a hash of the whitespace-collapsed line, so moving a line keeps it
-known, editing it makes it new, and a second copy of a known line is new too (a per-file count would let a new site hide behind
-a fixed old one). The same day: `expectScreenshotClean` in `@decryp7/paddock-e2e` runs the clipping checks that already existed in
-`layout.ts` together with raw-identifier, placeholder and status-chip checks, so an app calls one function before and after a
-photograph. **Lesson:** when a check is added to a codebase with existing violations, make the allowance a shrink-only list keyed by
-what the line says, with a date, and say in the check's fix text how to waive a real case.
