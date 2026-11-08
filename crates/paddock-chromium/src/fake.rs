@@ -386,12 +386,7 @@ fn connection(stream: std::net::TcpStream, ignore: bool, tabs: usize, url_file: 
         }
         let msg = match ws.read() {
             Ok(m) => m,
-            Err(tungstenite::Error::Io(e))
-                if matches!(
-                    e.kind(),
-                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
-                ) =>
-            {
+            Err(tungstenite::Error::Io(e)) if crate::cdp::is_transient(e.kind()) => {
                 continue;
             }
             Err(_) => return,
