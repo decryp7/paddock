@@ -272,7 +272,7 @@ fn install_with<R: Runtime>(
     let dir = paddock_setup::wiring::install_dir();
     // No hand-off (and so no way to install from the app) unless the folder passes the Program Files rule: the elevated program is
     // never found through a relative name or a folder an ordinary user can change.
-    let handoff = handoff_for(
+    let handoff = paddock_setup::wiring::handoff_for(
         dir.clone(),
         Arc::new(paddock_updater::tauri::ShellElevator),
         Arc::new(paddock_setup::wiring::SetupFacts),
@@ -280,18 +280,6 @@ fn install_with<R: Runtime>(
     let b = adopt_handoff(b, handoff);
     b.install_scope(InstallScope::PerMachine, dir, Some(paddock_updater::tauri::is_administrator()))
         .installer_lock(Arc::new(paddock_setup::wiring::SetupLock::new(&app.config().identifier)))
-}
-
-/// The per-machine hand-off for `dir`, the folder of the running program, when `contract` accepts it (the elevator and the contract
-/// are injected, so the decision is tested without a Windows machine).
-#[cfg(any(windows, test))]
-fn handoff_for(
-    dir: Option<std::path::PathBuf>,
-    elevator: Arc<dyn paddock_updater::Elevator>,
-    contract: Arc<dyn paddock_updater::SetupContract>,
-) -> Result<Arc<dyn paddock_updater::Installer>, String> {
-    let dir = dir.ok_or_else(|| "the folder of the running program is unknown".to_string())?;
-    paddock_updater::ElevatedHandoff::new(dir, elevator, contract).map(|h| Arc::new(h) as Arc<dyn paddock_updater::Installer>)
 }
 
 /// The updater with the per-machine hand-off when there is one; a copy without it (no install folder, or one outside Program
@@ -738,41 +726,6 @@ mod capability_tests {
             None,
             std::sync::Arc::new(crate::server_client::fake::FakeServer::new()),
         );
-        assert!(b.has_installer());
-    }
-
-    struct Contract(Result<(), String>);
-    impl paddock_updater::SetupContract for Contract {
-        fn check_install_dir(&self, _dir: &str) -> Result<(), String> {
-            self.0.clone()
-        }
-        fn check_download(&self, _path: &str) -> Result<(), String> {
-            Ok(())
-        }
-        fn sentence(&self, _code: i32) -> Option<String> {
-            None
-        }
-    }
-
-    struct NoElevator;
-    impl paddock_updater::Elevator for NoElevator {
-        fn run(&self, _p: &std::path::Path, _a: &[String], _t: std::time::Duration) -> paddock_updater::ElevatedOutcome {
-            paddock_updater::ElevatedOutcome::Failed("not in this test".into())
-        }
-    }
-
-    /// The hand-off exists only for a folder the contract accepts; an unknown folder or a refused one leaves updates offered only.
-    #[test]
-    fn the_hand_off_exists_only_for_a_folder_the_contract_accepts() {
-        use std::sync::Arc;
-        let dir = Some(std::path::PathBuf::from(r"C:\Program Files\Pitwall"));
-        let ok = crate::handoff_for(dir.clone(), Arc::new(NoElevator), Arc::new(Contract(Ok(()))));
-        assert!(ok.is_ok());
-        let refused = crate::handoff_for(dir, Arc::new(NoElevator), Arc::new(Contract(Err("Users can change it".into()))));
-        assert!(refused.err().unwrap().contains("Users can change it"));
-        let unknown = crate::handoff_for(None, Arc::new(NoElevator), Arc::new(Contract(Ok(()))));
-        assert!(unknown.is_err());
-        let b = crate::adopt_handoff(paddock_updater::tauri::UpdatesBuilder::new("Pitwall"), ok);
         assert!(b.has_installer());
     }
 

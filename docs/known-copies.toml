@@ -968,7 +968,7 @@ status = "planned"
   kind = "wiring"
   owner = "dyno"
   delete_by = "dyno-v1.2.0"
-  note = "paddock-updater's tauri adapter cannot depend on paddock-setup (paddock-setup depends on the updater for the signature check), so each app builds ElevatedHandoff from paddock_setup::wiring itself (the contract, the lock and the folder are shared there). Follow-up: a builder step in paddock-setup behind a feature that links the adapter, so an app calls one function; Pitcrew is the third member and takes that route, not a third copy."
+  note = "paddock-updater's tauri adapter cannot depend on paddock-setup (paddock-setup depends on the updater for the signature check), so each app wires it in itself; what can be shared is (paddock_setup::wiring: the contract, the lock, the folder and handoff_for, which builds the hand-off), and what is left of the copy is the adapter lines: install_with's builder calls (ShellElevator, is_administrator, install_scope, installer_lock) and adopt_handoff. Follow-up: a builder step in paddock-setup behind a feature that links the adapter, so an app calls one function; Pitcrew is the third member and takes that route, not a third copy."
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/lib.rs"]

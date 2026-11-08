@@ -5,7 +5,9 @@
 //! folder. One implementation for every app (rule 55); the app adds only `paddock_updater::tauri`'s elevator and administrator
 //! check, which need the Tauri adapter this crate does not link.
 
-use paddock_updater::SetupContract;
+use paddock_updater::{Elevator, Installer, SetupContract};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// What `paddock-setup` says about the download and its exit codes.
 pub struct SetupFacts;
@@ -91,6 +93,19 @@ fn as_sentence(text: &str) -> String {
         s.push('.');
     }
     s
+}
+
+/// The per-machine hand-off for `dir`, the folder of the running program, when `contract` accepts it (the elevator and the contract
+/// are injected, so the decision is tested without a Windows machine). The reason if there is none: the updater then only offers
+/// updates (`UpdatesBuilder::no_install`), and the app logs why.
+pub fn handoff_for(
+    dir: Option<PathBuf>,
+    elevator: Arc<dyn Elevator>,
+    contract: Arc<dyn SetupContract>,
+) -> Result<Arc<dyn Installer>, String> {
+    let dir = dir.ok_or_else(|| "the folder of the running program is unknown".to_string())?;
+    paddock_updater::ElevatedHandoff::new(dir, elevator, contract)
+        .map(|h| Arc::new(h) as Arc<dyn Installer>)
 }
 
 #[cfg(windows)]
@@ -259,5 +274,52 @@ mod tests {
         ] {
             assert!(SetupFacts.check_download(bad).is_err(), "{bad}");
         }
+    }
+
+    struct Contract(Result<(), String>);
+    impl SetupContract for Contract {
+        fn check_install_dir(&self, _dir: &str) -> Result<(), String> {
+            self.0.clone()
+        }
+        fn check_download(&self, _path: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn sentence(&self, _code: i32) -> Option<String> {
+            None
+        }
+    }
+
+    struct NoElevator;
+    impl Elevator for NoElevator {
+        fn run(
+            &self,
+            _p: &std::path::Path,
+            _a: &[String],
+            _t: std::time::Duration,
+        ) -> paddock_updater::ElevatedOutcome {
+            paddock_updater::ElevatedOutcome::Failed("not in this test".into())
+        }
+    }
+
+    /// The hand-off exists only for a folder the contract accepts; an unknown or a refused folder leaves updates offered only.
+    #[test]
+    fn the_hand_off_exists_only_for_a_folder_the_contract_accepts() {
+        let dir = Some(PathBuf::from(r"C:\Program Files\App"));
+        assert!(
+            handoff_for(
+                dir.clone(),
+                Arc::new(NoElevator),
+                Arc::new(Contract(Ok(())))
+            )
+            .is_ok()
+        );
+        let refused = handoff_for(
+            dir,
+            Arc::new(NoElevator),
+            Arc::new(Contract(Err("Users can change it".into()))),
+        );
+        assert!(refused.err().unwrap().contains("Users can change it"));
+        let unknown = handoff_for(None, Arc::new(NoElevator), Arc::new(Contract(Ok(()))));
+        assert!(unknown.err().unwrap().contains("unknown"));
     }
 }
