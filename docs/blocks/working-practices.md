@@ -7,7 +7,7 @@
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper models.
   Keep architecture and review on the main model.
 - Share first (rule 42): check Paddock's crates and packages before writing anything an app copy would duplicate.
-- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+- Record every benchmark you quote (rule 48), and compare like with like (ER-34): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
   (Debrief's `openDialog()`, once `fix/debrief-import-range-flake` lands), never let an optional chain perform a test's
