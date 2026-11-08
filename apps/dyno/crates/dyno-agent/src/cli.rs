@@ -436,6 +436,45 @@ mod tests {
     use super::*;
     use crate::instance::LockError;
 
+    /// Keeps every record of the process: the `Platform wired` test reads the one it needs.
+    struct Capture(std::sync::Mutex<Vec<(String, String)>>);
+
+    impl log::Log for Capture {
+        fn enabled(&self, _: &log::Metadata) -> bool {
+            true
+        }
+        fn log(&self, r: &log::Record) {
+            let mut ports = String::new();
+            struct V<'a>(&'a mut String);
+            impl<'kvs> log::kv::VisitSource<'kvs> for V<'_> {
+                fn visit_pair(&mut self, k: log::kv::Key<'kvs>, v: log::kv::Value<'kvs>) -> Result<(), log::kv::Error> {
+                    if k.as_str() == "Ports" {
+                        self.0.push_str(&v.to_string());
+                    }
+                    Ok(())
+                }
+            }
+            let _ = r.key_values().visit(&mut V(&mut ports));
+            self.0.lock().unwrap().push((r.args().to_string(), ports));
+        }
+        fn flush(&self) {}
+    }
+
+    #[test]
+    fn the_agent_logs_one_platform_wired_line_naming_every_port_at_start() {
+        static CAPTURE: Capture = Capture(std::sync::Mutex::new(Vec::new()));
+        log::set_logger(&CAPTURE).expect("no other test in this process installs a logger");
+        log::set_max_level(log::LevelFilter::Info);
+        let tmp = tempfile::tempdir().unwrap();
+        let (platform, _details) = platforms(&Dirs::at(tmp.path().join("data")));
+        let wired: Vec<_> = CAPTURE.0.lock().unwrap().iter().filter(|(m, _)| m == "Platform wired").cloned().collect();
+        assert_eq!(wired.len(), 1, "exactly one line: {wired:?}");
+        assert_eq!(wired[0].1, platform.wired_line(), "it carries every port=adapter pair");
+        for port in ["sensors=", "locks=", "startup=", "facts=", "wol.udp="] {
+            assert!(wired[0].1.contains(port), "{port} missing from {}", wired[0].1);
+        }
+    }
+
     #[test]
     fn the_version_line_names_the_build_commit_when_there_is_one() {
         assert_eq!(version_line("1.1.0", Some("abc1234")), "dyno-agent 1.1.0 (build abc1234)");
