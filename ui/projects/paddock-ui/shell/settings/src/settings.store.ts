@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { SectionView, SetResult, SettingsChanged, SettingsOverview, SettingValue } from '../generated/settings';
 import { SettingsBackend, type SettingsChanges, type Unlisten } from './settings-backend';
 
@@ -41,7 +41,8 @@ const without = <T>(map: Readonly<Record<string, T>>, id: string): Record<string
  */
 export const SettingsStore = signalStore(
   withState<SettingsState>({ overview: null, refusals: {}, selected: null, query: '', showAdvanced: false, notice: null, actionError: null, restartChanges: [] }),
-  withRequestStatus(),
+  // A failed read retries itself; a change event while in error reads every section again (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed((store) => ({
     sections: computed<readonly SectionView[]>(() => store.overview()?.sections ?? []),
     restartPending: computed(() => store.overview()?.restartPending ?? false),
@@ -78,16 +79,15 @@ export const SettingsStore = signalStore(
       }));
       return true;
     };
+    const reads = store._reads.define({
+      read: () => backend.overview(),
+      apply: (overview: SettingsOverview) => patchState(store, { overview }),
+      message: (e) => errorMessage(e, $localize`:@@pd.settings.store.load-failed:The settings could not be loaded.`),
+    });
     return {
       /** (Re)reads every section; the Retry of a failed load. */
       async load(): Promise<void> {
-        patchState(store, setLoading());
-        try {
-          const overview = await backend.overview();
-          patchState(store, { overview }, setLoaded());
-        } catch (e) {
-          patchState(store, setError(errorMessage(e, $localize`:@@pd.settings.store.load-failed:The settings could not be loaded.`)));
-        }
+        await reads.load();
       },
       section: (id: string): SectionView | undefined => sectionOf(id),
       select: (selected: string) => patchState(store, { selected, query: '' }),
@@ -139,9 +139,10 @@ export const SettingsStore = signalStore(
           return false;
         }
       },
-      /** A change from any window (the engine's event). */
+      /** A change from any window (the engine's event); while the overview is in error, it is read again. */
       _receive(change: SettingsChanged): void {
         replace(change.section, change.values, change.restartPending);
+        reads.event();
       },
     };
   }),

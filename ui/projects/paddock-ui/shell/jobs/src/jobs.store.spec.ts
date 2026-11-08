@@ -113,8 +113,8 @@ describe('JobsStore', () => {
     });
 
     /** Fails read `n` and waits until the store has armed its next retry. */
-    const failRead = async (backend: QueuedBackend, n: number, clock: { ticking: number }) => {
-      backend.reads[n]?.reject(new Error('still down'));
+    const failRead = async (backend: QueuedBackend, n: number, clock: { ticking: number }, message = 'still down') => {
+      backend.reads[n]?.reject(new Error(message));
       await vi.waitFor(() => expect(clock.ticking).toBe(1));
     };
 
@@ -149,6 +149,30 @@ describe('JobsStore', () => {
       expect(clock.ticking).toBe(0);
       clock.advance(120_000);
       expect(backend.reads).toHaveLength(2);
+    });
+
+    it('stops retrying once an event re-read succeeds: no timer is left and no read follows', async () => {
+      const { backend, store, clock } = await start();
+      expect(clock.ticking).toBe(1);
+      // Queued, not running: a running job keeps the "Still working" tick on the same clock.
+      backend.handler?.(snap(1, 1, 'queued'));
+      expect(backend.reads).toHaveLength(2);
+      backend.reads[1]?.resolve([snap(1, 1, 'queued')]);
+      await vi.waitFor(() => expect(store.requestStatus()).toBe('loaded'));
+      expect(clock.ticking).toBe(0);
+      clock.advance(120_000);
+      expect(backend.reads).toHaveLength(2);
+    });
+
+    it('does not set the same error again while the reads keep failing alike (the alert is not announced twice)', async () => {
+      const { backend, store, clock } = await start();
+      const first = store.requestStatus();
+      clock.advance(2_000);
+      await failRead(backend, 1, clock, 'agent unavailable');
+      expect(store.requestStatus()).toBe(first);
+      clock.advance(4_000);
+      await failRead(backend, 2, clock);
+      expect(store.requestStatus()).toEqual({ error: 'still down' });
     });
 
     it('starts the delays again after a manual Retry that fails', async () => {
@@ -203,8 +227,8 @@ describe('JobsStore', () => {
       backend.reads[2]?.resolve([snap(1, 5), snap(2, 1)]);
       await retry;
       backend.reads[1]?.reject(new Error('late failure'));
-      await Promise.resolve();
-      await Promise.resolve();
+      // A macrotask: every promise continuation of the late read has run once it fires (not a count of turns).
+      await new Promise<void>((resolve) => setTimeout(resolve));
       expect(store.requestStatus()).toBe('loaded');
       expect(store.jobs().map((j) => j.seq)).toEqual([5, 1]);
     });

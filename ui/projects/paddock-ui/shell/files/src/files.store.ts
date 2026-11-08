@@ -1,7 +1,7 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { toCommandError, type CommandError } from '@decryp7/paddock-ui/ipc';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { AppFolder, PickRequest, RecentLists } from '../generated/files';
 import { FilesBackend, type Unlisten } from './backend';
 import { entriesOf } from './wire';
@@ -23,7 +23,8 @@ interface FilesState {
  */
 export const FilesStore = signalStore(
   withState<FilesState>({ lists: null, failure: null, dropped: [] }),
-  withRequestStatus(),
+  // A failed read retries itself; a snapshot event ends the error at once (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ lists }) => ({
     /** The recent files and folders, newest first. */
     files: computed(() => entriesOf(lists(), 'files')),
@@ -41,6 +42,12 @@ export const FilesStore = signalStore(
         return fallback;
       }
     };
+    const reads = store._reads.define({
+      read: () => backend.recent(),
+      apply: (lists: RecentLists) => patchState(store, { lists }),
+      message: (e) => errorMessage(e, $localize`:@@pd.files.no-recent:The recent files could not be read.`),
+      quiet: () => store.lists() !== null,
+    });
     return {
       /** Entries of any list the app declared. */
       entries(list: string) {
@@ -48,12 +55,7 @@ export const FilesStore = signalStore(
       },
       /** Asks the engine for the lists (also the Retry of a failed ask). */
       async load(): Promise<void> {
-        if (!store.lists()) patchState(store, setLoading());
-        try {
-          patchState(store, { lists: await backend.recent() }, setLoaded());
-        } catch (e) {
-          patchState(store, setError(errorMessage(e, $localize`:@@pd.files.no-recent:The recent files could not be read.`)));
-        }
+        await reads.load();
       },
       /** Shows the native dialog; the chosen paths, or none when it was closed or refused. */
       pick(request: PickRequest): Promise<string[]> {
@@ -102,7 +104,8 @@ export const FilesStore = signalStore(
         return taken;
       },
       _lists(lists: RecentLists): void {
-        patchState(store, { lists }, setLoaded());
+        patchState(store, { lists });
+        reads.received();
       },
       _dropped(paths: readonly string[]): void {
         patchState(store, { dropped: [...store.dropped(), ...paths] });

@@ -1,10 +1,10 @@
-import { computed, DestroyRef, effect, inject } from '@angular/core';
+import { computed, effect, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import { JobsBackend, type Unlisten } from './jobs-backend';
-import { JOBS_CLOCK, JOBS_CONFIG, JOBS_RETRY_BACKOFF_MS, JOBS_RETRY_STEADY_MS } from './jobs-config';
-import { setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { JOBS_CLOCK, JOBS_CONFIG } from './jobs-config';
+import { withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { isActiveJob } from './wire';
 
 /** The notification kinds the store posts (registered by `JOBS_CONTRIBUTIONS`). */
@@ -70,7 +70,8 @@ function listOrder(a: SuJobSnapshot, b: SuJobSnapshot): number {
  */
 export const JobsStore = signalStore(
   withState<JobsState>({ jobs: [], heardAt: {}, now: 0 }),
-  withRequestStatus(),
+  // A failed read of the list retries itself on the jobs clock; a job event while in error re-reads it (ADR 0058).
+  withRequestStatus({ retry: true, clock: JOBS_CLOCK }),
   withComputed((store, config = inject(JOBS_CONFIG)) => ({
     /** The jobs as the list shows them: active first, then finished. */
     list: computed(() => [...store.jobs()].sort(listOrder)),
@@ -87,7 +88,7 @@ export const JobsStore = signalStore(
     lead: computed(() => store.jobs().find((j) => j.state === 'running') ?? null),
     _hasRunning: computed(() => store.jobs().some((j) => j.state === 'running')),
   })),
-  withMethods((store, backend = inject(JobsBackend), ports = inject(SHELL_PORTS), clock = inject(JOBS_CLOCK), config = inject(JOBS_CONFIG), destroyRef = inject(DestroyRef)) => {
+  withMethods((store, backend = inject(JobsBackend), ports = inject(SHELL_PORTS), clock = inject(JOBS_CLOCK), config = inject(JOBS_CONFIG)) => {
     const waiters = new Set<Waiter>();
 
     /** Merges snapshots under the highest-`seq` rule; returns the ones that changed the store. */
@@ -122,85 +123,21 @@ export const JobsStore = signalStore(
       return waited;
     };
 
-    const applyList = (jobs: readonly SuJobSnapshot[]): void => {
-      for (const job of merge(jobs)) settle(job);
-      patchState(store, setLoaded());
-    };
-
-    /** Counts reads; a read that finishes after a newer one started is dropped, so it cannot overwrite the newer result. */
-    let generation = 0;
-    let refreshing = false;
-    let lastRefreshFailedAt = Number.NEGATIVE_INFINITY;
-    /** The self-retry while the list is in error: the pending timer, and how many retries were armed since the last success or Retry. */
-    let cancelRetry: (() => void) | undefined;
-    let retries = 0;
-    let destroyed = false;
-
-    const stopRetrying = (): void => {
-      cancelRetry?.();
-      cancelRetry = undefined;
-      retries = 0;
-    };
-
-    /** Arms the next self-retry (replacing a pending one); the delays grow, see `JOBS_RETRY_BACKOFF_MS`. */
-    const armRetry = (): void => {
-      if (destroyed) return;
-      cancelRetry?.();
-      const delay = JOBS_RETRY_BACKOFF_MS[retries] ?? JOBS_RETRY_STEADY_MS;
-      retries++;
-      cancelRetry = clock.after(delay, () => {
-        cancelRetry = undefined;
-        void refresh(true);
-      });
-    };
-
-    destroyRef.onDestroy(() => {
-      destroyed = true;
-      stopRetrying();
-    });
-
-    /** Reads the list (also the Retry of a failed load). Never notifies: these jobs did not just end. */
-    const load = async (): Promise<void> => {
-      const mine = ++generation;
-      stopRetrying();
-      patchState(store, setLoading());
-      try {
-        const jobs = await backend.snapshot();
-        // Merged in a sync step of its own: the state is read fresh there, not across the await (rule 29).
-        if (mine === generation) applyList(jobs);
-      } catch (e) {
-        if (mine === generation) {
-          patchState(store, setError(message(e)));
-          armRetry();
-        }
-      }
-    };
-
     /**
-     * The re-read of a list in error, started by a job event (the link is back, but the list may lack older jobs) or by the
-     * self-retry timer (`own`: no event may ever come). It keeps the error up until a read succeeds (no "loading" in
-     * between, so the alert is not removed and announced again) and runs at most one read at a time. After a failed read an
-     * event-started one waits `stillWorkingAfterMs`; the timer's own spacing is the backoff. Success stops the retrying.
+     * The list's read (also the Retry of a failed load). Never notifies: these jobs did not just end. While the list is in
+     * error it is read again on its own (2 s, 4 s, 8 s, then every 15 s) and on a job event (the link is back, but the list
+     * may lack older jobs), at most once per `stillWorkingAfterMs` after a failed re-read; see `withRequestStatus`.
      */
-    const refresh = async (own = false): Promise<void> => {
-      if (destroyed || refreshing || (!own && clock.now() - lastRefreshFailedAt < config.stillWorkingAfterMs)) return;
-      refreshing = true;
-      const mine = ++generation;
-      try {
-        const jobs = await backend.snapshot();
-        if (mine === generation) {
-          applyList(jobs);
-          stopRetrying();
-        }
-      } catch (e) {
-        lastRefreshFailedAt = clock.now();
-        if (mine === generation) {
-          patchState(store, setError(message(e)));
-          armRetry();
-        }
-      } finally {
-        refreshing = false;
-      }
+    const reads = store._reads.define({
+      read: () => backend.snapshot(),
+      apply: (jobs: readonly SuJobSnapshot[]) => {
+        for (const job of merge(jobs)) settle(job);
+      },
+      message,
+      eventSpacingMs: config.stillWorkingAfterMs,
+    });
+    const load = async (): Promise<void> => {
+      await reads.load();
     };
 
     return {
@@ -235,8 +172,8 @@ export const JobsStore = signalStore(
       /** A snapshot from the engine's event. A job that just ended is announced unless someone waits for it. */
       _receive(job: SuJobSnapshot): void {
         const before = store.jobs().find((j) => j.id === job.id);
-        // An event proves the link is back: read the list again (see `refresh`).
-        if (store.requestError() !== null) void refresh();
+        // An event proves the link is back: while in error, read the list again (see `reads`).
+        reads.event();
         if (!merge([job]).length) return;
         const waited = settle(job);
         const justEnded = !isActiveJob(job) && (!before || isActiveJob(before));

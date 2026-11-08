@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { SetupCommandError, SetupState } from '../generated/setup';
 import { SetupBackend, type Unlisten } from './backend';
 import { asSetupError, setupMessage } from './wire';
@@ -32,7 +32,8 @@ interface SetupStoreState {
  */
 export const SetupStore = signalStore(
   withState<SetupStoreState>({ setup: null, requested: [], failure: null }),
-  withRequestStatus(),
+  // A failed read retries itself; a snapshot event ends the error at once (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ setup }) => {
     const items = computed(() => setup()?.items ?? []);
     return {
@@ -46,15 +47,15 @@ export const SetupStore = signalStore(
     };
   }),
   withMethods((store, backend = inject(SetupBackend)) => {
-    const load = async (): Promise<void> => {
+    const reads = store._reads.define({
+      read: () => backend.state(),
+      apply: (setup: SetupState) => patchState(store, { setup }),
+      message: (e) => setupMessage(e, $localize`:@@pd.setup.no-state:The set-up steps could not be asked.`),
       // A refresh keeps the state on screen; only the first ask shows as loading.
-      if (!store.setup()) patchState(store, setLoading());
-      try {
-        const setup = await backend.state();
-        patchState(store, { setup }, setLoaded());
-      } catch (e) {
-        patchState(store, setError(setupMessage(e, $localize`:@@pd.setup.no-state:The set-up steps could not be asked.`)));
-      }
+      quiet: () => store.setup() !== null,
+    });
+    const load = async (): Promise<void> => {
+      await reads.load();
     };
     const fail = (id: string, action: SetupAction, e: unknown): void => {
       const error = asSetupError(e) ?? { code: 'failed' as const, message: setupMessage(e, $localize`:@@pd.setup.refused:The request was not accepted.`), retryable: true };
@@ -119,7 +120,8 @@ export const SetupStore = signalStore(
       _update(setup: SetupState): void {
         // A step the engine no longer reports as working has answered whatever was asked of it.
         const still = store.requested().filter((id) => setup.items.some((i) => i.id === id && i.working));
-        patchState(store, { setup, requested: still }, setLoaded());
+        patchState(store, { setup, requested: still });
+        reads.received();
       },
     };
   }),

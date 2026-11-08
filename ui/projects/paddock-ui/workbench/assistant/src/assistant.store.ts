@@ -85,7 +85,12 @@ const cut = (text: string, max: number): string => (text.length <= max ? text : 
 export const AssistantStore = signalStore(
   { protectedState: true },
   withState(initialState),
-  withRequestStatus(),
+  withRequestStatus({
+    retry: false,
+    kind: 'temporary',
+    why: 'not adopted yet (ADR 0058 rollout step 3): the Retry of the first load reads again',
+    until: '2026-12-31',
+  }),
   withProps(() => ({ _backend: inject(AssistantBackend), _registry: inject(WorkbenchRegistry), _host: inject(ShellContextHost) })),
   withComputed((store) => {
     const chips = computed<readonly ContextChip[]>(() => {

@@ -1,7 +1,7 @@
 import { computed, inject, InjectionToken } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { SHELL_PORTS } from '@decryp7/paddock-ui/shell';
-import { errorMessage, injectTrackLoad, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, injectTrackLoad, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { Preferences, UpdateErrorDto, UpdateInfo, UpdateStatus } from '../generated/about';
 import { UpdatesBackend, type Unlisten } from './backend';
 import { toUpdateError } from './wire';
@@ -38,7 +38,8 @@ interface UpdatesState {
  */
 export const UpdatesStore = signalStore(
   withState<UpdatesState>({ status: null, actionError: null, announced: null, heard: 0 }),
-  withRequestStatus(),
+  // A failed read retries itself; a status event (the whole status) ends the error at once (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ status, actionError }) => {
     const phase = computed(() => status()?.phase ?? null);
     return {
@@ -77,6 +78,18 @@ export const UpdatesStore = signalStore(
       }
     };
 
+    /** The status read; its reply is applied unless an event arrived while it ran (that event is newer). */
+    const reads = store._reads.define({
+      read: () => {
+        const heard = store.heard();
+        return backend.status().then((status) => ({ status, heard }));
+      },
+      apply: ({ status, heard }: { status: UpdateStatus; heard: number }) => {
+        if (store.heard() === heard) apply(status);
+      },
+      message: (e) => errorMessage(e, $localize`:@@pd.updates.no-answer:The updater did not answer.`),
+    });
+
     /** Runs one step; its reply is applied unless an event arrived meanwhile (that event is newer). */
     const step = async (call: () => Promise<UpdateStatus>): Promise<boolean> => {
       const heard = store.heard();
@@ -84,6 +97,8 @@ export const UpdatesStore = signalStore(
       try {
         const status = await call();
         if (store.heard() === heard) apply(status);
+        // The reply is the whole status: the updater answers, so a failed read's error ends.
+        reads.received();
         return true;
       } catch (e) {
         patchState(store, { actionError: toUpdateError(e) });
@@ -94,15 +109,7 @@ export const UpdatesStore = signalStore(
     return {
       /** Reads the status (also the Retry of a failed read). */
       async load(): Promise<void> {
-        const heard = store.heard();
-        patchState(store, setLoading());
-        try {
-          const status = await backend.status();
-          if (store.heard() === heard) apply(status);
-          patchState(store, setLoaded());
-        } catch (e) {
-          patchState(store, setError(errorMessage(e, $localize`:@@pd.updates.no-answer:The updater did not answer.`)));
-        }
+        await reads.load();
       },
       check: () => step(() => backend.check()),
       download: () => step(() => backend.download()),
@@ -120,6 +127,7 @@ export const UpdatesStore = signalStore(
       _receive(status: UpdateStatus): void {
         patchState(store, { heard: store.heard() + 1 });
         apply(status);
+        reads.received();
       },
     };
   }),

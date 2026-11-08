@@ -1,7 +1,7 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import type { ShellNotice } from '@decryp7/paddock-ui/shell';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, setError, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { NotificationsBackend, type Unlisten } from './backends';
 import { NOTIFY_CLOCK } from './notify-config';
 import { EMPTY_NOTICES, type Notice, type NoticesEvent, type NoticesSnapshot } from './wire.types';
@@ -50,7 +50,8 @@ function upsertLast(list: readonly Notice[], n: Notice): Notice[] {
 export const NotificationsStore = signalStore(
   { protectedState: true },
   withState<NotificationsState>({ snapshot: EMPTY_NOTICES, local: [], toasts: [], read: 'all', focus: null, shorts: {} }),
-  withRequestStatus(),
+  // A failed read of the list retries itself; a change event (it carries the whole list) ends the error (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed((store) => {
     const all = computed(() => [...store.local(), ...store.snapshot().notices].sort((a, b) => b.at - a.at || b.id - a.id));
     const filtered = computed(() => (store.read() === 'all' ? all() : all().filter((n) => !n.read)));
@@ -83,6 +84,7 @@ export const NotificationsStore = signalStore(
       patchState(store, { snapshot: { revision: next.revision, notices: next.notices, unread: next.unread } });
       return true;
     };
+    const reads = store._reads.define({ read: () => backend.list(), apply: (next: NoticesSnapshot) => void take(next), message: (e) => errorMessage(e, FALLBACK()) });
     const dismissToast = (cause: string): void => patchState(store, (s) => ({ toasts: s.toasts.filter((t) => t.cause !== cause) }));
     const isLocal = (id: number): boolean => id < 0;
     /** A notice this window keeps itself (the engine could not take it); the same kind and text again merges into it with a count. */
@@ -132,6 +134,8 @@ export const NotificationsStore = signalStore(
     return {
       /** A change from the engine (an older one than the window has is ignored): the new list, and a toast for the message just posted (unless already read). */
       apply(e: NoticesEvent): void {
+        // The event carries the whole list: the centre answers, so a failed read's error ends (an older one too).
+        reads.received();
         if (!take(e)) return;
         const p = e.posted;
         if (p && !p.read) patchState(store, (s) => ({ toasts: upsertLast(s.toasts, p) }));
@@ -142,13 +146,7 @@ export const NotificationsStore = signalStore(
 
       /** Reads the list (also the Retry of a failed read). Never toasts: these messages are not new. */
       async load(): Promise<void> {
-        patchState(store, setLoading());
-        try {
-          take(await backend.list());
-          patchState(store, setLoaded());
-        } catch (e) {
-          patchState(store, setError(errorMessage(e, FALLBACK())));
-        }
+        await reads.load();
       },
 
       /**

@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { MAX_CHANNELS, type ChannelConfig, type ChannelsEvent, type ChannelsView, type TestPhase } from '../generated/channels';
 import { ChannelsBackend, type Unlisten } from './backend';
 import { channelsMessage } from './wire';
@@ -38,7 +38,8 @@ interface ChannelsState {
  */
 export const ChannelsStore = signalStore(
   withState<ChannelsState>({ view: null, saveStatus: 'idle', tests: {} }),
-  withRequestStatus(),
+  // A failed read retries itself; a test event while in error reads the view again (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ view, saveStatus }) => ({
     channels: computed(() => view()?.settings.channels ?? []),
     /** Whether channel `id` has a secret stored. */
@@ -56,9 +57,17 @@ export const ChannelsStore = signalStore(
       const { [id]: _gone, ...rest } = store.tests();
       patchState(store, { tests: rest });
     };
+    const reads = store._reads.define({
+      read: () => backend.get(),
+      apply: (view: ChannelsView) => patchState(store, { view }),
+      message: (e) => channelsMessage(e, $localize`:@@pd.channels.load-failed:The notification channels could not be read.`),
+      // A refresh keeps the list on screen; only the first ask shows as loading.
+      quiet: () => store.view() !== null,
+    });
     const refresh = async (): Promise<void> => {
       try {
         patchState(store, { view: await backend.get() });
+        reads.received();
       } catch {
         // The view on screen stays; a failed refresh is not worth hiding it.
       }
@@ -67,7 +76,8 @@ export const ChannelsStore = signalStore(
       patchState(store, { saveStatus: 'saving' });
       try {
         const view = await backend.save({ channels: [...channels] });
-        patchState(store, { view, saveStatus: 'idle' }, setLoaded());
+        patchState(store, { view, saveStatus: 'idle' });
+        reads.received();
         return true;
       } catch (e) {
         patchState(store, { saveStatus: { error: channelsMessage(e, $localize`:@@pd.channels.save-failed:The channels could not be saved.`) } });
@@ -77,13 +87,7 @@ export const ChannelsStore = signalStore(
     return {
       /** Asks the engine for the channels (also the Retry of a failed ask). */
       async load(): Promise<void> {
-        // A refresh keeps the list on screen; only the first ask shows as loading.
-        if (!store.view()) patchState(store, setLoading());
-        try {
-          patchState(store, { view: await backend.get() }, setLoaded());
-        } catch (e) {
-          patchState(store, setError(channelsMessage(e, $localize`:@@pd.channels.load-failed:The notification channels could not be read.`)));
-        }
+        await reads.load();
       },
       /** Re-reads the view quietly (after the secret dialog stored or the engine changed something). */
       refresh,
@@ -140,6 +144,8 @@ export const ChannelsStore = signalStore(
       },
       /** An event from the engine: progress or the outcome of a test, matched by channel and test id (a stale one is ignored). */
       _event(event: ChannelsEvent): void {
+        // The engine answers again: while the view is in error, read it again.
+        reads.event();
         const now = store.tests()[event.channelId];
         if (now?.state !== 'running' || (now.testId !== null && now.testId !== event.testId)) return;
         if (event.kind === 'testProgress') {
