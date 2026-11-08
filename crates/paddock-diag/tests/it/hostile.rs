@@ -116,15 +116,21 @@ const HOSTILE: &[(&str, &str, &str, Verdict)] = &[
         Removed,
     ),
     (
-        "macOS profile folder with a space, last in the text",
-        "crash in /Users/Dana Lee",
+        "Windows profile folder of five short words, last in the text",
+        "crash in C:\\Users\\Jo Li Wu Ma Smith",
+        "Smith",
+        Removed,
+    ),
+    (
+        "Windows profile folder followed by a sentence",
+        "cannot open C:\\Users\\Dana Lee because it is locked",
         "Lee",
         Removed,
     ),
     (
-        "Linux home folder with a space, last in the text",
-        "crash in /home/dana lee",
-        "lee",
+        "Windows profile folder of several words before a separator",
+        "C:\\Users\\Ana de la Cruz Diaz\\Documents\\a.evtx",
+        "Diaz",
         Removed,
     ),
     (

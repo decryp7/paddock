@@ -8,7 +8,7 @@
 
 ### Fixed
 
-- Report a problem: a user folder name that contains a space, such as a first and last name, is now removed completely, also when it comes last in a line.
+- Report a problem: a Windows user folder name made of several words, such as a first and last name, is now removed completely, also when it comes last in a line or is followed by more text. Up to 20 characters of the name are removed, so a word or two after it may go too. On macOS and Linux the first word of the account folder is removed.
 
 ## [1.1.0] - 2026-11-06
 

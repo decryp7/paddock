@@ -204,29 +204,49 @@ fn profile_marker(rest: &str) -> Option<usize> {
     (tail > 0).then_some(lead + word + tail)
 }
 
-/// The owner segment after a marker: up to the next separator or quote (spaces included: `Alex Doe`), at most four words. With
-/// no separator or quote after it, the rest of the line when that is at most four words (a name last in the text:
-/// `C:\Users\Dana Lee`), else the first word only, so a sentence is not swallowed.
-fn profile_segment(after: &str) -> usize {
+/// The longest account name Windows allows (`sAMAccountName`); a profile folder name is at most this long.
+const WINDOWS_NAME_MAX: usize = 20;
+
+/// The owner segment after a marker, as a byte length. `windows` says the path is a Windows one (a backslash in the marker or
+/// a drive letter before it):
+/// - Windows folder names are display names and may hold spaces: the segment is the longest run of whole words of at most
+///   [`WINDOWS_NAME_MAX`] characters (at least the first word), ending earlier at the next separator, quote or line end. It may
+///   take a word or two of the sentence after the name; over-redacting is the safe side.
+/// - macOS and Linux account names have no spaces: the first word. A folder closed by a separator or quote on the same line is
+///   taken whole (`/Users/Alex Doe/Documents`).
+fn profile_segment(after: &str, windows: bool) -> usize {
     let stop = |c: char| is_sep(c) || matches!(c, '"' | '\'' | '\n' | '\r');
-    let words = |s: &str| s.split(' ').filter(|w| !w.is_empty()).count();
-    match after.find(stop) {
-        Some(i) if after[i..].starts_with(is_sep) || after[i..].starts_with(['"', '\'']) => {
-            if after[..i].split(' ').count() <= 4 {
-                i
-            } else {
-                after.find(' ').unwrap_or(i)
-            }
-        }
-        found => {
-            let line = &after[..found.unwrap_or(after.len())];
-            if words(line) <= 4 {
-                line.trim_end().len()
-            } else {
-                after.find([' ', '\n', '\r']).unwrap_or(after.len())
-            }
-        }
+    let end = after.find(stop).unwrap_or(after.len());
+    let region = &after[..end];
+    if !windows {
+        let closed = after[end..].starts_with(|c: char| is_sep(c) || matches!(c, '"' | '\''));
+        return if closed {
+            end
+        } else {
+            region.find(' ').unwrap_or(region.len())
+        };
     }
+    let mut taken = 0;
+    let mut pos = 0;
+    for word in region.split(' ') {
+        let word_end = pos + word.len();
+        if !word.is_empty() {
+            if taken > 0 && region[..word_end].chars().count() > WINDOWS_NAME_MAX {
+                break;
+            }
+            taken = word_end;
+        }
+        pos = word_end + 1;
+    }
+    taken
+}
+
+/// Whether the text before a marker ends in a drive letter and a colon (`C:`).
+fn after_drive_letter(before: &str) -> bool {
+    let mut chars = before.chars().rev();
+    chars.next() == Some(':')
+        && chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.next().is_none_or(|c| !is_word(c))
 }
 
 /// Replaces the owner segment of `/Users/<x>`, `/home/<x>` and `C:\Users\<x>` (any case, doubled separators too) with `<user>`.
@@ -237,7 +257,8 @@ fn replace_profiles(text: &str) -> (String, u32) {
     while !rest.is_empty() {
         if let Some(m) = profile_marker(rest) {
             let after = &rest[m..];
-            let seg = &after[..profile_segment(after)];
+            let windows = rest[..m].contains('\\') || after_drive_letter(&out);
+            let seg = &after[..profile_segment(after, windows)];
             out.push_str(&rest[..m]);
             if !seg.is_empty()
                 && !["<user>", "shared", "public", "~"]
@@ -633,21 +654,42 @@ mod tests {
     fn a_profile_folder_with_a_space_is_removed_whole_even_at_the_end_of_the_text() {
         let r = Personal::default();
         for (text, want) in [
+            // Windows: the longest run of whole words that fits 20 characters, ending earlier at a separator or quote.
             (r"crash in C:\Users\Dana Lee", r"crash in C:\Users\<user>"),
             (r"C:\\Users\\Dana Lee", r"C:\\Users\\<user>"),
-            ("see /Users/Dana Lee", "see /Users/<user>"),
-            (
-                "see /home/dana lee\nnext line",
-                "see /home/<user>\nnext line",
-            ),
             (
                 r"opened C:\Users\Dana Lee\x twice",
                 r"opened C:\Users\<user>\x twice",
             ),
-            // A long tail is a sentence, not a name: only the first word goes.
             (
-                "see /home/carol for the details of the crash",
-                "see /home/<user> for the details of the crash",
+                r"C:\Users\Ana de la Cruz Diaz\Documents",
+                r"C:\Users\<user>\Documents",
+            ),
+            (
+                r"crash in C:\Users\Jo Li Wu Ma Smith",
+                r"crash in C:\Users\<user>",
+            ),
+            (
+                r"C:\Users\Dana Lee because it is locked",
+                r"C:\Users\<user> is locked",
+            ),
+            (
+                r"C:\Users\averyveryverylongusername25 x",
+                r"C:\Users\<user> x",
+            ),
+            // macOS and Linux: account names have no spaces, so the first word; a folder closed by a separator or quote is whole.
+            ("see /Users/Dana Lee", "see /Users/<user> Lee"),
+            (
+                "see /home/carol for details",
+                "see /home/<user> for details",
+            ),
+            (
+                "see /home/dana lee\nnext line",
+                "see /home/<user> lee\nnext line",
+            ),
+            (
+                "/Users/Alex Doe/Documents/plan.docx",
+                "/Users/<user>/Documents/plan.docx",
             ),
         ] {
             let (s, c) = r.apply(text);

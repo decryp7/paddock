@@ -1083,6 +1083,8 @@ pub(crate) mod tests {
             ("opened \"C:\\Users\\Dana Lee\\Documents\\a.evtx\" twice", "Dana Lee"),
             ("url \"https://svc:s3cr3tpw@internal.example/x\"", "s3cr3tpw"),
             ("failed to open C:\\Users\\Dana Lee", "Lee"),
+            ("cannot open C:\\Users\\Dana Lee because it is locked", "Lee"),
+            ("C:\\Users\\Ana de la Cruz Diaz\\Documents\\a.evtx", "Diaz"),
         ];
         let d = temp("sidecar-awkward");
         let mut inputs = inputs_in(&d);
