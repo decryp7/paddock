@@ -138,7 +138,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/ai/tests/pitwall.rs",
-   "line": 150,
+   "line": 148,
    "hash": "d6b395f9d534be1a"
   },
   {
@@ -243,7 +243,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/lib.rs",
-   "line": 1503,
+   "line": 1505,
    "hash": "3d5815373692ceed"
   },
   {
@@ -268,53 +268,48 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 613,
+   "line": 655,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 648,
+   "line": 690,
    "hash": "1fa9f6f51d67343b"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 656,
+   "line": 698,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 663,
+   "line": 705,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 737,
+   "line": 779,
    "hash": "45ddea1acd767c2a"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 828,
+   "line": 870,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 912,
+   "line": 954,
    "hash": "8a7b239b74fa9163"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 917,
+   "line": 959,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/logging.rs",
    "line": 544,
    "hash": "3d5815373692ceed"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/names.rs",
-   "line": 581,
-   "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/opener.rs",
@@ -333,7 +328,7 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/search_everything.rs",
-   "line": 307,
+   "line": 301,
    "hash": "4cad119e99fa6b8c"
   },
   {
@@ -1418,7 +1413,7 @@
   },
   {
    "file": "apps/debrief/crates/debrief-monitor/src/tests.rs",
-   "line": 607,
+   "line": 670,
    "hash": "8a7b239b74fa9163"
   },
   {
@@ -1753,12 +1748,12 @@
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/src/server.rs",
-   "line": 518,
+   "line": 519,
    "hash": "e84168b19821460d"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/src/server.rs",
-   "line": 547,
+   "line": 548,
    "hash": "e84168b19821460d"
   },
   {
@@ -1783,37 +1778,37 @@
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 251,
-   "hash": "8a7b239b74fa9163"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 351,
-   "hash": "855cc4dd1d9f922c"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 468,
+   "line": 259,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 479,
-   "hash": "a101d0b50615fe0b"
+   "line": 263,
+   "hash": "8a7b239b74fa9163"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 494,
-   "hash": "1f59029f9370b7f7"
+   "line": 363,
+   "hash": "855cc4dd1d9f922c"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 492,
+   "hash": "a101d0b50615fe0b"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
    "line": 507,
+   "hash": "1f59029f9370b7f7"
+  },
+  {
+   "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
+   "line": 520,
    "hash": "a101d0b50615fe0b"
   },
   {
    "file": "apps/debrief/crates/debrief-store-worker/tests/it/worker.rs",
-   "line": 611,
+   "line": 624,
    "hash": "8a7b239b74fa9163"
   },
   {

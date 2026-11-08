@@ -477,7 +477,8 @@ fn a_worker_killed_mid_import_or_mid_query_fails_the_call_and_recovers() {
     let store = w.open_store(&dir.0, Profile::default_profile(), true, None).unwrap();
     // Mid-import: the import job fails (retryable), it never hangs.
     let session = store.open(std::slice::from_ref(&logs.0)).unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    // Kill once the import is under way (or already over): a condition on the session, not a guessed time.
+    paddock_testkit::wait_until("the import to start", || session.is_finished() || session.progress().running);
     let pid = kill(&w);
     match session.wait() {
         Ok(_) => {} // finished before the kill landed

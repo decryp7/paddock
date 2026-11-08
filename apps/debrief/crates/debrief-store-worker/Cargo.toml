@@ -28,6 +28,7 @@ serde.workspace = true
 serde_json = { workspace = true, features = ["preserve_order", "float_roundtrip"] }
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 debrief-ipc = { path = "../debrief-ipc", features = ["test-support"] }
 getrandom.workspace = true
 chrono.workspace = true
