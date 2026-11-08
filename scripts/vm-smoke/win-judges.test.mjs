@@ -200,6 +200,7 @@ test('the install outcome is a new finished or failed line anywhere in the log, 
 test('the kill watcher polls the installer log for the part-way point and ends the installer there', () => {
   const ps = killWatcherScript({ log: 'C:\\p\\setup_log.txt', out: 'C:\\p\\k.txt', maxSec: 90 });
   assert.match(ps, /Start-Sleep -Milliseconds 100/);
+  assert.match(ps, /ReadWrite,Delete/, 'the log is open for writing by the installer: read it with a shared open');
   assert.match(ps, /phase=stop-all end/);
   assert.match(ps, /Stop-Process -Force/);
   assert.match(ps, /AddSeconds\(90\)/);

@@ -18,6 +18,26 @@ export async function closeMenus(actor) {
   for (let i = 0; i < 3; i++) { await actor.send('key ESC').catch(() => {}); await sleep(500); }
 }
 
+/**
+ * The tray menu has a "Wake device" submenu only when a computer is saved (wol_menu.rs: none when nothing is saved), and "Keep awake" only when the setting is on (seeded by
+ * win-suite.ps1 start-tray). The host saves one made-up computer through the Power page, by hand (the app's own form), and says what it did.
+ */
+export async function addWakeDevice(browser) {
+  try {
+    const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+    await main.evaluate(() => { location.hash = '#/power'; });
+    await sleep(2500);
+    await main.getByRole('tab', { name: /wake devices|wake/i }).first().click({ timeout: 10_000 });
+    await main.getByRole('button', { name: /Add by hand/ }).first().click({ timeout: 10_000 });
+    await main.getByLabel('Name of the computer').fill('vm-check-device');
+    await main.getByLabel('Hardware address').fill('02:00:00:aa:bb:cc');
+    await main.getByRole('button', { name: 'Add computer' }).click({ timeout: 10_000 });
+    await sleep(2500);
+    const listed = /vm-check-device/.test(await main.evaluate(() => document.body.innerText));
+    return listed ? 'saved the computer "vm-check-device" (02:00:00:aa:bb:cc) on the Power page, Wake devices' : 'pressed Add computer but the page does not list "vm-check-device"';
+  } catch (e) { return `could not save a wake device through the Power page: ${String(e.message).split('\n')[0]}`; }
+}
+
 /** The control icon's own menu (win-menu-control.ps1): started in the console session, promoted to the taskbar, right-clicked; always removed afterwards. */
 async function controlMenu(actor, { hereDir = 'C:\\paddock-test\\vmcheck' } = {}) {
   ssh(`schtasks /end /tn VmMenuControl 2>$null | Out-Null; schtasks /create /tn VmMenuControl /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${hereDir}\\win-menu-control.ps1 -MaxSec 300" | Out-Null; schtasks /run /tn VmMenuControl | Out-Null`);
@@ -63,6 +83,8 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
   if (browser) for (const p of browser.contexts().flatMap((c) => c.pages())) if (p.url().includes('dialog?id=')) { await p.keyboard.press('Escape').catch(() => {}); await sleep(500); }
   await actor.send('fg Dyno').catch(() => {});
   await sleep(1000);
+  const seeded = browser ? await addWakeDevice(browser) : 'no browser: no wake device saved';
+  evidence.push(`wake device: ${seeded}`);
   // The probe is shown to see a native tray menu first (the harness's own icon), then Dyno's icon is clicked, twice at most.
   const control = await controlMenu(actor);
   await actor.send('fg Dyno').catch(() => {});

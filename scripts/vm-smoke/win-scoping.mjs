@@ -28,7 +28,12 @@ export async function scopingStep() {
   // `dyno top` groups processes by the program's own name (FileDescription first): a renamed powershell.exe shows as "Windows PowerShell" (7d06 and 0ad rounds), so the
   // probe is a tiny program built here whose title, product and file name are all owner-secret-probe.
   const probeSrc = 'using System.Reflection; [assembly: AssemblyTitle("owner-secret-probe")] [assembly: AssemblyProduct("owner-secret-probe")] [assembly: AssemblyDescription("owner-secret-probe")] public static class P { public static void Main() { while (true) { } } }';
-  const built = ssh(`Add-Type -TypeDefinition '${probeSrc}' -OutputAssembly "C:\\Users\\paddock-test\\owner-secret-probe.exe" -OutputType ConsoleApplication -ErrorAction Stop 2>&1 | Out-String; (Get-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe").VersionInfo.FileDescription; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -WindowStyle Hidden; Start-Sleep 2; (Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Measure-Object).Count`);
+  const built = ssh(`Add-Type -TypeDefinition '${probeSrc}' -OutputAssembly "C:\\Users\\paddock-test\\owner-secret-probe.exe" -OutputType ConsoleApplication -ErrorAction Stop 2>&1 | Out-String; (Get-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe").VersionInfo.FileDescription; Remove-Item C:\\paddock-test\\vmcheck\\probe-ok.txt -ErrorAction SilentlyContinue; schtasks /create /tn VmOwnerProbe /sc once /st 00:00 /ru paddock-test /it /f /tr "C:\\Users\\paddock-test\\owner-secret-probe.exe" | Out-Null; schtasks /run /tn VmOwnerProbe | Out-Null; Start-Sleep 3; (Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Measure-Object).Count`);
+  // The probe is started by a task in the console session: a process started inside an SSH command ends with that command (OpenSSH for Windows puts its children in a job that is closed
+  // at logoff), which is why the owner's own views never listed it in 0ad rounds 3 and 4. Its presence is read again in a separate command, with the session it runs in.
+  const alive = ssh('Get-Process owner-secret-probe -ErrorAction SilentlyContinue | ForEach-Object { "pid=" + $_.Id + " session=" + $_.SessionId + " cpu=" + [int]$_.CPU }');
+  evidence.push(`probe alive in a later command: ${alive.replace(/\s+/g, ' ') || 'NO (it ended)'}`);
+  if (!/pid=\d+/.test(alive)) checks.push({ ok: false, kind: 'check', detail: 'the probe process (owner-secret-probe.exe) was not running after it was started: the control cannot show anything' });
   evidence.push(`probe built and started (FileDescription, running count): ${built.trim().replace(/\s+/g, ' ').slice(0, 200)}`);
   await sleep(4000);
   // `dyno top` lists only the busiest SIX groups (the sampler's `top`), so a probe is looked for in `dyno snapshot`, which carries every process, as well; polled up to 30 s
@@ -55,7 +60,7 @@ export async function scopingStep() {
   const diagRun = ssh(`Get-Content ${PUB}\\dyno2-run.log -ErrorAction SilentlyContinue | Select-Object -First 8; schtasks /query /tn Dyno2 /v /fo list | Select-String 'Last Result|Status|Run As User'`, { admin: true });
   evidence.push('--- second account task', ...diagRun.split('\n'), `--- owner's top (first 300 chars): ${ownerView.slice(0, 300).replace(/\s+/g, ' ')}`);
   if (!done) {
-    ssh(`schtasks /delete /tn Dyno2 /f 2>$null | Out-Null; Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe","${PUB}\\dyno2*" -Recurse -Force -ErrorAction SilentlyContinue; net user paddock-user2 /delete 2>$null | Out-Null`, { admin: true });
+    ssh(`schtasks /delete /tn Dyno2 /f 2>$null | Out-Null; Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force; schtasks /delete /tn VmOwnerProbe /f 2>$null | Out-Null; Remove-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe","${PUB}\\dyno2*" -Recurse -Force -ErrorAction SilentlyContinue; net user paddock-user2 /delete 2>$null | Out-Null`, { admin: true });
     return result('Windows: D6 scoping, a second standard account sees only its own and the system\'s programs', checks, evidence, '');
   }
   const who = ssh(`Get-Content ${PUB}\\dyno2-whoami.txt -ErrorAction SilentlyContinue`, { admin: true });
@@ -70,7 +75,7 @@ export async function scopingStep() {
   checks.push({ ok: other, detail: other ? 'the views carry an "other users" total' : 'no "other users" total in the second account\'s views (processes of other accounts are not summarised)' });
   evidence.push(`traffic in the snapshot: ${/traffic|bytes/i.test(snap) ? 'present' : 'not carried by `dyno snapshot`; Network > By program as a second account needs its own window'}`);
   // Clean up what this step made.
-  ssh(`schtasks /delete /tn Dyno2 /f 2>$null | Out-Null; Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe","${PUB}\\dyno2*" -Recurse -Force -ErrorAction SilentlyContinue; net user paddock-user2 /delete 2>$null | Out-Null`, { admin: true });
+  ssh(`schtasks /delete /tn Dyno2 /f 2>$null | Out-Null; Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force; schtasks /delete /tn VmOwnerProbe /f 2>$null | Out-Null; Remove-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe","${PUB}\\dyno2*" -Recurse -Force -ErrorAction SilentlyContinue; net user paddock-user2 /delete 2>$null | Out-Null`, { admin: true });
   // Without the positive control (the owner sees its own probe) nothing the second account does not see proves anything: those checks are the measurement's.
   const judged = control ? checks : checks.map((c, i) => (i === 0 || c.ok ? c : { ...c, kind: 'check', detail: `${c.detail} (not conclusive: the positive control failed)` }));
   return result('Windows: D6 scoping, a second standard account sees only its own and the system\'s programs', judged, evidence, 'the second account sees no other account\'s programs and gets an "other users" total');

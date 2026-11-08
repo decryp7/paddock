@@ -219,10 +219,13 @@ export const notDrivenWinRows = () => [notDriven(ROW_TITLES.secondUser, NOT_DRIV
 
 const NT = `Add-Type -Namespace N -Name P -MemberDefinition '[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h); [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr h);'; `;
 /**
- * The WebView2 renderers of dyno-app. Their command line carries `--webview-exe-name=dyno-app.exe` (the embedding program); the old filter looked for "dyno" in the
- * user-data folder, which is not on it (0ad round 2: "no WebView2 renderer of dyno-app was found"). Runs with the renderer type too, or by the app as ancestor.
+ * The WebView2 renderers of dyno-app: msedgewebview2.exe processes of `--type=renderer` that have a dyno-app.exe among their ancestors (renderer, then the WebView2 browser
+ * process, then the app). Two earlier filters read the command line (the user-data folder, then `--webview-exe-name`) and found none in 0ad rounds 2 and 4: the ancestry is the one
+ * fact that does not depend on which switches Edge passes on.
  */
-export const RENDERERS_PS = `$ids = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -match '--type=renderer' -and $_.CommandLine -match '--webview-exe-name=dyno-app' } | ForEach-Object { $_.ProcessId }); `;
+export const RENDERERS_PS = `$all = @(Get-CimInstance Win32_Process); $byId = @{}; foreach ($q in $all) { $byId[[int]$q.ProcessId] = $q }; function UnderDyno($p) { $c = $p; for ($i = 0; $i -lt 8 -and $c; $i++) { $c = $byId[[int]$c.ParentProcessId]; if ($c -and $c.Name -eq 'dyno-app.exe') { return $true } }; return $false }; $ids = @($all | Where-Object { $_.Name -eq 'msedgewebview2.exe' -and $_.CommandLine -match '--type=renderer' -and (UnderDyno $_) } | ForEach-Object { $_.ProcessId }); `;
+/** What the guest has, for the evidence when no renderer is found: every WebView2 process with its parent, its type switch and its embedding program. */
+export const WEBVIEW_LISTING_PS = `Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | ForEach-Object { 'pid=' + $_.ProcessId + ' parent=' + $_.ParentProcessId + ' ' + (($_.CommandLine -split ' ' | Where-Object { $_ -match '^--(type|webview-exe-name)=' }) -join ' ') }`;
 const renderers = RENDERERS_PS;
 
 /** A hung or paused visible page on Windows: the WebView2 renderer of dyno-app is suspended (NtSuspendProcess, no debugger); the question is read from the window list. Keep Waiting cannot be pressed here (no button lookup in the actor), so the doubling stays a broken check. */
@@ -232,7 +235,7 @@ export async function winHung() {
   const actor = new Actor(); actor.start(); await sleep(6000);
   const r = await hungPageStep({
     now: () => Date.now() / 1000, sleep,
-    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error('no WebView2 renderer of dyno-app was found'); },
+    suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error(`no WebView2 renderer of dyno-app was found (WebView2 processes: ${ssh(WEBVIEW_LISTING_PS).replace(/\s*\n\s*/g, ' | ').slice(0, 600) || 'none'})`); },
     resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`); },
     logLines: async () => ssh(APP_LOG_PS).split('\\n'),
     questions: async (phase) => { const n = (await actor.send('windows').catch(() => '')).split('\\n').filter((l) => /not responding|Keep Waiting/i.test(l)).length; return phase === 'open' && n === 0 ? null : n; },

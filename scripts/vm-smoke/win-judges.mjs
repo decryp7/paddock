@@ -272,13 +272,13 @@ export function installOutcomeSince(before, nowText) {
 /**
  * The guest-side watcher of the kill-the-installer row. The host cannot time a kill (an SSH round trip and a UAC answer take longer than the install, 0ad round 2: "the installer
  * ended before the kill"), so a script in the guest polls every 100 ms for the point the install is part-way (paddock-setup.exe's own log says `stop-all end`: the old files are
- * stopped and the new ones are being copied, the uninstall entry is not written yet) and ends the installer there, at once. It writes KILLED (with what it ended and the log lines
+ * stopped and the new ones are being copied, the uninstall entry is not written yet) and ends the installer there, at once. The log is read with a shared-write open (the installer holds it open while it runs; Get-Content found nothing in 0ad round 4: NEVER). It writes KILLED (with what it ended and the log lines
  * it saw), TOO-LATE (the log reached `check-version` first) or NEVER (nothing within maxSec) to `out`. Run as SYSTEM, which may end the elevated installer.
  */
 export function killWatcherScript({ log, out, maxSec = 150, point = 'phase=stop-all end', late = 'phase=check-version' }) {
-  return `$ErrorActionPreference='SilentlyContinue'; Remove-Item '${out}'; $end=(Get-Date).AddSeconds(${maxSec}); while((Get-Date) -lt $end){ $t=''; if(Test-Path '${log}'){ $t=Get-Content '${log}' -Raw }; ` +
+  return `$ErrorActionPreference='SilentlyContinue'; Remove-Item '${out}'; $end=(Get-Date).AddSeconds(${maxSec}); while((Get-Date) -lt $end){ $t=''; try { $fs=[IO.File]::Open('${log}','Open','Read','ReadWrite,Delete'); $sr=New-Object IO.StreamReader($fs); $t=$sr.ReadToEnd(); $sr.Close() } catch { }; ` +
     `if($t -match '${late}'){ 'TOO-LATE' | Set-Content '${out}'; exit }; ` +
-    `if($t -match '${point}'){ $v=@(Get-Process setup,paddock-setup | Where-Object { $_.Id -ne $PID }); $names=($v | ForEach-Object { $_.ProcessName + ':' + $_.Id }) -join ','; $v | Stop-Process -Force; ('KILLED ' + $names + ' at ' + (Get-Date).ToString('o')) | Set-Content '${out}'; exit }; Start-Sleep -Milliseconds 100 }; 'NEVER' | Set-Content '${out}'`;
+    `if($t -match '${point}'){ $v=@(Get-Process setup,paddock-setup | Where-Object { $_.Id -ne $PID }); $names=($v | ForEach-Object { $_.ProcessName + ':' + $_.Id }) -join ','; $v | Stop-Process -Force; ('KILLED ' + $names + ' at ' + (Get-Date).ToString('o')) | Set-Content '${out}'; exit }; Start-Sleep -Milliseconds 100 }; ('NEVER exists=' + (Test-Path '${log}') + ' len=' + $t.Length + ' setup-processes=' + (@(Get-Process setup,paddock-setup).Count)) | Set-Content '${out}'`;
 }
 
 /** The watcher's answer to the `killed` fact: true only when it ended at least one installer process at the point; otherwise why not. */
@@ -288,7 +288,7 @@ export function killWatcherOutcome(text) {
   if (m && m[1]) return { killed: true, detail: `the installer was ended part-way (${t})` };
   if (m) return { killed: false, detail: `the point was reached but no installer process was running to end (${t})` };
   if (/^TOO-LATE/.test(t)) return { killed: false, detail: 'the install had passed the kill point (check-version in setup.log) before the watcher acted' };
-  if (/^NEVER/.test(t)) return { killed: false, detail: 'the installer never reached the kill point (no stop-all line in setup.log) within the watcher\'s time' };
+  if (/^NEVER/.test(t)) return { killed: false, detail: `the installer never reached the kill point (no stop-all line in setup.log) within the watcher's time (${t})` };
   return { killed: false, detail: `the watcher wrote no answer (${t || 'empty'})` };
 }
 

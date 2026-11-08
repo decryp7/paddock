@@ -129,6 +129,21 @@ Check $s ($before.Count -ge 2) "precondition: the app is running before the seco
 Check $s (($before -join ',') -eq ($after -join ',')) "processes before [$($before -join ',')] and after [$($after -join ',')]"
 Finish $s 'single instance: no new process'
 
+# `start-tray` (the tray-menu rows of run-win --only): the same start, with the settings the tray menu needs seeded first: the one-minute idle rule (for the countdown line and its
+# Cancel and Snooze) and "Show Keep awake in the tray menu" (off by default, so the submenu is not in the menu unless it is switched on). The Wake submenu needs a saved computer: the host adds one.
+if ($Only -eq 'start-tray') {
+  Stop-All
+  $sfT = Join-Path $bin 'settings.json'
+  $dT = if (Test-Path $sfT) { Get-Content $sfT -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+  if (-not $dT.power) { $dT | Add-Member -NotePropertyName power -NotePropertyValue ([pscustomobject]@{}) -Force }
+  $ruleT = [pscustomobject]@{ enabled = $true; action = 'sleep'; afterSecs = 60; countdownSecs = 90; acOnly = $false; exceptions = [pscustomobject]@{ audio = $true; otherStayAwake = $false; fullScreen = $false; cpuPct = $null; diskBytesPerS = $null; netBytesPerS = $null; programs = @() } }
+  $dT.power | Add-Member -NotePropertyName idle -NotePropertyValue $ruleT -Force
+  $dT.power | Add-Member -NotePropertyName keepAwake -NotePropertyValue ([pscustomobject]@{ enabled = $true; trayItem = $true }) -Force
+  Write-Json $sfT $dT
+  Start-App -Cdp
+  [void](Ready)
+  'done' | Set-Content "$Out\done.txt"; exit 0
+}
 if ($Only -eq 'start') { 'done' | Set-Content "$Out\done.txt"; exit 0 }   # exploration: install and start only, the app stays up with the DevTools port
 
 # 4. Keep awake for 1 hour: powercfg /requests lists Dyno, then not.

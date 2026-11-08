@@ -17,8 +17,9 @@ test('judgeUninstall fails on a left folder and passes on a clean machine', () =
   assert.equal(bad.filter((c) => !c.ok).length, 2);
   assert.ok(judgeUninstall({ ...clean, folder: 'unreadable' }).some((c) => !c.ok && c.kind === 'check'), 'a dead SSH is not "removed"');
 });
-test('the renderer filter names the embedding program, as WebView2 puts it on the command line', () => {
-  assert.match(RENDERERS_PS, /--webview-exe-name=dyno-app/);
+test('the renderer filter follows the ancestry to dyno-app.exe, not a command line switch', () => {
   assert.match(RENDERERS_PS, /--type=renderer/);
-  assert.doesNotMatch(RENDERERS_PS, /-match 'dyno'/);
+  assert.match(RENDERERS_PS, /'dyno-app\.exe'/);
+  assert.match(RENDERERS_PS, /ParentProcessId/);
+  assert.doesNotMatch(RENDERERS_PS, /webview-exe-name|-match 'dyno'/);
 });

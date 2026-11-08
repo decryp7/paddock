@@ -18,7 +18,7 @@ const byToken = new Map(Object.entries(WIN_ROWS).flatMap(([k, r]) => [[k, k], ..
 
 /**
  * @param {string|undefined} only the --only value: comma-separated row names or numbers, or a win-suite.ps1 part.
- * @returns {{rows: string[], suitePart: string|null, ui: string[], after: string[], reboot: boolean, helper: boolean, oldInstaller: boolean, manifest: string[]}}
+ * @returns {{rows: string[], suitePart: string|null, startPart: string, ui: string[], after: string[], reboot: boolean, helper: boolean, oldInstaller: boolean, manifest: string[]}}
  */
 export function selectRows(only) {
   const tokens = String(only ?? '').split(',').map((t) => t.trim().toLowerCase()).filter(Boolean);
@@ -29,7 +29,7 @@ export function selectRows(only) {
   const needs = (n) => rows.some((k) => WIN_ROWS[k].needs?.includes(n));
   if (pick('reboot').length && rows.length > 1) throw new Error('restart-tray runs its own restart phase: name it alone');
   return {
-    rows, suitePart: rows.length ? null : tokens[0] ?? null, ui: pick('ui'), after: pick('after'), reboot: pick('reboot').length > 0,
+    rows, suitePart: rows.length ? null : tokens[0] ?? null, startPart: rows.includes('tray-menu') ? 'start-tray' : 'start', ui: pick('ui'), after: pick('after'), reboot: pick('reboot').length > 0,
     helper: needs('helper'), oldInstaller: needs('old-installer'), manifest: Object.keys(WIN_ROWS).filter((k) => rows.includes(k)).flatMap((k) => WIN_ROWS[k].manifest),
   };
 }

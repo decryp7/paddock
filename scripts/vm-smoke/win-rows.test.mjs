@@ -30,3 +30,7 @@ test('run-win: rows need --vnc, the swap needs the older installer, restart-tray
   assert.equal(parseArgs([...base, '--vnc', '--only', '10,16,21']).sel.helper, true);
   assert.equal(parseArgs([...base, '--only', 'start']).sel.rows.length, 0);
 });
+test('the tray rows start with the tray settings seeded, the others plain', () => {
+  assert.equal(selectRows('10').startPart, 'start-tray');
+  assert.equal(selectRows('16,21').startPart, 'start');
+});

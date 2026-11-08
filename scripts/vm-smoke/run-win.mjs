@@ -161,7 +161,7 @@ async function main(argv) {
       if (parse !== 'PARSED') throw new Error(`${f} does not parse in the guest: ${parse.replace(/\s*PARSED$/, '').slice(0, 400)}`);
     }
     log('running the suite in the interactive session (bounded 40 min)');
-    ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep || o.ui || o.reboot || o.sel.rows.length ? ' -KeepRunning' : ''}${o.sel.rows.length ? ' -Only start' : o.only ? ` -Only ${o.only}` : o.reboot ? ' -Only start' : ''}'; schtasks /run /tn VmCheck`);
+    ssh(`schtasks /create /tn VmCheck /sc once /st 00:00 /ru paddock-test /it /f /tr 'powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${GUEST}\\win-suite.ps1 -Installer ${guestExe} -Out ${GUEST}\\out${o.keep || o.ui || o.reboot || o.sel.rows.length ? ' -KeepRunning' : ''}${o.sel.rows.length ? ` -Only ${o.sel.startPart}` : o.only ? ` -Only ${o.only}` : o.reboot ? ' -Only start' : ''}'; schtasks /run /tn VmCheck`);
     let done = false;
     const answered = new Set();
     const uacNotes = [];
