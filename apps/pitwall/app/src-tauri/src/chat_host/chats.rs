@@ -4,6 +4,7 @@
 //! from Settings > Chats ("Save new chats"). A chat can move either way later: turning "Don't save" on deletes its saved copy
 //! (the UI asks first), turning it off saves it.
 
+use super::attach::KeptFile;
 use super::saved::{SavedChats, Usage, CHATS_DIR};
 use paddock_assistant::{
     Attachment, ChatMessage, Conversation, ConversationStore, ConversationSummary, Conversations, Overflow, SaveError, StoreLimits,
@@ -288,7 +289,10 @@ impl ChatStores {
 
     /// An attachment's bytes by its SHA-256, wherever it is kept.
     pub fn attachment(&self, sha: &str) -> Option<Vec<u8>> {
-        self.attachment_up_to(sha, usize::MAX)
+        match self.attachment_up_to(sha, usize::MAX) {
+            KeptFile::Bytes(b) => Some(b),
+            KeptFile::TooLarge | KeptFile::Gone => None,
+        }
     }
 
     fn in_memory(&self, sha: &str) -> Option<Arc<Vec<u8>>> {
@@ -296,11 +300,12 @@ impl ChatStores {
         staged.or_else(|| lock(&self.memory_attachments).get(sha).cloned())
     }
 
-    /// An attachment's bytes when it is at most `max` bytes (a file on disk is measured before it is read); `None` when it is
-    /// not kept or is larger.
-    pub fn attachment_up_to(&self, sha: &str, max: usize) -> Option<Vec<u8>> {
+    /// An attachment's bytes when it is at most `max` bytes (a file on disk is measured before it is read), else whether it is
+    /// kept but larger or not kept at all.
+    pub fn attachment_up_to(&self, sha: &str, max: usize) -> KeptFile {
         match self.in_memory(sha) {
-            Some(b) => (b.len() <= max).then(|| b.as_ref().clone()),
+            Some(b) if b.len() <= max => KeptFile::Bytes(b.as_ref().clone()),
+            Some(_) => KeptFile::TooLarge,
             None => self.saved.attachment_up_to(sha, max),
         }
     }

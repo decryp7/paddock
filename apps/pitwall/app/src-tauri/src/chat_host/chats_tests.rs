@@ -2,6 +2,7 @@
 //! files, the limits (refused in words, nothing deleted by itself), attachments by SHA-256, moving a chat either way, and a
 //! chat that is not saved leaving no file, also through the assistant. Temp folders and a fake clock only (ER-14).
 
+use super::attach::KeptFile;
 use super::chats::{ChatStores, ChatsError, PREFS_FILE};
 use super::saved::{SavedChats, SavedLimits, CHATS_DIR};
 use paddock_assistant::{
@@ -477,8 +478,14 @@ fn staged_files_have_their_own_bound_and_are_freed_when_sent_or_removed() {
     );
     // Sizes without reading, and a bounded read.
     assert_eq!(chats.attachment_len(&saved), Some(16));
-    assert_eq!(chats.attachment_up_to(&saved, 16).unwrap(), b"for a saved chat");
-    assert!(chats.attachment_up_to(&saved, 15).is_none(), "over the bound: not read");
+    assert_eq!(chats.attachment_up_to(&saved, 16), KeptFile::Bytes(b"for a saved chat".to_vec()));
+    assert_eq!(
+        chats.attachment_up_to(&saved, 15),
+        KeptFile::TooLarge,
+        "over the bound: not read, but there"
+    );
+    assert_eq!(chats.attachment_up_to(&unsaved, 18), KeptFile::TooLarge, "in memory too");
+    assert_eq!(chats.attachment_up_to(&removed, 1024), KeptFile::Gone);
 
     // Their own bound, with their own words.
     let big = vec![b'x'; usize::try_from(super::chats::MAX_STAGED_BYTES).unwrap() / 2 + 1];

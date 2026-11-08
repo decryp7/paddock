@@ -12,7 +12,7 @@
 //! attached (WP-4b) is read by its SHA-256 through the reader given with [`ServerChatProvider::with_attachments`] and sent
 //! after the question's text, fenced and labelled as data (`chat_host::attach::with_files`).
 
-use crate::chat_host::attach::with_files;
+use crate::chat_host::attach::{with_files, KeptFile};
 use crate::server_client::{FrameStream, ServerClient};
 use paddock_assistant::protocol::{DEFAULT_MAX_TOKENS, DEFAULT_TEMPERATURE};
 use paddock_assistant::{
@@ -34,8 +34,8 @@ pub const CANCEL_POLL: Duration = Duration::from_millis(50);
 /// this bounds only a server that is not there, never a running job (ER-19).
 const OPEN_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Reads an attachment's bytes by its SHA-256 (none: no longer kept).
-pub type AttachmentReader = Arc<dyn Fn(&str) -> Option<Vec<u8>> + Send + Sync>;
+/// Reads an attachment by its SHA-256, within the size a text attachment may have.
+pub type AttachmentReader = Arc<dyn Fn(&str) -> KeptFile + Send + Sync>;
 
 /// The Playground chat as an [`LlmProvider`].
 pub struct ServerChatProvider {
@@ -55,7 +55,7 @@ impl ServerChatProvider {
             runtime,
             model: Mutex::new(model.into()),
             context: AtomicUsize::new(0),
-            attachments: Arc::new(|_| None),
+            attachments: Arc::new(|_| KeptFile::Gone),
         }
     }
 
@@ -84,11 +84,7 @@ impl ServerChatProvider {
 /// The wire request for `req`: the system prompt first, tool calls and results as the wire carries them, the tools offered
 /// natively. Structured JSON answers are not part of the Playground chat.
 /// A user message's attached files are read through `read` and sent after its text.
-pub fn playground_request(
-    model: &str,
-    req: &ChatRequest,
-    read: &dyn Fn(&str) -> Option<Vec<u8>>,
-) -> Result<PlaygroundRequest, ProviderError> {
+pub fn playground_request(model: &str, req: &ChatRequest, read: &dyn Fn(&str) -> KeptFile) -> Result<PlaygroundRequest, ProviderError> {
     if req.json_schema.is_some() {
         return Err(ProviderError::Failed(
             "The Playground chat cannot constrain an answer to a JSON schema. Ask without one.".into(),
@@ -118,7 +114,7 @@ pub fn playground_request(
     })
 }
 
-fn wire_message(m: &ChatMessage, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> PlaygroundMessage {
+fn wire_message(m: &ChatMessage, read: &dyn Fn(&str) -> KeptFile) -> PlaygroundMessage {
     let content = if m.role == Role::User && !m.attachments.is_empty() {
         with_files(&m.content, &m.attachments, read)
     } else {
@@ -497,13 +493,19 @@ mod tests {
             ..Default::default()
         };
         let kept = "a".repeat(64);
-        let read = move |sha: &str| (sha == kept).then(|| b"three lines\nof notes\n".to_vec());
+        let read = move |sha: &str| {
+            if sha == kept {
+                KeptFile::Bytes(b"three lines\nof notes\n".to_vec())
+            } else {
+                KeptFile::Gone
+            }
+        };
         let w = playground_request("m", &req, &read).unwrap();
         let content = &w.messages[0].content;
         assert!(content.starts_with("Summarise\n\nAttached file \"notes.txt\""), "{content}");
         assert!(content.contains("```\nthree lines\nof notes\n\n```"), "{content}");
         assert_eq!(req.messages[0].content, "Summarise");
-        let gone = playground_request("m", &req, &|_| None).unwrap();
+        let gone = playground_request("m", &req, &|_| KeptFile::Gone).unwrap();
         assert!(gone.messages[0].content.ends_with("is no longer available on this computer."));
     }
 
@@ -532,7 +534,7 @@ mod tests {
             max_tokens: 0,
             ..Default::default()
         };
-        let w = playground_request("m", &req, &|_| None).unwrap();
+        let w = playground_request("m", &req, &|_| KeptFile::Gone).unwrap();
         assert_eq!(w.model_id, "m");
         assert_eq!((w.temperature, w.max_tokens), (0.5, u32::try_from(DEFAULT_MAX_TOKENS).unwrap()));
         let roles: Vec<_> = w.messages.iter().map(|m| m.role).collect();
@@ -547,10 +549,10 @@ mod tests {
         req.system.clear();
         req.temperature = None;
         req.max_tokens = 99;
-        let w = playground_request("m", &req, &|_| None).unwrap();
+        let w = playground_request("m", &req, &|_| KeptFile::Gone).unwrap();
         assert_eq!((w.messages.len(), w.temperature, w.max_tokens), (3, DEFAULT_TEMPERATURE, 99));
         req.json_schema = Some(json!({}));
-        assert!(playground_request("m", &req, &|_| None)
+        assert!(playground_request("m", &req, &|_| KeptFile::Gone)
             .unwrap_err()
             .to_string()
             .contains("JSON schema"));
