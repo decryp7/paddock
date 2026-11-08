@@ -64,8 +64,8 @@ approved = "coordinator"
 
 [[not_gated]]
 id = "C13"
-apps = ["debrief", "dyno", "pitcrew", "pitwall", "shell-demo", "spotter", "workbench-demo"]
-reason = "missing disallowed-methods entries and their call sites; the probe misses src-tauri workspaces and apps without Rust (ADR 0060 WP-4)"
+apps = ["debrief", "shell-demo", "workbench-demo"]
+reason = "Debrief never adopted the lint preset (46 members, 158 temp_dir sites: DBR-LINT, Debrief 1.2); the demos lack the workspace lint tables, their opt-ins and a clippy.toml (unwrap and expect would fail clippy)"
 owner = "ADR 0060 WP-4"
 since = 2026-11-08
 review_by = 2026-12-06

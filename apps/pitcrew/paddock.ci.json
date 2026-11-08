@@ -3,6 +3,9 @@
   "cargo": ".",
   "os": ["ubuntu-latest", "windows-latest", "macos-latest"],
   "angularDir": "app",
+  "checks": [
+    "node conformance/bin/paddock-conformance.mjs --app pitcrew --root apps/pitcrew --only C13 --paddock ."
+  ],
   "processPatterns": [
     "{tmp}[/\\\\]pitcrew-it-[^/\\\\]+[/\\\\]runner[/\\\\]bin[/\\\\]gitea-runner",
     "{build}[/\\\\]debug[/\\\\]examples[/\\\\]fake_runner(\\.exe)?( |$)"
