@@ -37,7 +37,7 @@ so the numbering is fixed.
 | [0030](0030-benchmark-tool.md) | The benchmark tool (Accepted): per-drive disk with direct I/O and a wear budget, CPU with a sustained run, STREAM-style memory and a latency sweep, GPU through wgpu in its own runner; runs as a cancellable job, at normal priority (rule 52), with repetitions, spread and method versions (amends 0015) |
 | [0031](0031-network-threat-lists-world-map-and-firewall-view.md) | Network threat lists, the connections world map and a read-only firewall view: core features over opt-in downloaded data (Accepted) |
 | [0032](0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) | Power: keep awake, Wake-on-LAN, idle and timed sleep or shut down, scheduled wake and an energy report; amends 0021 and 0027 (Accepted 2026-11-03) |
-| [0033](0033-no-test-fake-in-a-release-build.md) | No test fake in a release build: fakes compiled only for tests, every platform names every port, a wiring test and a shipped-feature check; real Windows readers for startup items, facts and file locks (Proposed 2026-11-08, revision 2, for 1.1.1) |
+| [0033](0033-no-test-fake-in-a-release-build.md) | No test fake in a release build: fakes compiled only for tests, every platform names every port, a wiring test and a shipped-feature check; real Windows readers for startup items, facts and file locks (Accepted 2026-11-08, for 1.1.1) |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.

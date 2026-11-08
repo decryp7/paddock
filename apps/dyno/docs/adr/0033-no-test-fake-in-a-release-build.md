@@ -1,8 +1,11 @@
 # 33. No test fake in a release build; real Windows readers for startup items, facts and file locks
 
-- Status: Proposed (2026-11-08), for Dyno 1.1.1. Waits for a delta review and the user's decisions D1 to D9.
+- Status: Accepted (2026-11-08), for Dyno 1.1.1. Approved: user, 2026-11-08: D1 to D9 as recommended, and D10 decided as
+  "the non-test host check runs on every Dyno branch run; its cost is measured and reported, and the user is asked again
+  only if it is large". The independent review approved revision 2 with no P1 (re-review of `2f911c8d3`); revision 3
+  folds in its P2s.
 - Date: 2026-11-08
-- Revision 2 (2026-11-08): answers the independent review of `350e351d9` (7 P1, 15 P2).
+- Revision 2 (2026-11-08): answers the independent review of `350e351d9` (6 P1, 15 P2).
   - P1 fixes:
     - the shipped list comes from `tauri.conf.json` and includes `dyno-helper`; the assertion lives in the test CI runs;
     - a non-test build on the Windows and macOS legs, and a corrected claim about pushes to main;
@@ -11,6 +14,17 @@
     - Health lists the facts it could not check (§4.5);
     - packaged-app startup tasks are a new source, and the sources that are not read are named (§4.1).
   - The P2 answers are inline, marked "(review P2-n)".
+- Revision 3 (2026-11-08): the re-review of `2f911c8d3` approved revision 2 with no P1. This revision folds in its P2s,
+  marked "(re-review P2-x)":
+  - the declaration check's scope;
+  - the packaged-app measurement;
+  - the host-check cost, with moving the check to the nightly now a user decision (D10);
+  - "not checked" kinds;
+  - `signerRead` from the engine;
+  - the estimate arithmetic;
+  - the protocol bump;
+  - the task-registration right;
+  - the WP-1/WP-2 order.
 - Trigger: the investigation of 2026-11-08 (Windows tray work, evidence in the coordinator's scratch folder `win-tray/`:
   `vm/startup-page.png`, `vm/logs.txt` and the notes). Dyno 1.1.0 ran in a Windows 11 VM where its own agent starts from the
   HKCU `Run` key (`dyno-agent/src/service/spec.rs`, `WINDOWS_RUN_KEY`). There:
@@ -183,8 +197,10 @@ nothing says so.
     (`paddock-power` `native.rs`) and `WolPorts::os` builds its store under the given folder. The Linux end-to-end test
     already builds the real platform.
 - **A declaration check (review P2-2).** A `syn` scan in the style of `dyno-agent/tests/helper_wiring.rs` reads the
-  non-test sources of the shipped crates: `dyno-core`, `dyno-platform`, `dyno-agent`, `dyno-helper` and
-  `app/src-tauri/src`. It fails on:
+  non-test sources of every shipped crate (re-review P2-A). The crate list is not hand-kept. It is §3.1's derived shipped
+  set (`dyno-app`, `dyno-agent`, `dyno-cli`, `dyno-bench`, `dyno-bench-gpu`, `dyno-helper`) plus their path dependencies
+  under `apps/dyno/crates`, read from `cargo metadata` (today `dyno-core`, `dyno-platform`, `dyno-helper-service` and
+  `dyno-plugin-host` and `dyno-plugin-api`, and any added later). The scan fails on:
   - a public item named `Fake*`;
   - a `mod fake` or `mod testing`;
   - an `impl` of a port trait for a type named `Fake*`, `Stub*` or `Scripted*`;
@@ -195,8 +211,9 @@ nothing says so.
 - **ER-27.** The agent logs one `Platform wired` line at start with every `port=adapter` pair. A Dyno diagnostic bundle
   would have shown `startup=dyno_platform::fake::Fake` in the first Windows report. Type names are not user content.
 - The shared traits (`paddock_power::PowerOs` and `SleepWakeSource`, `paddock_secrets::Secrets`) get no `adapter()`: it
-  would change the family API just for a test. For `PowerOs` and `SleepWakeSource`, §1.5's gate and the declaration check
-  of `paddock-power` are the guarantee. The test lists them as `(unnamed)`.
+  would change the family API just for a test. For `PowerOs` and `SleepWakeSource`, §1.5's gate (D2a) is the guarantee.
+  The declaration check scans only Dyno's crates; family crates are out of its scope (re-review P2-A). The test lists
+  them as `(unnamed)`.
 
 ### 3. The checks that keep it true (D1)
 
@@ -225,8 +242,15 @@ each of which covers what the others cannot see:
      non-Linux legs after clippy and with the same preparation (WP-1b; `.gitea/` is a shared integration point, so the
      integrating agent changes it). Today `rustChecks` runs on Linux only (`.gitea/actions/README.md:55`), and the Windows
      and macOS legs run only `clippy --all-targets` and `nextest`, which unify `test-support` in.
-   - WP-1 measures the cost per leg and records it (rule 48). It recompiles only `dyno-platform` and its dependents with
-     different features.
+   - **Cost (re-review P2-C).** Revision 2 said this recompiles only `dyno-platform` and its dependents, which is wrong.
+     `app/src-tauri`'s dev-dependencies change the features of third-party and shared crates:
+     - `tauri` with `["test"]`;
+     - `paddock-shell` with `["tray", "mock-runtime"]`;
+     - `paddock-menu` and `paddock-files` with `["tauri"]`.
+
+     So the non-test graph of `dyno-app` also rebuilds `tauri`, its plugins and the shell crates. Expect minutes on the
+     Windows leg. WP-1 and WP-1b measure the cost per leg before anything else is decided, and record it (rule 48).
+   - **Where it runs (D10, decided 2026-11-08):** on every Dyno branch run, Windows and macOS legs included. Nothing moves to the nightly automatically; a large measured cost goes back to the user.
 3. **The installers are built before WP-1 and WP-2 land** (rule 54).
    - The gate changes exactly what the dist build compiles, so the batch dispatches `dyno-release.yml` with gates on and
      bundles built for all three OSes.
@@ -277,8 +301,17 @@ Each reader is a thin adapter over small OS traits (`RegistryView`, `FolderList`
 
 - **Packaged apps (review P1-6, D7).** Task Manager lists them under Startup apps, and a machine whose only startup items
   are packaged apps would otherwise show "No startup items" again.
-  - WP-0 measures the key layout and the `State` values (enabled, turned off by the user, turned off by policy) on Windows
-    10 and 11 by toggling each in Task Manager.
+  - WP-0 measures before it toggles anything (re-review P2-B):
+    1. On a fresh image, record the `SystemAppData` keys and compare them with Task Manager's Startup apps list.
+    2. Only then toggle each task (enabled, turned off by the user, turned off by policy) and diff the keys.
+  - Toggling writes the key, so a task that was never toggled may have no key or no `State` value. If any task that Task
+    Manager lists has no key:
+    - the reader enumerates the current user's packages (`Windows.Management.Deployment.PackageManager`) and the
+      `uap5:StartupTask` entries of their manifests;
+    - each task's default comes from its `Enabled` attribute;
+    - the registry `State` is only an override.
+
+    That needs the `windows` crate features `Management_Deployment` and `ApplicationModel` (WP-5b).
   - The executable comes from the package's manifest when the install location can be read; otherwise `exe` is `None`
     and the command is `<PackageFamilyName>!<TaskId>`.
   - If WP-0 finds the state cannot be read reliably, the fallback is the permanent sentence below, not silence.
@@ -331,8 +364,12 @@ Each reader is a thin adapter over small OS traits (`RegistryView`, `FolderList`
   tasks are the slow part.
 - **Publisher (review P1-3, D8).** Revision 1 claimed an existing WinTrust signer reader. There is none: Windows process
   details are `NoDetails` (`SignatureInfo::Unknown`), and `git grep` finds only the `windows` crate's feature names.
-  - In 1.1.1 `publisher` stays `None` on Windows, and the startup filter's "Hide signed apps" says "Signer not read on
-    Windows yet" and is disabled there.
+  - In 1.1.1 `publisher` stays `None` on Windows.
+  - The engine says so (re-review P2-E): `StartupItems` gains a provided `signer_read(&self) -> bool` (default `true`;
+    `false` for the Windows reader), and the agent puts it on the startup reply as `signerRead`. It is mirrored in
+    `api.types.ts` and the mock as part of D3's wire change.
+  - The UI disables "Hide signed apps" and shows "Signer not read on this system yet" when `signerRead` is false. The UI
+    never decides this from the OS name.
   - "Hide system entries" still works: `is_os_owned` uses the path and the task name.
   - A signer reader (embedded Authenticode plus catalog signatures, bounded by file size and time, rule 51) is a later item.
     It should be shared with family ADR 0051's `WinVerifyTrust` check (ER-22 / rule 42), which also gives Windows process
@@ -407,23 +444,38 @@ Today `health::assess` adds reasons only for facts that have a value: `disks`, `
 (`health-hero.ts:32-33`). An unread fact is therefore an all-clear: the same false all-clear this record exists to remove,
 on the most visible card, and on macOS too, where pending updates are never read.
 
-- **Engine.** `HealthReport` gains `not_checked: Vec<NotChecked { what, why }>`. `assess` fills it for every fact it scores
-  whose reading is unavailable, with the reading's own sentence ("disk health: needs administrator rights").
-  - The field is appended at the end of the struct.
-  - The `Reply::Health` wire is postcard (`protocol.rs:1-5`), and appending a struct field is not the variant append that
-    rule allows. So WP-H follows the protocol rule: a `PROTOCOL_VERSION` bump unless the protocol golden test shows the
-    appended field decodes in an older reader.
-  - The app, agent and CLI ship in one installer.
-- **UI.** When `reasons` is empty and `not_checked` is not, the hero says "Nothing found in what Dyno could check" and
-  lists "Not checked: …" under it. "Nothing needs your attention" stays only when both lists are empty. The score is
-  unchanged, so a gap is said, not guessed.
+- **Engine.** `HealthReport` gains `not_checked: Vec<NotChecked { what, why, kind }>`. `assess` fills it for every fact it
+  scores whose reading has no value, with the reading's own sentence.
+  - `kind` keeps two different cases apart (re-review P2-D). The engine decides the kind, never the UI:
+    - `CouldNotRead`: the read failed or was denied this time ("disk health: needs administrator rights");
+    - `NotReadHere`: Dyno does not read this fact on this OS by design ("pending updates" on macOS and Windows,
+      "boot time" on Windows).
+  - `assess` learns which facts are not read by design from the facts themselves. `SystemFacts` gains
+    `not_read_here: Vec<FactKind>`, appended, which each `FactsSource` sets: `MacFacts` declares pending updates,
+    `WinFacts` declares pending updates and boot time, and `NotReadHere` declares everything except the OS name.
+- **Wire (re-review P2-G).** WP-H plans a `PROTOCOL_VERSION` bump.
+  - Postcard is not self-describing. A newer reader of an older `HealthReport` fails at the end of input, and an older
+    reader can ignore trailing bytes only when the struct is last in its frame. So appending fields to `HealthReport` and
+    `SystemFacts` is a protocol change, not an append the protocol rule allows.
+  - The bump goes with the golden update, and the app's version-mismatch path (it already asks for an agent restart) is
+    tested for it.
+  - `HealthReport` and `SystemFacts` are not persisted: `HealthReport` exists only in `Reply::Health` (`protocol.rs:836`),
+    built in `handlers.rs:631`. So there is no stored data to migrate. The app, agent and CLI ship in one installer.
+- **UI.**
+  - `CouldNotRead` entries are listed under the hero as "Not checked: …".
+  - `NotReadHere` entries are shown once as coverage, in smaller text under the reasons ("Dyno does not check pending
+    updates on macOS"), not as a problem.
+  - When `reasons` is empty, the hero says "Nothing found in what Dyno could check" if any entry is `CouldNotRead`.
+    Otherwise it says "Nothing needs your attention", with the coverage line under it.
+  - The score is unchanged, so a gap is said, not guessed.
 - **Tests (failing first).**
-  - `assess` over `SystemFacts::unknown(..)` returns the three scored facts in `not_checked`. It fails today: the field
-    does not exist.
+  - `assess` over `SystemFacts::unknown(..)` returns the three scored facts in `not_checked` as `CouldNotRead`. Over facts
+    that declare pending updates in `not_read_here`, it returns that fact as `NotReadHere`. Both fail today: the fields do
+    not exist.
   - A spec of the hero with an empty `reasons` and a non-empty `not_checked`.
   - The mock backend's Health answer gains a `notChecked` row.
-- **WP-1.** After WP-1 alone, Windows shows "Not checked: disk health, restart needed, pending updates — not read on
-  Windows yet" until WP-3 lands.
+- **WP-1.** After WP-1 and WP-H alone, Windows shows "Dyno does not check disk health, restart needed or pending updates
+  on this system yet" as coverage, from `NotReadHere`, until WP-3 lands.
 
 ### 5. Tests (failing first, ER-11)
 
@@ -463,8 +515,10 @@ entries:
 - The startup reader runs over a temporary key `HKCU\Software\DynoTest-<uuid>\…` and a temporary folder, through the
   `RegistryView` and `FolderList` traits pointed at them. The real `Run` key is never written.
 - The task test registers its task **disabled**, with an action pointing at a path that does not exist in the test's
-  temporary folder, in the root folder under the prefix. WP-0 checks whether a standard user can create a task folder; if
-  so, the task goes in its own folder.
+  temporary folder, in the root folder under the prefix. WP-0 checks whether a standard user may register a task with a
+  logon trigger at all, and whether it may create a task folder; if so, the task goes in its own folder (re-review
+  P2-H). If a standard user may not register a logon task, the test runs only where the runner account is an
+  administrator, and it says so when skipped. The mapping tests over fake task shapes still run everywhere.
 - The locks test's child process holds a temporary file. It is started and ended through `paddock_proc` (rule 53) and
   cannot outlive the test.
 
@@ -493,25 +547,33 @@ merged harness:
 ## Work packages
 
 The days are agent-days for one agent. WP-1 and WP-H can land on their own: together they remove the fakes and make the
-Windows gaps and the Health card say so honestly, ahead of the readers.
+Windows gaps and the Health card say so honestly, ahead of the readers. WP-2 runs beside WP-0, so it does not lengthen the critical path.
 
 | WP | Package | Depends on | Days |
 | --- | --- | --- | --- |
-| WP-0 | VM measurements (local) and source reading: the StartupApproved keys and bytes per source kind (Task Manager toggles, key diff); the packaged-app `SystemAppData` layout and `State` values; `MSFT_PhysicalDisk` as a standard user; Restart Manager's view of other accounts as a standard user; hidden and denied task folders as a standard user; task-folder creation rights; the power overlay GUIDs; `BackgroundAccessApplications` on 23H2+; the Task Scheduler walk's time and count on a fresh Windows 11. The remaining Microsoft Learn pages are fetched and dated in Sources. | – | 1 |
-| WP-1 | The mechanism. Tests first: the no-fake tests, the declaration check, and the `check-shipped` changes (derived `SHIPPED` with `dyno-helper`, the feature assertion, the positive control). Then: `adapter()` and `Platform::adapters()`; the `test-support` gates in `dyno-platform` and `dyno-core`; dev-dependency features in `dyno-agent`, `dyno-cli`, `dyno-helper` and the app; `NotReadHere` in place of `Unsupported` and `FakeBattery`; Windows `platform()` naming every port, with `NotReadHere` for the three gaps; the `Platform wired` log line; the doctest moved; `approved_value` under `cfg(test)`; the Linux `rustChecks` line with its cost measured; `cargo xwin check` clean; the rule 54 installer dispatch. | – | 2–2.5 |
+| WP-0 | VM measurements (local) and source reading: the StartupApproved keys and bytes per source kind (Task Manager toggles, key diff); the packaged-app `SystemAppData` keys on a fresh image before any toggle, compared with Task Manager's list, then the `State` values after toggles; `MSFT_PhysicalDisk` as a standard user; Restart Manager's view of other accounts as a standard user; hidden and denied task folders as a standard user; whether a standard user may register a task with a logon trigger at all, and create a task folder; the power overlay GUIDs; `BackgroundAccessApplications` on 23H2+; the Task Scheduler walk's time and count on a fresh Windows 11. The remaining Microsoft Learn pages are fetched and dated in Sources. | – | 1 |
+| WP-1 | The mechanism (depends on WP-2). Tests first: the no-fake tests, the declaration check, and the `check-shipped` changes (derived `SHIPPED` with `dyno-helper`, the feature assertion, the positive control). Then: `adapter()` and `Platform::adapters()`; the `test-support` gates in `dyno-platform` and `dyno-core`; dev-dependency features in `dyno-agent`, `dyno-cli`, `dyno-helper` and the app (after WP-2); `NotReadHere` in place of `Unsupported` and `FakeBattery`; Windows `platform()` naming every port, with `NotReadHere` for the three gaps; the `Platform wired` log line; the doctest moved; `approved_value` under `cfg(test)`; the Linux `rustChecks` line with its cost measured; `cargo xwin check` clean; the rule 54 installer dispatch. | – | 2–2.5 |
 | WP-1b | Shared CI contract: the `hostRustChecks` field in `app-gates` and its README, Dyno's entry, a run on the Windows and macOS legs with the cost recorded (integrating agent: `.gitea/`) | WP-1 | 0.5–1 |
-| WP-2 | Family: the `test-support` gate in `paddock-power` with its self dev-dependency for `tests/it`, the "inert to build" doc sentence, the `MemorySecrets` doc line, the CHANGELOG entries, and Dyno's dev-dependency lines (integrating agent; D2) | WP-1 | 0.5–1 |
-| WP-H | Health `not_checked`: the engine field and the failing test, the protocol decision and golden, the hero line and spec, the mock, `api.types.ts` | WP-1 | 1–1.5 |
+| WP-2 | Family: the `test-support` gate in `paddock-power` with its self dev-dependency for `tests/it`, the "inert to build" doc sentence, the `MemorySecrets` doc line and the CHANGELOG entries (integrating agent; D2). It lands **before or with WP-1**, because `dyno-platform/test-support` enables `paddock-power/test-support` (re-review P2-H). | – | 0.5–1 |
+| WP-H | Health `not_checked` with its two kinds: the engine fields (`HealthReport.not_checked`, `SystemFacts.not_read_here`) and the failing tests, the `PROTOCOL_VERSION` bump with its golden and the mismatch-path test, the hero lines and spec, the mock, `api.types.ts` | WP-1 | 1.5–2 |
 | WP-3 | Windows facts: `win_os_name` and its tests first, then the registry, power (overlay included), WMI and folder reads, with per-fact logging | WP-0, WP-1 | 1.5–2 |
-| WP-4 | Startup from the registry and folders: `assemble` and its tests first; the `RegistryView` and `FolderList` adapters with bounds; StartupApproved; the new location variants appended on the wire (D3: `dyno-core`, `api.types.ts`, `labels.ts`, the mock, the filter, `is_os_owned` tests); the coverage sentence; the disabled "signed apps" filter (D8); per-source logging; the temporary-key Windows test | WP-0, WP-1 | 2.5–3 |
+| WP-4 | Startup from the registry and folders: `assemble` and its tests first; the `RegistryView` and `FolderList` adapters with bounds; StartupApproved; the new location variants appended on the wire (D3: `dyno-core`, `api.types.ts`, `labels.ts`, the mock, the filter, `is_os_owned` tests); the coverage sentence; `signerRead` and the disabled "signed apps" filter (D8); per-source logging; the temporary-key Windows test | WP-0, WP-1 | 2.5–3 |
 | WP-5 | Startup from logon tasks: the `LogonTasks` trait, the COM walk with caps, the user filter and the denied-folder count, the pure mapping tests, the Windows-runner test with the hygiene of §5 | WP-4 | 1.5–2 |
-| WP-5b | Startup from packaged apps: the `PackagedStartup` trait, the `SystemAppData` read, the state mapping WP-0 measured, its `assemble` cases (D7) | WP-0, WP-4 | 1–1.5 |
+| WP-5b | Startup from packaged apps: the `PackagedStartup` trait, the `SystemAppData` read, the state mapping WP-0 measured, the package-manifest enumeration as the base when WP-0 finds untoggled tasks without a key (`windows` features `Management_Deployment`, `ApplicationModel`), its `assemble` cases (D7) | WP-0, WP-4 | 1.5–2 |
 | WP-6 | File locks through Restart Manager: the mapping and retry tests first, the session guard, the Windows-runner test on its own temporary file | WP-0, WP-1 | 1–1.5 |
 | WP-7 | The VM row on the harness branch, run on the merged harness; screenshots of the Health page and the startup card, independently reviewed (ER-23) | WP-3 to WP-6, WP-H | 1–1.5 |
 | WP-8 | Docs: `architecture.md`, `features.md` (Windows startup, facts and locks built; process details and signer not yet), the `windows/mod.rs` module doc, the user guide (coverage list, hidden tasks, what is not read), CHANGELOG 1.1.1, a lessons entry (the pattern and the checks), `wiring.toml` edges, and `docs/known-copies.toml` if the COM helper is shared | all | 0.5–1 |
 | CI | Windows-leg round trips: there is no local Windows host apart from the VM, and each Windows CI iteration is long | – | 1 |
 
-**Total: 16 to 21.5 agent-days** (revision 1 had 10 to 12.5). The increase comes from:
+**Total: 16 to 21.5 agent-days**, the sum of the table's rows (revision 1 had 10 to 12.5).
+
+Revision 2's rows summed to 15 to 20.5, not the 16 to 21.5 it printed (re-review P2-F). Revision 3 adds two half-days:
+WP-H (two kinds and the planned protocol bump) and WP-5b (the manifest base). The sum is now:
+
+- minimum: 1 + 2 + 0.5 + 0.5 + 1.5 + 1.5 + 2.5 + 1.5 + 1.5 + 1 + 1 + 0.5 + 1 = 16;
+- maximum: 1 + 2.5 + 1 + 1 + 2 + 2 + 3 + 2 + 2 + 1.5 + 1.5 + 1 + 1 = 21.5.
+
+The increase over revision 1 comes from:
 
 - the packaged-app source;
 - Health `not_checked`;
@@ -521,7 +583,9 @@ Windows gaps and the Health card say so honestly, ahead of the readers.
 - the broader WP-0;
 - an explicit allowance for Windows CI round trips.
 
-The critical path is WP-0 → WP-1 → WP-4 → WP-5 → WP-7, about 8 to 10.5 days. WP-1b, WP-2, WP-H, WP-3, WP-5b and WP-6 run
+The critical path is WP-0 (with WP-2 beside it) → WP-1 → WP-4 → WP-5 → WP-7: 1 + 2 + 2.5 + 1.5 + 1 = 8 to
+1 + 2.5 + 3 + 2 + 1.5 = 10 days. The riskiest rows are WP-5b (WinRT package enumeration) and WP-1b (a shared action change
+measured on two host legs). WP-1b, WP-2, WP-H, WP-3, WP-5b and WP-6 run
 beside it. Deferring the signer reader (D8) avoids about 1 to 1.5 days of FFI work in this release. If the user wants it
 in 1.1.1, it is a shared package with family ADR 0051 and its own estimate.
 
@@ -536,10 +600,10 @@ in 1.1.1, it is a shared package with family ADR 0051 and its own estimate.
 - **Facts.** They run every few minutes, off the sampling path. The WMI disk query is the slowest read. If WP-0 measures it
   over 250 ms, disk health is kept for 30 minutes, the way `smart_reader` caches.
 - **Locks.** One Restart Manager session per question, bounded by `MAX_HOLDERS` and three retries.
-- **CI.** The non-test `cargo check` adds one partial rebuild per leg. It is measured in WP-1 and WP-1b, and if it runs over
-  two minutes on a leg, it moves to the nightly run.
+- **CI.** The non-test `cargo check` adds a rebuild of the Tauri and shell crates without their test features on each leg
+  (re-review P2-C). It runs on every branch run (D10), and WP-1 and WP-1b measure and report its cost.
 
-## Decisions for the user
+## Decisions (accepted by the user, 2026-11-08)
 
 - **D1. The checks.** Recommended:
   - the `cfg` gate as the guarantee;
@@ -570,12 +634,22 @@ in 1.1.1, it is a shared package with family ADR 0051 and its own estimate.
 - **D6. Windows process details (`NoDetails`).** Recommended: out of scope. It is an honest, documented gap.
 - **D7. Packaged-app startup tasks.** Recommended: read as a ninth source (WP-5b). The alternative is a permanent
   coverage sentence, "Store apps that start at sign-in are not listed yet".
-- **D8. The signer of startup entries.** Recommended: not read in 1.1.1. The "Hide signed apps" filter is disabled on
-  Windows with a sentence. A later shared reader goes with family ADR 0051's `WinVerifyTrust` check, and also serves
+- **D8. The signer of startup entries.** Recommended: not read in 1.1.1. The engine's `signerRead: false` disables the
+  "Hide signed apps" filter on Windows, with a sentence. A later shared reader goes with family ADR 0051's `WinVerifyTrust` check, and also serves
   Windows process details.
 - **D9. Health's "not checked" line (§4.5).** Recommended: in 1.1.1, on every OS, because it is the symptom that triggered
   this record. Deferring it would leave "100, Good, Nothing needs your attention" on any machine where a scored fact cannot
   be read.
+- **D10. Where the non-test host check runs (re-review P2-C).** Recommended: keep it on the branch legs (Windows and
+  macOS) and measure first (WP-1, WP-1b). Then decide with the numbers, which are recorded in `docs/performance.md`.
+  The alternatives, to choose only after the measurement:
+  - (b) check only `dyno-platform`, `dyno-agent` and `dyno-helper` on the host legs. These do not pull the Tauri dev
+    features. The residual risk is that a Windows-only or macOS-only fake reference in `dyno-app` is found only by the
+    rule 54 dispatch and the nightly.
+  - (c) move the whole check to the nightly. That is D1(c), the residual risk accepted.
+
+  **Decided (user, 2026-11-08):** the check runs on every Dyno branch run. WP-1 and WP-1b measure its cost per leg and
+  report it (rule 48), and the user is asked again only if the cost is large.
 
 ## Consequences
 
