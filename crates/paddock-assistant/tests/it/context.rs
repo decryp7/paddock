@@ -45,7 +45,7 @@ fn a_new_chat_is_an_estimate_of_the_system_prompt_and_the_tools() {
 
 #[test]
 fn after_a_turn_the_count_is_the_engines_own_for_the_last_model_call() {
-    let r = rig_with(
+    let r = rig_cfg(
         vec![
             Step::Reply(
                 vec![],
@@ -58,7 +58,7 @@ fn after_a_turn_the_count_is_the_engines_own_for_the_last_model_call() {
             Step::Reply(vec![], reply(6400, 200)),
         ],
         vec![Arc::new(Echo(Arc::new(AtomicUsize::new(0))))],
-        |_| {},
+        whole_chat,
     );
     let (id, events) = r.turn(ask("How busy is this computer?"));
     done(&events);
@@ -73,6 +73,37 @@ fn after_a_turn_the_count_is_the_engines_own_for_the_last_model_call() {
             level: ContextLevel::High,
         }
     );
+}
+
+/// The app sends the whole conversation (Pitwall does): only then is the engine's last count what the next call carries.
+fn whole_chat(cfg: &mut AssistantConfig) {
+    cfg.history_chars = usize::MAX;
+}
+
+#[test]
+fn with_a_bounded_history_the_meter_estimates_over_what_the_model_would_read() {
+    // The engine counted 7200 tokens for the last call, but the next one reads only the last 400 characters of the chat (the
+    // newest question is always kept): the last count would overstate it and refuse a question that fits, so the meter
+    // estimates over the trimmed history.
+    let r = rig_cfg(
+        vec![
+            Step::Reply(vec![], reply(6000, 100)),
+            Step::Reply(vec![], reply(7100, 100)),
+        ],
+        vec![],
+        |c| c.history_chars = 400,
+    );
+    let (id, events) = r.turn(ask(&"x".repeat(5000)));
+    done(&events);
+    let (_, events) = r.turn(SendRequest {
+        conversation_id: Some(id.clone()),
+        ..ask("And a short one")
+    });
+    done(&events);
+    let used = r.assistant.context(Some(&id), &[]);
+    assert!(!used.exact, "{used:?}");
+    assert!(used.used_tokens < 200, "{used:?}");
+    assert_eq!(used.level, ContextLevel::Ok);
 }
 
 #[test]
@@ -99,7 +130,11 @@ fn a_chat_reopened_without_a_turn_is_estimated_from_its_history() {
 
 #[test]
 fn deleting_a_chat_forgets_its_count() {
-    let r = rig(vec![Step::Reply(vec![], reply(5000, 10))]);
+    let r = rig_cfg(
+        vec![Step::Reply(vec![], reply(5000, 10))],
+        vec![],
+        whole_chat,
+    );
     let (id, events) = r.turn(ask("A question"));
     done(&events);
     assert!(r.assistant.context(Some(&id), &[]).exact);
@@ -229,7 +264,11 @@ fn a_turn_that_cannot_fit_is_refused_in_words_before_anything_is_sent_or_kept() 
 
 #[test]
 fn a_follow_up_that_would_overflow_the_window_is_refused_too() {
-    let r = rig_cfg(vec![Step::Reply(vec![], reply(7100, 100))], vec![], |_| {});
+    let r = rig_cfg(
+        vec![Step::Reply(vec![], reply(7100, 100))],
+        vec![],
+        whole_chat,
+    );
     let (id, events) = r.turn(ask("First"));
     done(&events);
     assert_eq!(

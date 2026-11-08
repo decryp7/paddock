@@ -45,7 +45,8 @@ fn invoke(w: &WebviewWindow<MockRuntime>, cmd: &str, body: Value) -> Result<Valu
 }
 
 fn app_with(steps: Vec<Step>, tools: Vec<Arc<dyn AssistantTool>>) -> (App, Rig) {
-    let rig = rig_with(steps, tools, |_| {});
+    // The whole conversation is sent (as Pitwall does), so the meter after a turn is the engine's own count.
+    let rig = rig_cfg(steps, tools, |c| c.history_chars = usize::MAX);
     let app = mock_builder()
         .invoke_handler(route(handler(), |_invoke| false))
         .build(mock_context(noop_assets()))
