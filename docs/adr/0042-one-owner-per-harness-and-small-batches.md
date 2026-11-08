@@ -235,9 +235,9 @@ The user accepted the reviewer's recommendations on 2026-11-03. The delta re-rev
 - **D4:** `conformance` becomes an **additive** harness only once checks are auto-discovered (no `index.mjs` edit to add
   one); until then it is a strict home like the others.
 
-## Amendment (2026-11-08, proposed): the `vm-smoke` home built now, a shared probe kit, preconditions first, one `--only`, a cleanup registry and a harness lint
+## Amendment (2026-11-08, accepted): the `vm-smoke` home built now, a shared probe kit, preconditions first, one `--only`, a cleanup registry and a harness lint
 
-- Status: **Proposed** (2026-11-08), ER-21 / rule 40. The user decided on 2026-11-08 to do all redesigns now; the
+- Status: **Accepted** (2026-11-08), after the independent review approved it (branch `docs/adr-vm-harness`, `345e9cfa6`); proposed the same day, ER-21 / rule 40. The user decided on 2026-11-08 to do all redesigns now; the
   coordinator log lists "one VM harness + probe helper" among the foundation redesigns (log 1361). Revision 2 (same day)
   answers the independent review's round 1 (CHANGES NEEDED: four P1s, P2s). This amendment does not reopen §§1-6: it
   builds §1 and §2 for the `vm-smoke` harness first, adds a second pattern (probes that cannot see what they judge) with

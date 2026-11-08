@@ -239,9 +239,9 @@ The user accepted the reviewer's recommendations on 2026-11-03. The delta re-rev
   `windows.gui` block (not `null`, every tray item and dialog covered or listed as manual).
 - **D3:** the **150 % dialog pass runs in every run**.
 
-## Amendment (2026-11-08, proposed): §1 and §3 built on ADR 0042's `vm-smoke` home and probe kit
+## Amendment (2026-11-08, accepted): §1 and §3 built on ADR 0042's `vm-smoke` home and probe kit
 
-- Status: **Proposed** (2026-11-08), together with ADR [0042](0042-one-owner-per-harness-and-small-batches.md)'s
+- Status: **Accepted** (2026-11-08), after the independent review approved it (branch `docs/adr-vm-harness`, `345e9cfa6`); proposed the same day, together with ADR [0042](0042-one-owner-per-harness-and-small-batches.md)'s
   amendment of the same date, which holds the evidence and the mechanism. Revision 2 (same day) answers the independent
   review's round 1.
 - What was built, read 2026-11-08 on `test/dyno-vm-harness-1.1-win` (`330b7e356`): the Windows rows of Dyno 1.1.0 run in
