@@ -37,9 +37,17 @@ export function lint(message) {
   return problems;
 }
 
-/** [{ id, message }] for a git revision range (it may start with options such as `--first-parent`), run in `cwd`. */
-export function messagesInRange(range, cwd = process.cwd(), git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 })) {
-  return git(['log', '--no-merges', '--format=%H%x00%B%x01', ...range.trim().split(/\s+/)])
+/**
+ * [{ id, message }] for a git revision range, run in `cwd`. `flags` are git log options (only `--first-parent` is known); the
+ * range is one argument and must be a revision range or a count such as `-200`. Merge commits are left out, except with
+ * `--first-parent`: there the commits on main are listed as they are, the landing merge among them (its "Merge" header is
+ * exempt from the header rule, its message is not from the attribution rule).
+ */
+export function messagesInRange(range, cwd = process.cwd(), git = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 << 20 }), flags = []) {
+  const unknown = flags.filter((f) => f !== '--first-parent');
+  if (unknown.length) throw new Error(`unknown option ${unknown[0]}`);
+  if (range.startsWith('-') && !/^-\d+$/.test(range)) throw new Error(`"${range}" is not a revision range`);
+  return git(['log', ...(flags.includes('--first-parent') ? flags : ['--no-merges', ...flags]), '--format=%H%x00%B%x01', range])
     .split('\x01')
     .map((s) => s.trim())
     .filter(Boolean)
@@ -49,17 +57,11 @@ export function messagesInRange(range, cwd = process.cwd(), git = (args) => exec
     });
 }
 
-/**
- * The C23 waivers of `paddock.waivers.toml` in `cwd` (the file and loader the conformance run uses): `path = "commit <sha>"`,
- * the sha being the 10 characters the run prints or the full one. Returns { waivers, problems }.
- */
+/** The C23 waivers of `paddock.waivers.toml` in `cwd`, read by the loader the conformance run uses. */
 function c23Waivers(cwd) {
   const file = join(cwd, 'paddock.waivers.toml');
   const parsed = existsSync(file) ? parseWaivers(readFileSync(file, 'utf8')) : { waivers: [], problems: [] };
-  const waivers = parsed.waivers
-    .filter((w) => w.check === 'C23')
-    .map((w) => ({ ...w, path: (w.path ?? '').replace(/^(commit )([0-9a-f]{11,40})$/, (_, c, sha) => c + sha.slice(0, 10)) }));
-  return { waivers, problems: parsed.problems };
+  return { waivers: parsed.waivers.filter((w) => w.check === 'C23'), problems: parsed.problems };
 }
 
 /**
@@ -68,13 +70,14 @@ function c23Waivers(cwd) {
  * malformed waiver applies to nothing and only warns, and a waiver for a commit outside the range is ignored.
  */
 export function commitLintMain(argv, cwd = process.cwd(), log = console.error, now = new Date()) {
-  const [flag, value] = argv;
+  const flags = argv[0] === '--first-parent' ? ['--first-parent'] : [];
+  const [flag, value] = flags.length ? argv.slice(1) : argv;
   let items;
   try {
     if (flag === '--file' && value) items = [{ id: value, message: readFileSync(value, 'utf8') }];
-    else if (flag === '--range' && value) items = messagesInRange(value, cwd);
+    else if (flag === '--range' && value) items = messagesInRange(value, cwd, undefined, flags);
     else {
-      log('usage: paddock-conformance commit-lint --file <path> | --range <rev-range>');
+      log('usage: paddock-conformance commit-lint --file <path> | [--first-parent] --range <rev-range>');
       return 2;
     }
   } catch (e) {
