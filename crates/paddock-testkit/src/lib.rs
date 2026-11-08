@@ -13,7 +13,9 @@
 //!   port read off a listener that was then dropped (ADR 0023).
 //! - [`FakeClock`]: the deterministic clock of `paddock_jobs::time`, re-exported so a test needs one dependency.
 //!
-//! Nothing here touches the user's folders, starts a process or sleeps.
+//! - [`wait`]: `wait_until` / `wait_for` / `poll_for` / `holds_within`, a bounded poll on a condition instead of a sleep.
+//!
+//! Nothing here touches the user's folders or starts a process; the only real time is [`wait`]'s poll interval.
 
 pub mod env;
 pub mod golden;
@@ -21,6 +23,7 @@ pub mod hostile;
 pub mod net;
 pub mod runner;
 pub mod scratch;
+pub mod wait;
 
 pub use env::{EnvLock, env_lock};
 pub use golden::{Golden, GoldenError, GoldenMode, assert_golden, check_golden};
@@ -28,3 +31,4 @@ pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{Leftovers, Scratch, ScratchError};
+pub use wait::{HANG_GUARD, holds_within, poll_for, wait_for, wait_until, wait_until_within};
