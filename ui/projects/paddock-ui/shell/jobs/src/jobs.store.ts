@@ -1,9 +1,9 @@
-import { computed, effect, inject } from '@angular/core';
+import { computed, DestroyRef, effect, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import type { SuJobSnapshot } from '@decryp7/paddock-ui';
 import { SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import { JobsBackend, type Unlisten } from './jobs-backend';
-import { JOBS_CLOCK, JOBS_CONFIG } from './jobs-config';
+import { JOBS_CLOCK, JOBS_CONFIG, JOBS_RETRY_BACKOFF_MS, JOBS_RETRY_STEADY_MS } from './jobs-config';
 import { setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { isActiveJob } from './wire';
 
@@ -87,7 +87,7 @@ export const JobsStore = signalStore(
     lead: computed(() => store.jobs().find((j) => j.state === 'running') ?? null),
     _hasRunning: computed(() => store.jobs().some((j) => j.state === 'running')),
   })),
-  withMethods((store, backend = inject(JobsBackend), ports = inject(SHELL_PORTS), clock = inject(JOBS_CLOCK), config = inject(JOBS_CONFIG)) => {
+  withMethods((store, backend = inject(JobsBackend), ports = inject(SHELL_PORTS), clock = inject(JOBS_CLOCK), config = inject(JOBS_CONFIG), destroyRef = inject(DestroyRef)) => {
     const waiters = new Set<Waiter>();
 
     /** Merges snapshots under the highest-`seq` rule; returns the ones that changed the store. */
@@ -131,35 +131,73 @@ export const JobsStore = signalStore(
     let generation = 0;
     let refreshing = false;
     let lastRefreshFailedAt = Number.NEGATIVE_INFINITY;
+    /** The self-retry while the list is in error: the pending timer, and how many retries were armed since the last success or Retry. */
+    let cancelRetry: (() => void) | undefined;
+    let retries = 0;
+    let destroyed = false;
+
+    const stopRetrying = (): void => {
+      cancelRetry?.();
+      cancelRetry = undefined;
+      retries = 0;
+    };
+
+    /** Arms the next self-retry (replacing a pending one); the delays grow, see `JOBS_RETRY_BACKOFF_MS`. */
+    const armRetry = (): void => {
+      if (destroyed) return;
+      cancelRetry?.();
+      const delay = JOBS_RETRY_BACKOFF_MS[retries] ?? JOBS_RETRY_STEADY_MS;
+      retries++;
+      cancelRetry = clock.after(delay, () => {
+        cancelRetry = undefined;
+        void refresh(true);
+      });
+    };
+
+    destroyRef.onDestroy(() => {
+      destroyed = true;
+      stopRetrying();
+    });
 
     /** Reads the list (also the Retry of a failed load). Never notifies: these jobs did not just end. */
     const load = async (): Promise<void> => {
       const mine = ++generation;
+      stopRetrying();
       patchState(store, setLoading());
       try {
         const jobs = await backend.snapshot();
         // Merged in a sync step of its own: the state is read fresh there, not across the await (rule 29).
         if (mine === generation) applyList(jobs);
       } catch (e) {
-        if (mine === generation) patchState(store, setError(message(e)));
+        if (mine === generation) {
+          patchState(store, setError(message(e)));
+          armRetry();
+        }
       }
     };
 
     /**
-     * The re-read a job event starts while the list is in error: the link is back, but the list may lack older jobs. It
-     * keeps the error up until a read succeeds (no "loading" in between, so the alert is not removed and announced again),
-     * runs at most one read at a time and, after a failed one, waits `stillWorkingAfterMs` before the next.
+     * The re-read of a list in error, started by a job event (the link is back, but the list may lack older jobs) or by the
+     * self-retry timer (`own`: no event may ever come). It keeps the error up until a read succeeds (no "loading" in
+     * between, so the alert is not removed and announced again) and runs at most one read at a time. After a failed read an
+     * event-started one waits `stillWorkingAfterMs`; the timer's own spacing is the backoff. Success stops the retrying.
      */
-    const refresh = async (): Promise<void> => {
-      if (refreshing || clock.now() - lastRefreshFailedAt < config.stillWorkingAfterMs) return;
+    const refresh = async (own = false): Promise<void> => {
+      if (destroyed || refreshing || (!own && clock.now() - lastRefreshFailedAt < config.stillWorkingAfterMs)) return;
       refreshing = true;
       const mine = ++generation;
       try {
         const jobs = await backend.snapshot();
-        if (mine === generation) applyList(jobs);
+        if (mine === generation) {
+          applyList(jobs);
+          stopRetrying();
+        }
       } catch (e) {
         lastRefreshFailedAt = clock.now();
-        if (mine === generation) patchState(store, setError(message(e)));
+        if (mine === generation) {
+          patchState(store, setError(message(e)));
+          armRetry();
+        }
       } finally {
         refreshing = false;
       }

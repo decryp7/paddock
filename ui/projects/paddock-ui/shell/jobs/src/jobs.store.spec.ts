@@ -112,6 +112,89 @@ describe('JobsStore', () => {
       expect(store.jobs()).toHaveLength(1);
     });
 
+    /** Fails read `n` and waits until the store has armed its next retry. */
+    const failRead = async (backend: QueuedBackend, n: number, clock: { ticking: number }) => {
+      backend.reads[n]?.reject(new Error('still down'));
+      await vi.waitFor(() => expect(clock.ticking).toBe(1));
+    };
+
+    it('retries on its own with a growing delay (2 s, 4 s, 8 s, then every 15 s) and keeps the error up without loading', async () => {
+      const { backend, store, clock } = await start();
+      expect(clock.ticking).toBe(1);
+      const steps: [number, number][] = [
+        [2_000, 2],
+        [4_000, 3],
+        [8_000, 4],
+        [15_000, 5],
+        [15_000, 6],
+      ];
+      for (const [delay, reads] of steps) {
+        clock.advance(delay - 1);
+        expect(backend.reads).toHaveLength(reads - 1);
+        clock.advance(1);
+        expect(backend.reads).toHaveLength(reads);
+        expect(store.isLoading()).toBe(false);
+        expect(store.requestError()).not.toBeNull();
+        await failRead(backend, reads - 1, clock);
+        expect(store.requestError()).toBe('still down');
+      }
+    });
+
+    it('stops retrying once a read succeeds: the error clears and no timer is left', async () => {
+      const { backend, store, clock } = await start();
+      clock.advance(2_000);
+      expect(backend.reads).toHaveLength(2);
+      backend.reads[1]?.resolve([snap(1, 1, 'done')]);
+      await vi.waitFor(() => expect(store.requestStatus()).toBe('loaded'));
+      expect(clock.ticking).toBe(0);
+      clock.advance(120_000);
+      expect(backend.reads).toHaveLength(2);
+    });
+
+    it('starts the delays again after a manual Retry that fails', async () => {
+      const { backend, store, clock } = await start();
+      clock.advance(2_000);
+      await failRead(backend, 1, clock);
+      clock.advance(4_000);
+      await failRead(backend, 2, clock);
+      void store.load();
+      expect(clock.ticking).toBe(0);
+      expect(backend.reads).toHaveLength(4);
+      await failRead(backend, 3, clock);
+      clock.advance(1_999);
+      expect(backend.reads).toHaveLength(4);
+      clock.advance(1);
+      expect(backend.reads).toHaveLength(5);
+    });
+
+    it('does not start a second read when the timer fires during an event re-read', async () => {
+      const { backend, clock } = await start();
+      backend.handler?.(snap(1, 1));
+      expect(backend.reads).toHaveLength(2);
+      clock.advance(2_000);
+      expect(backend.reads).toHaveLength(2);
+    });
+
+    it('leaves no timer and starts no read after the store is destroyed', async () => {
+      const { backend, clock } = await start();
+      expect(clock.ticking).toBe(1);
+      TestBed.resetTestingModule();
+      expect(clock.ticking).toBe(0);
+      clock.advance(120_000);
+      expect(backend.reads).toHaveLength(1);
+    });
+
+    it('does not arm a timer when a read fails after the store was destroyed', async () => {
+      const { backend, clock } = await start();
+      clock.advance(2_000);
+      expect(backend.reads).toHaveLength(2);
+      TestBed.resetTestingModule();
+      backend.reads[1]?.reject(new Error('late'));
+      // A macrotask: every promise continuation of the failed read has run once it fires (not a count of turns).
+      await new Promise<void>((resolve) => setTimeout(resolve));
+      expect(clock.ticking).toBe(0);
+    });
+
     it('drops a stale read that finishes after a newer one (Retry)', async () => {
       const { backend, store } = await start();
       backend.handler?.(snap(1, 1));
