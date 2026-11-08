@@ -556,9 +556,10 @@ fn the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up() 
     assert!(matches!(before.memory, MemoryLayout::TotalOnly { .. }), "{:?}", before.memory);
     assert!(matches!(before.memory_via, ReadVia::NeedsHelper { .. }), "{:?}", before.memory_via);
     rig.up.store(true, Ordering::SeqCst);
-    // The readiness answer is kept a few seconds: wait on the condition, not on a fixed time.
+    // The readiness answer is kept a few seconds: wait on the condition, not on a fixed time. Every read opens a connection to the
+    // agent, so ask every 100 ms (the testkit's fast poll opened about 250 in the five seconds and the agent ended one in its handshake).
     let mut latest = None;
-    let _ = paddock_testkit::poll_until_within(SLOW, || {
+    let _ = paddock_testkit::retry_within(SLOW, Duration::from_millis(100), || {
         let inv = rig.inventory();
         let ready = inv.memory_via == ReadVia::Helper;
         latest = Some(inv);
