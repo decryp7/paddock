@@ -4,6 +4,9 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `@decryp7/paddock-ui/widgets`: the chooser names a row as the app describes it
+- New input `describe` on `pd-widget-chooser`: `(placement) => { title, summary } | null`. A row the app describes shows that title and summary instead of its kind's, in the row, its grip, its menu, the Undo message and the announcements; `null` keeps the kind's. Dyno names a menu-bar item that draws one picture by its metric ("Download").
+
 ### `paddock-widgets`: an edit that changes a placement's kind in place
 - New `Edit::ChangeKind { id, widget }` (wire `changeKind`): the placement keeps its id and its place, so whatever an app keys on the id (Dyno's tray icon identity and its pinned position) survives a change of kind. A span the new kind does not allow becomes its first; on a grid surface a rectangle the new kind does not allow is refused ("resize it first"). The kind's limits are checked as for an add; undo restores the old kind. `Replace` still keeps the kind. Additive on the wire; the generated `Edit` type of `@decryp7/paddock-ui/widgets` gains the variant.
 

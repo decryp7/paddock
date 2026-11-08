@@ -101,7 +101,7 @@ type Move = 'up' | 'down' | 'top' | 'bottom';
                 }
               </span>
               <div class="pd-wc-body" [class.pd-wc-body--more]="editable()">
-                <span class="pd-wc-txt"><b>{{ titleOf(p) }}</b><span>{{ info?.summary }}</span></span>
+                <span class="pd-wc-txt"><b>{{ titleOf(p) }}</b><span>{{ summaryOf(p, info) }}</span></span>
                 @if (editable()) {
                   @if (optionFor(p); as opt) {
                     <ng-container *ngTemplateOutlet="opt.template; context: { $implicit: p }" />
@@ -309,6 +309,11 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
   readonly again = input<Readonly<Record<string, string>>>({});
   /** The engine's message for an edit it refused (`WidgetError`'s display text, which the app gets with the error): shown at the top until the app clears it. Clear it (set null) before sending the next edit; a new value arriving after an edit means that edit was refused. */
   readonly error = input<string | null>(null);
+  /**
+   * The title and summary of a shown row when the app's engine names it otherwise than its kind (Dyno: a menu-bar number that
+   * shows the network rate is "Upload"); `null` keeps the kind's. Used in the row, its grip, menu, Undo and announcements.
+   */
+  readonly describe = input<(p: Placement<W>) => { title: string; summary: string } | null>(() => null);
   /** Show the preview column (project the preview with `slot="preview"`). */
   readonly preview = input(false);
   /** The app's per-kind option controls. */
@@ -409,7 +414,10 @@ export class PdWidgetChooser<S = unknown, W = unknown, K extends string = string
     return this.kinds().find((k) => k.kind === kind);
   }
   protected titleOf(p: Placement<W>): string {
-    return this.infoOf(p)?.title ?? this.kindOf()(p.widget);
+    return this.describe()(p)?.title ?? this.infoOf(p)?.title ?? this.kindOf()(p.widget);
+  }
+  protected summaryOf(p: Placement<W>, info: KindInfo<K> | undefined): string {
+    return this.describe()(p)?.summary ?? info?.summary ?? '';
   }
   protected optionFor(p: Placement<W>): PdWidgetOption<W> | undefined {
     const kind = this.kindOf()(p.widget);
