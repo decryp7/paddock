@@ -103,13 +103,24 @@ fn a_legs_nextest_config_names_only_packages_of_its_cargo_workspace_and_its_rele
     }
 }
 
-/// The process-pattern checks run `conformance/ci/job-isolation.sh` with the paths of a Unix host; the Linux leg runs them. On a
-/// Windows host leg Git Bash gives that script other paths, so there the test says so and stops (visible with nextest's output).
-fn skip_on_windows(what: &str) -> bool {
-    if cfg!(windows) {
-        println!("::notice::{what} was skipped on this Windows host; the Linux leg runs it.");
+/// `job-isolation.sh pattern <pattern>` the way the host-cleanup action runs it: bash to bash, the pattern in an environment variable
+/// (the action's `PATTERNS`), never as an argument of a native process, which Windows' command line parsing rewrites (`\\` became `\`
+/// in run 7724's log, so a `[^/\\]` class reached the script as `[^/\]`).
+fn pattern_command(pattern: &str, env: &[(&str, String)]) -> std::process::Output {
+    let mut cmd = paddock_proc::command("bash");
+    cmd.arg("-c")
+        .arg(r#"exec bash "$0" pattern "$PADDOCK_TEST_PATTERN""#)
+        .arg(root().join("conformance/ci/job-isolation.sh"))
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("PADDOCK_TEST_PATTERN", pattern);
+    if let Ok(v) = std::env::var("SYSTEMROOT") {
+        cmd.env("SYSTEMROOT", v);
     }
-    cfg!(windows)
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.output().unwrap()
 }
 
 const JOB_TMP: &str = "/Users/x/gitea-runner/work/0123456789abcdef/tmp";
@@ -120,26 +131,25 @@ const OTHER_TMP: &str = "/Users/x/gitea-runner/work/fedcba9876543210/tmp";
 /// `None` when the script refuses it (not anchored on a folder of the job).
 fn scoped(pattern: &str, app: &str, os: &str) -> Option<Regex> {
     let win = if os == "Windows" { "C:" } else { "" };
-    let out = paddock_proc::command("bash")
-        .arg(root().join("conformance/ci/job-isolation.sh"))
-        .args(["pattern", pattern])
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("RUNNER_OS", os)
-        .env("PADDOCK_CI_SLOT", "s1")
-        .env("PADDOCK_JOB_TEMP", format!("{win}{JOB_TMP}"))
-        .env("PADDOCK_BUILD_FOLDER", format!("{win}/Users/x/.paddock-ci/target-{app}-app-s1"))
-        .output()
-        .unwrap();
-    // The script prints a separator class as `[/\\]`; where one backslash reaches it (`[/\]`) JavaScript took that for the class
-    // closing, so it is read here as the same separator class.
-    out.status.success().then(|| {
-        let text = String::from_utf8_lossy(&out.stdout)
-            .trim()
-            .replace("[/\\]", "[/\\\\]")
-            .replace("[^/\\]", "[^/\\\\]");
-        Regex::new(&text).unwrap()
-    })
+    let out = pattern_command(
+        pattern,
+        &[
+            ("RUNNER_OS", os.to_string()),
+            ("PADDOCK_CI_SLOT", "s1".to_string()),
+            ("PADDOCK_JOB_TEMP", format!("{win}{JOB_TMP}")),
+            ("PADDOCK_BUILD_FOLDER", format!("{win}/Users/x/.paddock-ci/target-{app}-app-s1")),
+        ],
+    );
+    if !out.status.success() {
+        // Shown with a failing test: why the script refused this pattern on this host.
+        eprintln!(
+            "job-isolation.sh refused {pattern:?} ({os}): {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    out.status
+        .success()
+        .then(|| Regex::new(String::from_utf8_lossy(&out.stdout).trim()).unwrap())
 }
 
 fn scoped_all(app: &str, patterns: &[&str]) -> Vec<Option<Regex>> {
@@ -158,9 +168,6 @@ fn patterns_of(app: &Value) -> Vec<&str> {
 
 #[test]
 fn an_apps_host_cleanup_patterns_match_its_own_paths_and_never_the_real_runner_or_another_job() {
-    if skip_on_windows("the process-pattern contract") {
-        return;
-    }
     let real = [
         "gitea-runner daemon",
         "/usr/local/bin/gitea-runner daemon",
@@ -267,9 +274,6 @@ fn an_apps_host_cleanup_patterns_match_its_own_paths_and_never_the_real_runner_o
 
 #[test]
 fn pitwalls_and_dynos_patterns_never_reach_an_installed_app_another_job_or_the_users_own_tools() {
-    if skip_on_windows("the process-pattern contract") {
-        return;
-    }
     let cfg = configs();
     let pitwall = patterns_of(&cfg.iter().find(|(a, _)| a == "pitwall").unwrap().1)
         .into_iter()
@@ -329,9 +333,6 @@ fn pitwalls_and_dynos_patterns_never_reach_an_installed_app_another_job_or_the_u
 
 #[test]
 fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
-    if skip_on_windows("the process-pattern contract") {
-        return;
-    }
     assert!(
         scoped(r"[/\\]pitcrew-it-[^/]+[/\\]gitea-runner", "pitcrew", "macOS").is_none(),
         "a temp prefix alone matches every job"
@@ -340,14 +341,7 @@ fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
         scoped("fake_runner", "pitcrew", "macOS").is_none(),
         "an exact name matches every job"
     );
-    let out = paddock_proc::command("bash")
-        .arg(root().join("conformance/ci/job-isolation.sh"))
-        .args(["pattern", "{tmp}/x"])
-        .env_clear()
-        .env("PATH", "/usr/bin:/bin")
-        .env("RUNNER_OS", "macOS")
-        .output()
-        .unwrap();
+    let out = pattern_command("{tmp}/x", &[("RUNNER_OS", "macOS".to_string())]);
     assert!(!out.status.success(), "no job temp folder: nothing to anchor on");
 }
 
