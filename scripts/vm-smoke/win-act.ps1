@@ -18,6 +18,7 @@ Add-Type -Namespace W -Name A -MemberDefinition '
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr h);
 [System.Runtime.InteropServices.DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr h, System.Text.StringBuilder s, int n);
 [System.Runtime.InteropServices.DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr h, out uint pid);
+[System.Runtime.InteropServices.DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetClassName(System.IntPtr h, System.Text.StringBuilder s, int n);
 public delegate bool EnumCb(System.IntPtr h, System.IntPtr l);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }'
 [void][W.A]::SetProcessDPIAware()
@@ -34,6 +35,25 @@ function Windows-List {
   [void][W.A]::EnumWindows($cb, [IntPtr]::Zero)
   return $rows
 }
+# The visible native popup menus (window class #32768, what TrackPopupMenu makes): one row per menu, "handle<TAB>owner process<TAB>L,T,R,B". Titles are not needed, so this sees a menu
+# that Windows-List (titled windows only) and the UI Automation MenuItem search do not.
+function Menu-Windows {
+  $rows = New-Object System.Collections.ArrayList
+  $cb = [W.A+EnumCb]{ param($h, $l)
+    if ([W.A]::IsWindowVisible($h)) {
+      $sb = New-Object System.Text.StringBuilder 64; [void][W.A]::GetClassName($h, $sb, 64)
+      if ($sb.ToString() -eq '#32768') { $p = [uint32]0; [void][W.A]::GetWindowThreadProcessId($h, [ref]$p); $r = New-Object W.A+RECT; [void][W.A]::GetWindowRect($h, [ref]$r); [void]$rows.Add("$($h.ToInt64())`t$((Get-Process -Id $p -ErrorAction SilentlyContinue).ProcessName)`t$($r.L),$($r.T),$($r.R),$($r.B)") }
+    }
+    return $true }
+  [void][W.A]::EnumWindows($cb, [IntPtr]::Zero)
+  return $rows
+}
+function Menu-Items {
+  $root = [Windows.Automation.AutomationElement]::RootElement; $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::MenuItem))); $rows = @()
+  foreach ($e in $all) { $r = $e.Current.BoundingRectangle; if ($r.Width -gt 0 -and $e.Current.Name -and $e.Current.FrameworkId -ne 'Chrome') { $rows += "$($e.Current.Name)`t$([int]($r.X + $r.Width / 2)),$([int]($r.Y + $r.Height / 2))" } }
+  return ($rows -join "`n")
+}
+function Shot-To($name) { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm = New-Object System.Drawing.Bitmap $b.Width, $b.Height; $g = [System.Drawing.Graphics]::FromImage($bm); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bm.Save("$Dir\$name.png") }
 $end = (Get-Date).AddMinutes($MaxMin); $n = 0
 while ((Get-Date) -lt $end) {
   $n++
@@ -45,7 +65,7 @@ while ((Get-Date) -lt $end) {
   try {
     switch ($a[0]) {
       'key' { $keys = $a[1].Split('+') | ForEach-Object { [byte]$vk[$_.ToUpper()] }; foreach ($k in $keys) { [W.A]::keybd_event($k, 0, 0, [UIntPtr]::Zero) }; [array]::Reverse($keys); foreach ($k in $keys) { [W.A]::keybd_event($k, 0, 2, [UIntPtr]::Zero) } }
-      'rclick' { $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]); Start-Sleep -Milliseconds 250; [W.A]::mouse_event(8, 0, 0, 0, [UIntPtr]::Zero); [W.A]::mouse_event(16, 0, 0, 0, [UIntPtr]::Zero) }
+      'rclick' { $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]); Start-Sleep -Milliseconds 250; [W.A]::mouse_event(8, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 90; [W.A]::mouse_event(16, 0, 0, 0, [UIntPtr]::Zero) }
       'tray' { $root = [Windows.Automation.AutomationElement]::RootElement; $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button))); $rows = @(); foreach ($e in $all) { $r = $e.Current.BoundingRectangle; if ($e.Current.Name -match $a[1] -and $r.Width -gt 0 -and $e.Current.Name -notmatch 'running window|Expand ') { $rows += "$($e.Current.Name)`t$([int]($r.X + $r.Width / 2)),$([int]($r.Y + $r.Height / 2))" } }; $out = $rows -join "`n" }
       'menu' { $root = [Windows.Automation.AutomationElement]::RootElement; $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::MenuItem))); $rows = @(); foreach ($e in $all) { $r = $e.Current.BoundingRectangle; if ($r.Width -gt 0 -and $e.Current.Name -and $e.Current.FrameworkId -ne 'Chrome') { $rows += "$($e.Current.Name)`t$([int]($r.X + $r.Width / 2)),$([int]($r.Y + $r.Height / 2))" } }; $out = $rows -join "`n" }
       'move' { $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]) }
@@ -53,6 +73,11 @@ while ((Get-Date) -lt $end) {
       'fg' { $h = (Windows-List | Where-Object { ($_ -split "`t")[2] -match $a[1] } | Select-Object -First 1); if ($h) { $hh = [IntPtr][int64](($h -split "`t")[0]); [void][W.A]::ShowWindow($hh, 9); [void][W.A]::SetForegroundWindow($hh); $out = "fg $(($h -split "`t")[2])" } else { $out = 'no such window' } }
       'rect' { $h = (Windows-List | Where-Object { ($_ -split "`t")[2] -match $a[1] } | Select-Object -First 1); $out = $(if ($h) { ($h -split "`t")[3] } else { 'no such window' }) }
       'trayicons' { $root = [Windows.Automation.AutomationElement]::RootElement; $walk = [Windows.Automation.TreeWalker]::ControlViewWalker; $all = $root.FindAll([Windows.Automation.TreeScope]::Descendants, (New-Object Windows.Automation.PropertyCondition([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Button))); $rows = @(); foreach ($e in $all) { $r = $e.Current.BoundingRectangle; if ($e.Current.Name -match $a[1] -and $r.Width -gt 0) { $top = $e; $up = $walk.GetParent($top); while ($up -ne $null -and -not [Windows.Automation.Automation]::Compare($up, $root)) { $top = $up; $up = $walk.GetParent($top) }; $proc = (Get-Process -Id $top.Current.ProcessId -ErrorAction SilentlyContinue).ProcessName; $rows += "$($e.Current.Name)`t$([int]($r.X + $r.Width / 2)),$([int]($r.Y + $r.Height / 2))`t$($e.Current.ClassName)`t$($top.Current.ClassName)`t$proc" } }; $out = $rows -join "`n" }
+      'rclickwatch' { # right click at X Y, then look for a native menu every 100 ms for 6 s (guest side: no round trip between the click and the look); screenshot and items at first sight
+        $p = $a[1].Split(' '); [void][W.A]::SetCursorPos([int]$p[0], [int]$p[1]); Start-Sleep -Milliseconds 250; [W.A]::mouse_event(8, 0, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 90; [W.A]::mouse_event(16, 0, 0, 0, [UIntPtr]::Zero)
+        $sw = [Diagnostics.Stopwatch]::StartNew(); $seen = @(); while ($sw.ElapsedMilliseconds -lt 6000 -and $seen.Count -eq 0) { Start-Sleep -Milliseconds 100; $seen = @(Menu-Windows) }
+        if ($seen.Count -gt 0) { $t = $sw.ElapsedMilliseconds; Shot-To 'rcw-open'; $items = Menu-Items; $out = "SEEN $t`n--windows`n$($seen -join "`n")`n--items`n$items" } else { Shot-To 'rcw-none'; $out = "NONE 6000" } }
+      'menuwin' { $out = (Menu-Windows) -join "`n" }
       'windows' { $out = (Windows-List) -join "`n" }
       'shot' { $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; $bm = New-Object System.Drawing.Bitmap $b.Width, $b.Height; $g = [System.Drawing.Graphics]::FromImage($bm); $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); $bm.Save("$Dir\$($a[1]).png"); $out = "shot $($a[1])" }
       'quit' { $out = 'bye'; Set-Content "$Dir\act-$n.resp" $out; exit 0 }

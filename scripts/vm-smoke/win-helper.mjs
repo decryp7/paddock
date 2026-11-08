@@ -11,7 +11,7 @@ import { makeResult } from './verdict.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep } from './mcp-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
-import { attemptProbe, judgeControl, judgeExploitPrecondition, judgeInstallOutcome, judgeRefusal, judgeServed, judgeTrayCount, judgeWear } from './win-judges.mjs';
+import { parseConsent, judgeConsentAfterAnswer, installEvents, installOutcomeSince, attemptProbe, judgeControl, judgeExploitPrecondition, judgeInstallOutcome, judgeRefusal, judgeServed, judgeTrayCount, judgeWear } from './win-judges.mjs';
 
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
@@ -53,6 +53,8 @@ export function ensureAdminPassword() {
  * Answers the UAC credential prompt (consent.exe on the secure desktop) over the VM's VNC with the administrator's per-run password: waits (bounded)
  * for the prompt, takes a screenshot as evidence, types the credentials, and waits (bounded) for the prompt to go. Returns { ok, detail }.
  */
+const CONSENT_PS = `Get-CimInstance Win32_Process -Filter "Name='consent.exe'" | ForEach-Object { 'pid=' + $_.ProcessId + ' start=' + $_.CreationDate.ToString('s') + ' parent=' + $_.ParentProcessId + ' cmd=' + $_.CommandLine }`;
+/** Every elevation prompt is accounted for: the consent.exe rows (pid, start, parent) and the installer processes at the answer and after it go into the detail, so a prompt after the answer is judged on evidence. */
 export async function answerUac(label, { vnc = new Vnc(), seenSec = 90, goneSec = 60 } = {}) {
   const pw = ensureAdminPassword();
   const prompt = () => ssh('if (Get-Process consent -ErrorAction SilentlyContinue) { "yes" } else { "no" }', { admin: true }) === 'yes';
@@ -60,21 +62,25 @@ export async function answerUac(label, { vnc = new Vnc(), seenSec = 90, goneSec 
   for (let i = 0; i < seenSec / 3 && !seen; i++) { seen = prompt(); if (!seen) await sleep(1500); }
   if (!seen) return { ok: false, detail: `${label}: no UAC prompt (consent.exe) within ${seenSec} s` };
   await sleep(1500);
+  const answered = parseConsent(ssh(CONSENT_PS, { admin: true }));
   const shotFile = evidenceFile(`win-uac-${label}`);
   const shot = vnc.capture(shotFile).code === 0 ? `screenshot ${shotFile}` : 'VNC capture failed';
   vnc.key('ctrl-a'); vnc.key('bsp'); vnc.type(pw); vnc.key('enter');
   let gone = false;
   for (let i = 0; i < goneSec / 3 && !gone; i++) { await sleep(1500); gone = !prompt(); }
   if (!gone) {
-    // Still a consent.exe after the answer (0ad round 2: the install had ended 0, so the first answer took): a SECOND prompt. It is photographed, named in the result and
-    // answered once, so the row can go on; whether a second prompt belongs there is for the reader to judge from the screenshot.
+    // Still a consent.exe after the answer. The process table decides (judgeConsentAfterAnswer): the same consent.exe = the first prompt lingering or not taken, another = a second elevation.
+    const later = parseConsent(ssh(CONSENT_PS, { admin: true }));
+    const tree = ssh(`Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^(setup|paddock-setup|consent|dyno-helper|dyno-app)\\.exe$' } | ForEach-Object { $_.Name + ' pid=' + $_.ProcessId + ' parent=' + $_.ParentProcessId + ' ' + $_.CommandLine }`, { admin: true }).split('\n').join(' | ');
+    const j = judgeConsentAfterAnswer(answered, later);
     const second = evidenceFile(`win-uac-${label}-second`);
     const shot2 = vnc.capture(second).code === 0 ? `screenshot ${second}` : 'VNC capture failed';
     vnc.key('ctrl-a'); vnc.key('bsp'); vnc.type(pw); vnc.key('enter');
     for (let i = 0; i < goneSec / 3 && !gone; i++) { await sleep(1500); gone = !prompt(); }
-    return { ok: gone, second: true, detail: gone ? `${label}: the UAC prompt was answered (${shot}); a SECOND UAC prompt followed (${shot2}) and was answered too` : `${label}: a UAC prompt was still there after two answers (${shot}; ${shot2})` };
+    const ev = `${j.detail}; process tree: ${tree.slice(0, 700)}`;
+    return { ok: gone, second: j.second, detail: gone ? `${label}: the UAC prompt was answered (${shot}); a prompt was still listed ${goneSec} s later (${shot2}) and was answered again; ${ev}` : `${label}: a UAC prompt was still there after two answers (${shot}; ${shot2}); ${ev}` };
   }
-  return { ok: gone, detail: gone ? `${label}: the UAC prompt appeared (${shot}) and was answered over VNC` : `${label}: the UAC prompt was still there ${goneSec} s after the answer (${shot})` };
+  return { ok: gone, detail: gone ? `${label}: the UAC prompt appeared (${shot}) and was answered over VNC (consent.exe ${answered.map((c) => `pid ${c.pid}`).join(', ') || 'unlisted'}, gone within ${goneSec} s)` : `${label}: the UAC prompt was still there ${goneSec} s after the answer (${shot})` };
 }
 
 /** Turn on: the UAC credential prompt (the test account is a standard user) is answered over VNC with a per-run password for paddock-admin. */
@@ -193,14 +199,14 @@ async function pressInstallAndWait(browser, guardSec = 240) {
   await sleep(3000);
   const btn = s.getByRole('button', { name: /^Download and install smartmontools/ });
   if (!(await btn.count())) return { pressed: false, outcome: 'no install button' };
-  const before = helperLog(40).length;
+  const fullLog = () => ssh(`Get-Content ${HELPER}\\helper.log`, { admin: true, ms: 60_000 });
+  const before = installEvents(fullLog());
   await btn.click();
   const end = Date.now() + guardSec * 1000;
   while (Date.now() < end) {
     await sleep(4000);
-    const lines = helperLog(8).join('\n');
-    if (/InstallTool finished/.test(lines) && helperLog(40).length >= before) return { pressed: true, outcome: 'finished', log: lines };
-    if (/InstallTool failed/.test(lines)) return { pressed: true, outcome: 'failed', log: lines };
+    const outcome = installOutcomeSince(before, fullLog());
+    if (outcome) return { pressed: true, outcome, log: helperLog(40).filter((l) => /InstallTool/.test(l)).join('\n') };
   }
   return { pressed: true, outcome: 'timeout', log: helperLog(8).join('\n') };
 }
@@ -379,36 +385,40 @@ export async function winMcpStep() {
 /** The release rows the Windows suite cannot drive yet, as not-measured steps with their reasons. */
 export const winUndrivenRows = () => [['winReinstall'], ['winFirstUninstall'], ['hungPage'], ['secondUser'], ['killInstaller'], ['installAgain']].map(([k]) => notDriven(ROW_TITLES[k], NOT_DRIVEN[k]));
 
-export const helperSteps = [
-  async ({ browser }) => {
+export const helperStepTable = [
+  ['helper-on', async ({ browser }) => {
     const planted = plantJunction();
     const on = await helperOn(browser);
     const v = verifyJunction();
     const checks = [{ ok: /^PLANTED/m.test(planted), detail: /^PLANTED/m.test(planted) ? 'a standard user planted a junction at C:\\ProgramData\\Dyno\\Helper before the helper existed' : 'the junction could not be planted (the step proves nothing then)' }, ...on.checks, ...v.checks];
     return result('Windows: admin helper Turn on with a planted junction in its way (UAC over VNC)', checks, [...on.evidence, ...v.evidence], 'Turn on refused to follow the planted junction and the helper is On');
-  },
-  ({ actor }) => trayTooltips(actor),
-  () => helperProtection(),
-  () => helperFolderAcl(),
-  ({ browser }) => helperExploit(browser),
-  ({ browser }) => repeatInstall(browser),
-  ({ browser }) => diskHealth(browser),
+  }],
+  ['tray-tooltips', ({ actor }) => trayTooltips(actor)],
+  ['wp-sec', () => helperProtection()],
+  ['helper-acl', () => helperFolderAcl()],
+  ['exploit', ({ browser }) => helperExploit(browser)],
+  ['repeat-install', ({ browser }) => repeatInstall(browser)],
+  ['disk-health', ({ browser }) => diskHealth(browser)],
   // Release row: Launch at login (first-run default, the switch, the entry HKCU Run "Dyno"), BEFORE row 5a presses the switch.
-  async ({ browser }) => {
+  ['login-switch', async ({ browser }) => {
     const d = windowsLoginJobsDriver(browser, { openSettings, mainPage });
     const RUN = "(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run' -ErrorAction SilentlyContinue).Dyno";
     return loginSwitchStep({ sleep, readSwitch: () => d.readSwitch(), pressSwitch: () => d.pressSwitch(), apply: () => d.apply(),
       witness: async () => ssh(APP_LOG_PS).split('\n').filter((l) => /Run value|start at login|launch at login/i.test(l)).slice(-12), readEntry: async () => { const c = ssh(RUN).trim().split('\n').at(-1); return { present: Boolean(c), command: c, count: c ? 1 : 0 }; } });
-  },
+  }],
   // Row 5a: the Start at login change in the Jobs list (login-jobs-row.mjs). The raw `wbadmin` evidence step is gone with Backup health (removed in 1.1.0).
-  async ({ browser }) => loginJobsRow(windowsLoginJobsDriver(browser, { openSettings, mainPage }), { now: () => Date.now(), sleep }),
+  ['login-jobs', async ({ browser }) => loginJobsRow(windowsLoginJobsDriver(browser, { openSettings, mainPage }), { now: () => Date.now(), sleep })],
   // Release row: disk space (Dyno's figure against Explorer's, decimal units, refresh within 60 s of a 1 GB write)
-  async () => { const adapter = windowsAdapter({ ssh }); return diskSpaceStep({ exec: async (c) => ({ code: 0, stdout: ssh(c, { ms: 280_000 }) }), sleep, now: () => Date.now(), adapter }); },
-  async () => discoveryStep(windowsDiscoveryPrims({ ssh, sleep, now: () => Date.now() })),
+  ['disk-space', async () => { const adapter = windowsAdapter({ ssh }); return diskSpaceStep({ exec: async (c) => ({ code: 0, stdout: ssh(c, { ms: 280_000 }) }), sleep, now: () => Date.now(), adapter }); }],
+  ['discovery', async () => discoveryStep(windowsDiscoveryPrims({ ssh, sleep, now: () => Date.now() }))],
   // WP-VMH: one step per helper reading while the helper is on
-  ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser), { ssh })),
-  () => scopingStep(),
-  () => servedCounts(),
-  ({ browser }) => helperRepair(browser),
-  ({ browser }) => helperOff(browser),
+  ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser), { ssh })).map((fn, i) => [`reading-${i}`, fn]),
+  ['scoping', () => scopingStep()],
+  ['served', () => servedCounts()],
+  ['repair', ({ browser }) => helperRepair(browser)],
+  ['helper-off', ({ browser }) => helperOff(browser)],
 ];
+export const helperSteps = helperStepTable.map(([, fn]) => fn);
+
+/** The steps of `--only` UI rows (win-rows.mjs): the rows' own steps in table order, the helper turned on before and off after when one of them reads through it. */
+export const rowSteps = (ids, { helper }) => [...(helper ? ['helper-on'] : []), ...ids, ...(helper ? ['helper-off'] : [])].map((id) => helperStepTable.find(([k]) => k === id)?.[1]).filter(Boolean);

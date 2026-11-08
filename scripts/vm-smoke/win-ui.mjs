@@ -70,7 +70,9 @@ export async function quitViaMenu(browser) {
   return result('Windows: Quit Dyno (File menu) ends the app', checks, [], 'the app ended; the agent is reported');
 }
 
-export async function runUiPhase({ log = console.error, extra = [], after = [] } = {}) {
+/** `select` (a row run, win-rows.mjs) leaves out the parts it was not asked for: { snap, tour, tray } (default all). */
+export async function runUiPhase({ log = console.error, extra = [], after = [], select = {} } = {}) {
+  const on = { snap: true, tour: true, tray: true, ...select };
   const steps = [];
   const actor = new Actor();
   actor.start();
@@ -78,12 +80,18 @@ export async function runUiPhase({ log = console.error, extra = [], after = [] }
   const t = tunnel();
   try {
     const browser = await connect();
-    const snaps = await snapCheck(actor, { log });
-    steps.push(result('Windows: Aero snap announces Manual (form and viewer dialog, Win+Left)', snaps.map((s) => ({ ok: s.ok, detail: `${s.label}: ${s.detail}` })), [], 'both dialogs announced Manual after Win+Left'));
-    const tour = await domTour(browser, { shotDir: process.env.PADDOCK_WIN_SHOTS ?? null, log });
-    steps.push(result('Windows: shared screenshot check on every page and dialog of the real WebView2 DOM', tour.checks, tour.evidence, `${tour.checks.length} pages and dialogs clean`));
-    steps.push(await trayMenuStep(actor, { browser }).catch((e) => result('Windows: tray right-click menu', [{ ok: false, detail: e.message }])));
-    steps.push(await trayCountdownStep(actor).catch((e) => result('Windows: tray menu during an idle countdown', [{ ok: false, detail: e.message }])));
+    if (on.snap) {
+      const snaps = await snapCheck(actor, { log });
+      steps.push(result('Windows: Aero snap announces Manual (form and viewer dialog, Win+Left)', snaps.map((s) => ({ ok: s.ok, detail: `${s.label}: ${s.detail}` })), [], 'both dialogs announced Manual after Win+Left'));
+    }
+    if (on.tour) {
+      const tour = await domTour(browser, { shotDir: process.env.PADDOCK_WIN_SHOTS ?? null, log });
+      steps.push(result('Windows: shared screenshot check on every page and dialog of the real WebView2 DOM', tour.checks, tour.evidence, `${tour.checks.length} pages and dialogs clean`));
+    }
+    if (on.tray) {
+      steps.push(await trayMenuStep(actor, { browser }).catch((e) => result('Windows: tray right-click menu', [{ ok: false, detail: e.message }])));
+      steps.push(await trayCountdownStep(actor).catch((e) => result('Windows: tray menu during an idle countdown', [{ ok: false, detail: e.message }])));
+    }
     // A native tray menu blocks the app's UI thread while it is open: make sure the page is in front and answering before the helper steps open Settings.
     { const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id=')); await main?.bringToFront().catch(() => {}); await main?.evaluate(() => 1).catch(() => {}); }
     // Extension point: one function per wired helper reading (each `async ({ browser, actor }) => step`), run before Quit.

@@ -4,7 +4,7 @@
 // a place to click.
 import { spawnSync } from 'node:child_process';
 import { makeResult } from './verdict.mjs';
-import { judgeTrayClick, rightClicksInLog } from './win-judges.mjs';
+import { judgeNativeMenu, parseMenuWatch, rightClicksInLog } from './win-judges.mjs';
 import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog } from './win-tray-icons.mjs';
 
 const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
@@ -16,6 +16,22 @@ const items = (s) => s.split('\n').map((l) => l.split('\t')).filter((c) => c[0] 
 /** A native popup menu blocks the app's UI thread while it is open (a later File > Settings would never open): close every level, then check nothing is left. */
 export async function closeMenus(actor) {
   for (let i = 0; i < 3; i++) { await actor.send('key ESC').catch(() => {}); await sleep(500); }
+}
+
+/** The control icon's own menu (win-menu-control.ps1): started in the console session, promoted to the taskbar, right-clicked; always removed afterwards. */
+async function controlMenu(actor, { hereDir = 'C:\\paddock-test\\vmcheck' } = {}) {
+  ssh(`schtasks /end /tn VmMenuControl 2>$null | Out-Null; schtasks /create /tn VmMenuControl /sc once /st 00:00 /ru paddock-test /it /f /tr "cmd /c powershell -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File ${hereDir}\\win-menu-control.ps1 -MaxSec 300" | Out-Null; schtasks /run /tn VmMenuControl | Out-Null`);
+  let at = null;
+  for (let i = 0; i < 8 && !at; i++) {
+    await sleep(2500);
+    ssh(`Get-ChildItem 'HKCU:\\Control Panel\\NotifyIconSettings' -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath; if ($p.ExecutablePath -like '*powershell.exe') { Set-ItemProperty $_.PSPath IsPromoted 1 -Type DWord } }`);
+    at = items(await actor.send('tray VMCHECK-MENU-CONTROL'))[0]?.at ?? null;
+  }
+  let watch = null;
+  if (at) { watch = parseMenuWatch(await actor.send(`rclickwatch ${at}`, 60_000)); await closeMenus(actor); }
+  const shot = at ? await actor.fetch(watch?.seen ? 'rcw-open' : 'rcw-none', 'control-menu') : null;
+  ssh('schtasks /end /tn VmMenuControl 2>$null | Out-Null; Get-CimInstance Win32_Process -Filter "Name=\'powershell.exe\'" | Where-Object { $_.CommandLine -match \'win-menu-control\' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; schtasks /delete /tn VmMenuControl /f 2>$null | Out-Null');
+  return { icon: Boolean(at), watch, shot };
 }
 
 async function openMenu(actor) {
@@ -30,10 +46,12 @@ async function openMenu(actor) {
     icons = await read();
     promoted = true;
   }
-  if (!icons.length) return { icons, menu: [], promoted, metrics };
-  await actor.send(`rclick ${icons[0].at}`);
-  await sleep(1500);
-  return { icons, menu: items(await actor.send('menu')), promoted, metrics };
+  if (!icons.length) return { icons, menu: [], promoted, metrics, watch: parseMenuWatch(''), logged: false };
+  // The click and the look for a native menu (window class #32768) happen in the guest, every 100 ms for 6 s (win-act.ps1 `rclickwatch`).
+  const before = rightClicksInLog(ssh(APP_LOG_PS));
+  const watch = parseMenuWatch(await actor.send(`rclickwatch ${icons[0].at}`, 60_000));
+  const logged = rightClicksInLog(ssh(APP_LOG_PS)) > before;
+  return { icons, menu: watch.items, promoted, metrics, watch, logged };
 }
 
 export async function trayMenuStep(actor, { browser = null } = {}) {
@@ -45,16 +63,23 @@ export async function trayMenuStep(actor, { browser = null } = {}) {
   if (browser) for (const p of browser.contexts().flatMap((c) => c.pages())) if (p.url().includes('dialog?id=')) { await p.keyboard.press('Escape').catch(() => {}); await sleep(500); }
   await actor.send('fg Dyno').catch(() => {});
   await sleep(1000);
-  const logBefore = rightClicksInLog(ssh(APP_LOG_PS));
-  const { icons, menu, promoted, metrics } = await openMenu(actor);
-  const logAfter = rightClicksInLog(ssh(APP_LOG_PS));
-  const menuShot = await actor.shot('tray-menu-open');
-  evidence.push(`app log "tray click: Right Up": ${logBefore} before, ${logAfter} after the right click`, `screenshot with the menu open: ${menuShot ?? 'not taken'}`);
-  const click = judgeTrayClick({ logBefore, logAfter, menuItems: menu.length });
+  // The probe is shown to see a native tray menu first (the harness's own icon), then Dyno's icon is clicked, twice at most.
+  const control = await controlMenu(actor);
+  await actor.send('fg Dyno').catch(() => {});
+  await sleep(1000);
+  await closeMenus(actor);
+  const attempts = [];
+  let first = await openMenu(actor);
+  attempts.push({ logged: first.logged, watch: first.watch });
+  let { icons, menu, promoted, metrics } = first;
+  const menuShot = await actor.fetch(first.watch.seen ? 'rcw-open' : 'rcw-none', 'tray-menu-open');
+  if (icons.length && !first.watch.seen) { await closeMenus(actor); await actor.send('fg Dyno').catch(() => {}); await sleep(1500); const again = await openMenu(actor); attempts.push({ logged: again.logged, watch: again.watch }); if (again.watch.seen) { menu = again.menu; } }
+  evidence.push(`screenshot after the first right click: ${menuShot ?? 'not taken'} (taken in the guest at the first sight of a menu, or after 6 s with none)`, `control menu screenshot: ${control.shot ?? 'not taken'}`,
+    ...attempts.map((a, i) => `attempt ${i + 1}: app log "tray click: Right Up" ${a.logged ? 'logged' : 'NOT logged'}; native menu windows: ${a.watch.seen ? `${a.watch.windows.map((w) => `${w.proc} ${w.rect}`).join(', ')} after ${a.watch.ms} ms` : 'none in 6 s'}; items: ${a.watch.items.map((m) => m.name).join(' | ') || '(none)'}`));
   evidence.push(`taskbar icons: ${icons.map((i) => i.name).join(' | ') || '(none found)'}${promoted ? ' (found only after promoting them)' : ''}`, `menu: ${menu.map((m) => m.name).join(' | ') || '(none)'}`);
+  checks.push(...judgeNativeMenu({ control: control.watch, controlIcon: control.icon, attempts }));
   checks.push(...(metrics.length ? [] : [{ ok: false, kind: 'check', detail: 'the app log names no tray icon it created (metrics = 0), so the icons cannot be recognised' }]));
   checks.push({ ok: icons.length > 0, detail: icons.length ? `${icons.length} Dyno tray icon(s) on the taskbar${promoted ? ' (only after promoting them)' : ''}` : 'no Dyno icon found on the taskbar through UI Automation' });
-  checks.push(...click);
   const keep = menu.find((m) => /Keep awake/i.test(m.name));
   checks.push({ ...(menu.length ? {} : { kind: 'check' }), ok: Boolean(keep), detail: keep ? `the menu has "${keep.name}"` : 'the menu has no Keep awake entry' });
   if (keep) {

@@ -9,6 +9,12 @@ import { makeResult } from './verdict.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const PUB = 'C:\\Users\\Public';
+/** The probe in the owner's own views: the busiest-six list or the full snapshot. */
+export const ownerHasProbe = (top, snap) => /owner-secret-probe/i.test(`${top}\n${snap}`);
+/** The snapshot lines (compact JSON is one line: a window around each hit) that name the probe. */
+export const probeLines = (text) => [...String(text).matchAll(/.{0,60}owner-secret-probe.{0,60}/gi)].slice(0, 3).map((m) => m[0].replace(/\s+/g, ' '));
+/** An "other users" total in a view: the JSON key (`otherUsers`, `others`) or the words. */
+export const hasOtherUsersTotal = (text) => /"other_?users"\s*:\s*\{|"others"\s*:\s*\{|other users|Other users|othersTotal/i.test(String(text));
 // A broken measurement (the task never ran, the positive control unseen) is check-broken, never a product FAIL (ER-33).
 const result = makeResult;
 
@@ -25,11 +31,14 @@ export async function scopingStep() {
   const built = ssh(`Add-Type -TypeDefinition '${probeSrc}' -OutputAssembly "C:\\Users\\paddock-test\\owner-secret-probe.exe" -OutputType ConsoleApplication -ErrorAction Stop 2>&1 | Out-String; (Get-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe").VersionInfo.FileDescription; Start-Process "C:\\Users\\paddock-test\\owner-secret-probe.exe" -WindowStyle Hidden; Start-Sleep 2; (Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Measure-Object).Count`);
   evidence.push(`probe built and started (FileDescription, running count): ${built.trim().replace(/\s+/g, ' ').slice(0, 200)}`);
   await sleep(4000);
-  // Polled (the sampler lists a new process after a tick or two), up to 30 s; the whole view is kept as evidence.
+  // `dyno top` lists only the busiest SIX groups (the sampler's `top`), so a probe is looked for in `dyno snapshot`, which carries every process, as well; polled up to 30 s
+  // (the sampler lists a new process after a tick or two). Both views are kept as evidence.
   let ownerView = '';
-  for (let i = 0; i < 7 && !/owner-secret-probe/i.test(ownerView); i++) { if (i) await sleep(5000); ownerView = ssh(`& "${dyno}\\dyno.exe" top --by cpu -n 100 --json 2>&1 | Out-String`); }
-  evidence.push(`--- owner's top view (full): ${ownerView.replace(/\s+/g, ' ').slice(0, 2500)}`);
-  checks.push({ ok: /owner-secret-probe/i.test(ownerView), kind: /owner-secret-probe/i.test(ownerView) ? undefined : 'check', detail: /owner-secret-probe/i.test(ownerView) ? 'positive control: the owner sees its own probe process' : 'positive control failed: the owner does not see its own probe process in `dyno top`' });
+  let ownerSnap = '';
+  for (let i = 0; i < 7 && !ownerHasProbe(ownerView, ownerSnap); i++) { if (i) await sleep(5000); ownerView = ssh(`& "${dyno}\\dyno.exe" top --by cpu -n 100 --json 2>&1 | Out-String`); ownerSnap = ssh(`& "${dyno}\\dyno.exe" snapshot 2>&1 | Out-String`, { ms: 120_000 }); }
+  const control = ownerHasProbe(ownerView, ownerSnap);
+  evidence.push(`--- owner's top view (full): ${ownerView.replace(/\s+/g, ' ').slice(0, 1500)}`, `--- owner's snapshot: ${ownerSnap.length} chars; probe lines: ${probeLines(ownerSnap).join(' | ').slice(0, 600) || '(none)'}`);
+  checks.push({ ok: control, kind: control ? undefined : 'check', detail: control ? 'positive control: the owner sees its own probe process (in dyno snapshot' + (/owner-secret-probe/i.test(ownerView) ? ' and top)' : '; `dyno top` lists only the six busiest groups)') : 'positive control failed: the owner does not see its own probe process in `dyno top` or `dyno snapshot`' });
   // The second account.
   ssh('$p = [Console]::In.ReadLine(); net user paddock-user2 $p /add /y | Out-Null; net localgroup Users paddock-user2 /add 2>$null | Out-Null', { admin: true, input: `${pw}\n` });
   // A scheduled task with a stored password needs "Log on as a batch job" (SeBatchLogonRight), which a plain Users member lacks (7d06: SCHED_S_TASK_HAS_NOT_RUN).
@@ -57,13 +66,12 @@ export async function scopingStep() {
   const both = `${top}\n${snap}`;
   checks.push({ ok: top.length > 50 && !/owner-secret-probe/i.test(both), detail: /owner-secret-probe/i.test(both) ? 'D6 VIOLATION: the second account sees the owner\'s process name owner-secret-probe in its views' : 'the second account does not see the owner\'s process name' });
   checks.push({ ok: !/paddock-test/i.test(both.replace(/C:\\Users\\Public[^"\s]*/gi, '')), detail: /paddock-test/i.test(both) ? 'the second account\'s views name the owner account paddock-test' : 'the second account\'s views name no other account' });
-  const other = /other users|Other users|othersTotal|others/.test(both);
+  const other = hasOtherUsersTotal(both);
   checks.push({ ok: other, detail: other ? 'the views carry an "other users" total' : 'no "other users" total in the second account\'s views (processes of other accounts are not summarised)' });
   evidence.push(`traffic in the snapshot: ${/traffic|bytes/i.test(snap) ? 'present' : 'not carried by `dyno snapshot`; Network > By program as a second account needs its own window'}`);
   // Clean up what this step made.
   ssh(`schtasks /delete /tn Dyno2 /f 2>$null | Out-Null; Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force; Remove-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe","${PUB}\\dyno2*" -Recurse -Force -ErrorAction SilentlyContinue; net user paddock-user2 /delete 2>$null | Out-Null`, { admin: true });
   // Without the positive control (the owner sees its own probe) nothing the second account does not see proves anything: those checks are the measurement's.
-  const control = checks[0]?.ok === true;
   const judged = control ? checks : checks.map((c, i) => (i === 0 || c.ok ? c : { ...c, kind: 'check', detail: `${c.detail} (not conclusive: the positive control failed)` }));
   return result('Windows: D6 scoping, a second standard account sees only its own and the system\'s programs', judged, evidence, 'the second account sees no other account\'s programs and gets an "other users" total');
 }

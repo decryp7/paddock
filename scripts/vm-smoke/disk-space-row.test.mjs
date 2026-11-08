@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { judgeDisk, parseDisks, printedFree, diskSpaceStep, TITLE_DISK } from './disk-space-row.mjs';
+import { judgeDisk, parseDisks, printedFree, diskSpaceStep, TITLE_DISK, writeFile } from './disk-space-row.mjs';
 
 const GB = 1e9;
 const disks = [{ name: '/', freeBytes: 50 * GB, totalBytes: 100 * GB }];
@@ -44,4 +44,33 @@ test('when the OS figure itself did not fall, the refresh checks are broken chec
   const cs = judgeDisk({ ...base, afterWriteFree: 49.9 * GB, writeSecs: 60, afterDeleteFree: 49.9 * GB, deleteSecs: 60, osBaseline: 50 * GB, osAfterWrite: 49.95 * GB });
   assert.ok(cs.filter((c) => !c.ok).every((c) => c.kind === 'check'));
   assert.ok(cs.some((c) => !c.ok));
+});
+
+test('when the first file barely moves the OS figure, more is written until it does, then Dyno is judged', async () => {
+  let free = 50 * GB, t = 0, writes = 0;
+  const exec = async (c) => {
+    if (c === 'json') return { code: 0, stdout: JSON.stringify({ disks: [{ name: '/', freeBytes: free, totalBytes: 100 * GB }] }) };
+    if (c === 'text') return { code: 0, stdout: text };
+    if (c === 'write') { free -= 0.14 * GB; writes++; return { code: 0, stdout: '' }; }
+    if (c.startsWith('more')) { free -= 0.6 * GB; writes++; return { code: 0, stdout: '' }; }
+    if (c === 'del') { free = 50 * GB; return { code: 0, stdout: '' }; }
+    return { code: 0, stdout: '' };
+  };
+  const adapter = { volumeName: '/', statusJsonCmd: 'json', statusTextCmd: 'text', writeCmd: 'write', writeMoreCmd: (n) => `more${n}`, deleteCmd: 'del', osFree: async () => ({ bytes: free, source: 'fake' }) };
+  const r = await diskSpaceStep({ exec, sleep: async (ms) => { t += ms; }, now: () => t, adapter });
+  assert.equal(writes, 3, 'one file, then two more until the OS figure had fallen by 0.9 GB');
+  assert.equal(r.status, 'pass');
+});
+test('a guest whose OS figure never moves stays a broken check, with the files named', async () => {
+  const adapter = { volumeName: '/', statusJsonCmd: 'json', statusTextCmd: 'text', writeCmd: 'write', writeMoreCmd: (n) => `more${n}`, writeFactsCmd: 'facts', deleteCmd: 'del', osFree: async () => ({ bytes: 50 * GB, source: 'fake' }) };
+  const exec = async (c) => (c === 'json' ? { code: 0, stdout: JSON.stringify({ disks }) } : c === 'facts' ? { code: 0, stdout: 'vmsmoke-1gb.bin length=1000000000 attrs=Archive, Compressed' } : { code: 0, stdout: text });
+  let t = 0;
+  const r = await diskSpaceStep({ exec, sleep: async (ms) => { t += ms; }, now: () => t, adapter });
+  assert.notEqual(r.status, 'pass');
+  assert.ok(r.evidence.some((e) => /Compressed/.test(e)));
+});
+test('the Windows write is fresh random data per megabyte and flushed', () => {
+  const c = writeFile('C:\\t\\x.bin', 1000);
+  assert.match(c, /for\(\$i=0;\$i -lt 1000;\$i\+\+\)\{\$r\.NextBytes\(\$b\);/);
+  assert.match(c, /Flush\(\$true\)/);
 });

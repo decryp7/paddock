@@ -7,7 +7,7 @@ import { quitStopStep } from './mcp-judges.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { Actor } from './win-act.mjs';
 import { APP_LOG_PS } from './win-tray-icons.mjs';
-import { judgeColdUninstall, coldUninstallAccepted, judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
+import { killWatcherScript, killWatcherOutcome, judgeColdUninstall, coldUninstallAccepted, judgeInstalled, judgeKilledInstall } from './win-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
 import { swapNotDriven } from './upgrade-swap-row.mjs';
 import { winSwapRow } from './win-swap.mjs';
@@ -181,13 +181,17 @@ export async function installRows() {
   // 2. Uninstall, then kill the installer part-way.
   ssh(`Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Process '${PROG}\\uninstall.exe' -ArgumentList '/S' -Wait`, { admin: true, ms: 180_000 });
   for (let i = 0; i < 20 && facts().key !== 'no'; i++) await sleep(3000);
+  // The kill is made in the guest at a fixed point (killWatcherScript), not timed from here.
+  const WATCH = 'C:\\paddock-test\\vmcheck\\kill-watch';
+  ssh(`Remove-Item '${PROG}\\updates\\setup_log.txt' -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force '${WATCH}' | Out-Null; Set-Content '${WATCH}\\w.ps1' '${killWatcherScript({ log: `${PROG}\\updates\\setup_log.txt`, out: `${WATCH}\\k.txt` }).replace(/'/g, "''")}'; Remove-Item '${WATCH}\\k.txt' -ErrorAction SilentlyContinue; schtasks /create /tn DynoKillWatch /sc once /st 00:00 /ru SYSTEM /rl HIGHEST /f /tr "powershell -NoProfile -ExecutionPolicy Bypass -File ${WATCH}\\w.ps1" | Out-Null; schtasks /run /tn DynoKillWatch | Out-Null`, { admin: true });
   startInstaller();
   const uacK = await answerUac('kill-installer');
-  await sleep(2500);
-  const killed = installerRunning();
-  ssh('Get-Process -Name setup -ErrorAction SilentlyContinue | Stop-Process -Force');
+  let watched = '';
+  for (let i = 0; i < 60 && !/^(KILLED|TOO-LATE|NEVER)/.test(watched.trim()); i++) { await sleep(3000); watched = ssh(`Get-Content '${WATCH}\\k.txt' -ErrorAction SilentlyContinue`, { admin: true }); }
+  const w = killWatcherOutcome(watched);
   await sleep(4000);
-  steps.push(result(ROW_TITLES.killInstaller, [{ ok: uacK.ok, detail: uacK.detail }, ...judgeKilledInstall({ killed, ...facts() })], [uacK.detail], 'the machine reads Not installed after the installer was killed'));
+  ssh('schtasks /delete /tn DynoKillWatch /f 2>$null | Out-Null', { admin: true });
+  steps.push(result(ROW_TITLES.killInstaller, [{ ok: uacK.ok, detail: uacK.detail }, { ok: w.killed, kind: w.killed ? undefined : 'check', detail: w.detail }, ...judgeKilledInstall({ killed: w.killed, ...facts() })], [uacK.detail, w.detail], 'the machine reads Not installed after the installer was killed'));
   // 3. Install again.
   ssh(`Remove-Item '${PROG}' -Recurse -Force -ErrorAction SilentlyContinue`, { admin: true });
   const b = await installOnce('install-again');
@@ -214,7 +218,12 @@ export async function coldUninstallStep() {
 export const notDrivenWinRows = () => [notDriven(ROW_TITLES.secondUser, NOT_DRIVEN.secondUser)];
 
 const NT = `Add-Type -Namespace N -Name P -MemberDefinition '[DllImport("ntdll.dll")] public static extern int NtSuspendProcess(IntPtr h); [DllImport("ntdll.dll")] public static extern int NtResumeProcess(IntPtr h);'; `;
-const renderers = `$ids = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -match '--type=renderer' -and $_.CommandLine -match 'dyno' } | ForEach-Object { $_.ProcessId }); `;
+/**
+ * The WebView2 renderers of dyno-app. Their command line carries `--webview-exe-name=dyno-app.exe` (the embedding program); the old filter looked for "dyno" in the
+ * user-data folder, which is not on it (0ad round 2: "no WebView2 renderer of dyno-app was found"). Runs with the renderer type too, or by the app as ancestor.
+ */
+export const RENDERERS_PS = `$ids = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -match '--type=renderer' -and $_.CommandLine -match '--webview-exe-name=dyno-app' } | ForEach-Object { $_.ProcessId }); `;
+const renderers = RENDERERS_PS;
 
 /** A hung or paused visible page on Windows: the WebView2 renderer of dyno-app is suspended (NtSuspendProcess, no debugger); the question is read from the window list. Keep Waiting cannot be pressed here (no button lookup in the actor), so the doubling stays a broken check. */
 export async function winHung() {
@@ -276,4 +285,12 @@ export async function winHiddenStart() {
   r.evidence = [...(r.evidence ?? []), `entry command: ${cmd}`];
   return r;
 }
+/** The `--only` rows that run after Quit (win-rows.mjs), each a function returning a step or steps. */
+export const afterRowFns = {
+  'hung-page': () => winHung(),
+  'install-rows': () => installRows(),
+  'upgrade-swap': () => winSwapRow({ oldStaged: process.env.PADDOCK_OLD_SETUP === '1' }),
+  'second-user': () => notDrivenWinRows(),
+};
+export const afterRowSteps = (ids) => ids.map((k) => afterRowFns[k]);
 export const afterQuitSteps = [() => sameVersionRefused(), () => winMcpStep(), () => uninstall(), () => installRows(), () => winSwapRow({ oldStaged: process.env.PADDOCK_OLD_SETUP === '1' }), () => notDrivenWinRows(), () => winHung(), () => winHiddenStart(), () => winQuitStop()];

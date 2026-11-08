@@ -86,17 +86,26 @@ export async function diskSpaceStep({ exec, sleep, now, adapter }) {
     const alt = adapter.osAlt ? await adapter.osAlt(exec).catch(() => null) : null;
     // the OS figure is read right after Dyno's, so background churn is small; re-read Dyno's value as the baseline for the write test
     const baselineFree = freeOf((await read())) ?? freeOf(disks);
+    const osBeforeWrite = (await adapter.osFree(exec)).bytes; // right before the write: the control compares the OS with itself, not with a reading from minutes earlier
     const w0 = await exec(adapter.writeCmd);
     if (w0.code !== 0 || (adapter.writeOkPattern && !adapter.writeOkPattern.test(w0.stdout))) throw new Error(`writing the 1 GB file failed: ${String(w0.stdout).trim().slice(-160)}`);
-    const osAfterWrite = (await adapter.osFree(exec)).bytes;
+    // The control first: the OS's own figure must fall by the write. It fell by only 144 MB after a 1 GB write (0ad round 2), so more is written, a file at a time, until it has
+    // moved by what the judge needs (at most 4 files); the figure Dyno must then follow is the one the OS itself shows at the same moment.
+    let osAfterWrite = (await adapter.osFree(exec)).bytes;
+    const topUps = [];
+    for (let n = 1; adapter.writeMoreCmd && os.bytes - osAfterWrite < WRITE_BYTES * 0.9 && n <= 3; n++) {
+      const wm = await exec(adapter.writeMoreCmd(n));
+      topUps.push(`file ${n + 1}: exit ${wm.code}, OS figure ${os.bytes - (osAfterWrite = (await adapter.osFree(exec)).bytes)} bytes below the start`);
+    }
+    const writeFacts = adapter.writeFactsCmd ? String((await exec(adapter.writeFactsCmd)).stdout).trim() : '';
     const t0 = now(); let afterWriteFree = NaN, writeSecs = NaN;
     for (;;) { afterWriteFree = freeOf(await read()); writeSecs = Math.round((now() - t0) / 1000); if (baselineFree - afterWriteFree >= WRITE_BYTES * 0.9 || now() - t0 >= REFRESH_WAIT_MS) break; await sleep(3000); }
     const osAfterWait = (await adapter.osFree(exec)).bytes;
     await exec(adapter.deleteCmd);
     const t1 = now(); let afterDeleteFree = NaN, deleteSecs = NaN;
     for (;;) { afterDeleteFree = freeOf(await read()); deleteSecs = Math.round((now() - t1) / 1000); if (afterDeleteFree - afterWriteFree >= WRITE_BYTES * 0.9 || now() - t1 >= REFRESH_WAIT_MS) break; await sleep(3000); }
-    const checks = judgeDisk({ disks, volumeName, osFreeBytes: os.bytes, osSource: os.source, osAltFreeBytes: alt?.bytes, osAltSource: alt?.source, statusText, baselineFree, afterWriteFree, writeSecs, afterDeleteFree, deleteSecs, osBaseline: os.bytes, osAfterWrite: Math.min(osAfterWrite, Number.isFinite(osAfterWait) ? osAfterWait : osAfterWrite) });
-    return makeResult(TITLE_DISK, checks, [`OS: ${os.source} ${os.bytes}`, `status: ${statusText.split('\n').filter((l) => /^\s*Disk/.test(l)).join(' | ')}`], 'the disk figures match the OS, use decimal units and follow a 1 GB write and delete within 60 s');
+    const checks = judgeDisk({ disks, volumeName, osFreeBytes: os.bytes, osSource: os.source, osAltFreeBytes: alt?.bytes, osAltSource: alt?.source, statusText, baselineFree, afterWriteFree, writeSecs, afterDeleteFree, deleteSecs, osBaseline: osBeforeWrite, osAfterWrite: Math.min(osAfterWrite, Number.isFinite(osAfterWait) ? osAfterWait : osAfterWrite) });
+    return makeResult(TITLE_DISK, checks, [`OS: ${os.source} ${os.bytes}`, ...(writeFacts ? [`written file(s): ${writeFacts.replace(/\s+/g, ' ').slice(0, 400)}`] : []), ...topUps, `status: ${statusText.split('\n').filter((l) => /^\s*Disk/.test(l)).join(' | ')}`], 'the disk figures match the OS, use decimal units and follow a 1 GB write and delete within 60 s');
   } catch (e) {
     await exec(adapter.deleteCmd).catch(() => {});
     return { title: TITLE_DISK, status: 'not-measured', cls: 'check', summary: `not measured: ${String(e.message ?? e).split('\n')[0]}`, checks: [{ ok: false, kind: 'check', detail: String(e.message ?? e) }], evidence: [] };
@@ -123,6 +132,9 @@ export function unixAdapter({ os, dyno, volumeName = undefined, tmp = '/var/tmp/
   };
 }
 
+/** PowerShell: `mb` megabytes of fresh random data into `path`, flushed; prints WROTE. */
+export const writeFile = (path, mb) => `$f=[IO.File]::Create('${path}'); $b=New-Object byte[] 1000000; $r=New-Object Random; for($i=0;$i -lt ${mb};$i++){$r.NextBytes($b); $f.Write($b,0,$b.Length)}; $f.Flush($true); $f.Close(); 'WROTE'`;
+
 /** Windows (PowerShell over ssh as the session user): `ssh(cmd) -> string`. Explorer's figure is Win32_LogicalDisk.FreeSpace. */
 export function windowsAdapter({ ssh, dyno = 'C:\\Program Files\\Dyno\\dyno.exe', tmp = 'C:\\Users\\paddock-test\\AppData\\Local\\Temp\\vmsmoke-1gb.bin' }) {
   const ps = (c) => ({ code: 0, stdout: ssh(c, { ms: 280_000 }) });
@@ -130,8 +142,11 @@ export function windowsAdapter({ ssh, dyno = 'C:\\Program Files\\Dyno\\dyno.exe'
     volumeName: undefined, preferNames: ['C:\\', 'C:', 'C:/'],
     writeOkPattern: /WROTE/,
     statusJsonCmd: `& '${dyno}' status --json 2>$null`, statusTextCmd: `& '${dyno}' status 2>$null`,
-    writeCmd: `$f=[IO.File]::Create('${tmp}'); $b=New-Object byte[] 1000000; (New-Object Random).NextBytes($b); for($i=0;$i -lt 1000;$i++){$f.Write($b,0,$b.Length)}; $f.Flush($true); $f.Close(); 'WROTE'`,
-    deleteCmd: `Remove-Item '${tmp}' -Force -ErrorAction SilentlyContinue`,
+    // Every megabyte is new random data (nothing for NTFS compression or a deduplicating layer to shrink), flushed to the disk before the figures are read.
+    writeCmd: writeFile(tmp, 1000), writeMoreCmd: (n) => writeFile(`${tmp}.${n}`, 1000),
+    // The file's own size and attributes (a Compressed or Sparse attribute would explain a figure that does not move) and the volume's free bytes, as evidence.
+    writeFactsCmd: `Get-Item '${tmp}*' | ForEach-Object { "$($_.Name) length=$($_.Length) attrs=$($_.Attributes)" }`,
+    deleteCmd: `Remove-Item '${tmp}','${tmp}.*' -Force -ErrorAction SilentlyContinue`,
     // Explorer's figure is the volume's free bytes (GetDiskFreeSpaceEx = DriveInfo). CIM, Get-Volume and Get-PSDrive answer a standard user with Access denied or nothing on this guest.
     async osFree(exec) { return { bytes: num((await exec(`([IO.DriveInfo]'C').AvailableFreeSpace`)).stdout), source: 'Explorer (GetDiskFreeSpaceEx C:)' }; },
     async osAlt(exec) { return { bytes: num((await exec(`([IO.DriveInfo]'C').TotalFreeSpace`)).stdout), source: 'DriveInfo.TotalFreeSpace C:' }; },
