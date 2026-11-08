@@ -100,6 +100,49 @@ export function checkSetupSubsystem({ bytes, name }) {
   }
 }
 
+/** One string of a version resource (UTF-16: key, NULs, value), or null. */
+export function resourceStringOf(bytes, key) {
+  const b = Buffer.from(bytes);
+  const k = Buffer.from(key, 'utf16le');
+  for (let at = b.indexOf(k); at >= 0; at = b.indexOf(k, at + 2)) {
+    // A key is preceded by its block header; skip a hit that is inside another string (the key must be followed by its NUL).
+    if (b[at + k.length] !== 0 || b[at + k.length + 1] !== 0) continue;
+    let i = at + k.length;
+    while (i + 1 < b.length && b[i] === 0 && b[i + 1] === 0) i += 2;
+    let end = i;
+    while (end + 1 < b.length && !(b[end] === 0 && b[end + 1] === 0)) end += 2;
+    return b.subarray(i, end).toString('utf16le');
+  }
+  return null;
+}
+
+/** What a build account leaves in a Windows program: its home folder and the cargo registry path (`--remap-path-prefix` removes both). */
+const BUILD_PATH_LEAKS = [/[A-Za-z]:\\Users\\[^\\\0]+/, /\.cargo[\\/]registry/];
+
+/**
+ * paddock-setup.exe is judged by Defender's machine-learning model, which reads the file's metadata (Dyno 1.1.1 WP-4, WP-7): a full version resource (every
+ * field), an `asInvoker` manifest with `supportedOS`, its own version (the crate's, so the bytes do not move with an app release) and no build
+ * account path in it.
+ */
+export function checkSetupDescribed({ bytes, name, expectVersion, product }) {
+  if (!bytes) return [`${name}: paddock-setup.exe could not be extracted to check its version resource`];
+  const f = [];
+  const want = { FileVersion: expectVersion, ProductVersion: expectVersion, OriginalFilename: 'paddock-setup.exe', InternalName: 'paddock-setup', ProductName: product, FileDescription: `${product} update` };
+  for (const key of ['CompanyName', 'LegalCopyright', ...Object.keys(want)]) {
+    const v = resourceStringOf(bytes, key);
+    if (v === null || v === '') f.push(`${name}: paddock-setup.exe has no ${key} in its version resource (crates/paddock-setup/src/versionres.rs)`);
+    else if (key in want && want[key] !== undefined && v !== want[key]) f.push(`${name}: paddock-setup.exe ${key} is "${v}", expected "${want[key]}"${key.endsWith('Version') ? ': it carries the crate version, not the app version' : ''}`);
+  }
+  const text = Buffer.from(bytes).toString('latin1');
+  if (!text.includes('level="asInvoker"')) f.push(`${name}: paddock-setup.exe has no asInvoker manifest`);
+  if (!text.includes('<supportedOS')) f.push(`${name}: paddock-setup.exe manifest has no supportedOS`);
+  for (const re of BUILD_PATH_LEAKS) {
+    const m = re.exec(text);
+    if (m) f.push(`${name}: paddock-setup.exe contains a build path (${m[0]}): build it through scripts/stage-paddock-setup.mjs, which remaps paths`);
+  }
+  return f;
+}
+
 const NSIS_MIN = [3, 12];
 
 /** The NSIS version that made an installer, from the stub's default branding string ("Nullsoft Install System v3.13", ANSI or
@@ -133,6 +176,12 @@ export function checkSelfTest({ stdout, status, identifier, name }) {
   return f;
 }
 
+/** The `version` of a crate's `[package]` table, or null. */
+export function crateVersion(toml) {
+  const pkg = /^\[package\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml)?.[1] ?? '';
+  return /^version\s*=\s*"([^"]+)"/m.exec(pkg)?.[1] ?? null;
+}
+
 /** What is wrong with one installer, one sentence each with the next step. */
 export function checkInstaller({ bytes, files, expectVersion, name }) {
   const f = [];
@@ -158,6 +207,8 @@ function main(argv) {
   const includePath = o.include ?? 'crates/paddock-setup/nsis/paddock-per-machine.nsh';
   const expectVersion = /PADDOCK_INCLUDE_VERSION "([^"]+)"/.exec(readFileSync(includePath, 'utf8'))?.[1];
   const conf = JSON.parse(readFileSync(o.conf, 'utf8'));
+  // paddock-setup has its own version (the crate's), not the app's.
+  const setupVersion = crateVersion(readFileSync(o.setupManifest ?? 'crates/paddock-setup/Cargo.toml', 'utf8'));
   const installers = findInstallers(o.dir);
   if (installers.length === 0) {
     console.error(`::error::no *-setup.exe under ${o.dir}: nothing to check`);
@@ -187,6 +238,7 @@ function main(argv) {
         const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
         const exe = join(tmp, 'paddock-setup.exe');
         problems.push(...checkSetupSubsystem({ bytes: ex.status === 0 ? readFileSync(exe) : null, name }));
+        problems.push(...checkSetupDescribed({ bytes: ex.status === 0 ? readFileSync(exe) : null, name, expectVersion: setupVersion, product: conf.productName }));
         // Running it needs Windows. Its output is read through pipes: a GUI-subsystem program still writes to inherited handles.
         if (process.platform === 'win32' && ex.status === 0) {
           const run = spawnSync(exe, ['self-test'], { encoding: 'utf8', timeout: 60000 });

@@ -1,6 +1,6 @@
 [package]
 name = "paddock-setup"
-version = "0.1.0"
+version = "1.2.0"
 description = "The installer's work for per-machine Windows installs (family ADR 0053): the small program `paddock-setup.exe` carried inside each app's installer (guard, check-dir, same-folder, stop-all, clean-run, clean-staging, apply-update, hold-installing, self-test) and the pure core behind it (decisions, argument parsing, version rules, hive-scan filtering, the setup log), also used in-process by the app (the leftover per-user copy probe)."
 edition.workspace = true
 license.workspace = true

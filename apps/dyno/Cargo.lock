@@ -4216,7 +4216,7 @@ dependencies = [
 
 [[package]]
 name = "paddock-setup"
-version = "0.1.0"
+version = "1.2.0"
 dependencies = [
  "base64 0.22.1",
  "paddock-proc",

@@ -52,7 +52,7 @@
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
-!define PADDOCK_INCLUDE_VERSION "4"
+!define PADDOCK_INCLUDE_VERSION "5"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
 !ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
   VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
@@ -63,6 +63,14 @@
 !if /FileExists "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
 !else
   !error "paddock-setup.exe is not next to paddock-per-machine.nsh (${PADDOCK_SETUP_DIR}): the bundle step stages it (ADR 0053 S7) before the installer is built"
+!endif
+
+; paddock-setup.exe has its own version (the crate's), not the app's, so its bytes do not change with an app release (Dyno 1.1.1 WP-7).
+; check-version compares the installed copy with the version of the embedded one, read from the file at compile time. The test harness's stub has no
+; version resource.
+!ifndef PADDOCK_TEST_HARNESS
+  !getdllversion "${PADDOCK_SETUP_DIR}\paddock-setup.exe" PADDOCK_SV_
+  !define PADDOCK_SETUP_VERSION "${PADDOCK_SV_1}.${PADDOCK_SV_2}.${PADDOCK_SV_3}"
 !endif
 
 !include LogicLib.nsh
@@ -425,10 +433,10 @@ Var PaddockHaveSetup
 !macro PADDOCK_INSTALL_SETUP
   File "/oname=$INSTDIR\paddock-setup.exe" "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
   ; The file copy silently fails to overwrite a paddock-setup.exe that is still running (the `apply-update` that handed over). The
-  ; per-app build gives it a FileVersion equal to the app version, so the new copy compares the installed one: a mismatch is
+  ; build gives it its own FileVersion (PADDOCK_SETUP_VERSION, read from the embedded file), so the new copy compares the installed one: a mismatch is
   ; printed in the details and written to setup.log by the tool (exit 12), and never fails the install.
-  !ifdef VERSION
-    !insertmacro _PADDOCK_RUN 'check-version --dir "$R5" --expect ${VERSION}'
+  !ifdef PADDOCK_SETUP_VERSION
+    !insertmacro _PADDOCK_RUN 'check-version --dir "$R5" --expect ${PADDOCK_SETUP_VERSION}'
     ${If} $0 == 12
       DetailPrint "NOTE paddock-setup.exe was not replaced; run the installer again to fix it (see setup.log)"
       !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe version mismatch"

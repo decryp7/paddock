@@ -5,10 +5,10 @@
 //!
 //! Run on the Windows test VM as an administrator (`docs/testing/windows-test-vm.md`):
 //! `PADDOCK_SETUP_EXE` is a build with `PADDOCK_SETUP_IDENTIFIER=net.decryptology.paddock-setup-test`,
-//! `PADDOCK_SETUP_PRODUCT=PaddockSetupTest`, `PADDOCK_SETUP_MAIN=paddock-setup.exe`, `PADDOCK_SETUP_VERSION=0.1.0` and
+//! `PADDOCK_SETUP_PRODUCT=PaddockSetupTest`, `PADDOCK_SETUP_MAIN=paddock-setup.exe`, `PADDOCK_SETUP_TEST_VERSION=0.1.0` and
 //! `PADDOCK_SETUP_UPDATE_KEY` = the text of `paddock-updater/tests/fixtures/key.pub`;
 //! `PADDOCK_SETUP_EXE_STOP` is a build on a tree that has `paddock_proc::installed` (cfg `has_proc_installed`);
-//! `PADDOCK_SETUP_EXE_E2E_NEWER` is the e2e build with `PADDOCK_SETUP_VERSION=9.9.9` (for the downgrade refusal).
+//! `PADDOCK_SETUP_EXE_E2E_NEWER` is the e2e build with `PADDOCK_SETUP_TEST_VERSION=9.9.9` (for the downgrade refusal).
 //! The success path needs a program that really is signed: `PADDOCK_SETUP_EXE_E2E` is a 0.1.0 build with a throw-away
 //! test key, `PADDOCK_SETUP_E2E_INSTALLER` the `fake_installer` example signed for 9.9.9 with that key and
 //! `PADDOCK_SETUP_E2E_SIGNATURE` the file with its signature text (made by the script that runs these tests);

@@ -130,6 +130,36 @@ whole monorepo (hundreds of commits that are not Dyno's), so `dyno-release.yml` 
 apps/dyno/CHANGELOG.md`: while no other `dyno-v*` tag exists, the notes are that file's `## [<version>]` section, and the run
 fails (in the bundle job, before the three builds) if the section is missing, still says "Unreleased", or has nothing but blank lines and link references (`conformance/ci/first-release-notes.sh`, tested by `conformance/test/first-release-notes.test.mjs`). From `dyno-v1.0.1` on, git-cliff takes over.
 
+## Windows Security false positives (`paddock-setup.exe`)
+
+The apps stay unsigned (decision 2026-11-05, kept 2026-11-08). Windows Security's machine-learning model has flagged `paddock-setup.exe` once
+(`Trojan:Win32/Bearfoos.A!ml`, one install in six; research note `defender-research/NOTE.md`). A verdict is per file hash, so the program is built
+to keep its bytes:
+
+- **Its own version.** `paddock-setup` has the version of its crate (`crates/paddock-setup/Cargo.toml`), not the app's. `FileVersion` and the
+  installer's `check-version` use it (read from the embedded file at compile time, include v5). Change the crate version only when the program's
+  code or constants change; an app release alone leaves the hash as it was.
+- **Deterministic link and paths.** `build.rs` links with `/Brepro` and `/DEBUG:NONE`; `scripts/stage-paddock-setup.mjs` remaps the home folder,
+  cargo home and checkout with `--remap-path-prefix` for this one build. The gate (`check-per-machine-installer.mjs`) fails a program without the
+  full version resource (CompanyName, FileDescription, FileVersion, InternalName, LegalCopyright, OriginalFilename, ProductName), without the
+  `asInvoker` manifest with `supportedOS`, with a different `FileVersion` than the crate's, or with a build path in it.
+- **Proof.** Two clean builds (different target folders, different app versions) gave the same sha256 (3f0d920b...725a on `cargo xwin`); repeat
+  the check on the Windows runner after a toolchain change: build twice with `node scripts/stage-paddock-setup.mjs --app dyno`, compare the printed
+  `paddock-setup.exe sha256` lines.
+
+**After each tag** (once per release, from the tag's installer):
+
+1. Read the `paddock-setup.exe sha256` line of the bundle job's log. If it equals the previous release's, the earlier verdict carries over: record
+   that and stop here for `paddock-setup.exe`; still submit the installer (step 3).
+2. Submit `paddock-setup.exe` (extract it from the installer with 7-Zip, check the sha256) at <https://www.microsoft.com/wdsi/filesubmission>
+   as a **software developer**, choosing "Incorrectly detected as malware/malicious", with the detection name seen in the evidence, the file's
+   sha256 and a one-line description ("per-machine installer helper of the Dyno desktop app, built from a public tag").
+3. Submit the setup installer (`Dyno_<version>_x64-setup.exe`) the same way.
+4. Record the submission ids, the date and Microsoft's determination in the release log (the release's engineering notes, as `release-1.1.0-engineering-notes.md` was) when
+   it arrives (days, not hours). Also read VirusTotal's tags for both files ("obfuscated", "detect-debug-environment") and note them.
+5. The VM harness prints the full Defender evidence on every Windows install row and can run the rate check (10 installs with an EICAR
+   control): `scripts/vm-smoke/defender-evidence.mjs`; run it on the final installer and keep the rate with the submission ids.
+
 ## First launch note
 
 The apps are not signed or notarized: updates are protected by the family update key, and paid certificates would be needed to remove the OS warnings (decision 2026-11-05). The release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).

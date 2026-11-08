@@ -1631,7 +1631,8 @@ service.repair(&cancel)?;                       // the Repair button (never depe
 The installer's work for per-machine Windows installs. A library (pure core, tested on any host) and one binary,
 `paddock-setup.exe`, which each app's Windows bundle job builds with the app's constants compiled in
 (`PADDOCK_SETUP_IDENTIFIER`, `PADDOCK_SETUP_PRODUCT`, `PADDOCK_SETUP_MAIN`, `PADDOCK_SETUP_UPDATE_KEY`, and for the version
-resource `PADDOCK_SETUP_PRODUCT` and `PADDOCK_SETUP_VERSION`: `FileDescription` becomes "<App> update").
+resource `PADDOCK_SETUP_PRODUCT`: `FileDescription` becomes "<App> update"). The program has its own version (`paddock-setup`'s crate
+version, in `FileVersion`), not the app's, and a deterministic link, so an unchanged program is the same bytes in every app release.
 
 - **Commands** (`paddock-setup <command> [--option value]`, exit codes in `exit::Exit`): `guard` (per-user copy guard),
   `check-dir`, `same-folder`, `stop-all` (over `paddock_proc::installed::stop_all_here`), `clean-run`,

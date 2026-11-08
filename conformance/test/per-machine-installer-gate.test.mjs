@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles } from '../release/check-per-machine-installer.mjs';
+import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles, checkSetupDescribed, resourceStringOf, crateVersion } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -119,4 +119,38 @@ test('the installer must be made by NSIS 3.12 or later (3.11 and earlier can run
   assert.match(checkNsisVersion({ bytes: brand('3.11'), name: 'a-setup.exe' }).join(), /NSIS 3\.11.*3\.12/s);
   assert.match(checkNsisVersion({ bytes: brand('3.08'), name: 'a-setup.exe' }).join(), /NSIS 3\.08/);
   assert.match(checkNsisVersion({ bytes: Buffer.from('MZ'), name: 'a-setup.exe' }).join(), /NSIS version was not measured/, 'no branding: not measured, so not passed (ER-33)');
+});
+
+const described = ({ omit = [], over = {}, extra = '' } = {}) => {
+  const fields = { CompanyName: 'decryptology', FileDescription: 'Dyno update', FileVersion: '1.2.0', InternalName: 'paddock-setup', LegalCopyright: 'Copyright (C) decryptology', OriginalFilename: 'paddock-setup.exe', ProductName: 'Dyno', ProductVersion: '1.2.0', ...over };
+  const parts = [Buffer.from('MZ..')];
+  for (const [k, v] of Object.entries(fields)) if (!omit.includes(k)) parts.push(utf16(k), Buffer.from([0, 0]), utf16(v), Buffer.from([0, 0]));
+  parts.push(Buffer.from('<requestedExecutionLevel level="asInvoker" uiAccess="false"/><supportedOS Id="{x}"/>'), Buffer.from(extra));
+  return Buffer.concat(parts);
+};
+const args = (bytes) => ({ bytes, name: 'Dyno_1.1.1_x64-setup.exe', expectVersion: '1.2.0', product: 'Dyno' });
+
+test('paddock-setup.exe carries every version resource field, its own version and an asInvoker manifest', () => {
+  assert.deepEqual(checkSetupDescribed(args(described())), []);
+  assert.equal(resourceStringOf(described(), 'OriginalFilename'), 'paddock-setup.exe');
+  for (const k of ['CompanyName', 'LegalCopyright', 'OriginalFilename', 'InternalName', 'ProductName', 'FileVersion']) {
+    assert.match(checkSetupDescribed(args(described({ omit: [k] }))).join('\n'), new RegExp(`no ${k}`), k);
+  }
+  assert.match(checkSetupDescribed(args(described({ over: { FileVersion: '1.1.1' } }))).join('\n'), /FileVersion is "1\.1\.1", expected "1\.2\.0".*crate version, not the app version/);
+  assert.match(checkSetupDescribed(args(null)).join(''), /could not be extracted/);
+});
+
+test('the manifest must be asInvoker with supportedOS; a build path in the program fails the gate', () => {
+  const noManifest = Buffer.concat([described().subarray(0, described().indexOf('<requestedExecutionLevel'))]);
+  const msgs = checkSetupDescribed(args(noManifest)).join('\n');
+  assert.match(msgs, /no asInvoker manifest/);
+  assert.match(msgs, /no supportedOS/);
+  assert.match(checkSetupDescribed(args(described({ extra: 'C:\\Users\\decryp7\\.cargo\\registry\\src\\x' }))).join('\n'), /build path \(C:\\Users\\decryp7\)/);
+  assert.match(checkSetupDescribed(args(described({ extra: '/home/x/.cargo/registry/src' }))).join('\n'), /build path/);
+  assert.deepEqual(checkSetupDescribed(args(described({ extra: '/cargo/registry/src/x /rustc/abc/library' }))), []);
+});
+
+test("the expected version is the crate's own, read from its [package] table", () => {
+  assert.equal(crateVersion('[package]\nname = "paddock-setup"\nversion = "1.2.0"\n[dependencies]\nsemver = { version = "1" }\n'), '1.2.0');
+  assert.equal(crateVersion('[package]\nname = "x"\n[dependencies]\nversion = "3"\n'), null);
 });
