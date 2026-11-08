@@ -301,14 +301,32 @@ mod tests {
     }
 
     #[test]
-    fn the_same_input_gives_the_same_bytes_and_only_the_version_fields_follow_the_version() {
-        assert_eq!(to_res(&info()), to_res(&info()));
-        let mut other = info();
-        other.version = "1.2.0".into();
-        assert_ne!(to_res(&info()), to_res(&other));
-        // Nothing else in the resource depends on anything outside `VersionInfo`: the same fields with the same version are identical,
-        // so a build for another app release (same crate version) gives the same resource.
-        other.version = "1.1.0".into();
-        assert_eq!(to_res(&info()), to_res(&other));
+    fn every_field_of_the_input_reaches_the_bytes_and_nothing_else_does() {
+        // The resource is a pure function of `VersionInfo`: each field changes the bytes (so none is dropped), and building from the same
+        // fields in a fresh struct gives the same bytes (no clock, no environment, no counter reaches the output).
+        let base = to_res(&info());
+        let changed: [(&str, fn(&mut VersionInfo)); 8] = [
+            ("description", |i| i.description = "Other update".into()),
+            ("product", |i| i.product = "Other".into()),
+            ("version", |i| i.version = "1.2.0".into()),
+            ("company", |i| i.company = "other company".into()),
+            ("internal_name", |i| i.internal_name = "other-setup".into()),
+            ("original_filename", |i| {
+                i.original_filename = "other.exe".into()
+            }),
+            ("copyright", |i| i.copyright = "Copyright other".into()),
+            ("version again", |i| i.version = "1.1.1".into()),
+        ];
+        for (name, change) in changed {
+            let mut i = info();
+            change(&mut i);
+            assert_ne!(to_res(&i), base, "{name} does not reach the bytes");
+        }
+        let fresh = VersionInfo { ..info() };
+        assert_eq!(to_res(&fresh), base);
+        // The manifest names the program, so its identity follows `internal_name`.
+        let mut i = info();
+        i.internal_name = "other-setup".into();
+        assert!(find(&to_res(&i), b"name=\"other-setup\"").is_some());
     }
 }

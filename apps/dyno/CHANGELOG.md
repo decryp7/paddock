@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Windows: the installer's helper program (`paddock-setup.exe`) is built to be byte-identical from one Dyno release to the next, with a full version description and an `asInvoker` manifest, so a Windows Security verdict on it carries over to later releases. It now has its own version (1.2.0; it showed 1.1.0, Dyno's, before) and no longer carries the build machine's folder names.
+
 ## [1.1.0] - 2026-11-06
 
 **On Windows, uninstall Dyno 1.0.0 first (keep your data), then install 1.1.0; 1.0.0 may offer this update but cannot install it.**

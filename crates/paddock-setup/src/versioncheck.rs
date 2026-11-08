@@ -1,6 +1,7 @@
 //! The check after the installer's copy of `paddock-setup.exe` (ADR 0053 amendment 1, section 2/4.3): the installer's own file
 //! copy silently fails to overwrite a program that is still running, and `apply-update` is such a program when it hands over.
-//! The per-app build gives the program a `FileVersion` equal to the app version, so the installer (after its copy) and the app
+//! The program has its own version (`crate::PROGRAM_VERSION`, in its `FileVersion`; never the app's, so its bytes do not move with an app
+//! release), so the installer (after its copy, from the embedded file's version) and the app
 //! (at its next start) compare it with the version they expect. A mismatch is reported, never fatal: in the installer's details,
 //! in `setup.log` and as a Health line in the app.
 

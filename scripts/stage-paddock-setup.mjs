@@ -71,7 +71,7 @@ export function remapConfig({ root, cargoHome, home }) {
 /** Cargo ignores .cargo/config.toml rustflags (including `+crt-static`) when one of these is set: refuse instead of building a different program. */
 export function assertNoRustflagsEnv(env) {
   for (const k of ['RUSTFLAGS', 'CARGO_ENCODED_RUSTFLAGS']) {
-    if (env[k]) throw new Error(`${k} is set: cargo would then ignore .cargo/config.toml's rustflags (+crt-static) and this script's path remapping. Unset it for this step, then run it again.`);
+    if (k in env) throw new Error(`${k} is set (even empty): cargo would then ignore .cargo/config.toml's rustflags (+crt-static) and this script's path remapping. Unset it for this step, then run it again.`);
   }
 }
 

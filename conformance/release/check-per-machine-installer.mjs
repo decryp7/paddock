@@ -5,10 +5,12 @@
 // is also run with `self-test`, which must name the app's identifier and say `stop_all=present`.
 //
 //   node conformance/release/check-per-machine-installer.mjs --dir <cargo profile folder holding bundle/nsis> --conf <tauri.conf.json>
-//        [--include crates/paddock-setup/nsis/paddock-per-machine.nsh]
+//        [--include crates/paddock-setup/nsis/paddock-per-machine.nsh] [--setup-manifest crates/paddock-setup/Cargo.toml]
+//        [--hashes crates/paddock-setup/released-hashes.json] [--root <build folder to look for in the program>]
 //
 // Needs 7-Zip (it opens NSIS installers): on PATH or in C:\\Program Files\\7-Zip; without it the gate fails, it never passes unchecked.
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -116,19 +118,26 @@ export function resourceStringOf(bytes, key) {
   return null;
 }
 
-/** What a build account leaves in a Windows program: its home folder and the cargo registry path (`--remap-path-prefix` removes both). */
-const BUILD_PATH_LEAKS = [/[A-Za-z]:\\Users\\[^\\\0]+/, /\.cargo[\\/]registry/];
+/**
+ * What a build leaves in a Windows program: any drive's source path (`X:\\...\\file.rs`: the checkout, the target folder, a runner slot such as
+ * `D:\\a\\...` or `C:\\act\\...`), a home folder and the cargo registry. `--remap-path-prefix` removes all of them. The roots a build used
+ * (checkout, target folder, home) are also matched literally, in both slash forms, when the caller passes them.
+ */
+const BUILD_PATH_LEAKS = [/[A-Za-z]:\\[^\0\r\n]{2,}?\.(?:rs|toml)\b/, /[A-Za-z]:\\Users\\[^\\\0]+/, /\.cargo[\\/]registry/];
 
 /**
  * paddock-setup.exe is judged by Defender's machine-learning model, which reads the file's metadata (Dyno 1.1.1 WP-4, WP-7): a full version resource (every
  * field), an `asInvoker` manifest with `supportedOS`, its own version (the crate's, so the bytes do not move with an app release) and no build
- * account path in it.
+ * account path in it. The manifest strings are looked for anywhere in the file (not parsed out of RT_MANIFEST); the version resource strings are
+ * read by key.
  */
-export function checkSetupDescribed({ bytes, name, expectVersion, product }) {
+export function checkSetupDescribed({ bytes, name, expectVersion, product, roots = [] }) {
   if (!bytes) return [`${name}: paddock-setup.exe could not be extracted to check its version resource`];
   const f = [];
-  const want = { FileVersion: expectVersion, ProductVersion: expectVersion, OriginalFilename: 'paddock-setup.exe', InternalName: 'paddock-setup', ProductName: product, FileDescription: `${product} update` };
-  for (const key of ['CompanyName', 'LegalCopyright', ...Object.keys(want)]) {
+  // ER-33: without the expected version the FileVersion comparison would be skipped and the gate would pass unchecked.
+  if (!expectVersion) f.push(`${name}: the paddock-setup version was not measured (crates/paddock-setup/Cargo.toml has no literal version = "x.y.z" in [package]); the program's FileVersion is not checked, so do not release until it is`);
+  const want = { ...(expectVersion ? { FileVersion: expectVersion, ProductVersion: expectVersion } : {}), OriginalFilename: 'paddock-setup.exe', InternalName: 'paddock-setup', ProductName: product, FileDescription: `${product} update` };
+  for (const key of new Set(['CompanyName', 'LegalCopyright', 'FileVersion', 'ProductVersion', ...Object.keys(want)])) {
     const v = resourceStringOf(bytes, key);
     if (v === null || v === '') f.push(`${name}: paddock-setup.exe has no ${key} in its version resource (crates/paddock-setup/src/versionres.rs)`);
     else if (key in want && want[key] !== undefined && v !== want[key]) f.push(`${name}: paddock-setup.exe ${key} is "${v}", expected "${want[key]}"${key.endsWith('Version') ? ': it carries the crate version, not the app version' : ''}`);
@@ -136,6 +145,11 @@ export function checkSetupDescribed({ bytes, name, expectVersion, product }) {
   const text = Buffer.from(bytes).toString('latin1');
   if (!text.includes('level="asInvoker"')) f.push(`${name}: paddock-setup.exe has no asInvoker manifest`);
   if (!text.includes('<supportedOS')) f.push(`${name}: paddock-setup.exe manifest has no supportedOS`);
+  for (const root of roots.filter((r) => r && r.length > 3)) {
+    for (const form of new Set([root, root.replaceAll('\\', '/'), root.replaceAll('/', '\\')])) {
+      if (text.includes(form)) f.push(`${name}: paddock-setup.exe contains the build folder ${form}: build it through scripts/stage-paddock-setup.mjs, which remaps paths`);
+    }
+  }
   for (const re of BUILD_PATH_LEAKS) {
     const m = re.exec(text);
     if (m) f.push(`${name}: paddock-setup.exe contains a build path (${m[0]}): build it through scripts/stage-paddock-setup.mjs, which remaps paths`);
@@ -176,6 +190,20 @@ export function checkSelfTest({ stdout, status, identifier, name }) {
   return f;
 }
 
+/**
+ * The program's bytes may only change with its version: `records` is crates/paddock-setup/released-hashes.json ({ "<app identifier>": { "<version>": "<sha256>" } }),
+ * written after each release from the bundle log's `paddock-setup.exe sha256` line. The same version with other bytes means the code (or a dependency,
+ * the lockfile, the toolchain) changed without a bump, so a stale copy of the program would go unnoticed by `check-version`. Returns { problems, notes }.
+ */
+export function checkReleasedHash({ bytes, name, identifier, version, records }) {
+  if (!bytes || !version) return { problems: [], notes: [] };
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  const known = records?.[identifier]?.[version];
+  if (known === undefined) return { problems: [], notes: [`${name}: paddock-setup.exe ${version} has no recorded sha256 yet (${sha}); after the release add it to crates/paddock-setup/released-hashes.json under ${identifier}`] };
+  if (known !== sha) return { problems: [`${name}: paddock-setup.exe is ${sha}, but ${version} was released as ${known}: the program changed without a version bump. Bump the version in crates/paddock-setup/Cargo.toml (and the workspace dependency line), then build again`], notes: [] };
+  return { problems: [], notes: [] };
+}
+
 /** The `version` of a crate's `[package]` table, or null. */
 export function crateVersion(toml) {
   const pkg = /^\[package\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(toml)?.[1] ?? '';
@@ -201,14 +229,21 @@ function main(argv) {
     else o[k] = argv[++i];
   }
   if (!o.dir || !o.conf) {
-    console.error('usage: check-per-machine-installer.mjs --dir <folder> --conf <tauri.conf.json> [--include <nsh>]');
+    console.error('usage: check-per-machine-installer.mjs --dir <folder> --conf <tauri.conf.json> [--include <nsh>] [--setup-manifest <Cargo.toml>] [--hashes <json>] [--root <build folder>]');
     return 2;
   }
   const includePath = o.include ?? 'crates/paddock-setup/nsis/paddock-per-machine.nsh';
   const expectVersion = /PADDOCK_INCLUDE_VERSION "([^"]+)"/.exec(readFileSync(includePath, 'utf8'))?.[1];
   const conf = JSON.parse(readFileSync(o.conf, 'utf8'));
   // paddock-setup has its own version (the crate's), not the app's.
-  const setupVersion = crateVersion(readFileSync(o.setupManifest ?? 'crates/paddock-setup/Cargo.toml', 'utf8'));
+  const setupVersion = crateVersion(readFileSync(o['setup-manifest'] ?? 'crates/paddock-setup/Cargo.toml', 'utf8'));
+  let records = {};
+  try {
+    records = JSON.parse(readFileSync(o.hashes ?? 'crates/paddock-setup/released-hashes.json', 'utf8'));
+  } catch {
+    // No record file yet: nothing is gated by hash (a note says so below).
+  }
+  const roots = [o.root, process.env.GITHUB_WORKSPACE, process.env.GITEA_WORKSPACE, process.env.CARGO_TARGET_DIR, process.env.USERPROFILE, process.env.HOME].filter(Boolean);
   const installers = findInstallers(o.dir);
   if (installers.length === 0) {
     console.error(`::error::no *-setup.exe under ${o.dir}: nothing to check`);
@@ -238,7 +273,10 @@ function main(argv) {
         const ex = spawnSync(sevenZip.cmd, ['e', '-y', `-o${tmp}`, path, 'paddock-setup.exe'], { encoding: 'utf8', timeout: 120000 });
         const exe = join(tmp, 'paddock-setup.exe');
         problems.push(...checkSetupSubsystem({ bytes: ex.status === 0 ? readFileSync(exe) : null, name }));
-        problems.push(...checkSetupDescribed({ bytes: ex.status === 0 ? readFileSync(exe) : null, name, expectVersion: setupVersion, product: conf.productName }));
+        problems.push(...checkSetupDescribed({ bytes: ex.status === 0 ? readFileSync(exe) : null, name, expectVersion: setupVersion, product: conf.productName, roots }));
+        const released = checkReleasedHash({ bytes: ex.status === 0 ? readFileSync(exe) : null, name, identifier: conf.identifier, version: setupVersion, records });
+        problems.push(...released.problems);
+        for (const n of released.notes) console.log(`::warning::${n}`);
         // Running it needs Windows. Its output is read through pipes: a GUI-subsystem program still writes to inherited handles.
         if (process.platform === 'win32' && ex.status === 0) {
           const run = spawnSync(exe, ['self-test'], { encoding: 'utf8', timeout: 60000 });

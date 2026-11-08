@@ -5,6 +5,10 @@ Unicode true
 SilentInstall silent
 RequestExecutionLevel user
 OutFile "paddock-setup.exe"
+; A version resource, as the real program has one: the include reads it at compile time (!getdllversion) for `check-version --expect`.
+VIProductVersion "9.8.7.0"
+VIAddVersionKey "FileVersion" "9.8.7.0"
+VIAddVersionKey "ProductName" "PaddockStub"
 !include FileFunc.nsh
 !include LogicLib.nsh
 !insertmacro GetParameters

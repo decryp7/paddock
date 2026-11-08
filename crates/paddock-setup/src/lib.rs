@@ -57,6 +57,11 @@ pub struct Baked {
     pub update_key: Option<&'static str>,
 }
 
+/// The version of the program itself (this crate's), as written in its `FileVersion`. It is not the app's version: the program's bytes stay
+/// the same across app releases, so whoever checks the installed copy (the installer's `check-version`, the app's start-up health check)
+/// compares with this value.
+pub const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Whether this build can stop other sessions' programs (`paddock_proc::installed` was in the tree, see build.rs).
 pub const STOP_ALL_PRESENT: bool = cfg!(has_proc_installed);
 

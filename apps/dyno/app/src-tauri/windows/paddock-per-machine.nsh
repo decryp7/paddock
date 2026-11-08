@@ -52,7 +52,7 @@
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
-!define PADDOCK_INCLUDE_VERSION "5"
+!define PADDOCK_INCLUDE_VERSION "9"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
 !ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
   VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
@@ -66,12 +66,10 @@
 !endif
 
 ; paddock-setup.exe has its own version (the crate's), not the app's, so its bytes do not change with an app release (Dyno 1.1.1 WP-7).
-; check-version compares the installed copy with the version of the embedded one, read from the file at compile time. The test harness's stub has no
-; version resource.
-!ifndef PADDOCK_TEST_HARNESS
-  !getdllversion "${PADDOCK_SETUP_DIR}\paddock-setup.exe" PADDOCK_SV_
-  !define PADDOCK_SETUP_VERSION "${PADDOCK_SV_1}.${PADDOCK_SV_2}.${PADDOCK_SV_3}"
-!endif
+; check-version compares the installed copy with the version of the embedded one, read from the file at compile time (the test
+; harness's stub has a version resource too).
+!getdllversion "${PADDOCK_SETUP_DIR}\paddock-setup.exe" PADDOCK_SV_
+!define PADDOCK_SETUP_VERSION "${PADDOCK_SV_1}.${PADDOCK_SV_2}.${PADDOCK_SV_3}"
 
 !include LogicLib.nsh
 !include FileFunc.nsh

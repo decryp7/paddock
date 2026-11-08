@@ -129,10 +129,15 @@ pub fn updated_problem() -> Cause {
         .code("dy.update.restart")
 }
 
-/// Checks the installed `paddock-setup.exe` against this Dyno's version (Windows, at start) and reports a mismatch.
+/// The version the installed `paddock-setup.exe` must have: the program's own (its bytes do not move with a Dyno release), never Dyno's.
+pub fn expected_setup_version() -> Option<paddock_setup::versioncheck::Version> {
+    paddock_setup::versioncheck::Version::parse(paddock_setup::PROGRAM_VERSION).ok()
+}
+
+/// Checks the installed `paddock-setup.exe` against the version expected (Windows, at start) and reports a mismatch.
 #[cfg(windows)]
 pub fn check_setup_version<R: Runtime>(app: &AppHandle<R>, install_dir: &std::path::Path) {
-    let expected = paddock_setup::versioncheck::Version::parse(env!("CARGO_PKG_VERSION")).ok();
+    let expected = expected_setup_version();
     let found = paddock_setup::native::fileversion::file_version(&install_dir.join("paddock-setup.exe"));
     if let Err(why) = &found {
         crate::logging::info(&format!("paddock-setup.exe: the version could not be read: {why}"));
@@ -280,6 +285,15 @@ mod tests {
             super::setup_problem(&compare(None, &new)).is_some(),
             "an unreadable version is reported too"
         );
+    }
+
+    #[test]
+    fn the_installed_setup_program_is_expected_at_its_own_version_not_the_apps() {
+        use paddock_setup::versioncheck::Version;
+        // paddock-setup.exe has the crate's version (its bytes do not move with an app release): expecting Dyno's version would show
+        // "Run the Dyno installer again" on every start, and running the installer cannot fix it.
+        assert_eq!(expected_setup_version(), Version::parse(paddock_setup::PROGRAM_VERSION).ok());
+        assert_ne!(expected_setup_version(), Version::parse(env!("CARGO_PKG_VERSION")).ok(), "the app's own version must not be the expectation");
     }
 
     use super::*;

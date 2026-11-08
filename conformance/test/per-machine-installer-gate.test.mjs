@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles, checkSetupDescribed, resourceStringOf, crateVersion } from '../release/check-per-machine-installer.mjs';
+import { createHash } from 'node:crypto';
+import { checkInstaller, checkNsisVersion, nsisVersionOf, checkSetupSubsystem, subsystemOf, checkSelfTest, find7z, checkSignatureName, trustedCommentOf, findInstallers, hasAdministratorManifest, includeVersionOf, listedFiles, checkSetupDescribed, resourceStringOf, crateVersion, checkReleasedHash } from '../release/check-per-machine-installer.mjs';
 
 const utf16 = (s) => Buffer.from(s, 'utf16le');
 const installer = ({ admin = true, version = '1' } = {}) =>
@@ -153,4 +154,32 @@ test('the manifest must be asInvoker with supportedOS; a build path in the progr
 test("the expected version is the crate's own, read from its [package] table", () => {
   assert.equal(crateVersion('[package]\nname = "paddock-setup"\nversion = "1.2.0"\n[dependencies]\nsemver = { version = "1" }\n'), '1.2.0');
   assert.equal(crateVersion('[package]\nname = "x"\n[dependencies]\nversion = "3"\n'), null);
+});
+
+test('a missing crate version fails the gate instead of skipping the FileVersion check (ER-33)', () => {
+  const msgs = checkSetupDescribed({ ...args(described()), expectVersion: null }).join('\n');
+  assert.match(msgs, /version was not measured.*do not release/);
+  assert.equal(crateVersion('[package]\nname = "x"\nversion.workspace = true\n'), null);
+});
+
+test('a build folder on any drive, or one named by the caller, in the program fails the gate', () => {
+  assert.match(checkSetupDescribed(args(described({ extra: 'D:\\a\\_work\\paddock\\crates\\paddock-setup\\src\\main.rs' }))).join('\n'), /build path/);
+  assert.match(checkSetupDescribed(args(described({ extra: 'C:\\act\\slot3\\paddock\\crates\\x\\Cargo.toml' }))).join('\n'), /build path/);
+  const roots = ['E:\\runner\\target-dyno-3'];
+  assert.match(checkSetupDescribed({ ...args(described({ extra: 'E:/runner/target-dyno-3/release' })), roots }).join('\n'), /build folder E:\/runner\/target-dyno-3/);
+  assert.deepEqual(checkSetupDescribed({ ...args(described({ extra: 'x' })), roots }), []);
+});
+
+test('the same version with other bytes fails; a version without a record only notes its sha256', () => {
+  const bytes = described();
+  const sha = createHash('sha256').update(bytes).digest('hex');
+  const a = { bytes, name: 'i.exe', identifier: 'net.x.dyno', version: '1.2.0' };
+  assert.deepEqual(checkReleasedHash({ ...a, records: { 'net.x.dyno': { '1.2.0': sha } } }), { problems: [], notes: [] });
+  const bad = checkReleasedHash({ ...a, records: { 'net.x.dyno': { '1.2.0': 'ab'.repeat(32) } } });
+  assert.match(bad.problems.join(''), /changed without a version bump.*Bump the version/);
+  const none = checkReleasedHash({ ...a, records: {} });
+  assert.deepEqual(none.problems, []);
+  assert.match(none.notes.join(''), new RegExp(sha));
+  // another app's record or another version is not this one's
+  assert.deepEqual(checkReleasedHash({ ...a, records: { 'net.x.other': { '1.2.0': 'ff' } } }).problems, []);
 });

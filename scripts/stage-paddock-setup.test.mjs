@@ -133,5 +133,7 @@ test('path remapping: home, cargo home and the checkout, narrowest last, as one 
 test('RUSTFLAGS in the environment is refused: cargo would drop +crt-static and the remapping', () => {
   assert.throws(() => assertNoRustflagsEnv({ RUSTFLAGS: '-D warnings' }), /RUSTFLAGS is set.*crt-static/);
   assert.throws(() => assertNoRustflagsEnv({ CARGO_ENCODED_RUSTFLAGS: 'x' }), /CARGO_ENCODED_RUSTFLAGS/);
+  assert.throws(() => assertNoRustflagsEnv({ RUSTFLAGS: '' }), /RUSTFLAGS is set/, 'an empty value also replaces the config');
+  assert.throws(() => assertNoRustflagsEnv({ CARGO_ENCODED_RUSTFLAGS: '' }), /CARGO_ENCODED_RUSTFLAGS/);
   assert.doesNotThrow(() => assertNoRustflagsEnv({}));
 });
