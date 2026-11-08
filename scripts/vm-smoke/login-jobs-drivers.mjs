@@ -123,10 +123,37 @@ export function macLoginJobsDriver(gui) {
 }
 
 /** Linux: the AT-SPI helper (`atspi.py`) through `atspi(args)` -> { code, stdout }. */
-export function linuxLoginJobsDriver(atspi, parseSwitchState) {
+/**
+ * The lines inside the open Jobs panel of the Linux AT-SPI tree (`landmark  Jobs` and everything nested under it), or null when the panel is closed. The status bar
+ * button says "1 running: Running benchmarks" too, so a read of the whole window would "see" a job in a closed list.
+ */
+export function jobsPanelText(tree) {
+  const lines = String(tree ?? '').split('\n');
+  const at = lines.findIndex((l) => /^\s*landmark\s+Jobs\s*$/.test(l));
+  if (at < 0) return null;
+  const indent = (l) => l.length - l.trimStart().length;
+  const base = indent(lines[at]);
+  const inside = [];
+  for (const l of lines.slice(at + 1)) {
+    // a tree line is "<indent><role>  <name>" (two spaces); a continuation of a multi-line name has none
+    if (l.trim() && indent(l) <= base && /\S {2}/.test(l)) break;
+    if (l.trim()) inside.push(l.trim());
+  }
+  return inside.join('\n');
+}
+
+export function linuxLoginJobsDriver(atspi, parseSwitchState, { settle = (ms) => new Promise((r) => setTimeout(r, ms)), agentSteady = async () => true } = {}) {
   const SW = '"Start Dyno at login" "check box|toggle button|switch"';
   return {
-    async readSwitch() { const r = atspi(`state dyno ${SW}`); return r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; },
+    // Read in place; when the page is not there (Settings was closed to look at the Jobs list), Settings is opened the way a person does and read again.
+    async readSwitch() {
+      const read = () => { const r = atspi(`state dyno ${SW}`); return r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; };
+      const first = read();
+      if (first !== 'unknown') return first;
+      atspi('press dyno "^File$" "menu item"'); await settle(1000); atspi('press dyno "^Settings…$" "menu item"'); await settle(4000); atspi('press dyno "^Dyno$" "push button"'); await settle(1500);
+      for (let i = 0; i < 3; i++) { const v = read(); if (v !== 'unknown') return v; await settle(2000); }
+      return 'unknown';
+    },
     async pressSwitch() {
       if (atspi(`press dyno ${SW}`).code === 0) return true;
       atspi('press dyno "^File$" "menu item"'); await new Promise((r) => setTimeout(r, 1000)); atspi('press dyno "^Settings…$" "menu item"'); await new Promise((r) => setTimeout(r, 4000)); atspi('press dyno "^Dyno$" "push button"'); await new Promise((r) => setTimeout(r, 1500));
@@ -143,12 +170,21 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
       for (let i = 0; i < 5 && v === 'unknown'; i++) { const r = atspi(`state dyno ${SW}`); v = r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; if (v === 'unknown') await new Promise((res) => setTimeout(res, 2000)); }
       return { ok: !pending, saved: v, detail: pending ? '"Save changes" or "Applying…" still shown after 30 s' : v === 'unknown' ? 'saved; the switch could not be read afterwards' : 'saved (no draft left)' };
     },
-    async openJobs() { atspi('press dyno "^Close$" "push button"'); return atspi(`press dyno ${JSON.stringify(STATUS)} "push button|toggle button"`).code === 0 || /Jobs/.test(atspi('tree dyno 60').stdout); },
+    // The status button toggles the panel: it is pressed only when the panel is not open (a second call used to close the list it had just opened).
+    async openJobs() {
+      atspi('press dyno "^Close$" "push button"');
+      const isOpen = () => jobsPanelText(atspi('tree dyno 80').stdout) !== null;
+      if (isOpen()) return true;
+      for (let i = 0; i < 3; i++) { atspi(`press dyno ${JSON.stringify(STATUS)} "push button|toggle button"`); await new Promise((r) => setTimeout(r, 1500)); if (isOpen()) return true; }
+      return false;
+    },
     async startLongJob() {
+      // A Start-at-login change replaces the agent with the login service's one: a benchmark started in that window is lost with the old agent (its Cancel then finds no agent).
+      if (!(await agentSteady())) return { ok: false, detail: 'the agent did not stay up and unchanged for a steady period after the login change, so a benchmark started now could be lost with it' };
       atspi('press dyno "^Close$" "push button"');
       if (atspi('press dyno "^Benchmarks$" "link"').code !== 0) return false;
       let ok = false;
-      for (let i = 0; i < 10 && !ok; i++) { ok = atspi('press dyno "^Sustained processor" "radio button|toggle button|push button"').code === 0; if (!ok) atspi('has dyno "^Benchmarks$"'); }
+      for (let i = 0; i < 30 && !ok; i++) { ok = atspi('press dyno "^Sustained processor" "radio button|toggle button|push button"').code === 0; if (!ok) { await new Promise((r) => setTimeout(r, 2000)); if (i % 4 === 3) atspi('press dyno "^Benchmarks$" "link"'); } } // the page appears a little after the link is pressed under Rosetta: wait on it, never spin
       const lines = () => atspi('tree dyno 80').stdout.split('\n').map((l) => l.trim()).filter((l) => /Run benchmarks|Sustained|Cancel|Running|Pass \d|Tick Yes|not|blocked/i.test(l)).slice(0, 12).join(' | ');
       if (!ok) return { ok: false, detail: `no "Sustained processor" choice on the Benchmarks page: ${lines()}` };
       if (atspi('press dyno "Run benchmarks$" "push button"').code !== 0) return { ok: false, detail: `no Run benchmarks button: ${lines()}` };
@@ -160,7 +196,7 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
       return { ok: true, detail: `benchmark running: ${text}` };
     },
     async stopLongJob() { atspi('press dyno "^Benchmarks$" "link"'); atspi('press dyno "^Cancel$" "push button"'); },
-    async jobsText() { return atspi('tree dyno 80').stdout.split('\n').filter((l) => /Start Dyno at login|Running benchmarks|Cancell?ed|Working|Cancel|jobs could not be read/i.test(l)).map((l) => l.trim()).join(' | '); },
+    async jobsText() { return (jobsPanelText(atspi('tree dyno 80').stdout) ?? '').split('\n').filter((l) => /Start Dyno at login|Running benchmarks|Cancell?ed|Working|Cancel|jobs could not be read/i.test(l)).map((l) => l.trim()).join(' | '); },
     async pressCancel() { return atspi('press dyno "^Cancel" "push button"').code === 0; },
   };
 }
