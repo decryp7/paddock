@@ -223,6 +223,30 @@ test('C99 waivers: a path with a glob is itself an error (W004), an exact path i
   }
 });
 
+test('C99 --scope: a release of one app is judged on that app and crates/ only, and a scope that matches nothing is broken', async (t) => {
+  const app = (name, deps) => ({
+    [`apps/${name}/paddock.ci.json`]: CI, [`apps/${name}/clippy.toml`]: '', [`apps/${name}/Cargo.lock`]: '#',
+    [`apps/${name}/Cargo.toml`]: `[package]\nname = "${name}"\nversion = "0.1.0"\n\n[dependencies]\n${deps}`, [`apps/${name}/src/lib.rs`]: 'pub fn f() {}\n',
+  });
+  const root = makeApp({ ...app('good', ''), ...app('bad', 'keyring = "4"\n'), 'crates/Cargo.toml': '[package]\nname = "shared"\nversion = "0.1.0"\n', 'crates/Cargo.lock': '#', 'crates/clippy.toml': '', 'crates/src/lib.rs': '' });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const seen = [];
+  const run = (scope) => findingsOf('C99', root, { options: { scope, probe: (d) => (seen.push(d.slice(root.length)), probe({ app: {} })), readSources: () => [], listBinaries: () => [] } });
+  assert.ok((await run(undefined)).some((f) => f.file === 'apps/bad/Cargo.toml'), 'repo-wide: the bad app is found');
+  seen.length = 0;
+  assert.deepEqual(await run('apps/good'), [], "scoped to the good app: the bad app's manifest does not block it");
+  assert.deepEqual(seen.sort(), ['/apps/good', '/crates'], 'its workspace and crates/ are probed, no other app');
+  assert.ok((await run('apps/bad')).some((f) => f.file === 'apps/bad/Cargo.toml'), 'scoped to the bad app: found');
+  const typo = await run('apps/goood');
+  assert.match(typo[0].message, /check broken: --scope apps\/goood matches no file/);
+  assert.equal(typo.length, 1);
+  // crates/ is always in scope.
+  const crates = makeApp({ ...app('good', ''), 'crates/Cargo.toml': '[package]\nname = "shared"\nversion = "0.1.0"\n\n[dependencies]\nkeyring = "4"\n', 'crates/src/lib.rs': '' });
+  t.after(() => rmSync(crates, { recursive: true, force: true }));
+  assert.ok((await findingsOf('C99', crates, { options: { scope: 'apps/good', graph: 'off' } })).some((f) => f.file === 'crates/Cargo.toml'));
+  assert.equal(parseArgs(['--app', 'x', '--scope', 'apps/y']).scope, 'apps/y');
+});
+
 // The whole path with a real cargo and no network: path dependencies.
 const hasCargo = spawnSync('cargo', ['--version']).status === 0;
 const skipCargo = hasCargo ? false : 'cargo is not installed here: run the conformance tests where cargo is (CI image)';

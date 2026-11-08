@@ -9,7 +9,7 @@ import { syncMain } from './sync/main.mjs';
 import { windowWeightMain } from './window-weight/cli.mjs';
 
 const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C04,C06] [--json] [--out file] [--summary file]
-                           [--strict C30,C36] [--no-graph] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
+                           [--strict C30,C36] [--no-graph] [--scope apps/<app>] [--bundle <dir>] [--artifacts <dir>] [--paddock <dir>] [--version vX.Y.Z]
                            [--preflight vX.Y.Z [--api url --repo owner/name]]
        paddock-conformance run [--allow-home a,b] [--keep] -- <command> [args]
        paddock-conformance commit-lint --file <path> | --range <rev-range>
@@ -17,7 +17,7 @@ const USAGE = `usage: paddock-conformance --app <name> [--root <dir>] [--only C0
        paddock-conformance window-weight [kind...] [--root <dir>] [--stats <file>] [--max <kB>] [--record]   # C29, rule 35
        paddock-conformance list`;
 
-const VALUE = new Set(['stats', 'max', 'app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'allow-home', 'strict']);
+const VALUE = new Set(['stats', 'max', 'app', 'root', 'only', 'out', 'summary', 'bundle', 'artifacts', 'paddock', 'version', 'preflight', 'api', 'repo', 'allow-home', 'strict', 'scope']);
 
 /** Parses `--key value` / `--flag` into an object; throws on anything unknown. */
 export function parseArgs(argv) {
@@ -85,6 +85,8 @@ export async function main(argv, { log = console.log, err = console.error, env =
         token: env.GITEA_TOKEN,
         // Offline local runs only (C99 layers 3 and 4 need the registry); CI never passes it. The run says so (a warning).
         graph: o['no-graph'] ? 'skipped' : undefined,
+        // C99 only: judge one app's workspaces and crates/ (a release of that app, ER-31).
+        scope: o.scope,
       },
     });
     writeOutputs(result, { out: o.out, summary: o.summary, env });

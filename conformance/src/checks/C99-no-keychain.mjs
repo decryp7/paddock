@@ -24,6 +24,8 @@
 //    Keychain feature on, and the sources of every other dependency are read for the Keychain symbols. A graph finding has
 //    its own path (`<dir>/Cargo.lock#<key>`) so a waiver names exactly that finding. A failed fetch, an unreadable graph or a
 //    missing Cargo.lock is "check broken" or "not measured": an error no waiver covers (ER-33).
+// `--scope apps/<app>` (the release path, ER-31): only that app's files and crates/ are read, so another app's finding cannot
+//    block this app's release; a scope matching no file is an unwaivable broken check. CI's c99 job runs the whole repository.
 // 5. The Clippy entries (lint/clippy.toml, compared by C13) ban the Keychain API paths and types in the app's own code.
 //    Recorded deviation (ADR 0057 §3.5): the two demos (apps/shell-demo, apps/workbench-demo) have no clippy.toml and keep
 //    none, so Clippy on macOS is NOT MEASURED for them; this check says so (a warning at `Cargo.lock#clippy-not-measured`)
@@ -152,7 +154,15 @@ export default {
     };
     const unreadable = (file) =>
       unwaivable(error('C99', 72, file, 1, `check broken: ${file} could not be read, so a Keychain use in it cannot be seen`, 'Make the file readable (permissions, encoding) and run the check again.'));
-    const files = ctx.files().filter(shipped);
+    // `--scope apps/<app>`: a release of one app is judged on that app's workspaces and the shared crates/ only (ER-31): another
+    // app's findings must not block it. A scope that matches no file is a broken check, never an empty pass (ER-33).
+    const scope = typeof ctx.options.scope === 'string' && ctx.options.scope ? ctx.options.scope.replace(/\/+$/, '') : null;
+    const inScope = (f) => !scope || f === scope || f.startsWith(`${scope}/`) || f.startsWith('crates/');
+    const all = ctx.files().filter(shipped);
+    if (scope && !all.some((f) => f.startsWith(`${scope}/`))) {
+      return [unwaivable(error('C99', 72, '.', 1, `check broken: --scope ${scope} matches no file, so nothing was checked`, 'Name the app folder as it is in the repository (apps/<app>).'))];
+    }
+    const files = all.filter(inScope);
     const manifests = files.filter((f) => f === 'Cargo.toml' || f.endsWith('/Cargo.toml'));
     if (!manifests.length) {
       // No Rust is a pass only when the app's CI contract says so (no `cargo` field); otherwise the scan saw nothing (ER-33).

@@ -24,15 +24,15 @@ export function parseWaivers(text) {
   return { waivers, problems };
 }
 
+/** Checks whose waivers must name one exact path (no `*`): a glob would cover findings nobody has read. */
+const EXACT_PATH_CHECKS = new Set(['C99']);
+
 /**
  * Splits findings into kept and waived, and adds findings for bad waivers: a waiver without a reason or a valid date is
  * W002, one past its date is W001 (and waives nothing). With `checksRun`, a live waiver for one of those checks that
  * waived no finding is a W003 warning (the finding was fixed: delete the waiver). A finding with `unwaivable: true` (a check
  * that could not run, "check broken" or "not measured") is never waived.
  */
-/** Checks whose waivers must name one exact path (no `*`): a glob would cover findings nobody has read. */
-const EXACT_PATH_CHECKS = new Set(['C99']);
-
 export function applyWaivers({ findings, waivers, problems = [], now = new Date(), file = 'paddock.waivers.toml', pathMatches, checksRun = null }) {
   const today = now.toISOString().slice(0, 10);
   const extra = problems.map((p) => ({ check: 'W002', severity: 'error', rule: 5, file, line: 1, message: `waiver file: ${p}`, fix: 'Fix the line.' }));
