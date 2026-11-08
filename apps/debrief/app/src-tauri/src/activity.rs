@@ -35,7 +35,7 @@ pub use ipc::{current_op, logged, OpId};
 pub use logger::{breadcrumbs, ActivityLogger};
 #[cfg(test)]
 pub(crate) use logger::{captured, test_capture, Captured};
-pub use steps::{steps, steps_text};
+pub use steps::steps;
 
 /// `SourceContext` of every activity entry (UI and Rust), the filter of Help ▸ Show activity log.
 pub const SOURCE_CONTEXT: &str = "Debrief.Activity";

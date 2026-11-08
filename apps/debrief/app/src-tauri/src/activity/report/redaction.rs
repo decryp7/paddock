@@ -1,11 +1,15 @@
-//! Removes secrets and personal data from the logs of a report, with the shared redactor (`paddock_diag`): secrets
-//! (tokens, passwords, keys, URL credentials, card numbers), user names, home folders, the machine's name, e-mail and
-//! IP addresses. Debrief adds MAC addresses, which the shared layers leave alone.
+//! Removes secrets and personal data from everything in a report but the user's own description, with the shared redactor
+//! (`paddock_diag`): secrets (tokens, passwords, keys, URL credentials, card numbers), user names, home folders, the machine's
+//! name, e-mail and public IP addresses (loopback and private ones are diagnostic and stay).
+//! Debrief adds MAC addresses, which the shared layers leave alone.
 //!
-//! Every log line passes here before the report counts, previews or writes it (a CLEF line is parsed and each string
-//! property redacted, so a replacement never breaks the line; anything else is redacted as text).
+//! Every log line and every JSON value passes here before the report counts, previews or writes it (a CLEF line is parsed and
+//! each string property redacted, so a replacement never breaks the line; a JSON file is redacted as a value, string by
+//! string, then printed; anything else is redacted as text).
 
 use paddock_diag::{RedactionCounts, Redactor};
+use serde::Serialize;
+use serde_json::Value;
 
 /// What replaces a MAC address.
 pub const MAC: &str = "<mac>";
@@ -56,20 +60,53 @@ pub fn redact_log(redactor: &Redactor, bytes: &[u8]) -> (Vec<u8>, RedactionCount
         }
         let (redacted, c) = redactor.log_line(line);
         out.push_str(&redacted);
-        add(&mut counts, &c);
+        counts.add(&c);
     }
     (out.into_bytes(), counts)
 }
 
-fn add(into: &mut RedactionCounts, o: &RedactionCounts) {
-    into.secrets += o.secrets;
-    into.fields += o.fields;
-    into.home_paths += o.home_paths;
-    into.profile_paths += o.profile_paths;
-    into.machine_names += o.machine_names;
-    into.user_names += o.user_names;
-    into.emails += o.emails;
-    into.ip_addresses += o.ip_addresses;
+/// A JSON value with the redactor's text rules applied to every string at every depth, keys included (a path or a name
+/// can be a key). Numbers, booleans and nulls are not text and stay.
+pub fn redact_value(redactor: &Redactor, value: &Value) -> (Value, RedactionCounts) {
+    let mut counts = RedactionCounts::default();
+    let out = walk(redactor, value, &mut counts);
+    (out, counts)
+}
+
+fn walk(redactor: &Redactor, value: &Value, counts: &mut RedactionCounts) -> Value {
+    match value {
+        Value::String(s) => Value::String(text(redactor, s, counts)),
+        Value::Array(items) => Value::Array(items.iter().map(|v| walk(redactor, v, counts)).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (text(redactor, k, counts), walk(redactor, v, counts)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn text(redactor: &Redactor, s: &str, counts: &mut RedactionCounts) -> String {
+    let (t, c) = redactor.text(s);
+    counts.add(&c);
+    t
+}
+
+/// What a JSON file of a report holds: `value` (any serialisable data) redacted as a [`Value`], then pretty-printed. The
+/// text is never redacted after printing, where a JSON-escaped path (`C:\\Users\\x`) would read differently.
+pub fn redacted_json(redactor: &Redactor, value: &impl Serialize) -> (Vec<u8>, RedactionCounts) {
+    let Ok(value) = serde_json::to_value(value) else {
+        return (Vec::new(), RedactionCounts::default());
+    };
+    let (value, counts) = redact_value(redactor, &value);
+    (serde_json::to_vec_pretty(&value).unwrap_or_default(), counts)
+}
+
+/// The steps to reproduce with each step redacted.
+pub fn redact_steps(redactor: &Redactor, steps: &[String]) -> (Vec<String>, RedactionCounts) {
+    let mut counts = RedactionCounts::default();
+    let out = steps.iter().map(|s| text(redactor, s, &mut counts)).collect();
+    (out, counts)
 }
 
 /// " (N secrets and personal details removed)", or nothing when none were found.
