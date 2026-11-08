@@ -407,3 +407,80 @@ fn a_first_frame_that_is_not_a_hello_or_of_another_frame_version_is_refused() {
     assert!(t.join().unwrap().is_err());
     assert!(codes::TOO_LARGE != codes::BUSY);
 }
+
+/// A credential source the test controls (IP1 item 5).
+#[cfg(unix)]
+struct FakeUid(Option<u32>);
+
+#[cfg(unix)]
+impl paddock_ipc::handshake::PeerCredentials for FakeUid {
+    fn peer_uid(&self) -> Option<u32> {
+        self.0
+    }
+}
+
+#[cfg(unix)]
+fn authenticate_with(
+    h: &mut Host,
+    uid: Option<u32>,
+) -> (Result<paddock_ipc::Connection, IpcError>, bool) {
+    let client = connect_from_thread(h, h.token().clone(), ProtocolVersion::UNVERSIONED);
+    let (stream, pid) = h.accept_raw(GUARD).unwrap();
+    let result = h
+        .authenticator()
+        .authenticate_as(stream, pid, None, &FakeUid(uid));
+    let client_ok = match &result {
+        // Keep the connection open until the client has finished its own handshake.
+        Ok(_) => client.join().unwrap().is_ok(),
+        Err(_) => client.join().unwrap().is_err(),
+    };
+    (result, client_ok)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_host_for_its_own_account_refuses_a_client_of_another_user() {
+    // SAFETY: `geteuid` has no arguments and cannot fail.
+    #[allow(unsafe_code)]
+    let me = unsafe { libc::geteuid() };
+    let mut h = host(ProtocolVersion::UNVERSIONED).same_account_only();
+    let (other, client_saw_refusal) = authenticate_with(&mut h, Some(me.wrapping_add(1)));
+    assert!(
+        matches!(&other, Err(IpcError::Auth(m)) if m.contains("another user")),
+        "{other:?}"
+    );
+    assert!(
+        client_saw_refusal,
+        "the client must be refused, not left waiting"
+    );
+    let (unknown, _) = authenticate_with(&mut h, None);
+    assert!(
+        matches!(&unknown, Err(IpcError::Auth(m)) if m.contains("could not be read")),
+        "{unknown:?}"
+    );
+    let (same, client_ok) = authenticate_with(&mut h, Some(me));
+    assert_eq!(same.unwrap().peer_uid(), Some(me));
+    assert!(client_ok);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_service_host_without_the_rule_serves_other_accounts() {
+    let mut h = host(ProtocolVersion::UNVERSIONED);
+    let (conn, client_ok) = authenticate_with(&mut h, Some(0xFFFF_0001));
+    assert_eq!(conn.unwrap().peer_uid(), Some(0xFFFF_0001));
+    assert!(client_ok);
+}
+
+/// The OS is the real credentials source of a stream (IP1 item 5).
+#[cfg(unix)]
+#[test]
+fn a_streams_credentials_are_the_os_answer() {
+    use paddock_ipc::PeerCredentials;
+    let (a, b) = endpoint::pair().unwrap();
+    // SAFETY: `geteuid` has no arguments and cannot fail.
+    #[allow(unsafe_code)]
+    let me = unsafe { libc::geteuid() };
+    assert_eq!(PeerCredentials::peer_uid(&a), Some(me));
+    assert_eq!(PeerCredentials::peer_uid(&b), a.peer_uid());
+}

@@ -5,6 +5,7 @@ use paddock_jobs::wire::{WirePhase, WireSnapshot, WireState};
 use paddock_jobs::{
     CancelReason, JobId, JobKind, JobSnapshot, JobState, Phase, PhaseProgress, Unit,
 };
+use paddock_limits::{LimitExceeded, LimitId, Quantity, Scope};
 
 fn snapshot(state: JobState) -> JobSnapshot {
     JobSnapshot {
@@ -40,6 +41,19 @@ fn every_state() -> Vec<JobState> {
         JobState::Done,
         JobState::Failed {
             message: "no".into(),
+            limit: None,
+        },
+        JobState::Failed {
+            message: "too big".into(),
+            limit: Some(
+                LimitExceeded::new(
+                    LimitId::new("archive.entries"),
+                    Quantity::Count(5),
+                    Scope::File,
+                )
+                .reaching(Quantity::Count(9))
+                .unwrap(),
+            ),
         },
         JobState::Cancelled {
             reason: CancelReason::User,
@@ -70,7 +84,7 @@ fn only_an_ended_job_is_terminal() {
         .collect();
     assert_eq!(
         terminal,
-        [false, false, false, false, true, true, true, true]
+        [false, false, false, false, true, true, true, true, true]
     );
     let w = WireSnapshot::from(&snapshot(JobState::Running { phase: None }));
     assert!(matches!(w.state, WireState::Running(None)));
@@ -82,4 +96,30 @@ fn only_an_ended_job_is_terminal() {
         done: 1,
     };
     assert_eq!(p.done, 1);
+}
+
+#[test]
+fn a_limit_is_json_in_the_ui_shape_and_absent_when_there_is_none() {
+    let with = JobState::Failed {
+        message: "m".into(),
+        limit: Some(LimitExceeded::new(
+            LimitId::new("archive.entries"),
+            Quantity::Count(5),
+            Scope::File,
+        )),
+    };
+    let json = serde_json::to_value(&with).unwrap();
+    assert_eq!(json["state"], "failed");
+    assert_eq!(json["limit"]["id"], "archive.entries");
+    assert_eq!(serde_json::from_value::<JobState>(json).unwrap(), with);
+    let without = serde_json::to_value(JobState::Failed {
+        message: "m".into(),
+        limit: None,
+    })
+    .unwrap();
+    assert!(without.get("limit").is_none(), "{without}");
+    // An older sender that never wrote `limit` still reads.
+    let old: JobState =
+        serde_json::from_value(serde_json::json!({"state": "failed", "message": "m"})).unwrap();
+    assert!(matches!(old, JobState::Failed { limit: None, .. }));
 }

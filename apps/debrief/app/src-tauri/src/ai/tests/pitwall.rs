@@ -79,15 +79,13 @@ fn automatic_uses_a_paired_pitwall_and_keeps_the_built_in_model_out_of_memory() 
     assert_eq!(json["engine"]["pitwall"]["usable"], true);
     let r = w.core.provider().unwrap().chat(&hello(), &mut |_| {}).unwrap();
     assert_eq!(r.text, "Hello from Pitwall.");
-    // Background work goes behind what the user waits for.
-    w.core.background_provider().unwrap().chat(&hello(), &mut |_| {}).unwrap();
     let prio: Vec<String> = w
         .fake
         .requests_to("/v1/chat/completions")
         .into_iter()
         .filter_map(|(_, h, _)| h.into_iter().find(|(n, _)| n == "x-pitwall-priority").map(|(_, v)| v))
         .collect();
-    assert_eq!(prio, ["interactive", "background"]);
+    assert_eq!(prio, ["interactive"], "no feature sends background requests (rule 46)");
     // No built-in model was loaded and none would preload.
     w.core.autoload();
     assert_eq!(*w.f.runtime.loads.lock().unwrap(), 0);
@@ -209,7 +207,7 @@ fn pitwall_works_without_the_built_in_worker() {
     assert_eq!(ai_health_of(&s), AiHealth::Fine);
     let r = w.core.provider().unwrap().chat(&hello(), &mut |_| {}).unwrap();
     assert_eq!(r.text, "Hello from Pitwall.");
-    assert!(w.core.engine(debrief_ai::engine::pitwall::Priority::Background).is_ok());
+    assert!(w.core.engine(debrief_ai::engine::pitwall::Priority::Interactive).is_ok());
     // The built-in engine itself is still reported unavailable when it is the one selected.
     assert!(w.core.built_in_availability().is_err());
     let mut next = w.core.settings();

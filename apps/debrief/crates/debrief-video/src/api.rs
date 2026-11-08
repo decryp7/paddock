@@ -132,6 +132,18 @@ pub struct FramesRequest {
     pub redo: bool,
 }
 
+/// What describing frames would cost, asked before a job starts so the person can confirm (rule 46).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct DescribePlan {
+    /// How many frames the model would describe.
+    pub frames: u32,
+    /// A rough time for all of them, in seconds, from this machine's recent describe runs; `None` until one was
+    /// measured (an estimate, not a promise).
+    pub estimate_seconds: Option<u32>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]

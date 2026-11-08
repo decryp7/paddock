@@ -5,6 +5,7 @@
 
 use crate::cancel::CancelReason;
 use crate::model::{JobId, JobKind, JobSnapshot, JobState, Phase, PhaseProgress, Unit};
+use paddock_limits::LimitExceeded;
 use serde::{Deserialize, Serialize};
 
 /// One stage of a job with how far it is.
@@ -31,8 +32,14 @@ pub enum WireState {
     Running(Option<WirePhase>),
     /// Finished.
     Done,
-    /// Stopped by an error.
-    Failed(String),
+    /// Stopped by an error. The limit is kept as a type when one stopped it (it is not skipped when absent: this travels
+    /// as postcard too).
+    Failed {
+        /// What failed, in words.
+        message: String,
+        /// The limit, when that was the cause.
+        limit: Option<LimitExceeded>,
+    },
     /// Stopped on request or at a deadline.
     Cancelled(CancelReason),
 }
@@ -67,7 +74,7 @@ impl WireSnapshot {
     pub fn is_terminal(&self) -> bool {
         matches!(
             self.state,
-            WireState::Done | WireState::Failed(_) | WireState::Cancelled(_)
+            WireState::Done | WireState::Failed { .. } | WireState::Cancelled(_)
         )
     }
 }
@@ -84,7 +91,10 @@ impl From<&JobSnapshot> for WireSnapshot {
                 done: p.done,
             })),
             JobState::Done => WireState::Done,
-            JobState::Failed { message } => WireState::Failed(message.clone()),
+            JobState::Failed { message, limit } => WireState::Failed {
+                message: message.clone(),
+                limit: *limit,
+            },
             JobState::Cancelled { reason } => WireState::Cancelled(*reason),
         };
         WireSnapshot {
@@ -118,7 +128,7 @@ impl From<WireSnapshot> for JobSnapshot {
                 }),
             },
             WireState::Done => JobState::Done,
-            WireState::Failed(message) => JobState::Failed { message },
+            WireState::Failed { message, limit } => JobState::Failed { message, limit },
             WireState::Cancelled(reason) => JobState::Cancelled { reason },
         };
         JobSnapshot {

@@ -21,7 +21,8 @@ pub use debrief_ipc::frame::ProtocolVersion;
 /// built for the same major version and a minor version it knows; otherwise it refuses the plugin with a message
 /// saying whether the plugin or Debrief needs an update.
 ///
-/// - **minor**: a request, reply, host request or manifest field was added at the end (older plugins keep working);
+/// - **minor** (ADR 0001 of the family): only a variant appended at the end of an enum; a field appended to a struct
+///   is a **major** change (postcard bodies carry no field names or count);
 /// - **major**: anything else (a plugin built for another major version must be rebuilt).
 ///
 /// The versions Debrief releases speak are listed in `docs/plugin-sdk.md` ("Versions"). 1.1 added the elevated

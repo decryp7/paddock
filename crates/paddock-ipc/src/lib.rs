@@ -27,18 +27,20 @@ pub mod frame;
 pub mod handshake;
 pub mod identity;
 pub mod launch;
+pub mod limit_rows;
 pub mod limits;
 pub mod link;
 pub mod peer;
 pub mod token;
 pub mod trust;
 pub mod wire;
+mod writeq;
 
 pub use body::{BodyHandler, BodyOptions, BodyPeer, body_handler};
 pub use endpoint::Access;
-pub use error::{IpcError, RemoteError, codes, panic_message};
+pub use error::{IpcError, ProtocolError, RemoteError, codes, panic_message};
 pub use frame::{Frame, FrameLimit, ProtocolVersion, Skew};
-pub use handshake::{Client, Connection, Host};
+pub use handshake::{Client, Connection, Host, PeerCredentials};
 pub use identity::{
     AccountId, AdminRule, AuditHint, Caller, PeerError, PeerSource, TokenAdmin, caller_of,
 };

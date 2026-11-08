@@ -487,7 +487,7 @@ pub(crate) fn run_turn(
         let access = WindowStore(win.clone());
         let browser_env = browser.map(|b| b.env());
         let store = win.engine.store().ok();
-        let names = win.names.for_assistant(store.as_deref(), core.settings().name_aliases);
+        let names = win.names.for_assistant(store.as_deref());
         let mut env = ChatEnv::new(&assistant, (&access as &dyn StoreAccess).into()).with_names(names);
         if let (Some(b), Some(e)) = (browser, browser_env.as_ref()) {
             env = env.with_browser(e).with_pages(b.pages.clone());
