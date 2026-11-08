@@ -161,7 +161,7 @@ have their own exit codes, on all three runners:
 A step reports its **class**: `fail` is the product; `check-broken` is the measurement or its control (a dead SSH, a UAC answer that did not take, a
 per-user leftover in the snapshot, a missing base image) and never counts as a product FAIL. A literal `ok: true` row is `info` (it cannot make a
 pass). Without `--ui` or `--reboot-check` (Windows), `--reboot-check` (Linux) or the right `--suite` the missing steps make the run INCOMPLETE;
-`--partial` requires only what the flags ask for and the result says it is not a release verdict. Windows has two runs (`--ui`, `--reboot-check`)
+`--partial` requires only what the flags ask for and the result says it is not a release verdict. Linux also takes `--only <row numbers>` (the numbers of the report table, for example `--only 7,10,19,23`): the setup (install, cold start, helper on) runs, the chosen rows are driven and required, the preconditions of the chosen rows are checked first and a broken one stops the run as `check broken: <precondition>` (`only-rows.mjs`); the run is partial. Windows has two runs (`--ui`, `--reboot-check`)
 because the restart run stops after the install and the start.
 
 The result header states the **installer's sha256**, its source (CI run id or local path) and the **build binding**: `--run` reads the run's head

@@ -26,6 +26,7 @@ import { mcpStep, quitStopStep } from './mcp-judges.mjs';
 import { hungPageStep } from './hung-page.mjs';
 import { diskSpaceStep, unixAdapter } from './disk-space-row.mjs';
 import { discoveryStep, unixDiscoveryPrims } from './discovery-row.mjs';
+import { firstBrokenPrecondition, onlyRequired, parseOnly } from './only-rows.mjs';
 import { NOT_DRIVEN, ROW_TITLES, judgeLinuxHelperLogDir, notDriven, rowStep } from './release-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,7 @@ export function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const v = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
-    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep-vm') o.keep = true; else if (a === '--reboot-check') o.reboot = true; else if (a === '--tray-host') o.trayHost = true; else if (a === '--old-installer') o.oldInstaller = v(); else if (a === '--expect-commit') o.expectCommit = v(); else if (a === '--partial') o.partial = true;
+    if (a === '--app') o.app = v(); else if (a === '--installer') o.installer = v(); else if (a === '--run') o.run = v(); else if (a === '--out') o.out = v(); else if (a === '--keep-vm') o.keep = true; else if (a === '--reboot-check') o.reboot = true; else if (a === '--tray-host') o.trayHost = true; else if (a === '--old-installer') o.oldInstaller = v(); else if (a === '--expect-commit') o.expectCommit = v(); else if (a === '--partial') o.partial = true; else if (a === '--only') { o.only = parseOnly(v()); o.partial = true; if (o.only.some((n) => n >= 7 && n <= 10)) o.reboot = true; }
     else throw new Error(`unknown option ${a}`);
   }
   if (o.app !== 'dyno') throw new Error('--app dyno is the only app with a Linux suite');
@@ -89,6 +90,8 @@ async function main(argv) {
     for (let i = 0; i < 60 && !/gnome-shell/.test(g('pgrep -x gnome-shell || true').stdout); i++) await sleep(3000);
     const steps = [];
     const push = (s) => { steps.push(s); log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
+    // --only <rows>: the setup (install, cold start, helper on) always runs; a row that was not chosen is not driven.
+    const want = (...rows) => !o.only || rows.some((n) => o.only.includes(n));
     const rosetta = g('cat /proc/sys/fs/binfmt_misc/rosetta | head -1').stdout.trim();
     log(`desktop up; rosetta ${rosetta || 'NOT registered'}`);
 
@@ -123,16 +126,18 @@ async function main(argv) {
     push(result('Cold start, one instance', checks, ps, 'one app, one agent under it'));
 
     // 3. Keep awake: systemd-inhibit lists a Dyno block inhibitor, then not.
-    const inhib = () => g('systemd-inhibit --list --no-pager').stdout;
-    checks = [{ ok: !/dyno/i.test(inhib()), detail: 'no Dyno inhibitor before "on"' }];
-    const on = ses('dyno awake on --for 1h 2>&1');
-    checks.push({ ok: on.code === 0, detail: `dyno awake on --for 1h exit ${on.code}` });
-    await sleep(3000);
-    const held = inhib();
-    checks.push({ ok: /dyno/i.test(held) && /block/.test(held), detail: 'systemd-inhibit lists a Dyno inhibitor that blocks sleep' });
-    ses('dyno awake off >/dev/null 2>&1'); await sleep(3000);
-    checks.push({ ok: !/dyno/i.test(inhib()), detail: 'the inhibitor is gone after "off"' });
-    push(result('Keep awake: held by the OS, then released', checks, held.split('\n').slice(0, 6), 'held 1 h, released after off'));
+    if (want(4)) {
+      const inhib = () => g('systemd-inhibit --list --no-pager').stdout;
+      checks = [{ ok: !/dyno/i.test(inhib()), detail: 'no Dyno inhibitor before "on"' }];
+      const on = ses('dyno awake on --for 1h 2>&1');
+      checks.push({ ok: on.code === 0, detail: `dyno awake on --for 1h exit ${on.code}` });
+      await sleep(3000);
+      const held = inhib();
+      checks.push({ ok: /dyno/i.test(held) && /block/.test(held), detail: 'systemd-inhibit lists a Dyno inhibitor that blocks sleep' });
+      ses('dyno awake off >/dev/null 2>&1'); await sleep(3000);
+      checks.push({ ok: !/dyno/i.test(inhib()), detail: 'the inhibitor is gone after "off"' });
+      push(result('Keep awake: held by the OS, then released', checks, held.split('\n').slice(0, 6), 'held 1 h, released after off'));
+    }
 
     if (o.trayHost) {
       const press0 = (re, role = 'push button') => atspi(`press dyno ${JSON.stringify(re)} ${JSON.stringify(role)}`).code === 0;
@@ -159,9 +164,24 @@ async function main(argv) {
     checks.push({ ok: !/^0$/m.test(w.split('\n').at(-1)), detail: 'a standard user cannot create files in the helper data folder' });
     push(result('Admin helper Turn on (polkit) and its folders', checks, stat.split('\n'), 'polkit answered, service active, folders root-only'));
 
+    // --only: the preconditions of the chosen rows are checked once, here, before any chosen row is driven (ER-33): a broken one stops the run.
+    if (o.only) {
+      const expectedNow = expectedCommit(o.expectCommit) ?? (o.run ? commitOfRun(o.run) : null);
+      const facts = {
+        installed: /^\d+\.\d+\.\d+/.test(ver),
+        commitMatches: expectedNow ? g(`grep -c -a -F -e ${expectedNow} /usr/bin/dyno-app >/dev/null; exit $?`).code === 0 : true,
+        helperActive: g('systemctl is-active dyno-helper.service').stdout.trim() === 'active',
+        autostartEntry: g('test -f "$HOME/.config/autostart/Dyno.desktop"').code === 0,
+        windowReadable: /Dyno/.test(atspi('tree dyno 4 2>&1').stdout),
+      };
+      log(`preconditions for rows ${o.only.join(',')}: ${JSON.stringify(facts)}`);
+      const broken = firstBrokenPrecondition(facts, o.only);
+      if (broken) throw new Error(`check broken: ${broken}`);
+    }
+
     // Launch at login (release row): the first-run default (~/.config/autostart/Dyno.desktop, Exec "dyno-app --hidden"), then the Settings switch through AT-SPI (the same
     // name and roles as row 5a's driver): off removes the file, on restores it once. Read before anything else touches the switch.
-    {
+    if (want(6)) {
       press('^Dyno$'); await sleep(1500);
       const lj = linuxLoginJobsDriver(atspi, parseSwitchState);
       const readEntry = async () => {
@@ -174,7 +194,7 @@ async function main(argv) {
         witness: async () => g('grep -rh -i -E "autostart|start at login|launch at login" "$HOME/.local/share/dyno" "$HOME/.cache/dyno" 2>/dev/null | tail -n 12').stdout.split('\n') }));
     }
 
-    if (o.reboot) {
+    if (o.reboot && want(7, 8, 9, 10)) {
       // The restart check (user's real PC): helper on + Launch at login on, record start-at-boot, reboot the guest, log in, and without Repair
       // record the helper, the card, whether Dyno started itself (XDG autostart) and how long after login, the tray, and one reading.
       const boot = () => g('echo "is-enabled: $(systemctl is-enabled dyno-helper.service 2>&1)"; echo "is-active: $(systemctl is-active dyno-helper.service)"; systemctl cat dyno-helper.service 2>&1 | grep -E "^(WantedBy|Restart|RestartSec|ExecStart|\\[)" ; ls -l ~/.config/autostart/ /etc/xdg/autostart/ 2>&1 | grep -i dyno').stdout.trim().split('\n');
@@ -253,10 +273,10 @@ async function main(argv) {
         return Number(r.stdout.trim().split('\n').at(-1)) > 0 ? { ok: true, detail: 'nft rule on tcp port 59999 loaded' } : { ok: false, detail: `nft did not list the rule: ${r.stdout.trim().slice(-120)}` };
       },
       async cleanup(key) { if (key === 'nft-rule') g('sudo nft delete table inet vmsmoke 2>&1; true'); } };
-    for (const fn of readingSteps('linux', async () => driver)) push(await fn({}));
+    if (want(11, 12, 13, 14, 15, 16)) for (const fn of readingSteps('linux', async () => driver)) push(await fn({}));
 
     // Rule 71: Dyno's MCP from outside the app (guest only). The key and mcp.json are seeded where the product reads them (mcp-guest.mjs), then the app is restarted.
-    {
+    if (want(17)) {
       const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-mcp${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
       const mg = makeMcpGuest({
         os: 'linux', dyno: '/usr/bin/dyno', sh: async (c) => { const r = ses(c); return { code: r.code, stdout: r.stdout }; },
@@ -274,54 +294,60 @@ async function main(argv) {
     // The MCP row above restarted the app, which closed the Settings window: open it again the way a user does before the Settings rows (Turn off, Row 5a).
     for (let i = 0; i < 3 && !/Turn off administrator readings|Turn on administrator readings/.test(atspi('tree dyno 60 2>&1').stdout); i++) { press('^File$', 'menu item'); await sleep(1200); press('^Settings…$', 'menu item'); await sleep(5000); }
     // 6. Turn off: the service and data are gone.
-    press('^Dyno$');
-    checks = [{ ok: press('Turn off administrator readings'), detail: 'pressed "Turn off administrator readings"' }];
-    let offPrompt = false;
-    for (let i = 0; i < 15 && !offPrompt; i++) { await sleep(2000); offPrompt = g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes'; }
-    if (offPrompt) { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, info: true, detail: 'Turn off asked for polkit and was answered' }); }
-    // "Installed" = the service is active or enabled (or a copy of the unit sits in /etc, where a registration without the package writes it).
-    // The unit file in /usr/lib/systemd/system belongs to the .deb (dpkg owns it; Turn off only disables and stops it), so it stays until the
-    // package is removed. A leftover data folder is its own line, with what is in it.
-    const installed = () => g('if [ -e /etc/systemd/system/dyno-helper.service ] || systemctl is-active --quiet dyno-helper.service || systemctl is-enabled --quiet dyno-helper.service; then echo installed; else echo removed; fi').stdout.trim();
-    let state = installed();
-    for (let i = 0; i < 25 && state !== 'removed'; i++) { await sleep(3000); state = installed(); }
-    checks.push({ ok: state === 'removed', detail: state === 'removed' ? 'the service is stopped and disabled (the unit file stays: the package owns it)' : 'the service is still active or enabled, or a unit copy is in /etc, 75 s after Turn off' });
-    const folder = g('sudo ls -la /var/lib/dyno-helper 2>&1').stdout.trim();
-    const folderGone = /No such file or directory/.test(folder);
-    // 7526 includes the log-race fix (450746cfd): the data folder must be gone.
-    checks.push({ ok: folderGone, detail: folderGone ? 'the helper data folder is gone' : 'the helper data folder /var/lib/dyno-helper is left in place after Turn off (contents below)' });
-    const why = g('echo "pkexec: $(pgrep -x pkexec || echo none)"; echo "service: $(systemctl is-active dyno-helper.service) enabled: $(systemctl is-enabled dyno-helper.service 2>&1)"; ls -l /usr/lib/systemd/system/dyno-helper.service /etc/systemd/system/dyno-helper.service /etc/systemd/system/multi-user.target.wants/dyno-helper.service 2>&1; ls -ld /var/lib/dyno-helper 2>&1; sudo journalctl -u dyno-helper.service --no-pager 2>&1 | tail -5').stdout.trim();
-    const card = atspi('tree dyno 60').stdout.split('\n').map((l) => l.trim()).filter((l) => /administrator|Turn|helper|polkit|authenticate|not allowed|cancel/i.test(l)).slice(0, 8);
-    push(result('Admin helper Turn off removes it', checks, [...why.split('\n'), '$ sudo ls -la /var/lib/dyno-helper', ...folder.split('\n'), ...card], 'service and data removed'));
+    if (want(18)) {
+      press('^Dyno$');
+      checks = [{ ok: press('Turn off administrator readings'), detail: 'pressed "Turn off administrator readings"' }];
+      let offPrompt = false;
+      for (let i = 0; i < 15 && !offPrompt; i++) { await sleep(2000); offPrompt = g('pgrep -x pkexec >/dev/null && echo yes || echo no').stdout.trim() === 'yes'; }
+      if (offPrompt) { ses('xdotool type --delay 80 admin; xdotool key Return'); checks.push({ ok: true, info: true, detail: 'Turn off asked for polkit and was answered' }); }
+      // "Installed" = the service is active or enabled (or a copy of the unit sits in /etc, where a registration without the package writes it).
+      // The unit file in /usr/lib/systemd/system belongs to the .deb (dpkg owns it; Turn off only disables and stops it), so it stays until the
+      // package is removed. A leftover data folder is its own line, with what is in it.
+      const installed = () => g('if [ -e /etc/systemd/system/dyno-helper.service ] || systemctl is-active --quiet dyno-helper.service || systemctl is-enabled --quiet dyno-helper.service; then echo installed; else echo removed; fi').stdout.trim();
+      let state = installed();
+      for (let i = 0; i < 25 && state !== 'removed'; i++) { await sleep(3000); state = installed(); }
+      checks.push({ ok: state === 'removed', detail: state === 'removed' ? 'the service is stopped and disabled (the unit file stays: the package owns it)' : 'the service is still active or enabled, or a unit copy is in /etc, 75 s after Turn off' });
+      const folder = g('sudo ls -la /var/lib/dyno-helper 2>&1').stdout.trim();
+      const folderGone = /No such file or directory/.test(folder);
+      // 7526 includes the log-race fix (450746cfd): the data folder must be gone.
+      checks.push({ ok: folderGone, detail: folderGone ? 'the helper data folder is gone' : 'the helper data folder /var/lib/dyno-helper is left in place after Turn off (contents below)' });
+      const why = g('echo "pkexec: $(pgrep -x pkexec || echo none)"; echo "service: $(systemctl is-active dyno-helper.service) enabled: $(systemctl is-enabled dyno-helper.service 2>&1)"; ls -l /usr/lib/systemd/system/dyno-helper.service /etc/systemd/system/dyno-helper.service /etc/systemd/system/multi-user.target.wants/dyno-helper.service 2>&1; ls -ld /var/lib/dyno-helper 2>&1; sudo journalctl -u dyno-helper.service --no-pager 2>&1 | tail -5').stdout.trim();
+      const card = atspi('tree dyno 60').stdout.split('\n').map((l) => l.trim()).filter((l) => /administrator|Turn|helper|polkit|authenticate|not allowed|cancel/i.test(l)).slice(0, 8);
+      push(result('Admin helper Turn off removes it', checks, [...why.split('\n'), '$ sudo ls -la /var/lib/dyno-helper', ...folder.split('\n'), ...card], 'service and data removed'));
+    }
 
     // Row 5a: the Start at login change in the Jobs list with Cancel (Settings is open here).
-    push(await loginJobsRow(linuxLoginJobsDriver(atspi, parseSwitchState), { now: () => Date.now(), sleep }));
-    press('^Dyno$'); await sleep(1000);
+    if (want(19)) {
+      push(await loginJobsRow(linuxLoginJobsDriver(atspi, parseSwitchState), { now: () => Date.now(), sleep }));
+      press('^Dyno$'); await sleep(1000);
+    }
 
     // Release row: disk space (Dyno's figure against the OS's, decimal units, refresh within 60 s of a 1 GB write).
-    push(await diskSpaceStep({ exec: async (c) => ses(c, 300_000), sleep, now: () => Date.now(), adapter: unixAdapter({ os: 'linux', dyno: '/usr/bin/dyno' }) }));
+    if (want(20)) push(await diskSpaceStep({ exec: async (c) => ses(c, 300_000), sleep, now: () => Date.now(), adapter: unixAdapter({ os: 'linux', dyno: '/usr/bin/dyno' }) }));
 
     // Release row: the discovery file is rewritten within 30 s when deleted or naming another agent.
-    push(await discoveryStep(unixDiscoveryPrims({ exec: async (c) => ses(c, 120_000), sleep, now: () => Date.now(), file: '$HOME/.local/share/dyno/agent.json', dyno: '/usr/bin/dyno' })));
+    if (want(21)) push(await discoveryStep(unixDiscoveryPrims({ exec: async (c) => ses(c, 120_000), sleep, now: () => Date.now(), file: '$HOME/.local/share/dyno/agent.json', dyno: '/usr/bin/dyno' })));
 
     // 7. Quit: File > Quit ends the app and the agent.
-    press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit Dyno( \\(keeps measuring\\))?$', 'menu item'); await sleep(8000);
-    // The helper is a system service that runs while it is on, independent of the app (coordinator 2026-11-07): it is not a leftover after Quit.
-    // Quit: poll up to 40 s (as on macOS and Windows) for no dyno process; print what is left with its parent.
-    let leftList = '';
-    for (let i = 0; i < 20; i++) { leftList = g('ps -eo pid=,ppid=,etimes=,args= | grep -E "dyno-(app|agent)( |$)" | grep -v -e grep -e dyno-helper').stdout.trim(); if (!leftList) break; await sleep(2000); }
-    // With the login service on, the supervised agent (`dyno-agent run` under systemd --user, unit active) is expected to survive Quit;
-    // everything else of Dyno must be gone.
-    const supervised = ses('systemctl --user is-active dyno-agent 2>&1').stdout.trim() === 'active';
-    const sysUserPid = ses('systemctl --user show -p MainPID --value dyno-agent 2>&1').stdout.trim();
-    const leftLines = leftList ? leftList.split('\n') : [];
-    const isSupervisedAgent = (l) => { const f = l.trim().split(/\s+/); return supervised && /dyno-agent run$/.test(l.trim()) && f[0] === sysUserPid; };
-    const others = leftLines.filter((l) => !isSupervisedAgent(l));
-    const survivors = leftLines.filter(isSupervisedAgent);
-    push(result('Quit (File > Quit) leaves only the supervised agent', [{ ok: others.length === 0, detail: others.length === 0 ? 'no Dyno process other than the supervised agent 40 s after Quit' : `${others.length} Dyno process(es) still running 40 s after Quit (pid ppid seconds args below)` }, ...(supervised ? [{ ok: survivors.length === 1, detail: survivors.length === 1 ? `the supervised agent survived Quit: pid ${sysUserPid}, unit dyno-agent active` : `the login service is active (MainPID ${sysUserPid}) but no matching dyno-agent run survived Quit` }] : [])], leftList ? ['pid ppid age-s args', ...leftLines] : [], 'only the supervised agent is left'));
+    if (want(22, 23)) {
+      press('^Close$'); press('^File$', 'menu item'); await sleep(1000); press('^Quit Dyno( \\(keeps measuring\\))?$', 'menu item'); await sleep(8000);
+      // The helper is a system service that runs while it is on, independent of the app (coordinator 2026-11-07): it is not a leftover after Quit.
+      // Quit: poll up to 40 s (as on macOS and Windows) for no dyno process; print what is left with its parent.
+      let leftList = '';
+      for (let i = 0; i < 20; i++) { leftList = g('ps -eo pid=,ppid=,etimes=,args= | grep -E "dyno-(app|agent)( |$)" | grep -v -e grep -e dyno-helper').stdout.trim(); if (!leftList) break; await sleep(2000); }
+      // With the login service on, the supervised agent (`dyno-agent run` under systemd --user, unit active) is expected to survive Quit;
+      // everything else of Dyno must be gone.
+      const supervised = ses('systemctl --user is-active dyno-agent 2>&1').stdout.trim() === 'active';
+      const sysUserPid = ses('systemctl --user show -p MainPID --value dyno-agent 2>&1').stdout.trim();
+      const leftLines = leftList ? leftList.split('\n') : [];
+      const isSupervisedAgent = (l) => { const f = l.trim().split(/\s+/); return supervised && /dyno-agent run$/.test(l.trim()) && f[0] === sysUserPid; };
+      const others = leftLines.filter((l) => !isSupervisedAgent(l));
+      const survivors = leftLines.filter(isSupervisedAgent);
+      push(result('Quit (File > Quit) leaves only the supervised agent', [{ ok: others.length === 0, detail: others.length === 0 ? 'no Dyno process other than the supervised agent 40 s after Quit' : `${others.length} Dyno process(es) still running 40 s after Quit (pid ppid seconds args below)` }, ...(supervised ? [{ ok: survivors.length === 1, detail: survivors.length === 1 ? `the supervised agent survived Quit: pid ${sysUserPid}, unit dyno-agent active` : `the login service is active (MainPID ${sysUserPid}) but no matching dyno-agent run survived Quit` }] : [])], leftList ? ['pid ppid age-s args', ...leftLines] : [], 'only the supervised agent is left'));
+    }
 
     // Rule 71: Quit and stop measuring (menu click over AT-SPI, no product flag), observed for 60 s, then reopened.
-    {
+    if (want(23)) {
       const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-qs${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(8000); };
       const count = async () => Number(g('ps -eo comm= | grep -cE "^dyno-(app|agent)$"').stdout.trim()) || 0;
       const rebootEv = [];
@@ -354,7 +380,7 @@ async function main(argv) {
       }));
     }
     // Hung or paused visible page (watchdog design, crates/paddock-startup): the WebKit content process is stopped with SIGSTOP; the app log and AT-SPI show the question.
-    {
+    if (want(24)) {
       const startApp = async () => { ses(`systemd-run --user --collect --unit=dyno-hung${Date.now() % 100000} -E DISPLAY=:0 -E XAUTHORITY=$XAUTHORITY /usr/bin/dyno-app >/dev/null 2>&1`); for (let i = 0; i < 30 && ses('dyno status >/dev/null 2>&1; echo $?').stdout.trim() !== '0'; i++) await sleep(4000); await sleep(15_000); };
       await startApp();
       const count = () => Number(atspi('tree . 12 | grep -c "Keep Waiting"').stdout.trim()) || 0;
@@ -367,7 +393,7 @@ async function main(argv) {
       }, ROW_TITLES.hungPage));
     }
     // Release rows: the Linux uninstall must leave the helper's log folder; the rest are not driven here.
-    {
+    if (want(25)) {
       // The precondition is set up here, always: the helper was turned off by the step above, so it is installed again the way the Settings button does it (as root,
       // `dyno-helper install --for uid:1000`, no prompt), and the row only judges when the unit is active and the folder already lists its log.
       g('sudo /usr/bin/dyno-helper install --for uid:1000 >/dev/null 2>&1; true', 120_000);
@@ -380,7 +406,7 @@ async function main(argv) {
       push(rowStep(ROW_TITLES.linuxLogDir, judgeLinuxHelperLogDir({ code: ls.code, out: ls.stdout, helperActive, logBefore }), 'the helper log folder survives the uninstall (helper on at the removal)'));
     }
     // Release row: the new .deb over a RUNNING older build (--old-installer <older .deb>; dpkg -i).
-    {
+    if (want(26)) {
       if (!o.oldInstaller) push(swapNotDriven('no older build was given (--old-installer <older .deb>: the 1.0.0 .deb or an older RC), so there is nothing to install over'));
       else {
         sh('bash', ['-c', `cat ${JSON.stringify(resolve(o.oldInstaller))} | TART_HOME=${TART_HOME} tart exec -i ${vm} bash -c 'cat > /tmp/DynoOld.deb'`], 600_000);
@@ -397,7 +423,8 @@ async function main(argv) {
     const expected = expectedCommit(o.expectCommit) ?? (o.run ? commitOfRun(o.run) : null);
     const probe = expected ? g(`grep -c -a -F -e ${expected} /usr/bin/dyno-app >/dev/null; exit $?`) : null;
     const allSteps = withBuildStep(steps, buildStep({ expected, found: probe ? foundFromGrep(probe.code) : null }));
-    const required = requiredSteps({ os: 'linux', reboot: Boolean(o.reboot), trayHost: Boolean(o.trayHost), release: !o.partial, partial: Boolean(o.partial) });
+    const required0 = requiredSteps({ os: 'linux', reboot: Boolean(o.reboot), trayHost: Boolean(o.trayHost), release: !o.partial, partial: Boolean(o.partial) });
+    const required = o.only ? onlyRequired(required0, o.only) : required0;
     const source = o.installer ?? `CI run ${o.run}, artifact dyno-Linux, ${basename(deb)}`;
     const { file, exit } = finalizeRun({
       out, started, meta: { label: 'linux-reboot', os: 'linux', run: o.run ?? null },
