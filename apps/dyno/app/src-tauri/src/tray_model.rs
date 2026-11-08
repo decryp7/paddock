@@ -360,6 +360,9 @@ pub struct TrayItems {
     policy: AlertPolicy,
     /// The metrics the agent has an open alarm for now.
     alarmed: Vec<Metric>,
+    /// The last [`HISTORY`] live updates (without the process table), oldest first: a graph made now starts from them instead
+    /// of one column.
+    recent: VecDeque<LiveUpdate>,
 }
 
 /// A measurement: where it sits on the 0-100 drawing scale, and how to say it.
@@ -402,6 +405,7 @@ impl TrayItems {
             memo: Default::default(),
             policy: AlertPolicy::default(),
             alarmed: Vec::new(),
+            recent: VecDeque::new(),
         }
     }
 
@@ -457,12 +461,28 @@ impl TrayItems {
         &self.specs
     }
 
-    /// Replaces the items; returns whether they changed.
+    /// Replaces the items; returns whether they changed. An item that keeps its id and metric keeps its history (a change of
+    /// style or of an other item does not empty its graph); every item is drawn again at the next update.
     pub fn set_specs(&mut self, specs: Vec<ItemSpec>) -> bool {
         if specs == self.specs {
             return false;
         }
-        self.state = specs.iter().map(|_| ItemState::default()).collect();
+        let mut old: std::collections::HashMap<String, (Metric, ItemState)> = self
+            .specs
+            .drain(..)
+            .zip(self.state.drain(..))
+            .map(|(spec, st)| (spec.id, (spec.metric, st)))
+            .collect();
+        self.state = specs
+            .iter()
+            .map(|spec| match old.remove(&spec.id) {
+                Some((metric, st)) if metric == spec.metric => ItemState {
+                    history: st.history,
+                    ..ItemState::default()
+                },
+                _ => ItemState::default(),
+            })
+            .collect();
         self.memo.borrow_mut().clear();
         self.specs = specs;
         true
@@ -523,6 +543,15 @@ impl TrayItems {
                 self.state[i].last = Some(frame.clone());
                 changed.push((self.specs[i].id.clone(), frame));
             }
+        }
+        // Kept for graphs made later; the process table is the large part and no item reads it (they read the top lists).
+        let mut kept = u.clone();
+        kept.processes = None;
+        kept.groups = None;
+        kept.other_users = None;
+        self.recent.push_back(kept);
+        while self.recent.len() > HISTORY {
+            self.recent.pop_front();
         }
         changed
     }
@@ -603,6 +632,17 @@ impl TrayItems {
             let tooltip = item_tooltip(&name, &TipState::Unavailable);
             return self.frame(&spec, &Sample::default(), Visual::Unavailable, dark, tooltip);
         };
+        let graph = matches!(spec.glyph, Glyph::Graph | Glyph::GraphNumber);
+        if graph && self.state[i].history.is_empty() {
+            // A graph made now (added, or changed to a graph) starts from the recent updates, not from one column.
+            let seed: Vec<f32> = self
+                .recent
+                .iter()
+                .filter_map(|old| self.measure(old, &spec.metric))
+                .map(|m| m.scale)
+                .collect();
+            self.state[i].history.extend(seed);
+        }
         let history = &mut self.state[i].history;
         history.push_back(m.scale);
         while history.len() > HISTORY {
@@ -617,11 +657,7 @@ impl TrayItems {
         let s = Sample {
             value: Some(shown),
             // Only the graphs draw the history; for the others it must not make the sample (and so the memo key) change every tick.
-            history: if matches!(spec.glyph, Glyph::Graph | Glyph::GraphNumber) {
-                history.iter().copied().collect()
-            } else {
-                Vec::new()
-            },
+            history: if graph { history.iter().copied().collect() } else { Vec::new() },
             // Only the core bars draw the cores (they return above) and only the network items draw up and down: for the
             // others these change every tick on a real machine and would make the memo key miss every time.
             cores: Vec::new(),
@@ -720,6 +756,15 @@ mod tests {
         ItemSpec::new(id, metric, glyph)
     }
 
+    /// The columns of a Windows icon that hold the accent (the graph's fill), left to right.
+    fn accent_columns(look: &Look, dark: bool) -> usize {
+        let accent = pixel::Theme { dark }.accent();
+        let w = look.width as usize;
+        (0..w)
+            .filter(|x| look.pictures[0].rgba.chunks(4).skip(*x).step_by(w).any(|p| p == accent))
+            .count()
+    }
+
     #[test]
     fn a_style_change_keeps_the_id_remakes_that_icon_and_its_picture_differs() {
         use paddock_widgets::{apply, Edit, Layout, PlacementId};
@@ -756,6 +801,56 @@ mod tests {
             };
             assert_ne!(picture(&old), picture(&new), "{:?} {}", env.platform, env.px);
         }
+    }
+
+    #[test]
+    fn a_new_graph_starts_from_the_recent_updates_not_from_one_column() {
+        let number = item("number", Metric::CpuTotal, Glyph::Number);
+        let mut t = TrayItems::new(vec![number.clone()], win_env(16));
+        for i in 0..12 {
+            t.frames(&update(20.0 + 5.0 * i as f32), true);
+        }
+        let graph = item("line-graph", Metric::CpuTotal, Glyph::Graph);
+        assert!(t.set_specs(vec![number, graph.clone()]));
+        let first = t
+            .frames(&update(40.0), true)
+            .into_iter()
+            .find(|(i, _)| i == "line-graph")
+            .expect("drawn")
+            .1;
+        assert!(
+            accent_columns(&first.look, true) > 1,
+            "the first frame of a new graph has its history"
+        );
+        assert_eq!(accent_columns(&first.look, true), 13, "the twelve updates before it and its own");
+    }
+
+    #[test]
+    fn a_graph_keeps_its_history_when_another_item_changes_and_loses_it_with_its_metric() {
+        let graph = item("line-graph", Metric::CpuTotal, Glyph::Graph);
+        let mut t = TrayItems::new(vec![graph.clone()], win_env(16));
+        for i in 0..5 {
+            t.frames(&update(30.0 + i as f32), true);
+        }
+        t.set_specs(vec![graph.clone(), item("number", Metric::Memory, Glyph::Number)]);
+        let kept = t
+            .frames(&update(50.0), true)
+            .into_iter()
+            .find(|(i, _)| i == "line-graph")
+            .expect("drawn")
+            .1;
+        assert_eq!(accent_columns(&kept.look, true), 6);
+        // Another metric on the same id starts from the recent updates of that metric.
+        let mut memory = graph;
+        memory.metric = Metric::Memory;
+        t.set_specs(vec![memory]);
+        let swapped = t
+            .frames(&update(50.0), true)
+            .into_iter()
+            .find(|(i, _)| i == "line-graph")
+            .expect("drawn")
+            .1;
+        assert_eq!(accent_columns(&swapped.look, true), 7, "six recent updates and this one");
     }
 
     #[test]

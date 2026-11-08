@@ -8,6 +8,7 @@
 - On Windows, adding an item says that Windows puts the new icon in the overflow and how to keep it on the taskbar (Settings > Personalization > Taskbar > Other system tray icons).
 - On Windows and Linux, Bars draws a vertical column (it drew the meter) and Graph and number draws the number over a small graph (it drew the graph), at every icon size.
 - Where a style is drawn as another, the Style select says so ("Ring, drawn as meter" on a Mac). Network and temperature items say what they draw instead of offering a style.
+- A graph you add, or change an item to, starts with the recent values instead of one column, and a graph keeps its history when another item changes.
 
 ## [1.1.0] - 2026-11-06
 
