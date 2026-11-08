@@ -35,7 +35,7 @@ describe('MockWidgets layouts', () => {
     expect(() => w.edit({ popover: { resize: { id: 'cpu-memory', span: 1 } } })).toThrow(/not available/);
     expect(() => w.edit({ popover: { remove: { id: 'nope' } } })).toThrow(/no longer/);
     expect(() => w.edit({ popover: 'undo' })).toThrow(/nothing to undo/);
-    for (const k of ['network', 'backupHealth', 'lastIssue', 'pinnedCounters'] as const) w.edit({ popover: { add: { widget: k, span: null, at: null } } });
+    for (const k of ['network', 'lastIssue', 'pinnedCounters', 'topApps'] as const) w.edit({ popover: { add: { widget: k, span: null, at: null } } });
     w.edit({ popover: { add: { widget: { diskSpace: { volume: 'system' } }, span: null, at: null } } });
     expect(ids(w)).toContain('disk-space-2');
     expect(() => w.edit({ popover: { add: { widget: { diskSpace: { volume: 'all' } }, span: null, at: null } } })).toThrow(/At most 8 widgets fit in the popup/);
@@ -72,8 +72,8 @@ describe('MockWidgets dashboard grid', () => {
     const w = new MockWidgets();
     const d = dash(w);
     expect(d.layout.placements).toHaveLength(15);
-    expect(rect(w, 'health')).toMatchObject({ x: 0, y: 0, w: 6, h: 9 });
-    expect(rect(w, 'diagnosis')).toMatchObject({ x: 6, y: 0, w: 6, h: 9 });
+    expect(rect(w, 'health')).toMatchObject({ x: 0, y: 0, w: 6, h: 12 });
+    expect(rect(w, 'diagnosis')).toMatchObject({ x: 6, y: 0, w: 6, h: 12 });
     expect(d.arrangements.map((a) => a.columns)).toEqual([12, 6, 1]);
     const order = (n: number) => d.arrangements[n]!.placements.map((p) => p.id);
     expect(order(1)).toEqual(order(0));
@@ -192,6 +192,7 @@ describe('mockMetricReading', () => {
     expect(mockMetricReading(query('diskFree'), system)).toMatchObject({ text: '40', unit: '%', reason: null });
     expect(mockMetricReading(query('networkDown'), system)).toMatchObject({ text: '2.5', unit: 'MB/s', percent: null, reason: null });
     expect(mockMetricReading(query('networkUp'), system)).toMatchObject({ text: '800', unit: 'B/s' });
+    expect(mockMetricReading(query('networkBoth'), system)).toMatchObject({ text: '2.5', unit: 'MB/s' });
   });
 
   it('says why when the disk reports no busy time', () => {

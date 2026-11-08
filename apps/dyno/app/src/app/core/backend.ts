@@ -2,16 +2,15 @@ import { InjectionToken } from '@angular/core';
 import type {
   ActivityEntry,
   AgentStatus,
+  TrayAvailability,
   Alarm,
   AlarmChange,
   AlarmFilter,
   AlarmStats,
   Alert,
-  BundlePreview,
   HostName,
   RecorderSnapshot,
   RecorderSnapshotInfo,
-  SavedDiagnostics,
   ShelveFor,
   Anomaly,
   Diagnosis,
@@ -20,7 +19,7 @@ import type {
   HistoryRange,
   LiveDetail,
   LiveUpdate,
-  Locker,
+  LockerList,
   PluginInfo,
   ProcessDetails,
   ProcessRef,
@@ -68,7 +67,6 @@ import type {
   BenchExportFormat,
   BenchEstimateRequest,
   BenchRunEstimate,
-  BackupReport,
   ChangeTimeline,
   ChangesQuery,
   GpuReport,
@@ -108,6 +106,10 @@ export interface DynoBackend {
   onAlert(listener: (a: Alert) => void): Unsubscribe;
   onActivity(listener: (a: ActivityEntry) => void): Unsubscribe;
   onAgentStatus(listener: (s: AgentStatus) => void): Unsubscribe;
+  /** Whether the desktop shows the tray icons now (Settings > Menu bar shows the engine's note when it does not). */
+  trayAvailability(): Promise<TrayAvailability>;
+  /** The desktop started or stopped showing the tray icons (a tray host appeared after the start, or went). */
+  onTrayAvailability(listener: (a: TrayAvailability) => void): Unsubscribe;
   /** Alarm changes pushed by the agent (new, repeated, returned, acknowledged, shelved, muted, noted). */
   onAlarm(listener: (c: AlarmChange) => void): Unsubscribe;
   /** A disk scan's status changed (at most four a second per scan, one final); keep the highest `seq`. No polling. */
@@ -117,7 +119,7 @@ export interface DynoBackend {
 
   // Processes.
   processDetails(target: ProcessRef): Promise<ProcessDetails>;
-  lockers(path: string): Promise<Locker[]>;
+  lockers(path: string): Promise<LockerList>;
   openLocation(target: ProcessRef): Promise<void>;
   takeSnapshot(label: string): Promise<SnapshotInfo>;
   snapshots(): Promise<SnapshotInfo[]>;
@@ -240,11 +242,6 @@ export interface DynoBackend {
   recorderSnapshots(): Promise<RecorderSnapshotInfo[]>;
   recorderSnapshot(id: number): Promise<RecorderSnapshot>;
 
-  // Diagnostics bundle: a redacted zip for a bug report. Nothing is written until the user picks a file.
-  diagnosticsPreview(): Promise<BundlePreview>;
-  /** Asks the user where to save (the OS save dialog) and writes the bundle there; resolves `null` when they cancel. */
-  saveDiagnostics(): Promise<SavedDiagnostics | null>;
-
   // Benchmarks: start only on a click; poll `benchmarks()` while a run is in progress.
   benchmarks(): Promise<BenchOverview>;
   startBenchmark(request: StartBenchmark): Promise<BenchOverview>;
@@ -294,7 +291,7 @@ export interface DynoBackend {
   /** The startup entries after hiding the OS's and signed ones, with the counts. */
   startupOverview(filter: StartupFilter): Promise<StartupOverview>;
 
-  // Extras (read-only views) and backup health.
+  // Extras (read-only views).
   /** Installs, updates, new start-up items and setting changes in a window. */
   changes(query: ChangesQuery): Promise<ChangeTimeline>;
   /** GPU use per process. */
@@ -305,11 +302,9 @@ export interface DynoBackend {
   pickFolder(): Promise<string | null>;
   /** Where the maintenance windows stand now. */
   maintenance(): Promise<MaintenanceStatus>;
-  /** The last backup check (the engine runs one when there is none yet). */
-  backup(): Promise<BackupReport>;
 
   // Long operations are jobs (ER-17 to ER-19): find large and duplicate files in a folder the person chose (deletes nothing),
-  // read the OS logs now, check the backup tools now, hash a program's file, and the sleep, boot, app-usage and software reads.
+  // read the OS logs now, hash a program's file, and the sleep, boot, app-usage and software reads.
   // The shell's jobs store follows them (`paddock://jobs`) and cancels them (`job_cancel`); `JobStarter` ties these together.
   // Nothing here waits for the work, so none of it needs a long timeout.
   /** Starts a job and resolves at once with its id. A second start of the same work answers the running job; another search or log read while one runs is refused with `busy`. */
@@ -334,7 +329,7 @@ export interface DynoBackend {
   popoverSnapshot(): Promise<PopoverSurfaceValues>;
   /** The values for the Settings preview, with the slow widgets asked of the agent now. It never marks the popover visible. */
   popoverPreview(): Promise<PopoverSurfaceValues>;
-  /** A widget's button: open a page, retry, start the backup check, restart the agent, open Settings. */
+  /** A widget's button: open a page, retry, restart the agent, open Settings. */
   runWidgetAction(action: WidgetActionId): Promise<void>;
   /** The popup's values, pushed while the popover is visible (`dyno://popover-values`). */
   onPopoverValues(listener: (v: PopoverSurfaceValues) => void): Unsubscribe;
@@ -360,6 +355,10 @@ export interface DynoBackend {
   hideTray(): Promise<void>;
   /** Quits the Dyno app (the background agent keeps its own lifecycle). */
   quitApp(): Promise<void>;
+  /** Whether the agent keeps measuring after a plain Quit: a login service is installed and supervises it (the engine decides). */
+  quitKeepsMeasuring(): Promise<boolean>;
+  /** Quit and stop measuring: stops the agent (until Dyno is opened again or the next login), then closes the app. The engine confirms with the system that the agent is gone. */
+  quitAndStopAgent(): Promise<void>;
 }
 
 export const BACKEND = new InjectionToken<DynoBackend>('DynoBackend');

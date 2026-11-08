@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { pressMod } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
+import { MOCK_ESTIMATES, mockRun, mockTrace } from '../src/app/core/mock/bench';
+import type { BenchOverview } from '../src/app/core/api.types';
 import { join } from 'node:path';
 
 /**
@@ -13,6 +15,9 @@ const FROZEN = Date.UTC(2026, 9, 22, 14, 30, 0);
 
 /** The tallest a page picture gets (CSS px of content); a taller page ends on the last card that fits. */
 const MAX_CONTENT = 1300;
+
+/** The window never gets shorter than the sidebar needs (CSS px), so the nav list is whole beside a short page. */
+const MIN_WINDOW = 900;
 
 /**
  * Makes the window as tall as the page's content, so no card or row is cut in half: a short page ends where it ends; a long page ends
@@ -32,7 +37,7 @@ async function fitToContent(page: Page, maxContent = MAX_CONTENT): Promise<void>
     return { chrome, content, scrollable: full > el.clientHeight };
   }, maxContent);
   if (!plan.scrollable) return;
-  await page.setViewportSize({ width: 1440, height: Math.round(plan.chrome + plan.content + 16) });
+  await page.setViewportSize({ width: 1440, height: Math.max(MIN_WINDOW, Math.round(plan.chrome + plan.content + 16)) });
   await page.clock.runFor(300);
   await main.evaluate((el) => el.scrollTo(0, 0));
 }
@@ -76,7 +81,7 @@ async function freezeClock(page: Page): Promise<void> {
   await page.clock.runFor(200);
 }
 
-const SCREENS: { name: string; path: string; mock?: string; query?: string; latency?: number; maxContent?: number; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
+const SCREENS: { name: string; path: string; mock?: string; query?: string; latency?: number; maxContent?: number; before?: (page: Page) => Promise<void>; ready: (page: Page) => Promise<void>; size?: { width: number; height: number } }[] = [
   {
     name: 'dashboard',
     path: '/#/',
@@ -137,6 +142,8 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
   {
     name: 'benchmarks',
     path: '/#/benchmarks',
+    // The Latest result cards and the History table, not only the first card.
+    maxContent: 2600,
     ready: async (page) => void (await expect(page.getByRole('region', { name: 'Latest result' })).toBeVisible()),
   },
   {
@@ -148,11 +155,83 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     name: 'widgets-edit',
     path: '/#/',
     // The dashboard in edit mode: the edit bar and the widgets with their menus and grips.
-    maxContent: 3800,
+    maxContent: 900,
     ready: async (page) => {
       await page.getByRole('button', { name: 'Edit layout' }).click();
       await expect(page.getByText('Editing layout')).toBeVisible();
+      // The widget gallery: the side sheet with every kind and its Add button.
+      await page.getByRole('button', { name: 'Add widget', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: 'Add a widget' })).toBeVisible();
       await page.clock.runFor(2_000);
+    },
+  },
+  {
+    // A sustained processor run in progress (the mock plays the scenario written to localStorage, as screenshots-bench.spec.ts does).
+    name: 'benchmarks-running',
+    path: '/#/benchmarks',
+    maxContent: 2600,
+    before: async (page) => {
+      const done = mockRun('r1', FROZEN - 3_600_000, 'Baseline', 1);
+      const overview: BenchOverview = {
+        running: {
+          runId: 'r2',
+          startedAt: FROZEN,
+          kinds: ['cpu'],
+          current: 'cpu',
+          done: [],
+          phase: { phase: 'cpu-sustained', label: 'Sustained run, all cores', rep: 16, of: 60, count: 80, total: 300 },
+          liveness: 'running',
+          limited: null,
+          trace: mockTrace(80, 180, 0.8, 40),
+        },
+        // Two kinds, so the History row's "Measured" text fits on one line.
+        runs: [{ ...done, results: done.results.filter((r) => r.kind === 'cpu' || r.kind === 'memory') }],
+        diskTestEnabled: true,
+        estimates: MOCK_ESTIMATES,
+      };
+      await page.addInitScript((o) => localStorage.setItem('dyno.mock.bench', o), JSON.stringify(overview));
+    },
+    ready: async (page) => {
+      await expect(page.getByRole('button', { name: 'Cancel' })).toBeVisible();
+      await expect(page.getByText(/Sustained run, all cores/).first()).toBeVisible();
+      await page.clock.runFor(500);
+    },
+  },
+  {
+    // A real job (the Large and duplicate files search, held at its first step by the mock) in the Jobs popover, with its phase and Cancel.
+    // The job is started on Extras and the page then changes to Power: the popover is the status bar's, so it follows the job.
+    name: 'jobs',
+    path: '/#/extras?tab=files',
+    query: '&jobsteps=40&jobstepms=600000',
+    ready: async (page) => {
+      // Hold the clock first: the job's elapsed time and its "Still working" mark follow the page clock.
+      await freezeClock(page);
+      await page.getByRole('button', { name: 'Choose a folder' }).click();
+      await page.clock.runFor(300);
+      const pill = page.locator('pd-jobs-status button.pd-pill');
+      await expect(pill).toContainText('1 running');
+      await page.getByRole('link', { name: 'Power', exact: true }).click();
+      await page.clock.runFor(1_000);
+      await expect(page.getByRole('heading', { name: 'Power', level: 1 })).toBeVisible();
+      await pill.click();
+      await page.clock.runFor(300);
+      const popover = page.getByRole('region', { name: 'Jobs' });
+      await expect(popover.getByRole('button', { name: 'Cancel' })).toBeVisible();
+      await expect(popover.locator('pd-job')).toHaveCount(1);
+      await page.mouse.move(2, 2);
+      await page.clock.runFor(500);
+    },
+  },
+  {
+    // The Power page: keep awake held for an hour, with its tabs for Sleep and shut down, Schedule and Wake devices.
+    name: 'power',
+    path: '/#/power',
+    ready: async (page) => {
+      await expect(page.getByRole('heading', { name: 'Power', level: 1 })).toBeVisible();
+      await page.getByRole('button', { name: '1 hour' }).click();
+      await expect(page.getByRole('button', { name: 'Stop keeping awake' })).toBeVisible();
+      await page.mouse.move(2, 2);
+      await page.clock.runFor(500);
     },
   },
   {
@@ -164,7 +243,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
       await expect(page.getByRole('region', { name: 'Start-up items' }).getByRole('grid')).toBeVisible();
     },
   },
-  { name: 'backup', path: '/#/backup', ready: async (page) => void (await expect(page.getByRole('grid', { name: 'Backup tools' })).toBeVisible()) },
   {
     name: 'extras-changes',
     path: '/#/extras?tab=changes',
@@ -218,7 +296,7 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     },
   },
   { name: 'recorder', path: '/#/recorder', size: { width: 1440, height: 1100 }, ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Flight recorder' })).toBeVisible()) },
-  { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Save bundle/ })).toBeVisible()) },
+  { name: 'diagnostics', path: '/#/diagnostics', ready: async (page) => void (await expect(page.getByRole('button', { name: /Report a problem/ })).toBeVisible()) },
   { name: 'why-slow', path: '/#/why-slow', ready: async (page) => void (await expect(page.getByRole('heading', { name: 'Why is my computer slow?' })).toBeVisible()) },
   {
     name: 'throttling',
@@ -294,21 +372,6 @@ const SCREENS: { name: string; path: string; mock?: string; query?: string; late
     },
   },
   {
-    name: 'jobs',
-    path: '/#/backup',
-    latency: 150,
-    query: '&jobsteps=6',
-    ready: async (page) => {
-      // The Jobs list is opened first: a click made while a job runs waits for it to end, so the check is started with an event.
-      await page.getByRole('button', { name: /^Jobs/ }).click();
-      await page.getByRole('button', { name: 'Check now' }).dispatchEvent('click');
-      await page.clock.runFor(1_700);
-      const jobs = page.getByRole('region', { name: 'Jobs' });
-      await expect(jobs.getByRole('button', { name: /Cancel/ })).toBeVisible();
-      await page.mouse.move(2, 2);
-    },
-  },
-  {
     name: 'tray',
     path: '/#/tray',
     size: { width: 440, height: 660 },
@@ -323,6 +386,7 @@ for (const theme of ['dark', 'light'] as const) {
     test(`${screen.name} (${theme})`, async ({ page }) => {
       if (screen.size) await page.setViewportSize(screen.size);
       await prepare(page, theme);
+      await screen.before?.(page);
       await page.goto(`${screen.path.replace('/#/', `/?latency=${screen.latency ?? 0}&chrome=macos&menu=native${screen.mock ? `&mock=${screen.mock}` : ''}${screen.query ?? ''}#/`)}`);
       await expect(page.locator('pd-shell-frame, dy-tray').first()).toBeVisible();
       await page.clock.runFor(45_000);

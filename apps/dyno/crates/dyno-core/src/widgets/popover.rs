@@ -36,8 +36,6 @@ pub enum PopoverWidget {
     CpuMemory,
     /// Download and upload now, with the last minute.
     Network,
-    /// The backup check's last report.
-    BackupHealth,
     /// The newest problem of the last 7 days.
     LastIssue,
     /// The pinned performance counters.
@@ -59,8 +57,6 @@ pub enum PopoverKind {
     CpuMemory,
     /// [`PopoverWidget::Network`].
     Network,
-    /// [`PopoverWidget::BackupHealth`].
-    BackupHealth,
     /// [`PopoverWidget::LastIssue`].
     LastIssue,
     /// [`PopoverWidget::PinnedCounters`].
@@ -78,7 +74,6 @@ impl Widget for PopoverWidget {
             PopoverWidget::DiskSpace { .. } => PopoverKind::DiskSpace,
             PopoverWidget::CpuMemory => PopoverKind::CpuMemory,
             PopoverWidget::Network => PopoverKind::Network,
-            PopoverWidget::BackupHealth => PopoverKind::BackupHealth,
             PopoverWidget::LastIssue => PopoverKind::LastIssue,
             PopoverWidget::PinnedCounters => PopoverKind::PinnedCounters,
             PopoverWidget::TopApps => PopoverKind::TopApps,
@@ -143,15 +138,6 @@ const KINDS: &[KindSpec<PopoverKind>] = &[
         size: &[1, 2],
         max_instances: 1,
         refresh: Refresh::Live,
-    },
-    KindSpec {
-        kind: PopoverKind::BackupHealth,
-        title: "Backup",
-        summary: "When your last backup ran and whether it is healthy",
-        icon: "backup",
-        size: &[1, 2],
-        max_instances: 1,
-        refresh: Refresh::OnChange,
     },
     KindSpec {
         kind: PopoverKind::LastIssue,
@@ -244,6 +230,18 @@ mod tests {
         ], "presets": []});
         let r = read::<PopoverCatalogue>(&value);
         assert_eq!(r.layout.placements.len(), 1);
+        assert_eq!(r.notes.len(), 1);
+    }
+
+    #[test]
+    fn a_saved_layout_naming_the_removed_backup_widget_loads_without_it() {
+        let value = serde_json::json!({"version": 1, "placements": [
+            {"id": "cpu-memory", "span": 2, "widget": "cpuMemory"},
+            {"id": "backup-health", "span": 2, "widget": "backupHealth"},
+            {"id": "net", "span": 2, "widget": "network"}
+        ], "presets": []});
+        let r = read::<PopoverCatalogue>(&value);
+        assert_eq!(r.layout.placements.len(), 2);
         assert_eq!(r.notes.len(), 1);
     }
 

@@ -170,12 +170,9 @@ mod tests {
     fn the_slow_kinds_take_the_slow_slot() {
         assert_eq!(weight(&HelperRequest::LoginItems), Weight::Slow);
         assert_eq!(weight(&HelperRequest::Firewall), Weight::Slow);
-        for r in [
-            HelperRequest::Info,
-            HelperRequest::Audit(1),
-            HelperRequest::Uninstall,
-            HelperRequest::Traffic,
-        ] {
+        // Two sweeps of the process table per request: one at a time per account.
+        assert_eq!(weight(&HelperRequest::Traffic), Weight::Slow);
+        for r in [HelperRequest::Info, HelperRequest::Audit(1), HelperRequest::Uninstall] {
             assert_eq!(weight(&r), Weight::Light);
         }
     }

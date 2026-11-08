@@ -14,7 +14,6 @@ use dyno_core::power::energy::{PowerLogEntry, PowerLogKind, ALIVE_EVERY};
 use dyno_core::power::idle::{IdleAction, IdleEffect, IdleEvent, IdleInputs, IdleMachine};
 use dyno_core::power::{Capability, PowerCaps, PowerView};
 use dyno_core::process::{Measured, ProcessSample};
-use dyno_core::protocol::Message;
 use dyno_core::time::Timestamp;
 use paddock_power::{HoldRequest, KeepAwake, PowerError, PowerEvent, PowerOs, Scope, SleepWakeSource};
 use std::collections::VecDeque;
@@ -178,7 +177,7 @@ impl PowerCentre {
         }
         let after = self.view();
         if before != after {
-            shared.broadcast(&Message::PowerChanged(Box::new(after.clone())));
+            shared.broadcast_power(&after);
         }
         after
     }
@@ -264,6 +263,10 @@ impl PowerCentre {
                 PowerEvent::Woke => ("the computer woke", Event::Woke),
             };
             log::info!(target: "dyno_agent::power", "power event: {text}");
+            if event == PowerEvent::Woke {
+                // Volumes may have come or gone, and free space moved, while the computer slept.
+                shared.disk.on_system_event("wake");
+            }
             self.apply(shared, mapped, now());
         }
     }
@@ -289,13 +292,12 @@ impl PowerCentre {
             .store
             .power_events(since)
             .map_err(|e| format!("Dyno could not read its power log: {e}"))?;
-        Ok(dyno_core::power::energy::report(
-            &entries,
-            days,
-            at,
-            core.zone.as_ref(),
-            &core.settings.power.energy,
-        ))
+        // The CPU energy the helper measured goes beside the estimate, never in its place (plan section 2.7).
+        let (cpu_joules, cpu_via) = shared.climate.cpu_energy();
+        Ok(
+            dyno_core::power::energy::report(&entries, days, at, core.zone.as_ref(), &core.settings.power.energy)
+                .with_cpu_energy(&cpu_joules, cpu_via),
+        )
     }
 
     /// Releases the hold and removes the marker: a clean stop of the agent.
@@ -388,7 +390,7 @@ impl PowerCentre {
         }
         let after = self.view();
         if before != after {
-            shared.broadcast(&Message::PowerChanged(Box::new(after)));
+            shared.broadcast_power(&after);
         }
     }
 
@@ -425,7 +427,7 @@ impl PowerCentre {
                 core.save_settings(&shared.dirs);
                 drop(core);
                 let v = self.view();
-                shared.broadcast(&Message::PowerChanged(Box::new(v)));
+                shared.broadcast_power(&v);
             }
         }
         let inputs = self.idle_inputs(shared);

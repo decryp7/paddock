@@ -84,6 +84,9 @@ pub struct SocketRow {
     pub state: SocketState,
     /// The owning process, when the OS told us (other users' processes need elevation on macOS and Linux).
     pub pid: Option<u32>,
+    /// Linux only: the socket's inode (`/proc/net/*`), which the helper maps to the program that holds it when the kernel hid the
+    /// owner from this account. An input to the agent's owner step; the agent clears it before the rows leave it.
+    pub inode: Option<u64>,
 }
 
 /// How far a listening socket can be reached.
@@ -198,8 +201,7 @@ impl<'de> Deserialize<'de> for Owner {
     }
 }
 
-const UNKNOWN_REASON: &str =
-    "The OS did not say which program owns this. It may belong to another user or the system; Dyno does not run with administrator rights.";
+const UNKNOWN_REASON: &str = "The OS did not say which program owns this. It may belong to another account or the system. On Linux, turn on Administrator readings in Settings and Dyno's helper names it.";
 
 fn owner_of(pid: Option<u32>, names: &HashMap<u32, (&str, Option<&str>)>) -> Owner {
     match pid {
@@ -292,6 +294,9 @@ pub struct NetworkQuery {
     /// Only connections to this country (ISO code, from the location database): what a click on the map asks for.
     #[serde(default)]
     pub country: Option<String>,
+    /// A person pressed "Try again" on the owners' source line: ask the helper now even if it was left alone after a failure.
+    #[serde(default)]
+    pub retry_helper: bool,
 }
 
 impl NetworkQuery {
@@ -338,6 +343,15 @@ pub struct NetworkSnapshot {
     pub traffic: Vec<crate::network_traffic::TrafficRow>,
     /// Why `traffic` is empty (one plain sentence), or `None` when it is available.
     pub traffic_note: Option<String>,
+    /// Who read the per-program traffic.
+    #[serde(default)]
+    pub traffic_via: crate::read_via::ReadVia,
+    /// What other accounts' programs moved together, for a caller who may not see them one by one (the helper's scoping).
+    #[serde(default)]
+    pub traffic_others: Option<crate::network_traffic::OthersTraffic>,
+    /// Who read the socket owners.
+    #[serde(default)]
+    pub owners_via: crate::read_via::ReadVia,
 }
 
 /// Builds the view: names owners from `processes`, applies `query`, sorts (listeners by port, connections by program) and
@@ -453,6 +467,9 @@ pub fn build_with_geo(
         note: None,
         traffic: Vec::new(),
         traffic_note: None,
+        traffic_via: crate::read_via::ReadVia::Local,
+        traffic_others: None,
+        owners_via: crate::read_via::ReadVia::Local,
     }
 }
 
@@ -501,6 +518,22 @@ impl NetEvent {
                 format!("{program} started listening on {p} port {port}, {reach}.")
             }
             NetEvent::NewRemoteHost { program, host, port } => format!("{program} connected to a new host, {host}:{port}."),
+        }
+    }
+
+    /// What the event adds to its alarm's title (the title already names the program and the kind): the address, or the reach.
+    pub fn alarm_detail(&self) -> String {
+        match self {
+            NetEvent::NewListener { proto, exposure, .. } => {
+                let reach = match exposure {
+                    Exposure::Loopback => "on this computer only",
+                    Exposure::AllInterfaces => "on every network interface (reachable from the network)",
+                    Exposure::Interface => "on one network interface",
+                };
+                let p = if *proto == Proto::Tcp { "TCP" } else { "UDP" };
+                format!("{p}, {reach}.")
+            }
+            NetEvent::NewRemoteHost { host, port, .. } => format!("Address {host}:{port}"),
         }
     }
 
@@ -599,6 +632,18 @@ impl Tracker {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_unnamed_owner_points_at_the_helper_and_the_turn_on_step() {
+        let Owner::Unknown { reason } = owner_of(None, &HashMap::new()) else {
+            panic!("an owner nobody named is unknown")
+        };
+        assert!(
+            reason.contains("Administrator readings in Settings") && reason.contains("helper"),
+            "{reason}"
+        );
+        assert!(!reason.contains("does not run with administrator rights"), "{reason}");
+    }
+
     use super::*;
     use crate::process::RunState;
     use std::net::{Ipv4Addr, Ipv6Addr};
@@ -632,6 +677,7 @@ mod tests {
             remote: None,
             state: SocketState::Listen,
             pid,
+            inode: None,
         }
     }
 
@@ -643,6 +689,7 @@ mod tests {
             remote: Some((remote, port)),
             state,
             pid,
+            inode: None,
         }
     }
 
@@ -677,7 +724,7 @@ mod tests {
         assert_eq!(snap.listeners.iter().map(|l| l.port).collect::<Vec<_>>(), vec![22, 8080, 8080]);
         assert_eq!(snap.connections.len(), 2, "the loopback connection is hidden");
         assert!(snap.connections.iter().all(|c| c.lookup_ok), "both remaining peers are public");
-        assert!(matches!(&snap.listeners[0].owner, Owner::Unknown { reason } if reason.contains("another user")));
+        assert!(matches!(&snap.listeners[0].owner, Owner::Unknown { reason } if reason.contains("another account")));
         assert!(matches!(&snap.listeners[1].owner, Owner::Process { name, .. } if name == "Server"));
         assert!(matches!(&snap.connections[0].owner, Owner::Unknown { reason } if reason.contains("999")));
         assert_eq!(snap.unknown_owners, 2, "the unnamed listener and the gone pid are counted");

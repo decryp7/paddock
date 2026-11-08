@@ -33,7 +33,7 @@ class DynoDiagram extends Diagram {
     return xml;
   }
 }
-export const P = (o) => new DynoDiagram({ app: 'dyno', date: '2026-10-28', ...o });
+export const P = (o) => new DynoDiagram({ app: 'dyno', date: '2026-11-06', ...o });
 export const save = (name, d, bottom) => writeFileSync(`${OUT}/${name}.drawio`, d.finish(bottom));
 /** Port fraction on rect `hub` for the vertical centre of rect `other`. */
 export function tOf(d, hub, other, axis = 1) {

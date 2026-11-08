@@ -1,7 +1,7 @@
 # Dyno architecture
 
 Dyno is built from a pure Rust core, thin OS adapters, a per-user agent that measures and keeps history, a Tauri app that
-shows it. There is no privileged helper in 1.0: everything runs with the user's own rights. Dyno only watches ([ADR 0021](adr/0021-monitoring-only.md)). This page describes how the pieces fit and what is true today; the diagrams
+shows it. Everything runs with the user's own rights; an optional administrator helper reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log ([ADR 0027](adr/0027-helper-for-1-1-0.md)). Power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time) run as the owner sets them up ([ADR 0032](adr/0032-power-keep-awake-wake-on-lan-idle-actions-energy.md)). This page describes how the pieces fit and what is true today; the diagrams
 are in [design.md](design.md) and the reasoning is in the [ADRs](adr/README.md). Anything marked *planned* is not in the
 code.
 
@@ -27,7 +27,7 @@ code.
 
 `dyno_core` holds the model (`metrics`, `process`), `grouping` (ADR 0003), 
 `diagnosis`, `anomaly`, `forecast`, `health`, `history` (tiers and min/avg/max downsampling), `sampling` (adaptive intervals), `startup` (view), `alerts`,
-`report`, `issues` (OS problem events, the stability score), `unusual` (the baseline of programs), `extras` (parsers for the sleep, boot, energy, GPU, software, changes and file-finder views, and maintenance windows), `backup` (backup health judgement) and `toolpath` (the search list for the user's tools), `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
+`report`, `issues` (OS problem events, the stability score), `unusual` (the baseline of programs), `extras` (parsers for the sleep, boot, energy, GPU, software, changes and file-finder views, and maintenance windows), `snapshot`, `settings` (versioned), `tray` and `units` (pure formatting), and `protocol` (the app-agent
 contract, `PROTOCOL_VERSION`). The ports are in `ports.rs`: `SystemSensors`, `ProcessSource`,
 `FileLocks`, `StartupItems`, `FactsSource`, `UserActivity`, with `PlatformError`. Their contract (no panics, unavailable
 readings with a reason, bounded calls, start-time check on every `ProcessRef`) is documented there and binding on every
@@ -63,7 +63,7 @@ block with a `// SAFETY:` comment.
 - **`issues`** and **`unusual`**: two background threads. The first reads the platform's `IssueSource`s every 15 minutes
   (panic-contained, "unavailable: reason" per source), stores new events and raises alarms; the second compares the process
   table with the baseline every 30 s ([ADR 0017](adr/0017-issues-and-the-program-baseline.md)).
-- **`extras`**: the extras (WP-13) and backup health checks (WP-14): runs read-only OS tools through a `ToolRunner` with the user's login-shell `PATH`, records what changed, answers the requests; a background thread records the boot and checks backups inside the maintenance windows ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md)).
+- **`extras`**: the extras (WP-13): runs read-only OS tools through a `ToolRunner` with the user's login-shell `PATH`, records what changed, answers the requests; a background thread records the boot and compares the software lists inside the maintenance windows ([ADR 0020](adr/0020-extras-backup-checks-and-taming-proof.md); its backup checks were removed in 1.1.0).
 - **`store`** and **`rollup`**: the SQLite store (ADR 0008) and the `HistoryWriter` that records raw points and rolls
   closed buckets up through the minute, 15-minute and hour tiers.
 - **`service`**: install, uninstall, status and `ensure` of the per-user registration (ADR 0010); the unit text is pure.
@@ -88,15 +88,14 @@ implementation calls the shell's one `dyno` command and whose mock serves the br
 
 ### Privileges and plugins
 
-Dyno 1.0 has no privileged helper (ADR 0021; the helper design is ADR 0022, planned for 1.1). The app and the agent run with the
-user's own rights; Dyno registers no system service (its files and agent are per user; on Linux the .deb itself is an ordinary system package). A reading the OS gives only to administrators or to a process's owner is a
+Dyno 1.0 had no privileged helper; 1.1.0 adds an optional one (ADR 0027; ADR 0021 is superseded in part, 2026-11-06). The app and the agent run with the user's own rights; apart from that helper Dyno registers no system service (the agent is per user; on Windows the files are per machine in Program Files, and on Linux the .deb itself is an ordinary system package). A reading the OS gives only to administrators or to a process's owner is a
 `Reading::Unavailable` with a plain reason, never a zero. The platform adapters tell three groups apart: the user's own
 processes and the system's are listed one by one, and every other account's processes form one **Other users** row with whatever
 totals the OS allows (by session on Windows, by uid on macOS and Linux). On Windows the adapter reads
 `NtQuerySystemInformation` and trusts its undocumented CPU and I/O fields only when a start-up self-check against the documented
 calls agrees.
 
-From 1.1 an optional read-only helper (a system service the user turns on in Settings; ADR 0027, built on ADR 0016 and 0022)
+From 1.1 an optional administrator helper (a system service the user turns on in Settings; ADR 0027, built on ADR 0016 and 0022)
 answers a closed list of requests over a local pipe or socket: the caller is identified from the OS's own credentials, each request
 has a standing table (owner, administrator, other) saying full, counts only or denied, and a per-account cap bounds the load.
 The app and the agent still run with the user's own rights; Dyno 1.0 has no way to run elevated.
@@ -115,9 +114,9 @@ first use of the plugins page (`Request::Plugins`) and the host guards them (tim
 | [0003](adr/0003-process-grouping.md) | Processes grouped by application |
 | [0006](adr/0006-privileged-helper-and-observe-only.md) | Observe-only default (write parts superseded by 0021; the helper is not in 1.0) |
 | [0016](adr/0016-privileged-helper-install-and-ipc.md) | The helper: a system service installed on a click, one authorised user and program, audit log; not in 1.0 (planned for 1.1) |
-| [0021](adr/0021-monitoring-only.md) | Monitoring only: no taming, cleanup or tuning; no helper in 1.0 |
+| [0021](adr/0021-monitoring-only.md) | Monitoring only: no taming, cleanup or tuning; superseded in part (2026-11-06) by 0027 and 0032 |
 | [0017](adr/0017-issues-and-the-program-baseline.md) | Issues from the OS logs behind a port; a baseline of programs that explains, never accuses |
-| [0020](adr/0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver |
+| [0020](adr/0020-extras-backup-checks-and-taming-proof.md) | Extras behind a ToolRunner (its backup checks were removed in 1.1.0; see the ADR) |
 | [0007](adr/0007-extensibility-three-tiers.md) | Core, TOML packs, out-of-process plugins |
 | [0008](adr/0008-storage-sqlite-and-retention.md) | SQLite, tiers, versioned schema |
 | [0009](adr/0009-native-feel.md) | Desktop feel in a webview |
@@ -170,7 +169,7 @@ working in memory.
   again. Open only what the user chose.
 - **Never trust another process.** Frames are bounded; the handshake needs the per-launch token (constant-time compare)
   and, where the OS tells, the peer pid. The discovery file is owner-only.
-- **Least privilege.** Nothing Dyno runs is elevated unless the user turns on the helper (ADR 0027); Dyno changes nothing on the machine and installs no service or helper by default. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
+- **Least privilege.** Nothing Dyno runs is elevated unless the user turns on the helper (ADR 0027); Dyno installs no service or helper by default. Tauri capabilities grant only events and window dragging; the CSP has no `unsafe-eval` and no remote
   origin; `scripts/check-capabilities.mjs` enforces it in CI.
 - **Contain failures.** Per-request and per-tick panics are caught, locks recover from poisoning, plugins are guarded and
   quarantined, a failing sensor is an unavailable reading, the app restarts a dead agent and an agent without an app keeps

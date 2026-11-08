@@ -8,7 +8,8 @@
 //! - [`server`] accepts connections on the system endpoint ([`paths`]) over `paddock-ipc`, with per-account limits.
 //! - [`setup`] installs and removes the helper through `dyno-helper-service` (and so `paddock-service`).
 //!
-//! The binary (`main.rs`) is three commands: `serve`, `install` and `uninstall`.
+//! The binary (`main.rs`) is three commands: `serve` (and `service` under the Windows Service Control Manager, both through
+//! `paddock_service::service_main`), `install` and `uninstall`.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 pub mod audit;
@@ -17,18 +18,19 @@ pub mod cli;
 pub mod config;
 pub mod dispatch;
 pub mod elevate;
+pub mod lifecycle;
 pub mod logfile;
 pub mod orphan;
 pub mod paths;
 pub mod policy;
+pub mod protect;
+pub mod refusal;
 pub mod serve;
 pub mod server;
 pub mod setup;
 pub mod startup;
 pub mod sys;
 pub mod tools;
-#[cfg(windows)]
-pub mod winsvc;
 
 /// The helper's version: the agent only trusts a helper built from the same Dyno version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

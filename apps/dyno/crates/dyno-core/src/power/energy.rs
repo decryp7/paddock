@@ -3,8 +3,11 @@
 //! "Estimated from your numbers"); nothing is claimed as measured until a whole-system reading exists, and CO2 and cost show
 //! only when the person gave a factor and a tariff. No savings claims.
 
+use crate::helper_counters::EnergyDomain;
+use crate::read_via::ReadVia;
 use crate::time::{day_start, next_day_start, LocalZone, Timestamp, DAY, MINUTE};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// How often a running agent notes that it is alive.
 pub const ALIVE_EVERY: i64 = 5 * MINUTE;
@@ -197,6 +200,10 @@ pub struct EnergyDay {
     pub cost: Option<f64>,
     /// Kilograms of CO2, when a factor was given.
     pub co2_kg: Option<f64>,
+    /// CPU energy the helper measured on this day, in kWh. It is the processor's alone (not the machine's), so it sits beside the
+    /// estimate and never replaces it; `None` when nothing was measured.
+    #[serde(default)]
+    pub cpu_kwh: Option<f64>,
 }
 
 /// The report.
@@ -217,6 +224,9 @@ pub struct EnergyReport {
     pub currency: Option<String>,
     /// The first note Dyno has, when there is one.
     pub tracking_since: Option<Timestamp>,
+    /// Who measured the CPU energy: the helper, or why nobody could (`Local` where this computer is not asked, so nothing shows).
+    #[serde(default)]
+    pub cpu_via: ReadVia,
 }
 
 fn figures(on: u64, sleep: u64, s: &EnergySettings) -> (Option<f64>, Option<f64>, Option<f64>) {
@@ -262,6 +272,7 @@ pub fn report(entries: &[PowerLogEntry], days: u32, now: Timestamp, zone: &dyn L
             kwh,
             cost,
             co2_kg,
+            cpu_kwh: None,
         });
         start = end;
     }
@@ -277,6 +288,7 @@ pub fn report(entries: &[PowerLogEntry], days: u32, now: Timestamp, zone: &dyn L
         kwh,
         cost,
         co2_kg,
+        cpu_kwh: None,
     };
     EnergyReport {
         enabled: s.enabled,
@@ -290,6 +302,109 @@ pub fn report(entries: &[PowerLogEntry], days: u32, now: Timestamp, zone: &dyn L
         sleep_energy_counted: s.watts_sleep.is_some(),
         currency: s.currency.clone(),
         tracking_since: entries.first().map(|e| e.at),
+        cpu_via: ReadVia::Local,
+    }
+}
+
+/// The longest gap between two readings that still counts as one stretch of time. Time the helper was not asked is not guessed.
+pub const CPU_MAX_GAP_MS: i64 = 3 * MINUTE;
+/// The most days the meter keeps.
+pub const CPU_MAX_DAYS: usize = MAX_DAYS as usize + 8;
+
+/// The domains that are the processor package: macOS `CPU Power`, Linux RAPL `package-N`. Others (GPU, the neural engine, a
+/// sub-domain that the package already includes) are left out so nothing counts twice.
+pub fn cpu_package_domains(all: &[EnergyDomain]) -> Vec<EnergyDomain> {
+    all.iter()
+        .filter(|d| {
+            let label = d.label.to_ascii_lowercase();
+            label == "cpu power" || label.starts_with("package")
+        })
+        .cloned()
+        .collect()
+}
+
+/// Joules between two readings of one domain, `dt_ms` apart; `None` when they cannot be compared.
+fn joules_between(prev: &EnergyDomain, cur: &EnergyDomain, dt_ms: i64) -> Option<f64> {
+    if let (Some(a), Some(b)) = (prev.microjoules, cur.microjoules) {
+        let micro = if b >= a {
+            b - a
+        } else {
+            // The counter wrapped; with no wrap point it was reset, and nothing is claimed.
+            cur.wraps_at_microjoules.filter(|w| *w >= a)? - a + b
+        };
+        return Some(micro as f64 / 1_000_000.0);
+    }
+    let now = f64::from(cur.milliwatts?);
+    let watts = prev.milliwatts.map_or(now, |p| (f64::from(p) + now) / 2.0) / 1000.0;
+    Some(watts * dt_ms as f64 / 1000.0)
+}
+
+/// Adds up the CPU's measured energy per local day from the helper's readings (pure; the caller keeps the clock and the file).
+///
+/// A cumulative counter (microjoules, with its wrap point) contributes the difference between two readings; an instantaneous
+/// power (milliwatts) contributes the mean of the two readings times the time between them. A gap over [`CPU_MAX_GAP_MS`], a
+/// first reading and a counter that went backwards without a wrap point contribute nothing. A reading counts on the local day it
+/// was taken (at most one reading interval of error at midnight).
+#[derive(Debug, Clone, Default)]
+pub struct CpuEnergyMeter {
+    days: BTreeMap<i64, f64>,
+    prev: Option<(Timestamp, Vec<EnergyDomain>)>,
+}
+
+impl CpuEnergyMeter {
+    /// A meter that continues from `days` (joules by local day start, in milliseconds).
+    pub fn new(days: BTreeMap<i64, f64>) -> CpuEnergyMeter {
+        CpuEnergyMeter { days, prev: None }
+    }
+
+    /// The joules by local day start.
+    pub fn days(&self) -> &BTreeMap<i64, f64> {
+        &self.days
+    }
+
+    /// Takes the reading at `at`.
+    pub fn feed(&mut self, at: Timestamp, domains: &[EnergyDomain], zone: &dyn LocalZone) {
+        if let Some((then, before)) = self.prev.take() {
+            let dt = at.since(then);
+            if dt > 0 && dt <= CPU_MAX_GAP_MS {
+                let joules: f64 = domains
+                    .iter()
+                    .filter_map(|cur| {
+                        let prev = before.iter().find(|p| p.label == cur.label)?;
+                        joules_between(prev, cur, dt)
+                    })
+                    .sum();
+                if joules.is_finite() && joules > 0.0 {
+                    *self.days.entry(day_start(at, zone).0).or_insert(0.0) += joules;
+                }
+            }
+        }
+        while self.days.len() > CPU_MAX_DAYS {
+            self.days.pop_first();
+        }
+        self.prev = Some((at, domains.to_vec()));
+    }
+
+    /// A reading failed: the time until the next one is not counted.
+    pub fn lose_thread(&mut self) {
+        self.prev = None;
+    }
+}
+
+impl EnergyReport {
+    /// Puts the measured CPU energy (`joules` by local day start) beside the estimate, with who measured it.
+    pub fn with_cpu_energy(mut self, joules: &BTreeMap<i64, f64>, via: ReadVia) -> EnergyReport {
+        let kwh = |j: f64| j / 3_600_000.0;
+        let mut total: Option<f64> = None;
+        for d in &mut self.days {
+            d.cpu_kwh = joules.get(&d.day_start.0).copied().map(kwh);
+            if let Some(k) = d.cpu_kwh {
+                *total.get_or_insert(0.0) += k;
+            }
+        }
+        self.totals.cpu_kwh = total;
+        self.cpu_via = via;
+        self
     }
 }
 
@@ -484,5 +599,118 @@ mod tests {
         assert!(EnergySettings::default().enabled);
         let j: EnergySettings = serde_json::from_str(r#"{"wattsOn":50}"#).unwrap();
         assert_eq!((j.watts_on, j.enabled), (Some(50.0), true));
+    }
+
+    // ---- measured CPU energy (helper wiring, WP-CNT) ----
+
+    fn mw(label: &str, milliwatts: u32) -> EnergyDomain {
+        EnergyDomain {
+            label: label.into(),
+            microjoules: None,
+            wraps_at_microjoules: None,
+            milliwatts: Some(milliwatts),
+        }
+    }
+    fn uj(label: &str, microjoules: u64, wraps: Option<u64>) -> EnergyDomain {
+        EnergyDomain {
+            label: label.into(),
+            microjoules: Some(microjoules),
+            wraps_at_microjoules: wraps,
+            milliwatts: None,
+        }
+    }
+    const UTC: crate::time::FixedZone = crate::time::FixedZone(0);
+
+    #[test]
+    fn only_the_cpu_package_counts_so_nothing_is_counted_twice() {
+        let all = [
+            mw("CPU Power", 1),
+            mw("GPU Power", 2),
+            mw("ANE Power", 3),
+            mw("Combined Power (CPU + GPU + ANE)", 6),
+            uj("package-0", 5, None),
+            uj("core", 4, None),
+        ];
+        let labels: Vec<String> = cpu_package_domains(&all).into_iter().map(|d| d.label).collect();
+        assert_eq!(labels, ["CPU Power", "package-0"]);
+    }
+
+    #[test]
+    fn measured_power_is_the_mean_of_two_readings_times_the_time_between_them() {
+        let mut m = CpuEnergyMeter::default();
+        let t = T0.plus(HOUR);
+        m.feed(t, &[mw("CPU Power", 2_000)], &UTC);
+        assert!(m.days().is_empty(), "a first reading has no time behind it");
+        m.feed(t.plus(30 * SECOND), &[mw("CPU Power", 4_000)], &UTC);
+        // (2 W + 4 W) / 2 * 30 s = 90 J.
+        assert_eq!(m.days().get(&T0.0).copied(), Some(90.0));
+    }
+
+    #[test]
+    fn a_counter_adds_its_difference_and_survives_a_wrap_but_not_a_reset() {
+        let mut m = CpuEnergyMeter::default();
+        let t = T0.plus(HOUR);
+        m.feed(t, &[uj("package-0", 900_000_000, Some(1_000_000_000))], &UTC);
+        m.feed(t.plus(10 * SECOND), &[uj("package-0", 50_000_000, Some(1_000_000_000))], &UTC);
+        // 100 J to the wrap point and 50 J after it.
+        assert_eq!(m.days().get(&T0.0).copied(), Some(150.0));
+        m.feed(t.plus(20 * SECOND), &[uj("package-0", 10, None)], &UTC);
+        m.feed(t.plus(30 * SECOND), &[uj("package-0", 5, None)], &UTC);
+        assert_eq!(
+            m.days().get(&T0.0).copied(),
+            Some(150.0),
+            "a counter that went back with no wrap point adds nothing"
+        );
+    }
+
+    #[test]
+    fn time_the_helper_was_not_asked_is_not_guessed() {
+        let mut m = CpuEnergyMeter::default();
+        let t = T0.plus(HOUR);
+        m.feed(t, &[mw("CPU Power", 5_000)], &UTC);
+        m.feed(t.plus(CPU_MAX_GAP_MS + SECOND), &[mw("CPU Power", 5_000)], &UTC);
+        assert!(m.days().is_empty());
+        m.feed(t.plus(CPU_MAX_GAP_MS + 10 * SECOND), &[mw("CPU Power", 5_000)], &UTC);
+        assert_eq!(m.days().len(), 1);
+        m.lose_thread();
+        m.feed(t.plus(CPU_MAX_GAP_MS + 20 * SECOND), &[mw("CPU Power", 5_000)], &UTC);
+        assert_eq!(m.days().values().copied().sum::<f64>(), 45.0, "a failed read is not bridged");
+    }
+
+    #[test]
+    fn the_meter_keeps_a_bounded_number_of_days() {
+        let days: BTreeMap<i64, f64> = (0..(CPU_MAX_DAYS as i64 + 5)).map(|d| (d * DAY, 1.0)).collect();
+        let mut m = CpuEnergyMeter::new(days);
+        let t = Timestamp((CPU_MAX_DAYS as i64 + 10) * DAY);
+        m.feed(t, &[mw("CPU Power", 1_000)], &UTC);
+        m.feed(t.plus(SECOND), &[mw("CPU Power", 1_000)], &UTC);
+        assert_eq!(m.days().len(), CPU_MAX_DAYS);
+        assert!(
+            m.days().contains_key(&t.0.div_euclid(DAY).saturating_mul(DAY)),
+            "the newest day stays"
+        );
+    }
+
+    #[test]
+    fn measured_cpu_energy_is_reported_beside_the_estimate() {
+        let log = [e(0, AgentStarted), e(HOUR, Alive)];
+        let s = EnergySettings {
+            watts_on: Some(60.0),
+            ..Default::default()
+        };
+        let now = T0.plus(2 * HOUR);
+        let base = report(&log, 1, now, &UTC, &s);
+        let estimate = base.totals.kwh;
+        // 3.6 MJ is exactly 1 kWh.
+        let measured = base
+            .clone()
+            .with_cpu_energy(&BTreeMap::from([(T0.0, 3_600_000.0)]), ReadVia::Helper);
+        assert_eq!(measured.days[0].cpu_kwh, Some(1.0));
+        assert_eq!(measured.totals.cpu_kwh, Some(1.0));
+        assert_eq!(measured.totals.kwh, estimate, "the estimate stays");
+        assert_eq!(measured.cpu_via, ReadVia::Helper);
+        let none = base.with_cpu_energy(&BTreeMap::new(), ReadVia::needs_admin("CPU energy needs it."));
+        assert_eq!(none.totals.cpu_kwh, None);
+        assert!(matches!(none.cpu_via, ReadVia::NeedsHelper { .. }));
     }
 }

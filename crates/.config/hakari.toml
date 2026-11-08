@@ -20,4 +20,9 @@ third-party = [
     { name = "tauri-runtime-wry" },
     { name = "wry" },
     { name = "ts-rs" },
+    # gtk-rs 0.18: paddock-startup's `dialog` feature is its only user and is optional; unifying it would build gtk on Linux for
+    # every shared crate and put glib (RUSTSEC-2024-0429) into the cargo-deny graph.
+    { name = "gtk" },
+    { name = "gio" },
+    { name = "glib" },
 ]

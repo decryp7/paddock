@@ -7,12 +7,14 @@
 use crate::auth::{authorize, scope, weight};
 use crate::dispatch::{Ctx, Dispatcher};
 use crate::policy::HelperPolicy;
+use dyno_core::helper_policy::RequestKind;
 use dyno_core::helper_wire::{codes, CallerView, HelperMessage, HelperUser, MAX_FRAME};
 use paddock_ipc::endpoint::Listener;
 use paddock_ipc::{
     caller_of, AccountId, AccountLimits, AdminRule, BodyHandler, BodyOptions, BodyPeer, Caller, Connection, FrameLimit, RemoteError,
 };
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use paddock_jobs::time::{Clock, SystemClock};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -22,6 +24,81 @@ pub const SESSION_MAX: Duration = Duration::from_secs(120);
 pub const MAX_SESSIONS: usize = 16;
 /// Consecutive accept failures after which the daemon gives up (the service manager restarts it).
 const MAX_ACCEPT_FAILURES: u32 = 50;
+
+/// How many requests of each kind the helper answered, for the stop line `served: kind=count ...` (ADR 0052 section 1.5).
+///
+/// Only counts, indexed by [`RequestKind`]: no account, no argument, no content. The VM suite fails when a reading an OS
+/// advertises was served 0 times, which is the run-time half of the static check in `dyno-agent/tests/helper_wiring.rs`.
+#[derive(Debug)]
+pub struct ServedCounts {
+    counts: [AtomicU64; RequestKind::ALL.len()],
+}
+
+impl Default for ServedCounts {
+    fn default() -> Self {
+        ServedCounts {
+            counts: std::array::from_fn(|_| AtomicU64::new(0)),
+        }
+    }
+}
+
+impl ServedCounts {
+    /// Counts one answered request of `kind`.
+    pub fn record(&self, kind: RequestKind) {
+        self.counts[kind as usize].fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// How many of `kind` were answered so far.
+    pub fn get(&self, kind: RequestKind) -> u64 {
+        self.counts[kind as usize].load(Ordering::Relaxed)
+    }
+
+    /// `kind=count` for every kind, in the enum's order (a kind served 0 times is listed with 0).
+    pub fn summary(&self) -> String {
+        RequestKind::ALL
+            .iter()
+            .map(|k| format!("{k:?}={}", self.get(*k)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+/// How often the helper logs its served counts while it runs (only when they changed).
+pub const SERVED_LOG_EVERY: Duration = Duration::from_secs(600);
+
+/// Decides when the periodic `served:` line is due: every [`SERVED_LOG_EVERY`] on the injected clock, and only when the counts
+/// differ from the last line. Pure apart from the clock reading it is given, so a test drives it with a fake clock.
+#[derive(Debug)]
+pub struct ServedLine {
+    every: Duration,
+    last_at: Duration,
+    last_summary: String,
+}
+
+impl ServedLine {
+    /// Starts at `now` (the loop's start) with the counts as `summary`, so a quiet helper logs nothing.
+    pub fn new(every: Duration, now: Duration, summary: String) -> Self {
+        ServedLine {
+            every,
+            last_at: now,
+            last_summary: summary,
+        }
+    }
+
+    /// The summary to log at `now`, or `None` when the interval has not passed or the counts did not change.
+    pub fn due(&mut self, now: Duration, served: &ServedCounts) -> Option<String> {
+        if now.saturating_sub(self.last_at) < self.every {
+            return None;
+        }
+        self.last_at = now;
+        let summary = served.summary();
+        if summary == self.last_summary {
+            return None;
+        }
+        self.last_summary.clone_from(&summary);
+        Some(summary)
+    }
+}
 
 /// The listening daemon.
 pub struct Daemon {
@@ -47,6 +124,7 @@ struct Session {
     owner: HelperUser,
     limits: AccountLimits,
     policy: Arc<Mutex<HelperPolicy>>,
+    served: Arc<ServedCounts>,
 }
 
 impl BodyHandler<HelperMessage> for Session {
@@ -88,7 +166,13 @@ impl BodyHandler<HelperMessage> for Session {
                 tools: vec![],
             },
         };
-        self.dispatcher.handle_for(&ctx, request).map(HelperMessage::Reply)
+        let kind = request.kind();
+        let answer = self.dispatcher.handle_for(&ctx, request).map(HelperMessage::Reply);
+        // Answered means the reader ran and replied; a request the handler failed is not a served reading.
+        if answer.is_ok() {
+            self.served.record(kind);
+        }
+        answer
     }
 }
 
@@ -97,10 +181,37 @@ impl Daemon {
     ///
     /// # Errors
     /// The accept failures, in words.
-    pub fn run(mut self) -> Result<(), String> {
+    pub fn run(self) -> Result<(), String> {
+        self.run_counted(Arc::new(ServedCounts::default()))
+    }
+
+    /// [`Daemon::run`] with the caller's own counter (tests read it); logs `served: kind=count ...` when the loop ends.
+    ///
+    /// # Errors
+    /// The accept failures, in words.
+    pub fn run_counted(self, served: Arc<ServedCounts>) -> Result<(), String> {
+        self.run_counted_on(served, Arc::new(SystemClock))
+    }
+
+    /// [`Daemon::run_counted`] on the given clock, which times the periodic `served:` line (every [`SERVED_LOG_EVERY`], when the
+    /// counts changed).
+    ///
+    /// # Errors
+    /// The accept failures, in words.
+    pub fn run_counted_on(mut self, served: Arc<ServedCounts>, clock: Arc<dyn Clock>) -> Result<(), String> {
+        let result = self.serve(&served, clock.as_ref());
+        log::info!(outcome = if result.is_ok() { "stopped" } else { "failed" }; "Helper: served: {}", served.summary());
+        result
+    }
+
+    fn serve(&mut self, served: &Arc<ServedCounts>, clock: &dyn Clock) -> Result<(), String> {
         let active = Arc::new(AtomicUsize::new(0));
         let mut failures = 0u32;
+        let mut line = ServedLine::new(SERVED_LOG_EVERY, clock.monotonic(), served.summary());
         while !self.stop.load(Ordering::SeqCst) {
+            if let Some(summary) = line.due(clock.monotonic(), served) {
+                log::info!("Helper: served so far: {summary}");
+            }
             match self.listener.accept(Duration::from_millis(500)) {
                 Ok((stream, _pid)) => {
                     failures = 0;
@@ -130,6 +241,7 @@ impl Daemon {
                         owner: self.owner.clone(),
                         limits: self.limits.clone(),
                         policy: self.policy.clone(),
+                        served: served.clone(),
                     };
                     let count = active.clone();
                     let spawned = std::thread::Builder::new().name("helper-session".into()).spawn(move || {
@@ -169,7 +281,23 @@ mod tests {
     use dyno_core::ports::{PlatformError, ProcessTraffic};
     use paddock_ipc::endpoint::Stream;
     use paddock_ipc::IpcError;
-    use paddock_jobs::time::SystemClock;
+    use paddock_jobs::time::FakeClock;
+
+    #[test]
+    fn the_served_line_is_due_every_interval_and_only_when_the_counts_changed() {
+        let clock = FakeClock::default();
+        let served = ServedCounts::default();
+        let mut line = ServedLine::new(SERVED_LOG_EVERY, clock.monotonic(), served.summary());
+        clock.advance(SERVED_LOG_EVERY);
+        assert_eq!(line.due(clock.monotonic(), &served), None, "nothing was served");
+        served.record(RequestKind::ALL[0]);
+        clock.advance(SERVED_LOG_EVERY - Duration::from_secs(1));
+        assert_eq!(line.due(clock.monotonic(), &served), None, "the interval has not passed");
+        clock.advance(Duration::from_secs(1));
+        assert_eq!(line.due(clock.monotonic(), &served), Some(served.summary()));
+        clock.advance(SERVED_LOG_EVERY);
+        assert_eq!(line.due(clock.monotonic(), &served), None, "unchanged since the last line");
+    }
 
     struct NoTraffic;
     impl ProcessTraffic for NoTraffic {
@@ -190,6 +318,7 @@ mod tests {
         dispatcher: Arc<Dispatcher>,
         stop: Arc<AtomicBool>,
         daemon: Option<std::thread::JoinHandle<Result<(), String>>>,
+        served: Arc<ServedCounts>,
         _dir: tempfile::TempDir,
     }
 
@@ -217,6 +346,7 @@ mod tests {
                 processes: Box::new(dyno_core::helper_processes::NoProcesses),
                 smart: Box::new(crate::tools::NotHere("none")),
                 tools: Box::new(crate::tools::NotHere("none")),
+                firewall: Box::new(crate::tools::NotHere("none")),
                 wakes: Box::new(dyno_core::wake::NoWakes),
                 wol: Box::new(dyno_core::wake::NoWakes),
                 log_tail: Box::new(|_| vec![]),
@@ -231,11 +361,14 @@ mod tests {
                 policy: Arc::new(Mutex::new(HelperPolicy::default())),
                 stop: stop.clone(),
             };
+            let served = Arc::new(ServedCounts::default());
+            let counted = served.clone();
             Rig {
                 name,
                 dispatcher,
                 stop,
-                daemon: Some(std::thread::spawn(move || daemon.run())),
+                served,
+                daemon: Some(std::thread::spawn(move || daemon.run_counted(counted))),
                 _dir: dir,
             }
         }
@@ -339,6 +472,7 @@ mod tests {
                 tag: dyno_core::wake::WakeTag::parse("t").unwrap(),
             },
             K::ListWakes => HelperRequest::ListWakes,
+            K::Build => HelperRequest::Build,
             K::WolState => HelperRequest::WolState {
                 ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
             },
@@ -363,6 +497,24 @@ mod tests {
             assert_eq!(refused, access(kind, Standing::Other) == Access::Denied, "{kind:?}: {answer:?}");
         }
         rig.stop();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn answered_requests_are_counted_per_kind_and_refused_or_failed_ones_are_not() {
+        let rig = Rig::start(HelperUser::Uid(own_uid()), 8);
+        rig.call(HelperRequest::Info).unwrap();
+        rig.call(HelperRequest::Info).unwrap();
+        // The test rig's traffic reader fails: a failed request is not a served reading.
+        rig.call(HelperRequest::Traffic).unwrap_err();
+        let served = rig.served.clone();
+        rig.stop();
+        assert_eq!(served.get(RequestKind::Info), 2);
+        assert_eq!(served.get(RequestKind::Traffic), 0);
+        assert!(served.summary().starts_with("Info=2 Processes=0 Traffic=0"), "{}", served.summary());
+        assert_eq!(served.summary().split(' ').count(), RequestKind::ALL.len());
+        // The counters are indexed by the enum's number: ALL must list the kinds in declaration order.
+        assert!(RequestKind::ALL.iter().enumerate().all(|(i, k)| *k as usize == i));
     }
 
     #[cfg(unix)]

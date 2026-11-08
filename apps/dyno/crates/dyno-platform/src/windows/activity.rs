@@ -1,4 +1,8 @@
 //! User activity: time since the last input (GetLastInputInfo) and the foreground window's process.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use dyno_core::ports::UserActivity;
 use dyno_core::process::Pid;
@@ -38,8 +42,9 @@ impl UserActivity for WinActivity {
         }
         let mut pid = 0u32;
         // SAFETY: `hwnd` came from GetForegroundWindow (a stale one just yields 0); `pid` is a valid out-pointer.
-        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-        (pid != 0).then_some(pid)
+        let thread = unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        // A zero thread id is the call's failure: the window is gone, there is no process to name.
+        (thread != 0 && pid != 0).then_some(pid)
     }
 }
 

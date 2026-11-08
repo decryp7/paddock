@@ -3,6 +3,8 @@
 //! - `serve`: the daemon (launchd and systemd run it; a person can run it in a terminal for debugging).
 //! - `service`: the daemon under the Windows Service Control Manager.
 //! - `install --for <uid:N|sid:S-1-…>`: the elevated installer Dyno starts after the user clicked (also the update).
+//! - `refresh`: the installer's step after an update (family ADR 0053, Dyno ADR 0027 H1): when the helper is installed and older
+//!   than this program, install this program in its place, keeping the recorded owner, the policy and the data.
 //! - `uninstall`: removes the helper (elevated, for when the daemon cannot be asked).
 
 use dyno_core::helper_wire::HelperUser;
@@ -19,6 +21,8 @@ pub enum Command {
         /// The account that turned the helper on (its owner).
         owner: HelperUser,
     },
+    /// Replace an installed, older helper by this program (after an update); does nothing when none is installed.
+    Refresh,
     /// Remove the helper.
     Uninstall,
     /// Print the version.
@@ -27,7 +31,7 @@ pub enum Command {
     SelfTest,
 }
 
-const USAGE: &str = "usage: dyno-helper serve | service | install --for <uid:N|sid:S-1-…> | uninstall | --self-test | --version";
+const USAGE: &str = "usage: dyno-helper serve | service | install --for <uid:N|sid:S-1-…> | refresh | uninstall | --self-test | --version";
 
 /// Parses the arguments after the program name.
 pub fn parse(args: &[String]) -> Result<Command, String> {
@@ -35,6 +39,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     match it.next() {
         Some("serve") if it.next().is_none() => Ok(Command::Serve),
         Some("service" | "--service") if it.next().is_none() => Ok(Command::Service),
+        Some("refresh") if it.next().is_none() => Ok(Command::Refresh),
         Some("uninstall") if it.next().is_none() => Ok(Command::Uninstall),
         Some("--version" | "version") if it.next().is_none() => Ok(Command::Version),
         Some("--self-test") if it.next().is_none() => Ok(Command::SelfTest),
@@ -80,14 +85,40 @@ pub fn self_test() -> Result<String, String> {
     ))
 }
 
-fn serve() -> Result<(), String> {
-    crate::serve::serve(
-        &crate::elevate::helper_paths(),
-        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    )
+/// Runs the daemon under `paddock_service::service_main` (the OS log from the first line, the exit code that names a
+/// refusal, a panic caught at the boundary) and returns the process exit status.
+fn serve(hosting: paddock_service::Hosting) -> i32 {
+    let paths = crate::elevate::helper_paths();
+    let result = paddock_service::service_main(&dyno_helper_service::spec(), hosting, move |context| {
+        let early = context.early_sink();
+        crate::serve::serve_with(&paths, context.stop, Some(early))
+    });
+    exit_status_of(result)
 }
 
-/// Runs `command` and returns the process exit code (0 done, 1 failed, 2 usage).
+/// The process exit status of a finished service run: the body's code as a Unix status (0 stays 0), or 1 when the service
+/// manager could not be reached (the reason is in the OS log and on standard error).
+fn exit_status_of(result: Result<u32, paddock_service::ServiceMainError>) -> i32 {
+    match result {
+        Ok(code) => paddock_service::service_main::exit_status(code),
+        Err(e) => {
+            eprintln!("dyno-helper: {e}");
+            1
+        }
+    }
+}
+
+/// The exit code of `refresh`: 0 done (or nothing to do), 1 failed, 3 refused (the data folder is not protected). The refusal
+/// has its own non-zero code so the installer's hook notes it in `setup.log` instead of reading it as a clean run.
+pub fn refresh_exit(result: &Result<paddock_service::privileged::Report, crate::setup::RefreshError>) -> i32 {
+    match result {
+        Ok(_) => 0,
+        Err(crate::setup::RefreshError::Failed(_)) => 1,
+        Err(crate::setup::RefreshError::Refused(_)) => 3,
+    }
+}
+
+/// Runs `command` and returns the process exit code (0 done, 1 failed, 2 usage, 3 for `refresh`: refused).
 pub fn run(command: Command) -> i32 {
     let result = match command {
         Command::Version => {
@@ -95,12 +126,23 @@ pub fn run(command: Command) -> i32 {
             Ok(())
         }
         Command::SelfTest => self_test().map(|line| println!("{line}")),
-        Command::Serve => serve(),
-        #[cfg(windows)]
-        Command::Service => crate::winsvc::run_as_service(),
-        #[cfg(not(windows))]
-        Command::Service => Err("The service command is for Windows; use `serve`.".to_string()),
+        Command::Serve => return serve(paddock_service::Hosting::Foreground),
+        Command::Service => return serve(paddock_service::Hosting::ServiceManager),
         Command::Install { owner } => crate::setup::install(owner).map(|r| report("install", &r)),
+        Command::Refresh => {
+            let result = crate::setup::refresh();
+            match &result {
+                Ok(r) => report("refresh", r),
+                Err(e) => {
+                    // Standard output is what the installer's details capture; the OS log keeps it for later.
+                    println!("dyno-helper: {e}");
+                    if matches!(e, crate::setup::RefreshError::Refused(_)) {
+                        crate::setup::log_refusal(e);
+                    }
+                }
+            }
+            return refresh_exit(&result);
+        }
         Command::Uninstall => crate::setup::uninstall().map(|r| report("uninstall", &r)),
     };
     match result {
@@ -136,6 +178,27 @@ mod tests {
             })
         );
         assert!(parse(&args(&["install", "--for", "sid:S-1-5-21-1"])).is_ok());
+        assert_eq!(parse(&args(&["refresh"])), Ok(Command::Refresh));
+        assert!(
+            parse(&args(&["refresh", "--for", "uid:1"])).is_err(),
+            "the owner is the recorded one, never an argument"
+        );
+    }
+
+    #[test]
+    fn a_finished_service_run_exits_with_its_code_and_a_missing_manager_exits_with_one() {
+        use paddock_service::ServiceMainError;
+        assert_eq!(exit_status_of(Ok(0)), 0);
+        assert_eq!(exit_status_of(Ok(3)), 3);
+        assert_eq!(exit_status_of(Ok(256)), 1, "never reads as success");
+        assert_eq!(exit_status_of(Err(ServiceMainError::NotStartedByManager("x".into()))), 1);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn the_service_command_is_refused_off_windows_with_the_way_out() {
+        // The refusal is the shared entry point's: the body never runs and the process exits 1.
+        assert_eq!(run(Command::Service), 1);
     }
 
     #[test]

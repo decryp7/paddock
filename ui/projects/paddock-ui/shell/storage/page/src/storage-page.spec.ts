@@ -102,7 +102,7 @@ describe('the Storage page', () => {
     expect(p.el.querySelector('pd-table[data-testid="storage-table"]')).not.toBeNull();
     expect(Array.from(p.el.querySelectorAll('.pd-group')).map((g) => text(g.querySelector('.pd-group-name')!))).toEqual(['Cache: rebuilt by the app', 'Your data: cannot be rebuilt']);
     // The group heading carries the aggregate, right-aligned in the Size column, rounded down for a lower bound.
-    expect(text(p.el.querySelector('.pd-group-summary.pd-end')!)).toBe('46 MB');
+    expect(text(p.el.querySelector('.pd-group-summary.pd-end')!)).toBe('48 MB');
     expect(text(Array.from(p.el.querySelectorAll('.pd-group-summary.pd-end'))[1]!)).toMatch(/^≥ \d/);
     expect(text(p.row('models'))).toContain('≥');
     expect(p.row('cache').querySelectorAll('.pd-storage__title')).toHaveLength(1);

@@ -26,10 +26,10 @@ pub enum ConnectError {
 impl std::fmt::Display for ConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConnectError::NotRunning(why) => write!(f, "The helper is not running ({why}). Turn it on in Settings > Helper."),
+            ConnectError::NotRunning(why) => write!(f, "The helper is not running ({why}). Turn it on in Settings > Dyno > Administrator readings."),
             ConnectError::Untrusted(why) => write!(
                 f,
-                "Something else answers where the helper should be, so Dyno did not use it ({why}). Turn the helper off and on again in Settings > Helper."
+                "Something else answers where the helper should be, so Dyno did not use it ({why}). Turn the helper off and on again in Settings > Dyno > Administrator readings."
             ),
             ConnectError::Peer(e) => write!(f, "The helper could not be reached: {e}"),
         }
@@ -43,7 +43,15 @@ impl std::error::Error for ConnectError {}
 /// # Errors
 /// [`ConnectError`].
 pub fn connect(endpoint: &str) -> Result<BodyPeer<HelperMessage>, ConnectError> {
-    connect_with(endpoint, &Stream::connect_system)
+    connect_for(endpoint, CONNECT_TIMEOUT)
+}
+
+/// [`connect`] that waits at most `timeout` for the endpoint (a live reading has less than [`CONNECT_TIMEOUT`] left).
+///
+/// # Errors
+/// [`ConnectError`].
+pub fn connect_for(endpoint: &str, timeout: Duration) -> Result<BodyPeer<HelperMessage>, ConnectError> {
+    connect_with(endpoint, &|e, _| Stream::connect_system(e, timeout))
 }
 
 /// [`connect`] over another way to open the stream (tests).
@@ -103,7 +111,7 @@ mod tests {
             .err()
             .unwrap();
         assert!(matches!(&err, ConnectError::NotRunning(w) if w.contains("no such file")));
-        assert!(err.to_string().contains("Settings > Helper"));
+        assert!(err.to_string().contains("Settings > Dyno > Administrator readings"));
     }
 
     #[test]

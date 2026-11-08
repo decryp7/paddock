@@ -1,0 +1,11 @@
+#! recorded 2026-11-04 on the Windows 11 Arm test VM (VMware Fusion, build 10.0.26300, en-GB), as paddock-admin over SSH
+#! command: sc.exe query DynoHelper
+#! state: right after sc stop: STOP_PENDING with the checkpoint and wait hint service_main reports
+SERVICE_NAME: DynoHelper 
+        TYPE               : 10  WIN32_OWN_PROCESS  
+        STATE              : 3  STOP_PENDING 
+                                (NOT_STOPPABLE, NOT_PAUSABLE, IGNORES_SHUTDOWN)
+        WIN32_EXIT_CODE    : 0  (0x0)
+        SERVICE_EXIT_CODE  : 0  (0x0)
+        CHECKPOINT         : 0x1
+        WAIT_HINT          : 0x7530

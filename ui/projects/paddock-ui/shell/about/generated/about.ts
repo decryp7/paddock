@@ -1,6 +1,6 @@
 // Generated from the Rust wire types of paddock-updater (ts-rs). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-updater --lib generated.
 
-export type UpdateErrorKind = "notAvailable" | "offline" | "unreachable" | "noRelease" | "noPlatform" | "invalidManifest" | "signatureInvalid" | "tooLarge" | "diskFull" | "storage" | "installFailed" | "busy" | "invalid";
+export type UpdateErrorKind = "notAvailable" | "offline" | "unreachable" | "noRelease" | "noPlatform" | "invalidManifest" | "signatureInvalid" | "tooLarge" | "diskFull" | "storage" | "installFailed" | "notInstalled" | "declined" | "perMachine" | "busy" | "invalid";
 
 export type UpdateErrorDto = { kind: UpdateErrorKind, message: string, nextStep: string, detail: string | null, };
 
@@ -22,9 +22,21 @@ export type UpdatePhase = { "kind": "unavailable" } | { "kind": "idle" } | { "ki
 /**
  * Install when the app quits instead of now.
  */
-installOnQuit: boolean, } | { "kind": "installing", info: UpdateInfo, } | { "kind": "failed", error: UpdateErrorDto, info: UpdateInfo | null, };
+installOnQuit: boolean, } | { "kind": "installing", info: UpdateInfo, } | { "kind": "installerRunning", version: string, } | { "kind": "failed", error: UpdateErrorDto, info: UpdateInfo | null, };
 
 export type ChannelInfo = { id: string, label: string, };
+
+export type InstallScope = "perUser" | "perMachine";
+
+export type InstallInfo = { scope: InstallScope, 
+/**
+ * Whether "Install when the app quits" exists (never for [`InstallScope::PerMachine`]).
+ */
+installOnQuitAvailable: boolean, 
+/**
+ * Shown beside Install for an account that is not an administrator; the button stays (ADR 0053 decision O3).
+ */
+administratorNotice: string | null, };
 
 export type UpdateStatus = { 
 /**
@@ -38,7 +50,11 @@ lastChecked: number | null, autoCheck: boolean, channel: string, channels: Array
 /**
  * The host a check contacts (`None` in a build without updates).
  */
-endpointHost: string | null, releasesPage: string | null, };
+endpointHost: string | null, releasesPage: string | null, 
+/**
+ * What the Updates UI shows about installing (scope, install on quit, the administrator text).
+ */
+install: InstallInfo, };
 
 export type Preferences = { 
 /**

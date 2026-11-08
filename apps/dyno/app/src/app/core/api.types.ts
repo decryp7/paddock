@@ -193,10 +193,34 @@ export interface ProcessDetails {
   startupSource: string | null;
 }
 
+/** What to do about a reading that could not be given (the engine's `NextStep`). */
+export type NextStep = 'retry' | 'updateHelper' | 'updateApp' | 'showLog' | { openSettings: string } | { none: { why: string } };
+
+/** Who read a reading (the engine's `ReadVia`): the helper, this computer with the person's rights, or nobody, with the reason. */
+export type ReadVia = 'helper' | 'local' | { needsHelper: { reason: string; next: NextStep } } | { unavailable: { reason: string; next: NextStep | null } };
+
+/** Where the parts of one live push came from. */
+export interface LiveVia {
+  processes: ReadVia;
+  others: ReadVia;
+  temperatures: ReadVia;
+}
+
 export interface Locker {
   process: ProcessRef;
   name: string;
   kind: string | null;
+  /** Who read it. Always sent; `local` for a reading that never needed the helper. */
+  via: ReadVia;
+}
+
+/** The answer to "what is locking this file?": the programs, and how many more the reader could not list. */
+export interface LockerList {
+  lockers: Locker[];
+  /** Programs of other accounts that also hold the file but are not named (the helper counts them where the settings say not to name them). */
+  notListed: number;
+  /** The search stopped at its limit: more may hold the file. */
+  truncated: boolean;
 }
 
 /** One application with all its processes. */
@@ -269,6 +293,8 @@ export interface LiveUpdate {
   groups: AppGroup[] | null;
   /** Other users' processes, folded into one row (`processes` and `groups` leave them out); null when there are none. */
   otherUsers: OtherUsers | null;
+  /** Who read the processes, the "Other users" total and the temperatures. */
+  via: LiveVia;
 }
 
 /** `tray` is the shell's own level with no window open (the menu bar icons); a window asks for `summary` or `processes`. */
@@ -461,6 +487,8 @@ export interface DiskSettings {
   finderHashGib?: number;
   /** The disk maps kept for the next time (ADR 0029). */
   savedMaps?: SavedMapsSettings;
+  /** Seconds between two readings of the volumes' free space: 0 is Auto (60), else 10 to 600. */
+  spaceRefreshSecs?: number;
 }
 
 /** When a saved map is refreshed by itself: never (the default), or at the first look at the page when it is older than this. */
@@ -510,6 +538,10 @@ export interface Volume {
   reachable: boolean;
   /** Whether used space is a fixed scale for a scan; false for a network share (scanned like a folder). */
   wholeVolume: boolean;
+  /** When capacity and free were read (ms since 1970); absent before the agent stamped it. A share that stopped answering keeps its last figures and this time. */
+  measuredAt?: number | null;
+  /** How old the figures are against the refresh interval, decided by the agent. */
+  freshness?: 'fresh' | 'late' | 'stale';
 }
 
 /** What a scan covers. */
@@ -789,7 +821,8 @@ export interface SavedReport {
 export interface Settings {
   version: number;
   launchAtLogin: boolean;
-  sampling: { intervalMs: number; processIntervalMs: number };
+  /** `helperSweepMs` is how often the helper reads every account's processes; `null` is Auto (5 s, never faster than the process table). */
+  sampling: { intervalMs: number; processIntervalMs: number; helperSweepMs: number | null };
   retention: { rawHours: number; minuteDays: number; quarterHourDays: number; hourDays: number };
   alerts: {
     enabled: boolean;
@@ -827,8 +860,6 @@ export interface Settings {
   jobs?: JobSettings;
   /** Maintenance windows: when Dyno's own heavier background work may run. */
   maintenance: MaintenanceSettings;
-  /** Backup health checks. */
-  backup: BackupSettings;
   /** Power: keep awake (ADR 0032). */
   power: PowerSettings;
 }
@@ -855,6 +886,12 @@ export interface AgentStatus {
   state: AgentState;
   message: string | null;
 }
+
+/**
+ * Whether the desktop shows Dyno's tray icons (the engine's `TrayAvailability`, `crates/dyno-core/src/tray_host.rs`). On Linux the
+ * icons show only when a StatusNotifier host is running; without one the engine sends the whole note to show as `hint`.
+ */
+export type TrayAvailability = 'shown' | { noHost: { hint: string } };
 
 // --------------------------------------------------------------------------------------------------------- errors
 
@@ -952,6 +989,8 @@ export interface SystemInventory {
   memory: MemoryLayout;
   disks: DiskInfo[];
   hints: Hint[];
+  /** Who read the memory layout. */
+  memoryVia: ReadVia;
 }
 
 // ---------------------------------------------------------------------------------------------------------- alarms
@@ -1101,38 +1140,6 @@ export interface RecorderSnapshot {
   reason: CaptureReason;
   /** About one per second, oldest first (thinned if the capture was large). */
   samples: RecorderSample[];
-}
-
-// ------------------------------------------------------------------------------------------------------ diagnostics
-// Agent requests: `diagnosticsPreview` -> BundlePreview (nothing is written), `saveDiagnostics {path}` -> SavedDiagnostics.
-// The path comes from the user's save dialog: absolute, ending in `.zip`, in an existing folder (the engine re-checks).
-
-export interface RedactionCounts {
-  homePaths: number;
-  profilePaths: number;
-  machineNames: number;
-  userNames: number;
-  emails: number;
-  ipAddresses: number;
-}
-
-export interface BundleFileInfo {
-  path: string;
-  description: string;
-  bytes: number;
-}
-
-export interface BundlePreview {
-  /** Every file with its size, the manifest included. */
-  files: BundleFileInfo[];
-  totalBytes: number;
-  redactions: RedactionCounts;
-}
-
-export interface SavedDiagnostics {
-  path: string;
-  bytes: number;
-  files: number;
 }
 
 // ------------------------------------------------------------------------------------------------------ benchmarks
@@ -1397,6 +1404,15 @@ export interface NetworkQuery {
   search: string;
   /** Only connections to this country (ISO code, from the location database). */
   country: string | null;
+  /** Set by "Try again" on the owners' source line: ask the helper now, even if it was left alone after a failure. */
+  retryHelper?: boolean;
+}
+
+/** Other accounts' programs as one total (bytes since each program started). */
+export interface OthersTraffic {
+  programs: number;
+  bytesIn: number;
+  bytesOut: number;
 }
 
 export interface NetworkSnapshot {
@@ -1410,6 +1426,12 @@ export interface NetworkSnapshot {
   traffic?: TrafficRow[];
   /** Why `traffic` is empty (shown as a one-line note), or null when it is available. */
   trafficNote?: string | null;
+  /** Who read the per-program traffic. */
+  trafficVia: ReadVia;
+  /** What other accounts' programs moved together, for a caller the helper scopes to its own programs (no names). */
+  trafficOthers?: OthersTraffic | null;
+  /** Who read the socket owners. */
+  ownersVia: ReadVia;
 }
 
 /** What one program sent and received in the last interval. */
@@ -1696,7 +1718,8 @@ export type IssueKind =
   | 'serviceFailure'
   | 'memoryExhaustion'
   | 'updateFailure'
-  | 'driverFailure';
+  | 'driverFailure'
+  | 'stoppedFromOutside';
 
 export type IssueSourceId = 'macReports' | 'macLog' | 'windowsEvents' | 'journal' | 'coredumps';
 
@@ -1849,6 +1872,8 @@ export interface StartupOverview {
   signedCount: number;
   /** What could not be read (the list is then partial). */
   unavailable: string[];
+  /** Who read the login items and background tasks (macOS). */
+  btmVia: ReadVia;
 }
 
 export type ChangeKind = 'installed' | 'updated' | 'removed' | 'startupAdded' | 'startupRemoved';
@@ -1898,6 +1923,8 @@ export interface SleepReport {
   wakes: WakeEvent[];
   blockersUnavailable: string | null;
   wakesUnavailable: string | null;
+  /** Who read the blockers. */
+  blockersVia: ReadVia;
 }
 
 export interface BootStep {
@@ -2019,7 +2046,7 @@ export interface FinderLimitHit {
 // ------------------------------------------------------------------------------------------------------------- jobs
 
 /**
- * Long operations (find files, read the system logs, check the backups, hash a file, the sleep, boot, app-usage and software
+ * Long operations (find files, read the system logs, hash a file, the sleep, boot, app-usage and software
  * reads) run as jobs in the agent: starting one answers at once with its id, the shell's jobs store follows it through the
  * `paddock://jobs` events, Cancel is the shell's `job_cancel`, and `jobResult` hands over what a done job produced. Mirrors
  * `dyno_core::jobs`; the status itself is the shell's `SuJobSnapshot`.
@@ -2027,7 +2054,6 @@ export interface FinderLimitHit {
 export type JobSpec =
   | { findFiles: { query: FinderQuery } }
   | { rescanIssues: { query: IssuesQuery } }
-  | 'refreshBackup'
   | { fileHash: { source: HashSource } }
   | 'sleepBlockers'
   | 'bootAnalysis'
@@ -2045,7 +2071,7 @@ export type JobOutput =
   | { intel: IntelStatus }
   | { finder: FinderResult }
   | { issues: IssuesOverview }
-  | { backup: BackupReport }
+ 
   | { fileHash: FileHashInfo }
   | { sleep: SleepReport }
   | { boot: BootReport }
@@ -2059,10 +2085,10 @@ export type JobOutput =
 
 /**
  * Whether the helper is usable. `notIncluded`: this build or system has no helper (an AppImage). `off`: never turned on.
- * `notRunning`: installed but not answering. `missing`: damaged. `foreign`: another program answers where the helper should be
+ * `notRunning`: installed but not answering. `starting`: installed and coming up (after a start of Windows): no Repair until it has taken over three minutes. `missing`: damaged. `foreign`: another program answers where the helper should be
  * (never trusted, never sent anything). `outdated`: needs the bundled newer helper. `ready`: running.
  */
-export type HelperState = 'notIncluded' | 'off' | 'notRunning' | 'missing' | 'foreign' | 'outdated' | 'ready';
+export type HelperState = 'notIncluded' | 'off' | 'notRunning' | 'missing' | 'foreign' | 'outdated' | 'ready' | 'starting';
 
 /** What the user asks of the helper; each runs as a job with phases. */
 export type HelperAction = 'turnOn' | 'repair' | 'update' | 'turnOff';
@@ -2116,46 +2142,6 @@ export interface MaintenanceStatus {
   openNow: boolean;
   closesAt: Timestamp | null;
   nextOpensAt: Timestamp | null;
-}
-
-// ------------------------------------------------------------------------------------------------------- backup
-// Mirrors `dyno_core::backup` (WP-14). Dyno reads each tool's own state with timeouts; it never runs or manages a backup.
-
-export type BackupTool = 'timeMachine' | 'windowsBackup' | 'fileHistory' | 'restic' | 'borg' | 'duplicati';
-
-export type BackupState = 'healthy' | 'stale' | 'noBackupYet' | 'notConfigured' | 'cannotCheck';
-
-export interface BackupStatus {
-  tool: BackupTool;
-  name: string;
-  state: BackupState;
-  /** When the last successful backup finished, when known. */
-  lastBackup: Timestamp | null;
-  summary: string;
-  nextStep: string | null;
-}
-
-export interface BackupReport {
-  statuses: BackupStatus[];
-  /** When it was checked; null while the first check is still running. */
-  checkedAt: Timestamp | null;
-  checking: boolean;
-  loginPathUsed: boolean;
-}
-
-/** Folders to look in before the PATH for one tool installed somewhere unusual. */
-export interface ToolOverride {
-  tool: BackupTool;
-  /** Absolute folders, searched first. */
-  dirs: string[];
-}
-
-export interface BackupSettings {
-  /** Check in the background and raise an alarm for a stale backup. */
-  alertWhenStale: boolean;
-  /** A backup older than this many hours is stale (1 to 2160). */
-  staleAfterHours: number;
-  overrides: ToolOverride[];
 }
 
 // ---------------------------------------------------------------------------------------------- IP lists, the map, the firewall
@@ -2317,6 +2303,8 @@ export interface FirewallSource {
   truncated: number;
   rulesHidden: boolean;
   note: string | null;
+  /** Who read it. Always sent; `local` for a reading that never needed the helper. */
+  via: ReadVia;
 }
 
 /** The firewall of this computer. */
@@ -2339,6 +2327,9 @@ export interface ToolStatus {
 /** Where the offer stands: downloadable, installed (the version), needs the helper first, or not offered here (what to do instead). */
 export type OfferState = 'available' | { installed: string } | { needsHelper: string } | { notHere: string };
 
+/** Which copy of the tool Dyno uses: the helper's, Dyno's own, or one the person installed (the path of its smartctl). */
+export type ToolSource = 'helper' | 'dyno' | { own: string };
+
 /** What the Settings card shows for the disk-health tool. */
 export interface ToolOffer {
   tool: ToolKind;
@@ -2349,6 +2340,8 @@ export interface ToolOffer {
   licence: string;
   sourceUrl: string;
   state: OfferState;
+  /** Which copy Dyno uses, when it is installed. */
+  source?: ToolSource | null;
 }
 
 // ---------------------------------------------------------------------------------------------------- power (ADR 0032)
@@ -2485,7 +2478,7 @@ export interface PowerSettings {
 export type WakeRepeat = 'once' | 'daily' | { days: { mask: number } };
 
 /** The jobs a schedule may run: a fixed list, never a command. */
-export type DynoJob = 'backupCheck' | 'softwareInventory';
+export type DynoJob = 'softwareInventory';
 
 export interface WakeLastRun {
   at: Timestamp;
@@ -2565,6 +2558,8 @@ export interface EnergyDay {
   kwh: number | null;
   cost: number | null;
   co2Kg: number | null;
+  /** CPU energy the helper measured (the processor's alone, not the machine's); null when nothing was measured. */
+  cpuKwh: number | null;
 }
 
 /** The energy report: the person's own watts times the time Dyno saw, labelled as an estimate. */
@@ -2576,6 +2571,8 @@ export interface EnergyReport {
   sleepEnergyCounted: boolean;
   currency: string | null;
   trackingSince: Timestamp | null;
+  /** Who measured the CPU energy: `local` where this computer is not asked, so nothing shows. */
+  cpuVia: ReadVia;
 }
 
 // ------------------------------------------------------------------------------------------ Wake-on-LAN (ADR 0032 section 3)

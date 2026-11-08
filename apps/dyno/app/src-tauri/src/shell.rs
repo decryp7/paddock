@@ -50,6 +50,8 @@ pub mod events {
     pub const WOL: &str = "dyno://wol";
     /// `WakesView`: the scheduled wakes changed.
     pub const WAKES: &str = "dyno://wakes";
+    /// `TrayAvailability`: the desktop started or stopped showing the tray icons.
+    pub const TRAY: &str = "dyno://tray";
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -126,6 +128,8 @@ pub trait TrayPixels<R: Runtime>: Send + Sync {
     fn set_power_menu(&self, app: &AppHandle<R>, menu: Option<&crate::power_menu::Menu>);
     /// The tray menu's Wake submenu follows `menu` (`None`: the menu has none).
     fn set_wol_menu(&self, app: &AppHandle<R>, menu: Option<&crate::wol_menu::Menu>);
+    /// The tray menus' Quit says whether the agent keeps measuring after it.
+    fn set_keeps_measuring(&self, app: &AppHandle<R>, keeps: bool);
 }
 
 /// The tray icons of the menu bar or notification area.
@@ -152,6 +156,9 @@ impl TrayPixels<Wry> for NativePixels {
     fn set_wol_menu(&self, app: &AppHandle<Wry>, menu: Option<&crate::wol_menu::Menu>) {
         crate::tray::set_wol_menu(app, menu);
     }
+    fn set_keeps_measuring(&self, app: &AppHandle<Wry>, keeps: bool) {
+        crate::tray::set_keeps_measuring(app, keeps);
+    }
 }
 
 /// Draws nothing (a test: no icon reaches the desktop).
@@ -170,10 +177,15 @@ impl<R: Runtime> TrayPixels<R> for NoPixels {
     fn show_disconnected(&self, _: &AppHandle<R>, _: &[(String, crate::tray_model::Frame)]) {}
     fn set_power_menu(&self, _: &AppHandle<R>, _: Option<&crate::power_menu::Menu>) {}
     fn set_wol_menu(&self, _: &AppHandle<R>, _: Option<&crate::wol_menu::Menu>) {}
+    fn set_keeps_measuring(&self, _: &AppHandle<R>, _: bool) {}
 }
 
 /// The installed app's shell glue (the commands' state).
 pub type Shell = ShellOf<Wry>;
+
+/// The first id of the app's own jobs (the Start-at-login switch). The agent's jobs, which the Jobs view lists with them,
+/// count from 1, so the two never share an id.
+const APP_JOB_ID_BASE: u64 = 0x4c4f_4749_4e00;
 
 /// The shell's state shared by the link, the commands and the tray.
 pub struct ShellOf<R: Runtime> {
@@ -184,7 +196,9 @@ pub struct ShellOf<R: Runtime> {
     /// Updates received since the shell started.
     updates: AtomicU64,
     /// `launchAtLogin` as last applied (None until the agent has told us).
-    launch_at_login: Mutex<Option<bool>>,
+    launch_at_login: Arc<Mutex<Option<bool>>>,
+    /// Applies the Start-at-login switch off the calling thread.
+    login_switch: login::SwitchWorker,
     /// The last agent status, replayed to windows that opened after it was pushed.
     status: Mutex<Option<AgentStatus>>,
     /// `notifications` as last read from the settings (desktop notifications for new alarms).
@@ -203,6 +217,10 @@ pub struct ShellOf<R: Runtime> {
     me: Weak<ShellOf<R>>,
     /// The newest live update, whatever the connection (the dashboard's and the previews' readings).
     last_live: Mutex<Option<LiveUpdate>>,
+    /// When `last_live` arrived, on `clock` (milliseconds); `u64::MAX` before the first.
+    last_live_at: std::sync::atomic::AtomicU64,
+    /// The injected clock (the tray's away delay and how old a reading served to an MCP client may be).
+    clock: Arc<dyn paddock_jobs::Clock>,
     /// A page or Settings section the main window was asked to open and has not taken yet (a window that is still being
     /// created misses the event, so it asks for this when it starts).
     navigation: Mutex<Option<Navigate>>,
@@ -225,6 +243,26 @@ pub struct ShellOf<R: Runtime> {
     power_drawn_at: std::sync::atomic::AtomicI64,
 }
 
+/// The oldest live update an MCP client may be given: three times the slowest pace the agent keeps with no window open (the
+/// unwatched process interval, which the live update carries), so a stopped agent is never read as the current state.
+pub const MAX_LIVE_AGE_MS: u64 = 3 * dyno_core::sampling::UNWATCHED_PROCESS_MS as u64;
+
+/// What a reading tool gets: the newest live update when the agent is connected and the update is recent enough (`age_ms` is how
+/// long ago it arrived, `None` before the first), else the words for the client. Pure, so the age bound is tested directly.
+pub fn fresh_live(connected: bool, last: Option<LiveUpdate>, age_ms: Option<u64>) -> Result<LiveUpdate, String> {
+    if !connected {
+        return Err("Dyno is not connected to its agent, so it has no current readings; try again in a moment.".into());
+    }
+    match (last, age_ms) {
+        (Some(update), Some(age)) if age <= MAX_LIVE_AGE_MS => Ok(update),
+        (Some(_), Some(age)) => Err(format!(
+            "Dyno's newest readings are {} seconds old, so they are not shown as current; try again in a moment.",
+            age / 1000
+        )),
+        _ => Err("Dyno has not received readings from its agent yet; try again in a moment.".into()),
+    }
+}
+
 impl<R: Runtime> ShellOf<R> {
     /// The shell for `app`; `hub` reports the agent link to the shell's service health; `pixels` draws the tray.
     pub fn new(
@@ -234,15 +272,21 @@ impl<R: Runtime> ShellOf<R> {
         items: Vec<crate::tray_model::ItemSpec>,
         clock: Arc<dyn paddock_jobs::Clock>,
     ) -> Arc<ShellOf<R>> {
+        if let Some(jobs) = app.try_state::<paddock_jobs::tauri::Jobs>() {
+            jobs.registry().start_ids_at(APP_JOB_ID_BASE);
+        }
         Arc::new_cyclic(|me| ShellOf {
             app,
             pixels,
             tray: Mutex::new(TrayItems::new(items, crate::tray_model::Env::native())),
             open_alarms: Mutex::new(Default::default()),
-            away: crate::tray_away::AwayTimer::new(clock),
+            away: crate::tray_away::AwayTimer::new(clock.clone()),
+            clock,
+            last_live_at: std::sync::atomic::AtomicU64::new(u64::MAX),
             throttle: Mutex::new(Throttle::new(TRAY_INTERVAL)),
             updates: AtomicU64::new(0),
-            launch_at_login: Mutex::new(None),
+            launch_at_login: Arc::new(Mutex::new(None)),
+            login_switch: login::SwitchWorker::default(),
             status: Mutex::new(None),
             notifications: std::sync::atomic::AtomicBool::new(true),
             hub,
@@ -275,7 +319,7 @@ impl<R: Runtime> ShellOf<R> {
         if let Some(votes) = lock(&self.votes).clone() {
             let wish = crate::tray_model::shows_apps(&specs).then_some(LiveDetail::Summary);
             if let Err(e) = votes.set_vote(MENU_BAR_VOTER, wish) {
-                logging::info(&format!("could not update the menu bar's live detail: {}", e.message));
+                logging::warn(&format!("could not update the menu bar's live detail: {}", e.message));
             }
         }
         let changed = self.tray.lock().unwrap_or_else(|e| e.into_inner()).set_specs(specs.clone());
@@ -286,7 +330,7 @@ impl<R: Runtime> ShellOf<R> {
                 .unwrap_or_else(|e| e.into_inner())
                 .unavailable_frames(crate::tray::dark_taskbar());
             if let Err(e) = self.pixels.sync_items(&self.app, &specs, &initial) {
-                logging::info(&format!("could not update the tray items: {e}"));
+                logging::warn(&format!("could not update the tray items: {e}"));
             }
         }
     }
@@ -325,10 +369,20 @@ impl<R: Runtime> ShellOf<R> {
 
     /// Asks the agent for an MCP tool: its answer, or the words to give the client.
     pub fn call_agent(&self, request: Request) -> Result<Reply, String> {
-        let Some(link) = lock(&self.link).clone() else {
+        let Some(link) = lock(&self.link).clone().filter(|l| l.connected()) else {
             return Err("Dyno is not connected to its agent; try again in a moment.".into());
         };
-        link.call(request).map_err(|e| e.message)
+        // Inside the MCP server's own call limit, so a slow agent ends this call before the server abandons it.
+        link.call_within(request, crate::mcp::AGENT_CALL_LIMIT).map_err(|e| e.message)
+    }
+
+    /// The newest live update the agent pushed, for an MCP reading tool (the same values the window and the tray draw), or the
+    /// words for the client when the agent is not connected or has sent none yet.
+    pub fn newest_live(&self) -> Result<LiveUpdate, String> {
+        let connected = lock(&self.link).as_ref().is_some_and(|l| l.connected());
+        let at = self.last_live_at.load(Ordering::SeqCst);
+        let age_ms = (at != u64::MAX).then(|| self.clock.now_ms().saturating_sub(at));
+        fresh_live(connected, lock(&self.last_live).clone(), age_ms)
     }
 
     /// A Wake entry of the tray menu was chosen: wake the computer (a job the agent runs) or open the Power page.
@@ -350,9 +404,14 @@ impl<R: Runtime> ShellOf<R> {
         let _ = std::thread::Builder::new().name("dyno-wol-menu".into()).spawn(move || {
             match link.call(Request::WolWake { id: device, test: false }) {
                 Ok(_) => logging::info(&format!("wake from the tray: device {device} started")),
-                Err(e) => logging::info(&format!("wake from the tray: device {device} failed: {}", e.message)),
+                Err(e) => logging::warn(&format!("wake from the tray: device {device} failed: {}", e.message)),
             }
         });
+    }
+
+    /// Whether the agent keeps measuring after a plain Quit changed: the tray menus' Quit says so.
+    pub fn set_keeps_measuring(&self, keeps: bool) {
+        self.pixels.set_keeps_measuring(&self.app, keeps);
     }
 
     /// A Keep awake entry of the tray menu was chosen: ask the agent (it answers with the new view, which is pushed back).
@@ -382,7 +441,7 @@ impl<R: Runtime> ShellOf<R> {
             .name("dyno-power-menu".into())
             .spawn(move || match link.call(request) {
                 Ok(_) => logging::info(&format!("keep awake from the tray: {id} done")),
-                Err(e) => logging::info(&format!("keep awake from the tray: {id} failed: {}", e.message)),
+                Err(e) => logging::warn(&format!("keep awake from the tray: {id} failed: {}", e.message)),
             });
     }
 
@@ -417,8 +476,14 @@ impl<R: Runtime> ShellOf<R> {
                 // Windows, once per start: the entry Dyno 1.0.0 left in place of the app's own is repaired with the switch.
                 #[cfg(windows)]
                 {
-                    let mut service = login::platform_service();
+                    let mut service = login::platform_service(crate::service_ops::OpCancel::default());
                     let mut autostart = login::platform_autostart(&self.app);
+                    match login::ensure_app_entry(wanted, autostart.as_mut()) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            log::warn!(target: "dyno", Error = e.as_str(); "Start at login is on but the app's logon entry could not be written. Turn Start at login off and on in Settings.")
+                        }
+                    }
                     match login::repair_stale_agent_entry(wanted, service.as_mut(), autostart.as_mut()) {
                         Ok(true) => logging::info(&format!(
                             "removed the stale agent logon entry that Dyno 1.0.0 wrote; the app's own entry is {}",
@@ -434,22 +499,50 @@ impl<R: Runtime> ShellOf<R> {
                         }
                     }
                 }
+                // The app's own login item does not outlive a switch that is off (an interrupted change, or an earlier build).
+                #[cfg(not(windows))]
+                if let Err(e) = login::remove_stale_app_item(wanted, login::platform_autostart(&self.app).as_mut()) {
+                    log::warn!(target: "dyno", Error = e.as_str(); "Start at login is off but the app's own login item could not be removed. Turn Start at login on and off in Settings.")
+                }
+                // Start at login is on by default: the first run registers it once. The start already tried it before the
+                // agent started; this is the same function, once per process, so a failed try is not repeated here.
+                login::run_first_run(&self.app, link, true);
                 Ok(())
             }
             Some(p) if p == wanted => Ok(()),
             Some(_) => {
-                let mut service = login::platform_service();
-                let mut autostart = login::platform_autostart(&self.app);
-                let result = login::apply_launch_at_login(wanted, login::current_location(), service.as_mut(), autostart.as_mut());
-                // What was just applied is recorded first (it decides what a quit does), then the agent is handed over to
-                // the service just registered, or taken back from the one just removed.
-                link.set_service_installed(service.installed());
-                link.refresh_service();
-                if result.is_ok() {
-                    *self.launch_at_login.lock().unwrap_or_else(|e| e.into_inner()) = Some(wanted);
-                    logging::info(&format!("start at login is now {}", if wanted { "on" } else { "off" }));
-                }
-                result
+                // The save returns at once; one worker applies it and reports as a job (ER-17). What was asked is recorded first
+                // (a second save sees it, and it decides what a quit does), then the agent is handed over to the service just
+                // registered, or taken back from the one just removed; a change that fails or is cancelled puts the old value back,
+                // and a death in between is put right at the next start (`wanted`).
+                let (app, value) = (self.app.clone(), self.launch_at_login.clone());
+                *lock(&value) = Some(wanted);
+                // The shell plugin manages the app's jobs; its Jobs view lists this one and its Cancel stops it.
+                let jobs = self.app.state::<paddock_jobs::tauri::Jobs>().registry().clone();
+                let register = move || jobs.register("start-at-login", "Start Dyno at login", None);
+                let on_done = value.clone();
+                let started = self
+                    .login_switch
+                    .start(&self.app.state::<crate::service_ops::ServiceOps>(), register, move |cancel| {
+                        let mut service = login::platform_service(cancel.clone());
+                        let mut plain = login::platform_autostart(&app);
+                        let result = login::apply_switch_change(
+                            wanted,
+                            login::current_location(),
+                            service.as_mut(),
+                            plain.as_mut(),
+                            cancel,
+                            &on_done,
+                            previous,
+                        );
+                        // The link is the one the app manages (the save command holds only a reference to it).
+                        if let Some(link) = app.try_state::<Arc<crate::link::AgentLink>>() {
+                            link.set_service_installed(service.installed());
+                            link.refresh_service();
+                        }
+                        result
+                    });
+                login::undo_if_refused(started, &value, wanted, previous)
             }
         }
     }
@@ -517,7 +610,7 @@ impl<R: Runtime> ShellOf<R> {
                     lock(&self.popover).on_slow(ask.generation, values.0);
                 }
                 Ok(_) => {}
-                Err(e) => logging::info(&format!("could not read the popup preview: {}", e.message)),
+                Err(e) => logging::warn(&format!("could not read the popup preview: {}", e.message)),
             }
         }
         self.popover_snapshot()
@@ -539,7 +632,7 @@ impl<R: Runtime> ShellOf<R> {
     pub fn navigate(&self, to: Navigate) {
         *lock(&self.navigation) = Some(to);
         if let Err(e) = self.app.emit_to(paddock_commands::labels::MAIN_LABEL, events::NAVIGATE, to) {
-            logging::info(&format!("could not emit {}: {e}", events::NAVIGATE));
+            logging::warn(&format!("could not emit {}: {e}", events::NAVIGATE));
         }
     }
 
@@ -597,7 +690,7 @@ impl<R: Runtime> ShellOf<R> {
                 Ok(Reply::PopoverValues(values)) => me.popover_answered(ask.generation, values.0),
                 Ok(_) => lock(&me.popover).force_refresh(),
                 Err(e) => {
-                    logging::info(&format!("could not read the popup values: {}", e.message));
+                    logging::warn(&format!("could not read the popup values: {}", e.message));
                     lock(&me.popover).force_refresh();
                 }
             }
@@ -627,7 +720,7 @@ impl<R: Runtime> ShellOf<R> {
             .spawn(move || match link.call(Request::WidgetLayout { surface }) {
                 Ok(Reply::WidgetLayout(view)) => me.layout_read(*view),
                 Ok(_) => {}
-                Err(e) => logging::info(&format!("could not read the {surface:?} layout: {}", e.message)),
+                Err(e) => logging::warn(&format!("could not read the {surface:?} layout: {}", e.message)),
             });
     }
 
@@ -663,9 +756,14 @@ impl<R: Runtime> ShellOf<R> {
 
     fn emit<S: serde::Serialize + Clone>(&self, event: &str, payload: S) {
         if let Err(e) = self.app.emit(event, payload) {
-            logging::info(&format!("could not emit {event}: {e}"));
+            logging::warn(&format!("could not emit {event}: {e}"));
         }
     }
+}
+
+/// Which lists a lost-events notice makes the shell read again: the activity log and the alerts (lost alarm changes are only logged).
+fn rereads(lost: &dyno_core::protocol::LostEvents) -> (bool, bool) {
+    (lost.activity > 0, lost.alerts > 0)
 }
 
 impl<R: Runtime> Sink for ShellOf<R> {
@@ -708,6 +806,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
             }
         }
         *lock(&self.last_live) = Some(update.clone());
+        self.last_live_at.store(self.clock.now_ms(), Ordering::SeqCst);
         self.popover_tick(&update);
         // With no window open nothing listens: skip serialising a (large) update for nobody.
         if !self.app.webview_windows().is_empty() {
@@ -737,12 +836,47 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 use tauri_plugin_notification::NotificationExt;
                 let a = &change.alarm;
                 if let Err(e) = self.app.notification().builder().title(&a.title).body(&a.detail).show() {
-                    logging::info(&format!("could not show a notification: {e}"));
+                    logging::warn(&format!("could not show a notification: {e}"));
                 }
             }
         }
         self.popover_changed();
         self.emit(events::ALARM, change);
+    }
+
+    fn events_lost(&self, lost: dyno_core::protocol::LostEvents) {
+        logging::warn(&format!(
+            "the agent gave up events this window was too slow to take: {} activity rows, {} alerts, {} alarm changes; reading them again",
+            lost.activity, lost.alerts, lost.alarms
+        ));
+        let (activity, alerts) = rereads(&lost);
+        let Some(link) = lock(&self.link).clone() else { return };
+        let app = self.app.clone();
+        // On its own thread: this runs on the link's push thread, which a request would wait on.
+        let spawned = std::thread::Builder::new().name("dyno-events-resync".into()).spawn(move || {
+            // Both lists are merged by id on the page, so showing a row again changes nothing.
+            if activity {
+                match link.call(Request::Activity { limit: 100 }) {
+                    Ok(Reply::Activities(rows)) => rows.into_iter().rev().for_each(|row| {
+                        let _ = app.emit(events::ACTIVITY, row);
+                    }),
+                    Ok(_) => {}
+                    Err(e) => logging::warn(&format!("could not read the activity log again: {}", e.message)),
+                }
+            }
+            if alerts {
+                match link.call(Request::Alerts { limit: 100 }) {
+                    Ok(Reply::Alerts(alerts)) => alerts.into_iter().rev().for_each(|alert| {
+                        let _ = app.emit(events::ALERT, alert);
+                    }),
+                    Ok(_) => {}
+                    Err(e) => logging::warn(&format!("could not read the alerts again: {}", e.message)),
+                }
+            }
+        });
+        if let Err(e) = spawned {
+            logging::warn(&format!("could not start the re-read of the lost events: {e}"));
+        }
     }
 
     fn wakes_changed(&self, view: dyno_core::power::schedule::WakesView) {
@@ -772,7 +906,7 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 .body(body)
                 .show()
             {
-                logging::info(&format!("could not show the countdown notification: {e}"));
+                logging::warn(&format!("could not show the countdown notification: {e}"));
             }
         }
         *lock(&self.power) = Some(view.clone());
@@ -818,6 +952,10 @@ impl<R: Runtime> Sink for ShellOf<R> {
         self.hub.report_stall(stall);
     }
 
+    fn app_updated(&self, updated: bool) {
+        self.hub.report_updated(updated);
+    }
+
     fn widget_layout_changed(&self, surface: DynoSurface) {
         self.layout_changed(surface);
     }
@@ -832,12 +970,12 @@ impl<R: Runtime> Sink for ShellOf<R> {
         match link.call(Request::PowerState) {
             Ok(Reply::Power(v)) => self.power_changed(*v),
             Ok(_) => {}
-            Err(e) => logging::info(&format!("could not read the power state: {}", e.message)),
+            Err(e) => logging::warn(&format!("could not read the power state: {}", e.message)),
         }
         match link.call(Request::WolDevices) {
             Ok(Reply::Wol(v)) => self.wol_changed(*v),
             Ok(_) => {}
-            Err(e) => logging::info(&format!("could not read the Wake-on-LAN list: {}", e.message)),
+            Err(e) => logging::warn(&format!("could not read the Wake-on-LAN list: {}", e.message)),
         }
         // Read what the shell itself needs: the tray's metrics and style, and whether launching at login is on.
         match link.call(Request::Settings) {
@@ -845,8 +983,43 @@ impl<R: Runtime> Sink for ShellOf<R> {
                 let _ = self.settings_changed(&s, link);
             }
             Ok(_) => {}
-            Err(e) => logging::info(&format!("could not read the settings: {}", e.message)),
+            Err(e) => logging::warn(&format!("could not read the settings: {}", e.message)),
         }
+    }
+}
+
+#[cfg(test)]
+mod fresh_live_tests {
+    use super::*;
+
+    fn update() -> LiveUpdate {
+        let mut system = dyno_platform::fake::quiet_sample(dyno_core::time::Timestamp(1));
+        system.cpu.total = 7.0;
+        LiveUpdate {
+            system,
+            pressure: dyno_core::metrics::MemoryPressure::Normal,
+            top_cpu: vec![],
+            top_memory: vec![],
+            overhead: Default::default(),
+            processes: None,
+            groups: None,
+            other_users: None,
+            via: Default::default(),
+        }
+    }
+
+    #[test]
+    fn readings_are_current_only_while_the_agent_is_connected_and_the_update_is_recent() {
+        assert!(fresh_live(true, Some(update()), Some(0)).is_ok());
+        assert!(fresh_live(true, Some(update()), Some(MAX_LIVE_AGE_MS)).is_ok());
+        let old = fresh_live(true, Some(update()), Some(MAX_LIVE_AGE_MS + 1_000)).unwrap_err();
+        assert!(old.contains("not shown as current"), "{old}");
+        let gone = fresh_live(false, Some(update()), Some(0)).unwrap_err();
+        assert!(
+            gone.contains("not connected"),
+            "an agent that crashed leaves old values behind: {gone}"
+        );
+        assert!(fresh_live(true, None, None).unwrap_err().contains("not received"));
     }
 }
 
@@ -887,5 +1060,21 @@ mod saved_items_tests {
         assert_eq!(saved_items(&dir.path().join("missing.json")), defaults);
         let path = write(dir.path(), "{ not json");
         assert_eq!(saved_items(&path), defaults);
+    }
+}
+
+#[cfg(test)]
+mod lost_events_tests {
+    use super::rereads;
+    use dyno_core::protocol::LostEvents;
+
+    #[test]
+    fn a_lost_events_notice_rereads_only_the_lists_that_lost_something() {
+        let lost = |activity, alerts, alarms| LostEvents { activity, alerts, alarms };
+        assert_eq!(rereads(&lost(0, 0, 0)), (false, false));
+        assert_eq!(rereads(&lost(1, 0, 0)), (true, false));
+        assert_eq!(rereads(&lost(0, 1, 0)), (false, true));
+        assert_eq!(rereads(&lost(5, 7, 3)), (true, true));
+        assert_eq!(rereads(&lost(0, 0, 9)), (false, false), "alarm changes are only logged");
     }
 }

@@ -92,7 +92,7 @@ pub enum WakeScheduleCmd {
         stay: Option<u32>,
         /// Saved computers to wake, by name or hardware address.
         devices: Vec<String>,
-        /// `backup` or `software`.
+        /// `software`.
         job: Option<String>,
     },
     /// Cancel one, by name or id.
@@ -199,12 +199,13 @@ pub struct Invocation {
 pub const USAGE: &str = "dyno: look at how your computer is doing, from a terminal or a script\n\n\
 usage: dyno <command> [options]\n\n\
 commands:\n  \
+mcp                                   speak MCP on stdin/stdout for a host (key in DYNO_MCP_KEY; Dyno must be open)\n  \
 status [--json]                       how the computer is doing right now\n  \
 idle [status|cancel|snooze MIN]       the sleep/shut down rules: what they wait for; cancel a countdown\n  \
 awake [on|off|status] [--for 90m|2h] [--until 18:30] [--busy cpu,network,disk] [--while-pid N] [--display]\n  \
                                       keep the computer awake (on without --for or --until: until `awake off`)\n  \
 wake NAME|ADDRESS [--test] [--json]   wake a saved computer (Wake-on-LAN); --test waits for it to answer\n  \
-wake-schedule list|add NAME --at 07:30 [--repeat once|daily|weekdays|weekends] [--stay 30m] [--device NAME]... [--job backup|software]|cancel NAME|ID\n  \
+wake-schedule list|add NAME --at 07:30 [--repeat once|daily|weekdays|weekends] [--stay 30m] [--device NAME]... [--job software]|cancel NAME|ID\n  \
                                       scheduled wakes of this computer\n  \
 why-slow [--json]                     why it feels slow, in plain words\n  \
 top [--by cpu|memory] [-n N] [--json] the busiest apps\n  \
@@ -216,7 +217,7 @@ counters get PATH... [--json]         read counters now (PATH looks like \\Memor
 agent COMMAND...                      the background agent's own commands (--version, status, stop, once,\n  \
                                       service install|uninstall|status|ensure); on Windows the agent program\n  \
                                       has no console, so use this to see its output and exit code\n\n\
-Dyno only looks: no command changes anything on your computer, except `awake`, `wake` and `wake-schedule` (power, only when you ask), `agent stop` and `agent service`.\n\
+These commands act: `awake`, `wake` and `wake-schedule` (power, when you ask), `idle cancel` and `idle snooze` (the sleep and shut down rules), `agent stop` and `agent service install|uninstall|ensure`. The others only read.\n\
 exit codes: 0 done, 1 failed, 2 wrong usage, 3 versions differ, 4 Dyno is not running\n";
 
 /// Why a command line is not usable (the message says what to type instead).
@@ -271,8 +272,8 @@ pub fn parse(args: &[String]) -> Result<Invocation, UsageError> {
             },
             "--job" => {
                 job = match it.next().map(String::as_str) {
-                    Some(j @ ("backup" | "software")) => Some(j.to_string()),
-                    _ => return err("--job takes backup or software."),
+                    Some(j @ "software") => Some(j.to_string()),
+                    _ => return err("--job takes software."),
                 }
             }
             "--stay" => {
@@ -564,7 +565,7 @@ mod tests {
     fn wake_schedule_takes_list_add_and_cancel() {
         assert_eq!(p("wake-schedule").unwrap().command, Command::WakeSchedule(WakeScheduleCmd::List));
         assert_eq!(
-            p("wake-schedule add Morning run --at 07:30 --repeat weekdays --stay 30m --device NAS --job backup")
+            p("wake-schedule add Morning run --at 07:30 --repeat weekdays --stay 30m --device NAS --job software")
                 .unwrap()
                 .command,
             Command::WakeSchedule(WakeScheduleCmd::Add {
@@ -573,7 +574,7 @@ mod tests {
                 repeat: "weekdays".into(),
                 stay: Some(30),
                 devices: vec!["NAS".into()],
-                job: Some("backup".into()),
+                job: Some("software".into()),
             })
         );
         assert_eq!(

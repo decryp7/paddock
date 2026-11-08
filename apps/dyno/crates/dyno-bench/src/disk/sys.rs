@@ -1,6 +1,10 @@
 //! The few operating-system calls the disk test needs that `std` does not have: no page cache for a file (macOS `F_NOCACHE`),
 //! a full flush to the device (macOS `F_FULLFSYNC`), dropping cached pages (Linux `posix_fadvise`) and the free space of a
 //! volume. Each is small and checked; everything else is safe `std`.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 #![allow(unsafe_code)]
 
 use std::fs::File;
@@ -45,10 +49,12 @@ pub fn drop_cache(file: &File) {
         use std::os::fd::AsRawFd;
         // SAFETY: the descriptor is open; offset 0 and length 0 mean the whole file. A failure only means pages stay cached,
         // which the labels already say.
+        // silent: a failed advice only leaves pages cached, which the labels already say
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED) };
     }
     #[cfg(not(target_os = "linux"))]
-    let _ = file;
+    let _: &File = file;
 }
 
 /// The alignment a direct-I/O file wants for buffers and offsets, as the kernel reports it (Linux `statx` with `STATX_DIOALIGN`,
@@ -67,7 +73,7 @@ pub fn dio_align(file: &File) -> Option<(u32, u32)> {
     }
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = file;
+        let _: &File = file;
         None
     }
 }
@@ -100,7 +106,7 @@ pub fn volume_space(dir: &Path) -> Option<(u64, u64)> {
     }
     #[cfg(not(unix))]
     {
-        let _ = dir;
+        let _: &Path = dir;
         None
     }
 }

@@ -1,5 +1,7 @@
 import { FullTextTip } from '../../shared/full-text-tip';
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import { PdViewportFollowsSize } from '@decryp7/paddock-ui/table';
+import { CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf } from '@angular/cdk/scrolling';
+import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import type { ActivityEntry, Alert } from '../../core/api.types';
 import { formatRelative } from '../../shared/format';
 import { Icon } from '../../shared/icon';
@@ -7,6 +9,7 @@ import type { IconName } from '../../shared/icons';
 import { ACTIVITY_ICON, ALERT_ICON, SEVERITY_TONE, type Tone } from '../../shared/labels';
 import { ActivityStore } from '../../state/activity.store';
 import { AlertsStore } from '../../state/alerts.store';
+import { EVENTS_KEPT } from '../../state/events-kept';
 import { LiveStore } from '../../state/live.store';
 
 export interface FeedItem {
@@ -32,36 +35,43 @@ export function buildFeed(activity: readonly ActivityEntry[], alerts: readonly A
   return [...fromActivity, ...fromAlerts].sort((x, y) => y.at - x.at).slice(0, limit);
 }
 
-/** How many events the feed lists. */
-export const FEED_LIMIT = 7;
+/**
+ * How many entries the board asks for of each kind (activity and alerts). The engine answers at most 500 of each; asking for fewer keeps
+ * the board's first read small. When either list reaches this, the feed says it shows the latest ones only.
+ */
+export const EVENTS_LOADED = EVENTS_KEPT;
+/** The height of one entry (two lines and its padding), in px: the virtual viewport's fixed item size. */
+export const EVENT_ROW_PX = 48;
 
 /** What Dyno noticed and what it warned about, newest first. */
 @Component({
   selector: 'dy-events-feed',
-  imports: [FullTextTip, Icon],
+  imports: [FullTextTip, Icon, CdkVirtualScrollViewport, CdkFixedSizeVirtualScroll, CdkVirtualForOf, PdViewportFollowsSize],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ul aria-label="Activity and alerts">
-      @for (i of items(); track i.id) {
-        <li>
-          <span class="ic" [attr.data-tone]="i.tone"><dy-icon [name]="i.icon" /></span>
-          <div class="txt">
-            <span class="title" [dyFullText]="i.title">{{ i.title }}</span>
-            <span class="detail truncate" [dyFullText]="i.detail">{{ i.detail }}</span>
-          </div>
-          <span class="when num">{{ ago(i.at) }}</span>
-        </li>
-      }
-    </ul>
-    @if (hidden() > 0) {
-      <p class="more num">+{{ hidden() }} more</p>
+    <cdk-virtual-scroll-viewport pdViewportFollowsSize class="viewport" [class.capped]="capped()" [itemSize]="rowPx" role="list" tabindex="0" aria-label="Activity and alerts" [style.--n]="items().length">
+      <div *cdkVirtualFor="let i of items(); trackBy: trackId; let n = index" class="row" role="listitem" [attr.aria-setsize]="items().length" [attr.aria-posinset]="n + 1">
+        <span class="ic" [attr.data-tone]="i.tone"><dy-icon [name]="i.icon" /></span>
+        <div class="txt">
+          <span class="title" [dyFullText]="i.title">{{ i.title }}</span>
+          <span class="detail truncate" [dyFullText]="i.detail">{{ i.detail }}</span>
+        </div>
+        <span class="when num">{{ ago(i.at) }}</span>
+      </div>
+    </cdk-virtual-scroll-viewport>
+    @if (capped()) {
+      <p class="more num">Showing the latest {{ items().length }} events.</p>
     }
   `,
   styles: `
     :host { display: block; min-width: 0; }
-    ul { list-style: none; margin: 0; padding: 0; display: grid; }
-    li { display: flex; align-items: center; gap: var(--sp-3); padding: 6px var(--sp-1); border-radius: var(--r-md); }
-    li:hover { background: var(--surface-hover); }
+    /* As tall as its entries, up to the widget's body (--wv-avail); a longer list scrolls inside it. The wheel passes on at the ends. */
+    .viewport { height: min(calc(var(--n, 1) * 48px), var(--wv-avail, 336px)); min-height: 48px; }
+    /* The note below takes its line out of the viewport, so the widget body does not scroll as well. */
+    .viewport.capped { height: min(calc(var(--n, 1) * 48px), calc(var(--wv-avail, 336px) - 28px)); }
+    .viewport:focus-visible { outline-offset: -2px; }
+    .row { box-sizing: border-box; height: 48px; display: flex; align-items: center; gap: var(--sp-3); padding: 0 var(--sp-1); border-radius: var(--r-md); }
+    .row:hover { background: var(--surface-hover); }
     .ic { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--r-md); background: var(--surface-active); color: var(--text-2); flex: none; }
     .ic dy-icon { --icon-size: 15px; }
     .ic[data-tone='warn'] { background: var(--warn-soft); color: var(--warn); }
@@ -75,16 +85,15 @@ export const FEED_LIMIT = 7;
   `,
 })
 export class EventsFeed {
-  /** How many entries to list (the dashboard widget gives as many as its height holds, so the last one is never cut). */
-  readonly limit = input(FEED_LIMIT);
+  protected readonly rowPx = EVENT_ROW_PX;
+  protected readonly trackId = (_: number, i: FeedItem) => i.id;
   protected readonly activity = inject(ActivityStore);
   protected readonly alerts = inject(AlertsStore);
   private readonly live = inject(LiveStore);
-  private readonly all = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), Infinity));
-  protected readonly items = computed(() => this.all().slice(0, this.limit()));
-  /** How many entries the limit leaves out (shown as "+n more"). */
-  protected readonly hidden = computed(() => this.all().length - this.items().length);
+  /** Every entry the stores hold, newest first. */
+  protected readonly items = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), Infinity));
+  /** Either list is as long as the board asked for, so older entries exist that the feed does not show. */
+  protected readonly capped = computed(() => this.activity.entries().length >= EVENTS_LOADED || this.alerts.alerts().length >= EVENTS_LOADED);
   /** Relative to the engine's clock, so the feed reads right whatever the computer's clock does. */
   protected readonly ago = (at: number) => formatRelative(at, this.live.system()?.at ?? Date.now());
-
 }

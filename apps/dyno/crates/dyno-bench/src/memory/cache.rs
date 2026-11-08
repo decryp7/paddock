@@ -1,6 +1,10 @@
 //! The size of the last-level caches together, per OS (ADR 0030 section 1): Linux reads `/sys/devices/system/cpu/cpu*/cache`,
 //! macOS asks `sysctl` (the performance and efficiency clusters' L2 on Apple silicon, else L3 or L2), Windows asks
 //! `GetLogicalProcessorInformationEx`. `None` when the OS will not say; the test then assumes 32 MiB.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use dyno_core::bench::memory::parse_linux_cache;
 use std::collections::BTreeSet;
@@ -91,6 +95,8 @@ fn windows_total() -> Option<u64> {
     let mut len = 0_u32;
     // SAFETY: the first call only asks how many bytes are needed (a null buffer with a zero length).
     unsafe {
+        // silent: the sizing call fails with ERROR_INSUFFICIENT_BUFFER by design; `len` is checked and the second call is judged
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = GetLogicalProcessorInformationEx(RelationCache, None, &mut len);
     }
     if len == 0 || len > 1 << 20 {

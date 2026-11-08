@@ -18,8 +18,14 @@ pub struct ScanDevice {
     pub kind: Option<String>,
 }
 
+/// The longest device name taken from a scan. Apple silicon names an NVMe controller by its IOService path (150 to 400 characters
+/// seen), which is longer than the 128 characters shown to people ([`MAX_SMART_TEXT`]). The name is one argument of a process
+/// started without a shell, so its length and `/`, `@` and `:` are harmless; it still may not look like an option or hold control
+/// characters.
+const MAX_SCAN_NAME: usize = 1024;
+
 fn name_ok(n: &str) -> bool {
-    !n.is_empty() && n.len() <= MAX_SMART_TEXT && !n.starts_with('-') && !n.chars().any(char::is_control)
+    !n.is_empty() && n.len() <= MAX_SCAN_NAME && !n.starts_with('-') && !n.chars().any(char::is_control)
 }
 
 fn kind_ok(k: &str) -> bool {
@@ -28,24 +34,38 @@ fn kind_ok(k: &str) -> bool {
 
 /// The devices of `smartctl --scan-open -j`, at most `max`; entries with odd names or types are left out.
 pub fn parse_scan(json: &str, max: usize) -> Vec<ScanDevice> {
+    scan_devices(json, max).0
+}
+
+/// [`parse_scan`] and how many entries were left out as odd (for the log line).
+pub fn scan_devices(json: &str, max: usize) -> (Vec<ScanDevice>, usize) {
     let Ok(v) = serde_json::from_str::<Value>(json) else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
     let Some(list) = v["devices"].as_array() else {
-        return Vec::new();
+        return (Vec::new(), 0);
     };
-    list.iter()
+    let mut rejected = 0;
+    let devices = list
+        .iter()
         .filter_map(|d| {
-            let name = d["name"].as_str().filter(|n| name_ok(n))?.to_string();
-            let kind = match d["type"].as_str() {
-                Some(k) if kind_ok(k) => Some(k.to_string()),
-                Some(_) => return None,
-                None => None,
-            };
-            Some(ScanDevice { name, kind })
+            let parsed = (|| {
+                let name = d["name"].as_str().filter(|n| name_ok(n))?.to_string();
+                let kind = match d["type"].as_str() {
+                    Some(k) if kind_ok(k) => Some(k.to_string()),
+                    Some(_) => return None,
+                    None => None,
+                };
+                Some(ScanDevice { name, kind })
+            })();
+            if parsed.is_none() {
+                rejected += 1;
+            }
+            parsed
         })
         .take(max)
-        .collect()
+        .collect();
+    (devices, rejected)
 }
 
 /// Why a disk could not be read.
@@ -91,10 +111,13 @@ pub fn parse_disk(device: &str, json: &str, exit: Option<i32>) -> Result<SmartDi
         ));
     }
     let text = |s: &str| s.trim().chars().take(MAX_SMART_TEXT).collect::<String>();
+    // The wear reading comes from the one shared parser (rule 55), so the helper's and the agent's readings cannot drift.
+    let wear = parse_smartctl_ssd(json);
     let model = v["model_name"]
         .as_str()
         .map(text)
         .filter(|m| !m.is_empty())
+        .or_else(|| wear.as_ref().map(|w| text(&w.name)))
         .unwrap_or_else(|| "Unknown disk".into());
     let int = |x: &Value| x.as_i64();
     let temperature_c = int(&v["temperature"]["current"])
@@ -117,11 +140,14 @@ pub fn parse_disk(device: &str, json: &str, exit: Option<i32>) -> Result<SmartDi
         power_on_hours: v["power_on_time"]["hours"].as_u64().or_else(|| nvme["power_on_hours"].as_u64()),
         unsafe_shutdowns: nvme["unsafe_shutdowns"].as_u64(),
         passed,
+        wear_id: wear.as_ref().map(|w| w.id.clone()),
+        bytes_written: wear.as_ref().and_then(|w| w.bytes_written),
+        rated_bytes: wear.as_ref().and_then(|w| w.rated_bytes),
     })
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Invented, same shape as an Apple silicon NVMe read (WP-0): exit 4, health log present, a serial that must not survive.
@@ -145,8 +171,10 @@ mod tests {
             ("APPLE SSD EXAMPLE", Some(38), Some(3), Some(0), Some(7), Some(true))
         );
         assert_eq!((d.capacity, d.power_on_hours), (Some(500_000_000_000), Some(321)));
+        // No WWN ever; the serial only inside the wear id (the history key).
         let all = format!("{d:?}");
-        assert!(!all.contains("ZZ99SERIAL") && !all.contains("naa"), "{all}");
+        assert!(!all.contains("naa"), "{all}");
+        assert_eq!(d.wear_id.as_deref(), Some("APPLE SSD EXAMPLE ZZ99SERIAL"));
     }
 
     #[test]
@@ -180,7 +208,7 @@ mod tests {
 "temperature":{"current":31},"power_on_time":{"hours":9},"ata_smart_attributes":{"table":[{"id":177,"name":"Wear_Leveling_Count","value":97,"raw":{"value":3}}]}}"#;
         let d = parse_disk("sda", ata, Some(0)).unwrap();
         assert_eq!((d.percent_used, d.temperature_c, d.media_errors), (Some(3), Some(31), None));
-        assert!(!format!("{d:?}").contains("S1\""));
+        assert_eq!(d.wear_id.as_deref(), Some("SATA EXAMPLE S1"));
     }
 
     #[test]
@@ -200,5 +228,87 @@ mod tests {
         assert_eq!(all[2].kind, None);
         assert_eq!(parse_scan(scan, 1).len(), 1);
         assert!(parse_scan("garbage", 32).is_empty());
+    }
+
+    /// Captured shape (invented values): Apple silicon lists one NVMe controller as several IOService paths, 150 to 370 characters long.
+    pub(crate) fn apple_silicon_scan() -> String {
+        let long = |ans: &str, tail: &str| {
+            format!("IOService:/AppleARMPE/arm-io@10F00000/AppleH16GFamilyIO/{ans}@A000000/AppleANS3NVMeController/{tail}")
+        };
+        let a = format!("{}/{}", long("ans", "NS_01@1"), "IOBlockStorageServices/".repeat(2));
+        let b = format!("{}/{}", long("ans", "NS_02@2"), "IOBlockStorageServices/".repeat(10));
+        let c = format!("{}/{}", long("ans", "NS_03@3"), "IOBlockStorageServices/".repeat(10));
+        format!(
+            r#"{{"json_format_version":[1,0],"smartctl":{{"exit_status":0}},"devices":[{{"name":"{a}","info_name":"{a}","type":"nvme","protocol":"NVMe"}},{{"name":"{b}","info_name":"{b}","type":"nvme","protocol":"NVMe"}},{{"name":"{c}","info_name":"{c}","type":"nvme","protocol":"NVMe"}}]}}"#
+        )
+    }
+
+    /// Captured shape (invented values): one internal NVMe controller and two USB drives, which smartctl also lists as `nvme`.
+    #[cfg(unix)]
+    pub(crate) fn internal_and_usb_scan() -> String {
+        let internal = "IOService:/AppleARMPE/arm-io@10F00000/AppleH16GFamilyIO/ans@A000000/AppleANS3NVMeController/NS_01@1";
+        let usb = |n: u8| {
+            format!("IOService:/AppleARMPE/arm-io@10F00000/AppleT8140USBXHCI/usb-drd{n}@B000000/AppleUSBXHCI/usb-device@1/IOUSBHostInterface@0/IOBlockStorageServices")
+        };
+        let entry = |name: &str| format!(r#"{{"name":"{name}","info_name":"{name}","type":"nvme","protocol":"NVMe"}}"#);
+        format!(
+            r#"{{"smartctl":{{"exit_status":0}},"devices":[{},{},{}]}}"#,
+            entry(internal),
+            entry(&usb(1)),
+            entry(&usb(2))
+        )
+    }
+
+    #[test]
+    fn apple_silicon_scan_names_over_128_characters_are_kept() {
+        let scan = apple_silicon_scan();
+        let (devices, rejected) = scan_devices(&scan, 16);
+        assert_eq!(
+            (devices.len(), rejected),
+            (3, 0),
+            "long IOService names are valid arguments, got {devices:?}"
+        );
+        assert!(devices.iter().any(|d| d.name.len() > 300));
+        assert!(devices.iter().all(|d| d.kind.as_deref() == Some("nvme")));
+        // Still strict: absurd lengths, leading dashes and control characters are rejected and counted.
+        let bad = format!(
+            r#"{{"devices":[{{"name":"{}"}},{{"name":"-x"}},{{"name":"a\nb"}},{{"name":"/dev/disk0"}}]}}"#,
+            "x".repeat(5000)
+        );
+        let (devices, rejected) = scan_devices(&bad, 16);
+        assert_eq!((devices.len(), rejected), (1, 3));
+    }
+}
+
+#[cfg(test)]
+mod same_reading {
+    use super::*;
+
+    /// Invented smartctl JSON (never a user's): an NVMe disk with a serial, bytes written and a power-on count.
+    const NVME: &str = r#"{"smartctl":{"exit_status":4},"model_name":"EXAMPLE NVME 1TB","serial_number":"EX123456","user_capacity":{"bytes":1000204886016},
+"smart_status":{"passed":true},"power_on_time":{"hours":4321},
+"nvme_smart_health_information_log":{"temperature":41,"percentage_used":7,"data_units_written":166000000,"media_errors":0,"power_on_hours":4321,"unsafe_shutdowns":5}}"#;
+    /// A SATA disk with the wear attributes and no model name.
+    const SATA: &str = r#"{"smartctl":{"exit_status":0},"serial_number":"EXS1","device":{"name":"/dev/sdb"},"smart_status":{"passed":true},
+"power_on_time":{"hours":9},"ata_smart_attributes":{"table":[{"id":177,"name":"Wear_Leveling_Count","value":97,"raw":{"value":3}}]}}"#;
+
+    #[test]
+    fn the_helper_path_and_the_agents_own_path_make_the_same_wear_reading_with_the_same_id() {
+        for json in [NVME, SATA] {
+            let local = parse_smartctl_ssd(json).expect("an SSD");
+            let through_helper = parse_disk("/dev/x", json, None).unwrap().to_wear().expect("an SSD");
+            assert_eq!(through_helper, local, "one reading, whichever path made it");
+            assert_eq!(through_helper.id, local.id, "the history continues across both paths");
+        }
+        let nvme = parse_disk("/dev/x", NVME, None).unwrap().to_wear().unwrap();
+        assert_eq!(nvme.id, "EXAMPLE NVME 1TB EX123456");
+        assert!(nvme.bytes_written.is_some(), "Written so far survives the helper path");
+    }
+
+    #[test]
+    fn a_hard_disk_has_no_wear_reading_on_either_path() {
+        let hdd = r#"{"smartctl":{"exit_status":0},"model_name":"EXAMPLE HDD","rotation_rate":7200,"smart_status":{"passed":true},"ata_smart_attributes":{"table":[]}}"#;
+        assert!(parse_smartctl_ssd(hdd).is_none());
+        assert!(parse_disk("/dev/y", hdd, None).unwrap().to_wear().is_none());
     }
 }

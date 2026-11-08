@@ -2,13 +2,12 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterLink } from '@angular/router';
 import { formatGhz, formatPercent, formatCount, splitValue } from '../../shared/format';
 import { coreHeat } from '../../shared/heat';
-import { Sparkline } from '../../shared/sparkline';
-import { LiveStore } from '../../state/live.store';
+import { LiveStore, SPARK_CAPACITY } from '../../state/live.store';
 import { Icon } from '../../shared/icon';
 import { ViewPrefs } from '../../core/view-prefs';
 import { coreGroups } from '../cpu/core-layout';
 import { MatIconButton } from '@angular/material/button';
-import { SuSegmentedControl, type SuSegment } from '@decryp7/paddock-ui';
+import { SuSegmentedControl, SuSparkline, type SuSegment } from '@decryp7/paddock-ui';
 import { MatTooltip } from '@angular/material/tooltip';
 
 /** The number and unit of a formatted value, for the hero (`<b>` number, `<small>` unit). */
@@ -18,7 +17,7 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
 /** CPU: hero, one sparkline, caption rows; the toggle switches to one live bar per core grouped by core kind. */
 @Component({
   selector: 'dy-cpu-tile',
-  imports: [MatTooltip, SuSegmentedControl, MatIconButton, Sparkline, RouterLink, Icon],
+  imports: [MatTooltip, SuSegmentedControl, MatIconButton, SuSparkline, RouterLink, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (cpu(); as c) {
@@ -29,7 +28,7 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
         <a matIconButton routerLink="/cpu" aria-label="CPU details" matTooltipPosition="left" [matTooltip]="'CPU details'"><dy-icon name="arrow-right" /></a>
       </div>
       @if (prefs.cpuView() === 'overall') {
-        <dy-sparkline [values]="live.series().cpu" [max]="100" color="var(--accent)" label="CPU use over the last minute" style="--spark-h: 32px" />
+        <pd-sparkline [values]="live.series().cpu" scale="zero" [area]="true" [max]="100" [capacity]="sparkCapacity" [formatValue]="pct" [pad]="0" [dot]="false" [height]="32" color="var(--accent)" label="CPU use over the last minute" />
         <div class="cores" role="img" [attr.aria-label]="coreLabel()">
           @for (v of c.perCore; track $index) {
             <span class="core" [style.background]="coreColor(v)" [matTooltip]="'Core ' + count($index) + ': ' + pct(v)"></span>
@@ -76,6 +75,8 @@ const CPU_VIEWS: SuSegment[] = [{ value: 'overall', label: 'Overall' }, { value:
 })
 export class CpuTile {
   protected readonly live = inject(LiveStore);
+  protected readonly sparkCapacity = SPARK_CAPACITY;
+  protected readonly pct = formatPercent;
   protected readonly prefs = inject(ViewPrefs);
   protected readonly cpuViews = CPU_VIEWS;
   protected readonly cpu = computed(() => this.live.system()?.cpu ?? null);
@@ -83,7 +84,6 @@ export class CpuTile {
     const c = this.cpu();
     return c ? coreGroups(c.coreKinds, c.perCore.length) : [];
   });
-  protected readonly pct = formatPercent;
   protected readonly ghz = formatGhz;
   protected readonly total = (v: number) => parts(formatPercent(v));
   protected readonly count = (i: number) => formatCount(i + 1);

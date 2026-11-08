@@ -128,8 +128,8 @@ describe('diskTrendOption', () => {
   it('the tooltip formats the free space', () => {
     const o = diskTrendOption(trend('notFilling'), LIGHT) as { tooltip: { formatter: (r: unknown) => string }; yAxis: { axisLabel: { formatter: (v: number) => string } } };
     expect(o.tooltip.formatter([])).toBe('');
-    expect(o.tooltip.formatter([{ axisValue: day, seriesName: 'Free space', value: [day, 2048] }])).toContain('<b>2 KB</b> free');
-    expect(o.yAxis.axisLabel.formatter(1024)).toBe('1 KB');
+    expect(o.tooltip.formatter([{ axisValue: day, seriesName: 'Free space', value: [day, 2000] }])).toContain('<b>2 KB</b> free');
+    expect(o.yAxis.axisLabel.formatter(1000)).toBe('1 KB');
   });
 });
 

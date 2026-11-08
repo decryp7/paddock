@@ -1,0 +1,59 @@
+# Request kinds of the helper wire that no production code sends yet, and why (family ADR 0052 section 1.1).
+# The static check `crates/dyno-agent/tests/helper_wiring.rs` reads this file; `./dev check` C83 takes it over unchanged.
+# Rules: a kind that is advertised by `readings()` may not be listed; a listed kind that becomes wired must be deleted;
+# `until` is a release tag (dyno-vX.Y.Z) or a date at most 60 days ahead.
+
+# Plan 2026-11-04, D4 (accepted): WolState is wired in 1.1.0 into Linux Wake-on-LAN readiness (WP-INT deletes its entry when the
+# sender lands). LogTail is wired: the agent sends it for the problem report (`diagnostics::HelperLog`), so its entry is gone.
+[[unwired]]
+wire = "agent-helper"
+kind = "WolState"
+why = "D4: wired into Linux Wake-on-LAN readiness by its own package before the 1.1.0 tag"
+until = "dyno-v1.1.0"
+
+# OS-edge modules (family ADR 0054 sections 2.1 and 2.2): modules that hold an adapter, call an OS API through FFI or run an OS
+# tool. C93 fails on a discarded result in their non-test code. Paths are relative to this app folder.
+# Not listed yet, each to be added by the package that owns the file (their findings are that package's to fix):
+# `app/src-tauri/src/{tray,shell,login}.rs` (ADR 0054 L-2 and L-3) and
+# `crates/dyno-helper/src/{winsvc,logfile,setup}.rs` (RC-1, E-2 and L-3).
+[edges]
+modules = [
+  "app/src-tauri/src/link/driver.rs",
+  "app/src-tauri/src/link/launchd.rs",
+  "app/src-tauri/src/link/machine.rs",
+  "app/src-tauri/src/link/mod.rs",
+  "app/src-tauri/src/link/ports.rs",
+  "app/src-tauri/src/link/steps.rs",
+  "crates/dyno-agent/src/bench_child.rs",
+  "crates/dyno-agent/src/cli.rs",
+  "crates/dyno-agent/src/firewall.rs",
+  "crates/dyno-agent/src/service/mod.rs",
+  "crates/dyno-bench/src/disk/scratch.rs",
+  "crates/dyno-bench/src/disk/sys.rs",
+  "crates/dyno-bench/src/memory/cache.rs",
+  "crates/dyno-helper/src/audit.rs",
+  "crates/dyno-helper/src/dispatch.rs",
+  "crates/dyno-helper/src/serve.rs",
+  "crates/dyno-helper/src/tools.rs",
+  "crates/dyno-platform/src/fileid.rs",
+  "crates/dyno-platform/src/hardware.rs",
+  "crates/dyno-platform/src/helper_holders.rs",
+  "crates/dyno-platform/src/inventory/mod.rs",
+  "crates/dyno-platform/src/network.rs",
+  "crates/dyno-platform/src/process.rs",
+  "crates/dyno-platform/src/wakes.rs",
+  "crates/dyno-platform/src/windows/activity.rs",
+  "crates/dyno-platform/src/windows/counters.rs",
+  "crates/dyno-platform/src/windows/firewall_com.rs",
+  "crates/dyno-platform/src/windows/pdh.rs",
+  "crates/dyno-platform/src/windows/power.rs",
+  "crates/dyno-platform/src/windows/topology.rs",
+  "crates/dyno-platform/src/windows/wake_timer.rs",
+  "crates/dyno-platform/src/wol/neighbours/win.rs",
+]
+
+# `// silent: <why>` lines allowed in this app's edge modules (ADR 0054 section 2.2; ADR 0052's starting value). Eleven are in
+# use after E-4's fixes, each a send to a receiver that is gone at shutdown, a bounded formatter that refuses on purpose, or a Win32
+# sizing call that fails by design.
+[caps]
+silent = 20

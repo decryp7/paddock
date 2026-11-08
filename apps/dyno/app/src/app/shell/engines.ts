@@ -31,6 +31,19 @@ export class BrowserEngines {
   readonly jobs = new MemoryJobsBackend((id) => this.cancelJob(id));
   /** Only the shell's Appearance section: Dyno's own settings are its page in the window. */
   readonly settings = new MemorySettingsBackend({ ...SETTINGS_OVERVIEW_FIXTURE, sections: SETTINGS_OVERVIEW_FIXTURE.sections.filter((s) => s.id === 'pd.appearance') }, {});
+
+  constructor() {
+    // Mock only: `?seed=network-alarms` lists what Dyno's network rules post (the engine's own text), without a toast, for the layout checks and screenshots.
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('seed') === 'network-alarms') seedNetworkAlarms(this.centre);
+  }
+}
+
+/** The text of `network_alerts.rs`: the title names the program, the body adds only what the title lacks. Invented hosts (TEST-NET addresses). */
+export function seedNetworkAlarms(centre: MemoryNotificationCentre): void {
+  const post = (cause: string, severity: 'info' | 'warning', title: string, body: string): void => void centre.post({ cause, source: 'alarm', severity, title, body, quiet: true });
+  post('network:newRemoteHost:browser:203.0.113.17', 'info', 'browser.exe connected to a new host', 'Address 203.0.113.17:443');
+  post('network:newRemoteHost:mailer:198.51.100.23', 'info', 'mailer.exe connected to a new host', 'Address 198.51.100.23:993');
+  post('network:newExposedListener:node:tcp:3000', 'warning', 'node started listening on port 3000', 'TCP, on every network interface (reachable from the network).');
 }
 
 let about: AboutBackend | null = null;
@@ -97,16 +110,27 @@ export function settingsBackend(): SettingsBackend {
 }
 
 /**
- * The jobs port over Dyno's agent. The jobs run in the agent, not in this process, so the shell's `jobs_snapshot` and
- * `job_cancel` are answered by forwarding to the agent through the one `dyno` command (`jobs`, `cancelJob`); the agent's job
- * statuses reach the window as `paddock://jobs` events, relayed by the shell from the link's push.
+ * The jobs port: the agent's jobs and the app's own (the Start-at-login switch) in one list. The agent's jobs run in
+ * the agent, so the shell's `jobs_snapshot` and `job_cancel` also forward to it through the one `dyno` command
+ * (`jobs`, `cancelJob`); the app's jobs are the shell's own (`jobs_snapshot`, `job_cancel`), and their ids never meet the
+ * agent's. Statuses of both reach the window as `paddock://jobs` events: the agent's relayed by the shell from the
+ * link's push, the app's emitted by its registry.
  */
 export function dynoJobsIpc(ipc: Pick<DynoIpc, 'invoke' | 'listen'>): JobsIpc {
   return {
-    invoke: <T>(command: string, args?: Record<string, unknown>): Promise<T> =>
-      command === 'jobs_snapshot'
-        ? ipc.invoke<T>('dyno', { request: 'jobs' })
-        : ipc.invoke<T>('dyno', { request: { cancelJob: { id: args?.['id'] } } }),
+    invoke: async <T>(command: string, args?: Record<string, unknown>): Promise<T> => {
+      if (command === 'jobs_snapshot') {
+        const [agent, app] = await Promise.all([
+          ipc.invoke<unknown[]>('dyno', { request: 'jobs' }),
+          ipc.invoke<unknown[]>('jobs_snapshot'),
+        ]);
+        // The app's ids start above the agent's, so the list stays ordered by id.
+        return [...agent, ...app] as T;
+      }
+      // The registry says false for an id that is not its own: then the agent's job it is.
+      if (await ipc.invoke<boolean>('job_cancel', args)) return true as T;
+      return ipc.invoke<T>('dyno', { request: { cancelJob: { id: args?.['id'] } } });
+    },
     listen: (event, handler) => ipc.listen(event, handler),
   };
 }

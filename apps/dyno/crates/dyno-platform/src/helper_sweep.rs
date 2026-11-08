@@ -164,7 +164,7 @@ impl ProcessSweeper for SystemSweeper {
                 let name = p.user_id().and_then(|u| users.get_user_by_id(u)).map(|u| u.name().to_string());
                 let owner = match p.user_id() {
                     Some(u) => classify_owner(&user_of(u), name.as_deref(), first_person),
-                    None => RawOwner::Service("unknown".into(), None),
+                    None => RawOwner::Unknown,
                 };
                 let disk = p.disk_usage();
                 RawProcess {

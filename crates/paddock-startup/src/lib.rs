@@ -5,10 +5,11 @@
 //! window list, Safe Mode restart or dialog layer (those are builder options of the adapter).
 //!
 //! Every window reports `window_ready` once it has painted its frame. A window that does not within
-//! [`Config::ready_timeout`] is reloaded once; if the reload does not help either, the user is asked natively: Reload /
-//! Restart in Safe Mode / Keep Waiting. Once ready, a visible window answers a ping (`paddock://ping` → `window_pong`)
-//! every [`Config::ping_interval`]; after [`Config::missed_pings`] missed in a row it is marked unresponsive, logged,
-//! its dialog may be closed by the OS close, and the user is asked: Reload / Keep Waiting. A gap between ticks longer
+//! [`Config::ready_timeout`] is reloaded once; if the reload does not help either within [`Config::ask_timeout`], and the window is
+//! visible, the user is asked natively: Reload / Restart in Safe Mode / Keep Waiting. Once ready, a visible window answers a ping
+//! (`paddock://ping` → `window_pong`) every [`Config::ping_interval`]; after [`Config::missed_pings`] missed in a row it is marked
+//! unresponsive, logged, and its dialog may be closed by the OS close; if it stays silent for [`Config::ask_timeout`] the user is
+//! asked: Reload / Keep Waiting. One question per window at a time; each doubles the next wait. A gap between ticks longer
 //! than [`Config::pause_gap`] means the app process itself was paused (a CPU limiter, a suspend): the clocks restart
 //! instead of firing. A window whose web content process terminated is reloaded (at most three times a minute) and its
 //! reloaded page hears why, with its last UI checkpoint.
@@ -34,6 +35,7 @@ pub mod boot_error;
 pub mod checkpoint;
 pub mod config;
 pub mod lifecycle;
+pub mod run_marker;
 pub mod safe_mode;
 pub mod session;
 pub mod watchdog;

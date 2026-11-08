@@ -314,6 +314,18 @@ pub struct KindResult {
     pub device: Option<String>,
 }
 
+impl KindResult {
+    /// Rewrites Dyno 1.0's stored "runner missing ... reinstall Dyno" reason as a past fact ([`LEGACY_RUNNER_MISSING`]);
+    /// the runner may be present now, so the stored advice would be wrong. Other reasons are untouched.
+    fn restate_legacy_reason(&mut self) {
+        if let BenchStatus::Unavailable { reason } = &mut self.status {
+            if reason.contains("dyno-bench") && reason.contains("missing") {
+                *reason = LEGACY_RUNNER_MISSING.to_string();
+            }
+        }
+    }
+}
+
 fn legacy_method() -> u32 {
     LEGACY_METHOD
 }
@@ -742,6 +754,9 @@ pub struct BenchHistory {
     pub runs: Vec<BenchRun>,
 }
 
+/// What a 1.0 "runner missing" reason is rewritten to when its history is read: a fact about that run, not advice for now.
+pub const LEGACY_RUNNER_MISSING: &str = "The benchmark runner was missing from the Dyno 1.0 installation.";
+
 /// Current [`BenchHistory::version`].
 /// (2: repetitions with spread and method versions; version 1 files are read and their runs marked as measured the old way.)
 pub const HISTORY_VERSION: u32 = 2;
@@ -768,6 +783,7 @@ impl BenchHistory {
                 // Dyno 1.0's runs are kept and marked (ADR 0030 D9); they are never compared with the current method.
                 for r in &mut h.runs {
                     r.old_way = true;
+                    r.results.iter_mut().for_each(KindResult::restate_legacy_reason);
                     r.normalise();
                 }
                 h.version = HISTORY_VERSION;
@@ -1089,6 +1105,27 @@ mod tests {
         // New runs are not marked.
         assert!(!measured_run("n", 2, &[1.0]).old_way);
         assert!(BenchKind::Cpu.method_version() > LEGACY_METHOD && BenchKind::Memory.method_version() > LEGACY_METHOD);
+    }
+
+    #[test]
+    fn a_1_0_runner_missing_reason_is_kept_as_a_past_fact_without_reinstall_advice() {
+        let v1 = r#"{"version":1,"runs":[{"id":"1","startedAt":5,"label":"Benchmark","group":null,"phase":null,
+            "load":{"cpuPercent":3.0,"memoryPercent":40.0,"onBattery":null},"machine":"m",
+            "results":[{"kind":"cpu","millis":0,"status":{"state":"unavailable","reason":"The benchmark runner (dyno-bench) is missing from the installation; reinstall Dyno."}},
+            {"kind":"disk","millis":0,"status":{"state":"unavailable","reason":"No volume to test."}}]}]}"#;
+        let (h, _) = BenchHistory::parse(v1);
+        let reasons: Vec<String> = h.runs[0]
+            .results
+            .iter()
+            .map(|r| match &r.status {
+                BenchStatus::Unavailable { reason } => reason.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(reasons[0], LEGACY_RUNNER_MISSING);
+        assert!(!reasons[0].contains("reinstall"));
+        // Any other reason is left as it was written.
+        assert_eq!(reasons[1], "No volume to test.");
     }
 
     #[test]

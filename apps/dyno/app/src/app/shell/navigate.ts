@@ -12,7 +12,6 @@ export const PAGE_ROUTE: Readonly<Record<Page, string>> = {
   disk: '/disk-map',
   network: '/network',
   issues: '/issues',
-  backups: '/backup',
   counters: '/counters',
   processes: '/processes',
   power: '/power',

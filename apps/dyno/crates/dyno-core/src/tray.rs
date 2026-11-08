@@ -11,6 +11,28 @@ pub mod menu_bar;
 pub mod pixel;
 pub mod text;
 
+/// Which way a network item counts: an item shows its own direction only ("Network up" is the upload rate and nothing else).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetDir {
+    /// Bytes per second sent.
+    Up,
+    /// Bytes per second received.
+    Down,
+    /// Both, upload over download.
+    Both,
+}
+
+impl NetDir {
+    /// The rows the item draws, top to bottom: `true` is the upload row. One row is centred; two are stacked.
+    pub fn rows(self) -> &'static [bool] {
+        match self {
+            NetDir::Up => &[true],
+            NetDir::Down => &[false],
+            NetDir::Both => &[true, false],
+        }
+    }
+}
+
 /// A metric an icon can draw.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IconMetric {

@@ -445,6 +445,44 @@ impl TrayIcon {
         }
     }
 
+    /// Paddock patch: whether the OS holds this icon now. Windows: the shell accepted the last add (it refuses while Explorer's
+    /// notification area is not ready, and the icon is added again on `TaskbarCreated`). Elsewhere always true.
+    pub fn is_added(&self) -> bool {
+        #[cfg(windows)]
+        {
+            self.tray.borrow().is_added()
+        }
+        #[cfg(not(windows))]
+        {
+            true
+        }
+    }
+
+    /// Paddock patch: the add and recovery steps with the `GetLastError` of each failed one. Elsewhere empty.
+    pub fn recovery_trace(&self) -> String {
+        #[cfg(windows)]
+        {
+            self.tray.borrow().recovery_trace()
+        }
+        #[cfg(not(windows))]
+        {
+            String::new()
+        }
+    }
+
+    /// Paddock patch: how many `TaskbarCreated` messages this icon saw (Explorer restarted or finished creating its taskbar) and the
+    /// outcome of the last re-add. Elsewhere `(0, None)`.
+    pub fn taskbar_restarts(&self) -> (u32, Option<GuidStatus>) {
+        #[cfg(windows)]
+        {
+            self.tray.borrow().taskbar_restarts()
+        }
+        #[cfg(not(windows))]
+        {
+            (0, None)
+        }
+    }
+
     /// Returns the id associated with this tray icon.
     pub fn id(&self) -> &TrayIconId {
         &self.id
@@ -757,6 +795,18 @@ pub enum GuidStatus {
 /// ignored). Windows only uses the result; elsewhere it is ignored like [`TrayIconAttributes::guid`].
 pub fn set_guid_provider(provider: GuidProvider) {
     let _ = GUID_PROVIDER.set(provider);
+}
+
+/// Paddock patch (see `apps/dyno/vendor/PATCHES.md`): maps a tray icon id to the autosave name its macOS status item gets before
+/// it connects to the menu bar.
+pub type AutosaveNameProvider = fn(&str) -> Option<String>;
+
+static AUTOSAVE_NAME_PROVIDER: OnceCell<AutosaveNameProvider> = OnceCell::new();
+
+/// Registers the provider of the macOS autosave name of every icon, by id (once per process; later calls are ignored). Only macOS
+/// uses the result.
+pub fn set_autosave_name_provider(provider: AutosaveNameProvider) {
+    let _ = AUTOSAVE_NAME_PROVIDER.set(provider);
 }
 
 type TrayIconEventHandler = Box<dyn Fn(TrayIconEvent) + Send + Sync + 'static>;

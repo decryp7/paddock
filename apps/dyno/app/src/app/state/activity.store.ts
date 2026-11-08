@@ -1,6 +1,7 @@
 import { inject } from '@angular/core';
 import { patchState, signalStore, withHooks, withMethods, withState } from '@ngrx/signals';
 import type { ActivityEntry, CommandError } from '../core/api.types';
+import { EVENTS_KEPT } from './events-kept';
 import { BACKEND, type Unsubscribe } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 
@@ -12,7 +13,7 @@ interface ActivityState {
 }
 
 /** Puts a pushed or changed entry into the list: replaces the one with its id, else adds it on top. */
-export function mergeEntry(entries: readonly ActivityEntry[], entry: ActivityEntry, limit = 200): ActivityEntry[] {
+export function mergeEntry(entries: readonly ActivityEntry[], entry: ActivityEntry, limit = EVENTS_KEPT): ActivityEntry[] {
   const i = entries.findIndex((e) => e.id === entry.id);
   if (i >= 0) return entries.map((e, j) => (j === i ? entry : e));
   return [entry, ...entries].sort((a, b) => b.at - a.at).slice(0, limit);

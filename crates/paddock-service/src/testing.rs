@@ -34,6 +34,7 @@ pub type Responder = Box<dyn FnMut(&[String], Duration) -> Result<Output, RunErr
 struct Inner {
     files: BTreeMap<PathBuf, String>,
     programs: BTreeSet<PathBuf>,
+    processes: std::collections::BTreeMap<u32, paddock_proc::ProcessId>,
     calls: Vec<Call>,
     now: Duration,
     rules: Vec<(String, Responder)>,
@@ -41,6 +42,7 @@ struct Inner {
     remove_error: Option<std::io::ErrorKind>,
     read_error: Option<std::io::ErrorKind>,
     spawn_error: Option<String>,
+    effects: Vec<(String, PathBuf, String)>,
 }
 
 /// A recording [`System`]. Clones share one state, so a test keeps a handle while the backend owns another. Commands
@@ -78,6 +80,66 @@ impl FakeSystem {
         self.on(prefix, move |_, _| Ok(out.clone()))
     }
 
+    /// After every command starting with `prefix`, the file `path` holds `text` (something else rewrote it: a drop-in, a
+    /// package upgrade). The effect applies once the command has been answered.
+    pub fn rewrite_after(&self, prefix: &str, path: impl Into<PathBuf>, text: &str) -> &Self {
+        self.lock()
+            .effects
+            .push((prefix.to_string(), path.into(), text.to_string()));
+        self
+    }
+
+    /// Makes `reg add`, `reg delete` and `reg query` on the per-user `Run` key behave like a registry: a value added reads
+    /// back as added (`REG_SZ`), a deleted one is gone (exit 1), and any other key reads as missing. A later
+    /// `answer("reg query", ..)` still wins, so a test can show what someone else left there.
+    pub fn emulate_run_registry(&self) -> &Self {
+        let values: Arc<Mutex<BTreeMap<String, String>>> = Arc::default();
+        let word = |args: &[String], flag: &str| {
+            args.iter()
+                .position(|a| a == flag)
+                .and_then(|i| args.get(i + 1))
+                .cloned()
+        };
+        let store = values.clone();
+        self.on("reg add", move |args, _| {
+            if let (Some(name), Some(data)) = (word(args, "/v"), word(args, "/d")) {
+                store
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(name, data);
+            }
+            Ok(Output::code(0))
+        });
+        let store = values.clone();
+        self.on("reg delete", move |args, _| {
+            let removed = word(args, "/v").and_then(|name| {
+                store
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .remove(&name)
+            });
+            Ok(Output::code(if removed.is_some() { 0 } else { 1 }))
+        });
+        self.on("reg query", move |args, _| {
+            let data = args
+                .get(2)
+                .filter(|key| key.ends_with("CurrentVersion\\Run"))
+                .and_then(|_| word(args, "/v"))
+                .and_then(|name| {
+                    values
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .get(&name)
+                        .map(|data| (name, data.clone()))
+                });
+            Ok(match data {
+                Some((name, data)) => Output::ok(&format!("    {name}    REG_SZ    {data}\r\n")),
+                None => Output::code(1),
+            })
+        });
+        self
+    }
+
     /// Puts a file on the fake disk.
     pub fn put_file(&self, path: impl Into<PathBuf>, text: &str) -> &Self {
         self.lock().files.insert(path.into(), text.to_string());
@@ -90,6 +152,12 @@ impl FakeSystem {
     }
 
     /// Makes `path` an existing, non-empty program.
+    /// A process the fake machine runs (what `System::process` finds by its pid).
+    pub fn put_process(&self, id: paddock_proc::ProcessId) -> &Self {
+        self.lock().processes.insert(id.pid(), id);
+        self
+    }
+
     pub fn put_program(&self, path: impl Into<PathBuf>) -> &Self {
         self.lock().programs.insert(path.into());
         self
@@ -158,6 +226,10 @@ impl FakeSystem {
 }
 
 impl System for FakeSystem {
+    fn process(&mut self, pid: u32) -> Option<paddock_proc::ProcessId> {
+        self.lock().processes.get(&pid).copied()
+    }
+
     fn run(&mut self, program: &str, args: &[&str]) -> Result<Output, RunError> {
         let mut words = vec![program.to_string()];
         words.extend(args.iter().map(|a| a.to_string()));
@@ -170,10 +242,18 @@ impl System for FakeSystem {
             .iter_mut()
             .rev()
             .find(|(p, _)| line.starts_with(p.as_str()));
-        match rule {
+        let answer = match rule {
             Some((_, respond)) => respond(&words, now),
             None => Ok(Output::code(0)),
-        }
+        };
+        let rewrites: Vec<(PathBuf, String)> = inner
+            .effects
+            .iter()
+            .filter(|(p, _, _)| line.starts_with(p.as_str()))
+            .map(|(_, path, text)| (path.clone(), text.clone()))
+            .collect();
+        inner.files.extend(rewrites);
+        answer
     }
 
     fn spawn(&mut self, program: &Path, args: &[String]) -> Result<(), String> {
@@ -285,6 +365,12 @@ impl FakeAppService {
         self
     }
 
+    /// The status a successful `register` leaves (`None`: unchanged).
+    pub fn set_register_sets(&self, status: Option<AppServiceStatus>) -> &Self {
+        self.lock().register_sets = status;
+        self
+    }
+
     /// Makes `unregister` fail.
     pub fn fail_unregister(&self, why: Option<&str>) -> &Self {
         self.lock().unregister_error = why.map(str::to_string);
@@ -388,6 +474,7 @@ struct FilesInner {
     new_owner: Option<u32>,
     tamper: bool,
     fail: Option<std::io::ErrorKind>,
+    swap_after_open: Option<Vec<u8>>,
 }
 
 impl FakeFiles {
@@ -427,6 +514,13 @@ impl FakeFiles {
         inner.entries.insert(path.clone(), facts);
         inner.content.insert(path, content.to_vec());
         drop(inner);
+        self
+    }
+
+    /// The next `open_source` hands out the current bytes and then replaces the file at that path with `bytes`: the swap a
+    /// user makes between the check and a copy that reopens the path.
+    pub fn swap_source_after_open(&self, bytes: &[u8]) -> &Self {
+        self.lock().swap_after_open = Some(bytes.to_vec());
         self
     }
 
@@ -479,6 +573,11 @@ impl FakeFiles {
     }
 
     /// What exists at `path`.
+    /// The bytes at `path`.
+    pub fn content_of(&self, path: &Path) -> Option<Vec<u8>> {
+        self.lock().content.get(path).cloned()
+    }
+
     pub fn facts_of(&self, path: &Path) -> Option<crate::privileged::FileFacts> {
         self.lock().entries.get(path).cloned()
     }
@@ -519,20 +618,37 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
         Ok(())
     }
 
-    fn copy_program(&mut self, from: &Path, to: &Path, mode: u32) -> std::io::Result<String> {
-        use crate::privileged::{FileFacts, FileKind};
+    fn open_source(
+        &mut self,
+        path: &Path,
+        max: u64,
+    ) -> std::io::Result<Option<crate::privileged::HeldSource>> {
         let mut inner = self.lock();
-        inner
-            .calls
-            .push(format!("copy {} {}", from.display(), to.display()));
+        inner.calls.push(format!("open_source {}", path.display()));
         if let Some(kind) = inner.fail {
             return Err(std::io::Error::from(kind));
         }
-        let bytes = inner
-            .content
-            .get(from)
-            .cloned()
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+        let Some(facts) = inner.entries.get(path).cloned() else {
+            return Ok(None);
+        };
+        let bytes = inner.content.get(path).cloned().unwrap_or_default();
+        if bytes.len() as u64 > max {
+            return Err(std::io::Error::from(std::io::ErrorKind::InvalidData));
+        }
+        // A test swaps the file at this path right after the handle was opened.
+        if let Some(swapped) = inner.swap_after_open.take() {
+            inner.content.insert(path.to_path_buf(), swapped);
+        }
+        Ok(Some(crate::privileged::HeldSource { facts, bytes }))
+    }
+
+    fn write_program(&mut self, bytes: &[u8], to: &Path, mode: u32) -> std::io::Result<String> {
+        use crate::privileged::{FileFacts, FileKind};
+        let mut inner = self.lock();
+        inner.calls.push(format!("write {}", to.display()));
+        if let Some(kind) = inner.fail {
+            return Err(std::io::Error::from(kind));
+        }
         let owner = inner.new_owner.unwrap_or(0);
         let no_owner = inner.no_owner;
         inner.entries.insert(
@@ -544,8 +660,8 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
                 len: bytes.len() as u64,
             },
         );
-        let hash = crate::privileged::files::hash_bytes(&bytes);
-        inner.content.insert(to.to_path_buf(), bytes);
+        let hash = crate::privileged::files::hash_bytes(bytes);
+        inner.content.insert(to.to_path_buf(), bytes.to_vec());
         Ok(hash)
     }
 
@@ -611,6 +727,29 @@ impl crate::privileged::ProtectedFiles for FakeFiles {
             .remove(path)
             .map(drop)
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))
+    }
+}
+
+/// An [`OsLog`](crate::os_log::OsLog) that keeps every line (tests of a service's start-up and failures).
+#[derive(Clone, Default)]
+pub struct RecordingOsLog(Arc<Mutex<Vec<(log::Level, String)>>>);
+
+impl RecordingOsLog {
+    /// Every line written so far, with its level.
+    pub fn lines(&self) -> Vec<(log::Level, String)> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl crate::os_log::OsLog for RecordingOsLog {
+    fn write(&self, level: log::Level, text: &str) {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((level, text.to_string()));
     }
 }
 
@@ -715,5 +854,20 @@ mod tests {
         assert_eq!((facts.owner, text.as_str()), (Some(0), "others"));
         assert!(disk.read_checked(Path::new("/p"), 3).is_err());
         assert!(files.calls().iter().any(|c| c == "read /p"));
+    }
+
+    #[test]
+    fn the_fake_disk_fails_and_bounds_a_source_like_the_real_one() {
+        use crate::privileged::ProtectedFiles;
+        let files = FakeFiles::new();
+        files.put_file("/p", b"abcdef", 0, 0o644);
+        let mut disk = files.clone();
+        assert_eq!(
+            disk.open_source(Path::new("/p"), 3).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        files.fail_with(Some(std::io::ErrorKind::PermissionDenied));
+        assert!(disk.open_source(Path::new("/p"), 9).is_err());
+        assert!(disk.write_program(b"x", Path::new("/q"), 0o755).is_err());
     }
 }

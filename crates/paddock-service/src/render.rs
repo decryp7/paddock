@@ -11,7 +11,7 @@
 //! - [`nsis_hooks`]: `src-tauri/windows/installer-hooks.nsh` (replaces the three hand-written copies).
 
 use crate::hardening::{SDDL_USERS_MAY_START, Sandbox};
-use crate::spec::{Kind, Restart, ServiceSpec};
+use crate::spec::{Kind, Restart, ServiceSpec, WindowsStart};
 use crate::verbs::Verb;
 use std::fmt::Write as _;
 use std::time::Duration;
@@ -209,14 +209,23 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
     );
     let _ = writeln!(o, "RestartSec={}", spec.throttle_secs());
     o.push_str("TimeoutStopSec=60\n");
+    // The service's own OS log (ADR 0054 section 2.3): standard error is the journal, under the unit's name.
+    let _ = writeln!(
+        o,
+        "StandardOutput=journal\nStandardError=journal\nSyslogIdentifier={}",
+        spec.unit_name()
+    );
     if spec.low_priority() {
-        o.push_str("Nice=10\nCPUWeight=20\nIOSchedulingClass=idle\n");
+        // Never the idle I/O class (rule 52): the service answers requests somebody waits for.
+        o.push_str(
+            "Nice=10\nCPUWeight=20\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7\n",
+        );
     }
     if let Some(mb) = spec.memory_high_mb() {
         let _ = writeln!(o, "MemoryHigh={mb}M");
     }
     if let Some(sandbox) = sandbox {
-        systemd_sandbox(&mut o, sandbox);
+        systemd_sandbox(&mut o, sandbox, &spec.unit_file_name());
     }
     o.push_str("\n[Install]\n");
     let _ = writeln!(
@@ -233,7 +242,7 @@ pub fn systemd_unit(spec: &ServiceSpec, exe: &str, working_dir: Option<&str>) ->
 /// The sandbox keys of a system unit (ADR 0027 §1, systemd.exec(5)): the whole file system read-only but the service's
 /// own folders, no home, a private `/tmp`, no new privileges, only the declared capabilities and socket families, no IP
 /// traffic, system calls of a normal service without mounting, nothing writable and executable, files private by default.
-fn systemd_sandbox(o: &mut String, s: &Sandbox) {
+fn systemd_sandbox(o: &mut String, s: &Sandbox, unit: &str) {
     o.push_str(
         "ProtectSystem=strict\nProtectHome=read-only\nPrivateTmp=yes\nNoNewPrivileges=yes\n",
     );
@@ -248,10 +257,36 @@ fn systemd_sandbox(o: &mut String, s: &Sandbox) {
          MemoryDenyWriteExecute=yes\nUMask=0077\n",
     );
     if let Some(d) = s.state_directory() {
+        // The logs folder (`LogsDirectory=`) is a bind mount inside the sandbox too, so it is removed by the same step after the stop.
+        let logs = s
+            .logs_directory()
+            .map(|l| format!(" /var/log/{l}"))
+            .unwrap_or_default();
         let _ = writeln!(o, "StateDirectory={d}\nStateDirectoryMode=0700");
+        // `ProtectSystem=strict` leaves `/var/lib` read-only inside the service, so the service cannot remove its own state
+        // folder when it removes itself (rmdir: "Read-only file system"), and during the stop the service's bind mount of the
+        // folder is still in the host's mount table, so even a `+` stop step gets "busy". A transient unit ordered `After=` this
+        // one starts when the stop is over and the mount is gone. Its parts:
+        // - `rmdir --ignore-fail-on-non-empty` takes only an empty folder and is quiet about one with files (a normal stop leaves
+        //   the log and tools in it), so no stop leaves a failed unit behind;
+        // - `DefaultDependencies=no`: the default `Conflicts=shutdown.target` would stop the unit (or refuse it) when the stop
+        //   is part of a shutdown;
+        // - `systemctl is-active` first: after `systemctl restart` the unit is ordered after the restart job, so the service is
+        //   running again and its folder is left alone (the window between the stop and the check is the restart's own);
+        // - the leading `-` keeps a failed `systemd-run` from failing the stop.
+        // `/usr/bin/...` assumes a merged `/usr` (every systemd distribution since 2021: `/bin` is a link to `/usr/bin`).
+        let _ = writeln!(
+            o,
+            "ExecStopPost=-+/usr/bin/systemd-run --quiet --no-block --collect --property=DefaultDependencies=no \
+             --property=After={unit} /bin/sh -c '/usr/bin/systemctl is-active --quiet {unit} || \
+             exec /usr/bin/rmdir --ignore-fail-on-non-empty /var/lib/{d}{logs}'"
+        );
     }
     if let Some(d) = s.runtime_directory() {
         let _ = writeln!(o, "RuntimeDirectory={d}\nRuntimeDirectoryMode=0755");
+    }
+    if let Some(d) = s.logs_directory() {
+        let _ = writeln!(o, "LogsDirectory={d}\nLogsDirectoryMode=0755");
     }
 }
 
@@ -322,6 +357,8 @@ pub struct ScmConfig {
     pub privileges: Vec<String>,
     /// The service DACL as SDDL (`None`: the SCM default).
     pub sddl: Option<String>,
+    /// When the SCM starts it after boot.
+    pub start: WindowsStart,
 }
 
 /// The Windows service for `spec` running `exe` (the SCM always starts it with `--service`, see [`Verb::WindowsService`]).
@@ -345,6 +382,7 @@ pub fn scm_config(spec: &ServiceSpec, exe: &str) -> ScmConfig {
             .hardening()
             .filter(|h| h.users_start())
             .map(|_| SDDL_USERS_MAY_START.to_string()),
+        start: spec.windows_start(),
     }
 }
 
@@ -358,7 +396,7 @@ pub fn sc_commands(c: &ScmConfig) -> Vec<Vec<String>> {
         s("binPath="),
         c.command_line.clone(),
         s("start="),
-        s("delayed-auto"),
+        s(c.start.sc_word()),
         s("DisplayName="),
         c.display_name.clone(),
     ]];
@@ -390,6 +428,52 @@ pub fn sc_commands(c: &ScmConfig) -> Vec<Vec<String>> {
     ]);
     calls.push(vec![s("failureflag"), c.name.clone(), s("1")]);
     calls
+}
+
+/// The registry key that makes the Event Viewer show a service's entries under its own source (the service's name).
+pub fn event_source_key(spec: &ServiceSpec) -> String {
+    format!(
+        r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\{}",
+        spec.name()
+    )
+}
+
+/// The `reg.exe` calls (arguments of each) that register the service's Event Log source at install: the entries use the
+/// generic message table of `EventCreate.exe` (event ids 1 to 1000 print their one text), which is what
+/// [`crate::os_log`]'s event log writer reports with. Run elevated. A failure only means the entries show with Windows'
+/// "description cannot be found" wrapper around the same text.
+pub fn event_source_commands(spec: &ServiceSpec) -> Vec<Vec<String>> {
+    let key = event_source_key(spec);
+    let s = |v: &str| v.to_string();
+    vec![
+        vec![
+            s("add"),
+            key.clone(),
+            s("/v"),
+            s("EventMessageFile"),
+            s("/t"),
+            s("REG_EXPAND_SZ"),
+            s("/d"),
+            s(r"%SystemRoot%\System32\EventCreate.exe"),
+            s("/f"),
+        ],
+        vec![
+            s("add"),
+            key,
+            s("/v"),
+            s("TypesSupported"),
+            s("/t"),
+            s("REG_DWORD"),
+            s("/d"),
+            s("7"),
+            s("/f"),
+        ],
+    ]
+}
+
+/// The `reg.exe` call that removes the source at uninstall.
+pub fn event_source_remove_command(spec: &ServiceSpec) -> Vec<String> {
+    vec!["delete".into(), event_source_key(spec), "/f".into()]
 }
 
 /// The `sc.exe` calls as a script an administrator could run (and the golden file reads).
@@ -471,6 +555,46 @@ pub fn nsis_hooks(spec: &ServiceSpec) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_event_source_is_registered_with_a_message_file_and_removed_by_its_key_only() {
+        let spec =
+            ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+                .build()
+                .unwrap();
+        let key = r"HKLM\SYSTEM\CurrentControlSet\Services\EventLog\Application\DynoHelper";
+        assert_eq!(event_source_key(&spec), key);
+        let add = event_source_commands(&spec);
+        assert_eq!(add.len(), 2);
+        assert!(
+            add.iter().all(|c| c[0] == "add"
+                && c[1] == key
+                && c.last().map(String::as_str) == Some("/f"))
+        );
+        assert!(add[0].iter().any(|a| a.ends_with("EventCreate.exe")));
+        assert!(
+            add[1].windows(2).any(|w| w == ["/d", "7"]),
+            "error, warning and information"
+        );
+        assert_eq!(event_source_remove_command(&spec), ["delete", key, "/f"]);
+    }
+
+    #[test]
+    fn a_systemd_unit_writes_standard_output_and_error_to_the_journal_under_its_own_identifier() {
+        let spec =
+            ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+                .unit("dyno-helper")
+                .kind(Kind::SystemService)
+                .build()
+                .unwrap();
+        let unit = systemd_unit(&spec, "/usr/bin/dyno-helper", None);
+        assert!(
+            unit.contains(
+                "StandardOutput=journal\nStandardError=journal\nSyslogIdentifier=dyno-helper\n"
+            ),
+            "{unit}"
+        );
+    }
     use crate::spec::{ProcessType, ServiceSpec};
 
     fn agent() -> ServiceSpec {
@@ -596,6 +720,39 @@ mod tests {
         assert_eq!(calls[1][5], "restart/10000/restart/60000/restart/300000");
         assert!(
             c.restart_delays.windows(2).all(|w| w[0] < w[1]) && c.reset_after > c.restart_delays[2]
+        );
+    }
+
+    #[test]
+    fn a_spec_can_ask_for_a_plain_automatic_start_and_keeps_the_recovery_actions() {
+        let build = |start: Option<WindowsStart>| {
+            let mut b =
+                ServiceSpec::builder("net.decryptology.dyno.helper", "DynoHelper", "dyno-helper")
+                    .kind(Kind::SystemService);
+            if let Some(s) = start {
+                b = b.windows_start(s);
+            }
+            sc_commands(&scm_config(&b.build().unwrap(), "C:\\x\\dyno-helper.exe"))
+        };
+        let start_type = |calls: &[Vec<String>]| {
+            let create = &calls[0];
+            create[create.iter().position(|a| a == "start=").unwrap() + 1].clone()
+        };
+        assert_eq!(
+            start_type(&build(None)),
+            "delayed-auto",
+            "other users keep their own setting"
+        );
+        let auto = build(Some(WindowsStart::Auto));
+        assert_eq!(
+            start_type(&auto),
+            "auto",
+            "the boot gap is seconds, not a delayed minute or two"
+        );
+        assert!(
+            auto.iter().any(|c| c[0] == "failure"
+                && c.contains(&"restart/10000/restart/60000/restart/300000".to_string())),
+            "the failure actions stay: {auto:?}"
         );
     }
 }

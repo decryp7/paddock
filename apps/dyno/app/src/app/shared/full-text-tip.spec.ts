@@ -2,7 +2,7 @@ import { Component } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import { MatTooltip } from '@angular/material/tooltip';
-import { FullTextTip } from './full-text-tip';
+import { FULL_TEXT_TIP_CLASS, FullTextTip } from './full-text-tip';
 
 @Component({ imports: [FullTextTip], template: `<span class="t" [dyFullText]="text">{{ text }}</span>` })
 class Host {
@@ -22,6 +22,10 @@ function setup(scrollWidth: number, clientWidth: number, scrollHeight = 20, clie
 }
 
 describe('FullTextTip', () => {
+  it('marks its tooltip so the pointer passes through it', () => {
+    expect(setup(200, 100).tip.tooltipClass).toBe(FULL_TEXT_TIP_CLASS);
+  });
+
   it('has no tooltip message at rest, so the text is not described twice', () => {
     expect(setup(200, 100).tip.message).toBe('');
   });

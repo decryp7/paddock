@@ -46,6 +46,8 @@ pub struct Source {
     pub id: &'static str,
     /// Which database.
     pub kind: DbKind,
+    /// What the user calls it, for messages.
+    pub name: &'static str,
     stem: &'static str,
 }
 
@@ -53,12 +55,14 @@ pub struct Source {
 pub const COUNTRY: Source = Source {
     id: "geo-country",
     kind: DbKind::Country,
+    name: "IP to Country database",
     stem: "dbip-country-lite",
 };
 /// IP to ASN Lite.
 pub const ASN: Source = Source {
     id: "geo-asn",
     kind: DbKind::Asn,
+    name: "IP to ASN database",
     stem: "dbip-asn-lite",
 };
 
@@ -88,7 +92,7 @@ impl GeoError {
     pub fn kind(&self) -> &'static str {
         match self {
             GeoError::Fetch(e) => e.kind(),
-            GeoError::Db(_) => "database-check",
+            GeoError::Db(e) => e.kind(),
             GeoError::NotPublished => "not-published",
         }
     }
@@ -212,10 +216,18 @@ impl GeoFetcher {
             Ok(GeoOutcome::Updated { bytes, .. }) => {
                 log::info!(target: "dyno::geo", "database update: id={} outcome=updated bytes={bytes} duration_ms={ms}", source.id)
             }
-            Err(e) => log::warn!(target: "dyno::geo", "database update failed: id={} kind={} duration_ms={ms}", source.id, e.kind()),
+            Err(e) => {
+                let declared = match e {
+                    GeoError::Db(d) => d
+                        .declared_type()
+                        .map(|t| format!(" declared_type={t:?} expected={:?}", source.kind.database_type())),
+                    _ => None,
+                };
+                log::warn!(target: "dyno::geo", "database update failed: id={} kind={} duration_ms={ms}{}", source.id, e.kind(), declared.unwrap_or_default())
+            }
         }
         if let Err(e) = &result {
-            state.status.error = Some(e.to_string());
+            state.status.error = Some(format!("{}: {e}", source.name));
         }
         result
     }
@@ -476,7 +488,7 @@ mod tests {
         std::fs::create_dir_all(&c).unwrap();
         std::fs::write(c.join("current-2026-10.mmdb"), sample_country(NOW - 10 * 86_400)).unwrap();
         let mut st = FetchState::default();
-        assert_eq!(go(&r, COUNTRY, &mut st), Err(GeoError::Db(DbError::WrongType)));
+        assert!(matches!(go(&r, COUNTRY, &mut st), Err(GeoError::Db(DbError::WrongType(_)))));
         assert!(st.status.error.is_some());
         r.clock.advance(DAY);
         assert_eq!(go(&r, COUNTRY, &mut st), Err(GeoError::Db(DbError::NotGzip)));

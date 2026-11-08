@@ -239,6 +239,35 @@ function baseOf(base, registerPath) {
   return { text, trailers };
 }
 
+/** The per-crate table, the crates with most uncovered lines first. */
+export function table(crates) {
+  const rows = [...crates].map(([name, c]) => ({ name, ...c, missing: c.total - c.hit }));
+  rows.sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name));
+  const width = Math.max(5, ...rows.map((r) => r.name.length));
+  const out = [`${'crate'.padEnd(width)} ${'lines'.padStart(7)} ${'covered'.padStart(7)} ${'missing'.padStart(7)} ${'%'.padStart(7)}`];
+  for (const r of rows) {
+    const pct = r.total === 0 ? 100 : (100 * r.hit) / r.total;
+    out.push(`${r.name.padEnd(width)} ${String(r.total).padStart(7)} ${String(r.hit).padStart(7)} ${String(r.missing).padStart(7)} ${pct.toFixed(2).padStart(7)}`);
+  }
+  return out.join('\n');
+}
+
+/** Runs the gate over lcov text; returns { code, lines } (the output lines, the exit code). The rule: aggregate >= minimum. */
+export function gate(lcov, minimum = 99, read) {
+  const crates = new Map();
+  const { hit, total, skipped } = measure(lcov, read, crates);
+  const percent = total === 0 ? 0 : (100 * hit) / total;
+  const lines = [`lines ${hit}/${total} = ${percent.toFixed(2)}% (${skipped} generated #[tauri::command] lines not counted)`, table(crates)];
+  const pass = total > 0 && percent >= Number(minimum);
+  if (!pass) {
+    const needed = Math.max(0, Math.ceil((Number(minimum) / 100) * total) - hit);
+    lines.push(
+      `::error::line coverage ${percent.toFixed(2)}% is below the minimum ${Number(minimum)}%: ${total - hit} lines uncovered, ${needed} more must be covered. Next step: add tests for the crates at the top of the table above.`,
+    );
+  }
+  return { code: pass ? 0 : 1, lines };
+}
+
 if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const flag = (name) => { const i = args.indexOf(name); return i < 0 ? null : args.splice(i, 2)[1]; };

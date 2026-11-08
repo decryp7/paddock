@@ -10,6 +10,7 @@
 pub mod access;
 pub mod battery;
 pub mod btm_reader;
+pub mod build_id;
 pub mod counters;
 pub mod dev_folders;
 pub mod extras;
@@ -25,6 +26,7 @@ pub mod helper_sweep;
 pub mod inventory;
 pub mod issues;
 pub mod links;
+pub mod mount_events;
 pub mod network;
 pub mod nt;
 pub mod parse;
@@ -36,8 +38,8 @@ pub mod readability;
 pub mod runner;
 pub mod sensors;
 pub mod smart_reader;
+pub mod smartctl_search;
 pub mod tool_install;
-pub mod toolpath;
 #[cfg(unix)]
 #[allow(unsafe_code)]
 pub mod unix_proc;
@@ -160,23 +162,23 @@ impl HardwareReaders {
     }
 }
 
-/// The ports for the current OS.
-pub fn platform() -> Platform {
+/// The ports for the current OS. `secrets_dir` is where the macOS build keeps Wake-on-LAN passwords (see [`wol::os_store`]).
+pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     #[cfg(windows)]
     {
-        windows::platform()
+        windows::platform(secrets_dir)
     }
     #[cfg(target_os = "macos")]
     {
-        macos::platform()
+        macos::platform(secrets_dir)
     }
     #[cfg(target_os = "linux")]
     {
-        linux::platform()
+        linux::platform(secrets_dir)
     }
     #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     {
-        other::platform()
+        other::platform(secrets_dir)
     }
 }
 

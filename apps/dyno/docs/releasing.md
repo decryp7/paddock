@@ -15,7 +15,7 @@ offered to users: updaters read `latest.json` of the *latest* release. The `rele
 
 ## What a build contains
 
-- **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-user).
+- **Windows:** `Dyno_<version>_x64-setup.exe` (NSIS, per-machine in Program Files since 1.1.0).
 - **macOS:** `Dyno_<version>_aarch64.dmg`, and with signing secrets also the `.app.tar.gz` the updater installs. The bundle is
   **ad-hoc signed** (`signingIdentity "-"` in `tauri.macos.conf.json`): `SMAppService` and launch agents refuse a
   linker-signed bundle. It is not notarised: users open it once through Privacy & Security > Open Anyway (twice, then an administrator password; macOS 26). Developer ID signing and
@@ -77,8 +77,8 @@ reinstall from the releases page, and revoke the old secrets.
 In this order, on one commit:
 
 0. Every 1.0 branch is merged: disk-map-1.0, jobs-1.0 (with its CHANGELOG bullet folded into the `[1.0.0]` section), tables/layout and the startup fix. Nothing may land after step 1 without repeating steps 2 and 3.
-1. Bump the version in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files), and date the
-   `CHANGELOG.md` section (`## [1.0.0] - <date>`, never "Unreleased"): the first release's notes are that section and the
+1. Bump the version (and, in the same commit, update the README status line, for example "1.1.0 released") in `app/src-tauri/tauri.conf.json` and the workspace `Cargo.toml` (and the lock files), and date the
+   `CHANGELOG.md` section (`## [1.0.0] - <date>`, never "Unreleased"; the date is set in this bump commit to the tag date): the first release's notes are that section and the
    release run fails without it. `main` is green.
 2. Run one **manual `dyno-release` with `gates: true`** on that commit (Actions > dyno-release > Run workflow, rule 25). It
    runs Dyno's legs of `ci.yml` (WebKit included) and builds the installers on all three systems.
@@ -132,4 +132,27 @@ fails (in the bundle job, before the three builds) if the section is missing, st
 
 ## First launch note
 
-Apple notarization and Windows code signing are deferred until after the releases settle (decision 2026-10-23). Until then the release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+The apps are not signed or notarized: updates are protected by the family update key, and paid certificates would be needed to remove the OS warnings (decision 2026-11-05). The release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
+
+## The helper's signature (macOS) and how to test it locally
+
+The macOS helper that the one password prompt copies into `/Library/PrivilegedHelperTools` is verified by the elevated install
+against a minisign signature made with the family update key (security review of the helper install; ADR 0027 amendment).
+
+- `app/src-tauri/scripts/sidecar.mjs` signs the final, ad-hoc sealed helper under the file name `dyno-helper-<version>-<target
+  triple>`; the signature's trusted comment carries that name, and the helper accepts only its own version and architecture. The
+  signature is bundled as `Contents/Resources/dyno-helper.minisig`; the hash it covers goes to `binaries/dyno-helper.sha256`.
+- `scripts/check-bundle.sh` fails the build when the helper in the .app is not the file that was signed, and fails a tag build (or
+  a build with `TAURI_UPDATER_PUBKEY` set) whose helper is unsigned. Pull-request and dev builds only warn.
+
+Testing without the family key: make a throwaway pair and build with it.
+
+```sh
+cargo tauri signer generate -w /tmp/throwaway.key -p ""           # prints the public key; keep both out of the repository
+export TAURI_SIGNING_PRIVATE_KEY="$(cat /tmp/throwaway.key)" TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""
+export TAURI_UPDATER_PUBKEY="$(cat /tmp/throwaway.key.pub)"        # compiled into the helper by the same build
+node apps/dyno/app/src-tauri/scripts/sidecar.mjs && (cd apps/dyno/app && npx tauri build -- --profile dist)
+```
+
+The key must be the same for the signature and for the build that compiles `TAURI_UPDATER_PUBKEY` in, or the install says the
+helper does not match its signature. Unit tests use the fixtures in `crates/dyno-helper-service/tests/fixtures/` (a throwaway key).

@@ -1,4 +1,4 @@
-// Stylised mock screens for apps that have no screenshots yet (Sighter, Pacenotes) or whose screenshots are out of date (Dyno). Drawn in the Paddock design language
+// Stylised mock screens for apps that have no screenshots yet (Sighter, Pacenotes, Recce) or whose screenshots are out of date (Dyno). Drawn in the Paddock design language
 // with theme variables, in a fixed design size: hero 960x600, panel 672x280. They are concepts, not product screens.
 const r = (x, y, w, h, c = 'mc', rx = 8) => `<rect class="${c}" x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}"/>`;
 const t = (x, y, s, c = 'mt', a = '') => `<text class="${c}" x="${x}" y="${y}"${a ? ` text-anchor="${a}"` : ''}>${s}</text>`;
@@ -97,6 +97,7 @@ export function hero(app) {
       r(708, 332, 202, 1, 'mrule', 0) + t(708, 360, 'Needs labelling', 'mta') + sk(708, 376, 150) + sk(708, 396, 110) +
       r(232, 506, 696, 48, 'mc', 12) + glyphDot(256, 530) + t(276, 535, 'Find “the Save button”', 'mt') + t(912, 535, 'box 412, 288  ·  0.97  ·  detector', 'mm', 'end');
   }
+  if (app === 'recce') return recceHero();
   // pacenotes
   return sidebar(['Map', 'Search', 'Review', 'Diagrams', 'Requirements', 'MCP'], 0) +
     t(232, 52, 'Repository map', 'mh') + t(232, 70, 'Read-only index, nothing is executed', 'mm') +
@@ -107,6 +108,60 @@ export function hero(app) {
     ['retry.rs:42', 'config.rs:118', 'client.rs:77'].map((s, i) => r(710, 270 + i * 40, 130, 28, 'mact', 14) + t(724, 289 + i * 40, s, 'mta')).join('') +
     r(710, 410, 200, 1, 'mrule', 0) + t(710, 438, 'Callers', 'mm') + sk(710, 452, 150) + sk(710, 470, 120);
 }
+// ---- Recce (planned PC-wide search): one box, results from every source with their kind, an answer that cites its sources ----
+/** A kind tag (PDF, Mail, Word, ...) as a small pill. */
+const kindTag = (x, y, s) => r(x, y, s.length * 7.6 + 16, 20, 'mact', 10) + t(x + 8, y + 14.5, s, 'mta');
+/** The search field with a query and a caret. */
+const searchField = (x, y, w, q, cw = 7.1) => r(x, y, w, 44, 'mfield', 10) + `<circle class="mring" cx="${x + 24}" cy="${y + 21}" r="7"/><path class="medge" d="M${x + 29} ${y + 26} L${x + 34} ${y + 31}"/>` +
+  t(x + 46, y + 27, q, 'mt') + r(x + 48 + q.length * cw, y + 12, 2, 20, 'maccf', 1);
+const RECCE_RESULTS = [
+  ['PDF', 'Pump curve, test bench March', 'Documents › Lab › 2026-03', 'p. 4: “head drops 12 % above 40 l/min”'],
+  ['Mail', 'Re: bench results', 'Inbox · from Alex · 14 Mar', 'attachment: curve-v2.xlsx'],
+  ['SharePoint', 'Test plan Q1', 'Engineering › Plans', 'section 3, flow sweep'],
+  ['Word', 'Bench notes', 'OneDrive › Notes', '“the curve flattens at high flow”'],
+];
+function recceHero() {
+  const chips = ['All', 'Files', 'Mail', 'SharePoint', 'By meaning'];
+  let cx = 232;
+  const chipRow = chips.map((c, i) => { const w = c.length * 7.4 + 24, g = r(cx, 136, w, 26, i === 4 ? 'maccf' : 'mact', 13) + t(cx + 12, 153, c, i === 4 ? 'mtw' : 'mta'); cx += w + 8; return g; }).join('');
+  return sidebar(['Search', 'Ask', 'Sources', 'Launcher', 'Settings'], 0) +
+    t(232, 52, 'Search', 'mh') + t(232, 70, 'Indexed on this PC: files, mail, SharePoint', 'mm') +
+    searchField(232, 82, 696, 'pump curve from the March test') + chipRow +
+    r(232, 178, 440, 376, 'mc', 10) +
+    RECCE_RESULTS.map(([k, title, where, snip], i) => { const y = 194 + i * 88; return (i === 0 ? r(240, y - 8, 424, 82, 'mact', 8) : '') +
+      kindTag(252, y, k) + t(252 + k.length * 7.6 + 26, y + 15, title, 'mt') + t(252, y + 40, where, 'mm') + t(252, y + 62, snip, 'mm'); }).join('') +
+    r(692, 178, 236, 376, 'mc', 10) + t(710, 208, 'Answer', 'mt') + r(862, 194, 50, 20, 'mact', 10) + t(887, 208.5, 'local', 'mta', 'middle') +
+    sk(710, 228, 196) + sk(710, 246, 176) + sk(710, 264, 188) + sk(710, 282, 120) +
+    r(710, 306, 30, 22, 'maccf', 6) + t(725, 321.5, '1', 'mtw', 'middle') + r(746, 306, 30, 22, 'maccf', 6) + t(761, 321.5, '2', 'mtw', 'middle') +
+    r(710, 348, 200, 1, 'mrule', 0) + t(710, 376, 'Sources', 'mm') +
+    [['1', 'Pump curve, test bench March'], ['2', 'Re: bench results']].map(([n, s], i) => r(710, 390 + i * 40, 22, 22, 'maccf', 6) + t(721, 405.5 + i * 40, n, 'mtw', 'middle') + t(740, 406 + i * 40, s.length > 22 ? s.slice(0, 21) + '…' : s, 'mm')).join('') +
+    t(710, 530, 'Every claim links its source.', 'mm');
+}
+function reccePanel(kind) {
+  if (kind === 'search') {
+    return searchField(40, 24, 592, 'bench results') +
+      RECCE_RESULTS.slice(0, 3).map(([k, title, where], i) => { const y = 88 + i * 58; return r(40, y, 592, 50, 'mc', 10) + kindTag(56, y + 15, k) + t(56 + k.length * 7.6 + 30, y + 30, title, 'mt') + t(616, y + 30, where, 'mm', 'end'); }).join('');
+  }
+  if (kind === 'meaning') {
+    return searchField(40, 24, 592, 'why does the pump get weaker when it runs fast') +
+      r(40, 90, 592, 166, 'mc', 12) + kindTag(60, 108, 'PDF') + t(112, 122.5, 'Pump curve, test bench March · p. 4', 'mt') +
+      t(60, 162, 'Above 40 l/min the', 'mm') + r(186, 148, 238, 20, 'mband', 4) + t(190, 162, 'head drops by about 12 per cent,', 'mt') +
+      t(60, 186, 'so the delivered pressure falls off at the top of the range.', 'mm') +
+      r(60, 212, 150, 26, 'mact', 13) + t(135, 229, 'by meaning · 0.82', 'mta', 'middle') + r(220, 212, 120, 26, 'mfield', 13) + t(280, 229, 'different words', 'mm', 'middle');
+  }
+  if (kind === 'answer') {
+    return r(40, 24, 592, 232, 'mc', 12) + t(60, 56, 'Where did we decide the bench flow limit?', 'mt') + r(60, 72, 552, 1, 'mrule', 0) +
+      t(60, 102, 'The limit of 40 l/min comes from the March bench test', 'mm') + r(404, 88, 22, 20, 'maccf', 5) + t(415, 102.5, '1', 'mtw', 'middle') +
+      t(60, 128, 'and was agreed by mail on 14 March', 'mm') + r(284, 114, 22, 20, 'maccf', 5) + t(295, 128.5, '2', 'mtw', 'middle') +
+      r(60, 156, 552, 1, 'mrule', 0) +
+      [['1', 'PDF', 'Pump curve, test bench March'], ['2', 'Mail', 'Re: bench results']].map(([n, k, s], i) => r(60, 172 + i * 38, 22, 22, 'maccf', 6) + t(71, 187.5 + i * 38, n, 'mtw', 'middle') + kindTag(92, 173 + i * 38, k) + t(92 + k.length * 7.6 + 26, 188 + i * 38, s, 'mt')).join('');
+  }
+  // launcher
+  return r(136, 22, 400, 236, 'mc', 14) + searchField(152, 38, 368, '12*7.5', 8.2) +
+    [['=', '90', 'Calculator'], ['A', 'Pitwall', 'App'], ['F', 'pump-curve.pdf', 'File'], ['>', 'Lock screen', 'Action']].map(([g, s, k], i) => { const y = 96 + i * 38;
+      return (i === 0 ? r(144, y - 4, 384, 34, 'mact', 8) : '') + r(160, y + 2, 22, 22, i === 0 ? 'maccf' : 'mfield', 6) + t(171, y + 17.5, g, i === 0 ? 'mtw' : 'mm', 'middle') + t(196, y + 18, s, 'mt') + t(512, y + 18, k, 'mm', 'end'); }).join('');
+}
+
 const glyphDot = (x, y) => `<circle class="maccf" cx="${x}" cy="${y}" r="7"/>`;
 function graph(x, y, w, h) {
   const n = [[0.2, 0.18, 'main'], [0.62, 0.14, 'load_config'], [0.35, 0.42, 'Client::send'], [0.78, 0.45, 'retry_policy'], [0.18, 0.72, 'parse_args'], [0.56, 0.78, 'backoff'], [0.86, 0.8, 'Timer']];
@@ -122,6 +177,7 @@ export function panel(app, kind) {
   const W = 672, H = 280, base = r(0, 0, W, H, 'mbg', 0);
   const k = `${app}:${kind}`;
   if (app === 'dyno') return base + dynoPanel(kind);
+  if (app === 'recce') return base + reccePanel(kind);
   let g = '';
   if (k === 'sighter:record') {
     g = r(40, 36, 592, 150, 'mc', 12) + `<circle class="mrec" cx="68" cy="62" r="7"/>` + t(86, 67, 'Recording  00:42', 'mt') + t(612, 67, 'Checkout, window capture', 'mm', 'end') +

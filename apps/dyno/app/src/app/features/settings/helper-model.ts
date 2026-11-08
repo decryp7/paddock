@@ -19,6 +19,7 @@ const FACES: Record<HelperState, HelperFace> = {
   notIncluded: { label: 'Not available here', status: 'info', action: null, canTurnOff: false, canRecheck: false },
   off: { label: 'Off', status: 'neutral', action: { kind: 'turnOn', label: 'Turn on administrator readings' }, canTurnOff: false, canRecheck: true },
   notRunning: { label: 'Not running', status: 'warning', action: { kind: 'repair', label: 'Repair the helper' }, canTurnOff: true, canRecheck: true },
+  starting: { label: 'Starting', status: 'info', action: null, canTurnOff: false, canRecheck: true },
   missing: { label: 'Needs repair', status: 'warning', action: { kind: 'repair', label: 'Repair the helper' }, canTurnOff: true, canRecheck: true },
   foreign: { label: 'Not trusted', status: 'warning', action: { kind: 'repair', label: 'Repair the helper' }, canTurnOff: true, canRecheck: true },
   outdated: { label: 'Update available', status: 'warning', action: { kind: 'update', label: 'Update the helper' }, canTurnOff: true, canRecheck: true },
@@ -31,7 +32,7 @@ export function helperFace(state: HelperState): HelperFace {
 }
 
 /** The assurance under the list of readings. */
-export const HELPER_READS_ONLY = 'It only reads. It changes nothing on this computer except installing or removing itself.';
+export const HELPER_READS_ONLY = 'It reads system details that need administrator rights. It installs or removes only itself. On Windows it also installs the disk-health tool when you ask; on macOS and Linux it also sets Dyno\'s own scheduled wakes.';
 
 /** The word on the badge while an action runs ("Turning on"). */
 export function helperActionBadge(action: HelperAction): string {

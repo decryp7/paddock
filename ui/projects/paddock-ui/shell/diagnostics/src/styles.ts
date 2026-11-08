@@ -5,6 +5,7 @@ export const DIAGNOSTICS_STYLES = `
   p { margin: 0; }
   .pd-diag__muted { color: var(--pd-text-muted); }
   .pd-diag__lede { color: var(--pd-text-muted); }
+  .pd-diag__lede + .pd-diag__title { font-weight: var(--pd-weight-medium); margin: 0; }
   .pd-diag__field { display: flex; flex-direction: column; gap: var(--pd-space-1); }
   .pd-diag__field label { color: var(--pd-text-muted); font-size: var(--pd-text-label); font-weight: var(--pd-weight-medium); }
   textarea { box-sizing: border-box; width: 100%; min-height: 6em; resize: vertical; padding: var(--pd-space-2); border: 1px solid var(--pd-border-control); border-radius: var(--pd-radius-control); background: var(--pd-surface-1); color: var(--pd-text); font: inherit; }

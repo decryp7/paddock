@@ -132,6 +132,8 @@ export class MockIntel {
 
   /** `?geo=many`: a destination in every country (to see 250 arcs). */
   many = false;
+  /** `?rows=many`: sixty firewall rules instead of three. */
+  manyRules = false;
 
   constructor(private readonly now: () => number = () => NOW_FALLBACK) {}
 
@@ -286,6 +288,16 @@ export class MockIntel {
   }
 
   firewall(): FirewallView {
+    const view = this.firewallView();
+    const first = view.sources[0];
+    if (!this.manyRules || !first || first.rulesHidden) return view;
+    const template = first.rules[0];
+    if (!template) return view;
+    const rules = [...first.rules, ...Array.from({ length: 57 }, (_, i) => ({ ...template, name: `Sample rule ${i + 1}`, program: `/Applications/Sample ${i + 1}.app` }))];
+    return { ...view, sources: [{ ...first, rules, ruleCount: rules.length }, ...view.sources.slice(1)] };
+  }
+
+  private firewallView(): FirewallView {
     return {
       os: 'macos',
       sources: [
@@ -298,14 +310,16 @@ export class MockIntel {
           ],
           defaultIn: null,
           defaultOut: null,
-          ruleCount: 2,
+          ruleCount: 3,
           rules: [
+            { name: 'Example Sync helper (all networks)', direction: 'out', action: 'allow', enabled: true, program: 'C:\\Program Files\\WindowsApps\\ExampleVendor.ExampleSync_12.4.2026.0_x64__8wekyb3d8bbwe\\Helper\\ExampleSyncBackgroundService.exe', ports: '443', addresses: '192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12, fe80::/10, 2001:db8:1234:5678::/64, 2001:db8:abcd::/48', profile: 'all', source: 'applicationFirewall' },
             { name: 'Safari', direction: 'in', action: 'allow', enabled: true, program: '/Applications/Safari.app', ports: null, addresses: null, profile: 'all', source: 'applicationFirewall' },
             { name: 'Example Sync', direction: 'in', action: 'block', enabled: true, program: '/Applications/Example Sync.app', ports: null, addresses: null, profile: 'all', source: 'applicationFirewall' },
           ],
           truncated: 0,
           rulesHidden: false,
           note: null,
+          via: 'local',
         },
         {
           source: 'pf',
@@ -317,7 +331,8 @@ export class MockIntel {
           rules: [],
           truncated: 0,
           rulesHidden: true,
-          note: 'These rules need the helper. Turn it on in Settings to see them.',
+          note: 'The rules of the pf firewall can be read only by an administrator.',
+          via: { needsHelper: { reason: 'The rules of the pf firewall can be read only by an administrator. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } },
         },
       ],
     };

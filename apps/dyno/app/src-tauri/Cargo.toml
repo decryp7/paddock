@@ -51,15 +51,19 @@ paddock-proc = { path = "../../../../crates/paddock-proc" }
 # Report a problem: Dyno's own section beside paddock-diag's, the app's folders and the log handle the dialog's Logging section drives.
 paddock-diag = { path = "../../../../crates/paddock-diag", features = ["tauri"] }
 paddock-env = { path = "../../../../crates/paddock-env" }
+# Report a problem: the time of a report written without the window.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 paddock-log = { path = "../../../../crates/paddock-log" }
 # Dyno's MCP tools: two reads and two actions behind the user's opt-in (ADR 0032, D7).
 paddock-mcp = { path = "../../../../crates/paddock-mcp" }
-paddock-secrets = { path = "../../../../crates/paddock-secrets", features = ["keyring"] }
 # The shared launchd readers and the repair decision (a pending or running job is never stale).
 paddock-service = { path = "../../../../crates/paddock-service" }
 paddock-settings = { path = "../../../../crates/paddock-settings", features = ["tauri"] }
-paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri"] }
+paddock-startup = { path = "../../../../crates/paddock-startup", features = ["tauri", "dialog"] }
 paddock-updater = { path = "../../../../crates/paddock-updater", features = ["tauri", "install"] }
+# The per-machine hand-off's contract (which download `apply-update` accepts, its exit codes' sentences) and the installer lock
+# (ADR 0053 section 4); `paddock-updater` cannot depend on it, so the app wires it in (`per_machine`).
+paddock-setup = { path = "../../../../crates/paddock-setup" }
 paddock-download = { path = "../../../../crates/paddock-download", features = ["tauri"] }
 paddock-window = { path = "../../../../crates/paddock-window", features = ["tauri", "tray", "wry"] }
 log = { version = "0.4", features = ["kv"] }
@@ -70,33 +74,41 @@ tauri-plugin-dialog = "2.7.3"
 # The installer behind the shell's updater (`PluginInstaller`): verifies the package signature again and installs it.
 tauri-plugin-updater = { version = "2.14", default-features = false, features = ["rustls-tls"] }
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-tauri-plugin-autostart = "2"
-
 [target.'cfg(windows)'.dependencies]
 # The taskbar's light/dark setting (tray icon), read only.
 winreg = "0.56"
 # The taskbar window's DPI (the notification-area icon size).
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }
 # The GUID provider for the tray icons (the vendored, patched copy: apps/dyno/vendor/PATCHES.md).
 tray-icon = { version = "=0.25.1", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The session bus: whether a StatusNotifier host shows the tray icons (tray_host.rs). The blocking API with a call timeout; the
+# same crate paddock-power uses for logind.
+zbus = { version = "5", features = ["blocking-api"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Registering the bundled launch agent with SMAppService (macOS 13+).
 objc2 = "0.6"
+# The autosave-name provider for the menu-bar items (the vendored, patched copy: apps/dyno/vendor/PATCHES.md).
+tray-icon = { version = "=0.25.1", default-features = false }
+# ControlCenter's and Dyno's process start time from the kernel (tray_platform).
+libc = "0.2"
 # NSStatusItem.autosaveName of the menu-bar items (tray_identity).
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSStatusItem", "NSFont", "NSFontDescriptor", "objc2-core-foundation"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSStatusItem", "NSButton", "NSView", "NSWindow", "NSResponder", "NSApplication", "NSGraphics", "NSFont", "NSFontDescriptor", "NSRunningApplication", "libc", "objc2-core-foundation"] }
 # The CoreText adapter of the tray text port (tray_text.rs): the system font, drawn by the system into an alpha bitmap.
 objc2-core-foundation = "0.3.2"
-objc2-core-graphics = { version = "0.3.2", features = ["CGBitmapContext", "CGColorSpace", "CGContext", "CGImage"] }
+objc2-core-graphics = { version = "0.3.2", features = ["CGBitmapContext", "CGColorSpace", "CGContext", "CGImage", "CGWindow"] }
 objc2-core-text = { version = "0.3.2", features = ["CTLine", "CTFont", "CTStringAttributes", "CTFontDescriptor", "CTFontTraits"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSUserDefaults", "NSObject"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSError", "NSUserDefaults", "NSObject", "NSArray", "NSDictionary", "NSValue"] }
 objc2-service-management = { version = "0.3", default-features = false, features = ["std", "SMAppService"] }
 
 [dev-dependencies]
 # The capabilities are resolved through Tauri's own ACL in the tests.
 tauri-utils = "2.10"
 toml = "0.9"
+# Opens the bundle the report tests write.
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # The shell plugin on Tauri's mock runtime (no window, no user folders).
 tauri = { version = "2.12.4", features = ["test"] }
 paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray", "mock-runtime"] }

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, Injector, OnInit, afterNextRender, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DEFAULT_POWER } from '../power/power-model';
-import type { WakeSettings, WolSettings, EnergySettings, KeepAwakeSettings, BackupSettings, BackupTool, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
+import type { WakeSettings, WolSettings, EnergySettings, KeepAwakeSettings, BaselineSettings, DiskSettings, JobSettings, RefreshOnOpen, SavedMapsSettings, Threads, HardwareAlarms, IpLookupSettings, Settings, UnusualSettings } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { errorHint, toCommandError } from '../../core/command-error';
 import { AsyncState } from '../../shared/async-state';
@@ -19,12 +19,12 @@ import { HelperCard } from './helper-card';
 import { OnlineData } from '../lists/online-data';
 import { IntelStore } from '../../state/intel.store';
 import { ToolCard } from './tool-card';
-import { BACKUP_TOOLS, OVERRIDABLE, folderProblem, overrideText, validateBackup, withOverride } from '../backup/backup-model';
 import { MatButton } from '@angular/material/button';
 import { MatError, MatFormField, MatSuffix } from '@angular/material/form-field';
 import { ErrorStateMatcher } from '@angular/material/core';
 import { MatInput } from '@angular/material/input';
 import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
+import { spaceRefreshChoices } from './space-refresh';
 
 /** Dyno's page of the Settings window (Appearance, Updates and About are the shell's): start-up, sampling and retention, the tray, alert thresholds, the observe-only posture and plugins. */
 @Component({
@@ -43,20 +43,23 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
         }
         @if (dirty()) {
           <button type="button" matButton="outlined" (click)="revert()">Discard changes</button>
-          <button type="button" matButton="filled" [disabled]="store.saving() || !!backupProblem() || !!diskProblem()" (click)="save()">Save changes</button>
+          <button type="button" matButton="filled" [disabled]="store.saving() || !!diskProblem()" (click)="save()">Save changes</button>
         }
       </header>
 
       <dy-async [loaded]="!!draft()" [error]="store.error()" what="settings" [rows]="4" (retry)="store.load()">
         @if (draft(); as d) {
           <div class="stack">
-            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno only reads and changes nothing on your computer.</p>
+            <p class="posture" aria-label="What Dyno changes"><dy-icon name="shield-check" /> Dyno watches this computer. Its power actions, such as keep awake, sleep and Wake-on-LAN, run only when you set them up.</p>
 
             <section class="card" aria-label="Start-up">
               <h2>Start-up</h2>
               <div class="row">
-                <div class="lbl"><strong>Start Dyno at login</strong><small>The background agent keeps measuring either way once it is running.</small></div>
-                <mat-slide-toggle [checked]="d.launchAtLogin" aria-label="Start Dyno at login" (change)="set({ launchAtLogin: $event.checked })" />
+                <div class="lbl"><strong>Start Dyno at login</strong><small>With this on, the background agent keeps measuring after you quit Dyno. Quit and stop measuring (in the menu) stops it until you open Dyno again or log in.</small></div>
+                @if (store.saving()) {
+                  <small class="applying" role="status">Applying…</small>
+                }
+                <mat-slide-toggle [checked]="d.launchAtLogin" [disabled]="store.saving()" aria-label="Start Dyno at login" (change)="set({ launchAtLogin: $event.checked })" />
               </div>
             </section>
 
@@ -73,6 +76,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <div class="row">
                 <div class="lbl"><strong>Process sampling</strong><small>How often the process list is read.</small></div>
                 <pd-select [options]="processChoices" [value]="d.sampling.processIntervalMs + ''" ariaLabel="Process sampling interval" (valueChange)="setSampling({ processIntervalMs: +$event })" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Other accounts' processes</strong><small>How often the administrator helper reads every account's processes. Auto is every 5 seconds, or as often as the process list when that is slower.</small></div>
+                <pd-select [options]="sweepChoices" [value]="d.sampling.helperSweepMs === null ? 'auto' : d.sampling.helperSweepMs + ''" ariaLabel="Helper process reading interval" (valueChange)="setSampling({ helperSweepMs: $event === 'auto' ? null : +$event })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Keep raw samples</strong><small>Hours of one-sample-per-tick history, stored in the agent's local database.</small></div>
@@ -95,7 +102,6 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
             <section class="card" aria-label="Menu bar">
               <h2>Menu bar</h2>
               <h3 id="menu-bar-items">Menu bar items</h3>
-              <p class="sub">What the tray / menu-bar icon draws live. Add up to four, drag to reorder. Changes apply at once; Undo is in the message that follows.</p>
               <dy-menu-bar-items />
               <h3 id="popup-widgets">Popup widgets</h3>
               <p class="sub">What the popup shows when you click the icon, and in what order. The preview follows your choices.</p>
@@ -161,7 +167,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
               <div class="row" [class.off]="savedMaps().enabled === false">
                 <div class="lbl"><strong>Refresh when opened</strong><small>Scanning a volume is the heaviest thing Dyno does, so it never refreshes by itself unless you choose. It starts at the first look at the page, never in the background.</small></div>
-                <pd-select [options]="refreshChoices" [value]="savedMaps().refreshOnOpen ?? 'off'" ariaLabel="Refresh when opened" (valueChange)="setSavedMaps({ refreshOnOpen: refreshFrom($event) })" />
+                <pd-select class="refresh-select" [options]="refreshChoices" [value]="savedMaps().refreshOnOpen ?? 'off'" ariaLabel="Refresh when opened" (valueChange)="setSavedMaps({ refreshOnOpen: refreshFrom($event) })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Forget saved maps</strong><small>Deletes the saved maps now. The next scan is kept again if saving is on.</small></div>
@@ -175,6 +181,10 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               <div class="row">
                 <div class="lbl"><strong>Threads reading folders</strong><small>For the disk map and the file finder. Auto: a few on an SSD, one on a spinning disk, two per server on the network.</small></div>
                 <pd-select [options]="readThreadChoices" [value]="threadsValue(disk().readThreads)" ariaLabel="Threads reading folders" (valueChange)="setDisk({ readThreads: threadsFrom($event) })" />
+              </div>
+              <div class="row">
+                <div class="lbl"><strong>Free space refresh</strong><small>How often Dyno reads the free space of every disk, whether or not a window is open. Auto: every minute.</small></div>
+                <pd-select [options]="spaceRefreshOptions()" [value]="String(disk().spaceRefreshSecs ?? 0)" ariaLabel="Free space refresh" (valueChange)="setDisk({ spaceRefreshSecs: +$event })" />
               </div>
               <div class="row">
                 <div class="lbl"><strong>Jobs at once</strong><small>Searches, log reads and checks that run side by side; the rest wait their turn. Takes effect the next time Dyno starts.</small></div>
@@ -256,29 +266,6 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
               </div>
             </section>
 
-            <section class="card" aria-label="Backup health" id="backup">
-              <h2>Backup health</h2>
-              <p class="sub">Dyno reads the state of Time Machine, Windows Backup, File History, restic, Borg and Duplicati on the Backup health page. It never runs or manages a backup.</p>
-              <div class="row">
-                <div class="lbl"><strong>Tell me when a backup is out of date</strong><small>Checks every 6 hours, inside the maintenance windows, and raises an alarm.</small></div>
-                <mat-slide-toggle [checked]="backup().alertWhenStale" aria-label="Tell me when a backup is out of date" (change)="setBackup({ alertWhenStale: $event.checked })" />
-              </div>
-              <div class="row">
-                <div class="lbl"><strong>Out of date after</strong><small>A backup older than this counts as stale (1 hour to 90 days).</small></div>
-                <mat-form-field class="num-in"><input matInput type="number" min="1" max="2160" aria-label="Hours until a backup is out of date" [ngModel]="backup().staleAfterHours" (ngModelChange)="setBackup({ staleAfterHours: +$event })" /><span matTextSuffix>hours</span></mat-form-field>
-              </div>
-              @for (t of overridable; track t.tool) {
-                <div class="row top">
-                  <div class="lbl"><strong>Where {{ t.name }} is installed</strong><small>Only if Dyno cannot find it. Full folder paths, one per line; searched before the usual places.</small></div>
-                  <div class="ipt">
-                    <mat-form-field><textarea matInput rows="2" spellcheck="false" [attr.aria-label]="t.name + ' folders'" [ngModel]="overrideValue(t.tool)" (ngModelChange)="setOverride(t.tool, $event)"></textarea></mat-form-field>
-                    @if (overrideProblem(t.tool); as p) {
-                      <small class="problem" role="alert">{{ p }}</small>
-                    }
-                  </div>
-                </div>
-              }
-            </section>
 
             <section class="card" aria-label="Power" id="power">
               <h2>Power</h2>
@@ -402,6 +389,8 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .lbl { display: grid; gap: 2px; min-width: 0; }
     .lbl small, .txt small { color: var(--text-3); font-size: var(--fs-sm); }
     .num-in { width: 148px; }
+    /* A select shows its whole choice (the longest, "Never (only when I press Rescan)"), never past the window's edge. */
+    .row pd-select.refresh-select { flex: 0 0 auto; width: min(22rem, 100%); }
     .num-in input { text-align: right; font-variant-numeric: tabular-nums; }
     .sub-h { margin-top: var(--sp-5); }
     .sub { color: var(--text-3); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }
@@ -475,6 +464,8 @@ export class SettingsPage implements OnInit {
   protected readonly jobs = computed<JobSettings>(() => this.draft()?.jobs ?? {});
   protected readonly readThreadChoices = threadChoices(16);
   protected readonly jobWorkerChoices = threadChoices(8);
+  protected readonly spaceRefreshOptions = computed(() => spaceRefreshChoices(this.disk().spaceRefreshSecs));
+  protected readonly String = String;
   protected threadsValue(t: Threads | undefined): string {
     return t === undefined || t === 'auto' ? 'auto' : String(t.fixed);
   }
@@ -491,6 +482,7 @@ export class SettingsPage implements OnInit {
   protected readonly baselines = computed<BaselineSettings>(() => this.draft()?.baselines ?? { enabled: true, learningDays: 7, alarms: false });
   protected readonly hardwareAlarms = computed<HardwareAlarms>(() => this.draft()?.hardwareAlarms ?? { throttling: true, lifespan: true });
   protected readonly systemChoices = [500, 1000, 2000, 5000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));
+  protected readonly sweepChoices: PdSelectOption[] = [{ value: 'auto', label: 'Auto' }, ...[2000, 5000, 10000, 30000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }))];
   protected readonly processChoices = [1000, 2000, 5000, 10000].map((o): PdSelectOption => ({ value: String(o), label: this.every(o) }));
   protected readonly siteChoices: PdSelectOption[] = [...LOOKUP_PRESETS.map((p) => ({ value: p.id, label: `${p.name} — ${p.about}` })), { value: 'custom', label: 'Custom' }];
   protected readonly hint = computed(() => {
@@ -522,7 +514,6 @@ export class SettingsPage implements OnInit {
       const s = this.store.settings();
       untracked(() => {
         this.draft.set(s ? structuredClone(s) : null);
-        this.rawOverrides.set({});
       });
     });
   }
@@ -557,11 +548,6 @@ export class SettingsPage implements OnInit {
   protected setUnusual(p: Partial<UnusualSettings>): void {
     this.draft.update((d) => (d ? { ...d, unusual: { ...(d.unusual ?? { enabled: true, learningDays: 7 }), ...p } } : d));
   }
-  protected readonly backup = computed<BackupSettings>(() => this.draft()?.backup ?? { alertWhenStale: true, staleAfterHours: 48, overrides: [] });
-  protected readonly overridable = BACKUP_TOOLS.filter((t) => OVERRIDABLE.includes(t.tool));
-  /** What the person typed in each folder box (kept as typed, so a new line is not swallowed while they type). */
-  private readonly rawOverrides = signal<Partial<Record<BackupTool, string>>>({});
-  protected readonly backupProblem = computed(() => validateBackup(this.backup()));
   protected readonly power = computed<KeepAwakeSettings>(() => this.draft()?.power?.keepAwake ?? DEFAULT_POWER.keepAwake);
   protected setPower(p: Partial<KeepAwakeSettings>): void {
     this.draft.update((d) => (d ? { ...d, power: { ...(d.power ?? DEFAULT_POWER), keepAwake: { ...this.power(), ...p } } } : d));
@@ -587,23 +573,6 @@ export class SettingsPage implements OnInit {
   }
   protected mb(bytes: number): number {
     return Math.round(bytes / 1048576);
-  }
-  protected setBackup(p: Partial<BackupSettings>): void {
-    this.draft.update((d) => (d ? { ...d, backup: { ...this.backup(), ...p } } : d));
-  }
-  protected overrideValue(tool: BackupTool): string {
-    return this.rawOverrides()[tool] ?? overrideText(this.backup(), tool);
-  }
-  protected setOverride(tool: BackupTool, text: string): void {
-    this.rawOverrides.update((r) => ({ ...r, [tool]: text }));
-    this.draft.update((d) => (d ? { ...d, backup: withOverride(this.backup(), tool, text) } : d));
-  }
-  protected overrideProblem(tool: BackupTool): string | null {
-    for (const dir of this.backup().overrides.find((o) => o.tool === tool)?.dirs ?? []) {
-      const p = folderProblem(dir);
-      if (p) return p;
-    }
-    return null;
   }
   protected setAlerts(p: Partial<Settings['alerts']>): void {
     this.draft.update((d) => (d ? { ...d, alerts: { ...d.alerts, ...p } } : d));
@@ -646,7 +615,6 @@ export class SettingsPage implements OnInit {
   protected revert(): void {
     const s = this.store.settings();
     this.draft.set(s ? structuredClone(s) : null);
-    this.rawOverrides.set({});
   }
 
   protected every(ms: number): string {

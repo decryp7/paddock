@@ -194,13 +194,19 @@ impl CounterCentre {
     ) -> Result<T, AgentError> {
         let (tx, rx) = mpsc::channel();
         self.start(what, move |inner| {
-            let _ = tx.send(f(inner));
+            let value = f(inner);
+            // Sent once the slot is free: whoever receives the answer may start the next call at once.
+            move || {
+                let _ = tx.send(value);
+            }
         })?;
         rx.recv_timeout(deadline).map_err(|_| timed_out(what, deadline))
     }
 
-    /// Runs `f` on its own thread, counted as a call in flight until it ends; refused when [`MAX_IN_FLIGHT`] are.
-    fn start(&self, what: &str, f: impl FnOnce(&Arc<Inner>) + Send + 'static) -> Result<(), AgentError> {
+    /// Runs `f` on its own thread, counted as a call in flight until it ends; refused when [`MAX_IN_FLIGHT`] are. `f` returns
+    /// the hand-over that tells waiting callers it is done: it runs after the slot is freed, so a caller that has its
+    /// answer never meets a Busy caused by the call that just answered it.
+    fn start<D: FnOnce() + Send + 'static>(&self, what: &str, f: impl FnOnce(&Arc<Inner>) -> D + Send + 'static) -> Result<(), AgentError> {
         if self.inner.in_flight.fetch_add(1, Ordering::SeqCst) >= MAX_IN_FLIGHT {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
             return Err(AgentError::new(
@@ -213,8 +219,9 @@ impl CounterCentre {
         let spawned = std::thread::Builder::new().name("dyno-counters".into()).spawn(move || {
             // The user waits for it on the Counters page: live work (rule 52).
             dyno_platform::priority::set_current_thread(dyno_platform::priority::ThreadRole::Live);
-            let _slot = slot;
-            f(&inner);
+            let done = f(&inner);
+            drop(slot);
+            done();
         });
         if let Err(e) = spawned {
             self.inner.in_flight.fetch_sub(1, Ordering::SeqCst);
@@ -299,8 +306,10 @@ impl CounterCentre {
                         }
                         // Ended: a later call starts afresh (after a failure, too); callers already waiting get this result.
                         *lock(&inner.listing) = None;
-                        *lock(&mine.result) = Some(found);
-                        mine.done.notify_all();
+                        move || {
+                            *lock(&mine.result) = Some(found);
+                            mine.done.notify_all();
+                        }
                     })?;
                     *running = Some(l.clone());
                     l
@@ -838,6 +847,29 @@ mod tests {
             let l = c.objects().unwrap();
             assert_eq!(l.saved_at, None, "listed, not taken from the file");
             assert_eq!(l.objects.len(), 1);
+        }
+    }
+
+    /// A request that has answered no longer counts as in flight: the answer is sent after the slot is released, so the
+    /// next request or pinned read never meets a phantom Busy (flake seen in a full nextest run, 2026-11-04).
+    #[test]
+    fn an_answered_request_has_already_freed_its_slot() {
+        let src = Arc::new(FakeCounters::new(vec![Entry::new(
+            "Memory",
+            None,
+            "Free",
+            U::Bytes,
+            CounterKind::Gauge,
+            1.0,
+        )]));
+        let c = CounterCentre::new(src);
+        for i in 0..3000 {
+            c.values(&["\\Memory\\Free".into()], Timestamp(i)).unwrap();
+            assert_eq!(
+                c.inner.in_flight.load(Ordering::SeqCst),
+                0,
+                "round {i}: the answer came before the slot was freed"
+            );
         }
     }
 

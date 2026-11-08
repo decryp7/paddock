@@ -63,7 +63,6 @@ const POPOVER_KINDS = [
   info('diskSpace', 'Disk space', 'Free space per volume', 'disk', [2], 4, { every: { secs: 60 } }),
   info('cpuMemory', 'CPU and memory', 'Load and memory in use, with the last minute', 'cpu', [2]),
   info('network', 'Network', 'Download and upload now', 'network', [1, 2]),
-  info('backupHealth', 'Backup', 'When the last backup ran', 'backup', [1, 2], 1, 'onChange'),
   info('lastIssue', 'Last issue', 'The newest problem of the last 7 days', 'issue', [2], 1, 'onChange'),
   info('pinnedCounters', 'Pinned counters', 'Your pinned performance counters', 'counters', [2]),
   info('topApps', 'Top apps', 'The busiest apps right now', 'apps', [2]),
@@ -88,7 +87,7 @@ const DASHBOARD_KINDS = [
   info('issues', 'Issues', 'Unusual patterns found.', 'issue', cellsRule(3, 6, [3, 6], [4, 12]), 32, 'onChange'),
   info('health', 'Health', 'The health score.', 'health', cellsRule(6, 9, [3, 12], [5, 14]), 32),
   info('cpu', 'CPU', 'Load, per-core view and details.', 'cpu', cellsRule(6, 6, [4, 12], [5, 10]), 32),
-  info('diagnosis', 'Why slow', 'What is slowing the computer, in words.', 'diagnosis', cellsRule(6, 9, [4, 12], [6, 14]), 32, { every: { secs: 10 } }),
+  info('diagnosis', 'Why slow', 'What is slowing the computer, in words.', 'diagnosis', cellsRule(6, 12, [4, 12], [6, 14]), 32, { every: { secs: 10 } }),
   info('events', 'Recent events', 'Alarms and what Dyno did.', 'events', cellsRule(6, 7, [4, 12], [4, 14]), 32, 'onChange'),
   info('history', 'History', 'A chart with events marked.', 'history', cellsRule(12, 8, [6, 12], [5, 14]), 32, 'onChange'),
   info('consumers', 'Biggest consumers', 'Biggest consumers over a day.', 'consumers', cellsRule(6, 7, [4, 12], [5, 12]), 32, { every: { secs: 60 } }),
@@ -285,6 +284,9 @@ function clockOf(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+/** The most alarm or volume rows the engine sends one popup widget (`ALARM_ROWS` and `VOLUME_ROWS` in dyno-core's popover_values); the mock keeps in step. */
+export const POPOVER_LIST_MAX = 200;
+
 const STORE_KEY = 'dyno-mock-widgets';
 
 /** Options of the mock's widgets. */
@@ -295,6 +297,8 @@ export interface MockWidgetsOptions {
   popup?: Partial<Record<PopoverKind, MockWidgetState>>;
   /** Show the popup as if the agent had stopped. */
   agentStopped?: boolean;
+  /** Long alarm and volume lists, past the engine's bound (`?lists=long`). */
+  longLists?: boolean;
   /** The engine's golden cases: a dashboard whose layout is a case's items answers that case's gesture as the engine did. */
   gridCases?: readonly GridCase[];
   now?: () => number;
@@ -319,6 +323,7 @@ export class MockWidgets {
   private readonly cases: readonly GridCase[];
   private readonly states: Partial<Record<PopoverKind, MockWidgetState>>;
   private agentStopped: boolean;
+  private readonly longLists: boolean;
   private readonly layoutListeners = new Set<(s: DynoSurface) => void>();
   private readonly valueListeners = new Set<(v: PopoverSurfaceValues) => void>();
 
@@ -328,6 +333,7 @@ export class MockWidgets {
     this.cases = options.gridCases ?? [];
     this.states = { ...options.popup };
     this.agentStopped = options.agentStopped ?? false;
+    this.longLists = options.longLists ?? false;
     this.state = this.load();
     if (this.storage && typeof window !== 'undefined') {
       window.addEventListener('storage', (e) => {
@@ -672,23 +678,26 @@ export class MockWidgets {
       case 'activeAlarms':
         if (state === 'empty') return empty('No active alarms', 'All clear.', 'Open alarms', { openPage: 'alarms' }, true);
         if (state === 'error') return error("Couldn't read alarms", "The alarm store didn't answer.");
-        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }], more: 4 } }, stale);
+        if (this.longLists) {
+          const rows = Array.from({ length: POPOVER_LIST_MAX }, (_, i) => ({ id: i + 1, title: `Invented alarm ${i + 1}: a rather long title that has to be cut short on one line`, level: (['critical', 'warning', 'info'] as const)[i % 3]!, since: at - (i + 1) * 3 * 60_000, acknowledged: i % 4 === 0 }));
+          return ready({ activeAlarms: { rows, more: 5 } }, stale);
+        }
+        return ready({ activeAlarms: { rows: [{ id: 1, title: 'Memory pressure is high', level: 'warning', since: at - 4 * 60_000, acknowledged: false }], more: 0 } }, stale);
       case 'diskSpace': {
         if (state === 'empty') return empty("See Time Machine's space when it's connected", "The disk isn't connected now.", 'Choose another volume', 'chooseVolume');
         if (state === 'error') return error("Couldn't read volumes", "The volume list didn't answer.");
         const GB = 1e9;
-        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true }], more: 2 } }, stale);
+        if (this.longLists) {
+          const rows = Array.from({ length: 30 }, (_, i) => ({ id: `/Volumes/V${i}`, name: `Invented volume ${i + 1}`, usedPercent: (i * 7) % 100, freeBytes: (100 - ((i * 7) % 100)) * GB, totalBytes: 100 * GB, tone: 'ok' as const, reachable: true, measuredAt: null, freshness: 'fresh' as const }));
+          return ready({ diskSpace: { rows, more: 0 } }, stale);
+        }
+        return ready({ diskSpace: { rows: [{ id: '/', name: 'Macintosh HD', usedPercent: 82, freeBytes: 182 * GB, totalBytes: 994 * GB, tone: 'ok', reachable: true, measuredAt: null, freshness: 'fresh' as const }, { id: '/Volumes/Projects', name: 'Projects', usedPercent: 96, freeBytes: 19 * GB, totalBytes: 500 * GB, tone: 'bad', reachable: true, measuredAt: null, freshness: 'fresh' as const }], more: 0 } }, stale);
       }
       case 'cpuMemory':
         return ready({ cpuMemory: { cpuPercent: 76, cpuTone: 'warn', memoryUsed: 16.3 * 1024 ** 3, memoryTotal: 32 * 1024 ** 3, memoryPercent: 51, memoryTone: 'ok', cpuMinute: wave(70, 12) } }, stale);
       case 'network':
         if (state === 'empty') return empty('See traffic when online', 'Offline now.', 'Open network', { openPage: 'network' });
         return ready({ network: { rxBps: 2.4e6, txBps: 310e3, rxMinute: wave(2e6, 5e5, 2), txMinute: wave(3e5, 5e4, 3) } }, stale);
-      case 'backupHealth':
-        if (state === 'empty') return empty('Know when backups ran', 'No backup set up.', 'Set up checks', 'setUpBackupChecks');
-        if (state === 'error') return error("Couldn't check", 'tmutil failed.');
-        if (state === 'working') return { state: 'working', title: 'Checking backup', phase: '', progress: { count: { done: 2, unit: 'items' } }, last: null, cancel: null };
-        return ready({ backupHealth: { name: 'Time Machine', state: 'healthy', lastBackup: at - 2 * 3_600_000, summary: 'Time Machine finished a backup.', tools: 1 } }, stale);
       case 'lastIssue':
         if (state === 'empty') return empty('No issues in the last 7 days', 'Dyno reads the system logs for crashes and hangs.', 'Open issues', { openPage: 'issues' }, true);
         if (state === 'error') return error("Couldn't read issues", 'The issue index is unavailable.');
@@ -706,7 +715,7 @@ export class MockWidgets {
 
 const METRIC_TITLES: [Metric, string][] = [
   ['cpuTotal', 'CPU'], ['cpuPerCore', 'CPU per core'], ['memory', 'Memory'], ['memoryPressure', 'Memory pressure'], ['swap', 'Swap'],
-  ['diskActivity', 'Disk activity'], ['diskFree', 'Disk free'], ['networkDown', 'Network down'], ['networkUp', 'Network up'],
+  ['diskActivity', 'Disk activity'], ['diskFree', 'Disk free'], ['networkDown', 'Network down'], ['networkUp', 'Network up'], ['networkBoth', 'Network (up and down)'],
   ['gpuLoad', 'GPU'], ['temperature', 'Temperature'], ['fan', 'Fan'], ['battery', 'Battery'],
 ];
 const PERCENT: Metric[] = ['cpuTotal', 'memory', 'swap', 'diskFree', 'gpuLoad', 'battery'];
@@ -720,8 +729,22 @@ function accepted(kind: DashboardKind): Metric[] {
   return METRIC_TITLES.map(([m]) => m);
 }
 
+/** What the tray draws of a number item (the engine's `number_support`, imitated: macOS has both formats; Windows and Linux one, with the label only from 22 px). */
+export function mockNumberSupport(os: 'macos' | 'windows' | 'linux', px: number): WidgetChoices['number'] {
+  if (os === 'macos') return { formats: ['stacked', 'line'], labelInIcon: true, fixed: null, note: null };
+  const label = px >= 22;
+  return {
+    formats: ['stacked'],
+    labelInIcon: label,
+    fixed: label ? 'Label over value' : 'Value only (label in the tooltip)',
+    note: label
+      ? 'Here, tray icons have one number layout: the label over the value. The label is also in the tooltip.'
+      : `Here, tray icons are ${px} px, too small for a label above the number. The label shows in the tooltip; with display scaling at 150 % or more there is room for it.`,
+  };
+}
+
 /** What the choosers offer (the engine's `widget_choices`, imitated). */
-export function mockWidgetChoices(): WidgetChoices {
+export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = mockNumberSupport('macos', 18)): WidgetChoices {
   const title = (m: Metric) => METRIC_TITLES.find(([x]) => x === m)?.[1] ?? String(m);
   const choice = (metric: Metric) => ({ metric, title: title(metric) });
   return {
@@ -736,6 +759,7 @@ export function mockWidgetChoices(): WidgetChoices {
       return { kind, default: (kind === 'number' ? { number: { metric, unit: '%', label: '', format: 'stacked' } } : { [kind]: { metric } }) as MenuBarItem };
     }),
     menuBarMetrics: METRIC_TITLES.map(([m]) => choice(m)),
+    number: numberSupport,
   };
 }
 
@@ -766,6 +790,8 @@ function rateReading(bps: number, query: ReadingQuery): MetricReading {
 export function mockMetricReading(query: ReadingQuery, system: MockSystem): MetricReading {
   if (query.metric === 'networkDown' && system.rxBps !== undefined) return rateReading(system.rxBps, query);
   if (query.metric === 'networkUp' && system.txBps !== undefined) return rateReading(system.txBps, query);
+  // The total, as the engine reads it (the menu bar draws the two rates apart).
+  if (query.metric === 'networkBoth' && system.rxBps !== undefined && system.txBps !== undefined) return rateReading(system.rxBps + system.txBps, query);
   const raw =
     query.metric === 'cpuTotal' ? system.cpu
     : query.metric === 'memory' ? system.memory

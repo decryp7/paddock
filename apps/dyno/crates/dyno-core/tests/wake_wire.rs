@@ -15,12 +15,12 @@ use std::path::PathBuf;
 fn schedule() -> WakeSchedule {
     WakeSchedule {
         id: 1,
-        name: "Morning backup check".into(),
+        name: "Morning inventory".into(),
         minute_of_day: 420,
         repeat: Repeat::Days { mask: 0b0011111 },
         stay_awake_minutes: Some(30),
         wake_devices: vec![2],
-        job: Some(DynoJob::BackupCheck),
+        job: Some(DynoJob::SoftwareInventory),
         enabled: true,
         next_at: Some(Timestamp(1_700_050_000_000)),
         last_run: Some(LastRun {
@@ -42,7 +42,7 @@ fn reply(state: RowState, route: WakeRouteState) -> Value {
 fn sample() -> Value {
     let input = WakeInput {
         id: Some(1),
-        name: "Morning backup check".into(),
+        name: "Morning inventory".into(),
         minute_of_day: 420,
         repeat: Repeat::Once,
         stay_awake_minutes: None,

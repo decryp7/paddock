@@ -34,7 +34,7 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
           [rowKey]="rowKey"
           [filterable]="false"
           [rowActions]="actions"
-          [maxHeight]="560"
+          height="fill"
           [selectedKey]="selectedKey()"
           (rowActivate)="pick($event)"
           (action)="run($event)"
@@ -55,11 +55,14 @@ const SEVERITY_ORDER: Record<Alarm['severity'], number> = { critical: 0, warning
     </dy-async>
   `,
   styles: `
-    :host { display: block; }
-    dy-async { display: grid; gap: var(--sp-3); }
-    .section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: var(--control-h); margin-bottom: var(--sp-3); }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+    :host { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+    dy-async { display: flex; flex-direction: column; flex: 1 1 0; min-height: 360px; gap: var(--sp-3); }
+    dy-async > * { flex: none; }
+    dy-async > .layout { flex: 1 1 0; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); min-height: var(--control-h); }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: var(--sp-3); align-items: stretch; min-height: 0; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 320px; }
+    .layout > dy-alarm-detail { align-self: start; max-height: 100%; overflow-y: auto; }
     .unread { display: block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
     .line { display: flex; gap: var(--sp-2); align-items: baseline; min-width: 0; }
     .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--fw-medium); }
@@ -94,9 +97,9 @@ export class AlarmsActive {
   protected readonly columns: PdColumn<Alarm>[] = [
     { key: 'unread', header: 'Not acknowledged', value: (a) => (needsAcknowledge(a) ? 0 : 1), text: () => '', width: '14px', headerHidden: true, sortable: false },
     { key: 'severity', header: 'Severity', value: (a) => SEVERITY_ORDER[a.severity], text: (a) => severityWord(a.severity), width: '92px' },
-    { key: 'title', header: 'Alarm', value: (a) => a.title, required: true, width: 'minmax(0, 3fr)' },
+    { key: 'title', header: 'Alarm', value: (a) => a.title, required: true, width: 'minmax(0, 2.4fr)' },
     { key: 'detail', header: 'Detail', value: (a) => a.detail, width: 'minmax(0, 1.6fr)', hideBelow: 1500 },
-    { key: 'rule', header: 'Rule', value: (a) => ruleLabel(a.rule), width: 'minmax(64px, 1.4fr)', hideBelow: 1000 },
+    { key: 'rule', header: 'Rule', value: (a) => ruleLabel(a.rule), width: 'minmax(150px, 1.4fr)', hideBelow: 1000 },
     { key: 'state', header: 'State', value: (a) => stateWord(a.state), width: '190px' },
     { key: 'firstSeen', header: 'First seen', value: (a) => a.firstSeen, text: (a) => this.time(a.firstSeen), width: '84px', hideBelow: 1000 },
     { key: 'lastSeen', header: 'Last seen', value: (a) => a.lastSeen, text: (a) => this.time(a.lastSeen), width: '84px' },

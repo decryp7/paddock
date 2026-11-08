@@ -2,7 +2,7 @@
 //! decides something is a pure function with its test; the adapters only run fixed programs (ER-14: tests never run them).
 
 use crate::helper_centre::{HelperCentre, HelperInstaller};
-use crate::helper_link::HelperLink;
+use crate::helper_link::{HelperLink, HelperTransport};
 use crate::helper_peer::PeerTransport;
 use dyno_core::helper::HelperHost;
 use dyno_core::helper_paths::{HelperPaths, WindowsRoots};
@@ -163,13 +163,14 @@ impl HelperInstaller for OsInstaller {
     }
 }
 
+/// The folders Windows names, from the OS and not the environment (the one implementation, shared with the helper).
 fn windows_roots() -> WindowsRoots {
-    let var = |k: &str, d: &str| PathBuf::from(std::env::var_os(k).unwrap_or_else(|| d.into()));
-    WindowsRoots {
-        program_files: var("ProgramFiles", r"C:\Program Files"),
-        program_data: var("ProgramData", r"C:\ProgramData"),
-        system_root: var("SystemRoot", r"C:\Windows"),
-    }
+    dyno_helper_service::windows_roots(&paddock_service::privileged::OsKnownFolders)
+}
+
+/// Where this machine's helper keeps its files (the lifecycle file the report reads, the binary, the endpoint).
+pub fn helper_paths() -> HelperPaths {
+    HelperPaths::for_host(host(), &windows_roots())
 }
 
 /// The connection to this machine's helper (also what the VM test sends requests through).
@@ -178,16 +179,69 @@ pub fn transport() -> PeerTransport {
     let paths = HelperPaths::for_host(host, &windows_roots());
     let installed_path = paths.binary.clone();
     PeerTransport::new(paths.endpoint.clone(), move || is_installed(host, &installed_path, &SystemRunner))
+        .with_revive(Box::new(ServiceReviver::new(os_of(host), Arc::new(SystemClock))))
+}
+
+/// Starts the helper's stopped service through the Service Control Manager with the user's own token (no prompt: the service's
+/// security descriptor lets interactive users start it). Other systems have no such start and report that.
+pub struct ServiceReviver {
+    os: Os,
+    clock: Arc<dyn paddock_jobs::time::Clock>,
+}
+
+impl ServiceReviver {
+    /// A reviver for `os` timed by `clock`.
+    pub fn new(os: Os, clock: Arc<dyn paddock_jobs::time::Clock>) -> Self {
+        ServiceReviver { os, clock }
+    }
+}
+
+struct ClockPace {
+    clock: Arc<dyn paddock_jobs::time::Clock>,
+    began: Duration,
+}
+
+impl paddock_service::start::Pace for ClockPace {
+    fn elapsed(&mut self) -> Duration {
+        self.clock.monotonic().saturating_sub(self.began)
+    }
+    fn pause(&mut self, how_long: Duration) {
+        self.clock.sleep(how_long);
+    }
+}
+
+impl crate::helper_peer::Revive for ServiceReviver {
+    fn revive(&self, budget: Duration, ready: &mut dyn FnMut() -> bool) -> paddock_service::start::Revival {
+        let mut pace = ClockPace {
+            clock: self.clock.clone(),
+            began: self.clock.monotonic(),
+        };
+        paddock_service::start::revive(
+            &mut RealSystem::new(),
+            self.os,
+            dyno_helper_service::SERVICE_NAME,
+            budget,
+            &mut pace,
+            &dyno_core::helper_wire::start_exit_words,
+            ready,
+        )
+    }
 }
 
 /// The helper centre for this machine.
-pub fn centre() -> HelperCentre<PeerTransport> {
+pub fn centre() -> HelperCentre<Box<dyn HelperTransport>> {
     let host = host();
     let paths = HelperPaths::for_host(host, &windows_roots());
     let agent_exe = std::env::current_exe().unwrap_or_default();
     let bundled = bundled_helper(host, &agent_exe);
     let supported = unsupported(host, &bundled, bundled.is_file(), std::env::var_os("APPIMAGE").is_some());
     let installed_path = paths.binary.clone();
+    // The bundled helper's build, hashed once (the agent restarts when its app is replaced, so it cannot go stale).
+    let bundled_for_build = bundled.clone();
+    let bundled_build: crate::helper_link::BundledBuild = Arc::new({
+        let cache = std::sync::OnceLock::new();
+        move || cache.get_or_init(|| crate::build_id::file_build_id(&bundled_for_build)).clone()
+    });
     let transport = transport();
     let owner = current_owner(host, &SystemRunner);
     let installer = OsInstaller {
@@ -197,7 +251,7 @@ pub fn centre() -> HelperCentre<PeerTransport> {
         owner,
     };
     HelperCentre::new(
-        HelperLink::new(transport, Arc::new(SystemClock)),
+        HelperLink::new(Box::new(transport) as Box<dyn HelperTransport>, Arc::new(SystemClock)).with_bundled_build(bundled_build),
         host,
         supported,
         env!("CARGO_PKG_VERSION"),

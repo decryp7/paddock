@@ -138,8 +138,9 @@ test.describe('popup widgets', () => {
     await page.goto(POPUP());
     await page.getByRole('button', { name: 'More actions' }).click();
     const items = page.getByRole('menuitem');
-    await expect(items).toHaveCount(3);
-    for (let i = 0; i < 3; i++) {
+    // Open Dyno, Quit and stop measuring, Quit Dyno and the Report a problem entry: four (the shell's menu plus Dyno's).
+    await expect(items).toHaveCount(4);
+    for (let i = 0; i < 4; i++) {
       const item = items.nth(i);
       // The panel scales in while it opens: wait for the measurement to settle on the designed size.
       await expect.poll(async () => Math.round((await item.locator('mat-icon').first().boundingBox())?.width ?? 0)).toBe(16);
@@ -225,7 +226,7 @@ test.describe('screenshots for the independent review', () => {
       await snap(p4, 'popup-menu');
       await page.setViewportSize({ width: 1100, height: 900 });
       const chooser = await openChooser(page);
-      for (const [name, count] of [['Network', 4], ['Backup', 5], ['Last issue', 6], ['Pinned counters', 7]] as const) {
+      for (const [name, count] of [['Network', 4], ['Last issue', 6], ['Pinned counters', 7]] as const) {
         await chooser.getByRole('button', { name: `Add ${name}` }).click();
         await expect(shown(chooser)).toHaveCount(count);
       }
@@ -245,7 +246,7 @@ test.describe('screenshots for the independent review', () => {
       await chooser.getByRole('button', { name: /^More actions for Network/ }).click();
       await dialog.screenshot({ path: join(SHOTS!, `chooser-menu-${theme}.png`) });
       await page.keyboard.press('Escape');
-      const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale,network:empty,backupHealth:working,lastIssue:error,pinnedCounters:ready', 1500);
+      const p2 = await open('&popup=activeAlarms:empty,diskSpace:error,cpuMemory:stale,network:empty,lastIssue:error,pinnedCounters:ready', 1500);
       await snap(p2, 'popup-states', p2.locator('pd-tray-popover'));
       // The ready designs of the other kinds: the first three are removed, Top apps added.
       for (const title of ['Active alarms', 'Disk space', 'CPU and memory']) {

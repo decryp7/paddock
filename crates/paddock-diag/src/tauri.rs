@@ -90,6 +90,11 @@ impl Setup {
     /// The running log: pending "repeated n times" lines are written before a report is collected, and the shell's Logging
     /// section tunes its level.
     pub fn log(mut self, handle: LogHandle) -> Setup {
+        // The report lists what the user did just before (the log's breadcrumbs), once.
+        if !self.sections.iter().any(|s| s.id() == "trail") {
+            self.sections
+                .push(Arc::new(builtin::Trail::new(handle.clone())));
+        }
         self.log = Some(handle);
         self
     }
@@ -217,6 +222,19 @@ impl Diagnostics {
             next: AtomicU64::new(1),
             cache: Mutex::new(None),
             active: Mutex::new(Active::default()),
+        }
+    }
+
+    /// Tells the sections a report was saved (the crash section clears the markers that report held).
+    fn mark_reported(&self) {
+        let cx = crate::Context {
+            app: &self.app,
+            dirs: &self.dirs,
+            now: paddock_log::now_utc(&*self.clock),
+        };
+        for section in &self.sections {
+            let _ =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| section.reported(&cx)));
         }
     }
 
@@ -365,6 +383,9 @@ fn start_save<R: Runtime>(
     // The save blocks on the native dialog, so it runs on the blocking pool, never on the IPC or main thread.
     ::tauri::async_runtime::spawn_blocking(move || {
         let outcome = run_save(ctx, picker.as_ref(), &label, &suggested, &report);
+        if matches!(outcome, SaveOutcome::Saved(_)) {
+            state.mark_reported();
+        }
         {
             let mut active = lock(&state.active);
             active.saving = false;

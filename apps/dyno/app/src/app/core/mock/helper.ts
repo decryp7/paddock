@@ -21,7 +21,7 @@ function prompt(os: MockOs, verb: string): string {
 /** What the helper shows (`readings`): one list per system, used by the Off and the On card alike. */
 const READINGS: Record<MockOs, string[]> = {
   macos: ['Every process of every account', 'Login items and background tasks', 'Firewall (pf) rules', 'Temperature and energy readings'],
-  windows: ['Every process of every account', 'Per-program network traffic', 'Disk health', 'What is keeping the computer awake', 'Windows Backup versions (the backups of Backup and Restore)'],
+  windows: ['Every process of every account', 'Per-program network traffic', 'Disk health', 'What is keeping the computer awake'],
   linux: ['Every process of every account', 'Which program owns each socket and file', 'Firewall (nft) rules', 'Memory modules'],
 };
 
@@ -41,6 +41,8 @@ export function mockHelperStatus(variant: MockHelperVariant, os: MockOs): Helper
     case 'notRunning':
     case 'silent':
       return { ...base, state: 'notRunning', message: 'The helper is installed but did not answer. Repair it to start it again.', detail: 'The pipe did not answer within 3 s.' };
+    case 'starting':
+      return { ...base, state: 'starting', message: 'The helper is starting. This takes a moment after Windows starts; Dyno looks again by itself.', detail: 'the service is StartPending' };
     case 'missing':
       return { ...base, state: 'missing', message: 'The helper is installed but part of it is missing or not protected. Repair it to put it back.', detail: 'C:\\Program Files\\Dyno Helper\\dyno-helper.exe: not found.' };
     case 'foreign':

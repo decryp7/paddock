@@ -44,7 +44,10 @@ pub enum DbError {
     Invalid(String),
     /// Another database than expected.
     #[error("The downloaded file is a different kind of database; the previous one stays in use.")]
-    WrongType,
+    WrongType(
+        /// The `database_type` the file declares, printable ASCII, at most 64 characters (database metadata, not user content).
+        String,
+    ),
     /// Not an IPv6-capable tree.
     #[error("The downloaded database has an unexpected layout; the previous one stays in use.")]
     WrongLayout,
@@ -60,6 +63,47 @@ pub enum DbError {
     /// Not gzip.
     #[error("The downloaded file is not a valid archive; the previous database stays in use.")]
     NotGzip,
+}
+
+impl DbError {
+    /// A short kind for logs.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            DbError::Invalid(_) => "invalid",
+            DbError::WrongType(_) => "wrong-type",
+            DbError::WrongLayout => "wrong-layout",
+            DbError::BadDate => "bad-date",
+            DbError::BadSize => "too-small-or-large",
+            DbError::TooBig => "too-big",
+            DbError::NotGzip => "not-gzip",
+        }
+    }
+
+    /// The declared type of a [`DbError::WrongType`], for logs.
+    pub fn declared_type(&self) -> Option<&str> {
+        match self {
+            DbError::WrongType(t) => Some(t),
+            _ => None,
+        }
+    }
+}
+
+/// Whether a file's declared `database_type` is the `expected` product: the name itself, or the name followed by one
+/// ` (compat=...)` suffix (DB-IP declares `DBIP-ASN-Lite (compat=GeoLite2-ASN)`). Another product, or any other suffix, is refused.
+pub fn type_matches(actual: &str, expected: &str) -> bool {
+    match actual.strip_prefix(expected) {
+        Some("") => true,
+        Some(rest) => rest
+            .strip_prefix(" (compat=")
+            .and_then(|r| r.strip_suffix(')'))
+            .is_some_and(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')),
+        None => false,
+    }
+}
+
+/// A declared type made safe to log: printable ASCII only, at most 64 characters.
+fn declared_type(s: &str) -> String {
+    s.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').take(64).collect()
 }
 
 /// What an accepted database says about itself.
@@ -102,8 +146,8 @@ fn open_unguarded(bytes: Vec<u8>, kind: DbKind, now: u64, full: bool) -> Result<
     let info = {
         let reader = Reader::from_source(bytes.as_slice()).map_err(|e| DbError::Invalid(short(&e.to_string())))?;
         let m = &reader.metadata;
-        if m.database_type != kind.database_type() {
-            return Err(DbError::WrongType);
+        if !type_matches(&m.database_type, kind.database_type()) {
+            return Err(DbError::WrongType(declared_type(&m.database_type)));
         }
         if m.ip_version != 6 || m.record_size != 24 && m.record_size != 28 && m.record_size != 32 {
             return Err(DbError::WrongLayout);
@@ -466,7 +510,8 @@ pub mod testdb {
     pub fn sample_asn(build_epoch: u64) -> Vec<u8> {
         build(
             &Meta {
-                database_type: "DBIP-ASN-Lite".into(),
+                // The string the real DB-IP file declares (read from the public 2026-11 file).
+                database_type: "DBIP-ASN-Lite (compat=GeoLite2-ASN)".into(),
                 build_epoch,
                 ip_version: 6,
             },
@@ -506,6 +551,53 @@ mod tests {
     }
 
     #[test]
+    fn the_type_rule_takes_the_real_dbip_strings_and_refuses_other_products() {
+        let asn = |t: &str| {
+            let m = Meta {
+                database_type: t.into(),
+                build_epoch: NOW,
+                ip_version: 6,
+            };
+            let bytes = build(&m, &[("192.0.2.0".parse().unwrap(), 24, asn(64500, "Example Net"))]);
+            open_checked(bytes, DbKind::Asn, NOW, true).map(|_| ())
+        };
+        assert_eq!(asn("DBIP-ASN-Lite (compat=GeoLite2-ASN)"), Ok(()));
+        assert_eq!(asn("DBIP-ASN-Lite"), Ok(()));
+        for bad in [
+            "GeoLite2-ASN",
+            "DBIP-Country-Lite",
+            "DBIP-ASN-Lite-Extra",
+            "DBIP-ASN-Lite (compat=",
+            "DBIP-ASN-Lite (compat=X) tail",
+            "DBIP-ASN-Lite (other=X)",
+        ] {
+            assert!(matches!(asn(bad), Err(DbError::WrongType(_))), "{bad}");
+        }
+        assert!(type_matches("DBIP-Country-Lite", "DBIP-Country-Lite"));
+        assert!(!type_matches("DBIP-Country-Lite-Extra", "DBIP-Country-Lite"));
+    }
+
+    #[test]
+    fn a_wrong_type_carries_the_declared_type_sanitised_and_capped() {
+        let m = Meta {
+            database_type: format!("Evil\u{7}\n{}é", "x".repeat(200)),
+            build_epoch: NOW,
+            ip_version: 6,
+        };
+        let bytes = build(&m, &[("192.0.2.0".parse().unwrap(), 24, country("XA", "T"))]);
+        let Err(e) = open_checked(bytes, DbKind::Country, NOW, true).map(|_| ()) else {
+            panic!()
+        };
+        assert_eq!(e.kind(), "wrong-type");
+        let declared = e.declared_type().unwrap().to_string();
+        assert!(
+            declared.len() <= 64 && declared.chars().all(|c| c.is_ascii_graphic() || c == ' '),
+            "{declared:?}"
+        );
+        assert!(declared.starts_with("Evilxxx"));
+    }
+
+    #[test]
     fn a_wrong_type_layout_date_or_size_is_refused() {
         let ok = |m: Meta| build(&m, &[("192.0.2.0".parse().unwrap(), 24, country("XA", "T"))]);
         let m = Meta {
@@ -514,7 +606,7 @@ mod tests {
             ip_version: 6,
         };
         let e = |bytes, kind| open_checked(bytes, kind, NOW, true).err().unwrap();
-        assert_eq!(e(ok(m.clone()), DbKind::Asn), DbError::WrongType);
+        assert_eq!(e(ok(m.clone()), DbKind::Asn), DbError::WrongType("DBIP-Country-Lite".into()));
         assert_eq!(
             e(
                 ok(Meta {
@@ -523,7 +615,7 @@ mod tests {
                 }),
                 DbKind::Country
             ),
-            DbError::WrongType
+            DbError::WrongType("GeoLite2-City".into())
         );
         assert_eq!(
             e(

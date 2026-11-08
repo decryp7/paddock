@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BenchKindResult, BenchOverview, BenchProgress, BenchRun } from '../src/app/core/api.types';
-import { MOCK_ESTIMATES, mockKindResult, mockOldResults, mockRun, mockTrace } from '../src/app/core/mock/bench';
+import { MOCK_ESTIMATES, mockKindResult, mockRun, mockTrace } from '../src/app/core/mock/bench';
 
 /**
  * Every state of the Benchmarks page in both themes, for the independent review (ER-23):

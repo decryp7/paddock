@@ -27,6 +27,21 @@ const HANG_GUARD: Duration = Duration::from_secs(30);
 
 const MAC: &str = "02:00:5e:10:00:01";
 
+/// The agent's log lines of this test binary, so a test can check what the logs would show (ER-27).
+static LOG: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+struct Capture;
+impl log::Log for Capture {
+    fn enabled(&self, m: &log::Metadata) -> bool {
+        m.target().starts_with("dyno_agent::wol")
+    }
+    fn log(&self, r: &log::Record) {
+        if self.enabled(r.metadata()) {
+            LOG.lock().unwrap().push(format!("{} {}", r.level(), r.args()));
+        }
+    }
+    fn flush(&self) {}
+}
+
 struct Harness {
     running: Option<Running>,
     udp: Arc<FakeUdp>,
@@ -272,6 +287,43 @@ fn a_secureon_password_is_appended_to_the_packet() {
 }
 
 #[test]
+fn a_device_whose_password_is_gone_is_not_woken_without_it_and_the_job_says_what_to_do() {
+    // After an update that moves the password store (or a deleted file) the device still says "has a password": a wake without it
+    // would silently fail to wake the computer, so the job refuses and names the next step.
+    let _ = log::set_logger(&Capture);
+    log::set_max_level(log::LevelFilter::Info);
+    let h = Harness::start();
+    let (_w, _lists, jobs) = h.watcher();
+    let c = h.client();
+    let mut d = input("NAS", MAC);
+    d.secure_on = SecureOnEdit::Set {
+        password: "0a:0b:0c:0d:0e:0f".into(),
+    };
+    save(&c, d).unwrap();
+    h.secrets.delete(&Name::new("wol", "secure-on-1").unwrap()).unwrap();
+    let Reply::Job(started) = ask(&c, Request::WolWake { id: 1, test: false }).unwrap() else {
+        panic!("a job")
+    };
+    let snapshot = loop {
+        let s = jobs.recv_timeout(HANG_GUARD).expect("the job ends");
+        if s.id == started.id && s.is_terminal() {
+            break s;
+        }
+    };
+    let text = format!("{snapshot:?}");
+    assert!(
+        text.contains("password") && text.contains("enter it again"),
+        "the job says the SecureOn password is missing and how to fix it: {text}"
+    );
+    assert!(h.udp.sent().is_empty(), "nothing is sent without the password");
+    let lines = LOG.lock().unwrap().join("\n");
+    assert!(
+        lines.contains("WARN wake of device 1 (test=false) failed before it ended: The SecureOn password for this computer is missing"),
+        "the refusal is in the logs, with its cause: {lines}"
+    );
+}
+
+#[test]
 fn a_test_wake_waits_for_the_answer_and_saves_a_moved_address() {
     // No answer to the first look, then the computer shows up reachable at a new address.
     let h = Harness::start_with(Scripts {
@@ -407,4 +459,52 @@ fn readiness_is_what_the_platform_reads() {
     };
     assert_eq!(r.items.len(), 1);
     assert_eq!(r.items[0].kind, ReadinessKind::Firmware);
+}
+
+#[cfg(unix)]
+fn mode(p: &std::path::Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p).unwrap().permissions().mode() & 0o777
+}
+
+#[cfg(unix)]
+#[test]
+fn the_password_folder_becomes_owner_only_even_when_it_existed_with_wider_rights() {
+    use std::os::unix::fs::PermissionsExt;
+    let t = tempfile::tempdir().unwrap();
+    let folder = t.path().join("secrets");
+    std::fs::create_dir(&folder).unwrap();
+    std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    dyno_agent::wol::prepare_folder(&folder).unwrap();
+    assert_eq!(mode(&folder), 0o700);
+    let nested = t.path().join("a").join("b");
+    dyno_agent::wol::prepare_folder(&nested).unwrap();
+    assert_eq!(mode(&nested), 0o700, "a missing folder is created owner-only");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn on_macos_the_agent_prepares_its_password_folder_private_and_out_of_backups() {
+    let t = tempfile::tempdir().unwrap();
+    let dirs = Dirs::at(t.path().join("data"));
+    dyno_agent::wol::prepare_password_folder(&dirs);
+    let folder = dirs.secrets_folder();
+    assert_eq!(mode(&folder), 0o700);
+    assert_eq!(
+        dyno_agent::cache::backup::read_exclusion(&folder).as_deref(),
+        Some(&dyno_agent::cache::backup::exclusion_value()[..]),
+        "Time Machine skips the folder"
+    );
+}
+
+#[test]
+fn a_data_folder_that_is_a_file_does_not_stop_the_agent_from_starting() {
+    let t = tempfile::tempdir().unwrap();
+    let file = t.path().join("data");
+    std::fs::write(&file, "not a folder").unwrap();
+    dyno_agent::wol::prepare_password_folder(&Dirs::at(&file));
+    assert!(
+        dyno_agent::wol::prepare_folder(&file.join("secrets")).is_err(),
+        "the failure is reported, not hidden"
+    );
 }

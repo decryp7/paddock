@@ -586,3 +586,31 @@ fn a_problem_that_cannot_be_written_stops_at_the_failing_write_without_panicking
         assert!(write!(FailAfter { left: 1000 }, "{problem}").is_ok());
     }
 }
+
+#[test]
+fn a_file_that_never_restores_ignores_a_valid_backup_and_leaves_nothing_in_its_place() {
+    let t = tempfile::tempdir().unwrap();
+    let f = file(t.path()).no_restore();
+    f.save(&state("good", 1)).unwrap();
+    f.save(&state("newer", 2)).unwrap();
+    std::fs::write(f.path(), "garbage").unwrap();
+    let l = f.load();
+    assert_eq!(l.value, State::default(), "the older copy is not used");
+    assert!(matches!(
+        &l.problem,
+        Some(Problem::Damaged {
+            recovered_from_backup: false,
+            ..
+        })
+    ));
+    assert!(
+        !f.path().exists(),
+        "the damaged file was moved aside and nothing was written back"
+    );
+    assert!(names(t.path()).contains(&"state.json.corrupt-1000".to_string()));
+    assert_eq!(
+        f.load().problem,
+        None,
+        "the next start finds no file, not a restored copy"
+    );
+}

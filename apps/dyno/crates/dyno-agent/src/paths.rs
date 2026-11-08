@@ -63,6 +63,11 @@ impl Dirs {
         &self.root
     }
 
+    /// Where the macOS agent keeps Wake-on-LAN passwords: owner-only files, never the Keychain (see `dyno_platform::wol::os_store`).
+    pub fn secrets_folder(&self) -> PathBuf {
+        self.root.join("secrets")
+    }
+
     /// The history database.
     pub fn database(&self) -> PathBuf {
         self.root.join("dyno.db")

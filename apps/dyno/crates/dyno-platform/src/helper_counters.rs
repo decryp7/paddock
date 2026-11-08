@@ -287,6 +287,9 @@ mod tests {
         std::fs::write(p, text).unwrap();
     }
 
+    // The fake tree holds sysfs names such as `intel-rapl:0`; a Windows file name cannot contain a colon (it would name a data stream), so the
+    // tree can only be built on a Unix host.
+    #[cfg(unix)]
     #[test]
     fn a_sysfs_tree_gives_zones_fans_and_energy_domains() {
         let dir = tempfile::tempdir().unwrap();

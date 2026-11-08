@@ -40,6 +40,22 @@ describe('InventoryPage', () => {
     expect(el.querySelectorAll('dy-device-art')).toHaveLength(2);
   });
 
+  it('names the helper as the source of the slot table, or asks for it when only the total is known', async () => {
+    const helper = await render({ ...mockInventory('linux'), memoryVia: 'helper' });
+    expect((helper.nativeElement as HTMLElement).querySelector('[data-testid=reading-source-helper]')?.textContent).toContain('Read by the administrator helper');
+    TestBed.resetTestingModule();
+    const needs: SystemInventory = {
+      ...mockInventory('linux'),
+      memory: { totalOnly: { total: 16 * 1024 ** 3, reason: { reason: 'Linux lets only an administrator read the memory slots.' } } },
+      memoryVia: { needsHelper: { reason: 'The memory slots are readable only by an administrator. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } },
+      hints: [],
+    };
+    const f = await render(needs);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('[data-testid=reading-source-needs]')?.textContent).toContain('readable only by an administrator');
+    expect(el.querySelector('[data-testid=reading-source-turn-on]')?.textContent?.trim()).toBe('Turn on administrator readings');
+  });
+
   it('says why the modules are unknown when only the total is available', async () => {
     const inv: SystemInventory = { ...mockInventory('windows'), memory: { totalOnly: { total: 16 * 1024 ** 3, reason: { reason: 'The OS did not answer.' } } }, hints: [] };
     const f = await render(inv);

@@ -61,7 +61,7 @@ export class MockWakes {
       variant === 'empty'
         ? []
         : [
-            base(1, 'Morning backup check', 7 * 60, { repeat: { days: { mask: 0b0011111 } }, job: 'backupCheck', stayAwakeMinutes: 30, nextAt: mockNextAt(7 * 60, { days: { mask: 0b0011111 } }, now()), lastRun: { at: mockPrevAt(7 * 60, { days: { mask: 0b0011111 } }, now()), summary: 'staying awake 30 min; started its job' } }),
+            base(1, 'Morning inventory', 7 * 60, { repeat: { days: { mask: 0b0011111 } }, job: 'softwareInventory', stayAwakeMinutes: 30, nextAt: mockNextAt(7 * 60, { days: { mask: 0b0011111 } }, now()), lastRun: { at: mockPrevAt(7 * 60, { days: { mask: 0b0011111 } }, now()), summary: 'staying awake 30 min; started its job' } }),
             base(2, 'Wake the NAS for the weekend', 18 * 60, { repeat: { days: { mask: 0b0100000 } }, wakeDevices: [2], nextAt: mockNextAt(18 * 60, { days: { mask: 0b0100000 } }, now()), lastRun: { at: mockPrevAt(18 * 60, { days: { mask: 0b0100000 } }, now()), summary: 'Missed: the computer was off or Dyno was not running then.' } }),
             base(3, 'Once, tomorrow', 6 * 60 + 30, { repeat: 'once', stayAwakeMinutes: 60, enabled: false, nextAt: null }),
           ];

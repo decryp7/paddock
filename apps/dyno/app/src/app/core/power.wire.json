@@ -1,11 +1,13 @@
 {
   "energy": {
     "notSet": {
+      "cpuVia": "local",
       "currency": null,
       "days": [
         {
           "co2Kg": null,
           "cost": null,
+          "cpuKwh": null,
           "dayStart": 1700006400000,
           "kwh": null,
           "onSecs": 34800,
@@ -15,6 +17,7 @@
         {
           "co2Kg": null,
           "cost": null,
+          "cpuKwh": null,
           "dayStart": 1700092800000,
           "kwh": null,
           "onSecs": 0,
@@ -28,6 +31,7 @@
       "totals": {
         "co2Kg": null,
         "cost": null,
+        "cpuKwh": null,
         "dayStart": 1700006400000,
         "kwh": null,
         "onSecs": 34800,
@@ -37,11 +41,13 @@
       "trackingSince": 1700000000000
     },
     "priced": {
+      "cpuVia": "local",
       "currency": "S$",
       "days": [
         {
           "co2Kg": 0.2386666666666667,
           "cost": 0.29833333333333334,
+          "cpuKwh": null,
           "dayStart": 1700006400000,
           "kwh": 0.5966666666666667,
           "onSecs": 34800,
@@ -51,6 +57,7 @@
         {
           "co2Kg": 0.0,
           "cost": 0.0,
+          "cpuKwh": null,
           "dayStart": 1700092800000,
           "kwh": 0.0,
           "onSecs": 0,
@@ -64,6 +71,7 @@
       "totals": {
         "co2Kg": 0.2386666666666667,
         "cost": 0.29833333333333334,
+        "cpuKwh": null,
         "dayStart": 1700006400000,
         "kwh": 0.5966666666666667,
         "onSecs": 34800,

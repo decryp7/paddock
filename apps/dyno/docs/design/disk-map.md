@@ -262,8 +262,7 @@ counted once per name. It lives in the cleanup module that ADR 0021 drops.
      snapshots from `tmutil listlocalsnapshots <mount>` (count and dates; macOS gives no per-snapshot size, so their
      bytes stay in `remainder`).
    - Windows (NTFS): `pagefile.sys`, `hiberfil.sys`, `swapfile.sys` sizes from their directory entries (no open);
-     `SHQueryRecycleBinW` per drive; shadow-copy storage needs administrator rights, so it is read by the read-only
-     helper or shown as "Needs administrator" (ADR 0021 keeps the helper read-only).
+     `SHQueryRecycleBinW` per drive; shadow-copy storage needs administrator rights, so it is read by the helper or shown as "Needs administrator" (ADR 0027).
    - Linux: `f_bfree − f_bavail` (reserved for root); btrfs/ZFS snapshots `NotReported { "not measured" }`.
    - Network file systems: `NotReported` for purgeable and snapshots; free space as the server reports it.
 7. **File lists.** `DiskFiles { scan, under: node, order: Largest | Oldest, limit ≤ 500, min_bytes }` over the notable

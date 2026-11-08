@@ -2,6 +2,10 @@
 //! caller chose beyond a validated tag, a time and an interface name). Linux uses `systemd-run` with a timer that has
 //! `WakeSystem=true`; macOS uses `pmset schedule wake` with an owner string, so an event is Dyno's only when its owner starts with
 //! Dyno's prefix, and listing and cancelling look at those alone. The parsers are pure and compile everywhere.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use crate::runner::{tool, Tool, ToolRunner};
 use dyno_core::ports::PlatformError;
@@ -74,7 +78,9 @@ pub struct SystemdWakes(pub Box<dyn ToolRunner>);
 impl WakeScheduler for SystemdWakes {
     fn schedule(&self, tag: &WakeTag, at_utc: i64) -> Result<(), PlatformError> {
         // The same tag replaces: stop a timer of that name first (a missing one is fine).
-        let _ = self.0.run_tool(&systemd_cancel(tag), TIMEOUT);
+        if let Err(e) = self.0.run_tool(&systemd_cancel(tag), TIMEOUT) {
+            log::debug!(Tag = tag.as_str(), error:% = e; "wake: the old timer could not be stopped first");
+        }
         let out = self.0.run_tool(&systemd_schedule(tag, at_utc), TIMEOUT)?;
         if out.ok {
             log::info!(Tag = tag.as_str(); "wake scheduled (systemd timer)");
@@ -245,7 +251,9 @@ impl PmsetWakes {
 impl WakeScheduler for PmsetWakes {
     fn schedule(&self, tag: &WakeTag, at_utc: i64) -> Result<(), PlatformError> {
         // The same tag replaces: cancel the event of that tag first.
-        let _ = self.cancel(tag);
+        if let Err(e) = self.cancel(tag) {
+            log::debug!(Tag = tag.as_str(), error:% = e; "wake: the old event could not be cancelled first");
+        }
         let out = self
             .runner
             .run_tool(&pmset_schedule(tag, at_utc, (self.offset_at)(at_utc)), TIMEOUT)?;

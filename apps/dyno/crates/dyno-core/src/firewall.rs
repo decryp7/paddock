@@ -135,6 +135,9 @@ pub struct FirewallSource {
     pub rules_hidden: bool,
     /// A sentence about this source for the page (for example "Another firewall may be in charge"), or none.
     pub note: Option<String>,
+    /// Who read it (the agent sets it; the helper's own reply says `Local`).
+    #[serde(default)]
+    pub via: crate::read_via::ReadVia,
 }
 
 impl FirewallSource {
@@ -151,7 +154,14 @@ impl FirewallSource {
             truncated: 0,
             rules_hidden: false,
             note: None,
+            via: crate::read_via::ReadVia::Local,
         }
+    }
+
+    /// The same view, read by `via`.
+    pub fn with_via(mut self, via: crate::read_via::ReadVia) -> FirewallSource {
+        self.via = via;
+        self
     }
 
     /// Takes `rules`, keeping the count and capping the list.

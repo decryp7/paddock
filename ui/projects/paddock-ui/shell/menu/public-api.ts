@@ -74,7 +74,7 @@ export {
   type MenuSource,
   type MenuCommandState,
 } from './src/menu-model';
-export { AppMenu, MENU_MODE, MENU_CONFIG, MENU_OS, SHELL_MENU_TITLES, isTauri, provideMenus, type MenuMode, type MenuConfig } from './src/app-menu';
+export { AppMenu, MENU_MODE, MENU_CONFIG, MENU_OS, QUIT_TITLE, SHELL_MENU_TITLES, isTauri, provideMenus, type MenuMode, type MenuConfig } from './src/app-menu';
 export {
   NativeMenuBridge,
   NATIVE_MENU_PORT,

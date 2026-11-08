@@ -164,9 +164,9 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
       </ng-template>
       <ng-template pdWidget="cpu" [pdWidgetOf]="witness" let-x>
         <div class="wg-split">
-          <div class="wg-metric"><span class="wg-k" pdSkeleton>CPU</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.cpu ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton>@if (x) { <pd-sparkline [values]="cpuSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="CPU, last minute" /> }</span></div>
+          <div class="wg-metric"><span class="wg-k" pdSkeleton>CPU</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.cpu ?? '00' }}<small>%</small></span><span class="wg-spark" pdSkeleton>@if (x) { <pd-sparkline [values]="cpuSeries" [height]="24" [area]="true" scale="zero" [max]="100" label="CPU, last minute" /> }</span></div>
           <span class="wg-div"></span>
-          <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark wg-spark--mem" pdSkeleton>@if (x) { <pd-sparkline [values]="memSeries" [height]="24" [area]="true" [min]="0" [max]="100" label="Memory, last minute" /> }</span></div>
+          <div class="wg-metric"><span class="wg-k" pdSkeleton>{{ x?.cpu?.memText ?? 'Memory xxxxxxxxxxx' }}</span><span class="wg-hero" pdSkeleton>{{ x?.cpu?.mem ?? '00' }}<small>%</small></span><span class="wg-spark wg-spark--mem" pdSkeleton>@if (x) { <pd-sparkline [values]="memSeries" [height]="24" [area]="true" scale="zero" [max]="100" label="Memory, last minute" /> }</span></div>
         </div>
       </ng-template>
       <ng-template pdWidget="net" [pdWidgetOf]="witness" let-x>
@@ -259,9 +259,21 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
           </div>
         </pd-widget-chooser>
       </div>
+      <!-- A card (the widget grid's variant) in a cell too short for its list: the body scrolls inside, the head stays. -->
+      <ng-template #longList let-x><ul class="wg-long">@for (n of longItems; track n) { <li>{{ n }}</li> }</ul></ng-template>
+      <div class="wg-short-cell" data-testid="wgt-scroll-cell">
+        <pd-widget-frame title="What holds it back" icon="pd:activity" variant="card" [span]="12" [template]="longList" [state]="longState" />
+      </div>
+
+      <!-- A popup tile with more lines than its cap: the same scrolling body (the cap is --pd-widget-tile-body-max). -->
+      <div class="wg-tile-cell" data-testid="wgt-scroll-tile"><pd-widget-frame title="Disk space" icon="pd:folder" [template]="longList" [state]="longState" /></div>
+
     </section>
   `,
   styles: `
+    .wg-tile-cell { width: 326px; margin-bottom: var(--pd-space-4); }
+    .wg-short-cell { width: 326px; height: 140px; margin-bottom: var(--pd-space-4); }
+    .wg-long { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--pd-space-1); }
     h3 { margin: var(--pd-space-4) 0 0; font-size: var(--pd-text-body); font-weight: var(--pd-weight-semibold); }
     .wg-sheet { display: grid; grid-template-columns: repeat(auto-fill, 326px); gap: var(--pd-space-4); padding: var(--pd-space-4); background: var(--pd-surface-3); border-radius: var(--pd-radius-card); }
     .wg-cell { width: 326px; min-width: 0; align-self: start; }
@@ -304,6 +316,9 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
   `,
 })
 export class GalWidgets {
+  /** Twelve lines: more than a 140 px cell shows. */
+  protected readonly longItems = Array.from({ length: 12 }, (_, i) => `Reason ${i + 1} of 12`);
+  protected readonly longState: WidgetState<null, never> = { state: 'ready', value: null, asOf: NOW, staleSince: null };
   /** The type witness of the kind templates: `let-x` is a `Val | null` with no cast. */
   protected readonly witness: Val | null = null;
   /** The type witness of the chooser's option templates: `let-p` is a `Placement<Sample>`. */

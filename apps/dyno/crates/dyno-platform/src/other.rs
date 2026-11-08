@@ -41,7 +41,7 @@ impl UserActivity for Unsupported {
 }
 
 /// The ports for this OS.
-pub fn platform() -> Platform {
+pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     Platform {
         sensors: Box::new(SysinfoSensors::new(Box::new(NoProbe))),
         processes: Box::new(SysinfoProcesses::new(Box::new(NoDetails))),
@@ -56,7 +56,7 @@ pub fn platform() -> Platform {
         network: crate::NetworkPorts::os(),
         hardware: crate::HardwareReaders::os(),
         power: crate::PowerPorts::os(),
-        wol: crate::wol::WolPorts::os(),
+        wol: crate::wol::WolPorts::os(secrets_dir),
     }
 }
 

@@ -3,6 +3,10 @@
 //! language (the same strings the enumeration returns are the ones `PdhAddCounterW` accepts). PDH formats rates
 //! itself, so every counter is a gauge here. A counter needs two collections before PDH can compute a rate: the first
 //! reading after adding one says so.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use crate::parse::pdh_list::multi_sz;
 use dyno_core::counters::{
@@ -19,6 +23,15 @@ use windows::Win32::System::Performance::{
     PDH_CSTATUS_NO_INSTANCE, PDH_CSTATUS_NO_OBJECT, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_INVALID_DATA,
     PDH_MORE_DATA, PDH_NO_DATA, PERF_DETAIL_WIZARD,
 };
+
+/// A PDH status as a result: 0 (`ERROR_SUCCESS`) is success, anything else is the failure, in words for the log.
+pub(super) fn result_of(status: u32) -> Result<(), String> {
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(format!("PDH status {status:#x}"))
+    }
+}
 
 /// Most counters kept in the persistent query.
 const MAX_WATCHED: usize = 64;
@@ -148,7 +161,7 @@ impl Drop for Reader {
     fn drop(&mut self) {
         // SAFETY: the query was opened by PdhOpenQueryW and is closed once (closing it frees its counters).
         unsafe {
-            let _ = PdhCloseQuery(self.query);
+            paddock_proc::cleanup::logged("closing the performance query", result_of(PdhCloseQuery(self.query)));
         }
     }
 }
@@ -200,7 +213,7 @@ pub fn read(paths: &[CounterPath]) -> Vec<RawCounter> {
         if let Some(h) = reader.counters.remove(&k) {
             // SAFETY: the handle belongs to this query and is removed once.
             unsafe {
-                let _ = PdhRemoveCounter(h);
+                paddock_proc::cleanup::logged("removing a performance counter", result_of(PdhRemoveCounter(h)));
             }
         }
     }

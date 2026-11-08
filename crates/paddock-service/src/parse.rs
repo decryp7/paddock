@@ -24,6 +24,10 @@ pub struct JobReport {
     pub last_exit_code: Option<i32>,
     /// `last terminating signal = …`: a signal ended the job's last process.
     pub last_signal: bool,
+    /// The signal number in `last terminating signal = Killed: 9` (`None`: no signal, or none named).
+    pub signal: Option<i32>,
+    /// `runs = <n>`: how often launchd started the job's process.
+    pub runs: Option<u32>,
 }
 
 /// Reads the report of `launchctl print` (catalogue R03). Only the job's own keys count: nested blocks (`arguments`,
@@ -56,14 +60,35 @@ pub fn parse_job(launchctl_print: &str) -> JobReport {
             job.exit_config = job.last_exit_code == Some(78);
         } else if let Some(pid) = line.strip_prefix("pid = ") {
             job.pid = pid.trim().parse().ok().filter(|p| *p > 0);
-        } else if line.starts_with("last terminating signal = ") {
+        } else if let Some(sig) = line.strip_prefix("last terminating signal = ") {
             job.last_signal = true;
+            job.signal = sig.rsplit(':').next().and_then(|n| n.trim().parse().ok());
+        } else if let Some(runs) = line.strip_prefix("runs = ") {
+            job.runs = runs.trim().parse().ok();
         } else if line.starts_with("properties = ") {
             job.needs_lwcr_update = line.contains("needs LWCR update");
             job.has_lwcr = line.contains("has LWCR");
         }
     }
     job
+}
+
+/// The `program = <path>` line of the job's own block in `launchctl print` (for the log only: decisions use the record's
+/// registered program, because `BundleProgram` jobs may print a relative `program identifier` instead).
+pub fn print_program(launchctl_print: &str) -> Option<String> {
+    let mut depth = 0usize;
+    for line in launchctl_print.lines().map(str::trim) {
+        if line == "}" {
+            depth = depth.saturating_sub(1);
+        } else if line.ends_with('{') {
+            depth += 1;
+        } else if depth <= 1
+            && let Some(p) = line.strip_prefix("program = ")
+        {
+            return Some(p.trim().to_string());
+        }
+    }
+    None
 }
 
 impl JobReport {
@@ -295,6 +320,14 @@ pub fn sc_pid(sc_queryex: &str) -> Option<u32> {
         .filter(|p| *p != 0)
 }
 
+/// The pid in `systemctl show -p MainPID` output (`MainPID=1234`); `None` when the unit has no process (`0`).
+pub fn parse_main_pid(show: &str) -> Option<u32> {
+    show.lines()
+        .find_map(|l| l.trim().strip_prefix("MainPID="))
+        .and_then(|v| v.trim().parse().ok())
+        .filter(|p| *p != 0)
+}
+
 /// The privileges in `sc qprivs` output (`Se…Privilege` words, sorted, once each; the names do not depend on the language).
 pub fn sc_privileges(sc_qprivs: &str) -> Vec<String> {
     let mut found: Vec<String> = sc_qprivs
@@ -311,6 +344,71 @@ pub fn sc_privileges(sc_qprivs: &str) -> Vec<String> {
     found
 }
 
+/// What `systemctl show -p FragmentPath,UnitFileState,Result,NRestarts,ExecMainStatus,ExecMainCode` printed (`Key=Value`
+/// lines; a key that is missing, empty or not a number reads as `None`).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UnitShow {
+    /// `FragmentPath`: the unit file in force (empty for a masked or unknown unit).
+    pub fragment: Option<String>,
+    /// `UnitFileState`: `enabled`, `disabled`, `static`, `masked`, ...
+    pub unit_file_state: Option<String>,
+    /// `Result`: `success`, `exit-code`, `signal`, `core-dump`, `timeout`, ... The judge of a failure; the `ExecMain*` fields
+    /// are its detail.
+    pub result: Option<String>,
+    /// `NRestarts`.
+    pub restarts: Option<u32>,
+    /// `ExecMainStatus`: the exit status, or the signal number when `ExecMainCode` says killed.
+    pub exec_main_status: Option<i32>,
+    /// `ExecMainCode`: `CLD_EXITED` (1), `CLD_KILLED` (2) or `CLD_DUMPED` (3); 0 when the process never ended.
+    pub exec_main_code: Option<i32>,
+}
+
+/// Reads `systemctl show` output.
+pub fn parse_systemctl_show(stdout: &str) -> UnitShow {
+    let mut show = UnitShow::default();
+    for (key, value) in stdout.lines().filter_map(|l| l.split_once('=')) {
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        match key.trim() {
+            "FragmentPath" => show.fragment = Some(value.to_string()),
+            "UnitFileState" => show.unit_file_state = Some(value.to_string()),
+            "Result" => show.result = Some(value.to_string()),
+            "NRestarts" => show.restarts = value.parse().ok(),
+            "ExecMainStatus" => show.exec_main_status = value.parse().ok(),
+            "ExecMainCode" => show.exec_main_code = value.parse().ok(),
+            _ => {}
+        }
+    }
+    show
+}
+
+/// The exit codes in `sc query` output of a stopped service: `(WIN32_EXIT_CODE, SERVICE_EXIT_CODE)`.
+pub fn sc_exit_codes(sc_query: &str) -> Option<(u32, u32)> {
+    let first = |name: &str| {
+        sc_field(sc_query, name)?
+            .split_whitespace()
+            .next()?
+            .parse()
+            .ok()
+    };
+    Some((first("WIN32_EXIT_CODE")?, first("SERVICE_EXIT_CODE")?))
+}
+
+/// `ERROR_SERVICE_NEVER_STARTED`: stopped because it has not started since boot (demand or delayed start, or just created);
+/// there is no last exit, and it is not a failure.
+pub const SC_NEVER_STARTED: u32 = 1077;
+
+/// Whether a stopped service's `WIN32_EXIT_CODE` is a last exit at all: a service that never started since boot
+/// ([`SC_NEVER_STARTED`]) has none. The one check for the backend's read-back and for the unelevated start (rule 55).
+pub fn has_last_exit(win32: u32) -> bool {
+    win32 != SC_NEVER_STARTED
+}
+/// `ERROR_SERVICE_SPECIFIC_ERROR`: the real code is `SERVICE_EXIT_CODE`.
+pub const SC_SERVICE_SPECIFIC: u32 = 1066;
+/// `SERVICE_DEMAND_START` start type.
+pub const SC_DEMAND_START: u32 = 3;
 /// `SERVICE_RUNNING`.
 pub const SC_RUNNING: u32 = 4;
 /// `SERVICE_STOPPED`.
@@ -352,6 +450,14 @@ pub mod sc_exit {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn main_pid_is_read_and_zero_means_none() {
+        assert_eq!(parse_main_pid("MainPID=4242\n"), Some(4242));
+        assert_eq!(parse_main_pid("MainPID=0\n"), None);
+        assert_eq!(parse_main_pid("MainPID=x\nOther=1\n"), None);
+        assert_eq!(parse_main_pid(""), None);
+    }
+
     #[test]
     fn the_service_process_id_is_read_from_queryex() {
         let text = "SERVICE_NAME: DynoHelper\n        TYPE               : 10  WIN32_OWN_PROCESS\n        STATE              : 4  RUNNING\n        PID                : 9884\n        FLAGS              :\n";
@@ -696,5 +802,22 @@ mod tests {
             (other.last_exit_code, other.exit_config),
             (Some(780), false)
         );
+    }
+
+    #[test]
+    fn the_program_line_of_the_jobs_own_block_is_read_and_nested_blocks_are_skipped() {
+        let print = "gui/501/x = {\n\tstate = running\n\tprogram = /Applications/A.app/Contents/MacOS/a\n\tinherited environment = {\n\t\tprogram = /nested\n\t}\n}\n";
+        assert_eq!(
+            super::print_program(print).as_deref(),
+            Some("/Applications/A.app/Contents/MacOS/a")
+        );
+        // Only the top block and the one inside it count: a program line two levels down is not the job's.
+        let deep = "x = {\n\ta = {\n\t\tb = {\n\t\t\tprogram = /deep\n\t\t}\n\t}\n}\n";
+        assert_eq!(super::print_program(deep), None);
+        // After a block closes the depth is back: a line after it still counts.
+        let after = "x = {\n\ta = {\n\t}\n\tprogram = /after\n}\n";
+        assert_eq!(super::print_program(after).as_deref(), Some("/after"));
+        assert_eq!(super::print_program("no program here"), None);
+        assert_eq!(super::print_program(""), None);
     }
 }

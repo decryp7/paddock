@@ -23,7 +23,7 @@
 //! - [`watch`] and [`supervised`]: the program's side: restart itself when its executable changed and it is idle, and
 //!   take the login shell's `PATH` (`paddock_proc::login_path`) when the OS started it.
 //! - [`scm_host`]: the Windows service host (`--service`): runs the program in the logged-on user's session, restarts
-//!   it, moves it with the session and stops it gracefully (`native::run_as_service` is the dispatcher).
+//!   it, moves it with the session and stops it gracefully ([`service_main`] is the one entry point and the Windows dispatcher; `native::host_program` runs this host under it).
 //! - [`verbs`]: the words every background program understands (`install`, `uninstall`, `status`, `stop`,
 //!   `print-unit`, `print-plist`, `--service`).
 //!
@@ -55,16 +55,22 @@
 //! # Ok::<(), ServiceError>(())
 //! ```
 
+#[cfg(target_os = "macos")]
+pub mod apple_event;
 pub mod backend;
 pub mod control;
 mod error;
+pub mod fake_systemd;
 pub mod hardening;
+pub mod launch;
 pub mod launchctl;
 pub mod login;
 pub mod manager;
 pub mod native;
+pub mod os_log;
 pub mod parse;
 pub mod paths;
+pub mod per_machine;
 pub mod plan;
 pub mod port;
 pub mod privileged;
@@ -72,8 +78,11 @@ pub mod record;
 pub mod render;
 pub mod repair;
 pub mod scm_host;
+pub mod service_main;
 pub mod spec;
+pub mod start;
 pub mod status;
+pub mod stop;
 pub mod supervised;
 pub mod system;
 pub mod testing;
@@ -106,16 +115,27 @@ mod generated;
 #[cfg(test)]
 mod golden;
 #[cfg(test)]
+mod readback_tests;
+#[cfg(test)]
+mod recorded_tests;
+#[cfg(test)]
+mod resume_tests;
+#[cfg(test)]
 mod scenarios;
 
-pub use backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration, Target};
+pub use backend::{
+    Backend, Capabilities, DisabledMark, Inspection, Job, LastExit, LoginItemFacts, Mechanism,
+    Registration, Target, UnitFile, UnitFileState, UnitOrigin, UnregisterError,
+};
 pub use control::{Request, ServiceCommandError, ServiceControl, ServiceErrorCode, ServiceUpdate};
 pub use error::{ServiceError, SpecError};
 pub use manager::{Manager, Started};
-pub use plan::{Hold, Plan, Reason, Refusal};
+pub use os_log::OsLog;
+pub use plan::{Hold, Plan, Reason, Refusal, ResumePath};
 pub use port::{AppService, AppServiceStatus, Elevator, Output, RegisterError, RunError, System};
 pub use repair::{RepairOutcome, Step, Timings};
-pub use spec::{Kind, ProcessType, Restart, ServiceSpec, SpecBuilder};
+pub use service_main::{Context, Hosting, Outcome, ServiceExit, ServiceMainError, service_main};
+pub use spec::{Kind, ProcessType, Restart, ServiceSpec, SpecBuilder, WindowsStart};
 pub use status::{Condition, HealthReport, LOGIN_SECTION, ServiceStatus};
 pub use system::RealSystem;
 pub use tracker::{RepairNotice, RepairState, RepairTracker};

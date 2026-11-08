@@ -1,5 +1,7 @@
-//! What the helper's `Smart` request answers (ADR 0027 section 5): per-disk health with **no serial number and no WWN**
-//! (there is no field for them, so no reader can leak one), and the traits the helper's handler plugs real readers into.
+//! What the helper's `Smart` request answers (ADR 0027 section 5): per-disk health, and the traits the helper's handler plugs real
+//! readers into. There is no field for a WWN. The serial number travels only inside `wear_id` (the stable id the agent's history is
+//! keyed by, "model serial"); amended 2026-11-04 so the helper's reading is as complete as the agent's own and the history
+//! continues across both paths.
 
 use crate::helper_requests::{SmartQuery, ToolKind};
 use crate::helper_wire::ToolStatus;
@@ -31,6 +33,28 @@ pub struct SmartDisk {
     pub unsafe_shutdowns: Option<u64>,
     /// The drive's own overall verdict, when it gives one.
     pub passed: Option<bool>,
+    /// The id the wear history of this disk is kept under (`DiskWear::id`: the model and the serial, else the model); `None`
+    /// for a disk with no SSD wear reading (a hard disk). Produced by the same parser as the agent's own reader.
+    pub wear_id: Option<String>,
+    /// Total bytes written over the disk's life, when reported.
+    pub bytes_written: Option<u64>,
+    /// The manufacturer's rated endurance in bytes written, when known.
+    pub rated_bytes: Option<u64>,
+}
+
+impl SmartDisk {
+    /// The wear reading of this disk, the same value the agent's own reader makes from the same smartctl output.
+    pub fn to_wear(&self) -> Option<crate::hardware::DiskWear> {
+        Some(crate::hardware::DiskWear {
+            id: self.wear_id.clone()?,
+            name: self.model.clone(),
+            capacity: self.capacity,
+            percent_used: self.percent_used.map(f32::from),
+            bytes_written: self.bytes_written,
+            rated_bytes: self.rated_bytes,
+            power_on_hours: self.power_on_hours,
+        })
+    }
 }
 
 /// A disk the helper found but could not read, and why (never user content).
@@ -66,4 +90,6 @@ pub trait SmartReader: Send + Sync {
 pub trait ToolInstaller: Send + Sync {
     /// Installs `tool` from `bytes` and says what is now installed.
     fn install(&self, tool: ToolKind, bytes: &[u8]) -> Result<ToolStatus, PlatformError>;
+    /// The tools that are installed now, found by looking at the tools folder (empty when none or on a system without them).
+    fn installed(&self) -> Vec<ToolStatus>;
 }

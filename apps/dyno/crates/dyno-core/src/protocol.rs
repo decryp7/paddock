@@ -14,7 +14,7 @@ use crate::health::HealthReport;
 use crate::history::{Consumer, HistoryPoint, HistoryRange};
 use crate::metrics::{MemoryPressure, SystemSample};
 use crate::others::OtherUsers;
-use crate::process::{Locker, ProcessDetails, ProcessRef, ProcessSample};
+use crate::process::{ProcessDetails, ProcessRef, ProcessSample};
 use crate::report::WeeklyReport;
 use crate::settings::Settings;
 use crate::snapshot::{SnapshotDiff, SnapshotInfo};
@@ -26,6 +26,11 @@ use serde::{Deserialize, Serialize};
 ///
 /// 3: `Settings` lost `tray` and `tray_items` and holds the dashboard, menu bar and popup layouts as `paddock-widgets`
 /// layouts (family ADR 0035); `WidgetLayout`, `EditWidgetLayout`, `PopoverValues` and `WidgetLayoutChanged` are new.
+///
+/// 5: the problem report replaced the agent's own bundle. `Request::{DiagnosticsPreview, SaveDiagnostics}` and
+///   `Reply::{DiagnosticsPreview, DiagnosticsSaved}` are gone and `Request::DiagnosticsFiles` / `Reply::DiagnosticsFiles` took their
+///   place at the end of the diagnostics group, so every variant after them moved (positional postcard: an agent built before this
+///   change reads the app's requests wrongly, which the handshake now refuses).
 ///
 /// 4 (unreleased; one bump for everything below; the protocol is positional postcard, so an older peer reads these wrongly):
 /// - learning: `baseline::Learning::Learning` holds `day`, `days_needed`, `since` and `ready_at` (was `days_done`, `days_needed`);
@@ -51,9 +56,16 @@ use serde::{Deserialize, Serialize};
 ///   `Reply::{Wol, WolCandidates, WolReadiness}`, `Message::WolChanged`, `JobSpec::WolWake` and `JobOutput::Wol` are new;
 /// - scheduled wake (ADR 0032 section 5): `Request::{PowerWakes, PowerSetWake, PowerCancelWake}`, `Reply::PowerWakes` and
 ///   `Message::WakesChanged` are new;
+/// - disk-health tool: `ToolOffer` gained `source` (which copy of smartmontools Dyno uses); the helper's `Info` now lists its tools;
 /// - tray: `AlertSettings` gained `tray_alert_percent`. (`MenuBarItem::Number` also gained `format`, but it travels inside the
 ///   JSON widget layouts, not positionally.)
-pub const PROTOCOL_VERSION: u32 = 4;
+/// - helper wiring (unreleased, so no bump): the reply types of the readings the helper can give carry a `via: ReadVia` (`read_via`):
+///   `FirewallSource`, `StartupOverview.btm_via`, `NetworkSnapshot.{traffic_via, owners_via}`, `Locker`, `SystemInventory.memory_via`,
+///   `SleepReport.blockers_via`, `LiveUpdate.via`.
+///
+/// Version 6 (1.1.0) removed backup health: `Request::Backup`, `Reply::Backup`, `JobSpec::RefreshBackup`, `JobOutput::Backup`
+/// and `DynoJob::BackupCheck` are gone, which moves the variants after them.
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a
 /// client of another protocol is refused at the handshake with "update the older one" (the minor stays 0: new variants go at the
@@ -228,14 +240,9 @@ pub enum Request {
         /// Its id.
         id: u64,
     },
-    /// What a diagnostics bundle would contain, with sizes and what was redacted; nothing is written. Appended.
-    DiagnosticsPreview,
-    /// Write the diagnostics bundle to this path (chosen by the user in a save dialog: absolute, ending in `.zip`,
-    /// in an existing folder). Appended.
-    SaveDiagnostics {
-        /// The destination.
-        path: String,
-    },
+    /// The agent's data files for a problem report (inventory, alarms, sockets, activity, alerts, the recorder, the helper's
+    /// log), as plain text; the app's report redacts, previews and zips them. Appended.
+    DiagnosticsFiles,
     /// Open ports and connections per process, filtered (observe-only). Appended.
     Network {
         /// What to show.
@@ -397,7 +404,7 @@ pub enum Request {
         /// What to hide.
         filter: crate::startup::StartupFilter,
     },
-    // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
+    // ---- extras and taming proof (WP-13, WP-14, WP-36) ----
     /// "What changed": installs, updates, new startup items and setting changes in a window. A query. Appended.
     Changes {
         /// The window.
@@ -415,12 +422,9 @@ pub enum Request {
     },
     /// The maintenance windows' state now. A query. Appended.
     Maintenance,
-    /// Backup health (Time Machine, Windows Backup, File History, restic, Borg, Duplicati): the last check, without
-    /// running one unless there is none. Appended.
-    Backup,
 
     // ---- long operations as jobs (ER-17, ER-18, ER-19): every request below answers at once ----
-    /// Starts a long read-only operation (find files, read the OS logs, check the backups, hash a file) in the
+    /// Starts a long read-only operation (find files, read the OS logs, hash a file) in the
     /// background and answers its status at once. A second start of a kind that is running answers the running job.
     StartJob {
         /// What to run.
@@ -536,7 +540,7 @@ pub enum Request {
         /// one the edit is refused (another window edited meanwhile) and the app reloads the view. `None`: applied as is.
         base_revision: Option<u64>,
     },
-    /// The popup's values for the widgets that are not live (alarms, disk space, backup, last issue, pinned counters),
+    /// The popup's values for the widgets that are not live (alarms, disk space, last issue, pinned counters),
     /// from state the agent already keeps. Placements that are not in the popup layout, or are live, are left out.
     /// Answers [`Reply::PopoverValues`].
     PopoverValues {
@@ -688,6 +692,9 @@ pub struct LiveUpdate {
     /// Other users' processes folded into one row; `processes` and `groups` leave them out. `None` when there are none
     /// or the grouping is off.
     pub other_users: Option<OtherUsers>,
+    /// Who read the processes, the "Other users" total and the temperatures. Appended to protocol 4 (unreleased: no bump).
+    #[serde(default)]
+    pub via: crate::read_via::LiveVia,
 }
 
 /// A marker on the history timeline.
@@ -812,7 +819,7 @@ pub enum Reply {
     /// Activity entries.
     Activities(Vec<ActivityEntry>),
     /// Lockers.
-    Lockers(Vec<Locker>),
+    Lockers(crate::process::LockerList),
     /// A snapshot header.
     Snapshot(SnapshotInfo),
     /// Snapshot headers.
@@ -851,10 +858,8 @@ pub enum Reply {
     RecorderSnapshots(Vec<crate::recorder::RecorderSnapshotInfo>),
     /// A flight recorder snapshot with its samples. Appended.
     RecorderSnapshot(Box<crate::recorder::RecorderSnapshot>),
-    /// The bundle's listing. Appended.
-    DiagnosticsPreview(Box<crate::diagnostics::BundlePreview>),
-    /// The bundle was written. Appended.
-    DiagnosticsSaved(crate::diagnostics::SavedDiagnostics),
+    /// The agent's data files for a problem report. Appended.
+    DiagnosticsFiles(Box<crate::diagnostics::DiagnosticsFiles>),
     /// A web address for the shell to open in the browser (https only). Appended.
     Url(String),
     /// Open ports and connections. Appended.
@@ -902,7 +907,7 @@ pub enum Reply {
     SearchSeed(crate::weblinks::SearchSeed),
     /// The filtered startup list. Appended.
     StartupOverview(Box<crate::startup::StartupOverview>),
-    // ---- extras, backup health and taming proof (WP-13, WP-14, WP-36) ----
+    // ---- extras and taming proof (WP-13, WP-14, WP-36) ----
     /// What changed. Appended.
     Changes(Box<crate::extras::changes::ChangeTimeline>),
     /// GPU per process. Appended.
@@ -911,8 +916,6 @@ pub enum Reply {
     InventorySaved(SavedInventory),
     /// The maintenance windows' state. Appended.
     Maintenance(crate::extras::maintenance::MaintenanceStatus),
-    /// Backup health. Appended.
-    Backup(Box<crate::backup::BackupReport>),
     /// The volumes. Appended.
     DiskVolumes(Vec<crate::disk::volume::Volume>),
     /// One scan's status. Appended.
@@ -1015,8 +1018,7 @@ impl Reply {
             Reply::Captured(x) => v(x),
             Reply::RecorderSnapshots(x) => v(x),
             Reply::RecorderSnapshot(x) => v(x),
-            Reply::DiagnosticsPreview(x) => v(x),
-            Reply::DiagnosticsSaved(x) => v(x),
+            Reply::DiagnosticsFiles(x) => v(x),
             Reply::Url(x) => v(x),
             Reply::Network(x) => v(x),
             Reply::Benchmarks(x) => v(x),
@@ -1040,7 +1042,6 @@ impl Reply {
             Reply::Gpu(x) => v(x),
             Reply::InventorySaved(x) => v(x),
             Reply::Maintenance(x) => v(x),
-            Reply::Backup(x) => v(x),
             Reply::DiskVolumes(x) => v(x),
             Reply::DiskScan(x) => v(x),
             Reply::DiskScans(x) => v(x),
@@ -1134,6 +1135,18 @@ impl From<crate::ports::PlatformError> for AgentError {
     }
 }
 
+/// How many events one connection missed: the oldest of a bounded queue are given up when an app reads too slowly.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LostEvents {
+    /// Activity rows.
+    pub activity: u32,
+    /// Alerts.
+    pub alerts: u32,
+    /// Alarm changes.
+    pub alarms: u32,
+}
+
 /// A body on the app ↔ agent link: a request, its outcome, or a pushed event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1164,6 +1177,9 @@ pub enum Message {
     WolChanged(Box<crate::wol::WolView>),
     /// Agent -> app: the scheduled wakes changed (a save, a cancel, or a schedule that ran). Appended.
     WakesChanged(Box<crate::power::schedule::WakesView>),
+    /// Agent -> app: events the agent gave up for this connection because the app read too slowly (its queues are bounded). The app
+    /// re-reads the activity log, the alerts and the alarms and logs how many were lost. Appended.
+    EventsLost(LostEvents),
 }
 
 #[cfg(test)]
@@ -1367,7 +1383,7 @@ mod tests {
                 repeat: Repeat::Days { mask: 0b101 },
                 stay_awake_minutes: Some(30),
                 wake_devices: vec![1],
-                job: Some(DynoJob::BackupCheck),
+                job: Some(DynoJob::SoftwareInventory),
                 enabled: true,
             };
             for r in [
@@ -1425,6 +1441,31 @@ mod tests {
     }
 
     #[test]
+    fn a_live_update_carries_where_its_parts_came_from_under_the_field_via() {
+        use crate::read_via::{LiveVia, ReadVia};
+        let live = LiveUpdate {
+            system: sample(1),
+            pressure: MemoryPressure::Normal,
+            top_cpu: vec![],
+            top_memory: vec![],
+            overhead: Overhead::default(),
+            processes: None,
+            groups: None,
+            other_users: None,
+            via: LiveVia {
+                processes: ReadVia::Helper,
+                ..LiveVia::default()
+            },
+        };
+        let json = serde_json::to_value(&live).unwrap();
+        assert_eq!(
+            json["via"],
+            serde_json::json!({ "processes": "helper", "others": "local", "temperatures": "local" })
+        );
+        assert_eq!(round(&Message::Live(Box::new(live.clone()))), Message::Live(Box::new(live)));
+    }
+
+    #[test]
     fn messages_survive_postcard() {
         let live = LiveUpdate {
             system: sample(1),
@@ -1435,6 +1476,7 @@ mod tests {
             processes: None,
             groups: Some(vec![]),
             other_users: None,
+            via: Default::default(),
         };
         for m in [
             Message::Request(Box::new(Request::SaveSettings { settings: Box::default() })),
@@ -1453,7 +1495,7 @@ mod tests {
         let s = Reply::Settings(Box::default()).into_json().unwrap();
         assert_eq!(s["version"], 1);
         let all = vec![
-            Reply::Lockers(vec![]),
+            Reply::Lockers(crate::process::LockerList::default()),
             Reply::Snapshots(vec![]),
             Reply::Anomalies(vec![]),
             Reply::Startup(vec![]),
@@ -1496,7 +1538,6 @@ mod tests {
             Reply::Maintenance(
                 crate::extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), &crate::time::FixedZone::UTC),
             ),
-            Reply::Backup(Box::default()),
             Reply::CounterObjects(Box::default()),
             Reply::CounterHits(vec![]),
             Reply::CounterValues(vec![]),
@@ -1518,11 +1559,7 @@ mod tests {
                 bytes: 1,
                 count: 1,
             }),
-            Reply::DiagnosticsSaved(crate::diagnostics::SavedDiagnostics {
-                path: "/x.zip".into(),
-                bytes: 1,
-                files: 1,
-            }),
+            Reply::DiagnosticsFiles(Box::default()),
             Reply::RecorderSnapshot(Box::new(crate::recorder::RecorderSnapshot::new(
                 Timestamp(0),
                 crate::recorder::CaptureReason::Manual,
@@ -1572,7 +1609,6 @@ mod tests {
             Reply::DiskRings(Box::new(index.rings(index.root(), 2, 0.0, 10).unwrap())),
             Reply::Jobs(vec![]),
             Reply::JobCancelled(true),
-            Reply::JobOutput(Box::new(crate::jobs::JobOutput::Backup(Box::default()))),
         ];
         for r in replies {
             let m = Message::Reply(Box::new(Ok(r.clone())));
@@ -1658,6 +1694,15 @@ mod tests {
                 false,
                 None,
             ))),
+            Reply::ToolOffer(Box::new(crate::tool_offer::smartmontools_offer(
+                crate::helper::HelperHost::Windows,
+                None,
+                false,
+                Some(crate::tool_offer::InstalledTool {
+                    version: "7.5".into(),
+                    source: crate::tool_offer::ToolSource::Own("C:\\Example\\smartctl.exe".into()),
+                }),
+            ))),
         ] {
             let m = Message::Reply(Box::new(Ok(reply)));
             assert_eq!(round(&m), m);
@@ -1689,7 +1734,6 @@ mod tests {
         for (name, r) in [
             ("gpuProcesses", Request::GpuProcesses),
             ("maintenance", Request::Maintenance),
-            ("backup", Request::Backup),
             ("jobs", Request::Jobs),
         ] {
             assert_eq!(serde_json::to_value(&r).unwrap(), name);
@@ -1804,7 +1848,7 @@ mod search_watch_tests {
                 },
             },
             Request::StartJob {
-                spec: crate::jobs::JobSpec::RefreshBackup,
+                spec: crate::jobs::JobSpec::SleepBlockers,
             },
             Request::Jobs,
             Request::CancelJob { id: 9 },

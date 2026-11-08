@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { Icon } from '../../shared/icon';
 import { JobProgressCard } from '../../shared/job-progress';
-import { fileName } from '../../state/diagnostics.store';
+import { fileName } from '../../shared/format';
 import { IssuesStore } from '../../state/issues.store';
 import { UnusualStore } from '../../state/unusual.store';
 import { IssuesView } from './issues-view';
@@ -22,11 +22,11 @@ type View = 'issues' | 'unusual';
   imports: [MatTooltip, SuSegmentedControl, MatButton, MatIconButton, Icon, JobProgressCard, IssuesView, UnusualView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="page">
+    <div class="page fill">
       <header class="page-head">
         <div class="titles">
           <h1>Issues</h1>
-          <p>Crashes and other problems your system logged, and programs that are new here. Dyno only reads; it changes nothing.</p>
+          <p>Crashes and other problems your system logged, and programs that are new here. This page only reads.</p>
         </div>
         @if (view() === 'issues') {
           <button type="button" matButton="text" [disabled]="issues.exporting() || !issues.overview()" (click)="issues.exportForDebrief()">
@@ -58,8 +58,11 @@ type View = 'issues' | 'unusual';
     </div>
   `,
   styles: `
-    :host { display: block; }
-    .page { display: grid; gap: var(--sp-3); align-content: start; }
+    :host { display: block; height: 100%; }
+    /* A multi-section page (score card, two summary tables, the list): the 1440 px layout; the list takes the height left and keeps at least about six rows (the page scrolls below that). */
+    .page { display: flex; flex-direction: column; gap: var(--sp-3); min-height: 100%; padding-bottom: var(--sp-4); }
+    .page > * { flex: none; }
+    .page > dy-issues-view { flex: 1 1 auto; }
     .page-head { margin-bottom: 0; }
     .views { justify-self: start; }
     .count { margin-left: 6px; padding: 1px 6px; border-radius: var(--r-pill); background: var(--surface-active); color: var(--text-2); font-size: var(--fs-xs); font-weight: var(--fw-semibold); }

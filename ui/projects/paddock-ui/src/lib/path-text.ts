@@ -9,14 +9,14 @@ import { copyText } from './clipboard';
  * The text is fitted to the measured width (`fitPath`), so there is one ellipsis and no gap beside it: the root ("C:\" or "/")
  * stays, then the start of the directory, the ellipsis, the separator and the file name. When the name alone is too wide it shrinks
  * in the middle and keeps its last `keepTail` characters (the extension and the last word). Set in the
- * mono face at 12 px (`plain` for ordinary text). The full value is a `matTooltip`, shown only when the text on screen is not the whole value, and, with `copy`, one click on a Copy button (shown on hover and focus). Fills the
+ * mono face at 12 px (`plain` for ordinary text). The full value is a `matTooltip` above the text, shown only when the text on screen is not the whole value (a cut text is a keyboard stop, so the tooltip shows on focus too), and, with `copy`, one click on a Copy button (shown on hover and focus). Fills the
  * width it is given: put it in a flex or grid child with `min-width: 0`.
  */
 @Component({
   selector: 'pd-path-text',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [PdGlyph, MatTooltip],
-  template: `<span #box class="pd-text" [class.pd-plain]="plain()" [matTooltip]="whole()" [matTooltipDisabled]="!clipped()" [attr.data-full]="whole()" data-testid="path-text"><span class="pd-size" aria-hidden="true" [attr.data-full]="value()"></span><span class="pd-shown">{{ shown() }}</span></span>
+  template: `<span #box class="pd-text" [class.pd-plain]="plain()" #tip="matTooltip" [matTooltip]="tipText()" matTooltipPosition="above" matTooltipClass="pd-path-tip" (mouseenter)="place(tip)" (focus)="place(tip); tip.show()" (blur)="tip.hide()" [matTooltipDisabled]="!clipped()" [attr.tabindex]="clipped() ? 0 : null" [attr.data-full]="whole()" data-testid="path-text"><span class="pd-size" aria-hidden="true" [attr.data-full]="value()"></span><span class="pd-shown">{{ shown() }}</span></span>
     @if (copy()) {
       <button class="pd-copy" type="button" [attr.aria-label]="copied() ? copiedLabel : copyLabel" [matTooltip]="copied() ? copiedLabel : copyLabel" (click)="doCopy($event)">
         <pd-glyph [name]="copied() ? 'check' : 'copy'" [size]="14" />
@@ -65,6 +65,8 @@ export class PdPathText {
     return this.clip() === 'end' ? fitEnd(value, width, measure) : fitPath(value, width, measure, this.keepTail());
   });
   protected readonly whole = computed(() => this.full() ?? this.value());
+  /** The tooltip text: the whole value with a zero-width break after each separator, so a long path wraps at a folder, not mid-name. */
+  protected readonly tipText = computed(() => this.whole().replace(/([\\/])/g, '$1\u200b'));
   /** What is drawn is less than the whole value (cut to fit, or a short name for a full path): only then is the tooltip worth showing. */
   protected readonly clipped = computed(() => this.shown() !== this.whole());
   protected readonly copied = signal(false);
@@ -98,6 +100,19 @@ export class PdPathText {
   }
   protected readonly copyLabel = $localize`:@@pd.pathText.copy:Copy the full path`;
   protected readonly copiedLabel = $localize`:@@pd.pathText.copied:Copied`;
+
+  /**
+   * Puts the tooltip on the side with more room inside the scrolling list the text is in. Material hides a tooltip whose panel falls outside the
+   * scrolling ancestor of its origin, so "above" on the first row of a short list opened and closed again at once (Linux e2e, 900 px window).
+   */
+  protected place(tip: MatTooltip): void {
+    const el = this.box().nativeElement;
+    const list = el.closest('.cdk-virtual-scrollable, [cdkScrollable], [cdk-scrollable]');
+    if (!list) return;
+    const at = el.getBoundingClientRect();
+    const room = list.getBoundingClientRect();
+    tip.position = at.top - room.top >= room.bottom - at.bottom ? 'above' : 'below';
+  }
 
   protected async doCopy(event: Event): Promise<void> {
     event.stopPropagation();

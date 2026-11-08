@@ -366,6 +366,53 @@ pub struct Locker {
     pub name: String,
     /// What kind of program it is (e.g. "Service", "Application", "Explorer"), when known.
     pub kind: Option<String>,
+    /// Who read it.
+    #[serde(default)]
+    pub via: crate::read_via::ReadVia,
+}
+
+impl Locker {
+    /// A locker read on this computer.
+    pub fn new(process: ProcessRef, name: String, kind: Option<String>) -> Locker {
+        Locker {
+            process,
+            name,
+            kind,
+            via: crate::read_via::ReadVia::Local,
+        }
+    }
+
+    /// The same locker, read by `via`.
+    pub fn with_via(mut self, via: crate::read_via::ReadVia) -> Locker {
+        self.via = via;
+        self
+    }
+}
+
+/// The answer to "what is locking this file?": the programs, and what the reader could not list.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LockerList {
+    /// The programs that hold the file.
+    pub lockers: Vec<Locker>,
+    /// How many more programs of other accounts hold it but are not listed (the helper counts them where the person's settings
+    /// say not to name them), so an empty list is never read as "nothing has it".
+    #[serde(default)]
+    pub not_listed: u32,
+    /// The search stopped at its limit: more may hold the file.
+    #[serde(default)]
+    pub truncated: bool,
+}
+
+impl LockerList {
+    /// A complete list: nothing is left out.
+    pub fn of(lockers: Vec<Locker>) -> LockerList {
+        LockerList {
+            lockers,
+            not_listed: 0,
+            truncated: false,
+        }
+    }
 }
 
 #[cfg(test)]

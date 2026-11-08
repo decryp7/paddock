@@ -1,4 +1,12 @@
 //! Building a [`Command`]: no console window, a cleared environment with an allow-list, lower priority.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use std::ffi::OsStr;
 use std::process::Command;
@@ -65,7 +73,7 @@ pub fn lower_priority(cmd: &mut Command) {
         cmd.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     }
     #[cfg(not(windows))]
-    let _ = cmd;
+    let _: &mut Command = cmd;
 }
 
 #[cfg(test)]

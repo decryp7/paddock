@@ -78,6 +78,7 @@ pub struct ServiceSpec {
     memory_high_mb: Option<u32>,
     docs_url: Option<String>,
     hardening: Option<Hardening>,
+    windows_start: WindowsStart,
 }
 
 impl ServiceSpec {
@@ -104,6 +105,7 @@ impl ServiceSpec {
                 memory_high_mb: None,
                 docs_url: None,
                 hardening: None,
+                windows_start: WindowsStart::Delayed,
             },
         }
     }
@@ -115,6 +117,10 @@ impl ServiceSpec {
     /// The app's name (Windows service name and `Run` value name).
     pub fn name(&self) -> &str {
         &self.name
+    }
+    /// The systemd unit's name without the suffix (`pitwall`).
+    pub fn unit_name(&self) -> &str {
+        &self.unit
     }
     /// The systemd unit's file name (`pitwall.service`).
     pub fn unit_file_name(&self) -> String {
@@ -185,6 +191,30 @@ impl ServiceSpec {
     pub fn hardening(&self) -> Option<&Hardening> {
         self.hardening.as_ref()
     }
+    /// When the Service Control Manager starts a Windows service after boot.
+    pub fn windows_start(&self) -> WindowsStart {
+        self.windows_start
+    }
+}
+
+/// When Windows starts an automatic service after boot (`sc create start=`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WindowsStart {
+    /// `delayed-auto`: a minute or two after the boot, when the load of the start-up has eased (the default).
+    #[default]
+    Delayed,
+    /// `auto`: with the boot itself, for a service people wait for at log-in (a helper the app expects).
+    Auto,
+}
+
+impl WindowsStart {
+    /// The word `sc.exe` takes.
+    pub fn sc_word(self) -> &'static str {
+        match self {
+            WindowsStart::Delayed => "delayed-auto",
+            WindowsStart::Auto => "auto",
+        }
+    }
 }
 
 /// Builds a [`ServiceSpec`]; [`SpecBuilder::build`] checks every part.
@@ -249,7 +279,7 @@ impl SpecBuilder {
         self.spec.supervised_env = Some(var.to_string());
         self
     }
-    /// Lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`, idle I/O; launchd low-priority I/O).
+    /// Lower CPU and I/O priority (systemd `Nice=10`, `CPUWeight=20`, best-effort I/O at the lowest priority, never the idle class (rule 52); launchd low-priority I/O).
     pub fn low_priority(mut self) -> Self {
         self.spec.low_priority = true;
         self
@@ -268,6 +298,12 @@ impl SpecBuilder {
     /// What a privileged service gives up ([`Hardening`]); only for [`Kind::SystemService`].
     pub fn hardening(mut self, hardening: Hardening) -> Self {
         self.spec.hardening = Some(hardening);
+        self
+    }
+
+    /// When Windows starts the service after boot ([`WindowsStart::Delayed`] unless this is called).
+    pub fn windows_start(mut self, start: WindowsStart) -> Self {
+        self.spec.windows_start = start;
         self
     }
 

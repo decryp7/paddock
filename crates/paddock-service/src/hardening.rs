@@ -19,6 +19,7 @@ pub struct Sandbox {
     address_families: Vec<String>,
     state_dir: Option<String>,
     runtime_dir: Option<String>,
+    logs_dir: Option<String>,
 }
 
 impl Sandbox {
@@ -49,7 +50,8 @@ impl Sandbox {
         self
     }
 
-    /// `StateDirectory=` (0700, under `/var/lib`).
+    /// `StateDirectory=` (0700, under `/var/lib`). The rendered unit has the folder removed after every stop when it is empty
+    /// (the service itself cannot: `/var/lib` is read-only in its sandbox); a folder with files in it is left alone.
     #[must_use]
     pub fn state_dir(mut self, name: &str) -> Self {
         self.state_dir = Some(name.to_string());
@@ -60,6 +62,14 @@ impl Sandbox {
     #[must_use]
     pub fn runtime_dir(mut self, name: &str) -> Self {
         self.runtime_dir = Some(name.to_string());
+        self
+    }
+
+    /// `LogsDirectory=` (0755, under `/var/log`: a root-owned folder the service can write although `ProtectSystem=strict` makes
+    /// the rest read-only, readable by everyone, for a small file a person without rights must be able to read).
+    #[must_use]
+    pub fn logs_dir(mut self, name: &str) -> Self {
+        self.logs_dir = Some(name.to_string());
         self
     }
 
@@ -74,6 +84,10 @@ impl Sandbox {
     /// The state folder name.
     pub fn state_directory(&self) -> Option<&str> {
         self.state_dir.as_deref()
+    }
+    /// The logs folder name.
+    pub fn logs_directory(&self) -> Option<&str> {
+        self.logs_dir.as_deref()
     }
     /// The runtime folder name.
     pub fn runtime_directory(&self) -> Option<&str> {
@@ -101,7 +115,10 @@ impl Sandbox {
                 "needs at least one socket family, each AF_ followed by A-Z, 0-9 or _",
             ));
         }
-        for d in [&self.state_dir, &self.runtime_dir].into_iter().flatten() {
+        for d in [&self.state_dir, &self.runtime_dir, &self.logs_dir]
+            .into_iter()
+            .flatten()
+        {
             let ok = !d.is_empty()
                 && d.len() <= 64
                 && !d.starts_with(['-', '.'])
@@ -207,7 +224,7 @@ mod tests {
         let h = Hardening::new()
             .windows_privileges(["SeChangeNotifyPrivilege"])
             .users_may_start()
-            .sandbox(sandbox().runtime_dir("dyno-helper"));
+            .sandbox(sandbox().runtime_dir("dyno-helper").logs_dir("dyno-helper"));
         h.check().unwrap();
         assert_eq!(h.privileges(), ["SeChangeNotifyPrivilege"]);
         assert!(h.users_start());
@@ -218,6 +235,8 @@ mod tests {
             (s.state_directory(), s.runtime_directory()),
             (Some("dyno-helper"), Some("dyno-helper"))
         );
+        assert_eq!(s.logs_directory(), Some("dyno-helper"));
+        assert_eq!(Sandbox::new().logs_directory(), None);
         assert!(!Hardening::new().users_start() && Hardening::new().systemd_sandbox().is_none());
     }
 

@@ -2,6 +2,14 @@
 //! only a hint: it may be left by a process that is gone, and a pid in it may since belong to another process. Only a
 //! held lock ([`crate::instance`]) or a live connection proves a process. These helpers keep a hint from being mistaken
 //! for proof and from removing someone else's file.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use std::io::Write;
 use std::path::Path;
@@ -47,14 +55,14 @@ pub fn names_live(hint: &impl Hint, since_ms: i64, answers: impl FnOnce() -> boo
 /// ([`crate::instance`]), not this file, is what proves a process, and a lost hint is written again.
 pub fn remove_if_same<H: Hint>(path: &Path, seen: &H, read: impl Fn(&Path) -> Option<H>) {
     if read(path).is_some_and(|d| d.pid() == seen.pid() && d.started_ms() == seen.started_ms()) {
-        let _ = std::fs::remove_file(path);
+        crate::cleanup::remove_file(path);
     }
 }
 
 /// Removes the file if it still names this process.
 pub fn remove_if_mine<H: Hint>(path: &Path, read: impl Fn(&Path) -> Option<H>) {
     if read(path).is_some_and(|d| d.pid() == std::process::id()) {
-        let _ = std::fs::remove_file(path);
+        crate::cleanup::remove_file(path);
     }
 }
 
@@ -86,7 +94,7 @@ pub fn write_private_atomic(path: &Path, body: &[u8]) -> std::io::Result<()> {
         .and_then(|mut f| f.write_all(body))
         .and_then(|()| std::fs::rename(&tmp, path));
     if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
+        crate::cleanup::remove_file(&tmp);
     }
     result
 }

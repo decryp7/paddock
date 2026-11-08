@@ -86,7 +86,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             if !p.is_absolute() {
                 return Err(bad("Give the full path of the file."));
             }
-            Ok(Reply::Lockers(lock(&shared.ports.locks).lockers(p)?))
+            Ok(Reply::Lockers(lock(&shared.ports.locks).lockers_with_more(p)?))
         }
         Request::OpenLocation { target } => {
             let exe = lock(&shared.core)
@@ -157,6 +157,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             core.alarms.set_config(alarm_config);
             shared.disk.set_limits(core.settings.disk.limits());
             shared.disk.set_read_threads(core.settings.disk.read_threads);
+            shared.disk.set_space_refresh(core.settings.disk.space_refresh_secs);
             core.save_settings(&shared.dirs);
             let s = core.settings.clone();
             drop(core);
@@ -244,7 +245,13 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
                 ),
             )),
         },
-        Request::ToolOffer => Ok(Reply::ToolOffer(Box::new(crate::tool_download::offer(shared)))),
+        Request::ToolOffer => {
+            let offer = crate::tool_download::offer(shared);
+            // Asking again ("Check again", or opening Settings) also reads the disks again, so a tool installed by hand is
+            // picked up now and not at the next slow cycle (hours away); at most once in 30 s.
+            crate::hardware::request_reread(shared, std::time::Duration::from_secs(30));
+            Ok(Reply::ToolOffer(Box::new(offer)))
+        }
         Request::LookupIp { ip, template } => {
             let settings = match template {
                 Some(t) => dyno_core::ip_lookup::IpLookupSettings {
@@ -381,15 +388,7 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
             .map_err(internal)?
             .map(|s| Reply::RecorderSnapshot(Box::new(s)))
             .ok_or_else(|| AgentError::new(ErrorCode::NotFound, "That capture no longer exists.")),
-        Request::DiagnosticsPreview => {
-            let bundle = crate::diagnostics::collect(shared).map_err(internal)?;
-            Ok(Reply::DiagnosticsPreview(Box::new(dyno_core::diagnostics::preview(&bundle))))
-        }
-        Request::SaveDiagnostics { path } => {
-            let dest = dyno_core::diagnostics::validate_destination(&path).map_err(|e| bad(e.to_string()))?;
-            let bundle = crate::diagnostics::collect(shared).map_err(internal)?;
-            crate::diagnostics::write_zip(&dest, &bundle).map(Reply::DiagnosticsSaved)
-        }
+        Request::DiagnosticsFiles => Ok(Reply::DiagnosticsFiles(Box::new(crate::diagnostics::collect(shared)))),
         Request::AlarmHistory { alarm_id, limit } => Ok(Reply::AlarmChanges(
             lock(&shared.core).store.alarm_events(alarm_id, limit).map_err(internal)?,
         )),
@@ -458,11 +457,9 @@ fn dispatch(shared: &Arc<Shared>, conn: &Conn, request: Request) -> Answer {
         r @ (Request::SearchSeed { .. } | Request::WebSearch { .. } | Request::VirusTotalUrl { .. } | Request::StartupOverview { .. }) => {
             crate::handlers_search::handle(shared, r)
         }
-        r @ (Request::Changes { .. }
-        | Request::GpuProcesses
-        | Request::SaveInventoryReport { .. }
-        | Request::Maintenance
-        | Request::Backup) => crate::extras::handle(shared, r),
+        r @ (Request::Changes { .. } | Request::GpuProcesses | Request::SaveInventoryReport { .. } | Request::Maintenance) => {
+            crate::extras::handle(shared, r)
+        }
         Request::WidgetLayout { surface } => Ok(Reply::WidgetLayout(Box::new(dyno_core::widgets::layout_view(
             &lock(&shared.core).settings,
             surface,
@@ -497,7 +494,7 @@ fn edit_widget_layout(shared: &Arc<Shared>, edit: dyno_core::widgets::SurfaceEdi
     })?;
     core.save_settings(&shared.dirs);
     drop(core);
-    shared.broadcast(&Message::WidgetLayoutChanged(surface));
+    shared.broadcast_layout(&surface);
     Ok(Reply::WidgetLayout(Box::new(view)))
 }
 

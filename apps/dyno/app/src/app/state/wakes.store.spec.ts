@@ -16,7 +16,7 @@ describe('WakesStore', () => {
   it('loads the schedules and who sets the wake', async () => {
     const { store } = setup({ wake: 'on' });
     await store.load();
-    expect(store.view()?.rows.map((r) => r.entry.name)).toEqual(['Morning backup check', 'Wake the NAS for the weekend', 'Once, tomorrow']);
+    expect(store.view()?.rows.map((r) => r.entry.name)).toEqual(['Morning inventory', 'Wake the NAS for the weekend', 'Once, tomorrow']);
     expect(store.view()?.route).toBe('helperReady');
     expect(store.view()?.rows[0]?.state).toEqual({ armed: { route: 'helper' } });
     // The next wake is the schedule's own local time: 07:00 on a weekday.

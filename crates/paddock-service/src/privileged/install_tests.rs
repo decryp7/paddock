@@ -2,7 +2,9 @@
 //! backends of each OS on the recording fake (`launchctl`, `sc`, `systemctl` are never run).
 
 use super::*;
-use crate::backend::{Backend, Capabilities, Inspection, Job, Mechanism, Registration};
+use crate::backend::{
+    Backend, Capabilities, Inspection, Job, Mechanism, Registration, UnregisterError,
+};
 use crate::port::{Output, RegisterError, RunError};
 use crate::privileged::layout::tests::helper_spec;
 use crate::testing::{FakeFiles, FakeSystem};
@@ -10,11 +12,57 @@ use paddock_env::Os;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+#[test]
+fn a_service_removing_itself_confirms_the_registration_is_gone_and_says_so_when_it_is_not() {
+    // ADR 0054 RC-2: the unregister call reported success but the OS still holds the registration (the Linux packaged unit
+    // stayed enabled). The removal must not end as done.
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.registration_override = Some(Registration::Registered);
+    });
+    let layout = layout_for(Os::Linux);
+    let (mut f, mut b, mut s) = (FakeFiles::new(), backend.clone(), FakeSystem::new());
+    let err = Installer::new(&layout, &mut f, &mut b, &mut s)
+        .uninstall_self()
+        .unwrap_err();
+    assert!(
+        matches!(
+            err,
+            InstallError::Failed {
+                phase: Step::ConfirmGone,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_service_removing_itself_may_still_be_running_because_this_process_is_the_job() {
+    let backend = Scripted::with(|s| {
+        s.registered = true;
+        s.running = true;
+        s.job_override = Some(Job::Running);
+    });
+    let layout = layout_for(Os::Linux);
+    let (mut f, mut b, mut s) = (FakeFiles::new(), backend.clone(), FakeSystem::new());
+    Installer::new(&layout, &mut f, &mut b, &mut s)
+        .with_waits(Waits {
+            gone: Duration::from_secs(1),
+            ..Waits::default()
+        })
+        .uninstall_self()
+        .unwrap();
+}
+
 const MAC_PROGRAM: &str = "/Library/PrivilegedHelperTools/net.decryptology.dyno.helper";
 const SOURCE: &str = "/Applications/Dyno.app/Contents/MacOS/dyno-helper";
 const WIN_FOLDER: &str = "C:\\Program Files\\Dyno Helper";
 const WIN_PROGRAM: &str = "C:\\Program Files\\Dyno Helper\\dyno-helper.exe";
-const WIN_SOURCE: &str = "C:\\Users\\Ana\\AppData\\Local\\Dyno\\dyno-helper.exe";
+/// The bundled helper of a per-machine Dyno (Program Files: only administrators can change it).
+const WIN_SOURCE: &str = "C:\\Program Files\\Dyno\\dyno-helper.exe";
+/// The bundled helper of a per-user Dyno (a folder its user can change).
+const WIN_USER_SOURCE: &str = "C:\\Users\\Ana\\AppData\\Local\\Dyno\\dyno-helper.exe";
 
 fn layout_for(os: Os) -> Layout {
     let roots = crate::privileged::Roots {
@@ -41,6 +89,39 @@ struct State {
     /// The running job's process, and how many asks it stays alive for.
     process: Option<paddock_proc::ProcessId>,
     alive_polls: u32,
+}
+
+/// One look at the scripted OS: it counts as a poll for a job that starts after some.
+fn look(s: &mut State) -> Inspection {
+    if s.registered {
+        s.polls_since_register += 1;
+        if s.starts_after_polls
+            .is_some_and(|n| s.polls_since_register > n)
+        {
+            s.running = true;
+        }
+    }
+    view(s)
+}
+
+/// What the scripted OS holds now, without logging or advancing anything.
+fn view(s: &State) -> Inspection {
+    Inspection {
+        registration: s.registration_override.clone().unwrap_or(if s.registered {
+            Registration::Registered
+        } else {
+            Registration::Absent
+        }),
+        job: s.job_override.unwrap_or(if s.running {
+            Job::Running
+        } else if s.registered {
+            Job::NotRunning
+        } else {
+            Job::Absent
+        }),
+        points_here: s.points_here,
+        ..Inspection::absent()
+    }
 }
 
 #[derive(Clone, Default)]
@@ -71,32 +152,9 @@ impl Backend for Scripted {
     fn inspect(&mut self) -> Inspection {
         let mut s = self.0.lock().unwrap();
         s.log.push("inspect".into());
-        if s.registered {
-            s.polls_since_register += 1;
-            if s.starts_after_polls
-                .is_some_and(|n| s.polls_since_register > n)
-            {
-                s.running = true;
-            }
-        }
-        Inspection {
-            registration: s.registration_override.clone().unwrap_or(if s.registered {
-                Registration::Registered
-            } else {
-                Registration::Absent
-            }),
-            job: s.job_override.unwrap_or(if s.running {
-                Job::Running
-            } else if s.registered {
-                Job::NotRunning
-            } else {
-                Job::Absent
-            }),
-            points_here: s.points_here,
-            ..Inspection::absent()
-        }
+        look(&mut s)
     }
-    fn register(&mut self) -> Result<(), RegisterError> {
+    fn register(&mut self) -> Result<Inspection, RegisterError> {
         let mut s = self.0.lock().unwrap();
         s.log.push("register".into());
         if let Some(e) = s.register_error.clone() {
@@ -104,16 +162,16 @@ impl Backend for Scripted {
         }
         s.registered = true;
         s.polls_since_register = 0;
-        Ok(())
+        Ok(look(&mut s))
     }
-    fn unregister(&mut self) -> Result<(), String> {
+    fn unregister(&mut self) -> Result<Inspection, UnregisterError> {
         let mut s = self.0.lock().unwrap();
         s.log.push("unregister".into());
         if let Some(e) = s.unregister_error.clone() {
-            return Err(e);
+            return Err(UnregisterError::Failed(e));
         }
         s.registered = false;
-        Ok(())
+        Ok(Inspection::absent())
     }
     fn evict(&mut self) -> Result<(), String> {
         let mut s = self.0.lock().unwrap();
@@ -158,6 +216,57 @@ fn mac_disk() -> FakeFiles {
     files
 }
 
+/// A Windows machine as the install sees it: stock `C:\`, stock Program Files with the per-machine Dyno folder in it, the
+/// helper's folder the way the ACL step leaves it (an `icacls` run is faked, so the folder is put here) and a per-user
+/// profile whose folders the user can change.
+fn win_trust() -> crate::privileged::trust_fake::FakePort {
+    use crate::privileged::trust::{Ace, SID_ADMINISTRATORS, SID_SYSTEM};
+    use crate::privileged::trust_fake::*;
+    let mut p = windows_machine(|_| locked());
+    p.put(
+        "C:\\Program Files",
+        from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES),
+    )
+    .put(
+        "C:\\Program Files\\Dyno",
+        from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO),
+    )
+    .put(
+        WIN_SOURCE,
+        file(from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO)),
+    )
+    .put(
+        WIN_FOLDER,
+        from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO),
+    )
+    .put(
+        WIN_PROGRAM,
+        file(from_sddl(FileKind::Dir, SDDL_PROGRAM_FILES_DYNO)),
+    );
+    let user = "S-1-5-21-1-2-3-1001";
+    let mine = || {
+        win(
+            user,
+            vec![
+                Ace::allow(SID_SYSTEM, FULL),
+                Ace::allow(SID_ADMINISTRATORS, FULL),
+                Ace::allow(user, FULL),
+            ],
+        )
+    };
+    for dir in [
+        "C:\\Users",
+        "C:\\Users\\Ana",
+        "C:\\Users\\Ana\\AppData",
+        "C:\\Users\\Ana\\AppData\\Local",
+        "C:\\Users\\Ana\\AppData\\Local\\Dyno",
+    ] {
+        p.put(dir, mine());
+    }
+    p.put(WIN_USER_SOURCE, file(mine()));
+    p
+}
+
 fn run_install(
     layout: &Layout,
     files: &FakeFiles,
@@ -166,7 +275,13 @@ fn run_install(
     source: &str,
 ) -> Result<Report, InstallError> {
     let (mut f, mut b, mut s) = (files.clone(), backend.clone(), sys.clone());
-    Installer::new(layout, &mut f, &mut b, &mut s).install(Path::new(source))
+    let mut trust = win_trust();
+    let installer = Installer::new(layout, &mut f, &mut b, &mut s);
+    if layout.os == Os::Windows {
+        installer.with_trust(&mut trust).install(Path::new(source))
+    } else {
+        installer.install(Path::new(source))
+    }
 }
 
 fn run_uninstall(
@@ -258,7 +373,7 @@ fn a_fresh_macos_install_copies_checks_registers_and_confirms() {
     assert!(report.phases.iter().all(|p| !p.detail.is_empty()));
     // The copy is made before anything is registered.
     let calls = files.calls();
-    let copy_at = calls.iter().position(|c| c.starts_with("copy ")).unwrap();
+    let copy_at = calls.iter().position(|c| c.starts_with("write ")).unwrap();
     assert!(calls[..copy_at].iter().all(|c| !c.starts_with("remove")));
     assert_eq!(backend.log().iter().filter(|l| *l == "register").count(), 1);
 }
@@ -297,7 +412,7 @@ fn an_update_replaces_the_registration_and_waits_for_the_old_job() {
         files
             .calls()
             .iter()
-            .filter(|c| c.starts_with("copy "))
+            .filter(|c| c.starts_with("write "))
             .count(),
         1
     );
@@ -344,7 +459,7 @@ fn nothing_is_copied_into_a_folder_anyone_can_change_or_from_an_unsafe_source() 
     files.put_dir("/Library/PrivilegedHelperTools", 0, 0o777);
     refused(go(&files, SOURCE), "lets the group or others change it");
     assert!(
-        !files.calls().iter().any(|c| c.starts_with("copy ")),
+        !files.calls().iter().any(|c| c.starts_with("write ")),
         "refused before copying"
     );
     let files = mac_disk();
@@ -444,6 +559,33 @@ fn a_refused_registration_leaves_nothing_registered() {
 }
 
 #[test]
+fn a_clean_up_that_fails_after_a_refused_registration_is_logged_and_the_install_error_stays() {
+    let layout = layout_for(Os::MacOs);
+    let backend = Scripted::with(|s| {
+        s.register_error = Some(RegisterError::Other("busy".into()));
+        s.evict_error = Some("no such job".into());
+        s.unregister_error = Some("plist locked".into());
+    });
+    let err = run_install(&layout, &mac_disk(), &backend, &FakeSystem::new(), SOURCE).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            InstallError::Failed {
+                phase: Step::Register,
+                ..
+            }
+        ),
+        "{err:?}"
+    );
+    let log = backend.log();
+    assert_eq!(
+        &log[log.len() - 2..],
+        ["evict", "unregister"],
+        "both clean-up steps were tried"
+    );
+}
+
+#[test]
 fn what_the_os_says_after_registering_decides_the_outcome() {
     let layout = layout_for(Os::MacOs);
     let outcome = |f: fn(&mut State)| {
@@ -488,6 +630,37 @@ fn what_the_os_says_after_registering_decides_the_outcome() {
     let (r, b) = outcome(|s| s.starts_after_polls = Some(5));
     assert!(r.is_ok());
     assert!(b.log().contains(&"pause".to_string()));
+}
+
+#[test]
+fn a_service_that_stops_with_an_error_says_how_it_ended() {
+    let layout = layout_for(Os::MacOs);
+    let backend = Scripted::with(|s| {
+        s.job_override = Some(Job::Failed(crate::backend::LastExit::ServiceSpecific(3)));
+    });
+    let r = run_install(&layout, &mac_disk(), &backend, &FakeSystem::new(), SOURCE);
+    match r {
+        Err(InstallError::Failed {
+            phase: Step::Confirm,
+            why,
+        }) => assert!(
+            why.contains("service-specific exit code 3"),
+            "the cause reaches the user: {why}"
+        ),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn confirm_judges_the_inspection_register_returned_and_asks_the_os_again_only_to_wait() {
+    let layout = layout_for(Os::MacOs);
+    let backend = Scripted::with(|s| s.job_override = Some(Job::Running));
+    run_install(&layout, &mac_disk(), &backend, &FakeSystem::new(), SOURCE).unwrap();
+    assert_eq!(
+        backend.log().iter().filter(|l| *l == "inspect").count(),
+        1,
+        "one look before (is anything registered?); the read-back after registering is not repeated"
+    );
 }
 
 #[test]
@@ -564,7 +737,7 @@ fn a_windows_acl_that_cannot_be_set_or_does_not_read_back_stops_before_the_copy(
         let (files, sys) = (windows_disk(), FakeSystem::new());
         setup(&sys);
         let err = run_install(&layout, &files, &Scripted::default(), &sys, WIN_SOURCE).unwrap_err();
-        assert!(!files.calls().iter().any(|c| c.starts_with("copy ")));
+        assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
         match err {
             InstallError::Failed {
                 phase: Step::ApplyAcl,
@@ -657,7 +830,7 @@ fn linux_enables_the_packaged_unit_and_never_copies() {
         [Step::VerifyProgram, Step::Register, Step::Confirm]
     );
     assert!(report.sha256.is_none());
-    assert!(files.calls().iter().all(|c| !c.starts_with("copy ")));
+    assert!(files.calls().iter().all(|c| !c.starts_with("write ")));
     files.put_file("/usr/bin/dyno-helper", b"deb", 501, 0o755);
     let err = run_install(
         &layout,
@@ -756,8 +929,15 @@ fn uninstall_fails_loudly_when_the_os_keeps_the_job() {
         fn create_dir(&mut self, p: &Path, m: u32) -> std::io::Result<()> {
             self.0.create_dir(p, m)
         }
-        fn copy_program(&mut self, a: &Path, b: &Path, m: u32) -> std::io::Result<String> {
-            self.0.copy_program(a, b, m)
+        fn open_source(
+            &mut self,
+            p: &Path,
+            m: u64,
+        ) -> std::io::Result<Option<crate::privileged::HeldSource>> {
+            self.0.open_source(p, m)
+        }
+        fn write_program(&mut self, b: &[u8], to: &Path, m: u32) -> std::io::Result<String> {
+            self.0.write_program(b, to, m)
         }
         fn sha256(&mut self, p: &Path) -> std::io::Result<String> {
             self.0.sha256(p)
@@ -897,9 +1077,10 @@ fn windows_creates_the_service_with_one_privilege_and_a_start_dacl() {
         "icacls C:\\Program Files\\Dyno Helper",
         Output::ok(ICACLS_GOOD),
     );
-    let (mut f, mut o) = (files.clone(), os.clone());
-    let report =
-        Installer::new(&layout, &mut f, backend.as_mut(), &mut o).install(Path::new(WIN_SOURCE));
+    let (mut f, mut o, mut trust) = (files.clone(), os.clone(), win_trust());
+    let report = Installer::new(&layout, &mut f, backend.as_mut(), &mut o)
+        .with_trust(&mut trust)
+        .install(Path::new(WIN_SOURCE));
     assert!(report.is_ok(), "{report:?}");
     let commands = sys.commands();
     let at = |prefix: &str| {
@@ -940,17 +1121,35 @@ fn windows_refuses_to_start_a_service_that_holds_more_privileges() {
 fn linux_enables_the_unit_the_package_shipped_and_leaves_the_file_alone() {
     let layout = layout_for(Os::Linux);
     let sys = FakeSystem::new();
+    // The package put the unit there, disabled; `enable --now` is judged by reading it back.
+    sys.put_file(
+        "/usr/lib/systemd/system/dyno-helper.service",
+        &format!(
+            "[Service]\nExecStart={} --service\n",
+            layout.program.display()
+        ),
+    );
+    sys.put_program(layout.program.clone());
     let mut backend =
         crate::privileged::backend_for(&layout, &helper_spec(), Box::new(sys.clone())).unwrap();
     backend.register().unwrap();
     assert_eq!(
-        sys.commands(),
+        sys.commands()
+            .into_iter()
+            .filter(|c| !c.contains(" show ") && !c.contains("is-"))
+            .collect::<Vec<_>>(),
         ["systemctl enable --now dyno-helper.service"]
     );
     sys.clear_calls();
+    // Turned off, the packaged unit stays on disk but reads back disabled and stopped.
+    sys.answer("systemctl is-active", Output::ok("inactive\n"));
+    sys.answer("systemctl is-enabled", Output::ok("disabled\n"));
     backend.unregister().unwrap();
     assert_eq!(
-        sys.commands(),
+        sys.commands()
+            .into_iter()
+            .filter(|c| !c.contains(" show ") && !c.contains("is-"))
+            .collect::<Vec<_>>(),
         ["systemctl disable --now dyno-helper.service"]
     );
     assert!(sys.calls().iter().all(|c| !matches!(
@@ -964,6 +1163,7 @@ fn linux_enables_the_unit_the_package_shipped_and_leaves_the_file_alone() {
         "[Service]\nExecStart=\"/usr/bin/dyno-helper\" \"serve\"\n",
     );
     sys.answer("systemctl is-active", Output::ok("active\n"));
+    sys.answer("systemctl is-enabled", Output::ok("enabled\n"));
     let look = backend.inspect();
     assert_eq!(
         (look.registration, look.job, look.definition_current),
@@ -976,9 +1176,12 @@ fn a_service_removing_itself_deletes_its_files_first_and_stops_last() {
     use Step::*;
     assert_eq!(
         plan_uninstall_self(&layout_for(Os::MacOs)),
-        [RemoveProgram, RemoveFolder, StopExisting]
+        [RemoveProgram, RemoveFolder, StopExisting, ConfirmGone]
     );
-    assert_eq!(plan_uninstall_self(&layout_for(Os::Linux)), [StopExisting]);
+    assert_eq!(
+        plan_uninstall_self(&layout_for(Os::Linux)),
+        [StopExisting, ConfirmGone]
+    );
     let files = mac_disk();
     files.put_file(MAC_PROGRAM, b"x", 0, 0o755);
     let backend = Scripted::with(|s| {
@@ -990,7 +1193,10 @@ fn a_service_removing_itself_deletes_its_files_first_and_stops_last() {
     let report = Installer::new(&layout, &mut f, &mut b, &mut s)
         .uninstall_self()
         .unwrap();
-    assert_eq!(phases(&report), [RemoveProgram, RemoveFolder, StopExisting]);
+    assert_eq!(
+        phases(&report),
+        [RemoveProgram, RemoveFolder, StopExisting, ConfirmGone]
+    );
     assert!(files.facts_of(Path::new(MAC_PROGRAM)).is_none());
     assert_eq!(
         backend
@@ -1012,8 +1218,15 @@ fn a_program_the_os_will_not_delete_while_it_runs_is_left_and_the_registration_s
         fn create_dir(&mut self, p: &Path, m: u32) -> std::io::Result<()> {
             self.0.create_dir(p, m)
         }
-        fn copy_program(&mut self, a: &Path, b: &Path, m: u32) -> std::io::Result<String> {
-            self.0.copy_program(a, b, m)
+        fn open_source(
+            &mut self,
+            p: &Path,
+            m: u64,
+        ) -> std::io::Result<Option<crate::privileged::HeldSource>> {
+            self.0.open_source(p, m)
+        }
+        fn write_program(&mut self, b: &[u8], to: &Path, m: u32) -> std::io::Result<String> {
+            self.0.write_program(b, to, m)
         }
         fn sha256(&mut self, p: &Path) -> std::io::Result<String> {
             self.0.sha256(p)
@@ -1126,4 +1339,394 @@ fn a_service_removing_itself_unregisters_before_it_stops_because_the_stop_ends_t
         log.iter().all(|l| !l.starts_with("alive")),
         "it does not wait for its own process: {log:?}"
     );
+}
+
+// ---- the trust of the copy (security review findings F1 and F2) ----
+
+fn win_install_with(
+    trust: &mut crate::privileged::trust_fake::FakePort,
+    files: &FakeFiles,
+    source: &str,
+) -> Result<Report, InstallError> {
+    let sys = FakeSystem::new();
+    sys.answer(
+        "icacls C:\\Program Files\\Dyno Helper /inheritance:r",
+        Output::ok("Successfully processed 1 files"),
+    );
+    sys.answer(
+        "icacls C:\\Program Files\\Dyno Helper",
+        Output::ok(ICACLS_GOOD),
+    );
+    let backend = Scripted::with(|s| s.starts_after_polls = Some(0));
+    let (mut f, mut b, mut s) = (files.clone(), backend, sys);
+    Installer::new(&layout_for(Os::Windows), &mut f, &mut b, &mut s)
+        .with_trust(trust)
+        .install(Path::new(source))
+}
+
+#[test]
+fn a_windows_install_without_a_trust_check_is_refused() {
+    let (files, sys) = (windows_disk(), FakeSystem::new());
+    let (mut f, mut b, mut s) = (files.clone(), Scripted::default(), sys);
+    let err = Installer::new(&layout_for(Os::Windows), &mut f, &mut b, &mut s)
+        .install(Path::new(WIN_SOURCE))
+        .unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("no trust check")),
+        "{err:?}"
+    );
+    assert!(files.facts_of(Path::new(WIN_PROGRAM)).is_none());
+}
+
+#[test]
+fn a_per_user_source_is_refused_on_windows_with_the_next_step_and_nothing_is_copied() {
+    // The user can replace a per-user copy between the check and the copy: the chain to it must be administrators' only.
+    let files = windows_disk();
+    files.put_file(WIN_USER_SOURCE, b"helper.exe", 0, 0);
+    let err = win_install_with(&mut win_trust(), &files, WIN_USER_SOURCE).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("reinstall Dyno for all users")),
+        "{err:?}"
+    );
+    assert!(files.facts_of(Path::new(WIN_PROGRAM)).is_none());
+    assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
+}
+
+#[test]
+fn a_program_files_folder_users_may_delete_from_is_refused_before_anything_is_made() {
+    use crate::privileged::trust::{Ace, SID_ADMINISTRATORS, SID_SYSTEM, SID_USERS, right};
+    use crate::privileged::trust_fake::*;
+    let files = windows_disk();
+    let mut trust = win_trust();
+    trust.put(
+        "C:\\Program Files",
+        win(
+            SID_ADMINISTRATORS,
+            vec![
+                Ace::allow(SID_SYSTEM, FULL),
+                Ace::allow(SID_ADMINISTRATORS, FULL),
+                Ace::allow(SID_USERS, RX | right::DELETE_CHILD),
+            ],
+        ),
+    );
+    // The source is somewhere administrators-only that is not below Program Files, so only the install's own check of Program
+    // Files can refuse this.
+    files.put_file("C:\\Tools\\dyno-helper.exe", b"helper.exe", 0, 0);
+    trust
+        .put("C:\\Tools", locked())
+        .put("C:\\Tools\\dyno-helper.exe", file(locked()));
+    let err = win_install_with(&mut trust, &files, "C:\\Tools\\dyno-helper.exe").unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("Program Files") && w.contains("FILE_DELETE_CHILD")),
+        "{err:?}"
+    );
+    assert!(!files.calls().iter().any(|c| c.starts_with("create_dir")));
+}
+
+#[test]
+fn a_folder_the_acl_step_left_changeable_by_users_is_refused_even_when_icacls_listed_it_right() {
+    // `icacls` printed the expected three entries, but the real descriptor (read from the open folder) lets Users write: the
+    // trust rule, not the listing, decides. Windows reports no owner or mode, so `verify_protected` alone passes it.
+    use crate::privileged::trust::{Ace, SID_ADMINISTRATORS, SID_SYSTEM, SID_USERS};
+    use crate::privileged::trust_fake::*;
+    let files = windows_disk();
+    let mut trust = win_trust();
+    trust.put(
+        WIN_FOLDER,
+        win(
+            SID_ADMINISTRATORS,
+            vec![
+                Ace::allow(SID_SYSTEM, FULL),
+                Ace::allow(SID_ADMINISTRATORS, FULL),
+                Ace::allow(SID_USERS, MODIFY),
+            ],
+        ),
+    );
+    let err = win_install_with(&mut trust, &files, WIN_SOURCE).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("protected folder") && w.contains(SID_USERS)),
+        "{err:?}"
+    );
+    assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
+}
+
+#[test]
+fn a_copy_that_users_can_write_is_refused_after_it_was_written() {
+    use crate::privileged::trust::{Ace, SID_ADMINISTRATORS, SID_USERS};
+    use crate::privileged::trust_fake::*;
+    let files = windows_disk();
+    let mut trust = win_trust();
+    trust.put(
+        WIN_PROGRAM,
+        file(win(
+            SID_ADMINISTRATORS,
+            vec![
+                Ace::allow(SID_ADMINISTRATORS, FULL),
+                Ace::allow(SID_USERS, MODIFY),
+            ],
+        )),
+    );
+    let err = win_install_with(&mut trust, &files, WIN_SOURCE).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("installed program")),
+        "{err:?}"
+    );
+}
+
+/// Accepts exactly one program with exactly one signature.
+struct ExpectSignature {
+    program: Vec<u8>,
+    signature: Vec<u8>,
+}
+
+impl SourceVerifier for ExpectSignature {
+    fn verify(&self, program: &[u8], signature: &[u8]) -> Result<String, String> {
+        if signature != self.signature {
+            Err("the signature is not the one this program was signed with; reinstall Dyno".into())
+        } else if program != self.program {
+            Err("the program does not match its signature; reinstall Dyno".into())
+        } else {
+            Ok("valid".into())
+        }
+    }
+}
+
+const SIG: &str = "/Applications/Dyno.app/Contents/Resources/dyno-helper.minisig";
+
+fn mac_install_signed(
+    files: &FakeFiles,
+    verifier: &ExpectSignature,
+) -> Result<Report, InstallError> {
+    let (mut f, mut b, mut s) = (
+        files.clone(),
+        Scripted::with(|s| s.starts_after_polls = Some(0)),
+        FakeSystem::new(),
+    );
+    Installer::new(&layout_for(Os::MacOs), &mut f, &mut b, &mut s)
+        .with_signature(SignatureCheck {
+            verifier,
+            locations: vec![
+                PathBuf::from("/Applications/Dyno.app/Contents/MacOS/dyno-helper.minisig"),
+                PathBuf::from(SIG),
+            ],
+        })
+        .install(Path::new(SOURCE))
+}
+
+#[test]
+fn a_helper_with_the_right_signature_is_copied_and_the_verdict_is_reported() {
+    let files = mac_disk();
+    files.put_file(SIG, b"sig-1", 501, 0o644);
+    let v = ExpectSignature {
+        program: b"helper build 1".to_vec(),
+        signature: b"sig-1".to_vec(),
+    };
+    let report = mac_install_signed(&files, &v).unwrap();
+    assert_eq!(report.signature.as_deref(), Some("valid"));
+    assert_eq!(
+        report.sha256.as_deref(),
+        Some(crate::privileged::files::hash_bytes(b"helper build 1").as_str())
+    );
+}
+
+#[test]
+fn a_helper_with_a_bad_or_missing_signature_is_refused_and_nothing_is_written() {
+    let v = ExpectSignature {
+        program: b"helper build 1".to_vec(),
+        signature: b"sig-1".to_vec(),
+    };
+    // A bad signature.
+    let files = mac_disk();
+    files.put_file(SIG, b"forged", 501, 0o644);
+    let err = mac_install_signed(&files, &v).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("reinstall Dyno")),
+        "{err:?}"
+    );
+    assert!(
+        !files.calls().iter().any(|c| c.starts_with("write ")),
+        "{:?}",
+        files.calls()
+    );
+    assert!(files.facts_of(Path::new(MAC_PROGRAM)).is_none());
+    // A program that is not the signed one.
+    let files = mac_disk();
+    files.put_file(SOURCE, b"swapped helper", 501, 0o755);
+    files.put_file(SIG, b"sig-1", 501, 0o644);
+    let err = mac_install_signed(&files, &v).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("does not match")),
+        "{err:?}"
+    );
+    assert!(files.facts_of(Path::new(MAC_PROGRAM)).is_none());
+    // No signature file at all.
+    let files = mac_disk();
+    let err = mac_install_signed(&files, &v).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("no signature file") && w.contains("reinstall Dyno")),
+        "{err:?}"
+    );
+    assert!(files.facts_of(Path::new(MAC_PROGRAM)).is_none());
+}
+
+#[test]
+fn the_bytes_that_are_signed_are_the_bytes_that_are_copied_even_if_the_path_is_swapped_after_the_check()
+ {
+    // The user replaces the helper after it was checked. A copy that reopens the path would install the replacement; the
+    // installer writes the bytes it read through the handle it checked.
+    let files = mac_disk();
+    files.put_file(SIG, b"sig-1", 501, 0o644);
+    files.swap_source_after_open(b"evil helper");
+    let v = ExpectSignature {
+        program: b"helper build 1".to_vec(),
+        signature: b"sig-1".to_vec(),
+    };
+    let report = mac_install_signed(&files, &v).unwrap();
+    assert_eq!(
+        report.sha256.as_deref(),
+        Some(crate::privileged::files::hash_bytes(b"helper build 1").as_str())
+    );
+    assert_eq!(
+        files.content_of(Path::new(MAC_PROGRAM)).as_deref(),
+        Some(&b"helper build 1"[..])
+    );
+}
+
+#[test]
+fn a_copy_without_a_checked_source_is_refused() {
+    let layout = layout_for(Os::MacOs);
+    let (mut f, mut b, mut s) = (mac_disk(), Scripted::default(), FakeSystem::new());
+    let mut installer = Installer::new(&layout, &mut f, &mut b, &mut s);
+    let err = installer
+        .run_step(Step::CopyProgram, Some(Path::new(SOURCE)))
+        .unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("was not checked")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_signature_location_that_cannot_be_read_is_skipped_and_the_next_one_is_used() {
+    struct DeniesFirst(FakeFiles);
+    impl ProtectedFiles for DeniesFirst {
+        fn facts(&mut self, p: &Path) -> std::io::Result<Option<crate::privileged::FileFacts>> {
+            self.0.clone().facts(p)
+        }
+        fn create_dir(&mut self, p: &Path, m: u32) -> std::io::Result<()> {
+            self.0.create_dir(p, m)
+        }
+        fn open_source(
+            &mut self,
+            p: &Path,
+            m: u64,
+        ) -> std::io::Result<Option<crate::privileged::HeldSource>> {
+            if p.ends_with("MacOS/dyno-helper.minisig") {
+                return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+            }
+            self.0.open_source(p, m)
+        }
+        fn write_program(&mut self, b: &[u8], to: &Path, m: u32) -> std::io::Result<String> {
+            self.0.write_program(b, to, m)
+        }
+        fn sha256(&mut self, p: &Path) -> std::io::Result<String> {
+            self.0.sha256(p)
+        }
+        fn read_checked(
+            &mut self,
+            p: &Path,
+            m: u64,
+        ) -> std::io::Result<Option<(crate::privileged::FileFacts, String)>> {
+            self.0.read_checked(p, m)
+        }
+        fn remove_file(&mut self, p: &Path) -> std::io::Result<()> {
+            self.0.remove_file(p)
+        }
+        fn remove_dir(&mut self, p: &Path) -> std::io::Result<()> {
+            self.0.remove_dir(p)
+        }
+    }
+    let disk = mac_disk();
+    disk.put_file(SIG, b"sig-1", 501, 0o644);
+    let v = ExpectSignature {
+        program: b"helper build 1".to_vec(),
+        signature: b"sig-1".to_vec(),
+    };
+    let (mut f, mut b, mut s) = (
+        DeniesFirst(disk),
+        Scripted::with(|s| s.starts_after_polls = Some(0)),
+        FakeSystem::new(),
+    );
+    let report = Installer::new(&layout_for(Os::MacOs), &mut f, &mut b, &mut s)
+        .with_signature(SignatureCheck {
+            verifier: &v,
+            locations: vec![
+                PathBuf::from("/Applications/Dyno.app/Contents/MacOS/dyno-helper.minisig"),
+                PathBuf::from(SIG),
+            ],
+        })
+        .install(Path::new(SOURCE))
+        .unwrap();
+    assert_eq!(report.signature.as_deref(), Some("valid"));
+}
+
+#[test]
+fn a_verbatim_prefixed_source_is_judged_by_the_path_without_the_prefix() {
+    // `canonicalize` on Windows returns `\\?\C:\...`: the chain check and the "already inside the protected folder" comparison
+    // must see the plain path, or a per-machine source fails with "not there" and the installed copy could be copied onto itself.
+    let files = windows_disk();
+    let verbatim = format!("\\\\?\\{WIN_SOURCE}");
+    files.put_file(verbatim.as_str(), b"helper.exe", 0, 0);
+    let report = win_install_with(&mut win_trust(), &files, &verbatim);
+    assert!(report.is_ok(), "{report:?}");
+    let inside = format!("\\\\?\\{WIN_PROGRAM}");
+    files.put_file(inside.as_str(), b"helper.exe", 0, 0);
+    let err = win_install_with(&mut win_trust(), &files, &inside).unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("already inside")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn the_source_check_alone_changes_nothing_and_refuses_a_bad_source() {
+    let files = mac_disk();
+    let v = ExpectSignature {
+        program: b"helper build 1".to_vec(),
+        signature: b"sig-1".to_vec(),
+    };
+    let (mut f, mut b, mut s) = (files.clone(), Scripted::default(), FakeSystem::new());
+    let err = Installer::new(&layout_for(Os::MacOs), &mut f, &mut b, &mut s)
+        .with_signature(SignatureCheck {
+            verifier: &v,
+            locations: vec![PathBuf::from(SIG)],
+        })
+        .preflight(Path::new(SOURCE))
+        .unwrap_err();
+    assert!(
+        matches!(&err, InstallError::Refused(w) if w.contains("no signature file")),
+        "{err:?}"
+    );
+    assert!(
+        !files
+            .calls()
+            .iter()
+            .any(|c| c.starts_with("write ") || c.starts_with("create_dir"))
+    );
+    assert!(
+        !b.log()
+            .iter()
+            .any(|l| l == "register" || l == "unregister" || l == "evict")
+    );
+    files.put_file(SIG, b"sig-1", 501, 0o644);
+    let (mut f, mut b, mut s) = (files.clone(), Scripted::default(), FakeSystem::new());
+    let report = Installer::new(&layout_for(Os::MacOs), &mut f, &mut b, &mut s)
+        .with_signature(SignatureCheck {
+            verifier: &v,
+            locations: vec![PathBuf::from(SIG)],
+        })
+        .preflight(Path::new(SOURCE))
+        .unwrap();
+    assert_eq!(report.signature.as_deref(), Some("valid"));
+    assert!(!files.calls().iter().any(|c| c.starts_with("write ")));
 }

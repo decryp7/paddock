@@ -25,6 +25,46 @@ pub fn agent_args(args: &[String]) -> Option<&[String]> {
     }
 }
 
+/// The environment variable that holds the AI access key `dyno mcp` sends (a key on a command line shows in process lists).
+pub const MCP_KEY_VAR: &str = "DYNO_MCP_KEY";
+
+/// Whether `args` is `mcp` (the bridge a host such as Claude Desktop starts; ADR 0007 rule 1).
+pub fn is_mcp(args: &[String]) -> bool {
+    matches!(args, [first, ..] if first == "mcp")
+}
+
+/// `dyno mcp`: speaks MCP on stdin and stdout for a host that starts programs, by carrying the lines to the open Dyno app, which
+/// holds the tools and the policy. The key comes from `DYNO_MCP_KEY`. Returns the exit code (0 ended, 1 could not connect, 2 usage).
+pub fn run_mcp(args: &[String], env_key: Option<String>, err: &mut dyn Write) -> i32 {
+    if args.len() > 1 {
+        let _ = writeln!(
+            err,
+            "dyno mcp: takes no options; set {MCP_KEY_VAR} to the key from Settings > AI access"
+        );
+        return 2;
+    }
+    let Some(key) = env_key.filter(|k| !k.trim().is_empty()) else {
+        let _ = writeln!(err, "dyno mcp: set {MCP_KEY_VAR} to a key issued in Dyno's Settings > AI access");
+        return 2;
+    };
+    let dirs = match paddock_env::AppId::new("dyno", "Dyno").and_then(|id| paddock_env::AppDirs::for_app(&id)) {
+        Ok(d) => d,
+        Err(e) => {
+            let _ = writeln!(err, "dyno mcp: cannot find Dyno's folders ({e})");
+            return 1;
+        }
+    };
+    let file = paddock_mcp::listener::discovery_path(dirs.config());
+    let stdin = std::io::BufReader::new(std::io::stdin());
+    match paddock_mcp::bridge::run(&file, key.trim(), stdin, &mut std::io::stdout()) {
+        Ok(()) => 0,
+        Err(e) => {
+            let _ = writeln!(err, "dyno mcp: {e}");
+            1
+        }
+    }
+}
+
 /// Runs `dyno` with the arguments after the program name; returns the exit code (0 done, 1 failed, 2 wrong usage, 3 versions
 /// differ, 4 Dyno is not running).
 pub fn run(args: &[String], env: &Env, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
@@ -358,13 +398,7 @@ fn wake_schedule(agent: &dyn Agent, cmd: &args::WakeScheduleCmd, json: bool) -> 
                 "weekends" => Repeat::Days { mask: 0b1100000 },
                 _ => Repeat::Daily,
             };
-            let job = job.as_deref().map(|j| {
-                if j == "backup" {
-                    DynoJob::BackupCheck
-                } else {
-                    DynoJob::SoftwareInventory
-                }
-            });
+            let job = job.as_deref().map(|_| DynoJob::SoftwareInventory);
             let entry = WakeInput {
                 id: None,
                 name: name.clone(),

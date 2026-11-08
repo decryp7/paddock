@@ -106,6 +106,71 @@ path = "paddock-proc/src/testchild.rs"
 reason = "a re-executed copy of the test binary that its parent ends with SIGKILL, so its coverage data is never written; the parent side is covered."
 
 [[exclude]]
+path = "paddock-setup/src/main.rs"
+reason = "the entry point of `paddock-setup.exe`: it turns the command line into a `Command` and exits with its code (a GUI-subsystem program); the library behind it is covered."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/apply.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/facts.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/fileversion.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/folders.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/handle.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/hold.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/logfs.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/mod.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/mutex.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/registry.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/staging_fs.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
+path = "paddock-setup/src/native/wide.rs"
+reason = "the Windows glue of `paddock-setup` (registry, handles, files, mutex, the machine's facts): no decisions of its own, tested on a Windows machine (`tests/vm`, opt-in, ER-14)."
+job = "paddock-setup VM tests (local VMs only)"
+
+[[exclude]]
 path = "paddock-chromium/src/fake.rs"
 reason = "the fake DevTools browser: a script re-runs the test binary as a loopback WebSocket server that the driver's tests often end by force, so no coverage data is written (Unix only)."
 

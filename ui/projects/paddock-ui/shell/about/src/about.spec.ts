@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { DISMISSED, provideContributions, SHELL_IDLE, SHELL_PORTS, type ShellNotice } from '@decryp7/paddock-ui/shell';
 import { assertContributionsValid, createFramed } from '@decryp7/paddock-ui/shell/testing';
 import { MemoryJobsBackend, provideShellJobs } from '@decryp7/paddock-ui/shell/jobs';
-import type { AboutInfo, UpdateStatus, WhatsNew } from '../generated/about';
+import type { AboutInfo, UpdatePhase, UpdateStatus, WhatsNew } from '../generated/about';
 import { ABOUT_COMMANDS } from '../generated/about-commands';
 import { FILES_COMMANDS } from '../../files/generated/files-commands';
 import {
@@ -17,7 +17,7 @@ import {
 } from './backend';
 import { ABOUT_DIALOG_COMMANDS, ABOUT_DIALOG_IDS, aboutContributions, defineAboutDialogs } from './about.contributions';
 import { PdAboutDialog } from './about-dialog';
-import { formatBytes, systemText } from './format';
+import { formatStorage, systemText } from './format';
 import { ABOUT_STYLES } from './styles';
 import { provideShellAbout } from './provide-about';
 import { PdUpdatesDialog } from './updates-dialog';
@@ -53,11 +53,11 @@ async function settle(rounds = 6): Promise<void> {
   for (let i = 0; i < rounds; i++) await Promise.resolve();
 }
 
-function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main = false) {
+function bed(server: MemoryUpdatesOptions['server'], extra: unknown[] = [], main = false, install?: MemoryUpdatesOptions['install']) {
   const notices: ShellNotice[] = [];
   const opened: string[] = [];
   const about = new MemoryAboutBackend(INFO, { notices: '# Third-party notices\n\nlong list', mit: 'MIT License' }, NOTES, 'show');
-  const updates = new MemoryUpdatesBackend({ currentVersion: INFO.version, server, release: RELEASE, channels: [{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }] });
+  const updates = new MemoryUpdatesBackend({ currentVersion: INFO.version, server, release: RELEASE, channels: [{ id: 'stable', label: 'Stable' }, { id: 'beta', label: 'Beta' }], install });
   TestBed.configureTestingModule({
     providers: [
       provideZonelessChangeDetection(),
@@ -90,11 +90,12 @@ describe('the wire', () => {
     channels: [],
     endpointHost: null,
     releasesPage: null,
+    install: { scope: 'perUser', installOnQuitAvailable: true, administratorNotice: null },
   };
 
   it('accepts what the engine sends and refuses anything else', () => {
     expect(parseUpdateStatus(status)).toBe(status);
-    for (const bad of [null, [], {}, { ...status, phase: { kind: 'exploded' } }, { ...status, phase: null }, { ...status, channels: 3 }, { ...status, phase: { kind: 1 } }]) {
+    for (const bad of [null, [], {}, { ...status, phase: { kind: 'exploded' } }, { ...status, phase: null }, { ...status, channels: 3 }, { ...status, phase: { kind: 1 } }, { ...status, install: null }, { ...status, install: { scope: 'elsewhere', installOnQuitAvailable: true } }]) {
       expect(parseUpdateStatus(bad)).toBeNull();
     }
     expect(parseAboutInfo(INFO)).toBe(INFO);
@@ -114,10 +115,10 @@ describe('the wire', () => {
     expect(toUpdateError(new Error('boom')).message).toBe('boom');
     expect(toUpdateError('plain').message).toBe('plain');
     expect(toUpdateError(undefined)).toMatchObject({ kind: 'unreachable', message: 'The updater did not answer.' });
-    expect(formatBytes(12)).toBe('12 bytes');
-    expect(formatBytes(1_500)).toBe('1.5 KB');
-    expect(formatBytes(41_000_000)).toBe('39 MB');
-    expect(formatBytes(2_000_000_000)).toBe('1.9 GB');
+    expect(formatStorage(12)).toBe('12 bytes');
+    expect(formatStorage(1_500)).toBe('1.5 KB');
+    expect(formatStorage(41_000_000)).toBe('41 MB');
+    expect(formatStorage(2_000_000_000)).toBe('2 GB');
   });
 
   it('the Tauri backends call the generated commands and parse at the edge', async () => {
@@ -499,7 +500,7 @@ describe('the dialogs', () => {
     button(el, 'Check now').click();
     await settle();
     await fixture.whenStable();
-    expect(text(el)).toContain('Version 1.5.0 is available (39 MB).');
+    expect(text(el)).toContain('Version 1.5.0 is available (41 MB).');
     expect(text(el)).toContain('Faster.');
     // Hold the download in its job to see the progress.
     const hold: (() => void)[] = [];
@@ -511,11 +512,11 @@ describe('the dialogs', () => {
     jobs.emit({ id: id ?? -1, kind: 'update-download', title: 'Downloading the update', subject: '1.5.0', seq: 1, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: 41_000_000, done: 20_500_000 } });
     await settle();
     await fixture.whenStable();
-    expect(text(el)).toContain('Downloading: 20 MB of 39 MB');
+    expect(text(el)).toContain('Downloading: 21 MB of 41 MB');
     const bar = el.querySelector('mat-progress-bar')!;
     expect(bar.getAttribute('role')).toBe('progressbar');
     expect(bar.getAttribute('aria-valuenow')).toBe('50');
-    expect(bar.getAttribute('aria-label')).toBe('Downloading: 20 MB of 39 MB');
+    expect(bar.getAttribute('aria-label')).toBe('Downloading: 21 MB of 41 MB');
     expect(el.querySelector('progress')).toBeNull();
     // A phase without a total is an indeterminate bar, not a static 0 (rule 18).
     jobs.emit({ id: id ?? -1, kind: 'update-download', title: 'Downloading the update', subject: '1.5.0', seq: 2, elapsedMs: 0, etaMs: null, cancellable: true, notCancellableReason: null, state: 'running', phase: { id: 'download', label: 'Downloading', unit: 'bytes', total: null, done: 1000 } });
@@ -540,6 +541,48 @@ describe('the dialogs', () => {
     await fixture.whenStable();
     expect((await updates.status()).channel).toBe('beta');
     expect(text(el)).toContain('Not checked yet.');
+  });
+
+  it('Updates for a per-machine copy has an Install button, the administrator text, no install on quit, and waits while an installer runs', async () => {
+    const notice = 'An administrator must install this update. Windows will ask for an administrator\'s name and password.';
+    const { updates } = bed('release', [], false, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: notice });
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    button(el, 'Check now').click();
+    await settle();
+    await fixture.whenStable();
+    button(el, 'Download').click();
+    await settle();
+    await fixture.whenStable();
+    expect(text(el)).toContain('downloaded and its signature verified');
+    expect(el.querySelector('[data-testid="updates-administrator"]')?.textContent).toBe(notice);
+    expect(text(el)).not.toContain('Install when the app quits');
+    expect(button(el, 'Install')).toBeTruthy();
+    expect(text(el)).not.toContain('Restart to update');
+    (updates as unknown as { set: (p: UpdatePhase) => void }).set({ kind: 'installerRunning', version: '1.5.0' });
+    await settle();
+    await fixture.whenStable();
+    expect(el.querySelector('[data-testid="updates-installer-running"]')?.textContent).toContain('An update is being installed');
+  });
+
+  it('Updates offers Install again after a declined or failed hand-off, and it looks for the update and downloads it again', async () => {
+    const { updates } = bed('release', [], false, { scope: 'perMachine', installOnQuitAvailable: false, administratorNotice: null });
+    const fixture = createFramed(PdUpdatesDialog);
+    await settle();
+    await fixture.whenStable();
+    const el: HTMLElement = fixture.nativeElement;
+    const error = { kind: 'declined', message: 'Not installed: Windows permission was declined.', nextStep: 'Click Install again and choose Yes in the Windows prompt.', detail: null } as const;
+    (updates as unknown as { set: (p: UpdatePhase) => void }).set({ kind: 'failed', error, info: null });
+    await settle();
+    await fixture.whenStable();
+    expect(text(el)).toContain('Not installed: Windows permission was declined.');
+    button(el, 'Install again').click();
+    await settle();
+    await settle();
+    await fixture.whenStable();
+    expect(['downloading', 'ready']).toContain((await updates.status()).phase.kind);
   });
 
   it('Updates shows a refused signature with its next step, and nothing to press without a key', async () => {

@@ -1,11 +1,25 @@
 //! The ACL of the helper's Program Files folder (ADR 0027 §1): SYSTEM and Administrators Full control, Users Read and
 //! execute, no inheritance. Set with `icacls` by well-known SID (so the language of the system does not matter) and
 //! checked afterwards from `icacls`'s own listing by the shape of the rights, which are abbreviations in every language.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use std::path::Path;
 
 /// `icacls`.
 pub const ICACLS: &str = "icacls";
+
+/// The SDDL of a protected folder, the same ACL as [`acl_command`] but in the form `SetSecurityInfo` and
+/// `CreateDirectoryW` take: owner Administrators, the DACL protected (no inheritance from above), SYSTEM and Administrators Full
+/// control and Users Read and execute, all inherited by what the folder holds. A test keeps the two in step.
+pub const PROTECTED_FOLDER_SDDL: &str =
+    "O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 
 /// The `icacls` call that replaces the folder's ACL: inheritance removed, then SYSTEM (`S-1-5-18`) and Administrators
 /// (`S-1-5-32-544`) Full control and Users (`S-1-5-32-545`) Read and execute, all inherited by what the folder holds.
@@ -91,6 +105,27 @@ pub fn acl_shape_ok(listing: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_sddl_and_the_icacls_call_describe_the_same_acl() {
+        // SYSTEM Full, Administrators Full, Users Read and execute, both inherited by folders and files, owner Administrators.
+        let c = acl_command(Path::new("C:\\x"));
+        for (sid, sddl_sid, sddl_rights, icacls_rights) in [
+            ("S-1-5-18", "SY", "FA", "F"),
+            ("S-1-5-32-544", "BA", "FA", "F"),
+            ("S-1-5-32-545", "BU", "0x1200a9", "RX"),
+        ] {
+            assert!(
+                PROTECTED_FOLDER_SDDL.contains(&format!("(A;OICI;{sddl_rights};;;{sddl_sid})")),
+                "{sid}"
+            );
+            assert!(
+                c.contains(&format!("*{sid}:(OI)(CI){icacls_rights}")),
+                "{sid}"
+            );
+        }
+        assert!(PROTECTED_FOLDER_SDDL.starts_with("O:BAD:P"));
+    }
 
     #[test]
     fn the_acl_command_names_the_well_known_sids() {

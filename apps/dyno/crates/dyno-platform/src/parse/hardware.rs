@@ -43,37 +43,55 @@ pub fn parse_pmset_therm(text: &str) -> Option<OsThrottle> {
     })
 }
 
-/// The device names in `smartctl --scan -j`.
-pub fn parse_smartctl_scan(json: &str) -> Vec<String> {
-    let Ok(v) = serde_json::from_str::<Value>(json) else {
-        return Vec::new();
-    };
-    v["devices"]
-        .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|d| d["name"].as_str())
-                .filter(|n| !n.is_empty() && n.len() < 128)
-                .map(String::from)
-                .take(8)
-                .collect()
-        })
-        .unwrap_or_default()
+/// Why a `smartctl` run produced no data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// The OS withheld the drive from this account (needs administrator rights).
+    Access,
+    /// The drive does not expose SMART data to apps.
+    Unsupported,
+    /// smartctl could not open this one drive for a reason that is not rights (macOS: a USB drive, which has no SMART passthrough
+    /// without a third-party driver). A per-drive fact, not a failure of the reading.
+    OpenFailed,
 }
 
-/// Why a `smartctl` run produced no data, in words for the user; `None` when it produced data.
-pub fn smartctl_refusal(json: &str) -> Option<String> {
+/// Why a `smartctl` run produced no data, as a kind; `None` when it produced data or said nothing useful.
+pub fn smartctl_refusal_kind(json: &str) -> Option<Refusal> {
     let v: Value = serde_json::from_str(json).ok()?;
     let msgs = v["smartctl"]["messages"].as_array()?;
     let text: Vec<&str> = msgs.iter().filter_map(|m| m["string"].as_str()).collect();
     let joined = text.join(" ").to_ascii_lowercase();
-    if joined.contains("permission denied") || joined.contains("operation not permitted") || joined.contains("administrator") {
-        Some("Reading SSD wear needs administrator rights; Dyno's privileged helper will do it once installed.".into())
+    // "Access is denied" is Windows' wording for the same refusal as Unix's "Permission denied".
+    if joined.contains("permission denied")
+        || joined.contains("access is denied")
+        || joined.contains("access denied")
+        || joined.contains("operation not permitted")
+        || joined.contains("administrator")
+    {
+        Some(Refusal::Access)
     } else if joined.contains("unsupported") || joined.contains("unknown usb bridge") || joined.contains("smart support is: unavailable") {
-        Some("This drive does not expose SMART data to apps.".into())
+        Some(Refusal::Unsupported)
+    } else if joined.contains("iocreateplugininterface") || (joined.contains("open device") && joined.contains("failed")) {
+        Some(Refusal::OpenFailed)
     } else {
         None
     }
+}
+
+/// Why a `smartctl` run produced no data, in words for the user; `None` when it produced data.
+pub fn smartctl_refusal(json: &str) -> Option<String> {
+    smartctl_refusal_kind(json).map(|k| match k {
+        Refusal::Access => "Reading SSD wear needs administrator rights.".to_string(),
+        Refusal::Unsupported => "This drive does not expose SMART data to apps.".to_string(),
+        Refusal::OpenFailed => "smartctl could not open this drive.".to_string(),
+    })
+}
+
+/// The version in `smartctl --version` output (`smartctl 7.5 2025-04-30 r5714 [x86_64-w64-mingw32-...]`).
+pub fn parse_smartctl_version(text: &str) -> Option<String> {
+    let first = text.lines().find(|l| l.trim_start().starts_with("smartctl "))?;
+    let v = first.trim_start().strip_prefix("smartctl ")?.split_whitespace().next()?;
+    (v.len() < 24 && v.chars().next().is_some_and(|c| c.is_ascii_digit())).then(|| v.to_string())
 }
 
 /// One drive from `smartctl -a -j <device>`. `None` for hard disks and for drives with no wear counter at all.
@@ -257,9 +275,14 @@ mod tests {
 
     #[test]
     fn scans_and_refusals_are_understood() {
-        let scan = r#"{"devices":[{"name":"/dev/disk0","type":"nvme"},{"name":""},{"name":"/dev/disk1"}]}"#;
-        assert_eq!(parse_smartctl_scan(scan), vec!["/dev/disk0", "/dev/disk1"]);
-        assert!(parse_smartctl_scan("x").is_empty());
+        assert_eq!(
+            parse_smartctl_version("smartctl 7.5 2025-04-30 r5714 [x86_64-w64-mingw32-w10-22H2] (sf-7.5-1)\n").as_deref(),
+            Some("7.5")
+        );
+        assert_eq!(parse_smartctl_version("smartctl 8.0 nightly").as_deref(), Some("8.0"));
+        assert_eq!(parse_smartctl_version("nope"), None);
+        let win = r#"{"smartctl":{"messages":[{"string":"Smartctl open device: /dev/sdb failed: Access is denied"}]}}"#;
+        assert_eq!(smartctl_refusal_kind(win), Some(Refusal::Access), "Windows words it differently");
         let denied = r#"{"smartctl":{"messages":[{"string":"Smartctl open device: /dev/disk0 failed: Permission denied"}]}}"#;
         assert!(smartctl_refusal(denied).unwrap().contains("administrator"));
         let unsupported = r#"{"smartctl":{"messages":[{"string":"Unsupported device"}]}}"#;

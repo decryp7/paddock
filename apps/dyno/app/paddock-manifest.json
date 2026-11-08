@@ -10,16 +10,16 @@
       "title": "dy.capture"
     },
     {
-      "id": "dy.check-backup",
-      "title": "dy.check-backup"
-    },
-    {
       "id": "dy.export-issues",
       "title": "dy.export-issues"
     },
     {
       "id": "dy.export-report",
       "title": "dy.export-report"
+    },
+    {
+      "id": "dy.quit-stop",
+      "title": "dy.quit-stop"
     },
     {
       "id": "dy.refresh-history",
@@ -32,10 +32,6 @@
     {
       "id": "dy.run-why-slow",
       "title": "dy.run-why-slow"
-    },
-    {
-      "id": "dy.save-diagnostics",
-      "title": "dy.save-diagnostics"
     },
     {
       "id": "pd.about.open",
@@ -82,6 +78,13 @@
     },
     {
       "menu": "app",
+      "command": "dy.quit-stop",
+      "group": "quit",
+      "order": 900,
+      "accelerator": null
+    },
+    {
+      "menu": "app",
       "command": "pd.app.quit",
       "group": "quit",
       "order": 1000,
@@ -111,7 +114,6 @@
   ],
   "pages": [
     "dy.alarms",
-    "dy.backup",
     "dy.benchmarks",
     "dy.counters",
     "dy.dashboard",
@@ -164,7 +166,9 @@
       "width": 720,
       "height": 560,
       "commands": [
-        "dyno"
+        "dyno",
+        "job_cancel",
+        "jobs_snapshot"
       ]
     },
     "dy.lockers": {
@@ -257,6 +261,8 @@
         "dialog_open",
         "dyno",
         "edit_widget_layout",
+        "job_cancel",
+        "jobs_snapshot",
         "mcp_audit",
         "mcp_audit_clear",
         "mcp_get",
@@ -265,6 +271,7 @@
         "popover_preview",
         "popover_snapshot",
         "settings_*",
+        "tray_availability",
         "widget_choices",
         "widget_layout"
       ]
@@ -299,7 +306,10 @@
     }
   },
   "healthServices": [
-    "dy.agent"
+    "dy.agent",
+    "dy.setup",
+    "dy.tray",
+    "dy.update"
   ],
   "notificationKinds": {
     "dy.alarm": {
@@ -314,22 +324,21 @@
     "dy.alert-rule.title": "Alert rule",
     "dy.capture": "Capture the last ten minutes",
     "dy.category.alarms": "Alarms",
-    "dy.category.backup": "Backup health",
     "dy.category.dashboard": "Dashboard",
-    "dy.category.diagnostics": "Diagnostics",
     "dy.category.issues": "Issues",
     "dy.category.recorder": "Flight recorder",
     "dy.category.reports": "Reports",
     "dy.category.why-slow": "Why slow",
-    "dy.check-backup": "Check now",
     "dy.export-issues": "Export for Debrief…",
     "dy.export-report": "Export Markdown…",
     "dy.file-hash.title": "Search the file's hash on VirusTotal",
     "dy.health.agent": "the Dyno agent",
+    "dy.health.setup": "the installer program",
+    "dy.health.tray": "the tray icons",
+    "dy.health.update": "Dyno itself",
     "dy.lockers.title": "What is locking this file?",
     "dy.notification.alarm": "Alarm",
     "dy.page.alarms": "Alarms",
-    "dy.page.backup": "Backup health",
     "dy.page.benchmarks": "Benchmarks",
     "dy.page.counters": "Counters",
     "dy.page.dashboard": "Dashboard",
@@ -350,10 +359,10 @@
     "dy.page.reports": "Reports",
     "dy.page.throttling": "Throttling",
     "dy.page.why-slow": "Why slow",
+    "dy.quit-stop": "Quit and stop measuring",
     "dy.refresh-history": "Refresh history",
     "dy.rescan-issues": "Read the system logs now",
     "dy.run-why-slow": "Run again",
-    "dy.save-diagnostics": "Save bundle…",
     "dy.settings.general": "Dyno",
     "dy.status.agent": "The Dyno agent",
     "dy.web-search.title": "Search the web",

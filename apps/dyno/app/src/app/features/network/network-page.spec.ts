@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import type { ReadVia } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { Lookups } from '../lookup/lookups';
@@ -10,9 +11,18 @@ import { NetworkPage } from './network-page';
 
 const NOW = 1_700_000_000_000;
 
-async function open() {
+async function open(how: ReadVia | ((mock: MockBackend) => void) = () => undefined, onCall?: (q: { retryHelper?: boolean }) => void) {
   localStorage.clear();
   const mock = new MockBackend({ latencyMs: 0, now: () => NOW });
+  if (typeof how === 'function') how(mock);
+  else {
+    // Who read the owners of the sockets: the answer's `ownersVia` is set over the mock's own.
+    const real = mock.network.bind(mock);
+    vi.spyOn(mock, 'network').mockImplementation(async (q) => {
+      onCall?.(q);
+      return { ...(await real(q)), ownersVia: how };
+    });
+  }
   TestBed.configureTestingModule({ providers: [provideIcons(), provideRouter([]), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(NetworkPage);
   const settle = async () => {
@@ -37,6 +47,28 @@ afterEach(() => {
 });
 
 describe('NetworkPage', () => {
+  it('Try again on the owners source line asks the helper now, once, outside the poll', async () => {
+    const calls: Array<boolean | undefined> = [];
+    const { el, settle } = await open({ unavailable: { reason: 'The helper could not read it.', next: 'retry' } }, (q) => calls.push(q.retryHelper));
+    const before = calls.length;
+    (el.querySelector('[data-testid=reading-source-step]') as HTMLButtonElement).click();
+    await settle();
+    expect(calls.slice(before)).toContain(true);
+    expect(calls.slice(0, before).every((c) => !c)).toBe(true);
+  });
+
+  it('names the helper when it filled the owners, and asks for it when the kernel hides them', async () => {
+    const helper = await open('helper');
+    expect(helper.el.querySelector('[data-testid=reading-source-helper]')?.textContent).toContain('Read by the administrator helper');
+    TestBed.resetTestingModule();
+    const needs = await open({ needsHelper: { reason: 'Some sockets belong to other accounts. Turn on Administrator readings in Settings so the helper can read this.', next: { openSettings: 'helper' } } });
+    expect(needs.el.querySelector('[data-testid=reading-source-needs]')?.textContent).toContain('belong to other accounts');
+    expect(needs.el.querySelector('[data-testid=reading-source-turn-on]')).not.toBeNull();
+    TestBed.resetTestingModule();
+    const local = await open();
+    expect(local.el.querySelector('dy-reading-source [data-testid^=reading-source]')).toBeNull();
+  });
+
   it('is a tree grid grouped by program: group headings at level 1 spanning the row, sockets one level below', async () => {
     const { el, groups, rows } = await open();
     const grid = el.querySelector('[aria-label="Connections"]')!;
@@ -49,6 +81,31 @@ describe('NetworkPage', () => {
     expect(item.getAttribute('aria-level')).toBe('2');
     // One tab stop for the grid.
     expect(rows().filter((r) => r.tabIndex === 0)).toHaveLength(1);
+  });
+
+  it('per-program traffic: who read it, and other accounts as one total with no names', async () => {
+    const real = MockBackend.prototype.network;
+    const via: ReadVia = { needsHelper: { reason: 'Traffic per program needs administrator rights on Windows.', next: { openSettings: 'helper' } } };
+    const note = 'Traffic per program needs administrator rights on Windows. Turn on Administrator readings in Settings so the helper can read this.';
+    const needs = await open((mock) => {
+      vi.spyOn(mock, 'network').mockImplementation(async (q) => ({ ...(await real.call(mock, q)), traffic: [], trafficNote: note, trafficVia: via }));
+    });
+    expect(needs.el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain('administrator rights on Windows');
+    expect(needs.el.querySelector('[data-testid="reading-source-turn-on"]')?.textContent).toContain('Turn on administrator readings');
+    expect(needs.el.querySelector('.traffic-note')).toBeNull();
+    TestBed.resetTestingModule();
+    const helper = await open((mock) => {
+      vi.spyOn(mock, 'network').mockImplementation(async (q) => ({
+        ...(await real.call(mock, q)),
+        trafficNote: null,
+        trafficVia: 'helper',
+        trafficOthers: { programs: 2, bytesIn: 2048, bytesOut: 1024 },
+      }));
+    });
+    expect(helper.el.querySelector('[data-testid="reading-source-helper"]')?.textContent).toContain('administrator helper');
+    const others = helper.el.querySelector('[data-testid="traffic-others"]')?.textContent ?? '';
+    expect(others).toContain('Other users and ended programs: 2 programs');
+    expect(others).toMatch(/2(\.0+)? KB/);
   });
 
   it('folds a program with its chevron and with Left, unfolds it with Right, keeps the choice and the focus', async () => {

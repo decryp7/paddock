@@ -28,6 +28,8 @@ pub enum Metric {
     NetworkUp,
     /// Network download.
     NetworkDown,
+    /// Network upload and download together: the menu bar draws both rates stacked; elsewhere its value is the total.
+    NetworkBoth,
     /// GPU load.
     GpuLoad,
     /// The hottest temperature sensor.
@@ -61,7 +63,7 @@ impl Metric {
 
     /// The metrics a picker offers, in display order (the two parameterised ones, a process and a counter, are chosen
     /// another way).
-    pub const CHOICES: [Metric; 13] = [
+    pub const CHOICES: [Metric; 14] = [
         Metric::CpuTotal,
         Metric::CpuPerCore,
         Metric::Memory,
@@ -71,6 +73,7 @@ impl Metric {
         Metric::DiskFree,
         Metric::NetworkDown,
         Metric::NetworkUp,
+        Metric::NetworkBoth,
         Metric::GpuLoad,
         Metric::Temperature,
         Metric::Fan,
@@ -89,6 +92,7 @@ impl Metric {
             Metric::DiskFree => "Disk free".into(),
             Metric::NetworkDown => "Network down".into(),
             Metric::NetworkUp => "Network up".into(),
+            Metric::NetworkBoth => "Network (up and down)".into(),
             Metric::GpuLoad => "GPU".into(),
             Metric::Temperature => "Temperature".into(),
             Metric::Fan => "Fan".into(),

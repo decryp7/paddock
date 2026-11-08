@@ -99,6 +99,7 @@ fn tag_message(v: &Message) -> &'static str {
         Message::PowerChanged(_) => "PowerChanged",
         Message::WolChanged(_) => "WolChanged",
         Message::WakesChanged(_) => "WakesChanged",
+        Message::EventsLost(_) => "EventsLost",
     }
 }
 
@@ -106,7 +107,6 @@ fn tag_job_spec(v: &JobSpec) -> &'static str {
     match v {
         JobSpec::FindFiles { .. } => "FindFiles",
         JobSpec::RescanIssues { .. } => "RescanIssues",
-        JobSpec::RefreshBackup => "RefreshBackup",
         JobSpec::FileHash { .. } => "FileHash",
         JobSpec::SleepBlockers => "SleepBlockers",
         JobSpec::BootAnalysis => "BootAnalysis",
@@ -125,7 +125,6 @@ fn tag_job_output(v: &JobOutput) -> &'static str {
     match v {
         JobOutput::Finder(_) => "Finder",
         JobOutput::Issues(_) => "Issues",
-        JobOutput::Backup(_) => "Backup",
         JobOutput::FileHash(_) => "FileHash",
         JobOutput::Sleep(_) => "Sleep",
         JobOutput::Boot(_) => "Boot",
@@ -159,15 +158,17 @@ fn tag_helper_request(v: &HelperRequest) -> &'static str {
         HelperRequest::CancelWake { .. } => "CancelWake",
         HelperRequest::ListWakes => "ListWakes",
         HelperRequest::WolState { .. } => "WolState",
+        HelperRequest::Build => "Build",
     }
 }
 
 fn tag_helper_reply(v: &HelperReply) -> &'static str {
     match v {
         HelperReply::About(..) => "About",
-        HelperReply::Counters(_) => "Counters",
+        HelperReply::Traffic(_) => "Traffic",
         HelperReply::Entries(_) => "Entries",
         HelperReply::Bye => "Bye",
+        HelperReply::Build(_) => "Build",
         HelperReply::Firewall(_) => "Firewall",
         HelperReply::Wakes(_) => "Wakes",
         HelperReply::WakeCancelled(_) => "WakeCancelled",
@@ -225,8 +226,7 @@ fn tag_request(v: &Request) -> &'static str {
         Request::Capture => "Capture",
         Request::RecorderSnapshots => "RecorderSnapshots",
         Request::RecorderSnapshot { .. } => "RecorderSnapshot",
-        Request::DiagnosticsPreview => "DiagnosticsPreview",
-        Request::SaveDiagnostics { .. } => "SaveDiagnostics",
+        Request::DiagnosticsFiles => "DiagnosticsFiles",
         Request::Network { .. } => "Network",
         Request::LookupIp { .. } => "LookupIp",
         Request::Benchmarks => "Benchmarks",
@@ -256,7 +256,6 @@ fn tag_request(v: &Request) -> &'static str {
         Request::GpuProcesses => "GpuProcesses",
         Request::SaveInventoryReport { .. } => "SaveInventoryReport",
         Request::Maintenance => "Maintenance",
-        Request::Backup => "Backup",
         Request::StartJob { .. } => "StartJob",
         Request::Jobs => "Jobs",
         Request::CancelJob { .. } => "CancelJob",
@@ -332,8 +331,7 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::Captured(_) => "Captured",
         Reply::RecorderSnapshots(_) => "RecorderSnapshots",
         Reply::RecorderSnapshot(_) => "RecorderSnapshot",
-        Reply::DiagnosticsPreview(_) => "DiagnosticsPreview",
-        Reply::DiagnosticsSaved(_) => "DiagnosticsSaved",
+        Reply::DiagnosticsFiles(_) => "DiagnosticsFiles",
         Reply::Url(_) => "Url",
         Reply::Network(_) => "Network",
         Reply::Benchmarks(_) => "Benchmarks",
@@ -357,7 +355,6 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::Gpu(_) => "Gpu",
         Reply::InventorySaved(_) => "InventorySaved",
         Reply::Maintenance(_) => "Maintenance",
-        Reply::Backup(_) => "Backup",
         Reply::DiskVolumes(_) => "DiskVolumes",
         Reply::DiskScan(_) => "DiskScan",
         Reply::DiskScans(_) => "DiskScans",
@@ -428,7 +425,6 @@ fn job_spec_samples() -> Vec<JobSpec> {
         JobSpec::RescanIssues {
             query: IssuesQuery::default(),
         },
-        JobSpec::RefreshBackup,
         JobSpec::FileHash {
             source: HashSource::Process(process_ref()),
         },
@@ -451,7 +447,6 @@ fn job_output_samples() -> Vec<JobOutput> {
     vec![
         JobOutput::Finder(zero()),
         JobOutput::Issues(zero()),
-        JobOutput::Backup(zero()),
         JobOutput::FileHash(zero()),
         JobOutput::Sleep(zero()),
         JobOutput::Boot(zero()),
@@ -495,15 +490,17 @@ fn helper_request_samples() -> Vec<HelperRequest> {
         HelperRequest::WolState {
             ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
         },
+        HelperRequest::Build,
     ]
 }
 
 fn helper_reply_samples() -> Vec<HelperReply> {
     vec![
         HelperReply::About(zero(), zero()),
-        HelperReply::Counters(vec![]),
+        HelperReply::Traffic(zero()),
         HelperReply::Entries(vec![]),
         HelperReply::Bye,
+        HelperReply::Build("0123456789abcdef".into()),
         HelperReply::Firewall(zero()),
         HelperReply::Wakes(vec![]),
         HelperReply::WakeCancelled(true),
@@ -515,6 +512,27 @@ fn helper_reply_samples() -> Vec<HelperReply> {
         HelperReply::Extras(zero()),
         HelperReply::Processes(zero()),
         HelperReply::Smart(zero()),
+        HelperReply::Smart(dyno_core::smart::SmartReply {
+            disks: vec![dyno_core::smart::SmartDisk {
+                device: "/dev/nvme0".to_string(),
+                model: "EXAMPLE NVME".to_string(),
+                capacity: Some(1_000_000_000_000),
+                temperature_c: Some(40),
+                percent_used: Some(4),
+                media_errors: Some(0),
+                power_on_hours: Some(1200),
+                unsafe_shutdowns: Some(2),
+                passed: Some(true),
+                wear_id: Some("EXAMPLE NVME EX1".to_string()),
+                bytes_written: Some(84_800_000_000_000),
+                rated_bytes: Some(600_000_000_000_000),
+            }],
+            skipped: vec![dyno_core::smart::SmartSkip {
+                device: "/dev/sda".to_string(),
+                reason: "needs administrator rights".to_string(),
+            }],
+            not_visited: 1,
+        }),
         HelperReply::Installed(zero()),
         HelperReply::LoginItems(zero()),
         HelperReply::Log(vec!["a line".into()]),
@@ -582,8 +600,7 @@ fn request_samples() -> Vec<Request> {
         Request::Capture,
         Request::RecorderSnapshots,
         Request::RecorderSnapshot { id: 3 },
-        Request::DiagnosticsPreview,
-        Request::SaveDiagnostics { path: s("/d.zip") },
+        Request::DiagnosticsFiles,
         Request::Network { query: Default::default() },
         Request::LookupIp {
             ip: s("192.0.2.1"),
@@ -669,7 +686,6 @@ fn request_samples() -> Vec<Request> {
             format: extras::software::InventoryFormat::Markdown,
         },
         Request::Maintenance,
-        Request::Backup,
         Request::StartJob {
             spec: JobSpec::SoftwareInventory,
         },
@@ -781,14 +797,14 @@ fn wire_job() -> paddock_jobs::wire::WireSnapshot {
 }
 
 fn reply_samples() -> Vec<Reply> {
-    use dyno_core::{counters, diagnostics, extras, issues, recorder, report, widgets};
+    use dyno_core::{counters, extras, issues, recorder, report, widgets};
     let index = dyno_core::disk::index::DiskIndex::new("r", dyno_core::disk::index::ScanLimits::default());
     vec![
         Reply::Ok,
         Reply::Details(zero()),
         Reply::Activity(zero()),
         Reply::Activities(vec![]),
-        Reply::Lockers(vec![]),
+        Reply::Lockers(dyno_core::process::LockerList::default()),
         Reply::Snapshot(zero()),
         Reply::Snapshots(vec![]),
         Reply::Diff(zero()),
@@ -818,12 +834,7 @@ fn reply_samples() -> Vec<Reply> {
             recorder::CaptureReason::Manual,
             vec![],
         ))),
-        Reply::DiagnosticsPreview(zero()),
-        Reply::DiagnosticsSaved(diagnostics::SavedDiagnostics {
-            path: "/x.zip".into(),
-            bytes: 1,
-            files: 1,
-        }),
+        Reply::DiagnosticsFiles(zero()),
         Reply::Url("https://example.com/".into()),
         Reply::Network(zero()),
         Reply::Benchmarks(zero()),
@@ -865,7 +876,6 @@ fn reply_samples() -> Vec<Reply> {
             bytes: 1,
         }),
         Reply::Maintenance(extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), &dyno_core::time::FixedZone::UTC)),
-        Reply::Backup(zero()),
         Reply::DiskVolumes(vec![]),
         Reply::DiskScan(Box::new(disk_status())),
         Reply::DiskScans(vec![disk_status()]),
@@ -875,7 +885,7 @@ fn reply_samples() -> Vec<Reply> {
         Reply::Job(Box::new(wire_job())),
         Reply::Jobs(vec![wire_job()]),
         Reply::JobCancelled(true),
-        Reply::JobOutput(Box::new(JobOutput::Backup(zero()))),
+        Reply::JobOutput(Box::new(JobOutput::Sleep(zero()))),
         Reply::WidgetLayout(Box::new(widgets::layout_view(&Settings::default(), widgets::DynoSurface::Popover))),
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
         Reply::HelperStatus(Box::new(zero())),
@@ -909,6 +919,7 @@ fn message_samples() -> Vec<Message> {
             processes: None,
             groups: Some(vec![]),
             other_users: None,
+            via: Default::default(),
         })),
         Message::Alert(zero()),
         Message::Activity(zero()),
@@ -920,6 +931,11 @@ fn message_samples() -> Vec<Message> {
         Message::PowerChanged(Box::default()),
         Message::WolChanged(Box::new(zero())),
         Message::WakesChanged(Box::new(zero())),
+        Message::EventsLost(LostEvents {
+            activity: 3,
+            alerts: 2,
+            alarms: 1,
+        }),
     ]
 }
 

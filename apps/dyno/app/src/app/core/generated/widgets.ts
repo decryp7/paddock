@@ -677,7 +677,7 @@ placements: Array<PlacementState<V, A>>, };
 
 export type DynoSurface = "popover" | "dashboard" | "menuBar";
 
-export type Metric = "cpuTotal" | "cpuPerCore" | "memory" | "memoryPressure" | "swap" | "diskActivity" | "diskFree" | "networkUp" | "networkDown" | "gpuLoad" | "temperature" | "fan" | "battery" | { "process": string } | { "perfCounter": string };
+export type Metric = "cpuTotal" | "cpuPerCore" | "memory" | "memoryPressure" | "swap" | "diskActivity" | "diskFree" | "networkUp" | "networkDown" | "networkBoth" | "gpuLoad" | "temperature" | "fan" | "battery" | { "process": string } | { "perfCounter": string };
 
 export type VolumeChoice = "all" | "system" | { "mount": string };
 
@@ -685,9 +685,9 @@ export type PopoverWidget = "activeAlarms" | { "diskSpace": {
 /**
  * Which volume.
  */
-volume: VolumeChoice, } } | "cpuMemory" | "network" | "backupHealth" | "lastIssue" | "pinnedCounters" | "topApps";
+volume: VolumeChoice, } } | "cpuMemory" | "network" | "lastIssue" | "pinnedCounters" | "topApps";
 
-export type PopoverKind = "activeAlarms" | "diskSpace" | "cpuMemory" | "network" | "backupHealth" | "lastIssue" | "pinnedCounters" | "topApps";
+export type PopoverKind = "activeAlarms" | "diskSpace" | "cpuMemory" | "network" | "lastIssue" | "pinnedCounters" | "topApps";
 
 export type Thresholds = { 
 /**
@@ -779,17 +779,36 @@ export type MenuBarKind = "lineGraph" | "verticalBars" | "horizontalMeter" | "ri
 
 export type NumberFormat = "stacked" | "line";
 
+export type NumberSupport = { 
+/**
+ * The formats the tray draws; the others are shown but cannot be chosen.
+ */
+formats: Array<NumberFormat>, 
+/**
+ * Whether the label is drawn in the icon (it is always in the tooltip).
+ */
+labelInIcon: boolean, 
+/**
+ * What the row says when there is no choice of format: the one layout this tray draws, in words ("Value only (label in the
+ * tooltip)"). `None`: the person chooses among `formats`.
+ */
+fixed: string | null, 
+/**
+ * Why a format or the label is missing, in one sentence for the Settings page; `None` when everything is drawn.
+ */
+note: string | null, };
+
 export type ValueTone = "ok" | "warn" | "bad";
 
 export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "count" | "milliseconds" | "seconds" | "number";
 
-export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "backups" | "counters" | "processes" | "power";
+export type Page = "overview" | "alarms" | "disk" | "network" | "issues" | "counters" | "processes" | "power";
 
 export type SettingsSection = "popupWidgets" | "general";
 
 export type Navigate = { "page": Page } | { "settings": SettingsSection };
 
-export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "setUpBackupChecks" | "startBackupCheck" | "restartAgent" | "customizeWidgets" | "openSettings";
+export type WidgetActionId = { "openPage": Page } | { "retry": PlacementId } | "chooseVolume" | "pinCounters" | "restartAgent" | "customizeWidgets" | "openSettings";
 
 export type Level = "info" | "warning" | "critical";
 
@@ -843,7 +862,16 @@ tone: ValueTone,
 /**
  * False for a network volume that did not answer ("Not answering").
  */
-reachable: boolean, };
+reachable: boolean, 
+/**
+ * When the figures were read, ms since the epoch; none before the agent stamped them. For "as of 14:05" and
+ * "Not answering since 14:05".
+ */
+measuredAt: number | null, 
+/**
+ * How old the figures are against the refresh interval (the agent decides; the app only words it).
+ */
+freshness: "fresh" | "late" | "stale", };
 
 export type CounterRow = { 
 /**
@@ -880,30 +908,6 @@ name: string,
  * Its CPU, percent of the machine; none when it could not be read.
  */
 cpuPercent: number | null, };
-
-export type BackupVerdict = "healthy" | "stale" | "noBackupYet";
-
-export type BackupValue = { 
-/**
- * The tool's name ("Time Machine").
- */
-name: string, 
-/**
- * Its verdict.
- */
-state: BackupVerdict, 
-/**
- * When the last backup finished.
- */
-lastBackup: number | null, 
-/**
- * One plain sentence.
- */
-summary: string, 
-/**
- * How many tools are set up.
- */
-tools: number, };
 
 export type IssueValue = { 
 /**
@@ -991,7 +995,7 @@ rxMinute: Array<number>,
 /**
  * Upload over the last minute, oldest first.
  */
-txMinute: Array<number>, } } | { "backupHealth": BackupValue } | { "lastIssue": IssueValue } | { "pinnedCounters": { 
+txMinute: Array<number>, } } | { "lastIssue": IssueValue } | { "pinnedCounters": { 
 /**
  * The first rows.
  */
@@ -1065,7 +1069,11 @@ menuBar: Array<MenuBarKindChoices>,
 /**
  * Every metric a menu-bar item may show.
  */
-menuBarMetrics: Array<MetricChoice>, };
+menuBarMetrics: Array<MetricChoice>, 
+/**
+ * What this platform's tray draws of a number item (its formats, and whether the label fits in the icon).
+ */
+number: NumberSupport, };
 
 export type MetricReading = { 
 /**

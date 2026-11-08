@@ -257,20 +257,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
-name = "auto-launch"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17918dba7ecf78b9a14507ec9f984e7977d13fad87dc86d61038980a45d128cf"
-dependencies = [
- "dirs 6.0.0",
- "os_info",
- "smappservice-rs",
- "thiserror 2.0.21",
- "windows-registry",
- "windows-result",
-]
-
-[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1130,15 +1116,6 @@ dependencies = [
 
 [[package]]
 name = "dirs"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3e8aa94d75141228480295a7d0e7feb620b1a5ad9f12bc40be62411e38cce4e"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
-name = "dirs"
 version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d57d423b3c82e89b9a24ca3091fee61f456a26edbd28d26c65906f4bc1dcd8f"
@@ -1281,6 +1258,7 @@ name = "dyno-agent"
 version = "1.1.0"
 dependencies = [
  "dyno-core",
+ "dyno-helper",
  "dyno-helper-service",
  "dyno-platform",
  "dyno-plugin-host",
@@ -1289,6 +1267,7 @@ dependencies = [
  "log",
  "maxminddb",
  "paddock-bench",
+ "paddock-diag",
  "paddock-download",
  "paddock-env",
  "paddock-ipc",
@@ -1299,27 +1278,31 @@ dependencies = [
  "paddock-proc",
  "paddock-secrets",
  "paddock-service",
+ "paddock-startup",
  "paddock-widgets",
  "plist",
+ "postcard",
  "proptest",
  "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "syn 2.0.119",
  "sysinfo",
  "tempfile",
  "thiserror 2.0.21",
  "toml 1.1.8+spec-1.1.0",
- "zip",
 ]
 
 [[package]]
 name = "dyno-app"
 version = "1.1.0"
 dependencies = [
+ "chrono",
  "dyno-agent",
  "dyno-core",
  "dyno-platform",
+ "libc",
  "log",
  "objc2",
  "objc2-app-kit",
@@ -1341,9 +1324,9 @@ dependencies = [
  "paddock-mcp",
  "paddock-menu",
  "paddock-proc",
- "paddock-secrets",
  "paddock-service",
  "paddock-settings",
+ "paddock-setup",
  "paddock-shell",
  "paddock-startup",
  "paddock-updater",
@@ -1354,7 +1337,6 @@ dependencies = [
  "sha2 0.10.9",
  "tauri",
  "tauri-build",
- "tauri-plugin-autostart",
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
@@ -1367,6 +1349,8 @@ dependencies = [
  "tray-icon",
  "windows-sys 0.61.2",
  "winreg",
+ "zbus",
+ "zip",
 ]
 
 [[package]]
@@ -1402,8 +1386,10 @@ dependencies = [
  "dyno-agent",
  "dyno-core",
  "dyno-platform",
+ "paddock-env",
  "paddock-ipc",
  "paddock-jobs",
+ "paddock-mcp",
  "serde",
  "serde_json",
  "tempfile",
@@ -1449,8 +1435,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
- "windows",
- "windows-service",
 ]
 
 [[package]]
@@ -1462,6 +1446,8 @@ dependencies = [
  "paddock-env",
  "paddock-ipc",
  "paddock-service",
+ "paddock-updater",
+ "tempfile",
 ]
 
 [[package]]
@@ -3556,6 +3542,7 @@ checksum = "d49e936b501e5c5bf01fda3a9452ff86dc3ea98ad5f283e1455153142d97518c"
 dependencies = [
  "bitflags 2.13.2",
  "block2",
+ "libc",
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",
@@ -3775,7 +3762,6 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b213642d6959cc6023ceb1217aa595eaaf09b8094ce95127c103cab611fe65e8"
 dependencies = [
- "block2",
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",
@@ -3876,21 +3862,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "os_info"
-version = "3.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9cf20a545b305cf1da722b236b5155c9bb35f1d5ceb28c048bd96ca842f41b5b"
-dependencies = [
- "android_system_properties",
- "log",
- "nix",
- "objc2",
- "objc2-foundation",
- "objc2-ui-kit",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "osakit"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3960,6 +3931,7 @@ name = "paddock-diag"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "libc",
  "log",
  "paddock-commands",
  "paddock-dialogs",
@@ -4105,7 +4077,7 @@ dependencies = [
  "paddock-env",
  "paddock-jobs",
  "paddock-log",
- "paddock-secrets",
+ "paddock-proc",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -4197,6 +4169,8 @@ name = "paddock-secrets"
 version = "0.1.0"
 dependencies = [
  "keyring",
+ "paddock-env",
+ "paddock-proc",
  "paddock-workspace-hack",
  "zeroize",
 ]
@@ -4221,6 +4195,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tauri",
+ "thiserror 2.0.21",
  "windows",
  "windows-service",
 ]
@@ -4237,6 +4212,20 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+]
+
+[[package]]
+name = "paddock-setup"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "paddock-proc",
+ "paddock-service",
+ "paddock-updater",
+ "paddock-workspace-hack",
+ "semver",
+ "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4268,6 +4257,7 @@ dependencies = [
  "paddock-workspace-hack",
  "serde",
  "serde_json",
+ "sysinfo",
  "tauri",
  "tauri-plugin",
 ]
@@ -4288,7 +4278,12 @@ dependencies = [
 name = "paddock-startup"
 version = "0.2.0"
 dependencies = [
+ "block2",
+ "gtk",
  "log",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "paddock-commands",
  "paddock-env",
  "paddock-log",
@@ -4298,6 +4293,7 @@ dependencies = [
  "sysinfo",
  "tauri",
  "tauri-plugin-dialog",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4333,6 +4329,7 @@ dependencies = [
  "serde_json",
  "tauri",
  "tauri-plugin-updater",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4391,9 +4388,7 @@ dependencies = [
  "futures-core",
  "getrandom 0.3.4",
  "getrandom 0.4.3",
- "gio-sys",
- "glib-sys",
- "gobject-sys",
+ "gtk-sys",
  "http",
  "httparse",
  "idna",
@@ -5648,18 +5643,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
 
 [[package]]
-name = "smappservice-rs"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52703b97a53101cf5d4580e0737aaa634ce1fdcfc123c16b2a9658e358013488"
-dependencies = [
- "objc2",
- "objc2-foundation",
- "objc2-service-management",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "socket2"
 version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6007,7 +5990,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cookie",
- "dirs 7.0.0",
+ "dirs",
  "dunce",
  "embed_plist",
  "getrandom 0.3.4",
@@ -6058,7 +6041,7 @@ checksum = "adddb0e648752aaac5da9c3c3c6a68e1e87cab55e3b757b18a9441ef8c3ac614"
 dependencies = [
  "anyhow",
  "cargo_toml",
- "dirs 7.0.0",
+ "dirs",
  "glob",
  "heck 0.5.0",
  "json-patch",
@@ -6128,20 +6111,6 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
-]
-
-[[package]]
-name = "tauri-plugin-autostart"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bce56ceb0a99b8ab5eebc977ba9ffc62391b862648cb9ab76fc8bc7231b8f7e2"
-dependencies = [
- "auto-launch",
- "serde",
- "serde_json",
- "tauri",
- "tauri-plugin",
- "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -6251,7 +6220,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d957abbcb3f9f6c76d22a3a0f012f30880640d0bccb5634d2b12a9937e4c872b"
 dependencies = [
  "base64 0.23.1",
- "dirs 7.0.0",
+ "dirs",
  "flate2",
  "futures-util",
  "http",
@@ -6800,7 +6769,7 @@ name = "tray-icon"
 version = "0.25.1"
 dependencies = [
  "crossbeam-channel",
- "dirs 7.0.0",
+ "dirs",
  "libappindicator",
  "muda",
  "objc2",
@@ -7567,17 +7536,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-registry"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02752bf7fbdcce7f2a27a742f798510f3e5ad88dbe84871e5168e2120c3d5720"
-dependencies = [
- "windows-link",
- "windows-result",
- "windows-strings",
-]
-
-[[package]]
 name = "windows-result"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7925,7 +7883,7 @@ dependencies = [
  "block2",
  "cookie",
  "crossbeam-channel",
- "dirs 7.0.0",
+ "dirs",
  "dom_query",
  "dpi",
  "dunce",

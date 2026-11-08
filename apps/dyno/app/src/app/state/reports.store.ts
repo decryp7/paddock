@@ -4,7 +4,7 @@ import type { CommandError, ReportFormat, SavedReport, WeeklyReport } from '../c
 import { BACKEND } from '../core/backend';
 import { toCommandError } from '../core/command-error';
 import { Notifier } from '../shared/notifier';
-import { fileName } from './diagnostics.store';
+import { fileName } from '../shared/format';
 
 /** Dyno keeps about a year of history: the engine refuses weeks further back. */
 export const MAX_WEEKS_AGO = 52;

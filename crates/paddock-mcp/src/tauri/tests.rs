@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::control::{ErrorCode, MemorySettings};
-use crate::{AuditLog, KeyStore, Policy, Server, ToolDef, ToolOutput};
+use crate::{AuditLog, KeyStore, MemoryKeys, Policy, Server, ToolDef, ToolOutput};
 use ::tauri::ipc::{CallbackFn, InvokeBody};
 use ::tauri::test::{
     INVOKE_KEY, MockRuntime, get_ipc_response, mock_builder, mock_context, noop_assets,
@@ -11,7 +11,6 @@ use ::tauri::webview::InvokeRequest;
 use ::tauri::{Listener, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use paddock_jobs::FakeClock;
 use paddock_log::Redactor;
-use paddock_secrets::MemorySecrets;
 use serde_json::{Value, json};
 use std::sync::mpsc;
 
@@ -75,7 +74,7 @@ fn app() -> (App, WebviewWindow<MockRuntime>, Arc<McpControl>) {
             log,
             Arc::new(KeyStore::new()),
             Arc::new(MemorySettings::default()),
-            Arc::new(MemorySecrets::new("Demo")),
+            Arc::new(MemoryKeys::default()),
             emit,
             Arc::new(|| 1_700_000_000_000),
         )))

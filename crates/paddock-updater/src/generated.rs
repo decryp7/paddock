@@ -21,6 +21,8 @@ fn generated_files() -> Vec<(&'static str, String)> {
         crate::UpdateInfo::decl(),
         crate::UpdatePhase::decl(),
         crate::ChannelInfo::decl(),
+        crate::InstallScope::decl(),
+        crate::InstallInfo::decl(),
         crate::UpdateStatus::decl(),
         crate::Preferences::decl(),
         crate::LegalDocInfo::decl(),

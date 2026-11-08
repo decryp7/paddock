@@ -1,17 +1,17 @@
 import type { FinderMode, FinderResult, FoundFile } from '../../core/api.types';
-import { formatBytes, plural } from '../../shared/format';
+import { formatStorage, plural } from '../../shared/format';
 
-const MIB = 1024 * 1024;
+const MB = 1_000_000;
 
-/** The size filters offered, in MiB (the engine refuses anything under 1 MiB). */
-export const MIN_SIZES: readonly { mib: number; label: string }[] = [
-  { mib: 50, label: '50 MB' },
-  { mib: 100, label: '100 MB' },
-  { mib: 500, label: '500 MB' },
-  { mib: 1024, label: '1 GB' },
+/** The size filters offered, in decimal megabytes like the sizes the page shows ("100 MB" is 100,000,000 bytes). */
+export const MIN_SIZES: readonly { mb: number; label: string }[] = [
+  { mb: 50, label: '50 MB' },
+  { mb: 100, label: '100 MB' },
+  { mb: 500, label: '500 MB' },
+  { mb: 1000, label: '1 GB' },
 ];
 
-export const DEFAULT_MIN_MIB = 100;
+export const DEFAULT_MIN_MB = 100;
 
 export const MODES: readonly { mode: FinderMode; label: string }[] = [
   { mode: 'both', label: 'Both' },
@@ -19,7 +19,7 @@ export const MODES: readonly { mode: FinderMode; label: string }[] = [
   { mode: 'duplicates', label: 'Duplicates' },
 ];
 
-export const mibToBytes = (mib: number): number => Math.round(mib * MIB);
+export const mbToBytes = (mb: number): number => Math.round(mb * MB);
 
 /** A row of the results table: a group heading or a file. */
 export type FileRow =
@@ -32,7 +32,7 @@ export function fileRows(result: FinderResult, collapsed: ReadonlySet<string>): 
   if (result.large.length > 0) {
     const key = 'g:large';
     const bytes = result.large.reduce((a, f) => a + f.bytes, 0);
-    rows.push({ kind: 'group', key, title: 'Large files', detail: `${plural(result.large.length, 'file')}, ${formatBytes(bytes)}`, open: !collapsed.has(key) });
+    rows.push({ kind: 'group', key, title: 'Large files', detail: `${plural(result.large.length, 'file')}, ${formatStorage(bytes)}`, open: !collapsed.has(key) });
     if (!collapsed.has(key)) for (const f of result.large) rows.push({ kind: 'file', key: `l:${f.id}`, file: f });
   }
   result.duplicates.forEach((g, i) => {
@@ -41,7 +41,7 @@ export function fileRows(result: FinderResult, collapsed: ReadonlySet<string>): 
       kind: 'group',
       key,
       title: `${plural(g.files.length, 'copy', 'copies')} of ${baseName(g.files[0]?.path ?? '')}`,
-      detail: `${formatBytes(g.bytesEach)} each, ${formatBytes(g.wastedBytes)} wasted`,
+      detail: `${formatStorage(g.bytesEach)} each, ${formatStorage(g.wastedBytes)} wasted`,
       open: !collapsed.has(key),
     });
     if (!collapsed.has(key)) g.files.forEach((f) => rows.push({ kind: 'file', key: `d${i}:${f.id}`, file: f }));

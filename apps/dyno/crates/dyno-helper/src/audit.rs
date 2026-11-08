@@ -1,11 +1,16 @@
 //! The audit log: one JSON line per refusal or removal (ADR 0016). Root-owned and world-readable; it holds summaries,
 //! never file contents or secrets.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
+use crate::logfile::{open_append_no_follow, GateState, LogGate};
 use dyno_core::helper_wire::{parse_audit_line, AuditEntry};
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, MutexGuard, PoisonError};
 
 /// The log is rotated once when it grows past this.
 pub const MAX_LOG_BYTES: u64 = 1024 * 1024;
@@ -16,7 +21,8 @@ const TAIL_BYTES: u64 = 256 * 1024;
 pub struct AuditLog {
     path: PathBuf,
     max_bytes: u64,
-    lock: Mutex<()>,
+    /// The gate and lock of the file: once quiesced (before the data folder is removed) nothing is written any more.
+    state: Arc<GateState>,
 }
 
 impl AuditLog {
@@ -30,12 +36,17 @@ impl AuditLog {
         AuditLog {
             path,
             max_bytes,
-            lock: Mutex::new(()),
+            state: GateState::open(),
         }
     }
 
     fn guard(&self) -> MutexGuard<'_, ()> {
-        self.lock.lock().unwrap_or_else(PoisonError::into_inner)
+        self.state.lock.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The gate of this log (to stop its file before the data folder is removed).
+    pub fn gate(&self) -> LogGate {
+        LogGate(self.state.clone())
     }
 
     fn rotated(&self) -> PathBuf {
@@ -48,15 +59,18 @@ impl AuditLog {
     /// Appends `entry`. A log that cannot be written is reported to the caller, who must then refuse to remove anything.
     pub fn record(&self, entry: &AuditEntry) -> Result<(), String> {
         let _g = self.guard();
+        // Checked under the lock: after the gate is quiesced nothing is written (the helper is being removed).
+        if !self.state.armed.load(Ordering::SeqCst) {
+            return Ok(());
+        }
         if std::fs::metadata(&self.path).is_ok_and(|m| m.len() > self.max_bytes) {
-            let _ = std::fs::rename(&self.path, self.rotated());
+            if let Err(e) = std::fs::rename(&self.path, self.rotated()) {
+                log::warn!(error = e.to_string().as_str(); "Helper: the audit log could not be rotated; it keeps growing until it can");
+            }
         }
         let line = serde_json::to_string(entry).map_err(|e| e.to_string())?;
-        let mut f = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.path)
-            .map_err(|e| format!("The audit log {} cannot be written: {e}", self.path.display()))?;
+        let mut f =
+            open_append_no_follow(&self.path).map_err(|e| format!("The audit log {} cannot be written: {e}", self.path.display()))?;
         f.write_all(line.as_bytes())
             .and_then(|_| f.write_all(b"\n"))
             .and_then(|_| f.sync_data())
@@ -115,6 +129,62 @@ mod tests {
             verdict,
             detail: String::new(),
         }
+    }
+
+    #[test]
+    fn a_quiesced_audit_log_writes_nothing_more_and_a_racing_request_never_writes_after_it() {
+        use std::sync::atomic::AtomicBool;
+        for round in 0..30 {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("audit.jsonl");
+            let log = Arc::new(AuditLog::new(path.clone()));
+            log.record(&entry(0, "first", AuditVerdict::Done)).unwrap();
+            let stop = Arc::new(AtomicBool::new(false));
+            struct StopOnDrop(Arc<AtomicBool>);
+            impl Drop for StopOnDrop {
+                fn drop(&mut self) {
+                    self.0.store(true, Ordering::SeqCst);
+                }
+            }
+            let _stop_on_exit = StopOnDrop(stop.clone());
+            let worker = {
+                let (log, stop) = (log.clone(), stop.clone());
+                std::thread::spawn(move || {
+                    let mut at = 1;
+                    while !stop.load(Ordering::SeqCst) {
+                        // An audited request: it is told "recorded" whether the file took the line or not.
+                        log.record(&entry(at, "racing", AuditVerdict::Refused)).unwrap();
+                        at += 1;
+                    }
+                })
+            };
+            std::thread::yield_now();
+            log.gate().quiesce();
+            let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+            std::thread::sleep(std::time::Duration::from_millis(3));
+            assert_eq!(
+                std::fs::metadata(&path).map_or(0, |m| m.len()),
+                size,
+                "round {round}: nothing is written after the quiesce"
+            );
+            // And the folder can be removed.
+            stop.store(true, Ordering::SeqCst);
+            worker.join().unwrap();
+            std::fs::remove_file(&path).unwrap();
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_audit_log_is_never_written_through_a_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("elsewhere");
+        std::fs::write(&target, b"keep").unwrap();
+        let path = dir.path().join("audit.jsonl");
+        std::os::unix::fs::symlink(&target, &path).unwrap();
+        let log = AuditLog::new(path);
+        assert!(log.record(&entry(1, "x", AuditVerdict::Done)).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"keep");
     }
 
     #[test]

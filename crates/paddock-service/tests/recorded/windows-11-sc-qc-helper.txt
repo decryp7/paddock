@@ -1,0 +1,16 @@
+#! recorded 2026-11-04 on the Windows 11 Arm test VM (VMware Fusion, build 10.0.26300, en-GB), as paddock-admin over SSH
+#! command: sc.exe qc DynoHelper
+#! state: the installed helper service (auto start, quoted path and --service)
+[SC] QueryServiceConfig SUCCESS
+
+SERVICE_NAME: DynoHelper
+        TYPE               : 10  WIN32_OWN_PROCESS 
+        START_TYPE         : 2   AUTO_START
+        ERROR_CONTROL      : 1   NORMAL
+        BINARY_PATH_NAME   : "C:\Program Files\Dyno Helper\dyno-helper.exe" --service
+        LOAD_ORDER_GROUP   : 
+        TAG                : 0
+        DISPLAY_NAME       : Dyno helper
+        DEPENDENCIES       : 
+        SERVICE_START_NAME : LocalSystem
+

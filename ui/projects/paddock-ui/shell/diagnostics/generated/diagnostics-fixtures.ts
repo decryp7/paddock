@@ -68,13 +68,13 @@ export const LOGGING_SECTION_FIXTURE: SectionView = {
         "step": 1,
         "unit": "days"
       },
-      "default": 7,
+      "default": 30,
       "restartRequired": true,
       "advanced": false
     }
   ],
   "values": {
-    "keepFiles": 7,
+    "keepFiles": 30,
     "level": "info",
     "maxFileMb": 20
   }

@@ -102,10 +102,10 @@ export function mockEnergy(days: number, now: number, s: EnergySettings): Energy
     const on = today ? Math.floor((now - start) / 1000) : gap ? 5 * 3600 : 14 * 3600;
     const sleep = today ? 0 : gap ? 0 : 6 * 3600;
     const unknown = today ? 0 : 86_400 - on - sleep;
-    rows.push(price({ dayStart: start, onSecs: on, sleepSecs: sleep, unknownSecs: unknown, kwh: null, cost: null, co2Kg: null }, s));
+    rows.push(price({ dayStart: start, onSecs: on, sleepSecs: sleep, unknownSecs: unknown, kwh: null, cost: null, co2Kg: null, cpuKwh: null }, s));
   }
   const sum = (f: (d: EnergyDay) => number) => rows.reduce((a, d) => a + f(d), 0);
-  const totals = price({ dayStart: rows[0]!.dayStart, onSecs: sum((d) => d.onSecs), sleepSecs: sum((d) => d.sleepSecs), unknownSecs: sum((d) => d.unknownSecs), kwh: null, cost: null, co2Kg: null }, s);
+  const totals = price({ dayStart: rows[0]!.dayStart, onSecs: sum((d) => d.onSecs), sleepSecs: sum((d) => d.sleepSecs), unknownSecs: sum((d) => d.unknownSecs), kwh: null, cost: null, co2Kg: null, cpuKwh: null }, s);
   return {
     enabled: s.enabled,
     days: rows,
@@ -114,6 +114,7 @@ export function mockEnergy(days: number, now: number, s: EnergySettings): Energy
     sleepEnergyCounted: s.wattsSleep !== null,
     currency: s.currency,
     trackingSince: rows[0]!.dayStart,
+    cpuVia: 'local',
   };
 }
 

@@ -41,7 +41,7 @@ describe('dy-schedule-tab', () => {
     const { f, el } = render({ wake: 'on' });
     await settle(f);
     const rows = [...el.querySelectorAll('[aria-label="Scheduled wakes"] ' + ROW)];
-    expect(rows.map((r) => r.querySelector('strong')?.textContent)).toEqual(['Morning backup check', 'Wake the NAS for the weekend', 'Once, tomorrow']);
+    expect(rows.map((r) => r.querySelector('strong')?.textContent)).toEqual(['Morning inventory', 'Wake the NAS for the weekend', 'Once, tomorrow']);
     expect(rows[0]!.textContent).toContain('Weekdays');
     expect(rows[0]!.textContent).toContain('Stay awake 30 min');
     expect(rows[0]!.textContent).toContain('Next wake');
@@ -112,7 +112,7 @@ describe('dy-schedule-tab', () => {
     const spy = vi.spyOn(mock, 'powerSetWake');
     btn(el, 'Retry').click();
     await settle(f);
-    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ id: 1, name: 'Morning backup check' }));
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ id: 1, name: 'Morning inventory' }));
   });
 
   it('adds a schedule, with what happens after the wake', async () => {

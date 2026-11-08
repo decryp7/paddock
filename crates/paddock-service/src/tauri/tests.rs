@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::backend::{Target, WindowsRun};
-use crate::port::Output;
 use crate::spec::ServiceSpec;
 use crate::testing::FakeSystem;
 use ::tauri::ipc::{CallbackFn, InvokeBody};
@@ -48,7 +47,7 @@ fn rig(health: Option<&str>) -> Rig {
     let dir = tempfile::tempdir().unwrap();
     let sys = FakeSystem::new();
     sys.put_program("C:\\D\\dyno-agent.exe");
-    sys.answer("reg query", Output::code(1));
+    sys.emulate_run_registry();
     let spec = ServiceSpec::builder("net.decryptology.dyno.agent", "Dyno", "dyno-agent")
         .args(["run"])
         .build()

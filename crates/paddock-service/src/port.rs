@@ -81,6 +81,11 @@ pub trait System: Send {
     fn run(&mut self, program: &str, args: &[&str]) -> Result<Output, RunError>;
     /// Starts `program args…` detached (no console window), without waiting (a `Run` entry's agent after registering).
     fn spawn(&mut self, program: &Path, args: &[String]) -> Result<(), String>;
+    /// The process that holds `pid` now, by identity (pid and start time, rule 53); `None` when there is none. Tests answer from
+    /// a table, so what they see never depends on the processes of the machine they run on (ER-14).
+    fn process(&mut self, pid: u32) -> Option<paddock_proc::ProcessId> {
+        paddock_proc::ProcessId::of(pid)
+    }
     /// Reads a small text file (a plist, a unit).
     fn read(&mut self, path: &Path) -> std::io::Result<String>;
     /// Writes a file atomically, creating its folder.
@@ -125,12 +130,18 @@ pub enum RegisterError {
     Unavailable(String),
     /// Anything else, in words; worth another try.
     Other(String),
+    /// The write reported success, but reading the registration back shows something else (ADR 0054 section 1.1). It
+    /// carries what the OS holds; it is never `Ok`.
+    NotAsWritten(crate::backend::Inspection),
 }
 
 impl RegisterError {
     /// Whether another attempt can help.
     pub fn retryable(&self) -> bool {
-        matches!(self, RegisterError::Other(_))
+        matches!(
+            self,
+            RegisterError::Other(_) | RegisterError::NotAsWritten(_)
+        )
     }
 }
 
@@ -141,6 +152,17 @@ impl std::fmt::Display for RegisterError {
             RegisterError::NeedsElevation => f.write_str("administrator rights are needed"),
             RegisterError::Declined => f.write_str("the permission prompt was declined"),
             RegisterError::Unavailable(why) | RegisterError::Other(why) => f.write_str(why),
+            RegisterError::NotAsWritten(look) => write!(
+                f,
+                "the registration was written, but reading it back shows registration {:?}, job {:?}{}",
+                look.registration,
+                look.job,
+                if look.definition_current == Some(false) {
+                    ", and another definition is in force"
+                } else {
+                    ""
+                }
+            ),
         }
     }
 }

@@ -3,7 +3,39 @@
 //! per tick. While Dyno runs as administrator the grouping is off and every process is listed.
 
 use crate::process::{Measured, Owner, ProcessSample, Total};
+use crate::read_via::ReadVia;
 use serde::{Deserialize, Serialize};
+
+/// Where a process list came from and what the administrator helper added to it (WP-PROC). The default is a list read on this
+/// computer only.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProcessProvenance {
+    /// Who read the process list.
+    pub processes: ReadVia,
+    /// Who read the "Other users" total.
+    pub others: ReadVia,
+    /// The helper already lists other accounts' processes one by one, so they are not folded into "Other users".
+    pub lists_others: bool,
+    /// The total of other accounts' processes the helper counted for a caller who may not see them one by one; it replaces what
+    /// the list adds up to.
+    pub others_total: Option<OtherUsers>,
+}
+
+impl ProcessProvenance {
+    /// Whether other accounts' processes are folded into one row: the product choice unless the helper lists them.
+    pub fn fold_others(&self, product_choice: bool) -> bool {
+        product_choice && !self.lists_others
+    }
+
+    /// `(listed, other_users)` for `processes`: [`split`] with this provenance applied.
+    pub fn split(&self, processes: &[ProcessSample], product_choice: bool) -> (Vec<ProcessSample>, Option<OtherUsers>) {
+        let (listed, other) = split(processes, self.fold_others(product_choice));
+        match &self.others_total {
+            Some(total) if product_choice => (listed, (total.count > 0).then(|| total.clone())),
+            _ => (listed, other),
+        }
+    }
+}
 
 /// The aggregate of other users' processes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

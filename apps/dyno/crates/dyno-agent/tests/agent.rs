@@ -105,6 +105,30 @@ impl Harness {
         ask(&peer, Request::Subscribe { detail }).unwrap();
         (peer, rx)
     }
+
+    /// A connection that keeps every alarm, alert and activity push it receives.
+    fn event_pushes(&self) -> (BodyPeer<Message>, Receiver<Message>) {
+        let d = dyno_agent::discovery::Discovery::read(&self.dirs.discovery()).unwrap();
+        let conn = dyno_agent::wire::connect(&d.endpoint, &d.token().unwrap()).unwrap();
+        let (tx, rx) = channel();
+        let peer = BodyPeer::start(
+            conn,
+            BodyOptions::new("the agent").on_push(move |m| {
+                if matches!(m, Message::Alarm(_) | Message::Alert(_) | Message::Activity(_)) {
+                    let _ = tx.send(m);
+                }
+            }),
+        )
+        .unwrap();
+        ask(
+            &peer,
+            Request::Subscribe {
+                detail: LiveDetail::Summary,
+            },
+        )
+        .unwrap();
+        (peer, rx)
+    }
 }
 
 /// Waits for the data folder's lock to be free again. A test that forks (the child that has not exec'd yet) holds a copy of
@@ -357,6 +381,7 @@ fn the_network_page_shows_the_platforms_sockets_and_nothing_of_the_machine() {
                     remote: None,
                     state: SocketState::Listen,
                     pid: Some(100),
+                    inode: None,
                 });
             });
         },
@@ -399,6 +424,7 @@ fn the_inventory_is_read_once_and_cached() {
 fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_muted() {
     use dyno_core::alarms::{AlarmFilter, AlarmState, ShelveFor};
     let h = Harness::start();
+    let (_watching, pushes) = h.event_pushes();
     h.fake.push_sample(full_disk_sample());
     let peer = h.client();
     ask(
@@ -410,6 +436,18 @@ fn a_low_disk_alert_raises_one_alarm_that_can_be_acknowledged_noted_shelved_and_
     .unwrap();
     let alarm = wait_for_alarm(&peer);
     assert_eq!(alarm.rule, "alert:lowDisk");
+    // Every connected window is told: the alert, and the alarm's raise with its notification.
+    let (mut alert, mut raised) = (false, false);
+    while !(alert && raised) {
+        match pushes
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the alert and the alarm are pushed")
+        {
+            Message::Alert(a) => alert |= a.kind == dyno_core::alerts::AlertKind::LowDisk,
+            Message::Alarm(c) => raised |= c.alarm.id == alarm.id && c.notify && c.kind == dyno_core::alarms::ChangeKind::Raised,
+            _ => {}
+        }
+    }
     assert_eq!(alarm.state, AlarmState::Active);
     assert_eq!(alarm.severity, dyno_core::health::Severity::Critical);
 
@@ -597,35 +635,22 @@ fn the_flight_recorder_captures_on_request_and_when_an_alarm_fires() {
 }
 
 #[test]
-fn the_diagnostics_bundle_previews_and_saves_a_redacted_zip() {
+fn the_agent_hands_over_its_data_files_for_the_report() {
     let h = Harness::start();
     let peer = h.client();
-    let Reply::DiagnosticsPreview(p) = ask_within(&peer, Request::DiagnosticsPreview, SLOW).unwrap() else {
-        panic!("preview")
+    let Reply::DiagnosticsFiles(f) = ask_within(&peer, Request::DiagnosticsFiles, SLOW).unwrap() else {
+        panic!("files")
     };
-    let names: Vec<&str> = p.files.iter().map(|f| f.path.as_str()).collect();
-    assert!(names.contains(&"system/inventory.json") && names.contains(&"settings.json") && names.contains(&"manifest.json"));
-    assert!(p.total_bytes > 0);
-    let dest = h._tmp.path().join("diag.zip");
-    let Reply::DiagnosticsSaved(saved) = ask(
-        &peer,
-        Request::SaveDiagnostics {
-            path: dest.to_string_lossy().into_owned(),
-        },
-    )
-    .unwrap() else {
-        panic!("saved")
-    };
-    assert_eq!(saved.files as usize, p.files.len());
-    assert!(std::fs::metadata(&dest).unwrap().len() == saved.bytes);
-    // Refused: relative path, wrong extension, missing folder.
-    for bad in [
-        "diag.zip".to_string(),
-        h._tmp.path().join("diag.txt").to_string_lossy().into_owned(),
-        h._tmp.path().join("nope").join("d.zip").to_string_lossy().into_owned(),
-    ] {
-        assert!(ask(&peer, Request::SaveDiagnostics { path: bad }).is_err());
-    }
+    let names: Vec<&str> = f.files.iter().map(|f| f.name.as_str()).collect();
+    assert!(
+        names.contains(&"system/inventory.json") && names.contains(&"alarms/open.json"),
+        "{names:?}"
+    );
+    assert!(names.iter().all(|n| !n.starts_with("logs/") && *n != "manifest.json"), "{names:?}");
+    assert!(f
+        .files
+        .iter()
+        .all(|f| !f.text.is_empty() && dyno_core::diagnostics::MAX_PATH_CHARS >= f.name.len()));
 }
 
 // ------------------------------------------------------------------------------------------------------- disk map
@@ -1459,4 +1484,100 @@ mod widget_layouts {
         assert!(all.iter().all(|p| matches!(p.state, WidgetState::Empty { .. })), "{all:?}");
         assert!(ask_for(&[]).is_empty());
     }
+}
+
+#[test]
+fn asking_for_the_tool_offer_reads_the_disks_again_at_once_and_not_more_than_every_30_seconds() {
+    use dyno_core::hardware::DiskWear;
+    use dyno_core::metrics::Reading;
+    use dyno_core::ports::DiskWearSource;
+    use dyno_platform::hardware::{FakeBattery, FakeThrottle};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    struct Counting(Arc<AtomicU32>);
+    impl DiskWearSource for Counting {
+        fn read(&mut self) -> Reading<Vec<DiskWear>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Reading::unavailable("counted")
+        }
+    }
+    let h = Harness::start();
+    let peer = h.client();
+    let s = shared(&h);
+    let reads = Arc::new(AtomicU32::new(0));
+    s.hardware.replace_sources(
+        Box::new(FakeThrottle(vec![Reading::unavailable("none")])),
+        Box::new(Counting(reads.clone())),
+        Box::new(FakeBattery(Reading::unavailable("none"))),
+    );
+    let before = reads.load(Ordering::SeqCst);
+    assert!(matches!(ask(&peer, Request::ToolOffer).unwrap(), Reply::ToolOffer(_)));
+    // The re-read runs on its own thread: wait on the condition, bounded.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while reads.load(Ordering::SeqCst) == before && std::time::Instant::now() < deadline {
+        std::thread::yield_now();
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), before + 1, "\"Check again\" reads the disks again");
+    // Asked again at once: no second read (rate limit), and never two at the same time.
+    assert!(matches!(ask(&peer, Request::ToolOffer).unwrap(), Reply::ToolOffer(_)));
+    assert!(!dyno_agent::hardware::request_reread(&s, std::time::Duration::from_secs(30)));
+    assert_eq!(reads.load(Ordering::SeqCst), before + 1);
+}
+
+/// Waits (a condition, with the family hang guard) until `agent.json` reads as `want`.
+fn wait_for_discovery(dirs: &Dirs, want: &dyno_agent::discovery::Discovery) {
+    let end = std::time::Instant::now() + Duration::from_secs(40);
+    while std::time::Instant::now() < end {
+        if dyno_agent::discovery::Discovery::read(&dirs.discovery()).as_ref() == Some(want) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!(
+        "agent.json was never written again: {:?}",
+        dyno_agent::discovery::Discovery::read(&dirs.discovery())
+    );
+}
+
+#[test]
+fn a_deleted_discovery_file_is_written_again_by_the_agent_that_holds_the_lock() {
+    let _ = captured(); // installs the log capture before the agent starts
+    dyno_agent::build_id::set_watch_every_for_tests(Duration::from_millis(40));
+    let h = Harness::start();
+    let mine = h.running.as_ref().unwrap().discovery.clone();
+    assert_eq!(dyno_agent::discovery::Discovery::read(&h.dirs.discovery()).as_ref(), Some(&mine));
+    std::fs::remove_file(h.dirs.discovery()).unwrap();
+    wait_for_discovery(&h.dirs, &mine);
+    // The new file works: a client finds the agent by it.
+    let peer = h.client();
+    assert!(ask(&peer, Request::Settings).is_ok());
+    // The line follows the write: wait for it as a condition.
+    let end = std::time::Instant::now() + Duration::from_secs(40);
+    while !captured()
+        .iter()
+        .any(|l| l.contains("Discovery file written again") && l.contains("missing"))
+    {
+        assert!(std::time::Instant::now() < end, "the rewrite was not logged with its reason");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[test]
+fn a_discovery_file_naming_another_process_is_replaced_while_this_agent_holds_the_lock() {
+    dyno_agent::build_id::set_watch_every_for_tests(Duration::from_millis(40));
+    let h = Harness::start();
+    let mine = h.running.as_ref().unwrap().discovery.clone();
+    let other = dyno_agent::discovery::Discovery {
+        pid: mine.pid + 1,
+        build: "other".into(),
+        ..mine.clone()
+    };
+    other.write(&h.dirs.discovery()).unwrap();
+    wait_for_discovery(&h.dirs, &mine);
+    let dirs = h.dirs.clone();
+    drop(h);
+    assert!(
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).is_none(),
+        "a stopped agent leaves no file, and the guard does not write one behind it"
+    );
 }

@@ -1,4 +1,4 @@
-import { language, PSEUDO_LOCALE, SOURCE_LOCALE, type LanguageChoice } from './locale';
+import { language, PSEUDO_LOCALE, SOURCE_LOCALE, type LanguageChoice } from '@decryp7/paddock-ui/locale';
 
 /** One row of the language picker. */
 export interface LanguageOption {

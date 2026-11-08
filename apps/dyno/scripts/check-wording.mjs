@@ -36,6 +36,7 @@ export const ALLOW = [
   { file: 'app/src/app/core/generated/widgets.ts', text: 'resetToDefaults undo', reason: 'wire name of the layout edit "undo" (generated from paddock-widgets)' },
   { file: 'app/src/app/core/mock/widgets.ts', text: "undo", reason: 'mock of that layout edit and its refusal' },
   { file: 'app/src/app/features/settings/settings-page.ts', text: 'Undo is in the message that follows', reason: 'a widget layout edit is saved at once and can be undone: a setting of Dyno, not of the computer' },
+  { file: 'app/src/app/features/settings/menu-bar-items.ts', text: 'Undo is in the message that follows', reason: 'the same widget layout edit, on the menu-bar items page: saved at once, undone from Dyno\'s own message; a setting of Dyno, not of the computer' },
   { file: 'app/src/app/core/api.types.ts', text: 'tune retire', reason: 'wire value of the alarm statistics hint kind: adjust an alarm\'s own threshold' },
   { file: 'app/src/app/core/mock/alarms.ts', text: 'tune GPU load', reason: 'mock of that wire value' },
   // Landed with the widget grid, the benchmarks, the lists and the disk-health tool.

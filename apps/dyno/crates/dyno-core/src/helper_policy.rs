@@ -49,11 +49,13 @@ pub enum RequestKind {
     ListWakes,
     /// `WolState`.
     WolState,
+    /// `Build`.
+    Build,
 }
 
 impl RequestKind {
     /// Every kind, for tests and tables.
-    pub const ALL: [RequestKind; 19] = [
+    pub const ALL: [RequestKind; 20] = [
         RequestKind::Info,
         RequestKind::Processes,
         RequestKind::Traffic,
@@ -73,13 +75,16 @@ impl RequestKind {
         RequestKind::CancelWake,
         RequestKind::ListWakes,
         RequestKind::WolState,
+        RequestKind::Build,
     ];
 
-    /// Requests that run an external tool for a long time: the server gives them `Weight::Slow` (one per account at a time).
+    /// Requests that run an external tool for a long time, or sweep the whole process table twice (`Traffic`): the server gives them
+    /// `Weight::Slow` (one per account at a time).
     pub fn is_slow(self) -> bool {
         matches!(
             self,
             RequestKind::Smart
+                | RequestKind::Traffic
                 | RequestKind::LoginItems
                 | RequestKind::Firewall
                 | RequestKind::Extras
@@ -243,6 +248,7 @@ mod tests {
             K::Counters,
             K::MemoryModules,
             K::WolState,
+            K::Build,
             K::Smart,
         ] {
             assert_eq!(other(k), Access::Full, "{k:?}");
@@ -255,6 +261,7 @@ mod tests {
         assert_eq!(
             slow,
             [
+                K::Traffic,
                 K::LoginItems,
                 K::Smart,
                 K::InstallTool,

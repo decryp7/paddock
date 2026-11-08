@@ -498,6 +498,8 @@ enum State {
         armed: bool,
         last_idle: u64,
         snooze_until: Option<Timestamp>,
+        /// A timed action whose countdown was snoozed: its countdown shows again when the snooze ends.
+        timed_resume: Option<IdleAction>,
         last_blockers: Vec<Blocker>,
         unavailable: Option<String>,
     },
@@ -541,6 +543,7 @@ fn watching(armed: bool, last_idle: u64) -> State {
         armed,
         last_idle,
         snooze_until: None,
+        timed_resume: None,
         last_blockers: Vec::new(),
         unavailable: None,
     }
@@ -562,7 +565,7 @@ impl IdleMachine {
         match &self.state {
             State::Off => IdleView::Disabled,
             // The idle rule is off (only timed actions are on): the card never reports a rule that is off.
-            State::Watching { .. } if !self.settings.enabled => IdleView::Disabled,
+            State::Watching { timed_resume: None, .. } if !self.settings.enabled => IdleView::Disabled,
             State::Watching {
                 unavailable: Some(reason), ..
             } => IdleView::Unavailable { reason: reason.clone() },
@@ -658,12 +661,14 @@ impl IdleMachine {
                 IdleEvent::Snooze { minutes },
             ) => {
                 let until = now.plus(i64::from(minutes.clamp(1, 24 * 60)) * MINUTE);
-                let _ = (action, cause);
+                // A timed action was already marked as run when its countdown began; the snooze delays it, so it comes back.
+                let timed_resume = (cause == Cause::Timed).then_some(action);
                 (
                     State::Watching {
                         armed: true,
                         last_idle,
                         snooze_until: Some(until),
+                        timed_resume,
                         last_blockers: Vec::new(),
                         unavailable: None,
                     },
@@ -671,6 +676,8 @@ impl IdleMachine {
                 )
             }
             (s, IdleEvent::Snooze { .. }) => (s, vec![]),
+            // Another timed action is due while one is snoozed: it stays due until this one has had its turn.
+            (s @ State::Watching { timed_resume: Some(_), .. }, IdleEvent::TimedDue { .. }) => (s, vec![]),
             (State::Watching { last_idle, .. }, IdleEvent::TimedDue { action, countdown_secs })
             | (State::Stopped { last_idle, .. }, IdleEvent::TimedDue { action, countdown_secs }) => {
                 let deadline = now.plus(i64::from(countdown_secs.clamp(MIN_COUNTDOWN_SECS, MAX_COUNTDOWN_SECS)) * SECOND);
@@ -701,10 +708,11 @@ impl IdleMachine {
                     armed,
                     last_idle,
                     snooze_until,
+                    timed_resume,
                     ..
                 },
                 IdleEvent::Tick(i),
-            ) => self.tick_watching(armed, last_idle, snooze_until, &i, now),
+            ) => self.tick_watching(armed, last_idle, snooze_until, timed_resume, &i, now),
             (
                 State::Countdown {
                     action,
@@ -763,6 +771,7 @@ impl IdleMachine {
         armed: bool,
         last_idle: u64,
         snooze_until: Option<Timestamp>,
+        timed_resume: Option<IdleAction>,
         i: &IdleInputs,
         now: Timestamp,
     ) -> (State, Vec<IdleEffect>) {
@@ -773,6 +782,22 @@ impl IdleMachine {
         };
         let armed = armed || idle < last_idle;
         let snooze_until = snooze_until.filter(|t| *t > now);
+        // The snooze of a timed action is over: its countdown shows again (the timed rule does not look at idle time or blockers).
+        if let (None, Some(action)) = (snooze_until, timed_resume) {
+            let deadline = now.plus(i64::from(s.countdown_secs.clamp(MIN_COUNTDOWN_SECS, MAX_COUNTDOWN_SECS)) * SECOND);
+            return (
+                State::Countdown {
+                    action,
+                    deadline,
+                    cause: Cause::Timed,
+                    last_idle: idle,
+                },
+                vec![
+                    IdleEffect::ShowCountdown { action, deadline },
+                    IdleEffect::Log(format!("snooze over: the timed action will {} unless cancelled", action.verb())),
+                ],
+            );
+        }
         let blockers = if s.enabled { blockers(s, i) } else { Vec::new() };
         let ready =
             s.enabled && unavailable.is_none() && armed && snooze_until.is_none() && idle >= u64::from(s.after_secs) && blockers.is_empty();
@@ -804,6 +829,7 @@ impl IdleMachine {
             armed,
             last_idle: idle,
             snooze_until,
+            timed_resume,
             last_blockers: if idle >= u64::from(s.after_secs) { blockers } else { Vec::new() },
             unavailable,
         };
@@ -1230,6 +1256,54 @@ mod tests {
             assert_eq!(acts(&tick(&mut m, i.clone(), t * 1000)), 0);
         }
         assert!(matches!(m.view(), IdleView::Unavailable { ref reason } if reason.contains("idle source")));
+    }
+
+    #[test]
+    fn snoozing_a_timed_countdown_brings_it_back_after_the_snooze_and_cancel_ends_it() {
+        let due = |action| IdleEvent::TimedDue {
+            action,
+            countdown_secs: 60,
+        };
+        let mut m = machine(IdleSettings::default(), true);
+        m.step(due(IdleAction::Hibernate), T0);
+        let fx = m.step(IdleEvent::Snooze { minutes: 10 }, T0.plus(5 * SECOND));
+        assert!(fx.contains(&IdleEffect::HideCountdown));
+        assert!(
+            matches!(
+                m.view(),
+                IdleView::Watching {
+                    snoozed_until: Some(_),
+                    ..
+                }
+            ),
+            "the snooze shows"
+        );
+        assert!(
+            m.step(due(IdleAction::Sleep), T0.plus(6 * SECOND)).is_empty(),
+            "another due entry waits"
+        );
+        assert!(tick(&mut m, inputs(1), 300).is_empty(), "still snoozed");
+        let fx = tick(&mut m, inputs(1), 10 * 60 + 6);
+        assert!(
+            matches!(fx[0], IdleEffect::ShowCountdown { action: IdleAction::Hibernate, deadline } if deadline == T0.plus((10 * 60 + 66) * SECOND)),
+            "{fx:?}"
+        );
+        assert_eq!(acts(&tick(&mut m, inputs(1), 10 * 60 + 66)), 1);
+        // A longer request than a day is a day.
+        let mut m = machine(IdleSettings::default(), true);
+        m.step(due(IdleAction::Hibernate), T0);
+        m.step(IdleEvent::Snooze { minutes: 5000 }, T0);
+        assert!(matches!(m.view(), IdleView::Watching { snoozed_until: Some(t), .. } if t == T0.plus(24 * HOUR)));
+        // Cancel during the snooze ends it: nothing comes back.
+        let mut m = machine(IdleSettings::default(), true);
+        m.step(due(IdleAction::Hibernate), T0);
+        m.step(IdleEvent::Snooze { minutes: 10 }, T0.plus(SECOND));
+        m.step(IdleEvent::Cancel, T0.plus(2 * SECOND));
+        assert!(tick(&mut m, inputs(1), 3600).is_empty());
+        assert!(
+            !m.step(due(IdleAction::Sleep), T0.plus(3601 * SECOND)).is_empty(),
+            "the machine takes the next entry"
+        );
     }
 
     #[test]

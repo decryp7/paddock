@@ -52,6 +52,34 @@ pub struct LoginItemsReply {
 pub trait LoginItemsLink: Send {
     /// Asks the helper for `LoginItems`.
     fn login_items(&mut self) -> Result<LoginItemsReply, crate::ports::PlatformError>;
+
+    /// Who read what the last [`LoginItemsLink::login_items`] returned, or why nobody could and what to do about it.
+    fn last_via(&self) -> crate::read_via::ReadVia {
+        crate::read_via::ReadVia::Helper
+    }
+
+    /// Moves whenever the helper comes or goes (a kept answer from before is stale).
+    fn epoch(&self) -> u64 {
+        0
+    }
+
+    /// A person asked to try again: a helper left alone after a hang is asked at once.
+    fn retry_now(&mut self) {}
+}
+
+impl LoginItemsLink for Box<dyn LoginItemsLink> {
+    fn login_items(&mut self) -> Result<LoginItemsReply, crate::ports::PlatformError> {
+        (**self).login_items()
+    }
+    fn last_via(&self) -> crate::read_via::ReadVia {
+        (**self).last_via()
+    }
+    fn epoch(&self) -> u64 {
+        (**self).epoch()
+    }
+    fn retry_now(&mut self) {
+        (**self).retry_now()
+    }
 }
 
 /// The helper's side of `LoginItems`: reads the dump with the rights it has and keeps only what `uid` may see. The helper's

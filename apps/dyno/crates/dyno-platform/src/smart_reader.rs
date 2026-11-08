@@ -38,8 +38,9 @@ impl SmartReader for SmartctlReader {
     fn read(&self, query: SmartQuery) -> Result<SmartReply, PlatformError> {
         let started = self.clock.monotonic();
         let scan_tool = tool(&self.smartctl, &["--scan-open", "-j"]);
-        let scan = self.runner.run_tool(&scan_tool, SCAN_TIMEOUT).inspect_err(|e| {
-            log::warn!(Tool = self.smartctl.as_str(), Error = e.to_string().as_str(); "smartctl scan did not run to completion");
+        let scan = self.runner.run_tool(&scan_tool, SCAN_TIMEOUT).inspect_err(|e| match e {
+            PlatformError::NotFound(_) => log::info!(Tool = self.smartctl.as_str(); "the disk-health tool isn't installed"),
+            _ => log::warn!(Tool = self.smartctl.as_str(), Error = e.to_string().as_str(); "smartctl scan did not run to completion"),
         })?;
         let cap = usize::from(query.max_disks.min(MAX_SMART_DISKS));
         let found = parse_scan(&scan.stdout, usize::from(MAX_SMART_DISKS) + 1 + 4096);
@@ -148,7 +149,9 @@ mod tests {
         assert_eq!(reply.disks.len(), 1);
         assert_eq!(reply.skipped.len(), 2);
         assert!(reply.skipped[0].reason.contains("took longer") && reply.skipped[0].reason.contains("Try again"));
-        assert!(!format!("{reply:?}").contains("SECRET1"));
+        // The serial travels only inside the wear id (the history key, amended 2026-11-04); nowhere else in the reply.
+        assert_eq!(reply.disks[0].wear_id.as_deref(), Some("EX SECRET1"));
+        assert_eq!(format!("{reply:?}").matches("SECRET1").count(), 1);
         let seen = seen.lock().unwrap();
         let cmds: Vec<_> = seen.iter().map(|t| t.args.join(" ")).collect();
         assert_eq!(

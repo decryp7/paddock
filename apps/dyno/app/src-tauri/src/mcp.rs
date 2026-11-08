@@ -1,4 +1,5 @@
-//! Dyno's tools for the family's MCP server (ADR 0032 decision D7, ADR 0007): two read-only tools (`power_state`, `wol_devices`)
+//! Dyno's tools for the family's MCP server (ADR 0032 decision D7, ADR 0007): eight read-only reading tools
+//! ([`crate::mcp_readings`]), two read-only power tools (`power_state`, `wol_devices`)
 //! and exactly two actions (`wake_device`, `keep_awake`, at most 12 hours). The actions are hidden and refused until the user
 //! allows each by name in the AI access settings ([`paddock_mcp::Policy::allow_action`]); sleep, shut down, timed actions and
 //! scheduled wakes are never tools. A tool asks the agent through [`AgentCalls`], the same requests the Power page sends, so the
@@ -6,14 +7,21 @@
 
 use dyno_core::power::awake::{AwakeScope, AwakeSpec, AwakeUntil, AwakeView};
 use dyno_core::power::PowerView;
-use dyno_core::protocol::{Reply, Request};
+use dyno_core::protocol::{LiveUpdate, Reply, Request};
 use dyno_core::wol::WolView;
 use paddock_env::AppDirs;
 use paddock_jobs::time::SystemClock;
-use paddock_mcp::{AuditLog, Emit, FileSettings, KeyStore, McpControl, Server, ToolDef, ToolError, ToolOutput};
-use paddock_secrets::{KeyringSecrets, MemorySecrets, Secrets};
+use paddock_mcp::listener::Listener;
+use paddock_mcp::{AuditLog, Emit, FileKeys, FileSettings, KeyStore, McpControl, Server, ToolDef, ToolError, ToolOutput};
 use serde_json::{json, Value};
 use std::sync::Arc;
+
+/// How long a tool waits for the agent: under the tools' 10 s call limit ([`crate::mcp_readings`]), so the server never has to
+/// abandon a call that is still blocked on the link.
+pub const AGENT_CALL_LIMIT: std::time::Duration = std::time::Duration::from_secs(8);
+
+/// Most MCP clients connected at once.
+const MAX_CLIENTS: usize = 4;
 
 /// The longest `keep_awake` an AI client may ask for, in minutes (12 hours).
 pub const MAX_KEEP_AWAKE_MINUTES: u64 = 12 * 60;
@@ -29,12 +37,23 @@ impl<R: tauri::Runtime> AgentCalls for ShellCalls<R> {
             None => Err("Dyno is still starting; try again in a moment.".into()),
         }
     }
+
+    fn live(&self) -> Result<LiveUpdate, String> {
+        use tauri::Manager;
+        match self.0.try_state::<Arc<crate::shell::ShellOf<R>>>() {
+            Some(shell) => shell.newest_live(),
+            None => Err("Dyno is still starting; try again in a moment.".into()),
+        }
+    }
 }
 
 /// How a tool reaches the agent. The app's wiring is its agent link; a test is a script.
 pub trait AgentCalls: Send + Sync {
     /// Sends one request; the error is the agent's message, for the client to read.
     fn call(&self, request: Request) -> Result<Reply, String>;
+
+    /// The newest live update the agent pushed (what the dashboard and the tray draw); the error says why there is none yet.
+    fn live(&self) -> Result<LiveUpdate, String>;
 }
 
 fn power(calls: &dyn AgentCalls) -> Result<PowerView, ToolError> {
@@ -98,20 +117,13 @@ fn find_device(v: &WolView, wanted: &str) -> Result<u64, ToolError> {
 
 /// Builds the AI access control the shell manages (`Builder::mcp`): the server with Dyno's tools (off until the user switches it on in
 /// Settings > AI access, every action off until allowed by name), the settings in the config folder, the client keys in the
-/// credential store (a memory vault when `real_secrets` is false: a test never reaches the real one, ER-14) and the audit log.
-pub fn control(
-    dirs: &AppDirs,
-    app_name: &str,
-    version: &str,
-    real_secrets: bool,
-    emit: Emit,
-    calls: Arc<dyn AgentCalls>,
-) -> Arc<McpControl> {
+/// owner-only `mcp-keys.json` beside them (a hash per key, never the key, and never the OS credential store: opening a Keychain item of another build blocks the app before its window) and the audit log.
+pub fn control(dirs: &AppDirs, app_name: &str, version: &str, emit: Emit, calls: Arc<dyn AgentCalls>) -> Arc<McpControl> {
     let log = Arc::new(AuditLog::new(500));
     let sink = McpControl::announcing_sink(log.clone(), emit.clone());
     let server = Arc::new(
         Server::new(app_name, version, Arc::new(SystemClock), sink, Arc::new(paddock_log::Redactor::new())).with_instructions(
-            "Ask about Dyno's power state and Wake-on-LAN computers. Waking a computer and keeping this one awake work only if the user allowed them.",
+            "Ask about this computer's current readings (system summary, CPU and memory, disks, top programs, network, alarms, history, sensors), its power state and its Wake-on-LAN computers. Readings say why when one is not available. Waking a computer and keeping this one awake work only if the user allowed them.",
         ),
     );
     for tool in tools(calls) {
@@ -120,28 +132,41 @@ pub fn control(
             log::error!("a Dyno MCP tool was refused: {e}");
         }
     }
-    let secrets: Arc<dyn Secrets> = if real_secrets {
-        Arc::new(KeyringSecrets::os(app_name))
-    } else {
-        Arc::new(MemorySecrets::new(app_name))
-    };
-    Arc::new(McpControl::new(
+    let keys = Arc::new(KeyStore::new());
+    let listener = Arc::new(Listener::new(
+        server.clone(),
+        keys.clone(),
+        paddock_mcp::listener::discovery_path(dirs.config()),
+        MAX_CLIENTS,
+    ));
+    let control = Arc::new(McpControl::new(
         server,
         log,
-        Arc::new(KeyStore::new()),
+        keys,
         Arc::new(FileSettings::new(dirs.config().join("mcp.json"))),
-        secrets,
+        Arc::new(FileKeys::new(dirs.config().join("mcp-keys.json"))),
         emit,
         Arc::new(|| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
         }),
-    ))
+    ));
+    // Serves on 127.0.0.1 while AI access is on and a key exists (ADR 0007, ADR 0032 amendment 2026-11-05); this process holds the
+    // tools (they ask the agent through the shell), so a client works while the window is closed and the app stays in the tray.
+    control.attach_listener(listener);
+    control
 }
 
-/// Dyno's four tools over `calls`.
+/// Every tool Dyno offers over `calls`: the power and Wake-on-LAN tools here and the reading tools of [`crate::mcp_readings`].
 pub fn tools(calls: Arc<dyn AgentCalls>) -> Vec<ToolDef> {
+    let mut all = power_tools(calls.clone());
+    all.extend(crate::mcp_readings::tools(calls));
+    all
+}
+
+/// The power state, Wake-on-LAN list and the two actions.
+fn power_tools(calls: Arc<dyn AgentCalls>) -> Vec<ToolDef> {
     let (c1, c2, c3, c4) = (calls.clone(), calls.clone(), calls.clone(), calls);
     vec![
         ToolDef::read_only("power_state", "Whether Dyno is keeping the computer awake, and why a hold ended.", json!({"type": "object", "additionalProperties": false}), move |_, _| {
@@ -215,6 +240,10 @@ mod tests {
     }
 
     impl AgentCalls for Script {
+        fn live(&self) -> Result<LiveUpdate, String> {
+            Err("The script has no live readings.".into())
+        }
+
         fn call(&self, request: Request) -> Result<Reply, String> {
             self.asked.lock().unwrap().push(request.clone());
             if let Some(m) = &self.refuse {
@@ -331,6 +360,28 @@ mod tests {
             .collect()
     }
 
+    /// The names of every read-only tool (the two power reads and the reading tools) plus `actions`, in the order `tools/list` gives.
+    fn reads_and(actions: &[&str]) -> Vec<String> {
+        let mut v: Vec<String> = [
+            "alarms",
+            "cpu_memory",
+            "disks",
+            "history",
+            "network_summary",
+            "power_state",
+            "sensors",
+            "system_summary",
+            "top_processes",
+            "wol_devices",
+        ]
+        .iter()
+        .chain(actions)
+        .map(|s| s.to_string())
+        .collect();
+        v.sort();
+        v
+    }
+
     /// Whether the server refuses to serve at all (its master switch is off).
     fn refuses(s: &Server) -> bool {
         let session = Session::new("tester");
@@ -344,10 +395,10 @@ mod tests {
     }
 
     #[test]
-    fn only_the_two_reads_exist_until_the_user_allows_an_action_by_name() {
+    fn only_the_reads_exist_until_the_user_allows_an_action_by_name() {
         let s = server(Script::new(vec![]), Policy::read_only());
         let session = ready(&s);
-        assert_eq!(names(&s, &session), ["power_state", "wol_devices"]);
+        assert_eq!(names(&s, &session), reads_and(&[]));
         let refused = call(&s, &session, "keep_awake", json!({"minutes": 30}));
         assert!(
             refused["error"].is_object() || refused["result"]["isError"] == json!(true),
@@ -355,7 +406,7 @@ mod tests {
         );
         let s = server(Script::new(vec![]), Policy::read_only().allow_action("wake_device"));
         let session = ready(&s);
-        assert_eq!(names(&s, &session), ["power_state", "wake_device", "wol_devices"]);
+        assert_eq!(names(&s, &session), reads_and(&["wake_device"]));
     }
 
     #[test]

@@ -11,7 +11,7 @@ export const DIALOG_CONTRACTS = {
     height: 700,
     instanced: false,
     requiredChoice: false,
-    commands: ['dialog_open', 'dyno', 'edit_widget_layout', 'mcp_audit', 'mcp_audit_clear', 'mcp_get', 'mcp_revoke_key', 'mcp_save', 'popover_preview', 'popover_snapshot', 'settings_*', 'widget_choices', 'widget_layout'],
+    commands: ['dialog_open', 'dyno', 'edit_widget_layout', 'job_cancel', 'jobs_snapshot', 'mcp_audit', 'mcp_audit_clear', 'mcp_get', 'mcp_revoke_key', 'mcp_save', 'popover_preview', 'popover_snapshot', 'settings_*', 'tray_availability', 'widget_choices', 'widget_layout'],
   },
   'dy.alert-rule': {
     id: 'dy.alert-rule',
@@ -55,7 +55,7 @@ export const DIALOG_CONTRACTS = {
     height: 560,
     instanced: false,
     requiredChoice: false,
-    commands: ['dyno'],
+    commands: ['dyno', 'job_cancel', 'jobs_snapshot'],
   },
 } as const;
 

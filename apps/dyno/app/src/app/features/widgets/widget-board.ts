@@ -15,7 +15,7 @@ import { MetricReadings } from '../../state/metric-readings';
 import { WidgetChoicesStore } from '../../state/widget-choices';
 import { WidgetLayouts } from '../../state/widget-layouts';
 import { widgetCounterPaths } from '../counters/counters-model';
-import { buildFeed, FEED_LIMIT } from '../dashboard/events-feed';
+import { buildFeed, EVENTS_LOADED } from '../dashboard/events-feed';
 import { LiveStore } from '../../state/live.store';
 import { dashboardStates, type DashboardSnapshot, type DyAction, type DyValue } from './dashboard-states';
 import { DynoGridBackend } from './grid-backend';
@@ -113,7 +113,7 @@ export class WidgetBoard {
   /** The history has been read once. A range switch empties it again, but the panel stays mounted: its own loading state shows (the control being used stays under the pointer and keeps its focus). */
   private readonly historySeen = signal(false);
   private readonly placements = computed(() => this.view()?.layout.placements ?? []);
-  private readonly feedEmpty = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), FEED_LIMIT).length === 0);
+  private readonly feedEmpty = computed(() => buildFeed(this.activity.entries(), this.alerts.alerts(), 1).length === 0);
   private readonly snapshot = computed<DashboardSnapshot>(() => ({
     connected: this.live.connected(),
     at: this.live.system()?.at ?? 0,
@@ -136,7 +136,8 @@ export class WidgetBoard {
     return w.kind === 'topProcesses' ? `Top apps by ${sentenceCase(name)}` : name;
   };
   /** The kinds whose widgets have a metric to choose: those that accept more than one. */
-  protected readonly hasOptions = (kind: string): boolean => (this.choices.choices()?.dashboard ?? []).some((k) => k.kind === kind && k.metrics.length > 1);
+  protected readonly hasOptions = (kind: string): boolean => !PANEL_KINDS.includes(kind as DashboardKind) &&
+    (this.choices.choices()?.dashboard ?? []).some((k) => k.kind === kind && k.metrics.length > 1);
 
   constructor() {
     const host = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -202,8 +203,8 @@ export class WidgetBoard {
   }
 
   private reloadEvents(): void {
-    void this.activity.load(30);
-    void this.alerts.load(20);
+    void this.activity.load(EVENTS_LOADED);
+    void this.alerts.load(EVENTS_LOADED);
   }
 
   /** The widget whose options the sheet shows. */

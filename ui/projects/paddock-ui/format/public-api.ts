@@ -7,6 +7,7 @@ export {
   NONE,
   TransferMeter,
   formatBytes,
+  formatStorage,
   formatCompact,
   formatCount,
   formatDateTime,

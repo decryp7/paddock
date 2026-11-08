@@ -2,6 +2,7 @@ import {
   defineCommand,
   defineDialog,
   defineHealthService,
+  defineMenuItem,
   defineNotificationKind,
   definePage,
   defineSettingsPage,
@@ -119,8 +120,16 @@ const PAGES = NAV.map((item, index) =>
 );
 
 export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
+  // Quit and stop measuring sits right above the shell's Quit in the app menu (Quit stays last: Cmd+Q) (the menu bar, and the macOS menu bar).
+  menus: [defineMenuItem({ menu: 'app', command: 'dy.quit-stop', group: 'quit', order: 900 })],
   // The palette's commands beyond capture are the pages' own buttons, named as the buttons are (the category names the page).
   commands: [
+    defineCommand<DynoContext>({
+      id: 'dy.quit-stop',
+      title: msg('dy.quit-stop', 'Quit and stop measuring'),
+      category: msg('pd.category.app', 'Application'),
+      run: (ctx) => ctx.quitAndStop(),
+    }),
     defineCommand<DynoContext>({
       id: 'dy.capture',
       title: msg('dy.capture', 'Capture the last ten minutes'),
@@ -149,13 +158,6 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
       run: (ctx) => ctx.exportIssues(),
     }),
     defineCommand<DynoContext>({
-      id: 'dy.check-backup',
-      title: msg('dy.check-backup', 'Check now'),
-      category: msg('dy.category.backup', 'Backup health'),
-      enabled: (ctx) => ctx.canCheckBackup(),
-      run: (ctx) => ctx.checkBackup(),
-    }),
-    defineCommand<DynoContext>({
       id: 'dy.run-why-slow',
       title: msg('dy.run-why-slow', 'Run again'),
       category: msg('dy.category.why-slow', 'Why slow'),
@@ -168,13 +170,6 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
       category: msg('dy.category.reports', 'Reports'),
       enabled: (ctx) => ctx.canExportReport(),
       run: (ctx) => ctx.exportReport(),
-    }),
-    defineCommand<DynoContext>({
-      id: 'dy.save-diagnostics',
-      title: msg('dy.save-diagnostics', 'Save bundle…'),
-      category: msg('dy.category.diagnostics', 'Diagnostics'),
-      enabled: (ctx) => ctx.canSaveDiagnostics(),
-      run: (ctx) => ctx.saveDiagnostics(),
     }),
     defineCommand<DynoContext>({
       id: 'dy.add-alarm-rule',
@@ -195,6 +190,11 @@ export const CONTRIBUTIONS: ContributionBatch<DynoContext> = {
   ],
   settingsPages: SETTINGS_PAGES,
   dialogs: DIALOGS,
-  healthServices: [defineHealthService({ id: 'dy.agent', label: msg('dy.health.agent', 'the Dyno agent'), icon: 'dy:processes' })],
+  healthServices: [
+    defineHealthService({ id: 'dy.agent', label: msg('dy.health.agent', 'the Dyno agent'), icon: 'dy:processes' }),
+    defineHealthService({ id: 'dy.tray', label: msg('dy.health.tray', 'the tray icons'), icon: 'dy:dashboard' }),
+    defineHealthService({ id: 'dy.setup', label: msg('dy.health.setup', 'the installer program'), icon: 'dy:settings' }),
+    defineHealthService({ id: 'dy.update', label: msg('dy.health.update', 'Dyno itself'), icon: 'dy:settings' }),
+  ],
   notificationKinds: [defineNotificationKind({ id: 'dy.alarm', title: msg('dy.notification.alarm', 'Alarm'), actions: [] })],
 };

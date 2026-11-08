@@ -30,7 +30,7 @@ interface NoisyRule {
               @if (s.noisiest.length === 0) {
                 <p class="lead">No rule has fired yet.</p>
               } @else {
-                <pd-table [toolbar]="false" label="Noisiest rules" [rows]="s.noisiest" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" [rowActions]="actions" [maxHeight]="360" (action)="mute($event.row)">
+                <pd-table [toolbar]="false" label="Noisiest rules" [rows]="s.noisiest" [columns]="columns" [rowKey]="ruleKey" [filterable]="false" [rowActions]="actions" height="window" (action)="mute($event.row)">
                   <ng-template pdCell="rule" let-n><span class="id">{{ ruleName(n.rule) }}</span>@if (muted(n.rule)) {<span class="faint sfx">Muted</span>}</ng-template>
                 </pd-table>
               }

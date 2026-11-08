@@ -16,6 +16,20 @@ export function fakeOutcome(search: string = globalThis.location?.search ?? ''):
   return OUTCOMES.find((o) => o === wanted) ?? 'succeed';
 }
 
+/**
+ * `?service-step=manual`: the service's phases wait until the test calls `window.__sdServiceStep()` (one step per call), so a
+ * test sees each phase for as long as it wants instead of racing a 500 ms timer.
+ */
+function manualSteps(search: string = globalThis.location?.search ?? ''): boolean {
+  return new URLSearchParams(search).get('service-step') === 'manual';
+}
+
+const queued: (() => void)[] = [];
+function queueStep(step: () => void): void {
+  queued.push(step);
+  (globalThis as { __sdServiceStep?: () => void }).__sdServiceStep = () => queued.shift()?.();
+}
+
 let memory: ServiceBackend | null = null;
 
 /**
@@ -28,7 +42,7 @@ export function demoServiceBackend(): ServiceBackend {
   memory ??= new MemoryServiceBackend({
     condition: fakeCondition(),
     outcome: fakeOutcome(),
-    schedule: (step) => void setTimeout(step, 500),
+    schedule: manualSteps() ? queueStep : (step) => void setTimeout(step, 500),
   });
   return memory;
 }

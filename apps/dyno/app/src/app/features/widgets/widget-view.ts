@@ -1,28 +1,28 @@
 import { MatTooltip } from '@angular/material/tooltip';
+import { SuSparkline } from '@decryp7/paddock-ui';
+import { formatNumber } from '@decryp7/paddock-ui/format';
 import { PdSkeleton } from '@decryp7/paddock-ui/widgets';
 import { FullTextTip } from '../../shared/full-text-tip';
 import type { Measured } from '../../core/api.types';
 import { showMeasured } from '../../core/measured';
 import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
 import { Icon } from '../../shared/icon';
-import { formatBytes, formatPercent } from '../../shared/format';
+import { formatBytes, formatPercent, formatRate } from '../../shared/format';
 import { GRADE_LABEL, GRADE_TONE } from '../../shared/labels';
 import { coreHeat } from '../../shared/heat';
 import { Ring } from '../../shared/ring';
-import { Sparkline } from '../../shared/sparkline';
 import { DiagnosisStore } from '../../state/diagnosis.store';
 import { HealthStore } from '../../state/health.store';
-import { LiveStore } from '../../state/live.store';
+import { LiveStore, SPARK_CAPACITY } from '../../state/live.store';
 import { ANOMALY_ICON, ANOMALY_LABEL } from '../../shared/labels';
 import type { Cells, DashboardKind, DashboardWidget, MetricReading, Placement } from '../../core/generated/widgets';
+import { ReadingSource } from '../../core/reading-source';
 import { AnimatedNumber } from './animated-number';
 import { HealthHero } from '../dashboard/health-hero';
 import { CpuTile } from '../dashboard/tiles';
 import { DiagnosisCard } from '../dashboard/diagnosis-card';
 import { EventsFeed } from '../dashboard/events-feed';
 import { ConsumersPanel, DiskTrendPanel, HistoryPanel } from '../dashboard/history-panels';
-import { ActivityStore } from '../../state/activity.store';
-import { AlertsStore } from '../../state/alerts.store';
 import { CountersStore } from '../../state/counters.store';
 import { counterReading } from './counter-reading';
 import { seriesFor } from './series';
@@ -33,38 +33,6 @@ import type { DyValue } from './dashboard-states';
 export const HERO_MIN_WIDTH = 4;
 /** From this many rows the health hero lists three reasons, below it two (the third would be cut). */
 export const HERO_ROWS_FOR_THREE = 11;
-
-/** The height of one recent-events entry (two lines and its padding), the head and the padding and grip clearance of a card, in px. */
-export const EVENT_ROW_PX = 48;
-/** The height of one issue (a name of up to two lines and its line below) and of a "+n more" line, in px. */
-export const ISSUE_ROW_PX = 64;
-export const MORE_LINE_PX = 22;
-const CARD_CHROME_PX = 62;
-
-/** The px a body has below the head, inside the padding and clear of the resize grip, at the standard 24 px row and 16 px gap. */
-function innerPx(rows: number): number {
-  return rows * 24 + (rows - 1) * 16 - CARD_CHROME_PX;
-}
-
-/**
- * How many entries of `px` each fit `rows` grid rows out of `total`, at least one: all of them when they fit, else as many as fit
- * beside a "+n more" line. Nothing is capped while the card has room.
- */
-function fitting(rows: number, total: number, px: number): number {
-  const inner = innerPx(rows);
-  if (total * px <= inner) return total;
-  return Math.max(1, Math.floor((inner - MORE_LINE_PX) / px));
-}
-
-/** How many recent-events entries (of `total`) fit `rows` grid rows. */
-export function eventsFitting(rows: number, total = Number.POSITIVE_INFINITY): number {
-  return fitting(rows, total, EVENT_ROW_PX);
-}
-
-/** How many issues (of `total`) fit `rows` grid rows. */
-export function issuesFitting(rows: number, total = Number.POSITIVE_INFINITY): number {
-  return fitting(rows, total, ISSUE_ROW_PX);
-}
 
 /** The placement the body reads while there is no value (never drawn: the twin is). */
 const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1, widget: { kind: 'bigNumber', metric: 'cpuTotal', options: { rangeSecs: 300, showLabel: true, fill: true, accent: null }, thresholds: { warning: null, critical: null } } };
@@ -78,7 +46,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
  */
 @Component({
   selector: 'dy-widget',
-  imports: [FullTextTip, MatTooltip, PdSkeleton, Icon, Ring, Sparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
+  imports: [FullTextTip, MatTooltip, ReadingSource, PdSkeleton, Icon, Ring, SuSparkline, AnimatedNumber, HealthHero, CpuTile, DiagnosisCard, EventsFeed, HistoryPanel, ConsumersPanel, DiskTrendPanel],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { '[attr.data-kind]': 'kind()', '[style.--wv-rows]': 'rows()' },
   template: `
@@ -95,13 +63,14 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
         @if (reading().reason; as why) {
           <p class="note"><span>Not available. {{ why }}</span></p>
         }
+        @if (thermal()) { <dy-reading-source [via]="thermalVia()" /> }
       }
       @case ('graph') {
         <div class="hero" [attr.data-tone]="reading().tone"><b><dy-animated-number [value]="reading().text" /></b><small>{{ reading().unit }}</small></div>
         @if (reading().reason; as why) {
           <p class="note"><span>Not available. {{ why }}</span></p>
         } @else if (series(); as s) {
-          <dy-sparkline [values]="s.values" [values2]="s.values2" [max]="percent() ? 100 : null" [zoom]="zoomed() && percent()" [fill]="widget().options.fill" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" style="--spark-h: 48px" />
+          <pd-sparkline [values]="s.values" [values2]="s.values2" [scale]="sparkScale()" [max]="percent() ? 100 : undefined" [area]="widget().options.fill" [capacity]="sparkCapacity" [formatValue]="sparkFormat()" [pad]="0" [dot]="false" [height]="48" [color]="accent()" color2="var(--text-3)" [label]="title() + ' over the last minute'" />
         } @else {
           <p class="note">No live history is kept for this metric.</p>
         }
@@ -143,6 +112,7 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
         @if (anomalies().length === 0) {
           <p class="note ok"><dy-icon name="check" /> Nothing unusual found.</p>
         }
+        <div class="issues-scroll" tabindex="0" role="region" aria-label="Unusual things found">
         <ul class="issues">
           @for (a of anomalies(); track a.id) {
             <li>
@@ -151,13 +121,11 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
             </li>
           }
         </ul>
-        @if (moreIssues() > 0) {
-          <p class="more num">+{{ moreIssues() }} more</p>
-        }
+        </div>
       }
       @case ('cpu') { <dy-cpu-tile /> }
       @case ('diagnosis') { <dy-diagnosis-card /> }
-      @case ('events') { <dy-events-feed [limit]="eventLimit()" /> }
+      @case ('events') { <dy-events-feed /> }
       @case ('history') { <dy-history-panel /> }
       @case ('consumers') { <dy-consumers-panel /> }
       @case ('diskTrend') { <dy-disk-trend-panel /> }
@@ -207,7 +175,9 @@ const NONE: Placement<DashboardWidget, Cells> = { id: '', x: 0, y: 0, w: 1, h: 1
     .issues strong { font-size: var(--fs-base); font-weight: var(--fw-semibold); }
     /* A name wraps to a second line before it is cut (the tooltip has the rest). */
     .two-lines { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-    .more { margin: 0; color: var(--text-3); font-size: var(--fs-xs); }
+    /* Every issue is listed; a long list scrolls inside the widget's body and the wheel passes on at its ends. */
+    .issues-scroll { max-height: var(--wv-avail); overflow-y: auto; }
+    .issues-scroll:focus-visible { outline-offset: -2px; }
     .issues small { color: var(--text-3); font-size: var(--fs-xs); }
   `,
 })
@@ -229,8 +199,6 @@ export class WidgetView {
   protected readonly health = inject(HealthStore);
   private readonly diagnosis = inject(DiagnosisStore);
   private readonly counters = inject(CountersStore);
-  private readonly activity = inject(ActivityStore);
-  private readonly alerts = inject(AlertsStore);
 
   /** The metric's name (the content's accessible names; the frame's head says the same through the board's `titleOf`). */
   protected readonly title = computed(() => this.choices.title(this.widget().metric));
@@ -263,20 +231,30 @@ export class WidgetView {
     const values = this.counters.trail()[path] ?? [];
     return values.length > 1 ? { values, values2: null } : null;
   });
+  /** Whether the widget shows a thermal reading, whose source (the helper, or why nobody could read it) the engine reports with each update. */
+  protected readonly thermal = computed(() => this.widget().metric === 'temperature');
+  protected readonly thermalVia = computed(() => this.live.update()?.via?.temperatures);
   protected readonly cores = computed(() => this.live.system()?.cpu.perCore ?? []);
   protected readonly busiest = computed(() => Math.max(0, ...this.cores()));
   protected readonly top = computed(() => {
     const u = this.live.update();
     return ((this.widget().metric === 'memory' ? u?.topMemory : u?.topCpu) ?? []).slice(0, 5);
   });
-  /** As many feed entries as the widget's rows hold (two-line entries of `EVENT_ROW_PX` below the head, inside the padding and clear of the resize grip). */
-  protected readonly eventLimit = computed(() => eventsFitting(this.rows(), this.activity.entries().length + this.alerts.alerts().length));
-  /** As many issues as the rows hold (the rest as "+n more"). */
-  protected readonly anomalies = computed(() => this.diagnosis.anomalies().slice(0, issuesFitting(this.rows(), this.diagnosis.anomalies().length)));
-  protected readonly moreIssues = computed(() => this.diagnosis.anomalies().length - this.anomalies().length);
+  /** Every issue the engine found. */
+  protected readonly anomalies = this.diagnosis.anomalies;
   protected readonly grade = computed(() => (this.health.report() ? GRADE_LABEL[this.health.report()!.grade] : ''));
   protected readonly gradeTone = computed(() => (this.health.report() ? GRADE_TONE[this.health.report()!.grade] : 'accent'));
   protected readonly pct = formatPercent;
+  protected readonly sparkCapacity = SPARK_CAPACITY;
+  protected readonly sparkScale = computed(() => (this.zoomed() && this.percent() ? 'zoom' : 'zero') as 'zoom' | 'zero');
+  /** The graph's values in words for its accessible name: a percentage, a rate, or a number with the reading's unit. */
+  protected readonly sparkFormat = computed<(v: number) => string>(() => {
+    if (this.percent()) return formatPercent;
+    const m = this.widget().metric;
+    if (m === 'networkDown' || m === 'networkUp' || m === 'networkBoth') return formatRate;
+    const unit = this.reading().unit;
+    return (v) => `${formatNumber(v)} ${unit}`.trim();
+  });
   protected readonly round = (v: number) => Math.round(v).toString();
   protected readonly label = (k: keyof typeof ANOMALY_LABEL) => ANOMALY_LABEL[k];
   protected readonly anomalyIcon = (k: keyof typeof ANOMALY_ICON) => ANOMALY_ICON[k];

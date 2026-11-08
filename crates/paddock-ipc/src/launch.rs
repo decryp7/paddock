@@ -3,6 +3,14 @@
 //! drop, an optional memory cap),
 //! hands it the [`Bootstrap`] as one JSON line on stdin, keeps stdin open as its lifeline, and accepts its authenticated
 //! connection (token, protocol, and the pid of the process it started). The child side is [`crate::child`].
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::error::IpcError;
 use crate::frame::{FrameLimit, ProtocolVersion};
@@ -160,6 +168,8 @@ impl Child {
             if deadline.passed() {
                 return None;
             }
+            // silent: Err(Cancelled) is the wake-up; the loop re-reads the process and the deadline right after
+            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
             let _ = self
                 .clock
                 .wait(Duration::from_millis(10), &CancelToken::new());
@@ -208,6 +218,17 @@ impl Child {
 impl Drop for Child {
     fn drop(&mut self) {
         self.kill();
+    }
+}
+
+/// The launch error for a bootstrap line that could not be written. A closed pipe means the child is already gone (a child
+/// that exits at once may do so before the line is written, or after it): that is the same outcome as one that exits
+/// before it connects, so both read alike and the OS error stays in the message.
+fn bootstrap_failure(label: &str, e: &io::Error) -> IpcError {
+    if e.kind() == io::ErrorKind::BrokenPipe {
+        IpcError::Spawn(format!("{label} exited before it connected ({e})"))
+    } else {
+        IpcError::Spawn(format!("{label} did not take its bootstrap ({e})"))
     }
 }
 
@@ -272,15 +293,7 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
         s.write_all(line.as_bytes()).and_then(|()| s.flush())
     });
     // On failure `process` is dropped, which ends its tree.
-    // A closed pipe means the child is already gone (a child that exits at once may do so before the line is written).
-    written.map_err(|e| {
-        let what = if e.kind() == io::ErrorKind::BrokenPipe {
-            "exited before it took"
-        } else {
-            "did not take"
-        };
-        IpcError::Spawn(format!("{label} {what} its bootstrap ({e})"))
-    })?;
+    written.map_err(|e| bootstrap_failure(&label, &e))?;
     let conn = host.accept_while(Some(pid), spec.start_timeout, &mut || {
         if process.is_running() {
             Ok(())
@@ -300,4 +313,35 @@ pub fn launch(spec: &ChildSpec, handler: Arc<dyn Handler>) -> Result<Child, IpcE
         peer,
         _host: host,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn message(e: IpcError) -> String {
+        match e {
+            IpcError::Spawn(m) => m,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_child_that_exits_before_the_bootstrap_reads_like_one_that_exits_before_it_connects() {
+        let pipe = io::Error::from(io::ErrorKind::BrokenPipe);
+        let m = message(bootstrap_failure("plugin \"exit\"", &pipe));
+        assert!(m.contains("exited before it connected"), "{m}");
+        assert!(
+            m.contains(&pipe.to_string()),
+            "the OS error stays in the message: {m}"
+        );
+    }
+
+    #[test]
+    fn another_write_error_is_not_called_an_exit() {
+        let denied = io::Error::from(io::ErrorKind::PermissionDenied);
+        let m = message(bootstrap_failure("p", &denied));
+        assert!(m.contains("did not take its bootstrap"), "{m}");
+        assert!(!m.contains("exited"), "{m}");
+    }
 }

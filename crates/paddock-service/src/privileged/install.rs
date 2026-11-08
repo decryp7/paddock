@@ -3,14 +3,38 @@
 //! idempotent: run again it takes over an older registration (a 0.x helper under the same label, the previous version)
 //! and is therefore also the update. Every phase is logged with its duration and ends in the [`Report`] (ER-27).
 
-use super::files::{FileKind, ProtectedFiles, Violation, verify_protected};
+use super::files::{FileKind, HeldSource, ProtectedFiles, Violation, hash_bytes, verify_protected};
 use super::layout::{CopyTarget, Layout};
+use super::trust::{self, Style, TrustPort, Untrusted};
 use super::windows_acl::{ICACLS, acl_command, acl_shape_ok};
-use crate::backend::{Backend, Job, Registration};
+use crate::backend::{Backend, Inspection, Job, Registration};
 use crate::port::{RegisterError, System};
 use paddock_env::Os;
 use std::path::Path;
 use std::time::{Duration, Instant};
+
+/// The largest program the installer copies (it is read whole through one handle, so what is checked is what is written).
+pub const MAX_PROGRAM: u64 = 256 * 1024 * 1024;
+/// The largest signature file read.
+pub const MAX_SIGNATURE: u64 = 16 * 1024;
+
+/// Checks the bytes of the program that is about to be copied against a signature (macOS: a minisign signature of the family
+/// update key, because the bundle is user-owned and no ownership check can vouch for it).
+pub trait SourceVerifier: Send + Sync {
+    /// `Ok` with a short verdict for the log, or the reason in words (with the next step) the program is not accepted.
+    ///
+    /// # Errors
+    /// Why the bytes are not accepted.
+    fn verify(&self, program: &[u8], signature: &[u8]) -> Result<String, String>;
+}
+
+/// The signature check of an install: the verifier and where the signature file may be (the first that exists is read).
+pub struct SignatureCheck<'a> {
+    /// What judges the bytes.
+    pub verifier: &'a dyn SourceVerifier,
+    /// The places of the signature file, in order.
+    pub locations: Vec<std::path::PathBuf>,
+}
 
 /// One thing the installer does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,13 +92,14 @@ pub fn plan_uninstall(layout: &Layout) -> Vec<Step> {
 }
 
 /// The removal of the service by the service itself (its own `Uninstall` request): the files go first, the stop and the
-/// unregistering last, because stopping the job ends the process that is running these steps.
+/// unregistering last, because stopping the job ends the process that is running these steps. If this process is still
+/// alive afterwards, [`Step::ConfirmGone`] says whether the OS really dropped the registration (ADR 0054 RC-2).
 pub fn plan_uninstall_self(layout: &Layout) -> Vec<Step> {
     let mut steps = Vec::new();
     if layout.copy.is_some() {
         steps.extend([Step::RemoveProgram, Step::RemoveFolder]);
     }
-    steps.push(Step::StopExisting);
+    steps.extend([Step::StopExisting, Step::ConfirmGone]);
     steps
 }
 
@@ -117,6 +142,8 @@ pub struct Report {
     pub phases: Vec<PhaseRecord>,
     /// The SHA-256 of the protected copy that was written (for the audit log).
     pub sha256: Option<String>,
+    /// The signature verdict on the source program, when a signature check ran.
+    pub signature: Option<String>,
     /// An older registration was replaced.
     pub replaced_existing: bool,
 }
@@ -164,15 +191,35 @@ fn violation(what: &str, path: &Path, v: &Violation) -> InstallError {
     InstallError::Refused(format!("{what} {} is not protected: {v}", path.display()))
 }
 
+/// `\\?\C:\x` as `C:\x` (what `canonicalize` returns on Windows is the verbatim form, which neither the trust rule's path
+/// splitting nor a comparison with the layout's plain paths understands). `\\?\UNC\` paths are left as they are.
+pub fn without_verbatim_prefix(path: &str) -> &str {
+    match path.strip_prefix("\\\\?\\") {
+        Some(rest) if !rest.starts_with("UNC\\") => rest,
+        _ => path,
+    }
+}
+
+/// A Windows path that failed the trust rule, in words with the next step.
+fn untrusted(what: &str, e: &Untrusted) -> InstallError {
+    log::error!(what = what, path = e.path.as_str(), reason:% = e.reason; "install: not a protected place");
+    InstallError::Refused(format!("{what}: {}", e.describe()))
+}
+
 /// Runs the plans.
 pub struct Installer<'a> {
     layout: &'a Layout,
     files: &'a mut dyn ProtectedFiles,
     backend: &'a mut dyn Backend,
     sys: &'a mut dyn System,
+    trust: Option<&'a mut dyn TrustPort>,
+    signature: Option<SignatureCheck<'a>>,
+    held: Option<HeldSource>,
     waits: Waits,
     report: Report,
     running_here: bool,
+    /// What the OS held right after `register` (ADR 0054 section 1.1): `Confirm` judges it before asking again.
+    registered: Option<Inspection>,
 }
 
 impl<'a> Installer<'a> {
@@ -188,10 +235,29 @@ impl<'a> Installer<'a> {
             files,
             backend,
             sys,
+            trust: None,
+            signature: None,
+            held: None,
             waits: Waits::default(),
             report: Report::default(),
             running_here: false,
+            registered: None,
         }
+    }
+
+    /// The trust rule of the machine (Windows: who may change Program Files and the folder the program is copied into, and the
+    /// source of the copy). A Windows install without it is refused: nothing else can say that the copy is protected.
+    #[must_use]
+    pub fn with_trust(mut self, trust: &'a mut dyn TrustPort) -> Self {
+        self.trust = Some(trust);
+        self
+    }
+
+    /// Requires the program to carry a valid signature (see [`SignatureCheck`]); without one the install is refused.
+    #[must_use]
+    pub fn with_signature(mut self, check: SignatureCheck<'a>) -> Self {
+        self.signature = Some(check);
+        self
     }
 
     /// Other waits (tests).
@@ -216,11 +282,25 @@ impl<'a> Installer<'a> {
                 log::error!(step:? = step, error:% = e; "install failed");
                 if matches!(step, Step::Register | Step::Confirm) {
                     // Never leave a registration that does not work: the next start would fail again and again.
-                    let _ = self.backend.evict();
-                    let _ = self.backend.unregister();
+                    if let Err(why) = self.backend.evict() {
+                        log::warn!(step:? = step, error:% = why; "install clean-up: the job could not be stopped");
+                    }
+                    if let Err(why) = self.backend.unregister() {
+                        log::warn!(step:? = step, error:% = why; "install clean-up: the registration could not be removed");
+                    }
                 }
             })?;
         }
+        Ok(self.report)
+    }
+
+    /// Checks the program that would be installed (its place, its signature) and nothing else: no folder is made, nothing is
+    /// written or registered. The caller runs it before it prepares anything of its own, so a refused source leaves no trace.
+    ///
+    /// # Errors
+    /// An [`InstallError`] when the source would be refused by [`install`](Self::install).
+    pub fn preflight(mut self, source: &Path) -> Result<Report, InstallError> {
+        self.check_source(source)?;
         Ok(self.report)
     }
 
@@ -255,38 +335,109 @@ impl<'a> Installer<'a> {
         Ok(self.report)
     }
 
+    /// The trust port of a Windows install; its absence refuses the install.
+    fn trust_port(&mut self) -> Result<&mut (dyn TrustPort + 'a), InstallError> {
+        self.trust.as_deref_mut().ok_or_else(|| {
+            InstallError::Refused("no trust check is configured for this install, so nothing can say the copy is protected".into())
+        })
+    }
+
+    /// Opens the source once, checks it through that handle and keeps its bytes: what is checked here is what is written.
     fn check_source(&mut self, source: &Path) -> Result<(), InstallError> {
         let Some(copy) = &self.layout.copy else {
             return Ok(());
         };
-        let facts = self.files.facts(source).map_err(|e| {
+        let copy = copy.clone();
+        if self.layout.os == Os::Windows {
+            // The chain to the source must be one only administrators can change: a per-user copy is refused (a user could
+            // swap it between this check and the copy), the per-machine one in Program Files passes.
+            let text = without_verbatim_prefix(&source.to_string_lossy()).to_string();
+            let port = self.trust_port()?;
+            trust::verify_chain(port, &text, FileKind::File, None, false).map_err(|e| {
+                log::error!(source = "checked", verdict = "refused"; "install: the program to copy is not in a protected place");
+                InstallError::Refused(format!(
+                    "the program to copy is not in a place only administrators can change ({}); reinstall Dyno for all users (per-machine) and turn the helper on again",
+                    e.describe()
+                ))
+            })?;
+        }
+        let held = self.files.open_source(source, MAX_PROGRAM).map_err(|e| {
             failed(
                 Step::CopyProgram,
                 format!("{} cannot be read: {e}", source.display()),
             )
         })?;
-        match facts {
-            Some(f) if f.kind == FileKind::File => {}
-            Some(f) => {
-                return Err(InstallError::Refused(format!(
-                    "the program {} is a {:?}, not a file",
-                    source.display(),
-                    f.kind
-                )));
-            }
-            None => {
-                return Err(InstallError::Refused(format!(
-                    "the program {} is not there",
-                    source.display()
-                )));
-            }
+        let Some(held) = held else {
+            return Err(InstallError::Refused(format!(
+                "the program {} is not there",
+                source.display()
+            )));
+        };
+        if held.facts.kind != FileKind::File {
+            return Err(InstallError::Refused(format!(
+                "the program {} is a {:?}, not a file",
+                source.display(),
+                held.facts.kind
+            )));
         }
-        if source == copy.file || source.starts_with(&copy.folder) && !copy.folder_is_system {
+        let inside = if self.layout.os == Os::Windows {
+            // Windows paths are compared as text with Windows rules, whatever the host.
+            let plain = without_verbatim_prefix(&source.to_string_lossy()).to_string();
+            let (file, folder) = (copy.file.to_string_lossy(), copy.folder.to_string_lossy());
+            trust::is_within(&plain, &file, Style::Windows)
+                || (trust::is_within(&plain, &folder, Style::Windows) && !copy.folder_is_system)
+        } else {
+            source == copy.file || source.starts_with(&copy.folder) && !copy.folder_is_system
+        };
+        if inside {
             return Err(InstallError::Refused(
                 "the program to copy is already inside the protected folder".into(),
             ));
         }
+        let sha = hash_bytes(&held.bytes);
+        let verdict = self.check_signature(&held.bytes)?;
+        log::info!(
+            sha256 = sha.as_str(),
+            bytes = held.bytes.len(),
+            signature = verdict.as_deref().unwrap_or("not required");
+            "install: the source program was read through one handle and checked"
+        );
+        self.report.signature = verdict;
+        self.held = Some(held);
         Ok(())
+    }
+
+    /// The signature verdict on `program`, or a refusal (no signature file, a bad one, none configured is no check).
+    fn check_signature(&mut self, program: &[u8]) -> Result<Option<String>, InstallError> {
+        let Some(check) = &self.signature else {
+            return Ok(None);
+        };
+        let mut found = None;
+        for location in &check.locations {
+            match self.files.open_source(location, MAX_SIGNATURE) {
+                Ok(Some(h)) if h.facts.kind == FileKind::File => {
+                    found = Some(h.bytes);
+                    break;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!(signature_file = "unreadable", error:% = e; "install: a signature location could not be read")
+                }
+            }
+        }
+        let Some(signature) = found else {
+            log::error!(verdict = "missing"; "install: the program has no signature file");
+            return Err(InstallError::Refused(
+                "the helper has no signature file next to it, so it cannot be told from a replaced copy; reinstall Dyno from the official download and try again".into(),
+            ));
+        };
+        match check.verifier.verify(program, &signature) {
+            Ok(verdict) => Ok(Some(verdict)),
+            Err(why) => {
+                log::error!(verdict = "refused", reason = why.as_str(); "install: the program's signature was refused");
+                Err(InstallError::Refused(why))
+            }
+        }
     }
 
     fn run_step(&mut self, step: Step, source: Option<&Path>) -> Result<(), InstallError> {
@@ -326,9 +477,11 @@ impl<'a> Installer<'a> {
         let running = self.backend.job_process();
         if self.running_here {
             // The stop ends the process that is running these steps: take the registration away first.
-            self.backend
+            let after = self
+                .backend
                 .unregister()
                 .map_err(|e| failed(Step::StopExisting, e))?;
+            log::info!(registration:? = after.registration, job:? = after.job; "stop: unregistered, read back");
             if let Err(e) = self.backend.evict() {
                 notes.push(format!("stop: {e}"));
             }
@@ -336,9 +489,11 @@ impl<'a> Installer<'a> {
             if let Err(e) = self.backend.evict() {
                 notes.push(format!("stop: {e}"));
             }
-            self.backend
+            let after = self
+                .backend
                 .unregister()
                 .map_err(|e| failed(Step::StopExisting, e))?;
+            log::info!(registration:? = after.registration, job:? = after.job; "stop: unregistered, read back");
         }
         let mut waited = Duration::ZERO;
         while !self.backend.job_gone() {
@@ -377,6 +532,16 @@ impl<'a> Installer<'a> {
 
     fn ensure_folder(&mut self) -> Result<String, InstallError> {
         let copy = self.copy()?.clone();
+        if self.layout.os == Os::Windows {
+            // Program Files itself: nobody but administrators may replace what the install makes in it.
+            let folder = copy.folder.to_string_lossy().into_owned();
+            let parent = trust::parent_of(&folder, Style::Windows)
+                .ok_or_else(|| InstallError::Refused(format!("{folder} has no parent folder")))?;
+            let port = self.trust_port()?;
+            trust::verify_container(port, &parent)
+                .map_err(|e| untrusted("the Program Files folder", &e))?;
+            log::info!(root = parent.as_str(); "install: the Program Files folder passed the trust check");
+        }
         let facts = self
             .files
             .facts(&copy.folder)
@@ -420,15 +585,28 @@ impl<'a> Installer<'a> {
             .run(ICACLS, &[&folder_text])
             .map_err(|e| failed(Step::ApplyAcl, format!("icacls {e}")))?;
         acl_shape_ok(&listing.stdout).map_err(|why| failed(Step::ApplyAcl, why))?;
+        // The listing says what was set; the trust rule reads the real security descriptor from the open folder (owner,
+        // inheritance, every ancestor) and is what proves nobody else can change it.
+        let text = folder.to_string_lossy().into_owned();
+        let port = self.trust_port()?;
+        trust::verify_chain(port, &text, FileKind::Dir, Some(&text), false)
+            .map_err(|e| untrusted("the protected folder", &e))?;
         Ok("set and checked".into())
     }
 
     fn copy_program(&mut self, source: Option<&Path>) -> Result<String, InstallError> {
         let copy = self.copy()?.clone();
         let source = source.ok_or_else(|| InstallError::Refused("no program to copy".into()))?;
+        // The bytes that were checked through the one open handle; the path is not opened again.
+        let held = self.held.take().ok_or_else(|| {
+            InstallError::Refused(format!(
+                "{} was not checked before the copy",
+                source.display()
+            ))
+        })?;
         let hash = self
             .files
-            .copy_program(source, &copy.file, copy.file_mode)
+            .write_program(&held.bytes, &copy.file, copy.file_mode)
             .map_err(|e| failed(Step::CopyProgram, format!("{}: {e}", copy.file.display())))?;
         let short = hash.chars().take(12).collect::<String>();
         self.report.sha256 = Some(hash);
@@ -443,6 +621,15 @@ impl<'a> Installer<'a> {
             .map_err(|e| failed(Step::VerifyProgram, e))?;
         verify_protected(facts.as_ref(), FileKind::File)
             .map_err(|v| violation("the program", &program, &v))?;
+        if self.layout.os == Os::Windows {
+            // Windows reports no owner or mode on a file, so the line above only proved its kind: the trust rule reads the
+            // descriptor of the file and of every folder above it.
+            let text = program.to_string_lossy().into_owned();
+            let root = self.copy()?.folder.to_string_lossy().into_owned();
+            let port = self.trust_port()?;
+            trust::verify_chain(port, &text, FileKind::File, Some(&root), false)
+                .map_err(|e| untrusted("the installed program", &e))?;
+        }
         if let Some(written) = self.report.sha256.clone() {
             let now = self
                 .files
@@ -460,7 +647,11 @@ impl<'a> Installer<'a> {
 
     fn register(&mut self) -> Result<String, InstallError> {
         match self.backend.register() {
-            Ok(()) => Ok("registered".into()),
+            Ok(after) => {
+                log::info!(registration:? = after.registration, job:? = after.job; "install: registered, read back");
+                self.registered = Some(after);
+                Ok("registered".into())
+            }
             Err(RegisterError::NeedsElevation) => Err(InstallError::NeedsElevation),
             Err(RegisterError::Declined) => Err(InstallError::Declined),
             Err(e) => Err(failed(Step::Register, e)),
@@ -469,8 +660,10 @@ impl<'a> Installer<'a> {
 
     fn confirm(&mut self) -> Result<String, InstallError> {
         let mut waited = Duration::ZERO;
+        // The read-back `register` returned is the first look; the OS is asked again only to wait for the start.
+        let mut first = self.registered.take();
         loop {
-            let look = self.backend.inspect();
+            let look = first.take().unwrap_or_else(|| self.backend.inspect());
             match look.registration {
                 Registration::Registered => {}
                 Registration::NeedsApproval => {
@@ -510,10 +703,11 @@ impl<'a> Installer<'a> {
                 _ => {}
             }
             if waited >= self.waits.start {
-                return Err(failed(
-                    Step::Confirm,
-                    "it was registered but did not start in time",
-                ));
+                let how = match look.job {
+                    Job::Failed(exit) => format!("it was registered but stopped with {exit}"),
+                    _ => "it was registered but did not start in time".to_string(),
+                };
+                return Err(failed(Step::Confirm, how));
             }
             self.backend.pause(self.waits.poll);
             waited += self.waits.poll;
@@ -548,16 +742,24 @@ impl<'a> Installer<'a> {
 
     fn confirm_gone(&mut self) -> Result<String, InstallError> {
         let look = self.backend.inspect();
-        // A packaged unit stays on disk, switched off; anything registered or running is not gone.
-        let registered = !matches!(
-            look.registration,
-            Registration::Absent | Registration::SwitchedOff
-        );
-        let running = matches!(look.job, Job::Running | Job::Refused);
-        if registered || running {
+        log::info!(registration:? = look.registration, job:? = look.job; "confirm gone: read back");
+        // A packaged unit stays on disk, switched off; anything registered or running is not gone. A service removing
+        // itself is still the job, whose stop is in flight: only its registration is judged.
+        let gone = if self.running_here {
+            matches!(
+                look.registration,
+                Registration::Absent | Registration::SwitchedOff
+            )
+        } else {
+            look.withdrawn()
+        };
+        if !gone {
             return Err(failed(
                 Step::ConfirmGone,
-                "the OS still holds the registration or the job",
+                format!(
+                    "the OS still holds the registration or the job (registration {:?}, job {:?})",
+                    look.registration, look.job
+                ),
             ));
         }
         Ok("gone".into())

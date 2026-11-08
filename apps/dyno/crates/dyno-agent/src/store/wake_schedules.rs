@@ -9,6 +9,12 @@ pub(super) const SCHEMA_SQL: &str = "
 CREATE TABLE IF NOT EXISTS wake_schedules (id INTEGER PRIMARY KEY, data TEXT NOT NULL);
 ";
 
+/// A schedule saved with the removed backup-check job (before 1.1.0) keeps its wake and loses the job. The row is compact JSON
+/// written by `json`, so a plain replace is exact.
+fn without_removed_job(data: &str) -> String {
+    data.replace("\"job\":\"backupCheck\"", "\"job\":null")
+}
+
 impl Store {
     /// The schedules, by id; a row that no longer parses is skipped.
     pub fn wake_schedules(&self) -> Result<Vec<WakeSchedule>> {
@@ -17,7 +23,7 @@ impl Store {
         Ok(rows
             .filter_map(|r| r.ok())
             .filter_map(|(id, data)| {
-                let mut s: WakeSchedule = parse(&data)?;
+                let mut s: WakeSchedule = parse(&without_removed_job(&data))?;
                 s.id = u32::try_from(id).ok()?;
                 Some(s)
             })
@@ -48,6 +54,23 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_schedule_for_the_removed_backup_check_keeps_its_wake_and_loses_the_job() {
+        let s = Store::memory().unwrap();
+        let a = WakeSchedule {
+            name: "A".into(),
+            job: Some(dyno_core::power::schedule::DynoJob::SoftwareInventory),
+            ..WakeSchedule::default()
+        };
+        let old = json(&a).unwrap().replace("softwareInventory", "backupCheck");
+        assert!(old.contains("backupCheck"), "{old}");
+        s.conn
+            .execute("INSERT INTO wake_schedules (id, data) VALUES (7, ?1)", params![old])
+            .unwrap();
+        let all = s.wake_schedules().unwrap();
+        assert_eq!((all.len(), all[0].name.as_str(), all[0].job), (1, "A", None));
+    }
 
     #[test]
     fn schedules_round_trip_with_new_ids_and_skip_a_damaged_row() {

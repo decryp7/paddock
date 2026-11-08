@@ -20,7 +20,7 @@ export {
   plural,
   type LanguageChoice,
   type PluralForms,
-} from './src/locale';
+} from '@decryp7/paddock-ui/locale';
 export { LocalStorageLanguageStorage, parseLanguage, LANGUAGE_KEY, LANGUAGE_VERSION, type LanguageStorage } from './src/language-storage';
 export { initI18n, loaderFor, type Translations, type TranslationLoader, type I18nOptions } from './src/boot';
 export { LanguageStore, LANGUAGE_CONFIG, type LanguageConfig } from './src/language.store';

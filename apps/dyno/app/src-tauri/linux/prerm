@@ -11,7 +11,7 @@ case "$1" in
         systemctl disable --now dyno-helper.service 2>/dev/null || true
         ;;
     upgrade)
-        # The new package's postinst starts it again when it was enabled.
+        # The new package's postinst starts it again (a restart, not a try-restart) when it is enabled.
         systemctl stop dyno-helper.service 2>/dev/null || true
         ;;
 esac
