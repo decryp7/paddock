@@ -1,0 +1,12 @@
+# NEEDS USER APPROVAL (ADR 0060 3.2: a ratchet needs approved = "user"). Not applied: the C13 conformance step in debrief.yml cannot go
+# green yet, because the preset's clippy.toml paths (std::env::temp_dir: 158 sites; reqwest::Client::new) apply workspace-wide and are
+# not exempted by not_yet. Apply with: the workspace lint tables in apps/debrief/Cargo.toml (inert for members not opted in), this
+# entry, the missing clippy.toml paths with their 158 call sites justified, the debrief.yml step, and drop "debrief" from the C13
+# [[not_gated]] apps list.
+[[ratchet]]
+id = "C13"
+app = "debrief"
+not_yet = ["app/src-tauri", "crates/cargo-debrief-plugin", "crates/chromium-driver", "crates/debrief-agent", "crates/debrief-ai", "crates/debrief-ai-worker", "crates/debrief-alloc", "crates/debrief-batch", "crates/debrief-cli", "crates/debrief-collect", "crates/debrief-core", "crates/debrief-dump", "crates/debrief-etw", "crates/debrief-ipc", "crates/debrief-monitor", "crates/debrief-notes", "crates/debrief-pdf", "crates/debrief-plugin-api", "crates/debrief-plugin-dotnet", "crates/debrief-plugin-dumps", "crates/debrief-plugin-e2e", "crates/debrief-plugin-formats", "crates/debrief-plugin-host", "crates/debrief-plugin-native", "crates/debrief-plugin-otel", "crates/debrief-plugin-package", "crates/debrief-plugin-profiling", "crates/debrief-plugin-registry", "crates/debrief-plugin-syslog", "crates/debrief-plugin-test", "crates/debrief-plugin-tools", "crates/debrief-plugin-web", "crates/debrief-plugin-windows", "crates/debrief-plugins", "crates/debrief-profile", "crates/debrief-store-client", "crates/debrief-store-duck", "crates/debrief-store-worker", "crates/debrief-symbols", "crates/debrief-video", "examples/plugins/annotator-example", "examples/plugins/collector-example", "examples/plugins/importer-example", "examples/plugins/tool-example", "examples/plugins/transform-example", "xtask"]
+owner = "Debrief 1.2, DBR-LINT"
+target = "debrief-v1.3.0"
+approved = "user"
