@@ -42,6 +42,16 @@ for (const width of [1100, 760]) {
       const following = await edgesOver(page, 4_000);
       for (const n of BUTTONS) expect(following[n], `${n} while following`).toHaveLength(1);
 
+      // Nothing focusable in the left group is clipped by it (a button cut off by the lead's edge would stay tabbable).
+      const clipped = await page.evaluate(() => {
+        const lead = document.querySelector('debrief-timeline-panel .head .lead')?.getBoundingClientRect();
+        const items = [...document.querySelectorAll('debrief-timeline-panel .head .lead button, debrief-timeline-panel .head .lead [tabindex]')];
+        return lead ? items.filter((e) => e.getBoundingClientRect().right > lead.right + 1).map((e) => e.getAttribute('aria-label') ?? e.textContent) : ['no lead'];
+      });
+      // While following, at 1100 px, the title and hint give way first and nothing is cut off. Paused (the chip is 107 px wider)
+      // or on narrower panes the headline's own width no longer fits and its end is clipped: a known limit, see lessons.md.
+      if (width >= 1100) expect(clipped).toEqual([]);
+
       // The first zoom pauses following and the chip becomes "Paused — Resume following", about 150 px wider.
       const before = following['Zoom in']?.[0];
       await page.locator('debrief-timeline-panel').getByRole('button', { name: 'Zoom in' }).click();

@@ -40,7 +40,7 @@ import { isMac } from '../extensions/keybinding';
       @if (inst && !inst.synced()) { <span class="unlinked" title="Zoom, pan and the time cursor are not linked to the main timeline" i18n-title="@@timeline.panel.unlinked.title" i18n="@@timeline.panel.unlinked">Unlinked</span> }
       @if (src.main) {
         <!-- The health check's headline, on the title row (Home stays one click away). -->
-        <debrief-health-headline />
+        <debrief-health-headline class="headline" />
       }
       <span class="faint hint">{{ hint() }}</span>
       @if (hint()) {
@@ -106,11 +106,15 @@ import { isMac } from '../extensions/keybinding';
   `,
   styles: `
     .head { --loading-size: 10px; height: 32px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; }
-    .lead { flex: 1 1 0; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 12px; }
+    .lead { flex: 1 1 0; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 12px; container-type: inline-size; }
+    /* Too narrow for the hint to be readable: drop it and its help icon instead of clipping them (clipped stays tabbable). */
+    @container (max-width: 480px) { .hint, .hint-help { display: none; } }
     .tools { flex: none; display: flex; align-items: center; gap: 12px; }
     .hint-help { flex: none; margin-left: -8px; }
-    .hint { min-width: 0; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .section-title { white-space: nowrap; flex: none; }
+    .hint { flex: 0 10 auto; min-width: 0; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Shrink order when the pane is narrow: the hint first, then the title (ellipsis); the headline's buttons stay whole. */
+    .section-title { white-space: nowrap; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .headline { flex: none; }
     .title-input { width: 200px; height: 24px; padding: 0 6px; }
     .unlinked { flex: none; font-size: var(--fs-xs); padding: 0 6px; border-radius: 8px; border: 1px dashed var(--border-3); color: var(--text-2); }
     .config { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 0 14px 6px; font-size: var(--fs-sm); }
