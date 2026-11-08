@@ -115,6 +115,25 @@ export function macLoginJobsDriver(gui) {
 }
 
 /** Linux: the AT-SPI helper (`atspi.py`) through `atspi(args)` -> { code, stdout }. */
+/**
+ * The lines inside the open Jobs panel of the Linux AT-SPI tree (`landmark  Jobs` and everything nested under it), or null when the panel is closed. The status bar
+ * button says "1 running: Running benchmarks" too, so a read of the whole window would "see" a job in a closed list.
+ */
+export function jobsPanelText(tree) {
+  const lines = String(tree ?? '').split('\n');
+  const at = lines.findIndex((l) => /^\s*landmark\s+Jobs\s*$/.test(l));
+  if (at < 0) return null;
+  const indent = (l) => l.length - l.trimStart().length;
+  const base = indent(lines[at]);
+  const inside = [];
+  for (const l of lines.slice(at + 1)) {
+    // a tree line is "<indent><role>  <name>" (two spaces); a continuation of a multi-line name has none
+    if (l.trim() && indent(l) <= base && /\S {2}/.test(l)) break;
+    if (l.trim()) inside.push(l.trim());
+  }
+  return inside.join('\n');
+}
+
 export function linuxLoginJobsDriver(atspi, parseSwitchState) {
   const SW = '"Start Dyno at login" "check box|toggle button|switch"';
   return {
@@ -135,7 +154,14 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
       for (let i = 0; i < 5 && v === 'unknown'; i++) { const r = atspi(`state dyno ${SW}`); v = r.code === 0 ? parseSwitchState(r.stdout) : 'unknown'; if (v === 'unknown') await new Promise((res) => setTimeout(res, 2000)); }
       return { ok: !pending, saved: v, detail: pending ? '"Save changes" or "Applying…" still shown after 30 s' : v === 'unknown' ? 'saved; the switch could not be read afterwards' : 'saved (no draft left)' };
     },
-    async openJobs() { atspi('press dyno "^Close$" "push button"'); return atspi(`press dyno ${JSON.stringify(STATUS)} "push button|toggle button"`).code === 0 || /Jobs/.test(atspi('tree dyno 60').stdout); },
+    // The status button toggles the panel: it is pressed only when the panel is not open (a second call used to close the list it had just opened).
+    async openJobs() {
+      atspi('press dyno "^Close$" "push button"');
+      const isOpen = () => jobsPanelText(atspi('tree dyno 80').stdout) !== null;
+      if (isOpen()) return true;
+      for (let i = 0; i < 3; i++) { atspi(`press dyno ${JSON.stringify(STATUS)} "push button|toggle button"`); await new Promise((r) => setTimeout(r, 1500)); if (isOpen()) return true; }
+      return false;
+    },
     async startLongJob() {
       atspi('press dyno "^Close$" "push button"');
       if (atspi('press dyno "^Benchmarks$" "link"').code !== 0) return false;
@@ -152,7 +178,7 @@ export function linuxLoginJobsDriver(atspi, parseSwitchState) {
       return { ok: true, detail: `benchmark running: ${text}` };
     },
     async stopLongJob() { atspi('press dyno "^Benchmarks$" "link"'); atspi('press dyno "^Cancel$" "push button"'); },
-    async jobsText() { return atspi('tree dyno 80').stdout.split('\n').filter((l) => /Start Dyno at login|Running benchmarks|Cancell?ed|Working|Cancel|jobs could not be read/i.test(l)).map((l) => l.trim()).join(' | '); },
+    async jobsText() { return (jobsPanelText(atspi('tree dyno 80').stdout) ?? '').split('\n').filter((l) => /Start Dyno at login|Running benchmarks|Cancell?ed|Working|Cancel|jobs could not be read/i.test(l)).map((l) => l.trim()).join(' | '); },
     async pressCancel() { return atspi('press dyno "^Cancel" "push button"').code === 0; },
   };
 }
