@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { AssistantAttachments, type AttachmentChip, type AttachRules, type AttachSource } from '@decryp7/paddock-ui/workbench/assistant';
+import { AssistantAttachments, type Attachment, type AttachmentChip, type AttachRules, type AttachSource } from '@decryp7/paddock-ui/workbench/assistant';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
 
@@ -21,6 +21,10 @@ export class PitwallAttachments extends AssistantAttachments {
 
   rules(): Promise<AttachRules> {
     return this.backend.chatAttachRules();
+  }
+
+  override remove(attachment: Attachment): Promise<void> {
+    return this.backend.chatDetach(attachment.sha256);
   }
 
   async add(file: AttachSource): Promise<AttachmentChip> {

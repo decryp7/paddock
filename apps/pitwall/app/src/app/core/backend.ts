@@ -237,6 +237,8 @@ export interface PitwallBackend {
   chatAttachRules(): Promise<ChatAttachRules>;
   /** Hands a file to Rust, which checks it and keeps it until its question is sent; a refusal says why. */
   chatAttach(name: string, bytes: Uint8Array): Promise<ChatAttached>;
+  /** Forgets a file taken off the question before it was sent. */
+  chatDetach(sha256: string): Promise<void>;
   /** The app asks the open window to show the "When you quit" dialog. */
   onQuitAsk(handler: () => void): Unsubscribe;
   autostart(): Promise<boolean>;

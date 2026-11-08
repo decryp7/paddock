@@ -24,6 +24,14 @@ describe('PitwallAttachments (ADR 0023 WP-4b)', () => {
     await expect(port().add(source('photo.png', new Uint8Array([0x89, 0x50, 0x4e, 0x47])))).rejects.toThrow('is an image');
   });
 
+  it('tells Rust to forget a file taken off the question (review P2-1)', async () => {
+    const mock = new MockBackend({ latencyMs: 0 });
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({ providers: [{ provide: BACKEND, useValue: mock }, PitwallAttachments] });
+    await TestBed.inject(PitwallAttachments).remove({ kind: 'file', sha256: 'ab'.repeat(32), name: 'a.txt' });
+    expect(mock.detached).toEqual(['ab'.repeat(32)]);
+  });
+
   it('writes sizes as people read them', () => {
     expect([sizeText(8), sizeText(12_400), sizeText(1_250_000)]).toEqual(['8 B', '12 KB', '1.3 MB']);
   });

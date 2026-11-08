@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { MemoryAssistantBackend, TauriAssistantBackend, type SendRequest } from '@decryp7/paddock-ui/workbench/assistant';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChatSaving, createChatBackend, createChatSpeech, resetChatBackend, SavingAssistantBackend } from './chat-backend';
+import { browserReply, ChatSaving, createChatBackend, createChatSpeech, resetChatBackend, SavingAssistantBackend } from './chat-backend';
 
 const create = () => {
   TestBed.resetTestingModule();
@@ -55,10 +55,17 @@ describe('createChatBackend', () => {
 
   it("passes the context meter's question to the engine (ADR 0023 WP-4b)", async () => {
     const { backend } = create();
-    const used = { usedTokens: 10, limitTokens: 100, exact: true, level: 'ok' as const };
+    const used = { usedTokens: 10, limitTokens: 100, reserveTokens: 0, exact: true, level: 'ok' as const };
     const spy = vi.spyOn(backend.inner, 'context').mockResolvedValue(used);
-    expect(await backend.context('c1')).toEqual(used);
-    expect(spy).toHaveBeenCalledWith('c1');
+    const file = { kind: 'file' as const, sha256: 'a'.repeat(64), name: 'a.txt' };
+    expect(await backend.context('c1', [file])).toEqual(used);
+    expect(spy).toHaveBeenCalledWith('c1', [file]);
+  });
+
+  it("the browser build's stand-in answers on the question's subject (review P2-18)", () => {
+    expect(browserReply('Why did the backups pause?')).toContain('data volume filled up');
+    expect(browserReply('How busy is this computer?')).toContain('CPU');
+    expect(browserReply('hello')).toContain('short answer');
   });
 
   it('has no speech input in the app yet (WP-7); the browser build plays it only when asked', () => {

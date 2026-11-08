@@ -25,6 +25,8 @@ pub const MAX_UNSAVED: usize = 200;
 pub const MAX_UNSAVED_BYTES: u64 = 64 << 20;
 /// Most bytes of the unsaved chats' attachments in memory.
 pub const MAX_UNSAVED_ATTACHMENT_BYTES: u64 = 512 << 20;
+/// Most bytes of files attached in the composer and not sent yet (their own bound: they belong to no chat yet).
+pub const MAX_STAGED_BYTES: u64 = 32 << 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -102,6 +104,8 @@ pub struct ChatStores {
     prefs: VersionedFile<Prefs>,
     save_new: Mutex<Option<bool>>,
     memory_attachments: Mutex<HashMap<String, Arc<Vec<u8>>>>,
+    /// Files attached in the composer whose question is not sent yet.
+    staged: Mutex<HashMap<String, Arc<Vec<u8>>>>,
 }
 
 impl ChatStores {
@@ -132,6 +136,7 @@ impl ChatStores {
             prefs,
             save_new: Mutex::default(),
             memory_attachments: Mutex::default(),
+            staged: Mutex::default(),
         }
     }
 
@@ -235,28 +240,77 @@ impl ChatStores {
     }
 
     /// Keeps a file the user just attached in memory until its question is sent (ADR 0023 WP-4b): the chat may still become
-    /// "Don't save", or the file be removed before sending, so nothing is written yet. A saved chat's question writes it
-    /// ([`Conversations::create_saved`], [`Conversations::append`]). Returns its SHA-256.
+    /// "Don't save", or the file be removed before sending ([`unstage`](Self::unstage)), so nothing is written yet. The
+    /// question then writes it beside a saved chat or hands it to an unsaved one, and it leaves this place
+    /// ([`Conversations::create_saved`], [`Conversations::append`]). Bounded by [`MAX_STAGED_BYTES`]. Returns its SHA-256.
     pub fn stage_attachment(&self, bytes: &[u8]) -> Result<String, ChatsError> {
-        self.put_attachment(false, bytes)
+        let sha: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
+        let mut staged = lock(&self.staged);
+        let total: u64 = staged.values().map(|b| b.len() as u64).sum();
+        if !staged.contains_key(&sha) && total + bytes.len() as u64 > MAX_STAGED_BYTES {
+            return Err(ChatsError::Save(format!(
+                "Files waiting to be sent can take at most {} MiB. Send the question or remove a file, then attach this one.",
+                MAX_STAGED_BYTES >> 20
+            )));
+        }
+        staged.insert(sha.clone(), Arc::new(bytes.to_vec()));
+        Ok(sha)
     }
 
-    /// Writes the staged attachments `messages` refer to beside the saved chats (those already on disk are kept once).
-    fn save_staged(&self, messages: &[StoredMessage]) -> Result<(), SaveError> {
+    /// Forgets a file the user took off the question before sending it.
+    pub fn unstage(&self, sha: &str) {
+        lock(&self.staged).remove(sha);
+    }
+
+    /// Bytes of files waiting to be sent.
+    pub fn staged_bytes(&self) -> u64 {
+        lock(&self.staged).values().map(|b| b.len() as u64).sum()
+    }
+
+    /// Gives the staged files `messages` refer to their chat: written beside the saved chats, or kept with the unsaved ones;
+    /// either way they leave the staging place. A file that cannot be kept stays staged and the error says why.
+    fn settle_staged(&self, messages: &[StoredMessage], save: bool) -> Result<(), SaveError> {
         for a in messages.iter().flat_map(|m| m.attachments.iter()) {
             let sha = Attachment::sha256(a);
-            let staged = lock(&self.memory_attachments).get(sha).cloned();
-            if let Some(bytes) = staged {
+            let Some(bytes) = lock(&self.staged).get(sha).cloned() else {
+                continue;
+            };
+            if save {
                 self.saved.put_attachment(&bytes)?;
+            } else {
+                self.keep_in_memory(sha.to_string(), bytes.as_ref().clone())
+                    .map_err(|e| SaveError(e.to_string()))?;
             }
+            lock(&self.staged).remove(sha);
         }
         Ok(())
     }
 
     /// An attachment's bytes by its SHA-256, wherever it is kept.
     pub fn attachment(&self, sha: &str) -> Option<Vec<u8>> {
-        let kept = lock(&self.memory_attachments).get(sha).cloned();
-        kept.map(|b| b.as_ref().clone()).or_else(|| self.saved.attachment(sha))
+        self.attachment_up_to(sha, usize::MAX)
+    }
+
+    fn in_memory(&self, sha: &str) -> Option<Arc<Vec<u8>>> {
+        let staged = lock(&self.staged).get(sha).cloned();
+        staged.or_else(|| lock(&self.memory_attachments).get(sha).cloned())
+    }
+
+    /// An attachment's bytes when it is at most `max` bytes (a file on disk is measured before it is read); `None` when it is
+    /// not kept or is larger.
+    pub fn attachment_up_to(&self, sha: &str, max: usize) -> Option<Vec<u8>> {
+        match self.in_memory(sha) {
+            Some(b) => (b.len() <= max).then(|| b.as_ref().clone()),
+            None => self.saved.attachment_up_to(sha, max),
+        }
+    }
+
+    /// An attachment's size in bytes without reading it (the context meter counts it); `None` when it is not kept.
+    pub fn attachment_len(&self, sha: &str) -> Option<u64> {
+        match self.in_memory(sha) {
+            Some(b) => Some(b.len() as u64),
+            None => self.saved.attachment_len(sha),
+        }
     }
 
     /// Deletes every chat, saved or not, and every attachment; the chats' settings stay. Returns how many chats went.
@@ -266,6 +320,7 @@ impl ChatStores {
             let _ = self.memory.delete(id);
         }
         lock(&self.memory_attachments).clear();
+        lock(&self.staged).clear();
         Ok(unsaved.len() + self.saved.delete_all(&[PREFS_FILE])?)
     }
 
@@ -311,19 +366,21 @@ impl Conversations for ChatStores {
     }
 
     fn create_saved(&self, first: StoredMessage, save: bool) -> (String, String, Result<(), SaveError>) {
-        if save {
-            let staged = self.save_staged(std::slice::from_ref(&first));
-            let (id, title, kept) = self.saved.create(first);
-            // The chat is kept either way; a file that could not be written is said once, with the rest.
-            (id, title, staged.and(kept))
+        let staged = self.settle_staged(std::slice::from_ref(&first), save);
+        let (id, title, kept) = if save {
+            self.saved.create(first)
         } else {
             self.memory.create(first)
-        }
+        };
+        // The chat is kept either way; a file that could not be kept is said once, with the rest.
+        (id, title, staged.and(kept))
     }
 
     fn append(&self, id: &str, messages: Vec<StoredMessage>) -> Option<Result<(), SaveError>> {
-        let staged = if self.memory.get(id).is_none() && self.saved.is_on_disk(id).is_some() {
-            self.save_staged(&messages)
+        let staged = if self.memory.get(id).is_some() {
+            self.settle_staged(&messages, false)
+        } else if self.saved.is_on_disk(id).is_some() {
+            self.settle_staged(&messages, true)
         } else {
             Ok(())
         };

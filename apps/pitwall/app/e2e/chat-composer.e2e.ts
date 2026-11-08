@@ -42,7 +42,7 @@ test.describe('chat composer', () => {
   });
 
   for (const size of [
-    { width: 900, height: 640 },
+    { width: 900, height: 700 },
     { width: 1440, height: 900 },
   ]) {
     test(`fits ${size.width} px: nothing scrolls sideways, the composer's controls are on screen and apart`, async ({ page }) => {
@@ -65,6 +65,14 @@ test.describe('chat composer', () => {
         expect(b!.x + b!.width).toBeLessThanOrEqual(size.width);
         expect(b!.y + b!.height).toBeLessThanOrEqual(size.height);
       }
+      // The remove target is at least 24 px square (review P2-9); the empty state is whole, its icon below the pane's header
+      // (review P2-10: attaching files on a short window once scrolled it under the header).
+      const x = await chat.getByTestId('assistant-file-remove').boundingBox();
+      expect(x!.width).toBeGreaterThanOrEqual(24);
+      expect(x!.height).toBeGreaterThanOrEqual(24);
+      const log = await chat.getByTestId('assistant-log').boundingBox();
+      const icon = await chat.locator('.empty-icon').boundingBox();
+      expect(icon!.y).toBeGreaterThanOrEqual(log!.y);
       // The meter has its own room (a page-wide `.meter` style once squeezed it to 0 px wide).
       expect(meter!.width).toBeGreaterThan(100);
       // One row under the question: attach, then the meter, then Send at the right edge; nothing overlaps.

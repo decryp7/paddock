@@ -460,6 +460,27 @@ impl SavedChats {
         valid_sha(sha).then(|| std::fs::read(self.attachments().join(sha)).ok()).flatten()
     }
 
+    /// An attachment's size in bytes, read from the file system without opening it.
+    pub fn attachment_len(&self, sha: &str) -> Option<u64> {
+        valid_sha(sha)
+            .then(|| std::fs::metadata(self.attachments().join(sha)).ok())
+            .flatten()
+            .map(|m| m.len())
+    }
+
+    /// An attachment's bytes when the file is at most `max` bytes: it is measured first and never read past the bound.
+    pub fn attachment_up_to(&self, sha: &str, max: usize) -> Option<Vec<u8>> {
+        use std::io::Read;
+        if self.attachment_len(sha)? > max as u64 {
+            return None;
+        }
+        let file = std::fs::File::open(self.attachments().join(sha)).ok()?;
+        let mut out = Vec::new();
+        // The bound holds even if the file grew since it was measured.
+        file.take((max as u64).saturating_add(1)).read_to_end(&mut out).ok()?;
+        (out.len() <= max).then_some(out)
+    }
+
     /// Removes the attachment files `gone` that no saved conversation refers to any more.
     fn drop_orphans(&self, state: &mut State, gone: &BTreeSet<String>) {
         for sha in gone {

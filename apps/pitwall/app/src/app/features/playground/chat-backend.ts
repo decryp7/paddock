@@ -7,6 +7,7 @@ import {
   TauriAssistantBackend,
   type ApprovalChoice,
   type AssistantInfo,
+  type Attachment,
   type ContextUse,
   type Conversation,
   type ConversationSummary,
@@ -71,8 +72,8 @@ export class SavingAssistantBackend extends AssistantBackend {
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
     return this.inner.listen(handler);
   }
-  override context(id: string | null): Promise<ContextUse | null> {
-    return this.inner.context(id);
+  override context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
+    return this.inner.context(id, attachments);
   }
 }
 
@@ -87,10 +88,24 @@ export function createChatBackend(): SavingAssistantBackend {
   const saving = inject(ChatSaving);
   const ipc = tauriIpc();
   // Browser build only: `?mock-context=<tokens>` gives the memory engine a small window, so screenshots and specs reach the
-  // meter's high and full levels.
-  const tokens = Number(new URLSearchParams(openedWith()).get('mock-context'));
-  const inner = ipc ? new TauriAssistantBackend(ipc) : (browser ??= new MemoryAssistantBackend(tokens > 0 ? { contextTokens: tokens } : {}));
+  // meter's high and full levels; `?mock-context=unknown` plays a model whose window is not known.
+  const wanted = new URLSearchParams(openedWith()).get('mock-context');
+  const tokens = wanted === 'unknown' ? -1 : Number(wanted);
+  const inner = ipc ? new TauriAssistantBackend(ipc) : (browser ??= new MemoryAssistantBackend({ reply: browserReply, ...(tokens > 0 ? { contextTokens: tokens } : tokens < 0 ? { contextTokens: 0 } : {}) }));
   return new SavingAssistantBackend(inner, saving);
+}
+
+/**
+ * The browser build's stand-in model: a short answer on the question's subject (the computer's load, its disks and backups,
+ * an attached file), so screenshots and demos read as a chat. The memory engine's slash commands still play their scripts.
+ */
+export function browserReply(question: string): string {
+  const q = question.toLowerCase();
+  if (/backup|disk|volume|full|space/.test(q))
+    return 'The backups paused because the data volume filled up at 03:10, as **disk-report.md** says. The cleanup script only removes snapshots older than seven days (`prune_snapshots(7)`), so it is safe to run; free at least 20 GB before the next backup.';
+  if (/busy|cpu|load|memory|slow/.test(q)) return 'The computer is lightly loaded: CPU at 18 %, memory at 54 %, and no process above 5 % in the last minute.';
+  if (/summar|read|file|attached/.test(q)) return 'The file lists three events: the volume filled up at 03:10, backups paused at 03:12, and an alert went out at 03:15.';
+  return 'Here is a short answer from the local model. Connect an app in Connected apps to let it look things up.';
 }
 
 /**
