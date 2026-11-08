@@ -35,14 +35,29 @@ export class ChatSaving {
   readonly started = new Map<string, boolean>();
 }
 
-/** The assistant's port with the user's "Don't save" choice added to the question that starts a chat; the rest passes. */
+/**
+ * The assistant's port with the user's "Don't save" choice added to the question that starts a chat, and the model's window
+ * read again (Rust's `chat_refresh_window`) before the meter is measured and before a question is sent, so a per-slot change
+ * in Settings or a reload with other slots reaches both; the rest passes.
+ */
 export class SavingAssistantBackend extends AssistantBackend {
   constructor(
     /** The engine's own port. */
     readonly inner: AssistantBackend,
     private readonly saving: ChatSaving,
+    /** Reads the window again (none: the window never changes, as in the browser build). */
+    private readonly refreshWindow: (() => Promise<unknown>) | null = null,
   ) {
     super();
+  }
+
+  /** A failed read keeps the last window: the engine checks again when it sends. */
+  private async fresh(): Promise<void> {
+    try {
+      await this.refreshWindow?.();
+    } catch {
+      // The last window stands; the server's own error reaches the user on the next model call.
+    }
   }
 
   info(): Promise<AssistantInfo> {
@@ -58,6 +73,7 @@ export class SavingAssistantBackend extends AssistantBackend {
     return this.inner.delete(id);
   }
   async send(request: SendRequest): Promise<SendAck> {
+    await this.fresh();
     if (request.conversationId) return this.inner.send(request);
     const save = this.saving.saveNext();
     const ack = await this.inner.send({ ...request, save });
@@ -73,7 +89,8 @@ export class SavingAssistantBackend extends AssistantBackend {
   listen(handler: (event: Envelope) => void): Promise<Unlisten> {
     return this.inner.listen(handler);
   }
-  override context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
+  override async context(id: string | null, attachments: readonly Attachment[] = []): Promise<ContextUse | null> {
+    await this.fresh();
     return this.inner.context(id, attachments);
   }
 }
@@ -92,15 +109,18 @@ export function createChatBackend(): SavingAssistantBackend {
   // meter's high and full levels; `?mock-context=unknown` plays a model whose window is not known.
   const wanted = new URLSearchParams(openedWith()).get('mock-context');
   const tokens = wanted === 'unknown' ? -1 : Number(wanted);
+  const pitwall = inject(BACKEND, { optional: true });
   // The mock backend took the files (`chatAttach`) and knows their sizes: about four bytes a token, as Rust estimates.
-  const sizes = ipc ? null : (inject(BACKEND, { optional: true }) as { chatAttachedBytes?(sha256: string): number | undefined } | null);
+  const sizes = ipc ? null : (pitwall as { chatAttachedBytes?(sha256: string): number | undefined } | null);
   const attachmentTokens = (a: Attachment): number => {
     const bytes = sizes?.chatAttachedBytes?.(a.sha256);
     return bytes === undefined ? 250 : Math.ceil(bytes / 4);
   };
   const room = tokens > 0 ? { contextTokens: tokens } : tokens < 0 ? { contextTokens: 0 } : {};
   const inner = ipc ? new TauriAssistantBackend(ipc) : (browser ??= new MemoryAssistantBackend({ reply: browserReply, attachmentTokens, ...room }));
-  return new SavingAssistantBackend(inner, saving);
+  // In the app the window follows the model's context per slot (Rust reads it again); the browser build's window is fixed.
+  const refresh = ipc && pitwall ? () => pitwall.chatRefreshWindow() : null;
+  return new SavingAssistantBackend(inner, saving, refresh);
 }
 
 /**

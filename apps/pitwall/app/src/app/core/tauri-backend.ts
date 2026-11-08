@@ -432,6 +432,9 @@ export class TauriBackend implements PitwallBackend {
   setChatModel(modelId: string): Promise<ChatModels> {
     return this.run('set_chat_model', { modelId });
   }
+  chatRefreshWindow(): Promise<number> {
+    return this.run('chat_refresh_window');
+  }
   chatStorage(): Promise<ChatStorage> {
     return this.run('chat_storage');
   }

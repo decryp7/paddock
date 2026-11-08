@@ -208,14 +208,36 @@ pub async fn forget_app<R: Runtime>(app: AppHandle<R>, app_id: String) -> Result
     on_apps(&app, move |a| a.forget(&app_id)).await
 }
 
-async fn models_for(chat: &ChatState, wanted: Option<String>) -> Result<ChatModels, CommandError> {
-    let raw: Value = forward(chat.client.as_ref(), "local_models", Value::Null).await?;
-    let locals: Vec<LocalModel> = serde_json::from_value(raw).map_err(|_| {
+async fn local_models(client: &dyn crate::server_client::ServerClient) -> Result<Vec<LocalModel>, CommandError> {
+    let raw: Value = forward(client, "local_models", Value::Null).await?;
+    serde_json::from_value(raw).map_err(|_| {
         CommandError::new(
             ErrorCode::Internal,
             "Pitwall's server sent a model list this app does not understand.",
         )
-    })?;
+    })
+}
+
+/// Reads the chosen model's window again: its context per slot changes with Settings or a reload with other slots, and the
+/// meter and the check before sending use it (WP-4b review 3). A model no longer listed keeps the last window.
+pub async fn refresh_window(client: &dyn crate::server_client::ServerClient, provider: &ServerChatProvider) -> Result<usize, CommandError> {
+    let chosen = provider.model();
+    let locals = local_models(client).await?;
+    if let Some(m) = locals.iter().find(|m| m.id == chosen) {
+        provider.set_context_length(chat_window(m.context_max, m.context_per_slot));
+    }
+    Ok(paddock_assistant::LlmProvider::context_length(provider))
+}
+
+/// Reads the chat model's window again before the pane measures or sends (see [`refresh_window`]).
+#[tauri::command]
+pub async fn chat_refresh_window<R: Runtime>(app: AppHandle<R>) -> Result<usize, CommandError> {
+    let chat = chat_of(&app)?;
+    refresh_window(chat.client.as_ref(), &chat.provider).await
+}
+
+async fn models_for(chat: &ChatState, wanted: Option<String>) -> Result<ChatModels, CommandError> {
+    let locals = local_models(chat.client.as_ref()).await?;
     let wanted = wanted.or_else(|| Some(chat.provider.model()).filter(|m| !m.is_empty()));
     let catalog = pitwall_core::packs::Packs::builtin().models;
     let picker = chat_models(locals.iter().map(Facts::from), &catalog, wanted.as_deref());
@@ -337,4 +359,42 @@ pub async fn chat_attach<R: Runtime>(app: AppHandle<R>, name: String, bytes: Vec
 pub async fn chat_detach<R: Runtime>(app: AppHandle<R>, sha256: String) -> Result<(), CommandError> {
     chat_of(&app)?.chats.unstage(&sha256);
     Ok(())
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+    use crate::server_client::fake::{FakeServer, Reply};
+    use serde_json::json;
+
+    fn model(id: &str, per_slot: Option<u32>) -> Value {
+        json!({"id": id, "repo": "acme/tiny", "file": "tiny-q4.gguf", "name": "Tiny", "quant": "Q4_K_M", "sizeBytes": 400_000_000u64,
+               "paramsB": 0.5, "contextMax": 131_072, "architecture": "llama", "capabilities": ["chat", "tools"], "projector": null,
+               "addedAt": 1, "lastUsedAt": null, "loaded": true, "pinned": false, "idleSecs": null, "slots": 2, "slotsCustom": false,
+               "loadedSlots": 2, "contextPerSlot": per_slot,
+               "fit": {"verdict": "fits", "needRam": 1, "needVram": 0, "haveRam": 2, "haveVram": 0, "offload": "none", "message": "ok"}})
+    }
+
+    /// Review 3 P2-1: a per-slot change in Settings, or a reload with other slots, reaches the meter and the check before
+    /// sending the next time the chat asks, without choosing the model again.
+    #[tokio::test]
+    async fn the_window_is_read_again_when_the_slots_context_changes() {
+        let server = FakeServer::new();
+        let provider = ServerChatProvider::new(Arc::new(FakeServer::new()), tokio::runtime::Handle::current(), "tiny");
+        server.reply(
+            "local_models",
+            Reply::Ok(json!([model("other", Some(2048)), model("tiny", Some(8192))])),
+        );
+        assert_eq!(refresh_window(&server, &provider).await.unwrap(), 8192);
+        assert_eq!(paddock_assistant::LlmProvider::context_length(&provider), 8192);
+        server.reply("local_models", Reply::Ok(json!([model("tiny", Some(4096))])));
+        assert_eq!(refresh_window(&server, &provider).await.unwrap(), 4096);
+        assert_eq!(paddock_assistant::LlmProvider::context_length(&provider), 4096);
+        // A model no longer listed keeps the last window; a failed list is the server's error.
+        server.reply("local_models", Reply::Ok(json!([model("other", Some(2048))])));
+        assert_eq!(refresh_window(&server, &provider).await.unwrap(), 4096);
+        server.reply("local_models", Reply::Err(crate::server_client::unavailable()));
+        assert!(refresh_window(&server, &provider).await.is_err());
+        assert_eq!(paddock_assistant::LlmProvider::context_length(&provider), 4096);
+    }
 }

@@ -223,6 +223,8 @@ export interface PitwallBackend {
   chatModels(): Promise<ChatModels>;
   /** Chooses the chat's model (one without tools is never chosen). */
   setChatModel(modelId: string): Promise<ChatModels>;
+  /** Reads the chat model's window again (its context per slot changes with Settings or a reload); the tokens it holds. */
+  chatRefreshWindow(): Promise<number>;
   /** Settings > Chats: the default for new chats and what the saved ones take. */
   chatStorage(): Promise<ChatStorage>;
   /** "Save new chats" on or off. */

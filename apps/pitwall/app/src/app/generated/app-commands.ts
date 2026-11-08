@@ -20,6 +20,7 @@ export const APP_COMMANDS = {
   chat_detach: { kind: 'mutation', windows: ['main', 'popout'], limit: 262144 },
   chat_enabled: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   chat_models_list: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
+  chat_refresh_window: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   chat_saved: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   chat_storage: { kind: 'query', windows: ['main', 'popout', 'dialog'], limit: 262144 },
   clear_cache: { kind: 'mutation', windows: ['main', 'popout', 'dialog'], limit: 262144 },

@@ -72,6 +72,23 @@ describe('createChatBackend', () => {
     expect(spy).toHaveBeenCalledWith('c1', [file]);
   });
 
+  it("reads the model's window again before measuring and before sending, so a per-slot change reaches both (review 3 P2-1)", async () => {
+    const order: string[] = [];
+    const inner = new MemoryAssistantBackend();
+    vi.spyOn(inner, 'context').mockImplementation(() => (order.push('context'), Promise.resolve(null)));
+    vi.spyOn(inner, 'send').mockImplementation(() => (order.push('send'), Promise.resolve({ conversationId: 'c1' })));
+    let fail = false;
+    const refresh = (): Promise<unknown> => (order.push('refresh'), fail ? Promise.reject(new Error('server down')) : Promise.resolve(4096));
+    const backend = new SavingAssistantBackend(inner, new ChatSaving(), refresh);
+    await backend.context('c1');
+    await backend.send({ conversationId: 'c1', text: 'q', context: [], allowWrite: false });
+    expect(order).toEqual(['refresh', 'context', 'refresh', 'send']);
+    // A refresh that fails keeps the last window: the meter and the question still go on (the engine checks again).
+    fail = true;
+    await backend.context('c1');
+    expect(order.slice(-2)).toEqual(['refresh', 'context']);
+  });
+
   it("the browser build's stand-in answers on the question's subject (review P2-18)", () => {
     expect(browserReply('Why did the backups pause?')).toContain('data volume filled up');
     expect(browserReply('How busy is this computer?')).toContain('CPU');
