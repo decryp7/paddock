@@ -1,6 +1,7 @@
 # 59. Installer glue as declarations: apps declare, the shared include generates
 
-- Status: Proposed (2026-11-08), revision 2. The user approved the direction on 2026-11-08 and placed it **before Pitwall
+- Status: **Accepted 2026-11-08**: direction approved by the user, design approved by independent review (revision 2,
+  with the security re-review of Q2 approved with conditions, folded in as revision 3). The user approved the direction on 2026-11-08 and placed it **before Pitwall
   1.1 ships**: no app keeps hand-written NSIS install, service or uninstall steps; each per-machine app declares what it has
   in `windows/per-machine.json`, the shared include generates every step from that declaration, the shared harness proves
   the generated steps once on a Windows VM with a stub service, and each app gets a static check.
@@ -14,6 +15,14 @@
   the service name (§6); an artifact-gate work package; what happens without `docs/harnesses.toml`; the duplicate harness
   case R renamed; the landing order. Q2 decided as the reviewer proposed (the `sc` fallback also for a trusted folder that
   `check-dir` refuses, marked for security re-review); Q3 accepted. Re-estimated.
+- Revision 3 (2026-11-08): folds in the re-review's P2s and the Q2 conditions. Q2 (a) its own message, accurate that
+  `sc.exe` removes the service; (b) the recursive removal of `updates\` skipped in a folder that failed the check (S8b);
+  (c) `run` answering `refused` takes the same branch (S8c). Pitcrew's replace-own-registration compares canonically and takes
+  account and recovery from its spec, with three unit tests. The stub forwards `run` to the real tool; no seams in the shipped
+  tool. `_PADDOCK_DETAIL` reaches the harness log; the marker rule; `nosetup` takes the tool-missing branch; verbs leave no
+  process of their own (checked for Dyno and Pitwall); the program file's own protection; S11 split into a file symlink and
+  a folder junction, the remaining check-to-start race recorded; the base for the build is `origin/main` after the Pitwall
+  landing; `log.rs`'s wording, `<why>` in the messages, S8's `setup.log` wording, the `include!` for published crates.
 - Date: 2026-11-08
 - Related:
   - Family ADR [0053](0053-per-machine-windows-installs.md) (per-machine Windows installs; its amendment 1 on
@@ -195,19 +204,41 @@ paddock-setup run --dir "<$INSTDIR>" --program <program> --verb <word> [--verb <
 Every argument is a checked folder, a `valid_name`, a verb word or an integer: no declared text and no register content is
 on the command line. `run` (a new command of `paddock-setup`, `crates/paddock-setup/src/run.rs`):
 
-1. **Re-checks the folder** with `check-dir`'s rule immediately before the start (the same function; ADR 0053 §2.2) and that
-   `<dir>\<program>` is a regular file directly in it, not a reparse point. Refused: outcome `refused`; missing: `nofile`.
+1. **Re-checks the folder and the program** immediately before the start: the folder with `check-dir`'s rule (the same
+   function; ADR 0053 §2.2), and the program file with the protected-file rule of `paddock_service::privileged::trust`
+   (rule 55): `<dir>\<program>` opened without following a final reparse point is a regular file (not a directory, not a
+   reparse point: no file symlink, no junction above it, its final path by handle equal to the requested one,
+   `require_same_path`), directly in the folder (`checkdir::is_within`), owned by SYSTEM, Administrators or
+   TrustedInstaller, and writable by no other account. Refused: outcome `refused`; missing: `nofile`.
 2. **Starts the program in a new job object** with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, created suspended and assigned before
    it runs, so every process it starts is in the job. Its standard output and error are read on two threads, each bounded
    (stdout 4 KiB kept, stderr's last 2 KiB kept).
 3. **Waits on the process handle with the bound.** On expiry it terminates the job (the whole tree), waits for the job to be
-   empty, and the outcome is `timeout`. The job handle is closed on every path, so even a crash of `run` ends the tree.
-4. **Logs** to `$INSTDIR\updates\setup.log` through the checked log (ADR 0053 §2.5): the command (program and verbs; no user
-   content exists in it), the start time, duration, exit code or outcome, and the stderr tail (ER-27).
-5. **Answers** on its own stdout: the child's stdout (at most 512 bytes, one line per line, control characters dropped), then
-   a last line `PADDOCK-RUN exit=<n>` or `PADDOCK-RUN timeout` / `nofile` / `refused`. It exits 0 when it could report;
-   any other exit code is a failure of `run` itself (outcome `toolfailed`). The include reads the marker, never `run`'s exit
-   code, so a program's own exit code can never be mistaken for one of `run`'s outcomes.
+   empty, and the outcome is `timeout`. When the program exits in time but processes it started are still in the job, they
+   are ended with the job and logged as an error ("left processes running: n"; a breach of §5's contract, outcome
+   unchanged). The job handle is closed on every path, so even a crash of `run` ends the tree.
+4. **Logs** to `$INSTDIR\updates\setup.log` through the checked log (ADR 0053 §2.5; `log.rs`'s contract is reworded from "no
+   command lines" to "no command lines with user content": `run` logs the program name and its verb words, which are
+   declared constants, and never an argument that came from a user or a path outside the install folder), the start time,
+   duration, exit code or outcome, and the stderr tail (ER-27).
+5. **Answers** on its own stdout: the child's stdout (at most 512 bytes, control characters other than line ends dropped),
+   then a newline, then a last line `PADDOCK-RUN exit=<n>` or `PADDOCK-RUN timeout` / `nofile` / `refused`. It exits 0 when
+   it could report; any other exit code is a failure of `run` itself.
+
+**The marker rule.** The include accepts an outcome only when `run` exited 0 **and** the last non-empty line of its stdout
+starts with `PADDOCK-RUN ` and parses (`exit=` and a decimal, or one of the three words). Anything else (a non-zero exit, no
+marker, a marker that does not parse) is `toolfailed`. Because `run` writes its own newline before the marker, the child's
+output can never form the last line, and a child that prints a line `PADDOCK-RUN exit=0` cannot pass for `run`'s answer: that
+line is never last. Unit cases in W2a: a child that prints a fake marker as its last line, without a final newline, and
+with 600 bytes of output (truncation keeps the marker last). `run`'s exit code is never read as a program's outcome.
+
+`$0` = `nosetup` (the tool vanished between `PADDOCK_INSTALLING` and the call: Windows Security) takes the tool-missing
+branch of every step: in the installer `_PADDOCK_TOOL_GONE` ends the install with level 44 (as today); in the uninstaller the
+step goes to the tool-missing row of §2.3 (`sc` fallback or the "did not remove" message). Cases S10 and M4 cover it.
+
+**Every detail line goes through `_PADDOCK_DETAIL _TEXT`**, which writes `DetailPrint` and, compiled only under
+`PADDOCK_TEST_HARNESS`, the same line to the test log (`_PADDOCK_TEST_LOG`), so the harness sees every line a user would see
+in the details pane, not only the stub's own log.
 
 `_PADDOCK_RUN_APP` leaves the outcome in `$0` (`0`, another number, `timeout`, `nofile`, `refused`, `toolfailed`,
 `notaccepted`) and the child's output in `$1`, and writes one line to the details. `run` replaces revision 1's direct
@@ -242,21 +273,33 @@ Outcomes of each step (`n` is a non-zero exit code; "registered" is `_PADDOCK_SV
 | Step | `0` | `n`, `timeout`, `refused` or `toolfailed` | `nofile` (the program is missing) |
 | --- | --- | --- | --- |
 | Graceful stop | done | a detail line; go on (`stop-all` ends what is left) | a detail line; go on |
-| `_PADDOCK_SVC_UNREGISTER_FOR_INSTALL` (installer) | done | still registered: abort, level 43, "Windows could not remove `<label>` (code n), so `<product>` cannot be updated safely. Remove the service in Windows Services, restart the PC, or uninstall `<product>` first, then run this installer again."; not registered (1060): go on | **not registered: go on. Still registered: go on** to `stop-all`, the file copy and `_PADDOCK_SVC_REGISTER`, whose verb replaces a registration that names this folder's program and refuses one that names another program (§5); the details say "the program to remove `<label>` is missing; it is registered again after the files are installed" |
+| `_PADDOCK_SVC_UNREGISTER_FOR_INSTALL` (installer) | done | still registered: abort, level 43, "Windows could not remove `<label>` (`<why>`), so `<product>` cannot be updated safely. Remove the service in Windows Services, restart the PC, or uninstall `<product>` first, then run this installer again."; not registered (1060): go on | **not registered: go on. Still registered: go on** to `stop-all`, the file copy and `_PADDOCK_SVC_REGISTER`, whose verb replaces a registration that names this folder's program and refuses one that names another program (§5); the details say "the program to remove `<label>` is missing; it is registered again after the files are installed" |
 | `_PADDOCK_SVC_REGISTER` | done | runs `explain` when declared: when `explain` exits 0 the message is `register`'s own output, otherwise `explain`'s output (today's Pitwall rule); without `explain`, `failedText`; the message is "Windows could not register `<label>`." plus that text (silent: details and `setup.log` only); never an abort | as `n`, with "the program is missing; run the installer again" |
 | `_PADDOCK_SVC_REFRESH` | done | a note in the details and in `setup.log` (written by `run`); never an abort | as `n` |
-| `_PADDOCK_SVC_REMOVE` (uninstaller), accepted folder | done | still registered: a detail line, `setup.log`, and (not silent) "Windows could not remove `<label>` (code n). Remove it in Windows Services."; an uninstaller never aborts (it must stay usable) | still registered: the `sc` fallback when `fallback` is `sc-delete` (the folder is accepted; `sc.exe` from System32 runs nothing of it), otherwise the message above |
+| `_PADDOCK_SVC_REMOVE` (uninstaller), accepted folder | done | `n`, `timeout`, `toolfailed`, still registered: a detail line, `setup.log`, and (not silent) "Windows could not remove `<label>` (`<why>`). Remove it in Windows Services."; an uninstaller never aborts (it must stay usable). `refused`: the Q2 branch below | still registered: the `sc` fallback when `fallback` is `sc-delete` (the folder is accepted; `sc.exe` from System32 runs nothing of it), otherwise the message above |
+
+`<why>` in a message is the outcome in words: "code n" for an exit code, "it did not finish in s seconds" for `timeout`,
+"its program failed the installer's protection check" for `refused`, "the installer's tool failed; see setup.log" for
+`toolfailed`.
 
 `_PADDOCK_SVC_REMOVE` when the service is not registered does nothing. When the folder is **not accepted** it never runs a
 program of the folder, and:
 
-- trusted, the tool missing: the `sc` fallback when `fallback` is `sc-delete`, with the message "Windows removed `<label>`
-  without the installer's checking tool, because the tool was missing." plus `leftBehind`; with `none` the message "Windows did not
-  remove `<label>`. Remove it in Windows Services.";
-- **trusted, the tool present, `check-dir` refused** (an owner or reparse point changed in the registered folder; Q2,
-  decided): the same `sc` fallback and messages. A LocalSystem service whose program failed the folder check is a standing
-  risk, and `sc.exe` from System32 runs nothing of the folder. **This branch is marked for explicit security re-review**
-  before W2 lands;
+- trusted, the tool missing (or `nosetup`): the `sc` fallback when `fallback` is `sc-delete`, with the message "Windows
+  removed `<label>` with sc.exe, because the installer's checking tool was missing." plus `leftBehind`; with `none` the
+  message "Windows did not remove `<label>`. Remove it in Windows Services.";
+- **trusted, the tool present, `check-dir` refused, or `run` answered `refused`** for this service's program (an owner,
+  ACL or reparse point changed in the registered folder; Q2, decided, and its conditions (a) and (c)): the same `sc` fallback
+  with its own message, "Windows removed `<label>` with sc.exe, because its program folder is no longer protected (the
+  installer's folder check refused it)." plus `leftBehind`; with `none`, "Windows did not remove `<label>`, because its program
+  folder is no longer protected. Remove it in Windows Services." A LocalSystem service whose program failed the check is a
+  standing risk, and `sc.exe` from System32 runs nothing of the folder. **This branch, with the next item, is marked for
+  explicit security re-review** (with case S8) before W2b lands;
+- **the recursive removal of `updates\` is skipped when the folder is not accepted** (Q2 condition (b)):
+  `PADDOCK_REMOVE_PROGRAM_FILES`'s `RMDir /r "$INSTDIR\updates"` runs only when `$PaddockDirAccepted` is 1. In a folder that
+  failed the check, `updates\` may hold a junction, and a recursive delete running elevated must not be the thing that
+  follows it. The non-recursive `Delete` of `paddock-setup.exe` and the template's own file deletions stay (they delete
+  named files, not trees). The details say "updates\ was left in place: the folder failed the installer's check". Case S8b;
 - untrusted: unreachable, `PADDOCK_INSTALLING` has ended the run with level 45.
 
 **A timeout halfway through a verb.** `run` ends the verb's whole tree at the bound, so the service can be left half
@@ -272,13 +315,13 @@ Each is a property of the include for every valid declaration. The harness case 
 | # | Invariant | Proven by |
 | --- | --- | --- |
 | I1 | **Trust before anything.** An uninstaller whose `$INSTDIR` is not the folder HKLM registers, directly under `$PROGRAMFILES64` in the accepted spelling, ends in `PADDOCK_INSTALLING` with level 45: no program of that folder runs (not `paddock-setup.exe`, no graceful stop, no service verb) and nothing is deleted. | P, P2, P3 |
-| I2 | **The folder gates every app program.** No graceful stop, `register`, `explain`, `refresh` or `unregister` runs unless `$PaddockDirAccepted` is 1, and `run` refuses at the moment of the start when the folder or the program fails the check. The installer aborts at 41 before any of them; the uninstaller with a refused folder runs none of them and goes on. | B, Q2, S11 (each with its positive control) |
-| I3 | **Level 44 (TOOL_MISSING).** An installer whose `paddock-setup.exe` is gone never reports success. An uninstaller in a trusted folder without the tool runs no program of the folder and removes each registered service with `sc` when its `fallback` is `sc-delete`, saying so; with `none` it leaves it and says so. | M1 to M5, S3, S4 |
+| I2 | **The folder and the program gate every app program.** No graceful stop, `register`, `explain`, `refresh` or `unregister` runs unless `$PaddockDirAccepted` is 1, and `run` refuses at the moment of the start when the folder or the program fails the check. The installer aborts at 41 before any of them; the uninstaller with a refused folder runs none of them and goes on. | B, Q2, S11a, S11b, S8c (each with its positive control) |
+| I3 | **Level 44 (TOOL_MISSING).** An installer whose `paddock-setup.exe` is gone never reports success. An uninstaller in a trusted folder without the tool runs no program of the folder and removes each registered service with `sc` when its `fallback` is `sc-delete`, saying so; with `none` it leaves it and says so. | M1 to M5, S3, S4, S10 |
 | I4 | **Level 45 (UNTRUSTED)** as I1, also when the copied uninstaller sits next to planted copies of every declared program. | P2 |
 | I5 | **Update versus uninstall.** Installer-registered services are removed before files change on install, update, reinstall and uninstall, and registered again in POSTINSTALL. App-registered services are kept on update and on a reinstall (an in-place run, ADR 0053 §2.4), refreshed when declared and registered, and removed only on a real uninstall. | E2, G2, F2, M5 |
 | I6 | **A failed removal aborts the install only while the service is still registered.** An `unregister` that fails (non-zero, `timeout`, `refused`, `toolfailed`) aborts with level 43 before `stop-all` and before any file is copied when `sc query` does not answer 1060; it continues when it does. A missing program continues and registers again (§2.3). | S1, S2, S5, S9 |
 | I7 | **Order.** Graceful stops, then installer-registered removals, then `stop-all`; app-registered removals after `stop-all`; `register` and `refresh` only after the files and `paddock-setup.exe` are installed. | call order in every case's stub log |
-| I8 | **Every program run is bounded** by its declared timeout; at the bound the program's whole process tree is gone, and `timeout` has the meaning of a failure. | S5, GS1 |
+| I8 | **Every program run is bounded** by its declared timeout; at the bound the program's whole process tree is gone, and `timeout` has the meaning of a failure. | S5, GS1, S12 |
 | I9 | **A failed registration or refresh never fails the install,** and its reason reaches the user (message) or the log (silent). | S6, S6b, S7 |
 | I10 | **Declared text cannot become code.** Only allowlisted texts reach NSIS (§1), they need no escaping, and none reaches a command line. | validation unit tests; C2 (compile) and C2r (run time) |
 | I11 | **No hand-written hooks.** A hooks file that defines an `NSIS_HOOK_*` macro, or contains anything but the two includes, does not build (`makensis`) and fails C91. | C1; C91 tests |
@@ -294,10 +337,11 @@ Each is a property of the include for every valid declaration. The harness case 
   `leftBehind`), `full` (two graceful stops, one service of each kind, `fallback: none` on one). `build.sh` runs the **real
   generator** (`cargo run -p paddock-setup --example generate`) over each fixture and builds `harness-<fixture>.exe`; no
   generated file is typed by hand any more.
-- **The real `run`.** The stub `paddock-setup.exe` handles the include's own commands as today, but `run` is the real one:
-  the harness installer embeds a stub that forwards `run` to the real `paddock-setup.exe` built for the VM (or, simpler,
-  the real tool with its other commands' answers injected through `PADDOCK_STUB_*`, decided in W3 by whichever keeps the
-  existing cases unchanged). The job object, the re-check and the log are therefore what ships.
+- **The real `run` (decided).** The stub `paddock-setup.exe` answers the include's other commands as today and **forwards
+  `run` to the real `paddock-setup.exe`** built for the VM (`paddock-setup-real.exe` beside it), passing its arguments
+  unchanged and copying its stdout and exit code back. The shipped tool has no environment seams or test switches: every
+  test control lives in the stub and in the stub programs. The job object, both re-checks and the log are therefore what
+  ships. The races of S11 are made by the stub before it forwards.
 - **One stub program for every declared program**, `stub-server.nsi` extended and copied under each declared program name
   (`harness-server.exe`, `harness-agent.exe`, `harness-helper.exe`): it logs `SERVER <$EXEFILE> <args>`, so the log says which
   image ran. Its controls are keyed by image and verb: `PADDOCK_STUB_<IMAGE>_<VERB>_EXIT`, `_SLEEP` (outlast a bound), `_CHILD`
@@ -337,13 +381,22 @@ Cases (new or widened; A to U, P, Q, R, RG and M1 to M5 stay):
 | S6 | `installer-service` | `register` exits 1 with output, `explain` exits 1 with output | install exit 0, `explain`'s line in the details |
 | S6b | `installer-service` | `register` exits 1 with output, `explain` exits 0 | install exit 0, `register`'s own line in the details |
 | S7 | `app-service` | update with the stub service registered, `refresh` exits 1 | install exit 0, the refresh failure in `setup.log` |
-| S8 | `installer-service`, `app-service` | real uninstall, trusted folder, tool present, `check-dir` refused, service registered (control: accepted) | no `SERVER` line; `sc stop` and `sc delete`; stub service gone; the event in `setup.log` only if the tool's checked log accepted the folder, otherwise the details say why. **Security re-review** |
+| S8 | `installer-service`, `app-service` | real uninstall, trusted folder, tool present, `check-dir` refused, service registered (control: accepted) | no `SERVER` line; `sc stop` and `sc delete`; stub service gone; the "no longer protected" message; `setup.log` is not written (the checked log is made only from a folder `check-dir` accepted, so it refuses this one), and the details say "not in setup.log: the folder failed the installer's check". **Security re-review** |
+| S8b | `installer-service` | as S8, with `updates\` holding a junction to a folder with a marker file (control: accepted folder, plain `updates\`) | `updates\` and the junction left in place, the marker file still there, the "left in place" detail line. **Security re-review** |
+| S8c | `installer-service` | real uninstall, `check-dir` accepts, but the stub replaces `harness-server.exe` by a file symlink before forwarding `run` (Q2 condition (c)) | `run` answers `refused`; no `SERVER` line; the `sc` fallback with the "no longer protected" message; stub service gone |
 | S9 | `installer-service` | update, service registered, its program deleted from the install folder (control: present) | no abort; `stop-all`, the files and `SERVER harness-server.exe install` follow; the "missing" detail line |
-| S10 | `installer-service`, `app-service` | real uninstall, service registered, its program deleted (control: present) | no `SERVER` line; the `sc` fallback; stub service gone |
-| S11 | `installer-service` | update; between `PADDOCK_CHECK_DIR` and the verb the test hook replaces `harness-server.exe` by a junction (control: no swap) | `run` answers `refused`; no `SERVER` line; the folder rule in `setup.log` |
+| S10 | `installer-service`, `app-service` | real uninstall, service registered, its program deleted (control: present); repeated with the tool vanishing after `PADDOCK_INSTALLING` (`nosetup`) | no `SERVER` line; the `sc` fallback; stub service gone |
+| S11a | `installer-service` | update; before forwarding `run` the stub replaces `harness-server.exe` by a file symlink to a copy in a folder the test user can write (control: no swap) | `run` answers `refused`; no `SERVER` line from either copy; the protected-file rule's reason in `setup.log`; level 43 while the service is registered |
+| S11b | `installer-service` | update; before forwarding `run` the stub replaces the install folder by a junction to a user-writable folder holding a stub `harness-server.exe` (control: no swap) | `run` answers `refused` (the folder re-check); no `SERVER` line |
+| S12 | `installer-service` | `register` exits 0 but leaves a grandchild running | install exit 0; the grandchild is gone; "left processes running: 1" in `setup.log` |
 | GS1 | `full` | a graceful stop that sleeps past its bound and starts a grandchild | `timeout` logged; neither process remains; `stop-all` still runs; install completes |
 | C2r | `full` | an install whose `register` fails, so the message with `failedText` and an uninstall whose fallback shows `leftBehind` | the details carry both texts byte for byte as declared |
 | M5 | `app-service` | in-place reinstall with the tool dropped | update mode by the folder compare, the service untouched |
+
+**The race that stays (accepted).** `run`'s re-check and `CreateProcessW` are separate steps. Both checks require the folder
+and the file to be owned by SYSTEM, Administrators or TrustedInstaller and writable by no other account, so only an
+administrator or the system could swap the file between them, and they can run anything elevated already. Opening the file
+and starting it by handle is not possible with `CreateProcessW`; the gap is recorded here and not closed.
 
 **One end-to-end run per include version** inside Tauri's real template: `run-dyno-e2e.ps1` becomes `run-app-e2e.ps1
 -Installer <setup.exe> -Product <name>`, run on the release candidates of Dyno 1.1.1 and Pitwall 1.1 (the first two that
@@ -364,8 +417,18 @@ contract, and each app tests it as runtime behaviour:
 - **Idempotence.** `unregister` of a missing service exits 0; `refresh` of a current or missing helper exits 0. Every verb
   may be killed at any point (the bound), and the next run of the same verb finishes or repairs what the killed run left.
 - **`register`** replaces a registration whose program is this folder's program (the S9 path and a reinstall over a
-  half-removed app) and refuses one that names another program, with words for the user on its output.
+  half-removed app) and refuses one that names another program, with words for the user on its output. "This folder's
+  program" is decided canonically: the registration's `ImagePath` parsed quote-aware (`paddock_service::render::
+  windows_program_of`, the inverse of `windows_command_line`), the program path compared with the running verb's own
+  executable by `checkdir::is_within`'s pattern (canonical, case-insensitive, by path components; never a string prefix).
+  The replaced registration takes its account, start type and recovery actions from the verb's own spec, never from the old
+  registration.
 - **No interaction.** No verb opens a window or waits for input.
+- **No process of its own left running.** A verb ends with every process it started; anything long-lived is the service,
+  started by the SCM (a child of `services.exe`, so outside `run`'s job). `run` ends leftovers with the job and logs them
+  (S12). Read on 2026-11-08 (`pitwall/1.1-integrate`): Pitwall's `install` registers and starts the service through
+  `paddock_service`'s manager, and its watcher is spawned only in a supervised server, not in a verb; Dyno's helper crate
+  starts no child process (threads only). W5 and W6 confirm it by test on each verb.
 
 These are Rust and are unit-tested over the app's SCM port; the real-SCM rows run in the VM by the command line, without an
 installer (Pitwall PW-4, PW-7). Also per app:
@@ -401,7 +464,11 @@ C91 keeps what it checks (ADR 0053 §8) and adds, for every app with `installMod
    Windows registration includes it (`include!(concat!(env!("CARGO_MANIFEST_DIR"), "/<path>/per-machine.generated.rs"))`)
    and uses the constant instead of its own literal (Pitcrew's `WINDOWS_SERVICE_NAME` in `pitcrew-core` becomes that
    constant). C91 requires that some Rust source under the app includes the file, and `check_app` that the file is current;
-   a literal service name elsewhere is then a second source that review and the app's own tests catch, not C91.
+   a literal service name elsewhere is then a second source that review and the app's own tests catch, not C91. The
+   `include!` reaches outside the crate's folder, which `cargo package` cannot carry: that is fine for the app crates that
+   use it today (none is published to the registry, `publish = false`), and C91 refuses it in a crate whose `Cargo.toml`
+   allows publishing. Such a crate would get the constant written into its own `src/` by the generator instead (a path
+   inside the package), declared in the declaration's generator settings when the first such crate appears; none does.
 
 ### 7. The artifact gate
 
@@ -414,7 +481,11 @@ C91 keeps what it checks (ADR 0053 §8) and adds, for every app with `installMod
 The include's copy in every adopting app must equal the canonical one (the sync test), so the include change and the
 adoption by Dyno and Pitwall land **in one change** (rules 42 and 43); there is no window in which one app runs v9 and the
 other v8. The work branches from the Pitwall 1.1 line (`pitwall/1.1-integrate`), which holds include v8, Dyno's trust
-changes and Pitwall's adoption. **It lands on main as soon as it is green** (gates, the harness on the VM, both rule-54
+changes and Pitwall's adoption. **The base (decided):** that line is landing on main now, so the build branches from
+`origin/main` **once it contains the landing**, checked by `git merge-base --is-ancestor <pitwall/1.1-integrate tip>
+origin/main` (or the merge commit of `pitwall/1.1-integrate` in `git log origin/main`), never from the Pitwall line itself.
+The shared change and both adoptions then land on main by merge, carrying no Pitwall work in progress. Until the landing
+is there, the build does not start. **It lands on main as soon as it is green** (gates, the harness on the VM, both rule-54
 dispatches), **ahead of the Pitwall tag**: Dyno 1.1.1 needs the trust fix that comes with include v8, and waiting for
 Pitwall's tag would hold it. Family ADR 0022 §G.7 (no `crates/` change inside another app's release window) does not block
 it: the change is part of Pitwall 1.1's own window, and Dyno's next release (1.1.1) carries it.
@@ -460,7 +531,12 @@ the service unregistered until the installer runs again.
 with `"name": "Pitcrew"`, `"program": "pitcrew-service.exe"`, no `explain` (it has no `check-install` verb) and
 `"failedText": "Open Pitcrew, Settings, Service to try again."`. Its `uninstall` waits up to a minute for runners to finish a
 job, so its `unregister` bound is 120 s. Its `install` refuses an existing registration today ("it is installed already;
-uninstall it first"), so its adoption changes it to the §5 contract (replace a registration of the same program). Open for
+uninstall it first"), so its adoption changes it to the §5 contract: replace a registration whose `ImagePath`, parsed
+quote-aware, names its own executable (canonical comparison by `checkdir::is_within`'s pattern), with the account, start type
+and recovery actions of its own `ServiceSpec`, and refuse any other program with words for the user. Three unit tests in
+`pitcrew-service` over a fake SCM port: the same program (quoted, unquoted, different case and an 8.3 spelling) is
+replaced; another program is refused and left registered; an old registration with another account or recovery is replaced
+with the spec's. Open for
 its adoption: ADR 0003's "a busy runner keeps running and is adopted by the new service" must hold under `stop-all` and
 under `run`'s job object (a runner started by the service is not in the verb's job, but its process must not be in the
 stop list either); the runner programs are not programs of the bundle, but `pitcrew-service ctrl-break` runs from `$INSTDIR`
@@ -489,7 +565,7 @@ hand.
 | # | Question | Decision |
 | --- | --- | --- |
 | Q1 | Does `nsExec /TIMEOUT` end the child at the bound? | Not relied on: every app-program run goes through `paddock-setup run` with a job object (§2.2); S5 and GS1 assert the tree is gone. |
-| Q2 | A trusted folder that `check-dir` refuses: leave the service or remove it with `sc`? | **Remove it with `sc stop` and `sc delete`** (§2.3); harness case S8; **marked for explicit security re-review**. |
+| Q2 | A trusted folder that `check-dir` refuses: leave the service or remove it with `sc`? | **Remove it with `sc stop` and `sc delete`** (§2.3), with its own message, also when `run` answers `refused`, and without the recursive removal of `updates\` in that folder; harness cases S8, S8b, S8c; approved by the security re-review with those conditions; the built branch goes to security review again with S8, S8b and S8c. |
 | Q3 | The cancel window of a manual upgrade (ADR 0053 §2.4) | Accepted as in 0053; Pitwall's release notes mention it. |
 
 ## Work packages
@@ -500,20 +576,22 @@ integrating agent changes `crates/Cargo.toml` (one `schemars` line) and `.gitea/
 | WP | Package | Owned paths | Depends on | Days |
 | --- | --- | --- | --- | --- |
 | W1 | `paddock_setup::declaration` (types, validation, the text allowlist, typed errors, `canonical_hash`) and `paddock_setup::generate` (moved from `paddock_service::per_machine` with its tests and every caller: data-only generated `.nsh`, the generated `.rs` constants, schema output, `check_app`, `write_app`, `adopting_apps`); unit tests for every validation rule; the `generate` example | `crates/paddock-setup/src/{declaration,generate}.rs`, `crates/paddock-setup/schema/`, `crates/paddock-setup/examples/generate.rs`, `crates/paddock-service/src/per_machine*` (removed) | – | 1.5–2 |
-| W2a | `paddock-setup run`: the re-check, the job object, bounded output, the marker line, the log; `note --event`; unit tests over a fake process port and Windows tests with real `paddock_proc::testchild` children (ER-14) | `crates/paddock-setup/src/run.rs`, `crates/paddock-setup/src/native/`, `args.rs`, `log.rs` | W1 | 1–1.5 |
-| W2b | Include v9: the four hooks defined by the include, the slots, `_PADDOCK_RUN_APP`, `_PADDOCK_SVC_*`, `_PADDOCK_SC_REMOVE`, `_PADDOCK_ACCEPT_DIR`, the messages, the version keys; compile tests C1 and C2 | `crates/paddock-setup/nsis/paddock-per-machine.nsh`, `crates/paddock-setup/nsis/test/build.sh` | W1, W2a | 1–1.5 |
-| W3 | Harness: the four fixtures, the image-keyed stub, two stub services with their probe, the real `run`, positive controls, cases E2 to C2r, RG renamed, the README; two VM sessions (first run and the fix-up run), results with logs in `docs/research/`; `run-app-e2e.ps1` | `crates/paddock-setup/nsis/test/` | W2b | 2–2.5 |
+| W2a | `paddock-setup run`: the folder and protected-file re-checks, the job object, leftovers, bounded output, the marker line and its unit cases, the log and `log.rs`'s reworded contract; `note --event`; unit tests over a fake process port and Windows tests with real `paddock_proc::testchild` children (ER-14). **Stop for security review** | `crates/paddock-setup/src/run.rs`, `crates/paddock-setup/src/native/`, `args.rs`, `log.rs` | W1 | 1.25–1.75 |
+| W2b | Include v9: the four hooks defined by the include, the slots, `_PADDOCK_RUN_APP`, `_PADDOCK_SVC_*`, `_PADDOCK_SC_REMOVE`, `_PADDOCK_ACCEPT_DIR`, `_PADDOCK_DETAIL`, the Q2 branch and the skipped `updates\` removal, `<why>`, the messages, the version keys; compile tests C1 and C2. **Stop for security review** (with S8, S8b, S8c from W3) | `crates/paddock-setup/nsis/paddock-per-machine.nsh`, `crates/paddock-setup/nsis/test/build.sh` | W1, W2a | 1–1.5 |
+| W3 | Harness: the four fixtures, the image-keyed stub, two stub services with their probe, the real `run`, positive controls, the stub's forwarding of `run`, cases E2 to C2r with S8b, S8c, S11a, S11b and S12, RG renamed, the README; two VM sessions (first run and the fix-up run; each announced to the coordinator first, the VM is shared), results with logs in `docs/research/`; `run-app-e2e.ps1` | `crates/paddock-setup/nsis/test/` | W2b | 2.25–2.75 |
 | W4 | C91: the hooks-file grammar, the version, the generated `.rs` include; its tests; `PER_MACHINE_INPUT` widened; the `installer-compile` CI job (with the integrator) | `conformance/src/checks/C91-per-machine.mjs`, `conformance/test/c91-per-machine.test.mjs`, `scripts/affected.mjs` (one pattern) | W1 | 0.5–0.75 |
 | W5 | Dyno: declaration, hooks file, the helper crate on the generated constant, release notes; the rule-54 dispatch of `dyno-release.yml`; the e2e on the 1.1.1 candidate | `apps/dyno/app/src-tauri/windows/`, `apps/dyno/crates/dyno-helper*`, `apps/dyno/CHANGELOG.md` | W2b, W4 | 0.5–0.75 |
 | W6 | Pitwall: declaration, hooks file, the service crate on the generated constant, ADR 0024's row and VM table, release notes (with Q3's window); the rule-54 dispatch; the e2e on the 1.1 candidate | `apps/pitwall/app/src-tauri/windows/`, `apps/pitwall/crates/pitwall-{server,service}`, `apps/pitwall/docs/adr/0024-*`, `apps/pitwall/CHANGELOG.md` | W2b, W4 | 0.5–0.75 |
 | W7 | Docs: ADR 0053 pointer (§2 and §8 refer here), the testing manual's installer page, `new-app.mjs` and the template, a lessons entry | `docs/adr/0053-*` (a pointer line), `docs/lessons.md`, `scripts/new-app.mjs`, `templates/` | W2b | 0.25–0.5 |
 | W8 | Artifact gate: the two version-resource probes in each per-machine app's `release.toml` and `./dev release verify`'s use of `canonical_hash`; tests | `tools/paddock-dev` (release verify), `apps/{dyno,pitwall}/release.toml` | W1 | 0.5–1 |
 | R | Review rounds: the independent review of the built change, the security re-review of S8's branch and of `run`, and their fixes | – | W3 | 1–1.5 |
-| later | Pitcrew: the declaration, the constant and its `install` verb on the §5 contract, inside its ADR 0053 adoption | `apps/pitcrew/...` | W1–W4 | 0.5 (of its 2–3) |
+| later | Pitcrew: the declaration, the constant and its `install` verb on the §5 contract with its three unit tests, inside its ADR 0053 adoption | `apps/pitcrew/...` | W1–W4 | 0.75 (of its 2–3) |
 
-**In all 8.75 to 13 agent-days**, against the reviewer's 7.5 to 10: the top is higher because W3 counts two VM sessions and
-R counts two review subjects (the change and the security re-review). Revision 1 said 5.25 to 7.5; the difference is `run` (W2a), the
+**In all 9.25 to 13.5 agent-days** (revision 2 said 8.75 to 13; revision 3 adds the protected-file check and the marker
+cases to W2a and five harness cases to W3), against the reviewer's 7.5 to 10: the top is higher because W3 counts two VM
+sessions and R counts two review subjects (the change and the security re-review). Revision 1 said 5.25 to 7.5; the difference is `run` (W2a), the
 artifact gate (W8), the review rounds (R), the generator move with its callers (W1), the second VM session and positive
 controls (W3), and the CI job. Order: W1; then W2a, W4 and W8 beside each other; W2b; W3; W5 and W6 together with W7; R
 across W3 to W6. With two agents the critical path W1, W2a, W2b, W3, W6 and R is about **6.5 to 9 working days**, plus CI
-waits for the two rule-54 dispatches. The change lands on main once green, ahead of Pitwall's tag (§8).
+waits for the two rule-54 dispatches. The build starts once `origin/main` contains the Pitwall landing, and the change lands
+on main once green, ahead of Pitwall's tag (§8).
