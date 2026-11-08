@@ -36,7 +36,6 @@ export const ICONS: Record<string, string> = {
   close: s('<path d="M6 6l12 12M18 6 6 18"/>'),
   check: s('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
   more: s('<circle cx="5.5" cy="12" r="1.1"/><circle cx="12" cy="12" r="1.1"/><circle cx="18.5" cy="12" r="1.1"/>'),
-  'arrow-right': s('<path d="M4 12h15M13 6l6 6-6 6"/>'),
   'chevron-right': s('<path d="m9.5 6 6 6-6 6"/>'),
   'chevron-down': s('<path d="m6 9.5 6 6 6-6"/>'),
   'arrow-left': s('<path d="M19 12H5M11 6l-6 6 6 6"/>'),
