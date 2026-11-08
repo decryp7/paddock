@@ -11,11 +11,15 @@
 // hard floor of 90 %. Whole files that cannot run in unit tests are excluded by [[exclude]] entries, each with a reason; the
 // regex that CI gives cargo llvm-cov is generated from them (scripts/coverage-register.mjs).
 //
-// The ratchet: a minimum equals its crate's measured figure (a figure above it by more than max(0.05 %, 2 lines) is an error:
-// raise the minimum; under it is an error, exactly). `ratchet --base <rev>` compares the register with the one at that revision:
-// a lowered minimum always fails; a new [[crate]] or [[exclude]] entry fails unless a commit in <rev>..HEAD has the trailer
-// `Coverage-lowered: <crate|path> <reason> approved: user` (an honour-system marker that review checks). A base that has no
-// register (git ls-tree succeeds with no output) is the initial seed; any other git error fails.
+// The ratchet: a minimum equals its crate's measured figure (a figure above it by more than max(0.05 %, 2 lines): raise the
+// minimum, an error on main and a warning on a branch; under it is an error, exactly). A workspace member with no lines in the
+// lcov is an error. `ratchet --base <rev>` compares the register with the one at that revision: a lowered minimum fails unless
+// a commit in <rev>..HEAD has `Coverage-lowered: <crate> <old>→<new>: <reason>; approved: user` with exactly those figures, or
+// is a re-baseline (it changes only rust-toolchain or Cargo.lock besides the register); a new [[crate]] or [[exclude]] entry fails
+// unless a commit has `Coverage-lowered: <crate|path> <reason> approved: user` (honour-system markers that review checks). A base
+// that has no register (git ls-tree succeeds with no output) is the initial seed; any other git error fails.
+//
+// Figures are of the lines Linux compiles: `check` warns and `suggest` refuses on another OS (platformGuard).
 //
 // One kind of line is not counted: the `#[tauri::command]` attribute itself. Tauri's macro turns the attribute into a
 // wrapper (argument extraction with an error arm per argument, the response glue) and llvm-cov attributes every region of
@@ -26,7 +30,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { isMain } from '../conformance/src/util/is-main.mjs';
-import { DEFAULT_MINIMUM, HARD_FLOOR, ignoreRegex, addedTrailers, parseRegister, ratchetErrors, validateRegister, workspaceMembers } from './coverage-register.mjs';
+import { DEFAULT_MINIMUM, HARD_FLOOR, addedTrailers, changedMinimums, ignoreRegex, isRebaselineCommit, loweredTrailers, parseRegister, ratchetErrors, validateRegister, workspaceMembers } from './coverage-register.mjs';
 
 /** A figure above its minimum by more than max(this percent, RAISE_LINES lines) is an error: the minimum is the measured figure, raised by hand. */
 export const RAISE_TOLERANCE = 0.05;
@@ -91,7 +95,7 @@ export const floor2 = (x) => Math.floor(x * 100 + 1e-9) / 100;
  * Judges every crate. Returns { rows, errors, warnings }: a row per crate { crate, figure, minimum, reason, status }
  * with status 'pass' or 'FAIL'; errors and warnings are annotation texts without the `::error::` prefix.
  */
-export function evaluate(byCrate, register, registerWarnings = []) {
+export function evaluate(byCrate, register, registerWarnings = [], { onMain = true, members = [] } = {}) {
   const entries = new Map(register.crates.map((c) => [c.name, c]));
   const rows = [];
   const errors = [];
@@ -116,15 +120,23 @@ export function evaluate(byCrate, register, registerWarnings = []) {
     if (entry && figure >= DEFAULT_MINIMUM) {
       warnings.push(`crate ${crate}: ${shown} % reaches ${DEFAULT_MINIMUM} %; remove its [[crate]] entry from crates/coverage.toml.`);
     } else if (entry && status === 'pass' && figure - minimum > Math.max(RAISE_TOLERANCE, (100 * RAISE_LINES) / total)) {
-      status = 'FAIL';
-      errors.push(`crate ${crate}: ${shown} % is above its recorded minimum ${minimum} % by more than max(${RAISE_TOLERANCE} %, ${RAISE_LINES} lines). Next step: raise the minimum to ${floor2(figure).toFixed(2)} in crates/coverage.toml (minimums equal the measured figures and only go up).`);
+      const text = `crate ${crate}: ${shown} % is above its recorded minimum ${minimum} % by more than max(${RAISE_TOLERANCE} %, ${RAISE_LINES} lines). Next step: raise the minimum to ${floor2(figure).toFixed(2)} in crates/coverage.toml (minimums equal the measured figures and only go up).`;
+      // On main it is an error (the register must be exact there); on a branch a warning, so a neighbour's better tests never turn it red.
+      if (onMain) {
+        status = 'FAIL';
+        errors.push(text);
+      } else {
+        status = 'raise';
+        warnings.push(text);
+      }
     }
     rows.push({ crate, figure, minimum, reason: figure < DEFAULT_MINIMUM ? (entry?.reason ?? '') : '', status });
   }
-  for (const c of register.crates) {
-    if (!byCrate.has(c.name) || byCrate.get(c.name).total === 0) {
-      warnings.push(`crate ${c.name}: no measured lines in the lcov file, so its entry was not checked.`);
-    }
+  // A workspace member the lcov has no lines for was not measured at all (its tests did not run, or every file is excluded): it
+  // would pass unseen, so it is an error. The workspace-hack crate has no code of its own.
+  for (const name of members) {
+    if (name === 'paddock-workspace-hack' || (byCrate.get(name)?.total ?? 0) > 0) continue;
+    errors.push(`crate ${name}: no lines in the lcov file, so it was not judged. Next step: check that its tests ran in the coverage run (cargo llvm-cov nextest --workspace), or, if every file of it cannot run in unit tests, say so under [[exclude]] in crates/coverage.toml.`);
   }
   return { rows, errors, warnings };
 }
@@ -202,11 +214,11 @@ function git(args, cwd) {
 }
 
 /** Runs the check; returns { exit, out, summary }. Pure apart from the reads. */
-export function check({ lcovText, registerText, root, now = new Date(), read = readSource }) {
+export function check({ lcovText, registerText, root, now = new Date(), read = readSource, onMain = false }) {
   const register = parseRegister(registerText);
   const valid = validateRegister(register, root, now, { members: membersOf(root) });
   const byCrate = measureByCrate(lcovText, read, root);
-  const judged = evaluate(byCrate, register, valid.warnings);
+  const judged = evaluate(byCrate, register, valid.warnings, { onMain, members: membersOf(root) ?? [] });
   const errors = [...valid.errors, ...judged.errors];
   const result = { ...judged, errors };
   const out = [
@@ -236,36 +248,35 @@ function baseOf(base, registerPath) {
   const text = listed.trim() === '' ? null : run(['show', `${base}:./${name}`]);
   const shas = run(['rev-list', `${base}..HEAD`]).split('\n').filter(Boolean);
   const trailers = shas.flatMap((sha) => run(['interpret-trailers', '--parse'], run(['show', '-s', '--format=%B', sha])).split('\n').filter(Boolean));
-  return { text, trailers };
+  // Commits that re-baseline (rust-toolchain or Cargo.lock, nothing else but the register) may move minimums: the crates they changed.
+  const rebaselined = new Set();
+  for (const sha of shas) {
+    const files = run(['diff-tree', '--no-commit-id', '--name-only', '-r', '--root', sha]).split('\n').filter(Boolean);
+    if (!isRebaselineCommit(files)) continue;
+    const at = (rev) => {
+      try {
+        return execFileSync('git', ['show', `${rev}:./${name}`], { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 << 20 });
+      } catch {
+        return null;
+      }
+    };
+    for (const crate of changedMinimums(at(`${sha}^`), at(sha))) rebaselined.add(crate);
+  }
+  return { text, trailers, rebaselined };
 }
 
-/** The per-crate table, the crates with most uncovered lines first. */
-export function table(crates) {
-  const rows = [...crates].map(([name, c]) => ({ name, ...c, missing: c.total - c.hit }));
-  rows.sort((a, b) => b.missing - a.missing || a.name.localeCompare(b.name));
-  const width = Math.max(5, ...rows.map((r) => r.name.length));
-  const out = [`${'crate'.padEnd(width)} ${'lines'.padStart(7)} ${'covered'.padStart(7)} ${'missing'.padStart(7)} ${'%'.padStart(7)}`];
-  for (const r of rows) {
-    const pct = r.total === 0 ? 100 : (100 * r.hit) / r.total;
-    out.push(`${r.name.padEnd(width)} ${String(r.total).padStart(7)} ${String(r.hit).padStart(7)} ${String(r.missing).padStart(7)} ${pct.toFixed(2).padStart(7)}`);
+/**
+ * The figures are those of the lines Linux compiles (`#[cfg(target_os)]` arms differ per OS, and CI runs as root in the CI image),
+ * so a check on another OS judges other lines and `suggest` would write another OS's figures into the register. `suggest` refuses
+ * off Linux unless `anyPlatform`; `check` warns. Returns { refuse, lines }.
+ */
+export function platformGuard(command, platform, anyPlatform = false) {
+  if (platform === 'linux') return { refuse: false, lines: [] };
+  const how = 'Reproduce CI\'s figures in the CI image under docker as root (crates/README.md, "Reproducing the coverage figures").';
+  if (command === 'suggest' && !anyPlatform) {
+    return { refuse: true, lines: [`::error::suggest on ${platform} would record figures of ${platform}-compiled lines, not the Linux-compiled lines CI judges. Next step: ${how} (--any-platform prints it anyway, for reading only).`] };
   }
-  return out.join('\n');
-}
-
-/** Runs the gate over lcov text; returns { code, lines } (the output lines, the exit code). The rule: aggregate >= minimum. */
-export function gate(lcov, minimum = 99, read) {
-  const crates = new Map();
-  const { hit, total, skipped } = measure(lcov, read, crates);
-  const percent = total === 0 ? 0 : (100 * hit) / total;
-  const lines = [`lines ${hit}/${total} = ${percent.toFixed(2)}% (${skipped} generated #[tauri::command] lines not counted)`, table(crates)];
-  const pass = total > 0 && percent >= Number(minimum);
-  if (!pass) {
-    const needed = Math.max(0, Math.ceil((Number(minimum) / 100) * total) - hit);
-    lines.push(
-      `::error::line coverage ${percent.toFixed(2)}% is below the minimum ${Number(minimum)}%: ${total - hit} lines uncovered, ${needed} more must be covered. Next step: add tests for the crates at the top of the table above.`,
-    );
-  }
-  return { code: pass ? 0 : 1, lines };
+  return { refuse: false, lines: [`::warning::${command} on ${platform}: the lcov file holds ${platform}-compiled lines, not the Linux-compiled lines CI judges, so a figure here may differ from CI's. ${how}`] };
 }
 
 if (isMain(import.meta.url)) {
@@ -274,7 +285,14 @@ if (isMain(import.meta.url)) {
   const root = flag('--root') ?? '.';
   const summaryFile = flag('--summary') ?? process.env.GITHUB_STEP_SUMMARY ?? null;
   const base = flag('--base');
+  const anyPlatform = args.includes('--any-platform');
+  if (anyPlatform) args.splice(args.indexOf('--any-platform'), 1);
   const [cmd, a, b] = args;
+  if (cmd === 'check' || cmd === 'suggest') {
+    const guard = platformGuard(cmd, process.platform, anyPlatform);
+    for (const l of guard.lines) console.log(l);
+    if (guard.refuse) process.exit(2);
+  }
   if (cmd === 'regex' && a) {
     process.stdout.write(`${ignoreRegex(parseRegister(readFileSync(a, 'utf8')).excludes)}\n`);
   } else if (cmd === 'suggest' && a && b) {
@@ -290,9 +308,9 @@ if (isMain(import.meta.url)) {
     }
     let errors;
     try {
-      const { text, trailers } = baseOf(base, a);
+      const { text, trailers, rebaselined } = baseOf(base, a);
       if (text === null) console.log(`::notice::the base ${base} has no coverage.toml: this is the initial seed, the ratchet compares nothing.`);
-      errors = ratchetErrors(text === null ? null : parseRegister(text), parseRegister(readFileSync(a, 'utf8')), addedTrailers(trailers));
+      errors = ratchetErrors(text === null ? null : parseRegister(text), parseRegister(readFileSync(a, 'utf8')), addedTrailers(trailers), { lowered: loweredTrailers(trailers), rebaselined });
     } catch (e) {
       errors = [e.message];
     }
@@ -300,12 +318,14 @@ if (isMain(import.meta.url)) {
     if (errors.length === 0) console.log(`coverage ratchet: ok against ${base}.`);
     process.exit(errors.length === 0 ? 0 : 1);
   } else if (cmd === 'check' && a && b) {
-    const { exit, out, summary } = check({ lcovText: readFileSync(a, 'utf8'), registerText: readFileSync(b, 'utf8'), root });
+    // "Raise the minimum" is an error on main and a warning elsewhere (--on-main forces it, for a local run of main's rule).
+    const onMain = process.env.GITHUB_REF === 'refs/heads/main' || process.env.GITHUB_REF_NAME === 'main' && process.env.GITHUB_EVENT_NAME !== 'pull_request' || args.includes('--on-main');
+    const { exit, out, summary } = check({ lcovText: readFileSync(a, 'utf8'), registerText: readFileSync(b, 'utf8'), root, onMain });
     console.log(out.join('\n'));
     if (summaryFile) appendFileSync(summaryFile, summary);
     process.exit(exit);
   } else {
-    console.error('usage: coverage-gate.mjs check <lcov.info> <coverage.toml> [--root <crates>] [--summary <file>] | ratchet <coverage.toml> --base <rev> | suggest <lcov.info> <coverage.toml> [--root <crates>] | regex <coverage.toml>');
+    console.error('usage: coverage-gate.mjs check <lcov.info> <coverage.toml> [--root <crates>] [--summary <file>] [--on-main] | ratchet <coverage.toml> --base <rev> | suggest <lcov.info> <coverage.toml> [--root <crates>] [--any-platform] | regex <coverage.toml>');
     process.exit(2);
   }
 }

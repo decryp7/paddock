@@ -144,12 +144,51 @@ export function addedTrailers(trailerLines) {
 }
 
 /**
- * The ratchet against the register of the base. Minimums only go up: a lowered minimum of an existing [[crate]] entry always
- * fails. A new [[crate]] entry and a new [[exclude]] entry fail too, unless a commit of the change carries
- * `Coverage-lowered: <crate|path> <reason> approved: user`. `base` is a parsed register, or null when the base has none (the
- * initial seed: nothing to compare).
+ * The commits' `Coverage-lowered: <crate> <old>→<new>: <reason>; approved: user` trailers (also `->`): a Map crate -> { from, to, reason }.
+ * Only this form lowers the minimum of an existing entry, and only to the figures it names. The key is matched case-sensitively;
+ * the marker is an honour-system one that review must check (ADR 0050).
  */
-export function ratchetErrors(base, current, approved) {
+export function loweredTrailers(trailerLines) {
+  const out = new Map();
+  for (const line of trailerLines) {
+    const m = /^Coverage-lowered:\s+(\S+)\s+(\d+(?:\.\d+)?)\s*(?:\u2192|->)\s*(\d+(?:\.\d+)?)\s*:\s*(\S.*?)\s*;\s*approved:\s*user\s*$/.exec(line);
+    if (m) out.set(m[1], { from: Number(m[2]), to: Number(m[3]), reason: m[4] });
+  }
+  return out;
+}
+
+const TOOLCHAIN_OR_LOCK = /(?:^|\/)(?:rust-toolchain(?:\.toml)?|Cargo\.lock)$/;
+
+/**
+ * Whether a commit that changed exactly `files` may re-baseline the register: it changes a `rust-toolchain` file or a `Cargo.lock`
+ * (a new compiler or dependency set moves every figure) and nothing but the register besides. A source change in the same
+ * commit makes it an ordinary one.
+ */
+export function isRebaselineCommit(files) {
+  const trigger = files.some((f) => TOOLCHAIN_OR_LOCK.test(f));
+  return trigger && files.every((f) => TOOLCHAIN_OR_LOCK.test(f) || /(?:^|\/)coverage\.toml$/.test(f));
+}
+
+/** The crates whose [[crate]] minimum differs between two register texts (`before` null: none); a crate in only one counts. */
+export function changedMinimums(before, after) {
+  const min = (text) => new Map(text === null ? [] : parseRegister(text).crates.map((c) => [c.name, c.minimum]));
+  const was = min(before);
+  const now = min(after);
+  const out = new Set();
+  for (const [name, m] of now) if (was.get(name) !== m) out.add(name);
+  for (const name of was.keys()) if (!now.has(name)) out.add(name);
+  return out;
+}
+
+/**
+ * The ratchet against the register of the base. Minimums only go up, except where the user lowered one: an existing [[crate]]
+ * entry's lowered minimum fails unless a commit of the change has `Coverage-lowered: <crate> <old>→<new>: <reason>; approved: user`
+ * naming exactly the base's figure and the new one (`lowered`, from loweredTrailers), or a re-baseline commit (a change of
+ * rust-toolchain or Cargo.lock) changed that crate's minimum (`rebaselined`). A new [[crate]] entry and a new [[exclude]] entry
+ * fail unless a commit has `Coverage-lowered: <crate|path> <reason> approved: user` (`approved`). `base` is a parsed register,
+ * or null when the base has none (the initial seed: nothing to compare).
+ */
+export function ratchetErrors(base, current, approved, { lowered = new Map(), rebaselined = new Set() } = {}) {
   if (base === null) return [];
   const errors = [];
   const before = new Map(base.crates.map((c) => [c.name, c]));
@@ -158,8 +197,11 @@ export function ratchetErrors(base, current, approved) {
     const old = before.get(c.name);
     if (!old) {
       if (!approved.has(c.name)) errors.push(`crate ${c.name}: a new [[crate]] entry in coverage.toml lowers its crate's bar to ${c.minimum} %. ${trailer(c.name)}`);
-    } else if (typeof c.minimum === 'number' && c.minimum < old.minimum) {
-      errors.push(`crate ${c.name}: minimum lowered from ${old.minimum} % to ${c.minimum} % in coverage.toml. Next step: minimums only go up and no trailer allows a lower one; add tests, or restore ${old.minimum}.`);
+    } else if (typeof c.minimum === 'number' && c.minimum < old.minimum && !rebaselined.has(c.name)) {
+      const t = lowered.get(c.name);
+      if (t && t.from === old.minimum && t.to === c.minimum) continue;
+      const said = t ? ` The trailer says ${t.from} % to ${t.to} %, the register says ${old.minimum} % to ${c.minimum} %.` : '';
+      errors.push(`crate ${c.name}: minimum lowered from ${old.minimum} % to ${c.minimum} % in coverage.toml.${said} Next step: add tests, or restore ${old.minimum}; if the user approved the lower figure, add the trailer \`Coverage-lowered: ${c.name} ${old.minimum}\u2192${c.minimum}: <reason>; approved: user\` to a commit of this change; a change of rust-toolchain or Cargo.lock may re-baseline without it.`);
     }
   }
   const paths = new Set(base.excludes.map((e) => e.path));

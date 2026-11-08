@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { check, crateOf, floor2, measure, measureByCrate, suggest } from './coverage-gate.mjs';
-import { ignoreRegex, addedTrailers, parseRegister, ratchetErrors, validateRegister, workspaceMembers } from './coverage-register.mjs';
+import { check, crateOf, floor2, measure, measureByCrate, platformGuard, suggest } from './coverage-gate.mjs';
+import { ignoreRegex, addedTrailers, changedMinimums, isRebaselineCommit, loweredTrailers, parseRegister, ratchetErrors, validateRegister, workspaceMembers } from './coverage-register.mjs';
 
 const sources = {
   'a.rs': ['fn a() {}', '#[::tauri::command]', 'pub async fn cmd() {', '    body();', '}'].join('\n'),
@@ -59,8 +59,13 @@ function lcovFor(root, figures) {
     })
     .join('\n');
 }
-const run = (root, figures, register, extra = {}, now = new Date('2026-11-04T00:00:00Z')) =>
-  check({ lcovText: lcovFor(root, figures), registerText: register, root, now, read: () => null, ...extra });
+/** The members of the fixture's Cargo.toml that `figures` leaves out are fully covered, unless `fill` is false. */
+const run = (root, figures, register, extra = {}, now = new Date('2026-11-04T00:00:00Z')) => {
+  const { fill = true, ...rest } = extra;
+  const members = fill ? (workspaceMembers(readFileSync(join(root, 'Cargo.toml'), 'utf8')) ?? []) : [];
+  const all = { ...Object.fromEntries(members.map((m) => [m, [100, 100]])), ...figures };
+  return check({ lcovText: lcovFor(root, all), registerText: register, root, now, read: () => null, onMain: true, ...rest });
+};
 const entry = (name, minimum, extra = 'reason = "native"\nreview = "2027-02-01"') => `[[crate]]\nname = "${name}"\nminimum = ${minimum}\n${extra}\n`;
 
 test('every crate at 99 % passes with an empty register', () => {
@@ -189,7 +194,7 @@ test('ratchet: a lowered minimum, a new crate entry and a new exclude each fail 
   assert.deepEqual(ratchetErrors(reg(base), reg(entry('a', 99.5).replace('99.5', '96')), none), [], 'a raise is fine');
 });
 
-test('ratchet: a trailer allows only a new crate or a new exclude, never a lower minimum; no base register is the seed', () => {
+test('ratchet: the old trailer form allows only a new crate or a new exclude, never a lower minimum; no base register is the seed', () => {
   const approved = addedTrailers([
     'Coverage-lowered: b because the adapter needs a desktop approved: user',
     'coverage-lowered: x lower-case key approved: user',
@@ -200,7 +205,7 @@ test('ratchet: a trailer allows only a new crate or a new exclude, never a lower
   assert.deepEqual(ratchetErrors(reg(base), reg(base + entry('b', 96)), approved), []);
   assert.equal(ratchetErrors(reg(base), reg(base + entry('c', 96)), approved).length, 1);
   const lowered = ratchetErrors(reg(base), reg(entry('a', 94) + '[[exclude]]\npath = "a/src/n.rs"\nreason = "r"\n'), approved);
-  assert.match(lowered[0], /minimum lowered from 95 % to 94 %.*no trailer allows a lower one/, 'the trailer for a does not exempt a lowered minimum');
+  assert.match(lowered[0], /minimum lowered from 95 % to 94 %.*Coverage-lowered: a 95\u219294: <reason>; approved: user/, 'the old-form trailer for a does not exempt a lowered minimum');
   assert.deepEqual(ratchetErrors(null, reg(base), new Set()), []);
 });
 
@@ -272,5 +277,131 @@ test('the ratchet CLI reads the base register and the trailer block from git, an
   assert.match(cli().stdout, /::notice::coverage ratchet not checked: no base/);
   const strict = spawnSync('node', [gate, 'ratchet', join(root, 'coverage.toml')], { encoding: 'utf8', env: { ...env, GITHUB_EVENT_NAME: 'pull_request' } });
   assert.match(strict.stdout, /::warning::coverage ratchet not checked: no base revision on a pull request/);
+  rmSync(root, { recursive: true });
+});
+
+test('a workspace member with no lines in the lcov is an error; the workspace-hack crate is not asked for', () => {
+  const root = tree(['a', 'b', 'paddock-workspace-hack']);
+  const r = run(root, { a: [100, 100] }, '', { fill: false });
+  assert.equal(r.exit, 1);
+  const errors = r.out.filter((l) => l.startsWith('::error::'));
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /crate b: no lines in the lcov file.*Next step/);
+  assert.ok(!r.out.some((l) => /workspace-hack/.test(l)));
+  assert.match(r.summary, /crate b: no lines in the lcov file/);
+  assert.equal(run(root, { a: [100, 100], b: [100, 100] }, '', { fill: false }).exit, 0);
+  rmSync(root, { recursive: true });
+});
+
+test('a registered crate that is not a member has no lines to ask for; a member with an entry and no lines is still an error', () => {
+  const root = tree(['a', 'b']);
+  const r = run(root, { a: [100, 100] }, entry('b', 95), { fill: false });
+  assert.equal(r.exit, 1);
+  assert.ok(r.out.some((l) => l.startsWith('::error::crate b: no lines in the lcov file')));
+  rmSync(root, { recursive: true });
+});
+
+test('"raise the minimum" is a warning on a branch and an error on main', () => {
+  const root = tree(['a']);
+  const branch = run(root, { a: [98, 100] }, entry('a', 95), { onMain: false });
+  assert.equal(branch.exit, 0);
+  assert.ok(branch.out.some((l) => l.startsWith('::warning::crate a: 98.00 %') && /raise the minimum to 98\.00/.test(l)));
+  assert.ok(!branch.out.some((l) => l.startsWith('::error::')));
+  assert.match(branch.summary, /\| a \| 98\.00 % \| 95 % \|.*\| raise \|/);
+  const main = run(root, { a: [98, 100] }, entry('a', 95), { onMain: true });
+  assert.equal(main.exit, 1);
+  assert.ok(main.out.some((l) => l.startsWith('::error::crate a: 98.00 %') && /raise the minimum to 98\.00/.test(l)));
+  assert.equal(run(root, { a: [94, 100] }, entry('a', 95), { onMain: false }).exit, 1, 'under the minimum is an error on a branch too');
+  rmSync(root, { recursive: true });
+});
+
+test('the platform guard: suggest refuses off Linux, check warns, --any-platform lets suggest through', () => {
+  assert.deepEqual(platformGuard('check', 'linux'), { refuse: false, lines: [] });
+  assert.deepEqual(platformGuard('suggest', 'linux'), { refuse: false, lines: [] });
+  const chk = platformGuard('check', 'darwin');
+  assert.equal(chk.refuse, false);
+  assert.match(chk.lines[0], /^::warning::.*darwin.*Linux-compiled lines.*docker/s);
+  const sug = platformGuard('suggest', 'win32');
+  assert.equal(sug.refuse, true);
+  assert.match(sug.lines[0], /^::error::.*win32.*Linux-compiled lines.*CI image/s);
+  assert.deepEqual(platformGuard('suggest', 'darwin', true).refuse, false);
+  assert.match(platformGuard('suggest', 'darwin', true).lines[0], /^::warning::/);
+});
+
+const lowerTrailer = (crate, from, to) => `Coverage-lowered: ${crate} ${from}\u2192${to}: the adapter arm needs a desktop; approved: user`;
+
+test('loweredTrailers reads "<crate> <old>→<new>: <reason>; approved: user" (also with ->) and nothing looser', () => {
+  const m = loweredTrailers([lowerTrailer('a', 95, 94.5), 'Coverage-lowered: b 90->89.5: a reason; approved: user', 'Coverage-lowered: c 90→89: reason; approved: agent', 'Coverage-lowered: d reason approved: user', 'coverage-lowered: e 90→89: r; approved: user', 'Coverage-lowered: f 90→89: ; approved: user']);
+  assert.deepEqual([...m.keys()].sort(), ['a', 'b']);
+  assert.deepEqual(m.get('a'), { from: 95, to: 94.5, reason: 'the adapter arm needs a desktop' });
+  assert.equal(m.get('b').to, 89.5);
+});
+
+test('ratchet: a lowered minimum passes with a matching trailer and fails when the numbers differ or the trailer is the old form', () => {
+  const lowered = reg(entry('a', 94.5) + '[[exclude]]\npath = "a/src/n.rs"\nreason = "r"\n');
+  const opts = (lines) => ({ lowered: loweredTrailers(lines) });
+  assert.deepEqual(ratchetErrors(reg(base), lowered, new Set(), opts([lowerTrailer('a', 95, 94.5)])), []);
+  assert.match(ratchetErrors(reg(base), lowered, new Set(), opts([lowerTrailer('a', 95, 94)]))[0], /trailer says 95 % to 94 %, the register says 95 % to 94\.5 %/);
+  assert.match(ratchetErrors(reg(base), lowered, new Set(), opts([lowerTrailer('a', 96, 94.5)]))[0], /trailer says 96 %/);
+  assert.match(ratchetErrors(reg(base), lowered, new Set(['a']), opts([]))[0], /minimum lowered from 95 % to 94\.5 %.*Coverage-lowered: a 95\u219294\.5: <reason>; approved: user/s, 'the old trailer form no longer lowers');
+  assert.match(ratchetErrors(reg(base), lowered, new Set(), opts([lowerTrailer('b', 95, 94.5)]))[0], /minimum lowered/, 'another crate\'s trailer does not count');
+  assert.deepEqual(ratchetErrors(reg(base), lowered, new Set(), { rebaselined: new Set(['a']) }), [], 'a re-baseline commit lowered it');
+});
+
+test('isRebaselineCommit: only rust-toolchain or Cargo.lock (and the register) changed, at least one of the former', () => {
+  assert.equal(isRebaselineCommit(['rust-toolchain.toml', 'crates/coverage.toml']), true);
+  assert.equal(isRebaselineCommit(['crates/Cargo.lock', 'crates/coverage.toml']), true);
+  assert.equal(isRebaselineCommit(['apps/dyno/Cargo.lock']), true);
+  assert.equal(isRebaselineCommit(['rust-toolchain']), true);
+  assert.equal(isRebaselineCommit(['crates/coverage.toml']), false, 'the register alone is no re-baseline');
+  assert.equal(isRebaselineCommit(['Cargo.lock', 'crates/paddock-a/src/lib.rs']), false, 'a source change in the same commit');
+  assert.equal(isRebaselineCommit(['crates/Cargo.toml', 'Cargo.lock']), false);
+  assert.equal(isRebaselineCommit([]), false);
+});
+
+test('changedMinimums names the crates whose minimum differs between two registers', () => {
+  const before = entry('a', 95) + entry('b', 96) + entry('c', 97);
+  const after = entry('a', 94) + entry('b', 96) + entry('d', 91);
+  assert.deepEqual([...changedMinimums(before, after)].sort(), ['a', 'c', 'd']);
+  assert.deepEqual([...changedMinimums(null, after)].sort(), ['a', 'b', 'd']);
+});
+
+test('the ratchet CLI honours a lowering trailer and a re-baseline commit, and nothing else', () => {
+  const root = tree(['a', 'b']);
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...a], { cwd: root, encoding: 'utf8' });
+  git('init', '-q');
+  writeFileSync(join(root, 'Cargo.lock'), '1\n');
+  writeFileSync(join(root, 'coverage.toml'), entry('a', 95) + entry('b', 96));
+  git('add', '.');
+  git('commit', '-q', '-m', 'ci: register');
+  const registered = git('rev-parse', 'HEAD').trim();
+  const gate = fileURLToPath(new URL('./coverage-gate.mjs', import.meta.url));
+  const env = { ...process.env, GITHUB_EVENT_NAME: '', GITHUB_REF: '' };
+  const cli = (...extra) => spawnSync('node', [gate, 'ratchet', join(root, 'coverage.toml'), ...extra], { encoding: 'utf8', env });
+  // 1. a lowering with the trailer in the message
+  writeFileSync(join(root, 'coverage.toml'), entry('a', 94) + entry('b', 96));
+  git('commit', '-q', '-a', '-m', `ci: lower a\n\n${lowerTrailer('a', 95, 94)}`);
+  assert.equal(cli('--base', registered).status, 0, cli('--base', registered).stdout);
+  // 2. a lowering without it
+  writeFileSync(join(root, 'coverage.toml'), entry('a', 94) + entry('b', 95));
+  git('commit', '-q', '-a', '-m', 'ci: lower b');
+  const noTrailer = cli('--base', registered);
+  assert.equal(noTrailer.status, 1);
+  assert.match(noTrailer.stdout, /::error::crate b: minimum lowered from 96 % to 95 %/);
+  // 3. the same lowering in a commit that changes Cargo.lock and the register only
+  git('reset', '-q', '--hard', 'HEAD~1');
+  writeFileSync(join(root, 'Cargo.lock'), '2\n');
+  writeFileSync(join(root, 'coverage.toml'), entry('a', 94) + entry('b', 95));
+  git('commit', '-q', '-a', '-m', 'chore: update the lockfile and re-baseline coverage');
+  const rebased = cli('--base', registered);
+  assert.equal(rebased.status, 0, rebased.stdout);
+  // 4. a commit that also changes source is no re-baseline
+  git('reset', '-q', '--hard', 'HEAD~1');
+  writeFileSync(join(root, 'Cargo.lock'), '2\n');
+  writeFileSync(join(root, 'a', 'src', 'lib.rs'), 'fn x() {}\n');
+  writeFileSync(join(root, 'coverage.toml'), entry('a', 94) + entry('b', 95));
+  git('add', '.');
+  git('commit', '-q', '-m', 'chore: lockfile and a source change');
+  assert.equal(cli('--base', registered).status, 1);
   rmSync(root, { recursive: true });
 });
