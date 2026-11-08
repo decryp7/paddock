@@ -1,0 +1,5 @@
+AXMenuBarItem  Clock | Wed Nov 4  2:18 PM | com.apple.menuextra.clock
+    AXMenuBarItem  Control Center | com.apple.menuextra.controlcenter
+    AXMenuBarItem  
+    AXMenuBarItem  
+    AXMenuBarItem  

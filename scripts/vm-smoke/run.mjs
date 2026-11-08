@@ -7,10 +7,29 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statfsSync, writeFileSync, cpSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Check, runAll } from './checks.mjs';
-import { renderResult } from './judge.mjs';
+import { buildStep, expectedCommit } from './verdict.mjs';
+import { requiredSteps } from './manifest.mjs';
+import { commitOfRun, finalizeRun, foundFromGrep, sha256File, withBuildStep, preflightBase } from './report.mjs';
+import { PowerChecks, runPowerSuite } from './power-checks.mjs';
+import { MacGui } from './mac-gui.mjs';
+import { MacIdleChecks } from './mac-idle.mjs';
+import { macDriver, readingSteps } from './helper-readings.mjs';
+import { swapNotDriven, upgradeSwapStep } from './upgrade-swap-row.mjs';
+import { macSwapPrimitives } from './upgrade-swap-prims.mjs';
+import { loginJobsRow, macLoginJobsDriver } from './login-jobs-drivers.mjs';
+import { diskSpaceStep, unixAdapter } from './disk-space-row.mjs';
+import { discoveryStep, unixDiscoveryPrims } from './discovery-row.mjs';
+import { macRebootCheck } from './mac-reboot.mjs';
+import { makeMcpGuest } from './mcp-guest.mjs';
+import { mcpStep } from './mcp-judges.mjs';
+import { NOT_DRIVEN, ROW_TITLES, btmState, keychainOtherBuildStep, judgeLifecycleLog, judgeMacReopen, notDriven, rowStep } from './release-rows.mjs';
+import { hungPageStep } from './hung-page.mjs';
+import { quitStopStep } from './mcp-judges.mjs';
+import { loginSwitchStep, parseBtm } from './login-start-rows.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -24,22 +43,29 @@ const MANUAL = [
 ];
 
 export function parseArgs(argv) {
-  const o = { guest: 'macos', out: null, base: null, keep: false, maxLoad: Number(process.env.PADDOCK_VM_MAX_LOAD ?? 16) };
+  const o = { guest: 'macos', suite: 'start', out: null, base: null, keep: false, maxLoad: Number(process.env.PADDOCK_VM_MAX_LOAD ?? 16) };
   const take = (i, name) => { if (i + 1 >= argv.length) throw new Error(`${name} needs a value`); return argv[i + 1]; };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--app') o.app = take(i++, a);
     else if (a === '--installer') o.installer = take(i++, a);
+    else if (a === '--installer-before') o.installerBefore = take(i++, a);
     else if (a === '--run') o.run = take(i++, a);
     else if (a === '--artifact') o.artifact = take(i++, a);
     else if (a === '--out') o.out = take(i++, a);
     else if (a === '--base') o.base = take(i++, a);
     else if (a === '--guest') o.guest = take(i++, a);
+    else if (a === '--suite') o.suite = take(i++, a);
+    else if (a === '--reboot-check') o.reboot = true;
+    else if (a === '--expect-commit') o.expectCommit = take(i++, a);
+    else if (a === '--partial') o.partial = true;
     else if (a === '--keep-vm') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
+  if (!['start', 'power', 'helper'].includes(o.suite)) throw new Error(`--suite ${o.suite}: start (default), power or helper`);
   if (!o.app) throw new Error('--app <id> is needed (dyno, spotter, pitcrew, pitwall, debrief)');
   if (!/^[a-z][a-z-]*$/.test(o.app)) throw new Error(`--app ${o.app} is not an app id`);
+  if (o.installerBefore && o.suite !== 'power') throw new Error('--installer-before (the build that makes the key, for the keychain other-build measurement) needs --suite power');
   if (!o.installer === !o.run) throw new Error('give exactly one of --installer <file.dmg> or --run <CI run id>');
   if (o.run && !/^\d+$/.test(o.run)) throw new Error('--run takes a number');
   if (o.guest !== 'macos') throw new Error(`--guest ${o.guest}: only macos is scripted here. Windows guests: scripts/vm-win.sh on origin/tools/win-test-vm; Linux: tools/macos-vm-smoke.sh --guest linux (see README)`);
@@ -61,6 +87,7 @@ function hostRun(cmd, args, { timeoutMs = 120_000, input, env, cwd } = {}) {
     child.stderr.on('data', (d) => { stderr += d; });
     child.on('error', (e) => { stderr += String(e); if (!done) { done = true; clearTimeout(timer); res({ code: 127, stdout, stderr }); } });
     child.on('close', (code, sig) => { children.delete(child); if (!done) { done = true; clearTimeout(timer); res({ code: code ?? (sig ? 143 : 1), stdout, stderr }); } });
+    child.stdin.on('error', () => {}); // a child that exits before reading its stdin (EPIPE) is not an error of ours
     child.stdin.end(input ?? '');
   });
 }
@@ -147,6 +174,24 @@ async function main(argv) {
     const stage = join(scratch, 'stage');
     mkdirSync(stage);
     cpSync(dmg, join(stage, 'installer.dmg'));
+    if (o.installerBefore) {
+      if (!existsSync(o.installerBefore) || !statSync(o.installerBefore).isFile()) throw new Error(`--installer-before ${o.installerBefore} is not a file`);
+      cpSync(resolve(o.installerBefore), join(stage, 'before.dmg'));
+    }
+    if (o.suite === 'power' || o.suite === 'helper') {
+      // The GUI driver (guest/axdrive.swift) is compiled on the host, never run there, and cached by the hash of its source; the image's own
+      // copy predates `drag`. The guest installs it from the read-only share.
+      const src = join(HERE, 'guest', 'axdrive.swift');
+      const hash = createHash('sha256').update(readFileSync(src)).digest('hex').slice(0, 16);
+      mkdirSync(join(tartHome, '.paddock-vm-gui'), { recursive: true });
+      const bin = join(tartHome, '.paddock-vm-gui', `axdrive-${hash}`);
+      if (!existsSync(bin)) {
+        log('compiling axdrive (once)');
+        const c = await hostRun('swiftc', ['-O', '-o', bin, src], { timeoutMs: 600_000 });
+        if (c.code !== 0) throw new Error(`swiftc failed for axdrive: ${c.stderr.trim().slice(0, 300)}`);
+      }
+      cpSync(bin, join(stage, 'axdrive'));
+    }
 
     // A VM slot, host-wide, the same one tools/macos-vm-smoke.sh takes (`./dev ci slot`, an OS lock the kernel frees with its holder).
     mkdirSync(tartHome, { recursive: true });
@@ -177,12 +222,27 @@ async function main(argv) {
       const pulled = await tart(['pull', base], { timeoutMs: 3_600_000 });
       if (pulled.code !== 0) throw new Error(`pulling the base image failed: ${pulled.stderr.trim().slice(0, 200)}`);
     }
+    if (!base.startsWith('ghcr')) {
+      const pf = preflightBase((await tart(['list', '--quiet'])).stdout, base);
+      if (pf.status !== 'pass') {
+        // Reported as a broken check (INCOMPLETE, exit 3) with the reason; nothing was cloned.
+        const startedPf = new Date().toISOString();
+        const reqPf = requiredSteps({ os: 'macos', suite: o.suite, reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
+        const done = finalizeRun({ out, started: startedPf, meta: { label: o.suite === 'start' ? 'macos-start' : o.suite === 'power' ? 'macos-power' : o.reboot ? 'macos-helper-restart' : 'macos-helper', os: 'macos', suite: o.suite, run: o.run ?? null }, run: { app: config.app, installer: source, installerSha256: sha256File(dmg), source, partial: o.partial, required: reqPf, guest: `Tart ${base} (missing)`, started: startedPf, steps: [pf] } });
+        log(`preflight: ${pf.summary}`); console.log(done.file);
+        return done.exit;
+      }
+    }
     cloned = true; // before the clone: a signal during `tart clone` still deletes whatever it left
     const c = await tart(['clone', base, vm], { timeoutMs: 1_800_000 });
     if (c.code !== 0) throw new Error(`tart clone failed: ${c.stderr.trim().slice(0, 300)}`);
 
     log('booting headless');
-    runChild = spawn(tartBin, ['run', '--no-graphics', `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: 'ignore' });
+    // The power suite also needs the VM's own VNC server (real pointer drags); it listens on 127.0.0.1 only and the URL stays in memory.
+    const vnc = o.suite === 'power' || o.suite === 'helper';
+    runChild = spawn(tartBin, ['run', '--no-audio', '--no-graphics', ...(vnc ? ['--vnc-experimental'] : []), `--dir=stage:${stage}:ro`, vm], { env: tartEnv, stdio: ['ignore', 'pipe', 'ignore'] });
+    let vncUrl = null;
+    runChild.stdout.on('data', (d) => { vncUrl ??= /vnc:\/\/\S+/.exec(String(d))?.[0] ?? null; });
     const exec = async (cmd, opts = {}) => {
       const r = await tart(['exec', vm, 'env', 'PADDOCK_DISPOSABLE_VM=1', 'bash', '-c', cmd], { timeoutMs: opts.timeoutMs ?? 120_000 });
       return r;
@@ -197,16 +257,171 @@ async function main(argv) {
     log(`VM up after ${Math.round((Date.now() - t0) / 1000)} s`);
 
     const guest = { exec, now: () => Date.now(), sleep: (ms) => new Promise((r) => setTimeout(r, ms)) };
+    if (o.suite === 'power' || o.suite === 'helper') {
+      const i = await exec(`sudo cp '${SHARE}/axdrive' /usr/local/bin/axdrive && sudo chmod 755 /usr/local/bin/axdrive && /usr/local/bin/axdrive trusted; echo trusted=$?`);
+      log(`axdrive installed in the guest (${i.stdout.trim().split('\n').at(-1)})`);
+    }
     const check = new Check(guest, config, { log });
     const started = new Date().toISOString();
-    const { steps, version } = await runAll(check, { stagedDmg: `${SHARE}/installer.dmg`, manual: MANUAL });
+    const staged = `${SHARE}/installer.dmg`;
+    const { steps, version } = o.suite === 'power' || o.suite === 'helper'
+      ? await (async () => {
+        const evDir = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}-power-evidence`);
+        mkdirSync(evDir, { recursive: true });
+        // A guest file to the host as a file next to the result (PNG through base64: tart exec output is text).
+        const fetch = async (path) => {
+          const r = await tart(['exec', vm, 'base64', '-i', path], { timeoutMs: 60_000 });
+          if (r.code !== 0) return null;
+          const dest = join(evDir, basename(path));
+          writeFileSync(dest, Buffer.from(r.stdout.replace(/\s+/g, ''), 'base64'));
+          return dest;
+        };
+        const power = new PowerChecks(guest, 'macos', { bundle: `/Applications/${config.bundle}`, log });
+        const pw = process.env.PADDOCK_VM_PASSWORD ?? 'admin'; // the pinned image's admin account; never printed
+        const gui = new MacGui(guest, { password: pw, fetch, log });
+        power.ui = gui;
+        const idle = new MacIdleChecks(guest, power, check, { log, ui: gui, audioDevice: false });
+        const { loadRules, MacTour } = await import('./mac-tour.mjs');
+        const { macHelperLogStep } = await import('./mac-helper-log.mjs');
+        const tour = new MacTour(guest, gui, await loadRules(), { log, check });
+        const waitReady = async () => { for (let i = 0; i < 75; i++) { if ((await tart(['exec', vm, 'true'], { timeoutMs: 20_000 })).code === 0 && (await guest.exec('/usr/local/bin/axdrive windows | grep -c Dock')).stdout.trim() !== '0') return true; await sleepMs(4000); } return false; };
+        // Rule 71 Quit and stop measuring with its reboot half (the release row) in the restart run: menu item over AX, 60 s with no Dyno process, reopen, then a real
+        // restart; the login item must bring the agent back (polled up to 150 s after the guest is ready).
+        const bundleR = `/Applications/${config.bundle}`;
+        const macQuitStopRestart = async () => {
+          const count = async () => Number((await exec('ps -axo comm= | grep -cE "dyno-(app|agent)$"')).stdout.trim()) || 0;
+          return quitStopStep({
+            now: () => Date.now(), sleep: sleepMs,
+            trigger: async () => { await exec(`open -a ${bundleR}`); await sleepMs(15_000); if (!(await gui.press(gui.app, '^Quit and stop measuring', 'AXMenuItem'))) throw new Error('no "Quit and stop measuring" menu item (AX)'); await sleepMs(5000); },
+            count,
+            reopen: async () => { await exec(`open -a ${bundleR}`); for (let i = 0; i < 10; i++) { await sleepMs(5000); if ((await exec('pgrep -x dyno-agent >/dev/null')).code === 0) break; } return Number((await exec('pgrep -x dyno-agent | wc -l')).stdout.trim()) || 0; },
+            reboot: async () => {
+              const boot0 = (await exec('sysctl -n kern.boottime')).stdout.trim();
+              await exec('(sleep 2; sudo /sbin/reboot) >/dev/null 2>&1 &', { timeoutMs: 30_000 });
+              await sleepMs(40_000);
+              let up = false;
+              for (let i = 0; i < 80 && !up; i++) { up = (await waitReady()) && (await exec('sysctl -n kern.boottime')).stdout.trim() !== boot0; if (!up) await sleepMs(4000); }
+              if (!up) return null;
+              let n = 0;
+              for (let i = 0; i < 30 && n === 0; i++) { n = Number((await exec('pgrep -x dyno-agent | wc -l')).stdout.trim()) || 0; if (!n) await sleepMs(5000); }
+              log(`quit-stop restart: boot ${boot0.replace(/\s+/g, ' ')} -> restarted; dyno-agent processes after it: ${n}`);
+              return n;
+            },
+          });
+        };
+        const readings = o.reboot ? [macRebootCheck({ waitReady }), macQuitStopRestart] : readingSteps('macos', async () => macDriver(gui)); // WP-VMH: one step per helper reading
+        // Release rows of the power suite (rule 71 MCP, the lifecycle log) and the rows not driven yet, with their reasons.
+        const bundle = `/Applications/${config.bundle}`;
+        let killNext = false;
+        const macRows = async () => {
+          const cfg = '$HOME/Library/Application Support/Dyno';
+          const mg = makeMcpGuest({
+            // launchd restarts a killed agent within about a second (the 0ad round: the call met a new agent), so the kill and the call run in ONE guest command: the agent is
+            // killed by pid, its death is waited on, and the call follows at once, before the supervisor's new agent answers.
+            os: 'macos', dyno: `${bundle}/Contents/MacOS/dyno`, sh: async (c) => {
+              const inline = killNext && /\bmcp\b/.test(c);
+              if (inline) killNext = false;
+              const r = await exec(inline ? `p=$(pgrep -x dyno-agent | head -1); echo "$p" > /tmp/dyno-killed.pid; [ -n "$p" ] && kill -9 $p; n=0; while kill -0 $p 2>/dev/null && [ $n -lt 200 ]; do n=$((n+1)); sleep 0.01; done; ${c}` : c);
+              return { code: r.code, stdout: r.stdout };
+            },
+            password: pw,
+            configDir: async () => ((await exec(`cd "${cfg}" 2>/dev/null && pwd`)).stdout.trim() || null),
+            stopApp: async () => { await exec(`osascript -e 'quit app "Dyno"' ; pkill -x dyno-app; true`); await sleepMs(4000); },
+            startApp: async () => { await exec(`open -a ${bundle}`); for (let i = 0; i < 30; i++) { if ((await exec(`${bundle}/Contents/MacOS/dyno-agent status >/dev/null 2>&1`)).code === 0) break; await sleepMs(4000); } await sleepMs(8000); },
+            // The agent is supervised (launchd job net.decryptology.dyno.agent.ondemand restarts a killed one within seconds): take the job out first, or the "agent is gone" half cannot be seen.
+            killAgent: async () => { killNext = true; }, // by pid only, inline with the next call (above): the login job stays loaded (the product's own state); "dead" means the killed pid
+            restoreAgent: async () => {},
+            agentAlive: async () => (await exec('p=$(cat /tmp/dyno-killed.pid 2>/dev/null); [ -n "$p" ] && kill -0 $p 2>/dev/null')).code === 0,
+            agentRestarted: async () => (await exec('p=$(cat /tmp/dyno-killed.pid 2>/dev/null); n=$(pgrep -x dyno-agent | head -1); [ -n "$n" ] && [ "$n" != "$p" ]')).code === 0,
+            quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; true`); await sleepMs(4000); },
+            pidAlive: async (pid) => (await exec(`kill -0 ${pid} 2>/dev/null`)).code === 0,
+          });
+          const mcp = await mcpStep(mg);
+          const lg = await exec(`sudo -u nobody head -5 '/Library/Application Support/Dyno/helper-lifecycle.log' 2>&1; echo "EXIT=$?"`);
+          const m = /EXIT=(\d+)\s*$/.exec(lg.stdout);
+          // Quit and stop measuring, then reopen (menu item over AX), with the Login Items state before and after and the Background Items notice from the unified log.
+          const count = async () => Number((await exec('ps -axo comm= | grep -cE "dyno-(app|agent)$"')).stdout.trim()) || 0;
+          const btm = async () => btmState((await exec('sudo sfltool dumpbtm 2>&1 | head -600')).stdout);
+          // Precondition of the reopen row: the login item is OFF before Quit and stop. It is switched off the way Dyno offers (Settings > Start Dyno at login, Save changes:
+          // SMAppService unregisters it), not in System Settings, which this driver does not drive; the row then shows whether reopening Dyno turns it back on by itself.
+          const ld = macLoginJobsDriver(gui);
+          let switchedOff = false;
+          if ((await ld.readSwitch()) === 'on' && (await ld.pressSwitch())) { const a = await ld.apply(); switchedOff = a.ok; }
+          await gui.closeSettings();
+          const wasState = await btm();
+          const t0 = new Date(Date.now() - 5000).toISOString().replace('T', ' ').slice(0, 19);
+          const qs = await quitStopStep({
+            now: () => Date.now(), sleep: sleepMs,
+            trigger: async () => { await exec(`open -a ${bundle}`); await sleepMs(15_000); if (!(await gui.press(gui.app, '^Quit and stop measuring', 'AXMenuItem'))) throw new Error('no "Quit and stop measuring" menu item (AX)'); await sleepMs(5000); },
+            count, reopen: async () => { await exec(`open -a ${bundle}`); await sleepMs(30_000); return count(); }, // the reboot half is the helper restart run's (macQuitStopRestart)
+          });
+          const back = (await exec('pgrep -x dyno-agent >/dev/null')).code === 0;
+          const notice = (await exec(`log show --start "${t0}" --info --style compact --predicate 'eventMessage CONTAINS[c] "Background Items Added" OR eventMessage CONTAINS[c] "background item" AND eventMessage CONTAINS[c] "dyno"' 2>&1 | grep -c -i "background item"`)).stdout.trim();
+          const nowState = await btm();
+          const reopen = rowStep(ROW_TITLES.macReopen, judgeMacReopen({ agentBack: back, notificationSeen: /^\d+$/.test(notice) ? Number(notice) > 0 : null, loginItemWasOff: wasState === 'unreadable' ? null : wasState === 'off', loginItemNowOff: nowState === 'unreadable' ? null : nowState === 'off' }), 'the agent is back, the Login Items choice held');
+          reopen.evidence = [...(reopen.evidence ?? []), `login item before Quit and stop: ${wasState} (${switchedOff ? 'switched off with Dyno\'s own switch and saved' : 'not switched by this row'}); after the reopen: ${nowState}`];
+          // Put Start at login back on for the rows after this one.
+          if (switchedOff && (await ld.readSwitch()) === 'off' && (await ld.pressSwitch())) await ld.apply();
+          await gui.closeSettings();
+          // Hung or paused page: the WebContent process is stopped; the question is read through AX.
+          const hung = await hungPageStep({
+            now: () => Date.now() / 1000, sleep: sleepMs,
+            suspend: async () => { if ((await exec('pgrep -f com.apple.WebKit.WebContent >/dev/null')).code !== 0) throw new Error('no WebContent process'); await exec('pkill -STOP -f com.apple.WebKit.WebContent'); },
+            resume: async () => { await exec('pkill -CONT -f com.apple.WebKit.WebContent'); },
+            logLines: async () => (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | tail -n 400')).stdout.split('\n'),
+            questions: async () => (await gui.texts()).filter((t) => /Keep Waiting/.test(t.text)).length, keepWaiting: async () => gui.press(gui.app, '^Keep Waiting', 'AXButton'), shot: async (n) => gui.shot(n),
+          }, ROW_TITLES.hungPage);
+          return [mcp, qs, reopen,
+            rowStep(ROW_TITLES.macLifecycleLog, judgeLifecycleLog({ code: m ? Number(m[1]) : null, out: lg.stdout.replace(/EXIT=\d+\s*$/, '') }), 'a standard user reads the lifecycle log'),
+            hung];
+        };
+        // Launch at login switch (release row): the SMAppService login item (sfltool dumpbtm), the switch pressed and SAVED (Save changes), off then on.
+        const macLoginSwitch = async () => {
+          const d = macLoginJobsDriver(gui);
+          const readEntry = async () => { const b = parseBtm((await exec('sudo sfltool dumpbtm 2>&1 | head -600')).stdout); return { present: b.present, count: b.count }; };
+          return loginSwitchStep({ sleep: sleepMs, readSwitch: () => d.readSwitch(), pressSwitch: () => d.pressSwitch(), apply: () => d.apply(), readEntry,
+            witness: async () => (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -i -E "login item|start at login|SMAppService" | tail -n 12')).stdout.split('\n') });
+        };
+        const rowFns = o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
+          async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) }),
+          async () => discoveryStep(unixDiscoveryPrims({ exec: (c) => guest.exec(c), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), file: '$HOME/Library/Application Support/Dyno/agent.json', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }))] : [];
+        const suite = await runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
+        // The keychain other-build measurement (not in the manifest, never a pass or a fail): build A (--installer-before) makes a key through the app's own UI, build B
+        // (--installer) is installed over it. It runs last because it replaces the installed app.
+        if (o.installerBefore) {
+          const { macKeychainPrimitives } = await import('./mac-keychain-row.mjs');
+          const prim = macKeychainPrimitives({ guest, gui, check, share: SHARE, bundle: `/Applications/${config.bundle}`, log });
+          const km = await keychainOtherBuildStep(prim).catch((e) => ({ title: ROW_TITLES.keychainOtherBuild, status: 'not-measured', cls: 'check', summary: `not measured: ${e.message} (check broken)`, checks: [{ ok: false, kind: 'check', detail: String(e.message) }], evidence: [] }));
+          await prim.cleanup().catch(() => {});
+          log(`${km.status.toUpperCase()}  ${km.title}: ${km.summary}`);
+          suite.steps.push(km);
+        }
+        // Release row: the new build installed over a RUNNING older one (needs the older .dmg as --installer-before). Last: it replaces the installed app.
+        if (o.suite === 'power') {
+          const sw = o.installerBefore
+            ? await upgradeSwapStep(macSwapPrimitives({ guest, gui, check, share: SHARE, bundle: `/Applications/${config.bundle}` })).catch((e) => swapNotDriven(String(e.message ?? e)))
+            : swapNotDriven('no older build was given (--installer-before <older .dmg>: the 1.0.0 .dmg or an older RC), so there is nothing to install over');
+          log(`${sw.status.toUpperCase()}  ${sw.title}: ${sw.summary}`);
+          suite.steps.push(sw);
+        }
+        return suite;
+      })()
+      : await runAll(check, { stagedDmg: staged, manual: MANUAL });
     const commit = spawnSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
-    const md = renderResult({ app: config.app, version, installer: source, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps });
-    const file = join(out, `${started.replace(/[:.]/g, '-')}-${o.app}.md`);
-    writeFileSync(file, md);
+    // The build binding: the installed binary must contain the commit CI built (12 digits, embedded by build-env).
+    const expected = expectedCommit(o.expectCommit) ?? (o.run ? commitOfRun(o.run) : null);
+    const appSpec = config.processes.find((p) => p.role === 'app');
+    const probe = expected ? await exec(`grep -c -a -F -e ${expected} '/Applications/${config.bundle}/Contents/MacOS/${appSpec.name}' >/dev/null; exit $?`) : null;
+    const allSteps = withBuildStep(steps, buildStep({ expected, found: probe ? foundFromGrep(probe.code) : null }));
+    const label = o.suite === 'start' ? 'macos-start' : o.suite === 'power' ? 'macos-power' : o.reboot ? 'macos-helper-restart' : 'macos-helper';
+    const required = requiredSteps({ os: 'macos', suite: o.suite, reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
+    const { file, exit } = finalizeRun({
+      out, started, meta: { label, os: 'macos', suite: o.suite, run: o.run ?? null },
+      run: { app: config.app, version, installer: source, installerSha256: sha256File(dmg), source, expectedCommit: expected, partial: o.partial, required, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps: allSteps },
+    });
     log(`result: ${file}`);
     console.log(file);
-    return steps.some((s) => s.status === 'fail') ? 1 : 0;
+    return exit;
   } catch (e) {
     log(`error: ${e.message}`);
     return 2;

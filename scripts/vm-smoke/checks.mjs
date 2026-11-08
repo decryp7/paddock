@@ -1,7 +1,7 @@
 // The start check itself, against a `guest` (the Tart VM in run.mjs, a fake in checks.test.mjs). Every wait is a poll on state with a
 // guard for a truly stuck step; the verdicts come from judge.mjs. The guest is a throw-away clone: the only processes the check ends
 // are the app's own leftovers, and only after re-checking their identity in the same guest command (rule 53).
-import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs } from './judge.mjs';
+import { describeTree, instancesOf, judgeDistinct, judgeSnapshot, judgeStateFile, judgeWindow, orphansAfterQuit, parseLaunchctlPrint, parsePs, supervisedSurvivors } from './judge.mjs';
 
 const sq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -34,6 +34,17 @@ export class Check {
   async snapshot() {
     const r = await this.g.exec('ps -axww -o pid=,ppid=,etime=,lstart=,command=');
     const procs = parsePs(r.stdout);
+    // A helper with a launchd job of its own (spec.parentJob) that runs under launchd: ask launchd for the job, so the judge can check the pid.
+    procs.jobs = {};
+    for (const spec of this.config.processes) {
+      // The login item's job (SMAppService): asked always, because its agent shows in ps as a bare `dyno-agent run`.
+      if (spec.loginJob) {
+        procs.jobs[spec.loginJob] = parseLaunchctlPrint((await this.g.exec(`launchctl print gui/$(id -u)/${spec.loginJob} 2>&1`)).stdout);
+      }
+      if (spec.parentJob && instancesOf(procs, spec, this.bundle).some((p) => p.ppid === 1)) {
+        procs.jobs[spec.parentJob] = parseLaunchctlPrint((await this.g.exec(`launchctl print gui/$(id -u)/${spec.parentJob} 2>&1`)).stdout);
+      }
+    }
     this.trace.push({ at: this.g.now(), procs });
     return procs;
   }
@@ -57,7 +68,9 @@ export class Check {
   /**
    * Ends the app's own leftover processes. Each is ended only if its pid, its start time (`ps -o lstart=`) and its command line
    * still match in the same guest command (rule 53). Returns what could not be cleaned: a step that starts from a dirty guest is
-   * not trustworthy, so the callers fail on it.
+   * not trustworthy, so the callers fail on it. A discovery file is deleted only when the helper it names really ended: a helper that
+   * is still alive (launchd restarts a supervised agent, or the kill did not match) keeps its file, so it can still be found; the
+   * helpers that survived are returned in `kept`.
    */
   async reset() {
     const procs = await this.snapshot();
@@ -65,15 +78,26 @@ export class Check {
     const stillThere = async () => { const now = await this.snapshot(); return left.filter((p) => now.some((q) => q.pid === p.pid && q.command === p.command)); };
     const end = async (p, signal) => {
       if (!p.lstart) return; // no recorded start time: the identity cannot be checked, so nothing is ended
-      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid})" = ${sq(p.lstart)} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${signal} ${p.pid}`);
+      // `ps -o lstart= -p` pads its text with trailing blanks on macOS (the -axww listing the snapshot parses does not), so both sides are trimmed.
+      await this.g.exec(`[ "$(ps -o lstart= -p ${p.pid} | sed -e 's/ *$//')" = ${sq(p.lstart.trim())} ] && ps -p ${p.pid} -o command= | grep -qxF -- ${sq(p.command)} && kill ${signal} ${p.pid}`);
     };
     for (const p of left) await end(p, '-TERM');
     // An agent that ignores TERM (the orphan of the 7207 run did) is ended with KILL, after the same identity check.
     await this.until(async () => (await stillThere()).length === 0, 8_000);
     for (const p of await stillThere()) await end(p, '-KILL');
     const gone = await this.until(async () => (await stillThere()).length === 0, 12_000);
-    for (const f of this.config.stateFiles ?? []) await this.g.exec(`rm -f ${sq(await this.path(f.path))}`);
-    return { ended: left.length, gone: gone.ok };
+    // A supervised agent is restarted by launchd/systemd within seconds of the kill, with a NEW pid and a fresh discovery file: judge what runs NOW by name, not only
+    // the pids seen before (the 2026-11-07 round deleted the replacement's agent.json this way, and the app then never found its agent).
+    const nowProcs = await this.snapshot();
+    const survivors = [...await stillThere(), ...this.config.processes.flatMap((s) => instancesOf(nowProcs, s, this.bundle))];
+    const specOf = (p) => p.command.split(/\s/)[0].split('/').at(-1); // a login-item agent shows as a bare `dyno-agent run`
+    const kept = [];
+    for (const f of this.config.stateFiles ?? []) {
+      const spec = this.config.processes.find((x) => x.name === f.helper);
+      if (spec && survivors.some((p) => specOf(p) === spec.name)) { kept.push(f.path); continue; }
+      await this.g.exec(`rm -f ${sq(await this.path(f.path))}`);
+    }
+    return { ended: left.length, gone: gone.ok, kept };
   }
 
   async start({ hidden = false } = {}) {
@@ -88,7 +112,7 @@ export class Check {
     const counts = j.checks.filter((c) => c.id.startsWith('count:')).every((c) => c.ok);
     if (!counts) return false;
     for (const f of this.config.stateFiles ?? []) {
-      const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle);
+      const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle, this.config.processes.find((p) => p.name === f.helper));
       if (!s.present || !s.live) return false;
     }
     if (this.config.ready) {
@@ -110,7 +134,7 @@ export class Check {
   }
 
   /** Start, wait for ready (guarded), then observe: the common body of the cold start, relaunch and login-service steps. */
-  async startAndJudge({ hidden = false, loginService = false, title, pre } = {}) {
+  async startAndJudge({ hidden = false, loginService = this.config.loginService?.defaultOn === true, title, pre } = {}) {
     this.loginOn = loginService;
     const cleaned = await this.reset();
     if (pre) await pre();
@@ -125,32 +149,50 @@ export class Check {
     const checks = [{ ok: cleaned.gone, detail: `guest clean before the start (${cleaned.ended} leftover(s) of an earlier step ended${cleaned.gone ? '' : ', but some did not go away'})` },
       { ok: ready.ok, detail: ready.ok ? `ready after ${(ready.tookMs / 1000).toFixed(0)} s (all processes up, discovery file names the live helper, ready command answers)` : `not ready within the ${this.config.readyTimeoutSec} s guard` }, ...whole.checks.filter((x) => x.id.startsWith('peak:') || x.id.startsWith('parent:')), ...judgeDistinct(this.trace, this.config, this.bundle)];
     for (const f of this.config.stateFiles ?? []) {
-      const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle);
+      const s = judgeStateFile(await this.readFile(f.path), procs, f, this.bundle, this.config.processes.find((p) => p.name === f.helper));
       checks.push({ ok: s.present && s.live, detail: `${f.path}: ${s.present ? `names pid ${s.pid}, ${s.live ? 'a live ' + f.helper : 'NOT a live ' + f.helper + ' (stale)'}` : 'absent'}` });
     }
     const ok = checks.every((c) => c.ok);
     return { title, status: ok ? 'pass' : 'fail', summary: ok ? `one of each, peak ${JSON.stringify(whole.peak)}, no replacement or early duplicate` : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence: describeTree(procs, this.config, this.bundle) };
   }
 
+  /**
+   * Dyno 1.1.0 plain Quit (the app menu's "Quit Dyno (keeps measuring)", sent here as AppleScript `quit`): the app ends and the agent is KEPT
+   * (apps/dyno CHANGELOG 1.1.0, quit.rs). So the app must be gone, the agent may remain (one at most: the spec's `max` still holds through the
+   * distinct-count judge), and its discovery file stays with it. "Quit and stop measuring" is its own row (run.mjs, rule 71): both gone.
+   * The kept agent is then ended through `reset()` so the next step starts from a clean guest.
+   */
   async quit(title) {
     const name = this.config.quit.appleScriptName;
     const q = await this.g.exec(`osascript -e ${sq(`tell application "${name}" to quit`)}`, { timeoutMs: 30_000 });
-    const gone = await this.until(async () => orphansAfterQuit(await this.snapshot(), this.config, this.bundle).length === 0, 40_000);
+    const gone = await this.until(async () => orphansAfterQuit(await this.snapshot(), this.config, this.bundle, { loginService: this.loginOn === true, agentKept: true }).length === 0, 40_000);
     const procs = await this.snapshot();
-    const left = orphansAfterQuit(procs, this.config, this.bundle);
+    const login = this.loginOn === true;
+    const left = orphansAfterQuit(procs, this.config, this.bundle, { loginService: login, agentKept: true });
     const checks = [
       { ok: q.code === 0, detail: q.code === 0 ? 'Quit sent (osascript)' : `Quit command failed (exit ${q.code}): ${q.stderr.trim().slice(0, 200)}` },
       { ok: gone.ok, detail: gone.ok ? `every process of the app ended ${(gone.tookMs / 1000).toFixed(0)} s after Quit` : 'processes of the app still running after the 40 s guard' },
       ...left.map((o) => ({ ok: false, detail: `left behind: ${o.name} pid ${o.pid} (parent ${o.ppid}${o.orphan ? ', an orphan of launchd' : ''}, age ${o.etime})` })),
     ];
+    for (const spec of this.config.processes.filter((s) => s.parentJob)) {
+      const lc = await this.g.exec(`launchctl print gui/$(id -u)/${spec.parentJob} >/dev/null 2>&1; echo $?`);
+      const loaded = lc.stdout.trim() === '0';
+      checks.push({ ok: true, info: true, detail: `launchd job ${spec.parentJob}: ${loaded ? 'still loaded after Quit Dyno (keeps measuring): the agent is kept, as 1.1.0 says' : 'not loaded after Quit'}` });
+    }
+    // Start at login on: the supervised agent survives Quit, so it is the one that must be there, and its discovery file stays with it.
+    const survivors = login ? supervisedSurvivors(procs, this.config, this.bundle) : [];
+    if (login) checks.push({ ok: survivors.length > 0, detail: survivors.length ? `the supervised agent survived Quit as expected: ${survivors.join(', ')}` : 'Start at login is on but launchd has no running agent for the login job after Quit' });
+    const kept = procs ? config_agentsLeft(procs, this.config, this.bundle) : 0;
     for (const f of (this.config.stateFiles ?? []).filter((x) => x.removedAfterQuit)) {
       const c = await this.readFile(f.path);
-      checks.push({ ok: c == null, detail: `${f.path}: ${c == null ? 'removed' : 'still there after Quit'}` });
+      // The agent is kept, so its discovery file stays; with no agent left it must be gone.
+      checks.push({ ok: kept > 0 ? c != null || login : c == null, detail: `${f.path}: ${c == null ? 'removed' : 'present'} (${kept} agent(s) kept after Quit)` });
     }
     const evidence = describeTree(procs, this.config, this.bundle);
     const ok = checks.every((c) => c.ok);
-    if (!ok) await this.reset();
-    return { title, status: ok ? 'pass' : 'fail', summary: ok ? 'nothing the app started is left' : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence };
+    // The kept agent would make the next step start on a dirty guest: end it by identity (reset), unless the login service supervises it.
+    if (!ok || (kept > 0 && !login)) await this.reset();
+    return { title, status: ok ? 'pass' : 'fail', summary: ok ? 'the app is gone and the agent was kept (Quit Dyno keeps measuring)' : checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200), checks, evidence };
   }
 
   async install(stagedDmg) {
@@ -225,10 +267,11 @@ export class Check {
     await phase('off', svc.off, false);
     await phase('on again', svc.on, true);
     await run(svc.off);
+    this.loginOn = false;
     const ok = checks.every((c) => c.ok);
     // Duplicates are judged either way, but a handover that never registered the launchd job is not proven: say so instead of PASS.
     const proven = loaded.every(Boolean);
-    if (ok && !proven) checks.push({ ok: true, detail: `launchd never loaded ${svc.label} after "on" (launchctl print found no job): the CLI route did not register it, so the handover itself was not exercised` });
+    if (ok && !proven) checks.push({ ok: true, info: true, detail: `launchd never loaded ${svc.label} after "on" (launchctl print found no job): the CLI route did not register it, so the handover itself was not exercised` });
     const status = !ok ? 'fail' : proven ? 'pass' : 'skip';
     const summary = !ok ? checks.filter((c) => !c.ok).map((c) => c.detail).join('; ').slice(0, 200)
       : proven ? 'no duplicate and no illegal parent after any switch' : 'no duplicate after any switch, but the launchd job never loaded, so the handover is NOT proven: manual row (Settings > Launch at login, three times)';
@@ -269,7 +312,7 @@ export class Check {
       if (Number.isInteger(lpid)) await this.g.exec(`ps -p ${lpid} -o command= | grep -q 'vmsmoke-blackhole.pl' && sudo kill ${lpid}`);
     }
     step.checks.unshift({ ok: setup.code === 0 && listening !== '', detail: `${host} points at loopback (IPv4 and ::1) with a listener that accepts and never answers (${listening || 'listener did not start'})` });
-    step.checks.push({ ok: true, detail: contacts.length ? `the app connected to the black hole ${contacts.length} time(s) (${[...new Set(contacts)].join(', ')}) and still became ready` : 'nothing connected to the black hole during the start' });
+    step.checks.push({ ok: true, info: true, detail: contacts.length ? `the app connected to the black hole ${contacts.length} time(s) (${[...new Set(contacts)].join(', ')}) and still became ready` : 'nothing connected to the black hole during the start' });
     if (step.status === 'pass' && !contacts.length) {
       step.status = 'skip';
       step.summary = 'NOT EXERCISED: the app never contacted the update host during the start (update checks are off in this build or not on start), so a hung check could not be observed';
@@ -280,7 +323,9 @@ export class Check {
   async logs() {
     const evidence = [];
     for (const l of this.config.logs ?? []) {
-      const r = await this.g.exec(`tail -n 40 ${sq(await this.path(l))} 2>&1`);
+      const abs = await this.path(l);
+      // A pattern with * is expanded by the guest shell (the app writes dated files, dyno.<date>.log); a plain path is quoted.
+      const r = await this.g.exec(abs.includes('*') ? `for f in ${abs.replace(/([ ()'"])/g, '\\$1')}; do echo "== $f"; tail -n 80 "$f"; done 2>&1` : `tail -n 40 ${sq(abs)} 2>&1`);
       evidence.push(`--- ${l}`, ...(r.stdout.trim() ? r.stdout.trimEnd().split('\n') : ['(empty or absent)']));
     }
     return { title: 'Logs at the end', status: 'info', summary: 'last 40 lines of each log, for reading', evidence };
@@ -307,4 +352,9 @@ export async function runAll(check, { stagedDmg, manual }) {
   push(await check.logs());
   for (const m of manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
   return { steps, version: check.version };
+}
+
+/** How many agent (helper-role) processes are running in a snapshot. */
+function config_agentsLeft(procs, config, bundle) {
+  return config.processes.filter((s) => s.role === 'helper').reduce((n, s) => n + instancesOf(procs, s, bundle).length, 0);
 }
