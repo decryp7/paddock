@@ -1,6 +1,5 @@
 {
  "_comment": "Known timing sites of ADR 0041 / C71, by file and hash of the normalised line (line is for reading only). May only shrink; migrate a site by waiting on the condition and delete its entry.",
- "expires": "2027-04-30",
  "sites": [
   {
    "file": "apps/debrief/app/e2e/activity-errors.e2e.ts",
@@ -159,21 +158,6 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
-   "line": 118,
-   "hash": "ae778574bba627a4"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
-   "line": 138,
-   "hash": "7526eefaa7da97c2"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
-   "line": 141,
-   "hash": "a837550434f7c685"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
    "line": 356,
    "hash": "d6b395f9d534be1a"
   },
@@ -191,11 +175,6 @@
    "file": "apps/debrief/app/src-tauri/src/browser/renderer.rs",
    "line": 1042,
    "hash": "8a7b239b74fa9163"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/browser/sessions.rs",
-   "line": 704,
-   "hash": "806c30c165057c76"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/config_store.rs",
@@ -234,11 +213,6 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
-   "line": 594,
-   "hash": "f004d13b567f94d3"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/jobs/service.rs",
    "line": 963,
    "hash": "421b7cec5c980f1f"
   },
@@ -274,11 +248,6 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
-   "line": 601,
-   "hash": "3355ccab621e0777"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
    "line": 809,
    "hash": "9f38707b0db4ca99"
   },
@@ -296,11 +265,6 @@
    "file": "apps/debrief/app/src-tauri/src/lifecycle.rs",
    "line": 901,
    "hash": "8f2dc70f955d8e23"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/live.rs",
-   "line": 444,
-   "hash": "dc9182704fcc2674"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/live.rs",
@@ -349,16 +313,6 @@
   },
   {
    "file": "apps/debrief/app/src-tauri/src/names.rs",
-   "line": 183,
-   "hash": "cdea33951a01099d"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/names.rs",
-   "line": 291,
-   "hash": "17bbcf6da9077e33"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/names.rs",
    "line": 581,
    "hash": "ad246e7f5236447e"
   },
@@ -393,21 +347,6 @@
    "hash": "df443114a9da3e79"
   },
   {
-   "file": "apps/debrief/app/src-tauri/src/startup_watchdog.rs",
-   "line": 247,
-   "hash": "50e8c3d16541ae4d"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/updater.rs",
-   "line": 454,
-   "hash": "d5081e91baec4666"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/updater.rs",
-   "line": 516,
-   "hash": "56d38352e67ebb58"
-  },
-  {
    "file": "apps/debrief/app/src-tauri/src/updater/tests.rs",
    "line": 619,
    "hash": "cb140ea841063684"
@@ -416,11 +355,6 @@
    "file": "apps/debrief/app/src-tauri/src/updater/tests.rs",
    "line": 791,
    "hash": "d6b395f9d534be1a"
-  },
-  {
-   "file": "apps/debrief/app/src-tauri/src/watched.rs",
-   "line": 212,
-   "hash": "a837550434f7c685"
   },
   {
    "file": "apps/debrief/app/src-tauri/src/watched.rs",
@@ -1118,31 +1052,6 @@
    "hash": "04921d8fdbaf8b3b"
   },
   {
-   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
-   "line": 331,
-   "hash": "d6b395f9d534be1a"
-  },
-  {
-   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
-   "line": 365,
-   "hash": "090f4447a438ed17"
-  },
-  {
-   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
-   "line": 404,
-   "hash": "729f1be381f6f5cc"
-  },
-  {
-   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
-   "line": 416,
-   "hash": "a837550434f7c685"
-  },
-  {
-   "file": "apps/debrief/crates/chromium-driver/src/launch.rs",
-   "line": 491,
-   "hash": "89e6fd80a40cc1bc"
-  },
-  {
    "file": "apps/debrief/crates/chromium-driver/tests/it/real_browser.rs",
    "line": 74,
    "hash": "a837550434f7c685"
@@ -1683,16 +1592,6 @@
    "hash": "ad246e7f5236447e"
   },
   {
-   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower.rs",
-   "line": 366,
-   "hash": "cd8c8e3a57b99d11"
-  },
-  {
-   "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower.rs",
-   "line": 576,
-   "hash": "cb140ea841063684"
-  },
-  {
    "file": "apps/debrief/crates/debrief-plugin-windows/src/eventlog/follower/tests.rs",
    "line": 90,
    "hash": "d965fc272f82bee0"
@@ -1934,12 +1833,12 @@
   },
   {
    "file": "apps/dyno/app/e2e/flows.spec.ts",
-   "line": 274,
+   "line": 288,
    "hash": "7bba35e4f6072e4b"
   },
   {
    "file": "apps/dyno/app/e2e/flows.spec.ts",
-   "line": 328,
+   "line": 342,
    "hash": "7bba35e4f6072e4b"
   },
   {
@@ -1968,73 +1867,48 @@
    "hash": "7ea17622a91efd03"
   },
   {
-   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 48,
-   "hash": "58bc5f6c17c7dc29"
-  },
-  {
-   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 50,
-   "hash": "124cb5498dd4d240"
-  },
-  {
-   "file": "apps/dyno/app/e2e/screenshots-shell.spec.ts",
-   "line": 54,
-   "hash": "124cb5498dd4d240"
-  },
-  {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 114,
+   "line": 148,
    "hash": "cb140ea841063684"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 268,
+   "line": 345,
    "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 684,
+   "line": 797,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/link/tests.rs",
-   "line": 696,
+   "line": 809,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/dyno/app/src-tauri/src/logging.rs",
-   "line": 61,
+   "line": 83,
    "hash": "42aaa4ddeb20a99d"
   },
   {
-   "file": "apps/dyno/app/src-tauri/src/supervise/mod.rs",
-   "line": 217,
-   "hash": "411f1e629f09bdcf"
-  },
-  {
    "file": "apps/dyno/app/src/app/core/mock-backend.spec.ts",
-   "line": 17,
+   "line": 18,
    "hash": "6460a11b205cdcd7"
   },
   {
    "file": "apps/dyno/app/src/app/core/mock-backend.spec.ts",
-   "line": 574,
+   "line": 620,
    "hash": "cc501dc96ff7a6de"
   },
   {
-   "file": "apps/dyno/app/src/app/core/mock-backend.spec.ts",
-   "line": 589,
-   "hash": "daa99d1f749e551a"
-  },
-  {
    "file": "apps/dyno/app/src/app/core/tauri-backend.spec.ts",
-   "line": 227,
+   "line": 236,
    "hash": "fab39cd8206d4975"
   },
   {
    "file": "apps/dyno/app/src/app/core/tauri-backend.spec.ts",
-   "line": 241,
+   "line": 250,
    "hash": "fab39cd8206d4975"
   },
   {
@@ -2053,34 +1927,9 @@
    "hash": "fab39cd8206d4975"
   },
   {
-   "file": "apps/dyno/app/src/app/features/backup/backup-page.spec.ts",
-   "line": 22,
-   "hash": "2120f4a78d7eaac1"
-  },
-  {
-   "file": "apps/dyno/app/src/app/features/backup/backup-page.spec.ts",
-   "line": 23,
-   "hash": "e226e1510bfa8756"
-  },
-  {
-   "file": "apps/dyno/app/src/app/features/backup/backup-page.spec.ts",
-   "line": 157,
-   "hash": "cc501dc96ff7a6de"
-  },
-  {
-   "file": "apps/dyno/app/src/app/features/backup/backup-page.spec.ts",
-   "line": 165,
-   "hash": "cf9e622456b95bd5"
-  },
-  {
    "file": "apps/dyno/app/src/app/features/counters/counters-page.spec.ts",
    "line": 31,
    "hash": "fab39cd8206d4975"
-  },
-  {
-   "file": "apps/dyno/app/src/app/features/diagnostics/diagnostics-page.spec.ts",
-   "line": 17,
-   "hash": "e226e1510bfa8756"
   },
   {
    "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
@@ -2094,22 +1943,22 @@
   },
   {
    "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
-   "line": 350,
+   "line": 384,
    "hash": "cc501dc96ff7a6de"
   },
   {
    "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
-   "line": 361,
+   "line": 395,
    "hash": "cf9e622456b95bd5"
   },
   {
    "file": "apps/dyno/app/src/app/features/extras/extras-page.spec.ts",
-   "line": 371,
+   "line": 405,
    "hash": "cc501dc96ff7a6de"
   },
   {
    "file": "apps/dyno/app/src/app/features/health/health-page.spec.ts",
-   "line": 19,
+   "line": 20,
    "hash": "e226e1510bfa8756"
   },
   {
@@ -2169,7 +2018,7 @@
   },
   {
    "file": "apps/dyno/app/src/app/shared/chart.spec.ts",
-   "line": 43,
+   "line": 84,
    "hash": "88cb7f34bcfcddf6"
   },
   {
@@ -2178,33 +2027,23 @@
    "hash": "fab39cd8206d4975"
   },
   {
-   "file": "apps/dyno/crates/dyno-agent/src/bench.rs",
-   "line": 322,
-   "hash": "cb140ea841063684"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-agent/src/bench.rs",
-   "line": 365,
-   "hash": "ad246e7f5236447e"
-  },
-  {
    "file": "apps/dyno/crates/dyno-agent/src/counters.rs",
-   "line": 547,
+   "line": 640,
    "hash": "cb140ea841063684"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/src/counters.rs",
-   "line": 585,
+   "line": 678,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/src/counters.rs",
-   "line": 618,
+   "line": 711,
    "hash": "c0f7df0977a37afe"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/src/counters.rs",
-   "line": 698,
+   "line": 907,
    "hash": "cb140ea841063684"
   },
   {
@@ -2214,43 +2053,38 @@
   },
   {
    "file": "apps/dyno/crates/dyno-agent/src/network.rs",
-   "line": 408,
+   "line": 488,
    "hash": "cb140ea841063684"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 293,
+   "line": 348,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 551,
+   "line": 620,
    "hash": "a837550434f7c685"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 964,
+   "line": 1077,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 999,
+   "line": 1112,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/agent.rs",
-   "line": 1021,
+   "line": 1134,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/common/mod.rs",
    "line": 38,
    "hash": "a837550434f7c685"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-agent/tests/extras.rs",
-   "line": 250,
-   "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/issues.rs",
@@ -2264,27 +2098,22 @@
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/issues.rs",
-   "line": 480,
+   "line": 512,
    "hash": "d6b395f9d534be1a"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
-   "line": 146,
+   "line": 136,
    "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
-   "line": 494,
-   "hash": "ad246e7f5236447e"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-agent/tests/jobs.rs",
-   "line": 568,
+   "line": 461,
    "hash": "ad246e7f5236447e"
   },
   {
    "file": "apps/dyno/crates/dyno-agent/tests/local_day.rs",
-   "line": 265,
+   "line": 261,
    "hash": "a837550434f7c685"
   },
   {
@@ -2303,73 +2132,48 @@
    "hash": "c0f7df0977a37afe"
   },
   {
-   "file": "apps/dyno/crates/dyno-ipc/src/endpoint/mod.rs",
-   "line": 168,
-   "hash": "d6b395f9d534be1a"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-ipc/src/endpoint/mod.rs",
-   "line": 213,
-   "hash": "d6b395f9d534be1a"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-ipc/src/queue.rs",
-   "line": 114,
-   "hash": "c0f7df0977a37afe"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-ipc/src/queue.rs",
-   "line": 126,
-   "hash": "c0f7df0977a37afe"
-  },
-  {
    "file": "apps/dyno/crates/dyno-platform/src/linux/sensors.rs",
    "line": 401,
    "hash": "fcc932619d343380"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/macos/probe.rs",
-   "line": 159,
+   "line": 217,
    "hash": "a31eb41757c45e18"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/network.rs",
-   "line": 287,
+   "line": 300,
    "hash": "5b49960b70255439"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/network.rs",
-   "line": 303,
+   "line": 316,
    "hash": "5b49960b70255439"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/process.rs",
-   "line": 247,
-   "hash": "ad246e7f5236447e"
-  },
-  {
-   "file": "apps/dyno/crates/dyno-platform/src/process.rs",
-   "line": 392,
+   "line": 388,
    "hash": "855cc4dd1d9f922c"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/process.rs",
-   "line": 439,
+   "line": 435,
    "hash": "090f4447a438ed17"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/sensors.rs",
-   "line": 300,
+   "line": 362,
    "hash": "f73b6d836ad7b1d8"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/windows/counters.rs",
-   "line": 280,
+   "line": 293,
    "hash": "8f2dc70f955d8e23"
   },
   {
    "file": "apps/dyno/crates/dyno-platform/src/windows/pdh.rs",
-   "line": 270,
+   "line": 277,
    "hash": "8f2dc70f955d8e23"
   },
   {
@@ -2476,11 +2280,6 @@
    "file": "apps/pitwall/app/src-tauri/src/commands.rs",
    "line": 729,
    "hash": "ad246e7f5236447e"
-  },
-  {
-   "file": "apps/pitwall/app/src-tauri/src/server_client.rs",
-   "line": 343,
-   "hash": "ba479f1ae32ed38d"
   },
   {
    "file": "apps/pitwall/app/src-tauri/src/server_client.rs",
@@ -2979,17 +2778,17 @@
   },
   {
    "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
-   "line": 1328,
+   "line": 1334,
    "hash": "f3feea9628154c2c"
   },
   {
    "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
-   "line": 1364,
+   "line": 1370,
    "hash": "4d33633b44b31603"
   },
   {
    "file": "apps/spotter/crates/spotter-sources/src/folder.rs",
-   "line": 1366,
+   "line": 1372,
    "hash": "4d33633b44b31603"
   },
   {
@@ -3021,11 +2820,6 @@
    "file": "crates/paddock-download/tests/it/support/mod.rs",
    "line": 275,
    "hash": "ad246e7f5236447e"
-  },
-  {
-   "file": "crates/paddock-panels/src/tauri/native.rs",
-   "line": 112,
-   "hash": "449a5ccb93c97f61"
   },
   {
    "file": "crates/paddock-proc/tests/it/run_state.rs",
@@ -3093,16 +2887,6 @@
    "hash": "d88056c1497b8c1e"
   },
   {
-   "file": "ui/e2e/shell-demo-service.spec.ts",
-   "line": 40,
-   "hash": "58bc5f6c17c7dc29"
-  },
-  {
-   "file": "ui/e2e/shell-demo-setup.spec.ts",
-   "line": 32,
-   "hash": "58bc5f6c17c7dc29"
-  },
-  {
    "file": "ui/e2e/shell-demo-theme.spec.ts",
    "line": 81,
    "hash": "7bba35e4f6072e4b"
@@ -3154,38 +2938,23 @@
   },
   {
    "file": "ui/projects/paddock-ui/shell/dialogs/src/ui.spec.ts",
-   "line": 1088,
+   "line": 1107,
    "hash": "7a832cae47a10021"
   },
   {
    "file": "ui/projects/paddock-ui/shell/dialogs/src/ui.spec.ts",
-   "line": 1093,
+   "line": 1112,
    "hash": "7a832cae47a10021"
   },
   {
    "file": "ui/projects/paddock-ui/shell/dialogs/src/ui.spec.ts",
-   "line": 1149,
+   "line": 1185,
    "hash": "aa8592874558596f"
   },
   {
    "file": "ui/projects/paddock-ui/shell/dialogs/src/window-active.spec.ts",
    "line": 16,
    "hash": "1da606306af7f919"
-  },
-  {
-   "file": "ui/projects/paddock-ui/shell/jobs/src/ui-timeouts.spec.ts",
-   "line": 5,
-   "hash": "a6b4d3253f4e49d3"
-  },
-  {
-   "file": "ui/projects/paddock-ui/shell/jobs/src/ui-timeouts.spec.ts",
-   "line": 16,
-   "hash": "b77d30dfc5122ace"
-  },
-  {
-   "file": "ui/projects/paddock-ui/shell/jobs/src/ui-timeouts.spec.ts",
-   "line": 29,
-   "hash": "f61e2de55fe93b64"
   },
   {
    "file": "ui/projects/paddock-ui/shell/menu/src/app-menu.spec.ts",
@@ -3239,12 +3008,12 @@
   },
   {
    "file": "ui/projects/paddock-ui/table/src/table.spec.ts",
-   "line": 138,
+   "line": 158,
    "hash": "b68d3b040880d3a3"
   },
   {
    "file": "ui/projects/paddock-ui/table/src/table.spec.ts",
-   "line": 474,
+   "line": 496,
    "hash": "6460a11b205cdcd7"
   },
   {
@@ -3259,12 +3028,12 @@
   },
   {
    "file": "ui/projects/paddock-ui/widgets/src/widgets.spec.ts",
-   "line": 697,
+   "line": 740,
    "hash": "a6216afc9af9efed"
   },
   {
    "file": "ui/projects/paddock-ui/widgets/src/widgets.spec.ts",
-   "line": 824,
+   "line": 894,
    "hash": "a6216afc9af9efed"
   },
   {
