@@ -105,3 +105,119 @@ test('a commit that is not a merge is a usage error', () => {
     assert.match(res.stdout + res.stderr, /::error::/);
   } finally { r.done(); }
 });
+
+const errorLines = (res) => res.stdout.split('\n').filter((l) => l.startsWith('::error::'));
+const warningLines = (res) => res.stdout.split('\n').filter((l) => l.startsWith('::warning::'));
+
+test('an exact older blob set by a non-merge branch commit is an error (the stale tree, found from blob ids alone)', () => {
+  const r = repo();
+  try {
+    r.write('src/a.txt', lines(40, 'a'));
+    const stale = r.commit('initial');
+    r.write('src/a.txt', lines(40, 'a') + 'fix: release the buffer\n');
+    const fixed = r.commit('fix: memory');
+    r.git('checkout', '-q', '-b', 'feature', fixed);
+    r.git('checkout', stale, '--', 'src/a.txt'); // exactly the old file: one added line is the whole "fix"
+    r.write('src/new.txt', 'the feature\n');
+    r.commit('feat: the feature');
+    r.git('checkout', '-q', 'main');
+    const res = run(r.dir, '--branch', 'feature', '--target', 'main');
+    assert.equal(res.status, 1, res.stdout + res.stderr);
+    assert.match(errorLines(res).join('\n'), /src\/a\.txt/);
+    assert.match(res.stdout, /older version|older blob/);
+    assert.doesNotMatch(errorLines(res).join('\n'), /src\/new\.txt/);
+  } finally { r.done(); }
+});
+
+test('a Revert commit that goes back to an older blob is not an error', () => {
+  const r = repo();
+  try {
+    r.write('src/a.txt', lines(40, 'a'));
+    r.commit('initial');
+    r.write('src/a.txt', lines(40, 'a') + 'a bad idea\nanother bad idea\nyet another bad idea\n');
+    r.commit('feat: a bad idea');
+    r.git('checkout', '-q', '-b', 'feature');
+    r.git('revert', '--no-edit', 'HEAD');
+    r.git('checkout', '-q', 'main');
+    const res = run(r.dir, '--branch', 'feature', '--target', 'main');
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.deepEqual(errorLines(res), []);
+    assert.deepEqual(warningLines(res), []);
+  } finally { r.done(); }
+});
+
+test('a branch that deletes most of an earlier commit on purpose is a warning, not an error', () => {
+  const r = repo();
+  try {
+    r.write('src/a.txt', lines(40, 'a'));
+    r.commit('initial');
+    r.write('src/a.txt', lines(40, 'a') + 'old feature one\nold feature two\nold feature three\nold feature four\n');
+    r.commit('feat: old feature');
+    r.git('checkout', '-q', '-b', 'feature');
+    r.write('src/a.txt', lines(40, 'a') + 'a different feature\n'); // removes the old feature and is a new blob
+    r.commit('refactor: replace the old feature');
+    r.git('checkout', '-q', 'main');
+    r.write('src/b.txt', 'main work\n');
+    r.commit('fix: main work');
+    const res = run(r.dir, '--branch', 'feature', '--target', 'main');
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.deepEqual(errorLines(res), []);
+    const w = warningLines(res);
+    assert.equal(w.length, 1);
+    assert.match(w[0], /src\/a\.txt/);
+  } finally { r.done(); }
+});
+
+test('a conflict in CHANGELOG does not stop the check: the stale revert elsewhere is still caught', () => {
+  const r = repo();
+  try {
+    r.write('CHANGELOG.md', '# Changelog\n');
+    r.write('src/a.txt', lines(40, 'a'));
+    const stale = r.commit('initial');
+    r.write('src/a.txt', lines(40, 'a') + 'fix: release the buffer\nfix: redact the token\n');
+    const fixed = r.commit('fix: memory and redaction');
+    r.git('checkout', '-q', '-b', 'feature', fixed);
+    r.git('checkout', stale, '--', 'src/a.txt');
+    r.write('CHANGELOG.md', '# Changelog\nbranch entry\n');
+    r.commit('feat: the feature');
+    r.git('checkout', '-q', 'main');
+    r.write('CHANGELOG.md', '# Changelog\nmain entry\n');
+    r.commit('fix: main entry');
+    const res = run(r.dir, '--branch', 'feature', '--target', 'main');
+    assert.equal(res.status, 1, res.stdout + res.stderr);
+    const e = errorLines(res).join('\n');
+    assert.match(e, /src\/a\.txt/);
+    assert.doesNotMatch(e, /CHANGELOG/);
+    assert.match(res.stdout, /conflict/i); // the skipped path is named
+    assert.match(res.stdout, /CHANGELOG\.md/);
+  } finally { r.done(); }
+});
+
+test('a clean branch with a conflict only in CHANGELOG exits 0 and names the skipped path', () => {
+  const r = repo();
+  try {
+    r.write('CHANGELOG.md', '# Changelog\n');
+    r.write('src/a.txt', lines(20, 'a'));
+    r.commit('initial');
+    r.git('checkout', '-q', '-b', 'feature');
+    r.write('CHANGELOG.md', '# Changelog\nbranch entry\n');
+    r.commit('feat: x');
+    r.git('checkout', '-q', 'main');
+    r.write('CHANGELOG.md', '# Changelog\nmain entry\n');
+    r.commit('fix: y');
+    const res = run(r.dir, '--branch', 'feature', '--target', 'main');
+    assert.equal(res.status, 0, res.stdout + res.stderr);
+    assert.match(res.stdout, /CHANGELOG\.md/);
+  } finally { r.done(); }
+});
+
+// The real incident of 2026-11-05 (docs/lessons.md): needs the repository's own history (not a shallow clone).
+const here = fileURLToPath(new URL('.', import.meta.url));
+const hasCommits = (...shas) => shas.every((s) => spawnSync('git', ['-C', here, 'cat-file', '-e', `${s}^{commit}`]).status === 0);
+test('the real incident: the naive merge of b48df1818 into a929c6ad1 flags crates/paddock-diag/src/secrets.rs',
+  { skip: !hasCommits('b48df1818', 'a929c6ad1') && 'the incident commits are not in this clone' }, () => {
+  const res = spawnSync('node', [script, '--repo', here, '--branch', 'b48df1818', '--target', 'a929c6ad1'], { encoding: 'utf8' });
+  assert.equal(res.status, 1, res.stdout + res.stderr);
+  assert.match(errorLines(res).join('\n'), /crates\/paddock-diag\/src\/secrets\.rs/);
+  assert.doesNotMatch(errorLines(res).join('\n'), /apps\/dyno\/CHANGELOG\.md/); // conflicted: skipped
+});

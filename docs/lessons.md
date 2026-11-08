@@ -1399,8 +1399,11 @@ as baseline, memory as physical footprint, and an independent check of a headlin
 Commit `b48df1818` had the fixed tree as its parent but its own tree came from an older one, so merging it silently
 reverted a memory fix, a redaction and test fixes; git saw no conflict and the merge `da47e3c7e` was kept to 9 files by
 hand. **Lesson (class: a clean merge that goes backwards):** after merging, run `node scripts/merge-regression-check.mjs
-<merge-commit>` (or `--branch <b> --target <t>` before merging); it lists files the merge changed that the branch never
-touched, and files where the result removes most of what one earlier commit added. Read each flagged file's diff.
+<merge-commit>` (or `--branch <b> --target <t>` before merging, which works with conflicts: their paths are skipped and
+named). **Errors:** a file the merge changed that the branch never touched, and a file a non-merge branch commit set to an exact
+older blob (the stale-tree signature; `Revert` commits are exempt). **Warning:** a file whose result removes most of what one
+earlier commit added (a rewrite looks the same). Read each flagged file's diff. The first version stopped at any conflict and
+flagged only the warning shape as an error, so a deliberate rewrite failed and the real incident passed.
 
 ## A delayed service looked like a broken one (2026-11-04, Dyno helper after a Windows restart)
 

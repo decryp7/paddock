@@ -161,8 +161,10 @@ Apply these deliberately. They are not decoration:
 - Commit only complete, owned work. Never commit a workspace `Cargo.toml` listing crates whose sources aren't
   committed. After committing, verify the committed tree in isolation (`git archive HEAD`, then build and test) before
   pushing larger changes.
-- Before pushing a merge, run `node scripts/merge-regression-check.mjs <merge-commit>` (or `--branch <b> --target <t>`): it flags files
-  where the result goes backwards against the first parent, such as a stale-tree branch commit reverting fixes without a conflict.
+- Before pushing a merge, run `node scripts/merge-regression-check.mjs <merge-commit>` (or `--branch <b> --target <t>`, also with
+  conflicts: those paths are skipped and named): errors for files where the result goes backwards against the first parent (a
+  stale-tree branch commit that resets a file to an older blob, or a merge that changes a file the branch never touched), a
+  warning when a file loses most of an earlier commit's lines.
 - Windows-only and macOS-only code is checked and tested on its own CI runner; code that needs no platform SDK must at
   least type-check for the other targets (`cargo check --target x86_64-pc-windows-msvc`).
 
@@ -187,7 +189,7 @@ Apply these deliberately. They are not decoration:
 - Delegate mechanical or well-specified work (refactors with a precise spec, test scaffolding, docs) to cheaper models.
   Keep architecture and review on the main model.
 - Share first (rule 42): check Paddock's crates and packages before writing anything an app copy would duplicate.
-- Record every benchmark you quote (rule 48): first as a results block in the app's `docs/performance.md` (shared code:
+- Record every benchmark you quote (rule 48), and compare like with like (ER-34): first as a results block in the app's `docs/performance.md` (shared code:
   `docs/benchmarks.md`), then link it from the ADR, plan, CHANGELOG, commit or PR that quotes the number.
 - Specs never wait a fixed number of event-loop turns and never leave a patch behind (rule 49): wait on the condition
   (Debrief's `openDialog()`, once `fix/debrief-import-range-flake` lands), never let an optional chain perform a test's
