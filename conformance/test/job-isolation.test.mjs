@@ -521,3 +521,24 @@ test('the sweep locks a slot only when something of it is due', () => {
   assert.doesNotMatch(h.log(), /idle-run --slot s2 /, 's2 still had nothing due');
   assert.ok(!existsSync(join(h.ci, 'target-fresh-s3')) && existsSync(join(h.ci, 'target-fresh-s2')));
 });
+
+test('the tables read the same with Windows line ends (a checkout there turns kept-folders.txt and ports.txt into CRLF)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'paddock-crlf-'));
+  try {
+    const ci = join(dir, 'ci');
+    mkdirSync(ci);
+    for (const f of ['job-isolation.sh', 'ci-home.sh', 'job-tmpdir.sh', 'kept-folders.txt', 'ports.txt']) {
+      const p = join(PADDOCK, 'conformance', 'ci', f);
+      if (existsSync(p)) writeFileSync(join(ci, f), f.endsWith('.txt') ? read(p).replace(/\r?\n/g, '\r\n') : read(p));
+    }
+    const env = { PATH: '/usr/bin:/bin', HOME: dir, RUNNER_OS: 'Windows', PADDOCK_CI_SLOT: 's1' };
+    const run = (...args) => spawnSync('bash', [join(ci, 'job-isolation.sh'), ...args], { env, encoding: 'utf8' });
+    const p = run('pattern', '[/\\\\]test-browser-spotter-{slot}');
+    assert.equal(p.status, 0, `a {slot} pattern is refused with CRLF tables: ${p.stderr}`);
+    assert.match(p.stdout, /test-browser-spotter-s1/);
+    assert.equal(run('port', 'sccache').stdout.trim(), '4227', 'a port block with CRLF tables');
+    assert.equal(run('path', 'target', 'x-app').status, 0, 'a kept folder with CRLF tables');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

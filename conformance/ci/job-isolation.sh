@@ -78,7 +78,7 @@ slot() {
 # layout <kind>: "<layout> <scope>" from the table.
 layout() {
   local line
-  line="$(awk -v k="$1" '$1 == k && $1 !~ /^#/ { print $2, $3; exit }' "$table")"
+  line="$(awk -v k="$1" '$1 == k && $1 !~ /^#/ { print $2, $3; exit }' <(tr -d '\r' < "$table"))"
   [ -n "$line" ] || die "no kept folder '$1' in kept-folders.txt"
   printf '%s\n' "$line"
 }
@@ -115,7 +115,7 @@ slot_folders() {
     [ "$scope" = slot ] || continue
     glob="${lay//\{name\}/*}"; glob="${glob//\{slot\}/s$n}"
     for f in "$home"/$glob; do [ -d "$f" ] && [ ! -L "$f" ] && printf '%s\n' "$f"; done
-  done < "$table"
+  done < <(tr -d '\r' < "$table")
 }
 
 # legacy_folders <home>: kept folders of the old unslotted layout (a slot layout without its -{slot}; names that end in a slot
@@ -131,7 +131,7 @@ legacy_folders() {
       [[ "$(basename "$f")" =~ -s[0-9]+$ ]] && continue
       printf '%s\n' "$f"
     done
-  done < "$table"
+  done < <(tr -d '\r' < "$table")
 }
 
 keep_slots() {
@@ -232,7 +232,7 @@ cmd_owns() {
     glob="${lay//\{slot\}/$s}"; glob="${glob//\{name\}/?*}"
     # shellcheck disable=SC2053  # the layout is a glob on purpose
     if [[ "$rel" == $glob ]]; then return 0; fi
-  done < "$table"
+  done < <(tr -d '\r' < "$table")
   return 1
 }
 
@@ -319,13 +319,13 @@ slot_anchored() {
     stem="${lay%%'{name}'*}"
     stem="${stem//\//[/\\\\]}"
     if [[ "$before" == *@(/|\])"$stem"+([A-Za-z0-9._-])- ]] || [[ "$before" == "$stem"+([A-Za-z0-9._-])- ]]; then return 0; fi
-  done < "$table"
+  done < <(tr -d '\r' < "$table")
   return 1
 }
 
 cmd_port() {
   local name="${1:?usage: job-isolation.sh port <name>}" line base _width stride s
-  line="$(awk -v k="$name" '$1 == k && $1 !~ /^#/ { print $2, $3, $4; exit }' "$ports")"
+  line="$(awk -v k="$name" '$1 == k && $1 !~ /^#/ { print $2, $3, $4; exit }' <(tr -d '\r' < "$ports"))"
   [ -n "$line" ] || die "no port block '$name' in ports.txt"
   read -r base _width stride <<< "$line"
   s="$(slot)"
