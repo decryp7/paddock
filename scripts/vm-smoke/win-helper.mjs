@@ -446,6 +446,7 @@ export const helperStepTable = [
   }],
   // Row 5a: the Start at login change in the Jobs list (login-jobs-row.mjs). The raw `wbadmin` evidence step is gone with Backup health (removed in 1.1.0).
   ['jobs-restart', ({ browser }) => jobsAfterAgentRestart(browser)],
+  ['mcp', () => winMcpStep()],
   ['login-jobs', async ({ browser }) => loginJobsRow(windowsLoginJobsDriver(browser, { openSettings, mainPage }), { now: () => Date.now(), sleep })],
   // Release row: disk space (Dyno's figure against Explorer's, decimal units, refresh within 60 s of a 1 GB write)
   ['disk-space', async () => { const adapter = windowsAdapter({ ssh }); return diskSpaceStep({ exec: async (c) => ({ code: 0, stdout: ssh(c, { ms: 280_000 }) }), sleep, now: () => Date.now(), adapter }); }],
