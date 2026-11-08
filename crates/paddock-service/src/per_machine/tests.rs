@@ -442,8 +442,8 @@ fn the_uninstaller_decides_trust_before_it_copies_anything_of_its_folder() {
         "HKLM, written by administrators only"
     );
     assert!(
-        decision.contains("$PROGRAMFILES64"),
-        "directly under Program Files"
+        decision.contains("_PADDOCK_PF_CHILD"),
+        "directly under Program Files (the shared spelling test)"
     );
     assert!(
         !decision.contains("nsExec")
@@ -480,5 +480,36 @@ fn an_untrusted_uninstaller_ends_before_it_deletes_anything() {
     assert!(
         !branch[..abort].contains("Delete") && !branch[..abort].contains("RMDir"),
         "{branch}"
+    );
+}
+
+/// Review of B6b (installer and uninstaller must agree): PREINSTALL's check-dir macro also requires the raw `$INSTDIR` to be textually
+/// `$PROGRAMFILES64\<one name>`, with the same NSIS test the uninstaller's trust decision uses (one macro, not two copies), so an 8.3
+/// path or forward slashes are refused when the install is made, not discovered when it is uninstalled. The level-44 words say what
+/// to do when Settings > Apps does not list the product.
+#[test]
+fn the_installer_and_the_uninstaller_use_one_spelling_test() {
+    let t = canonical_include();
+    let body_of = |name: &str| {
+        let i = t
+            .find(&format!("!macro {name}"))
+            .unwrap_or_else(|| panic!("no macro {name}"));
+        &t[i..i + t[i..].find("!macroend").unwrap()]
+    };
+    let check = body_of("PADDOCK_CHECK_DIR");
+    let tool = check.find("check-dir --dir").expect("the tool's check");
+    let spelling = check.find("_PADDOCK_PF_CHILD").expect("the spelling test");
+    assert!(
+        tool < spelling && check.contains("PADDOCK_LEVEL_BAD_DIR"),
+        "{check}"
+    );
+    assert!(
+        body_of("_PADDOCK_TRUST_FOLDER").contains("_PADDOCK_PF_CHILD"),
+        "the same macro in the uninstaller"
+    );
+    assert!(body_of("_PADDOCK_PF_CHILD").contains("$PROGRAMFILES64"));
+    assert!(
+        t.contains("is not listed in Settings > Apps, run the ${PRODUCTNAME} installer again, then uninstall."),
+        "the level-44 words"
     );
 }

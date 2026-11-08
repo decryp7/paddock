@@ -172,6 +172,14 @@ Check 'Q refused folder: asked check-dir' ($u.Lines -match '^check-dir') ($u.Lin
 Check 'Q refused folder: the service program never ran' (-not ($u.Lines -match '^SERVER')) ($u.Lines -join '|')
 Remove-Item $key, $key32 -ErrorAction SilentlyContinue
 
+# R: the installer and the uninstaller agree on the folder's spelling (review of B6b): a folder the tool would accept but that is not
+# written as <root>\<one name> (forward slashes here; an 8.3 short path on a real PC, VM row PW-8) is refused at install time with the
+# folder's own level (41), because the uninstaller would trust nothing there.
+$rr = (Join-Path $base 'r') -replace '\\', '/'
+$r = Run $installer "/S /D=$rr" @{}
+Check 'R forward-slash spelling refused at install time (level 41)' ($r.Code -eq 41) "code $($r.Code)"
+Check 'R nothing installed' (-not (Test-Path (Join-Path $base 'r\uninstall.exe'))) 'uninstall.exe exists'
+
 # B: check-dir refused
 $b = Join-Path $base 'b'
 $r = Run $installer "/S /D=$b" @{ PADDOCK_STUB_EXIT_CHECK_DIR = '3' }

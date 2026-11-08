@@ -49,7 +49,7 @@
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
-!define PADDOCK_INCLUDE_VERSION "6"
+!define PADDOCK_INCLUDE_VERSION "7"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
 !ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
   VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
@@ -137,6 +137,42 @@ Var PaddockTrusted
   !endif
 !macroend
 
+; Sets $PaddockTrusted to 1 when $R9 (a folder without a trailing backslash) is textually "$PROGRAMFILES64\<one name>": a direct child, a
+; name without "\" or ":" and not starting with "." (so no 8.3 short path such as C:\PROGRA~1\X and no forward slashes: NSIS does not
+; normalise them, and the installer and the uninstaller must agree on what they accept). Otherwise 0. The test harness may name another
+; root in PADDOCK_STUB_ROOT (compiled only with PADDOCK_TEST_HARNESS). Uses $0 to $3, $R6 to $R8.
+!macro _PADDOCK_PF_CHILD
+  StrCpy $PaddockTrusted 0
+  StrCpy $R6 "$PROGRAMFILES64"
+  !ifdef PADDOCK_TEST_HARNESS
+    ReadEnvStr $R8 PADDOCK_STUB_ROOT
+    ${If} $R8 != ""
+      StrCpy $R6 $R8
+    ${EndIf}
+  !endif
+  StrLen $R8 $R6
+  IntOp $R8 $R8 + 1
+  StrCpy $R7 $R9 $R8
+  ${If} $R7 == "$R6\"
+    StrCpy $R7 $R9 "" $R8
+    StrLen $1 $R7
+    StrCpy $2 $R7 1
+    ${If} $1 > 0
+    ${AndIf} $2 != "."
+      StrCpy $PaddockTrusted 1
+      StrCpy $0 0
+      ${While} $0 < $1
+        StrCpy $3 $R7 1 $0
+        ${If} $3 == "\"
+        ${OrIf} $3 == ":"
+          StrCpy $PaddockTrusted 0
+        ${EndIf}
+        IntOp $0 $0 + 1
+      ${EndWhile}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 ; The uninstaller's trust decision, made in NSIS alone before anything of $INSTDIR is copied or run (an uninstall.exe can be copied
 ; to a folder the user controls, next to a planted paddock-setup.exe, and run elevated). $PaddockTrusted is 1 only when BOTH hold:
 ; $INSTDIR (trailing backslash trimmed, case-insensitive) is the folder the installer registered in HKLM (administrators write
@@ -161,34 +197,7 @@ Var PaddockTrusted
     ${EndIf}
   ${EndIf}
   ${If} $R7 == "$R9\uninstall.exe"
-    StrCpy $R6 "$PROGRAMFILES64"
-    !ifdef PADDOCK_TEST_HARNESS
-      ReadEnvStr $R8 PADDOCK_STUB_ROOT
-      ${If} $R8 != ""
-        StrCpy $R6 $R8
-      ${EndIf}
-    !endif
-    StrLen $R8 $R6
-    IntOp $R8 $R8 + 1
-    StrCpy $R7 $R9 $R8
-    ${If} $R7 == "$R6\"
-      StrCpy $R7 $R9 "" $R8
-      StrLen $1 $R7
-      StrCpy $2 $R7 1
-      ${If} $1 > 0
-      ${AndIf} $2 != "."
-        StrCpy $PaddockTrusted 1
-        StrCpy $0 0
-        ${While} $0 < $1
-          StrCpy $3 $R7 1 $0
-          ${If} $3 == "\"
-          ${OrIf} $3 == ":"
-            StrCpy $PaddockTrusted 0
-          ${EndIf}
-          IntOp $0 $0 + 1
-        ${EndWhile}
-      ${EndIf}
-    ${EndIf}
+    !insertmacro _PADDOCK_PF_CHILD
   ${EndIf}
 !macroend
 
@@ -220,7 +229,7 @@ Var PaddockTrusted
       !insertmacro _PADDOCK_TEST_LOG "NOTE untrusted uninstall folder: nothing in it is run"
       ; And nothing is deleted: the uninstaller ends here, before any step of the app and before the template's own deletions (so the
       ; template never removes the registered uninstall key of the real install on behalf of a copied uninstaller).
-      !insertmacro PADDOCK_ABORT "This is not the installed copy of ${PRODUCTNAME}. Use Settings > Apps to uninstall ${PRODUCTNAME}." ${PADDOCK_LEVEL_UNTRUSTED} ""
+      !insertmacro PADDOCK_ABORT "This is not the installed copy of ${PRODUCTNAME}. Use Settings > Apps to uninstall ${PRODUCTNAME}. If ${PRODUCTNAME} is not listed in Settings > Apps, run the ${PRODUCTNAME} installer again, then uninstall." ${PADDOCK_LEVEL_UNTRUSTED} ""
     ${EndIf}
   !endif
   ${If} $PaddockHaveSetup == 1
@@ -234,6 +243,18 @@ Var PaddockTrusted
   ${If} $0 != 0
     !insertmacro PADDOCK_ABORT "Install ${PRODUCTNAME} in Program Files. The folder $INSTDIR is not allowed." ${PADDOCK_LEVEL_BAD_DIR} ""
   ${EndIf}
+  ; The uninstaller trusts only the textual form "$PROGRAMFILES64\<one name>" (_PADDOCK_TRUST_FOLDER), so the installer accepts only
+  ; that form too: an 8.3 path (C:\PROGRA~1\X) or forward slashes would pass check-dir and leave an install that cannot be uninstalled.
+  StrCpy $R9 "$INSTDIR"
+  StrCpy $R8 $R9 1 -1
+  ${If} $R8 == "\"
+    StrCpy $R9 $R9 -1
+  ${EndIf}
+  !insertmacro _PADDOCK_PF_CHILD
+  ${If} $PaddockTrusted != 1
+    !insertmacro PADDOCK_ABORT "Install ${PRODUCTNAME} in Program Files, directly under $PROGRAMFILES64 and spelled that way (no short names or forward slashes). The folder $INSTDIR is not allowed." ${PADDOCK_LEVEL_BAD_DIR} ""
+  ${EndIf}
+  StrCpy $PaddockTrusted 1
 !macroend
 
 ; Asks check-dir without aborting: $0 is 0 when $INSTDIR is accepted (a direct child of Program Files, owned and protected by
