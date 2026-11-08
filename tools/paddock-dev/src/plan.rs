@@ -679,15 +679,17 @@ pub fn plan_for(root: &Path, history: &dyn History, req: &Request) -> Result<Val
 pub fn plan_with_graph(root: &Path, history: &dyn History, req: &Request) -> Result<(RepoGraph, Value), GraphError> {
     let graph = read_graph(root, history)?;
     let files_mode = !req.files.is_empty();
-    let gitea = (!req.all).then(|| {
-        crate::plan_repo::GitGitea::new(
+    let gitea = if req.all {
+        None
+    } else {
+        Some(crate::plan_repo::GitGitea::new(
             root,
             graph.apps.iter().cloned().collect(),
             files_mode,
             req.base.as_deref().unwrap_or("HEAD"),
             &req.head,
-        )
-    });
+        )?)
+    };
     let naming = |f: &str| crate::plan_repo::files_naming_generated(root, f);
     let mut opts = Options {
         all: req.all,
@@ -970,6 +972,34 @@ mod tests {
         assert_eq!(apps_of(&files), BTreeSet::from(["a".to_string(), "d".to_string()]));
     }
 
+    /// A repository with one empty commit: the `.gitea` readers need a real one.
+    fn repo(d: &Path) {
+        for args in [
+            ["init", "-q"].as_slice(),
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@example.invalid",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+        ] {
+            assert!(
+                std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(d)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+    }
+
     /// A history of one commit range that changed the lockfile, with files that are not on disk.
     struct Tracked(Vec<String>);
 
@@ -978,7 +1008,7 @@ mod tests {
             Ok(self.0.clone())
         }
         fn changed_files(&self, base: &str, head: &str) -> Result<Vec<String>, GraphError> {
-            assert_eq!((base, head), ("old", "new"));
+            assert_eq!((base, head), ("old", "HEAD"));
             Ok(vec!["package-lock.json".into()])
         }
         fn file_at(&self, rev: &str, path: &str) -> Result<Option<String>, GraphError> {
@@ -1000,13 +1030,14 @@ mod tests {
             explain: false,
             root: None,
             base: base.map(String::from),
-            head: "new".into(),
+            head: "HEAD".into(),
         }
     }
 
     #[test]
     fn a_tracked_file_missing_on_disk_is_a_typed_read_error_naming_the_file() {
         let d = tempfile::tempdir().unwrap();
+        repo(d.path());
         let err = plan_for(d.path(), &Tracked(vec!["ui/package.json".into()]), &request(None))
             .err()
             .unwrap();
@@ -1024,6 +1055,7 @@ mod tests {
     #[test]
     fn a_base_revision_plans_the_changed_files_and_reads_the_lock_at_both_ends() {
         let d = tempfile::tempdir().unwrap();
+        repo(d.path());
         std::fs::create_dir_all(d.path().join("ui")).unwrap();
         std::fs::write(d.path().join("ui/package.json"), r#"{"name":"ui"}"#).unwrap();
         let history = Tracked(vec!["ui/package.json".into()]);

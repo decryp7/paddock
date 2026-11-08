@@ -3,6 +3,7 @@
 
 use crate::plan_gitea::GiteaSource;
 use paddock_proc::{Limits, command, run_bounded};
+use paddock_repo_graph::GraphError;
 use regex::Regex;
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
@@ -25,6 +26,14 @@ fn lines(text: Option<String>) -> Vec<String> {
         .filter(|l| !l.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// Like [`git_text`], but a failure (no repository, a bad revision, a timeout) is an error that names the command: the planner
+/// must fail, never plan from an empty list.
+fn git_lines(root: &Path, args: &[&str]) -> Result<Vec<String>, GraphError> {
+    git_text(root, args)
+        .map(|t| lines(Some(t)))
+        .ok_or_else(|| GraphError::History(format!("git {} failed in {}", args.join(" "), root.display())))
 }
 
 /// The crate folders' Rust files that name `generated/<file name>`: `git grep -l -F` over `crates/**/*.rs`.
@@ -53,8 +62,8 @@ pub struct GitGitea {
 
 impl GitGitea {
     /// Files mode (`files = true`: HEAD against the working tree) or base mode (`base` against `head`).
-    pub fn new(root: &Path, apps: Vec<String>, files: bool, base: &str, head: &str) -> GitGitea {
-        let list = |paths: &[&str]| -> Vec<String> {
+    pub fn new(root: &Path, apps: Vec<String>, files: bool, base: &str, head: &str) -> Result<GitGitea, GraphError> {
+        let list = |paths: &[&str]| -> Result<Vec<String>, GraphError> {
             let mut args: Vec<&str> = if files {
                 vec!["ls-files"]
             } else {
@@ -64,11 +73,11 @@ impl GitGitea {
                 args.push("--");
             }
             args.extend(paths);
-            lines(git_text(root, &args))
+            git_lines(root, &args)
         };
-        let gitea = list(&[".gitea"]);
+        let gitea = list(&[".gitea"])?;
         let script_re = Regex::new(r"\.(mjs|cjs|js|sh)$");
-        let scripts = list(&["conformance"])
+        let scripts = list(&["conformance"])?
             .into_iter()
             .filter(|x| {
                 script_re.as_ref().is_ok_and(|r| r.is_match(x))
@@ -76,17 +85,18 @@ impl GitGitea {
                     && !x.starts_with("conformance/fixtures/")
             })
             .collect();
-        let dirty = files.then(|| {
+        let dirty = if files {
             // `git status --porcelain` lines are `XY path`.
-            lines(git_text(
-                root,
-                &["status", "--porcelain", "--no-renames", "--", ".gitea", "conformance"],
-            ))
-            .into_iter()
-            .map(|l| l.chars().skip(3).collect::<String>())
-            .collect()
-        });
-        GitGitea {
+            Some(
+                git_lines(root, &["status", "--porcelain", "--no-renames", "--", ".gitea", "conformance"])?
+                    .into_iter()
+                    .map(|l| l.chars().skip(3).collect::<String>())
+                    .collect(),
+            )
+        } else {
+            None
+        };
+        Ok(GitGitea {
             root: root.to_path_buf(),
             apps,
             dirty,
@@ -95,7 +105,7 @@ impl GitGitea {
             gitea,
             scripts,
             cache: RefCell::new(HashMap::new()),
-        }
+        })
     }
 
     fn show(&self, rev: &str, path: &str) -> Option<String> {
@@ -130,5 +140,21 @@ impl GiteaSource for GitGitea {
         };
         self.cache.borrow_mut().insert(key, v.clone());
         v
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failing_git_read_is_an_error_never_an_empty_list() {
+        let dir = tempfile::tempdir().unwrap();
+        for (files, head) in [(true, "HEAD"), (false, "HEAD")] {
+            let err = GitGitea::new(dir.path(), vec![], files, "HEAD", head)
+                .err()
+                .expect("not a repository");
+            assert!(err.to_string().contains("git "), "{err}");
+        }
     }
 }
