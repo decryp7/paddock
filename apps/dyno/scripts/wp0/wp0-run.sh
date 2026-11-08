@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Host driver for WP-0 (Dyno ADR 0033; results in the ADR). Refuses any VM but the pinned Paddock Windows test VM.
 #   wp0-run.sh --step <name> [--as paddock-test|paddock-admin] [--arg <path in guest>] [--keep]
-# The guest address comes from vmrun (or, where VMware Tools is absent on the Arm guest, from the NAT lease of the VM's fixed MAC), never
-# from the command line, so only the pinned VM can be reached. Results go outside the repository: WP0_OUT, default $TMPDIR/dyno-wp0-out.
+# What limits the script to the pinned VM is the host-key pin: ssh uses only the pinned known_hosts with StrictHostKeyChecking=yes, so any address
+# but the pinned guest, or that address answered by another host key, is refused before authentication. The address lookup (vmrun, or where
+# VMware Tools is absent on the Arm guest the newest active NAT lease of the VM's fixed MAC) only finds the guest and is not the guard.
+# Results go outside the repository: WP0_OUT, default $TMPDIR/dyno-wp0-out.
 set -euo pipefail
 PINNED=/Volumes/d7sst7/vms/paddock-win11-test
 VMX="$PINNED/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx"
@@ -14,15 +16,17 @@ here=$(cd "$(dirname "$0")" && pwd)
 trap 'echo "::error::wp0-run: failed at line $LINENO ($BASH_COMMAND). Next: read the output above; the VM is reverted to $SNAP on exit unless --keep; check the snapshot name with: vmrun listSnapshots <vmx>" >&2' ERR
 
 OUT=${WP0_OUT:-${TMPDIR:-/tmp}/dyno-wp0-out}
-mkdir -p "$OUT"
-out_real=$(cd "$OUT" && pwd -P)
+# The folder is resolved without creating it (through its nearest existing parent) so a refused run leaves nothing behind.
+resolve() { local p=$1 rest=""; while [ ! -d "$p" ]; do rest="/$(basename "$p")$rest"; p=$(dirname "$p"); done; echo "$(cd "$p" && pwd -P)$rest"; }
+out_real=$(resolve "$OUT")
 top=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null || true)
 if [ -n "$top" ]; then
   top_real=$(cd "$top" && pwd -P)
   case "$out_real/" in "$top_real"/*) echo "::error::WP0_OUT ($out_real) is inside the repository ($top_real): the results name the VM's accounts and must not be committed. Next: set WP0_OUT to a folder outside it." >&2; exit 2;; esac
 fi
 
-step=""; as="paddock-test"; arg=""; keep=0
+keep=0
+step=""; as="paddock-test"; arg=""
 while [ $# -gt 0 ]; do case "$1" in --step) step=$2; shift 2;; --as) as=$2; shift 2;; --arg) arg=$2; shift 2;; --keep) keep=1; shift;; *) echo "::error::unknown option $1" >&2; exit 2;; esac; done
 [ -n "$step" ] || { echo "::error::--step is required" >&2; exit 2; }
 [ -f "$VMX" ] || { echo "::error::the pinned VM is missing: $VMX" >&2; exit 2; }
@@ -33,15 +37,24 @@ key="$PINNED/keys/$as"; [ -f "$key" ] || { echo "::error::no key $key" >&2; exit
 admin_key="$PINNED/keys/paddock-admin"
 
 revert() { "$VMRUN" revertToSnapshot "$VMX" "$SNAP" && "$VMRUN" start "$VMX" nogui; }
-revert
+# The exit handler is set before the first revert, so a failed start is also put back to the snapshot (unless --keep).
 trap '[ "$keep" = 1 ] || "$VMRUN" revertToSnapshot "$VMX" "$SNAP" || echo "::error::could not revert $SNAP; revert it by hand" >&2' EXIT
+revert
 
 guest_ip() {
   local ip
   ip=$("$VMRUN" getGuestIPAddress "$VMX" 2>/dev/null || true)
   case "$ip" in [0-9]*.[0-9]*.[0-9]*.[0-9]*) echo "$ip"; return;; esac
   [ -r "$LEASES" ] || return 1
-  awk -v mac="$MAC" '/^lease /{a=$2} /hardware ethernet/{m=tolower($3); sub(/;$/,"",m); if (m==mac) f=a} END{if (f=="") exit 1; print f}' "$LEASES"
+  # The lease of the VM's MAC that ends last and has not ended (VMware's dhcpd file has no `binding state` line; one that says otherwise than active is skipped): a stale lease of an earlier boot must not name another VM's address.
+  local now; now=$(date -u +"%Y/%m/%d %H:%M:%S")
+  awk -v mac="$MAC" -v now="$now" '
+    /^lease /{a=$2; m=""; st=""; en=""}
+    /hardware ethernet/{m=tolower($3); sub(/;$/,"",m)}
+    /binding state/{st=$3; sub(/;$/,"",st)}
+    /^[ \t]*ends /{en=$3" "$4; sub(/;$/,"",en)}
+    /^}/{ if (m==mac && (st=="" || st=="active") && en>now && en>best) {best=en; f=a} }
+    END{ if (f=="") exit 1; print f }' "$LEASES"
 }
 host=""
 for i in $(seq 1 60); do host=$(guest_ip 2>/dev/null || true); [ -n "$host" ] && break; sleep 5; done
@@ -68,6 +81,11 @@ if [ "$step" = tasks-register ]; then
   S "$admin_key" paddock-admin "schtasks /query /tn $known" >"$OUT/$step/cleanup-control.txt" 2>&1 || { echo "::error::check broken: schtasks /query as paddock-admin cannot see the known task $known, so a clean result would mean nothing. Next: pick another known task or fix the admin key." >&2; exit 1; }
   S "$admin_key" paddock-admin 'schtasks /query /fo csv' >"$OUT/$step/cleanup-all.txt" 2>&1
   if grep -q 'DynoTest-' "$OUT/$step/cleanup-all.txt"; then echo "::error::a DynoTest- task is left in the guest: $(grep -o 'DynoTest-[^\",]*' "$OUT/$step/cleanup-all.txt" | head -3 | tr '\n' ' '). Next: delete it with schtasks /delete as paddock-admin, or let the snapshot revert remove it." >&2; exit 1; fi
-  echo "CLEANUP ok: the known task was listed and no DynoTest- task remains"
+  # schtasks lists tasks, not empty folders: list the folders too (a \DynoTest-<uuid> folder outlives its deleted task).
+  scp -i "$admin_key" "${opts[@]}" "$here/wp0-collect.ps1" "paddock-admin@$host:wp0-collect.ps1"
+  S "$admin_key" paddock-admin "$P -Step tasks-folders" >"$OUT/$step/cleanup-folders.txt" 2>&1
+  grep -q '^CONTROL ok' "$OUT/$step/cleanup-folders.txt" || { echo "::error::check broken: the folder listing as paddock-admin did not print an ok control. Next: read $OUT/$step/cleanup-folders.txt." >&2; exit 1; }
+  if grep -q 'DynoTest-' "$OUT/$step/cleanup-folders.txt"; then echo "::error::a DynoTest- task folder is left in the guest: $(grep -o 'DynoTest-[^ |]*' "$OUT/$step/cleanup-folders.txt" | head -3 | tr '\n' ' '). Next: remove it as paddock-admin (Schedule.Service DeleteFolder), or let the snapshot revert do it." >&2; exit 1; fi
+  echo "CLEANUP ok: the known task was listed and no DynoTest- task or task folder remains"
 fi
 echo "WP-0 $step done: $OUT/$step"

@@ -37,3 +37,15 @@ Run: `./wp0-run.sh --step <name>` per step (it refuses any VM but the pinned one
 it over SSH with the right user, fetches the output, and reverts again unless `--keep`). Results go to
 `$WP0_OUT/<step>/` (default `$TMPDIR/dyno-wp0-out`; the script refuses a folder inside the repository) and are then summarised in ADR 0033 "WP-0 results" with the
 build number and date; benchmarks (items 10, 11) also as a results block in `apps/dyno/docs/performance.md` (rule 48).
+
+## Driver paths not yet exercised on the VM (ER-33)
+
+The driver and probe changes of 2026-11-09 (the admin cleanup check and folder listing, the lease lookup, the strict host-key pin, the `physdisk` denial codes,
+the `tasks-folders` step, the exit handler before the first revert) have been read and syntax-checked but **not run against the VM**. No WP-0 result taken
+with them counts until each has run once on the pinned VM:
+1. the lease lookup with VMware Tools absent: the run shows which source gave the address, and it is the pinned guest;
+2. a strict host-key refusal: point a temporary copy of `known_hosts` at a wrong key and confirm ssh refuses with the script's `::error::`;
+3. `tasks-register` end to end as `paddock-test`, the admin cleanup check printing `CLEANUP ok` (tasks and folders);
+4. the negative of that check: register a `DynoTest-` task and a `DynoTest-` folder as admin with `--keep`, and confirm each makes the check fail;
+5. `physdisk` as `paddock-test` (denial path: the printed codes are one of the accepted ones) and as `paddock-admin` (row path), each with its CONTROL line.
+The 2026-11-09 results in the ADR were taken with the earlier probe script, whose controls were checked by hand.

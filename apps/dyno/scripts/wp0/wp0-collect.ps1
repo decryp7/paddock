@@ -1,6 +1,6 @@
 # WP-0 guest-side probes for Dyno ADR 0033. Run inside paddock-win11-test ONLY (the host driver wp0-run.sh checks). Reads; the only
 # things it creates are its own DynoTest-<uuid> objects (removed in finally) and, for -Step tasks-register, a disabled task.
-param([Parameter(Mandatory)][ValidateSet('env','approved-dump','appx-keys','physdisk','rm-probe','tasks-walk','tasks-register','power-overlay','background-apps')][string]$Step,
+param([Parameter(Mandatory)][ValidateSet('env','tasks-folders','approved-dump','appx-keys','physdisk','rm-probe','tasks-walk','tasks-register','power-overlay','background-apps')][string]$Step,
       [string]$Path = '', [int]$Expect = 1)
 $ErrorActionPreference = 'Stop'
 function Control($ok, $what) { if ($ok) { "CONTROL ok: $what" } else { "CONTROL BROKEN: $what" } }
@@ -43,17 +43,22 @@ switch ($Step) {
     Control ($manifests -gt 0) "package manifests read ($manifests)"
   }
   'physdisk' {
-    $ms = @(); $disks = $null; $denied = $null
+    $ms = @(); $disks = $null; $err = $null
     foreach ($i in 1..10) {
       $sw = [Diagnostics.Stopwatch]::StartNew()
-      try { $disks = Get-CimInstance -Namespace 'root\Microsoft\Windows\Storage' -ClassName MSFT_PhysicalDisk } catch { $denied = $_.Exception.Message; break }
+      try { $disks = Get-CimInstance -Namespace 'root\Microsoft\Windows\Storage' -ClassName MSFT_PhysicalDisk -ErrorAction Stop } catch { $err = $_; break }
       $sw.Stop(); $ms += $sw.ElapsedMilliseconds
     }
-    if ($denied) { "ERROR $denied" }
     foreach ($d in $disks) { "disk | $($d.FriendlyName) | HealthStatus=$($d.HealthStatus) | OperationalStatus=$($d.OperationalStatus)" }
     if ($ms.Count) { $s = $ms | Sort-Object; "MS median=$($s[[int]($s.Count / 2)]) all=$($ms -join ',')" }
-    # A denial is a result (the query answered), an empty answer without one is not: say which.
-    if ($denied) { "CONTROL ok: the query answered with an error for this user ($denied)" } else { Control (@($disks).Count -gt 0) 'MSFT_PhysicalDisk returned a row (as this user)' }
+    if ($err) {
+      $ex = $err.Exception
+      $codes = @($ex.HResult, $(if ($ex.InnerException) { $ex.InnerException.HResult }), $(if ($ex.PSObject.Properties['NativeErrorCode']) { $ex.NativeErrorCode })) | Where-Object { $null -ne $_ }
+      "ERROR type=$($ex.GetType().Name) codes=$(($codes | ForEach-Object { if ($_ -is [int]) { '0x{0:x8}' -f $_ } else { "$_" } }) -join ',') message=$($ex.Message)"
+      # Only an access denial is a result (the query answered "no"): WBEM_E_ACCESS_DENIED 0x80041003, E_ACCESSDENIED 0x80070005, or CIM's AccessDenied.
+      $denied = $codes | Where-Object { ($_ -is [int] -and (('{0:x8}' -f $_) -in @('80041003', '80070005'))) -or ("$_" -eq 'AccessDenied') }
+      if ($denied) { 'CONTROL ok: the query answered access denied for this user' } else { 'CONTROL BROKEN: the query failed for a reason that is not an access denial (WMI stopped, bad namespace, timeout): not a result' }
+    } else { Control (@($disks).Count -gt 0) 'MSFT_PhysicalDisk returned a row (as this user)' }
   }
   'rm-probe' {
     if (-not $Path) { throw 'pass -Path <a file held open by some process>' }
@@ -99,6 +104,13 @@ public static class Rm {
     "COUNT=$script:count FOLDERS=$script:folders HIDDEN=$script:hidden DENIED=$($script:denied.Count) MS=$($sw.ElapsedMilliseconds) user=$(whoami)"
     $script:denied | ForEach-Object { "denied | $_" }
     Control ($script:count -gt 0) 'the walk saw tasks (Windows ships dozens)'
+  }
+  'tasks-folders' {
+    $svc = New-Object -ComObject 'Schedule.Service'; $svc.Connect()
+    $script:n = 0
+    function List($f, $depth) { if ($depth -gt 16) { return }; $script:n++; "folder | $($f.Path)"; foreach ($s in $f.GetFolders(0)) { List $s ($depth + 1) } }
+    List $svc.GetFolder('\') 0
+    Control (($script:n -gt 1) -and ($svc.GetFolder('\Microsoft') -ne $null)) "the folder listing saw \Microsoft and its subfolders ($script:n folders)"
   }
   'tasks-register' {
     $id = "DynoTest-$([guid]::NewGuid())"; $svc = New-Object -ComObject 'Schedule.Service'; $svc.Connect()
