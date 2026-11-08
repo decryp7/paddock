@@ -51,6 +51,7 @@ jobs:
       - id: plan
         uses: ./.gitea/actions/plan
         with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
           app: dyno
           tag-pattern: dyno-v*
           nightly-marker: "false"

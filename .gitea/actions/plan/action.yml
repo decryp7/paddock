@@ -16,6 +16,9 @@ inputs:
   token:
     description: Token for the Gitea API (the last green ci.yml run of main is the diff base of a push).
     default: ${{ github.token }}
+  dev-token:
+    description: "Read token of the private package store for ./dev's prebuilt download (ADR 0022 R0b); empty: ./dev builds the tool. Pass BUILD_INPUTS_TOKEN."
+    default: ""
 outputs:
   run:
     description: "'true' or 'false'; later jobs use if: needs.plan.outputs.run == 'true'."
@@ -43,6 +46,7 @@ runs:
         APP: ${{ inputs.app }}
         TAG_PATTERN: ${{ inputs.tag-pattern }}
         PLAN_TOKEN: ${{ inputs.token }}
+        PADDOCK_DEV_TOKEN: ${{ inputs.dev-token }}
       run: |
         TAGS=""
         if [ "$EVENT" = push ] && [ "$REF" = "$MAIN_REF" ]; then

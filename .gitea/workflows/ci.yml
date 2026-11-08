@@ -77,6 +77,7 @@ jobs:
         id: plan
         env:
           PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
           PLAN_BASE: ${{ github.event.inputs.base }}
           PLAN_APP: ${{ inputs.app }}
           PLAN_WEBKIT: ${{ (inputs.webkit == true || inputs.webkit == 'true') && '1' || '' }}
@@ -573,6 +574,7 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
           PLAN_BASE: ${{ needs.plan.outputs.base }}
           INPUT_APP: ${{ inputs.app }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
           range="$(./dev plan --commit-range)"
           flags="$(./dev plan --commit-flags)"

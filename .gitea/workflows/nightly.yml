@@ -30,6 +30,8 @@ jobs:
       - uses: actions/checkout@v4
       - id: plan
         uses: ./.gitea/actions/plan
+        with:
+          dev-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
 
   ci:
     name: everything

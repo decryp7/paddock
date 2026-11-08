@@ -97,6 +97,7 @@ jobs:
           SHA: ${{ github.sha }}
           GREEN: ${{ steps.green.outputs.cache-hit }}
           PLAN_TOKEN: ${{ github.token }}
+          PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
           run=$(./dev plan --ci --app debrief)
           if [ "$EVENT" = schedule ] && [ "$GREEN" = true ]; then
