@@ -107,7 +107,12 @@ const HOSTILE: &[(&str, &str, &str, Verdict)] = &[
         "S4EVNF0M123456A",
         Left(OTHER),
     ),
-    ("IPv4 with port", "peer 10.1.2.3:8080", "10.1.2.3", Removed),
+    (
+        "IPv4 with port",
+        "peer 203.0.113.9:8080",
+        "203.0.113.9",
+        Removed,
+    ),
     ("IPv6 with zone", "peer fe80::1%en0", "fe80::1", Removed),
     ("e-mail", "from alex.doe@example.com", "alex.doe", Removed),
     (
@@ -332,4 +337,22 @@ fn the_list_of_what_is_left_is_the_list_the_dialog_shows() {
     reasons.sort();
     reasons.dedup();
     assert_eq!(reasons.len(), 3, "{reasons:?}");
+}
+
+#[test]
+fn loopback_and_private_addresses_are_diagnostic_and_stay_in_every_form() {
+    let r = redactor();
+    for text in [
+        "bind 10.1.2.3:8080",
+        "bind 127.0.0.1:8080",
+        "any 0.0.0.0",
+        "lan 192.168.1.5",
+        "peer [::1]:443",
+    ] {
+        let line = json!({"@m": text, "Peers": [{"Addr": text}]}).to_string();
+        let (out, c) = r.log_line(&line);
+        assert_eq!(c.ip_addresses, 0, "{text}: {out}");
+        assert!(out.contains(text), "{text} was changed: {out}");
+        assert_eq!(r.text(text).0, text);
+    }
 }

@@ -39,7 +39,8 @@ impl RedactionCounts {
             + self.ip_addresses
     }
 
-    pub(crate) fn add(&mut self, o: &RedactionCounts) {
+    /// Adds `o` to these counts, kind by kind.
+    pub fn add(&mut self, o: &RedactionCounts) {
         self.secrets += o.secrets;
         self.fields += o.fields;
         self.home_paths += o.home_paths;
@@ -104,18 +105,60 @@ fn replace_exact(text: &str, needle: &str, with: &str) -> (String, u32) {
     (text.replace(needle, with), count)
 }
 
-/// Replaces a path prefix (case-insensitive, either separator) with `with`.
+/// Length of the run of separators at the start of `t` (a normalised text: `/` only).
+fn sep_run(t: &str) -> usize {
+    t.bytes().take_while(|b| *b == b'/').count()
+}
+
+/// The end of `segs` matched at `start` in the normalised text `t`: segments joined by one or two separators (a path inside
+/// serialised JSON has every backslash doubled), after a leading run of them when `lead`.
+fn match_prefix_at(t: &str, start: usize, segs: &[&str], lead: bool) -> Option<usize> {
+    let mut i = start;
+    let between = |i: &mut usize| match sep_run(&t[*i..]) {
+        n @ 1..=2 => {
+            *i += n;
+            Some(())
+        }
+        _ => None,
+    };
+    if lead {
+        between(&mut i)?;
+    }
+    for (k, seg) in segs.iter().enumerate() {
+        if k > 0 {
+            between(&mut i)?;
+        }
+        if !t[i..].starts_with(seg) {
+            return None;
+        }
+        i += seg.len();
+    }
+    Some(i)
+}
+
+/// Replaces a path prefix (case-insensitive, either separator, a doubled separator as in JSON text) with `with`.
 fn replace_prefix(text: &str, prefix: &str, with: &str) -> (String, u32) {
     let norm = |s: &str| s.to_lowercase().replace('\\', "/");
     let (t, p) = (norm(text), norm(prefix.trim_end_matches(['/', '\\'])));
     if p.is_empty() || t.len() != text.len() {
         return (text.to_string(), 0);
     }
+    let lead = p.starts_with('/');
+    let segs: Vec<&str> = p.split('/').filter(|s| !s.is_empty()).collect();
+    let first = match segs.first() {
+        _ if lead => "/",
+        Some(first) => first,
+        None => return (text.to_string(), 0),
+    };
     let mut out = String::with_capacity(text.len());
-    let (mut last, mut from, mut count) = (0, 0, 0);
-    while let Some(i) = t[from..].find(&p) {
-        let start = from + i;
-        let end = start + p.len();
+    let (mut last, mut count) = (0, 0);
+    for (start, _) in t.match_indices(first) {
+        if start < last {
+            continue;
+        }
+        let Some(end) = match_prefix_at(&t, start, &segs, lead) else {
+            continue;
+        };
         let after_ok = text[end..]
             .chars()
             .next()
@@ -130,7 +173,6 @@ fn replace_prefix(text: &str, prefix: &str, with: &str) -> (String, u32) {
             last = end;
             count += 1;
         }
-        from = end;
     }
     out.push_str(&text[last..]);
     (out, count)
@@ -243,6 +285,17 @@ fn replace_emails(text: &str) -> (String, u32) {
     (out, count)
 }
 
+/// Loopback, unspecified and private (RFC 1918) IPv4 addresses: diagnostic, not personal, so they stay in a report.
+fn is_diagnostic_v4(ip: std::net::Ipv4Addr) -> bool {
+    ip.is_loopback() || ip.is_unspecified() || ip.is_private()
+}
+
+/// Loopback, unspecified and unique-local (`fc00::/7`) IPv6 addresses. Link-local ones stay redacted: their last 64 bits are
+/// often derived from the MAC address.
+fn is_diagnostic_v6(ip: std::net::Ipv6Addr) -> bool {
+    ip.is_loopback() || ip.is_unspecified() || (ip.segments()[0] & 0xfe00) == 0xfc00
+}
+
 fn replace_ipv4(text: &str) -> (String, u32) {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
@@ -279,8 +332,17 @@ fn replace_ipv4(text: &str) -> (String, u32) {
                 || !(chars[j].is_ascii_alphanumeric()
                     || (chars[j] == '.' && chars.get(j + 1).is_some_and(|c| c.is_ascii_digit())));
             if ok && groups == 4 && after_ok {
-                out.push_str("<ip>");
-                count += 1;
+                let text: String = chars[i..j].iter().collect();
+                // Loopback, unspecified and private addresses say how the machine is set up, not who owns it.
+                if text
+                    .parse::<std::net::Ipv4Addr>()
+                    .is_ok_and(|ip| !is_diagnostic_v4(ip))
+                {
+                    out.push_str("<ip>");
+                    count += 1;
+                } else {
+                    out.push_str(&text);
+                }
                 i = j;
                 continue;
             }
@@ -313,12 +375,18 @@ fn replace_ipv6(text: &str) -> (String, u32) {
             .chars()
             .next_back()
             .is_some_and(|c| c.is_alphanumeric() || c == '_');
-        if !word_before
-            && body.matches(':').count() >= 2
-            && body.parse::<std::net::Ipv6Addr>().is_ok()
-        {
-            out.push_str("<ip>");
-            count += 1;
+        let parsed = if !word_before && body.matches(':').count() >= 2 {
+            body.parse::<std::net::Ipv6Addr>().ok()
+        } else {
+            None
+        };
+        if let Some(ip) = parsed {
+            if is_diagnostic_v6(ip) {
+                out.push_str(body);
+            } else {
+                out.push_str("<ip>");
+                count += 1;
+            }
         } else {
             out.push_str(body);
         }
@@ -421,7 +489,7 @@ mod tests {
     #[test]
     fn unknown_profiles_emails_and_addresses_are_removed() {
         let r = Personal::default();
-        let (s, c) = r.apply("C:\\Users\\bob\\x /home/carol/y /Users/Shared/z mail bob@example.com, host 192.168.1.20:8080 and 1.2.3 and 999.1.1.1 v1.2.3.4x");
+        let (s, c) = r.apply("C:\\Users\\bob\\x /home/carol/y /Users/Shared/z mail bob@example.com, host 198.51.100.20:8080 and 1.2.3 and 999.1.1.1 v1.2.3.4x");
         assert_eq!(c.profile_paths, 2);
         assert!(
             s.contains("C:\\Users\\<user>\\x")
@@ -484,16 +552,46 @@ mod tests {
         let (t, n) = replace_ipv6(
             "peer 2a00:1450:4001:82b::200e and [::1]:443, fe80::1ff:fe23:4567:890a. at 12:30:45 mac aa:bb:cc:dd:ee:ff",
         );
-        assert_eq!(n, 3);
+        assert_eq!(n, 2);
         assert_eq!(
             t,
-            "peer <ip> and [<ip>]:443, <ip>. at 12:30:45 mac aa:bb:cc:dd:ee:ff"
+            "peer <ip> and [::1]:443, <ip>. at 12:30:45 mac aa:bb:cc:dd:ee:ff"
         );
         let (t, n) = replace_ipv6("nothing here: 1:2");
         assert_eq!((t.as_str(), n), ("nothing here: 1:2", 0));
         let r = Personal::new(&[], &[], &[]);
-        let (t, c) = r.apply("a 10.1.2.3 b 2001:db8::5");
+        let (t, c) = r.apply("a 198.51.100.3 b 2001:db8::5");
         assert_eq!(t, "a <ip> b <ip>");
         assert_eq!(c.ip_addresses, 2);
+    }
+
+    #[test]
+    fn loopback_unspecified_and_private_addresses_are_diagnostic_and_stay() {
+        let r = Personal::default();
+        let kept = "bind 127.0.0.1:8080, 0.0.0.0, 10.1.2.3, 172.16.0.9, 172.31.255.1, 192.168.1.5, ::1, [::1]:443, fd00::5 and fc00::1";
+        let (s, c) = r.apply(kept);
+        assert_eq!(s, kept);
+        assert_eq!(c.ip_addresses, 0);
+        // Public, link-local (the IPv6 one carries the MAC) and the edges of the private ranges go.
+        let (s, c) = r.apply("203.0.113.7 8.8.8.8 172.15.0.1 172.32.0.1 169.254.1.2 fe80::1ff:fe23:4567:890a 2001:db8::5");
+        assert_eq!(s, "<ip> <ip> <ip> <ip> <ip> <ip> <ip>");
+        assert_eq!(c.ip_addresses, 7);
+    }
+
+    #[test]
+    fn json_escaped_windows_paths_are_redacted_like_plain_ones() {
+        // A path inside serialised JSON has every backslash doubled.
+        let r = Personal::new(&["alex".into()], &["C:\\Users\\alex".into()], &[]);
+        let (s, c) = r.apply(
+            r"open C:\\Users\\alex\\Documents\\a.evtx, C:\\Users\\carol\\x and C:\Users\alex\y",
+        );
+        assert_eq!(
+            s,
+            r"open ~\\Documents\\a.evtx, C:\\Users\\<user>\\x and ~\y"
+        );
+        assert_eq!((c.home_paths, c.profile_paths), (2, 1));
+        // The home folder must still end at a path boundary when doubled.
+        let (s, _) = r.apply(r"C:\\Users\\alexandra\\f");
+        assert_eq!(s, r"C:\\Users\\<user>\\f");
     }
 }

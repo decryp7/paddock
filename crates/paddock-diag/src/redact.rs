@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn text_goes_through_secrets_then_personal_data() {
-        let (s, c) = machine().text("alex at ALEX-PC opened /Users/alex/x with token=abc123 from 10.0.0.7 mail alex@example.com");
+        let (s, c) = machine().text("alex at ALEX-PC opened /Users/alex/x with token=abc123 from 203.0.113.7 mail alex@example.com");
         assert_eq!(
             s,
             "<user> at <machine> opened ~/x with token=[redacted] from <ip> mail <email>"
@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn the_default_redactor_has_the_default_rules() {
-        let (s, c) = Redactor::default().text("token=abc and 10.0.0.1");
+        let (s, c) = Redactor::default().text("token=abc and 203.0.113.1");
         assert_eq!(
             (s.as_str(), c.secrets, c.ip_addresses),
             ("token=[redacted] and <ip>", 1, 1)
@@ -468,5 +468,39 @@ mod tests {
         let r = Redactor::for_machine(&MapVars::new().with("USER", "x"));
         assert_eq!(r.text("x marks").0, "x marks");
         assert_eq!(format!("{r:?}"), "Redactor(0 app patterns)");
+    }
+
+    #[test]
+    fn a_log_line_redacts_nested_arrays_and_objects_and_keeps_private_addresses() {
+        let line = json!({
+            "@m": "x",
+            "Peers": [{ "Host": "ALEX-PC", "Path": "C:\\Users\\carol\\a.evtx" }, ["/home/dave/z", 7]],
+            "Deep": { "A": { "B": [{ "Mail": "bob@example.org", "Ip": "203.0.113.9", "Local": "127.0.0.1" }] } },
+            "Meta": { "apiKey": ["x"] },
+        })
+        .to_string();
+        let (out, c) = machine().log_line(&line);
+        let back: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(back["Peers"][0]["Host"], "<machine>");
+        assert_eq!(back["Peers"][0]["Path"], "C:\\Users\\<user>\\a.evtx");
+        assert_eq!(back["Peers"][1][0], "/home/<user>/z");
+        assert_eq!(back["Peers"][1][1], 7);
+        assert_eq!(back["Deep"]["A"]["B"][0]["Mail"], "<email>");
+        assert_eq!(back["Deep"]["A"]["B"][0]["Ip"], "<ip>");
+        assert_eq!(back["Deep"]["A"]["B"][0]["Local"], "127.0.0.1");
+        assert_eq!(back["Meta"]["apiKey"], "***");
+        assert!(
+            c.machine_names == 1 && c.profile_paths == 2 && c.emails == 1 && c.ip_addresses == 1,
+            "{c:?}"
+        );
+    }
+
+    #[test]
+    fn counts_add_up_kind_by_kind() {
+        let (_, a) = Redactor::new().text("token=abc 203.0.113.1");
+        let mut sum = RedactionCounts::default();
+        sum.add(&a);
+        sum.add(&a);
+        assert_eq!((sum.secrets, sum.ip_addresses, sum.total()), (2, 2, 4));
     }
 }
