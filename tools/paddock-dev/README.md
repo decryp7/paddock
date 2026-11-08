@@ -16,7 +16,9 @@ The developer and CI tool of ADR 0022. Run it with `./dev <command>` (`dev.cmd` 
 
 ## Not ported yet (R0b gaps, listed on purpose)
 
-`graph affected` reproduces `scripts/affected.mjs`'s plan for a file list, a base and head revision, and `--all` (recorded cases in
-`tests/golden/`, and the script itself as a live oracle while it exists). Not ported until R4: `--ci` (the base from the event, the
-Gitea API for the last green run, the job outputs and summary), `--app` / `PLAN_APP`, the CI matrix legs and nextest narrowing.
-The `dev-build` job (one build per run for a hash nobody published, shared as a run artifact) and `setup-rust`'s image fast path are R0b too. Done: `dev-tool.yml` publishes the binary per input hash and runner kind, and the `dev` wrapper downloads it in CI (locally with `PADDOCK_DEV_DOWNLOAD=1`), checks its checksum and embedded hash, and builds on any miss or doubt.
+`dev plan` is the port of `scripts/affected.mjs` (`--ci`, `--app`, the matrix legs and the commit range; its recorded cases are in
+`tests/golden/`); `graph affected` is its graph step. Still open from R0b: the `dev-build` job (one build per run for a hash nobody
+published, shared as a run artifact) and `setup-rust`'s image fast path, both deferred (ADR 0022, status below). Done: `dev-tool.yml`
+publishes the binary per input hash and runner kind from `main`, and the `dev` wrapper downloads it in CI (locally with
+`PADDOCK_DEV_DOWNLOAD=1`), checks its checksum and embedded hash (transport checks, not a trust boundary), and builds on any miss
+or doubt; a run with `PADDOCK_DEV_DOWNLOAD=0` (release and tag jobs) never uses a downloaded copy.

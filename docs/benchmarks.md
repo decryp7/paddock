@@ -374,7 +374,8 @@ Question: what does a cache miss of the `./dev` wrapper cost a plan job? `cargo 
 | `paddock-ci:v2` image (linux/amd64) under emulation on that Mac, `--cpus=2` | did not finish in 25 minutes; not a measure of a CI host |
 
 A real Linux CI host was not available, so the CI number is still open: measure the first cold plan job once the prebuilt
-binary per hash (R0b) or the kept mount is in use. CI stays on `scripts/affected.mjs` until then.
+binary per hash (R0b) or the kept mount is in use. (Update: the prebuilt binary is measured in the next section, and the CI
+plan steps call `./dev plan` on the `ci/dev-prebuilt` branch.)
 
 ## `./dev` prebuilt download (ADR 0022 R0b, 2026-11-08)
 
