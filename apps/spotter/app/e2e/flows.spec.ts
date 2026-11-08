@@ -78,6 +78,10 @@ test.describe('Spotter against the mock backend', () => {
     await expect(page.getByText(/\d+ new/)).toBeVisible();
     await expect(page.getByRole('button', { name: 'Open Spotter' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Mark .* as seen/ }).first()).toBeVisible();
+    // The footer's secondary is a Material text button as tall as the primary, on the same centre line.
+    const [all, open] = await Promise.all([page.getByRole('button', { name: 'Mark all seen' }).boundingBox(), page.getByRole('button', { name: 'Open Spotter' }).boundingBox()]);
+    expect(all!.height).toBe(open!.height);
+    expect(Math.abs(all!.y + all!.height / 2 - (open!.y + open!.height / 2))).toBeLessThanOrEqual(0.5);
   });
 
   test('a release opens a side panel that Esc closes', async ({ page }) => {

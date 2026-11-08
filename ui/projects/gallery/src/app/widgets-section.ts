@@ -1,9 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject, signal, viewChildren } from '@angular/core';
 import { MatIconRegistry } from '@angular/material/icon';
 import { DomSanitizer } from '@angular/platform-browser';
-import { SuSparkline, SuStatusPill, SuTrayPopover } from '@decryp7/paddock-ui';
-import { MatIconButton } from '@angular/material/button';
-import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
+import { SuSparkline, SuStatusPill, SuTrayPopover, type SuTrayMenuEntry } from '@decryp7/paddock-ui';
 import { PdGlyph, PdStatusGlyph, registerPaddockIcons } from '@decryp7/paddock-ui/icons';
 import { PdSelect } from '@decryp7/paddock-ui/select';
 import {
@@ -126,7 +124,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
 @Component({
   selector: 'gal-widgets',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdWidgetArea, PdWidgetFrame, PdWidgetChooser, PdWidget, PdWidgetOption, PdSkeleton, PdSelect, SuTrayPopover, SuSparkline, SuStatusPill, MatIconButton, MatMenu, MatMenuItem, MatMenuTrigger, PdGlyph, PdStatusGlyph],
+  imports: [PdWidgetArea, PdWidgetFrame, PdWidgetChooser, PdWidget, PdWidgetOption, PdSkeleton, PdSelect, SuTrayPopover, SuSparkline, SuStatusPill, PdGlyph, PdStatusGlyph],
   template: `
     <section class="gal-section" data-testid="widgets" aria-labelledby="h-widgets">
       <h2 id="h-widgets">Widgets</h2>
@@ -220,7 +218,7 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
         <span data-testid="wgt-acted">Last action: {{ acted() ?? 'none' }}</span>
       </div>
       <div class="wg-popup" data-testid="wgt-popup">
-        <pd-tray-popover label="Dyno" platform="macos">
+        <pd-tray-popover label="Dyno" platform="macos" primaryLabel="Open Dyno" [menu]="footMenu" (primary)="acted.set('open')" (menuAction)="acted.set($event)">
           <strong slot="header" class="wg-name-head">Dyno</strong>
           @if (!loading()) {
             <pd-status-pill slot="header" class="wg-pill" [status]="stopped() ? 'danger' : 'success'" [label]="stopped() ? 'Agent stopped' : 'All good'" />
@@ -235,15 +233,6 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
             (action)="acted.set($event)"
             (customize)="acted.set('customize')"
           />
-          <div slot="footer" class="wg-foot">
-            <button type="button" class="gal-btn gal-btn--primary">Open Dyno</button>
-            <button matIconButton type="button" class="wg-more" aria-label="More actions" [matMenuTriggerFor]="footMenu"><pd-glyph name="more" [size]="16" /></button>
-            <mat-menu #footMenu="matMenu" class="wg-foot-menu" xPosition="before" yPosition="above">
-              <button mat-menu-item type="button" (click)="acted.set('customize')">Customize widgets…</button>
-              <button mat-menu-item type="button" (click)="acted.set('settings')">Settings…</button>
-              <button mat-menu-item type="button" (click)="acted.set('quit')">Quit Dyno</button>
-            </mat-menu>
-          </div>
         </pd-tray-popover>
       </div>
 
@@ -281,7 +270,6 @@ const view = (placements: Placement<Sample>[], canUndo: boolean, presets: Preset
     .wg-cell--half { width: 159px; }
     .wg-name-head { font-weight: var(--pd-weight-semibold); }
     .wg-pill { margin-inline-start: auto; }
-    .wg-foot { display: flex; align-items: center; justify-content: flex-end; gap: var(--pd-space-1); width: 100%; }
     .wg-popup { width: 440px; padding: 24px 0; display: flex; justify-content: center; background: var(--pd-surface-1); }
     .wg-chooser { padding: var(--pd-space-4); background: var(--pd-surface-1); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); }
     /* One track that may shrink (minmax(0, 1fr)): an auto track takes the widest row's nowrap content and pushes the rows past the frame. */
@@ -338,6 +326,13 @@ export class GalWidgets {
   protected readonly widgetFor = (k: string): Sample => (k === 'disk' ? { kind: k, volume: 'all' } : { kind: k });
 
   protected readonly acted = signal<string | null>(null);
+  /** The popup's more-actions menu (the shared footer of pd-tray-popover); Settings shows a key hint as an app's would. */
+  protected readonly footMenu: readonly SuTrayMenuEntry[] = [
+    { kind: 'item', id: 'customize', label: 'Customize widgets…' },
+    { kind: 'item', id: 'settings', label: 'Settings…', keyHint: '⌘,' },
+    { kind: 'separator' },
+    { kind: 'item', id: 'quit', label: 'Quit Dyno' },
+  ];
   protected readonly stopped = signal(false);
   protected readonly loading = signal(false);
   protected readonly emptied = signal(false);

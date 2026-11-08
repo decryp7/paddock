@@ -689,6 +689,15 @@ html .mat-mdc-menu-item {
   border-radius: var(--pd-radius-control);
 }
 
+// The tray popover's more-actions menu (pd-tray-popover's footer) keeps 6 px clear of its button: the open ring and a gap.
+html .pd-tray-menu.mat-menu-above {
+  margin-bottom: calc(var(--pd-space-1) + var(--pd-space-0));
+}
+
+html .pd-tray-menu.mat-menu-below {
+  margin-top: calc(var(--pd-space-1) + var(--pd-space-0));
+}
+
 // The tooltip: wraps at a readable width, never wider than the window.
 .mat-mdc-tooltip .mdc-tooltip__surface {
   max-width: min(320px, calc(100vw - var(--pd-space-4)));

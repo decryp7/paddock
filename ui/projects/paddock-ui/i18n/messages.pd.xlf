@@ -2408,6 +2408,9 @@
       <trans-unit id="pd.testing.framed" datatype="html">
         <source>Dialog</source>
       </trans-unit>
+      <trans-unit id="pd.trayPopover.more" datatype="html">
+        <source>More actions</source>
+      </trans-unit>
       <trans-unit id="pd.ui.elapsed.hours" datatype="html">
         <source><x id="hours"/> h</source>
       </trans-unit>

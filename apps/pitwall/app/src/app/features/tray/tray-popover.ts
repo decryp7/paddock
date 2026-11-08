@@ -1,9 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject, signal } from '@angular/core';
-import { MatButton, MatIconButton } from '@angular/material/button';
+import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
-import { MatMenu, MatMenuItem, MatMenuTrigger } from '@angular/material/menu';
-import { MatTooltip } from '@angular/material/tooltip';
-import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
+import { SuTrayPopover, type SuTrayMenuEntry, type SuTrayPlatform } from '@decryp7/paddock-ui';
 import { PdWidgetArea } from '@decryp7/paddock-ui/widgets';
 import { BACKEND } from '../../core/backend';
 import { toCommandError } from '../../core/command-error';
@@ -14,6 +12,9 @@ import { observeHeight } from '../../shared/observe-height';
 import { StatusPill } from './status-pill';
 import { TrayWidgetsStore } from './tray-widgets.store';
 import { WidgetSet } from './widget-set';
+
+/** The ids of the footer's more-actions menu. */
+type TrayMenuId = 'customize' | 'pause' | 'resume' | 'release' | 'settings' | 'quit';
 
 /** The platform the popover is drawn for (the shell fits the window; the frame's corners and shadow follow the OS). */
 function platformOf(userAgent: string): SuTrayPlatform {
@@ -27,10 +28,10 @@ function platformOf(userAgent: string): SuTrayPlatform {
  */
 @Component({
   selector: 'pw-tray-popover',
-  imports: [MatButton, MatIconButton, MatIcon, MatMenu, MatMenuItem, MatMenuTrigger, MatTooltip, SuTrayPopover, PdWidgetArea, WidgetSet, StatusPill],
+  imports: [MatButton, MatIcon, SuTrayPopover, PdWidgetArea, WidgetSet, StatusPill],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <pd-tray-popover label="Pitwall" [platform]="platform" (dismissed)="close()">
+    <pd-tray-popover label="Pitwall" [platform]="platform" primaryLabel="Open Pitwall" [menu]="menu()" (primary)="open('/')" (menuAction)="choose($event)" (dismissed)="close()">
       <div slot="header" class="head">
         <img src="brand/pitwall-macos.svg" alt="" width="16" height="16" />
         <h1>Pitwall</h1>
@@ -64,25 +65,6 @@ function platformOf(userAgent: string): SuTrayPlatform {
           <span class="sr">Loading the popup</span>
         </div>
       }
-      <div slot="footer" class="foot">
-        <span class="spacer"></span>
-        <button matButton="filled" type="button" (click)="open('/')"><mat-icon svgIcon="pw:arrow-right" aria-hidden="true" />Open Pitwall</button>
-        <button matIconButton type="button" aria-label="More actions" matTooltip="More actions" matTooltipPosition="left" [matMenuTriggerFor]="more">
-          <mat-icon svgIcon="pw:more" aria-hidden="true" />
-        </button>
-        <mat-menu #more="matMenu" yPosition="above" xPosition="before">
-          <button mat-menu-item type="button" (click)="customize()"><mat-icon svgIcon="pw:sliders" aria-hidden="true" />Customize widgets…</button>
-          @if (serving(); as s) {
-            <button mat-menu-item type="button" (click)="setServing(s === 'pause')">
-              <mat-icon [svgIcon]="s === 'pause' ? 'pw:pause' : 'pw:play'" aria-hidden="true" />{{ s === 'pause' ? 'Pause serving' : 'Resume serving' }}
-            </button>
-          }
-          <button mat-menu-item type="button" [disabled]="!widgets.header()?.canReleaseMemory" (click)="releaseMemory()"><mat-icon svgIcon="pw:release" aria-hidden="true" />Release memory</button>
-          <button mat-menu-item type="button" (click)="open(settingsRoute)"><mat-icon svgIcon="pw:settings" aria-hidden="true" />Settings…</button>
-          <hr class="sep" />
-          <button mat-menu-item type="button" (click)="quit()"><mat-icon svgIcon="pw:power" aria-hidden="true" />Quit Pitwall</button>
-        </mat-menu>
-      </div>
     </pd-tray-popover>
   `,
   styles: `
@@ -146,20 +128,6 @@ function platformOf(userAgent: string): SuTrayPlatform {
       height: 14px;
       color: var(--pd-danger);
     }
-    .foot {
-      display: flex;
-      align-items: center;
-      width: 100%;
-      gap: var(--pd-space-2);
-    }
-    .spacer {
-      flex: 1;
-    }
-    .sep {
-      border: 0;
-      border-top: 1px solid var(--pd-hairline);
-      margin: 4px 0;
-    }
     @media (prefers-reduced-motion: no-preference) {
       .sk {
         animation: sk-pulse 1.2s ease-in-out infinite;
@@ -176,7 +144,6 @@ export class TrayPopover {
   protected readonly widgets = inject(TrayWidgetsStore);
   private readonly backend = inject(BACKEND);
   private readonly windows = inject(WINDOW_CONTROL);
-  protected readonly settingsRoute = SETTINGS_GENERAL_ROUTE;
   protected readonly platform = platformOf(navigator.userAgent);
   /** What the last button press that failed said; cleared by the next press. */
   protected readonly actionError = signal<string | null>(null);
@@ -184,6 +151,20 @@ export class TrayPopover {
   protected readonly serving = computed(() => {
     const t = this.widgets.header()?.serving;
     return t === 'pause' || t === 'resume' ? t : null;
+  });
+  /** The footer's more-actions menu (the shared footer): what the engine allows now, Settings, then Quit after a separator. */
+  protected readonly menu = computed<readonly SuTrayMenuEntry<TrayMenuId>[]>(() => {
+    const serving = this.serving();
+    return [
+      { kind: 'item', id: 'customize', label: 'Customize widgets…', icon: 'pw:sliders' },
+      ...(serving
+        ? [{ kind: 'item', id: serving, label: serving === 'pause' ? 'Pause serving' : 'Resume serving', icon: serving === 'pause' ? 'pw:pause' : 'pw:play' } as const]
+        : []),
+      { kind: 'item', id: 'release', label: 'Release memory', icon: 'pw:release', disabled: !this.widgets.header()?.canReleaseMemory },
+      { kind: 'item', id: 'settings', label: 'Settings…', icon: 'pw:settings' },
+      { kind: 'separator' },
+      { kind: 'item', id: 'quit', label: 'Quit Pitwall', icon: 'pw:power' },
+    ];
   });
 
   constructor() {
@@ -210,16 +191,19 @@ export class TrayPopover {
     this.open(SETTINGS_TRAY_POPUP_ROUTE);
   }
 
-  protected setServing(pause: boolean): void {
-    this.attempt(this.backend.setServing(pause));
-  }
+  /** What each footer menu item does: one entry per id, so a new id does not compile until it has its action. */
+  private readonly menuActions: Record<TrayMenuId, () => void> = {
+    customize: () => this.customize(),
+    pause: () => this.attempt(this.backend.setServing(true)),
+    resume: () => this.attempt(this.backend.setServing(false)),
+    release: () => this.attempt(this.backend.releaseMemory()),
+    settings: () => this.open(SETTINGS_GENERAL_ROUTE),
+    quit: () => this.attempt(this.windows.quit()),
+  };
 
-  protected releaseMemory(): void {
-    this.attempt(this.backend.releaseMemory());
-  }
-
-  protected quit(): void {
-    this.attempt(this.windows.quit());
+  /** Runs a footer menu item. */
+  protected choose(id: TrayMenuId): void {
+    this.menuActions[id]();
   }
 
   /** Runs what a widget asked for through the command that does it; the app decides the rest. */
