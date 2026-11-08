@@ -1,6 +1,6 @@
 //! The `./dev gates` subcommands: argument handling and output only.
 
-use super::{ci, edge};
+use super::{ci, edge, evaluate, register::Date};
 use crate::input_hash;
 use paddock_cli::{CliError, Report};
 use serde_json::{Value, json};
@@ -44,4 +44,123 @@ pub fn model(root: Option<&Path>) -> Result<Report, CliError> {
         json!({"lines": lines, "roots": m.roots, "workflows": m.workflows.keys().collect::<Vec<_>>(), "actions": m.actions.keys().collect::<Vec<_>>(), "problems": m.problems}),
         text,
     ))
+}
+
+/// Arguments of `dev gates check`.
+pub struct CheckArgs {
+    /// The root.
+    pub root: Option<PathBuf>,
+    /// A release tag about to be made.
+    pub release_tag: Option<String>,
+    /// Report findings but exit clean.
+    pub warn: bool,
+    /// The revision the register may only shrink against.
+    pub base: String,
+}
+
+fn dev_command_paths() -> std::collections::BTreeSet<String> {
+    use clap::CommandFactory;
+    fn walk(c: &clap::Command, prefix: &str, out: &mut std::collections::BTreeSet<String>) {
+        for s in c.get_subcommands().filter(|s| !s.is_hide_set()) {
+            let path = if prefix.is_empty() {
+                s.get_name().to_string()
+            } else {
+                format!("{prefix} {}", s.get_name())
+            };
+            out.insert(path.clone());
+            walk(s, &path, out);
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    walk(&crate::cli::Cli::command(), "", &mut out);
+    out
+}
+
+/// `dev gates check`.
+pub fn check(a: &CheckArgs) -> Result<Report, CliError> {
+    let root = repo_root(a.root.as_deref())?;
+    let started = std::time::Instant::now();
+    let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
+    let sources = edge::load_sources(&root).map_err(CliError::failure)?;
+    let input = evaluate::Input {
+        tree: &tree,
+        sources: &sources,
+        conformance_list: edge::conformance_json(&root, "list"),
+        conformance_commands: edge::conformance_json(&root, "commands").ok(),
+        dev_commands: dev_command_paths(),
+        register_text: std::fs::read_to_string(root.join("docs/gates.toml")).ok(),
+        base_register_text: edge::register_at(&root, &a.base),
+        history: edge::register_history(&root),
+        today: Date::today(),
+        release_tag: a.release_tag.clone(),
+        warn: a.warn,
+        shallow: edge::is_shallow(&root),
+    };
+    let out = evaluate::evaluate(&input);
+    let table = evaluate::summary(&out.rows);
+    let mut text = String::new();
+    for f in &out.findings {
+        text.push_str(&f.annotation());
+        text.push('\n');
+    }
+    text.push_str(&format!(
+        "\nC100: {} checks, {} findings ({} ms)\n\n{table}",
+        out.rows.len(),
+        out.findings.len(),
+        started.elapsed().as_millis()
+    ));
+    let findings: Vec<Value> = out
+        .findings
+        .iter()
+        .map(|f| json!({"file": f.file, "line": f.line, "id": f.id, "message": f.message, "fix": f.fix}))
+        .collect();
+    let report = Report::new(json!({"findings": findings, "checks": out.rows.len(), "warn": a.warn}), text);
+    Ok(if out.findings.is_empty() || a.warn {
+        report
+    } else {
+        report.with_exit(paddock_cli::Exit::Findings)
+    })
+}
+
+/// `dev gates list --json`: every check with its gating.
+pub fn list(root: Option<&Path>, base: &str) -> Result<Report, CliError> {
+    let root = repo_root(root)?;
+    let tree = edge::GitTree::open(&root).map_err(CliError::failure)?;
+    let sources = edge::load_sources(&root).map_err(CliError::failure)?;
+    let input = evaluate::Input {
+        tree: &tree,
+        sources: &sources,
+        conformance_list: edge::conformance_json(&root, "list"),
+        conformance_commands: None,
+        dev_commands: dev_command_paths(),
+        register_text: std::fs::read_to_string(root.join("docs/gates.toml")).ok(),
+        base_register_text: edge::register_at(&root, base),
+        history: Vec::new(),
+        today: Date::today(),
+        release_tag: None,
+        warn: true,
+        shallow: false,
+    };
+    let out = evaluate::evaluate(&input);
+    let rows: Vec<Value> = out
+        .rows
+        .iter()
+        .map(|r| {
+            json!({
+                "kind": r.check.kind.name(), "id": r.check.id, "file": r.check.file, "line": r.check.line, "state": r.state,
+                "gated": r.gating.gated.iter().map(|l| l.name()).collect::<Vec<_>>(),
+                "conditional": r.gating.conditional.iter().map(|l| l.name()).collect::<Vec<_>>(),
+                "report_only": r.gating.report_only.iter().map(|l| l.name()).collect::<Vec<_>>(),
+                "missing_apps": r.gating.missing_apps, "unresolved": r.gating.unresolved,
+            })
+        })
+        .collect();
+    let text = evaluate::summary(&out.rows);
+    Ok(Report::new(json!({"checks": rows}), text))
+}
+
+/// `dev gates inputs`: the globs whose files change C100's answer, for the planner (ADR 0060 §4).
+pub fn inputs() -> Result<Report, CliError> {
+    let globs = super::inputs::GLOBS;
+    Ok(Report::new(json!({"globs": globs}), globs.join("\n")))
 }

@@ -29,6 +29,7 @@ paddock-proc = { path = "../../crates/paddock-proc" }
 paddock-repo-graph = { path = "../../crates/paddock-repo-graph", features = ["git-history", "cargo-metadata"] }
 paddock-slots = { path = "../../crates/paddock-slots" }
 yaml-rust2 = "0.13"
+toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 
 [target.'cfg(unix)'.dependencies]
 # fds.rs: the holder closes the descriptors it inherited.

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 /// `./dev`: the Paddock developer and CI tool.
 #[derive(Parser)]
 #[command(name = "dev", version, disable_help_subcommand = true)]
-struct Cli {
+pub(crate) struct Cli {
     /// Write exactly one JSON object to standard output (errors included).
     #[arg(long, global = true)]
     json: bool,
@@ -76,6 +76,38 @@ enum SlotCommand {
 enum GatesCommand {
     /// Print the CI model: every command CI can run, with its folder, levels and status (for debugging C100).
     Model(GatesRootArgs),
+    /// C100: every check the repository defines is gated by a reachable CI line, or registered with a reason.
+    Check(GatesCheckArgs),
+    /// Every check with its gating (use --json).
+    List(GatesListArgs),
+    /// The globs whose files change C100's answer (the planner's inputs).
+    Inputs,
+}
+
+#[derive(Args)]
+struct GatesCheckArgs {
+    /// The repository root (default: the folder containing .git, found from the current folder).
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// A release tag about to be made (debrief-v1.3.0): refused while a ratchet's target release is not met.
+    #[arg(long)]
+    release_tag: Option<String>,
+    /// Print every finding but exit 0 (the rollback of ADR 0060: the model counts a --warn line as report-only).
+    #[arg(long)]
+    warn: bool,
+    /// The revision the register may only shrink against.
+    #[arg(long, default_value = "origin/main")]
+    base: String,
+}
+
+#[derive(Args)]
+struct GatesListArgs {
+    /// The repository root.
+    #[arg(long)]
+    root: Option<PathBuf>,
+    /// The revision the register is compared with.
+    #[arg(long, default_value = "origin/main")]
+    base: String,
 }
 
 #[derive(Args)]
@@ -155,6 +187,20 @@ fn dispatch(command: Command) -> Result<Report, CliError> {
         Command::Gates {
             command: GatesCommand::Model(a),
         } => gates::command::model(a.root.as_deref()),
+        Command::Gates {
+            command: GatesCommand::Check(a),
+        } => gates::command::check(&gates::command::CheckArgs {
+            root: a.root,
+            release_tag: a.release_tag,
+            warn: a.warn,
+            base: a.base,
+        }),
+        Command::Gates {
+            command: GatesCommand::List(a),
+        } => gates::command::list(a.root.as_deref(), &a.base),
+        Command::Gates {
+            command: GatesCommand::Inputs,
+        } => gates::command::inputs(),
         Command::Graph {
             command: GraphCommand::Affected(a),
         } => plan::command(&plan::Request {

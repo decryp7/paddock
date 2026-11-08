@@ -17,7 +17,10 @@ pub enum Val {
     Null,
     /// An output of the plan job: "runs when the planner marks `<name>`" (§2.4). Truthy; records the name.
     Planned(String),
-    /// Something the model cannot know (a secret, a computed output, a syntax outside the subset).
+    /// A value only the runner knows (a secret, the commit, a step output): it can stand in an argument, where it changes no
+    /// decision, but it decides nothing in a condition and is unresolved as a command or a path.
+    Opaque(String),
+    /// Something the model cannot know (a syntax outside the subset).
     Unknown,
 }
 
@@ -32,7 +35,7 @@ impl Val {
                 n.to_string()
             }),
             Val::Null => Some(String::new()),
-            Val::Planned(_) | Val::Unknown => None,
+            Val::Planned(_) | Val::Opaque(_) | Val::Unknown => None,
         }
     }
 }
@@ -336,7 +339,7 @@ impl Eval<'_> {
                 self.planned.borrow_mut().insert(name.clone());
                 Some(true)
             }
-            Val::Unknown => None,
+            Val::Opaque(_) | Val::Unknown => None,
         }
     }
 }
@@ -410,12 +413,16 @@ pub fn interpolate(text: &str, lookup: &dyn Lookup) -> Interpolated {
             break;
         };
         let (v, p) = eval(&after[..end], lookup);
-        match v.text() {
-            Some(t) => {
+        match (&v, v.text()) {
+            (Val::Opaque(name), _) => {
+                // Marked with guillemets so that a command or path made of it can be told from an argument.
+                out.push_str(&format!("\u{2039}{name}\u{203a}"));
+            }
+            (_, Some(t)) => {
                 out.push_str(&t);
                 planned.extend(p);
             }
-            None => {
+            (_, None) => {
                 out.push_str(&rest[start..start + 3 + end + 2]);
                 unresolved = true;
             }
@@ -501,6 +508,19 @@ mod tests {
         assert_eq!(r.text, "a push b ${{ secrets.K }} c");
         let ok = interpolate("${{ format('{0}-{1}', 'x', github.event_name) }}", &ctx);
         assert_eq!((ok.text.as_str(), ok.unresolved), ("x-push", false));
+    }
+
+    #[test]
+    fn opaque_values_stand_in_arguments_but_decide_nothing() {
+        let lk = |n: &str| match n {
+            "secrets.TOKEN" => Val::Opaque("secrets.TOKEN".into()),
+            _ => Val::Unknown,
+        };
+        let r = interpolate("node x.mjs --token ${{ secrets.TOKEN }}", &lk);
+        assert!(!r.unresolved);
+        assert_eq!(r.text, "node x.mjs --token \u{2039}secrets.TOKEN\u{203a}");
+        assert_eq!(condition("secrets.TOKEN != ''", &lk).0, Tri::Unknown);
+        assert_eq!(condition("secrets.TOKEN", &lk).0, Tri::Unknown);
     }
 
     #[test]

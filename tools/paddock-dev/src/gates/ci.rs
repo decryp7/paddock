@@ -94,6 +94,8 @@ pub struct CiModel {
     pub workflows: Reach,
     /// Local actions reachable from a root, by folder (`.gitea/actions/licences`).
     pub actions: Reach,
+    /// Workflows reached through a `uses:` of a reachable job (a root that nobody calls is not in here).
+    pub called: Reach,
     /// The root workflows.
     pub roots: Vec<String>,
     /// Files the model could not read, `(path, why)`: each is a finding, never a silent skip.
@@ -552,6 +554,15 @@ impl Lookup for Scope<'_> {
                 "ref" => Val::Str(self.ctx.git_ref.clone()),
                 "workspace" => Val::Str("<ws>".into()),
                 "job" => Val::Str(self.job.to_string()),
+                "ref_name" => Val::Str(
+                    self.ctx
+                        .git_ref
+                        .rsplit_once("refs/heads/")
+                        .or_else(|| self.ctx.git_ref.rsplit_once("refs/tags/"))
+                        .map_or(self.ctx.git_ref.clone(), |(_, n)| n.to_string()),
+                ),
+                "sha" | "run_id" | "run_number" | "run_attempt" | "server_url" | "repository" | "actor" | "token" | "workflow"
+                | "event_path" | "api_url" => Val::Opaque(name.to_string()),
                 "action_path" => self.action_path.map_or(Val::Unknown, |p| Val::Str(format!("<ws>/{p}"))),
                 _ => match rest.strip_prefix("event.inputs.") {
                     Some(i) => self.ctx.inputs.get(i).map_or(Val::Null, |v| Val::Str(v.clone())),
@@ -567,6 +578,12 @@ impl Lookup for Scope<'_> {
             "needs" => {
                 let mut parts = rest.split('.');
                 match (parts.next(), parts.next(), parts.next()) {
+                    // A needed job is taken to have succeeded: the path on which the dependent job runs.
+                    (Some(_), Some("result"), None) => Val::Str("success".into()),
+                    (Some(job), Some("outputs"), Some(out)) if !self.planners.contains_key(job) => {
+                        let _ = out;
+                        Val::Opaque(name.to_string())
+                    }
                     (Some(job), Some("outputs"), Some(out)) => match self.planners.get(job).and_then(|o| o.get(out)) {
                         // An output computed from the event alone is evaluated; one read from a step is the planner's mark.
                         Some(e) if !e.contains("steps.") => expr::eval(e.trim().trim_start_matches("${{").trim_end_matches("}}"), self).0,
@@ -577,7 +594,10 @@ impl Lookup for Scope<'_> {
                 }
             }
             "steps" if rest.ends_with(".outcome") || rest.ends_with(".conclusion") => Val::Str("success".into()),
+            "steps" => Val::Opaque(name.to_string()),
+            "secrets" => Val::Opaque(name.to_string()),
             "runner" if rest == "os" => self.runner_os.clone(),
+            "runner" => Val::Opaque(name.to_string()),
             "vars" => self.vars.get(rest).map_or(Val::Unknown, |v| Val::Str(v.clone())),
             _ => Val::Unknown,
         }
@@ -603,7 +623,7 @@ fn working_dir(text: &str) -> Option<String> {
     if t.is_empty() || t == "." {
         return Some(String::new());
     }
-    if t.contains("${{") || t.starts_with('/') {
+    if t.contains("${{") || t.contains('\u{2039}') || t.starts_with('/') {
         return None;
     }
     shell::normalise(t)
@@ -618,6 +638,7 @@ struct Walker<'a> {
     lines: BTreeMap<LineKey, RunLine>,
     workflows: Reach,
     action_reach: Reach,
+    called: Reach,
     problems: Vec<(String, String)>,
 }
 
@@ -778,7 +799,8 @@ impl Walker<'_> {
             }
             Self::coe(&mut acc, job.coe.as_deref(), &scope);
             if let Some(uses) = &job.uses {
-                let Some(callee) = uses.strip_prefix("./") else {
+                // `./.paddock/…` is the same repository checked out a second time (app-release.yml): the same file.
+                let Some(callee) = uses.strip_prefix("./").map(|d| d.strip_prefix(".paddock/").unwrap_or(d)) else {
                     continue;
                 };
                 // Bind the callee's inputs from `with:`, over its declared defaults (§2.2).
@@ -792,6 +814,7 @@ impl Walker<'_> {
                     let i = expr::interpolate(v, &scope);
                     bound.insert(k.clone(), if i.unresolved { Val::Unknown } else { Val::Str(i.text) });
                 }
+                Self::mark(&mut self.called, callee, ctx.level, Self::status(&acc, false, false, false));
                 self.walk_workflow(callee, ctx, &bound, &acc, depth + 1);
                 continue;
             }
@@ -883,7 +906,9 @@ impl Walker<'_> {
                 ..base_scope_clone(scope)
             };
             if let Some(uses) = &step.uses {
-                let Some(dir) = uses.strip_prefix("./") else { continue };
+                let Some(dir) = uses.strip_prefix("./").map(|d| d.strip_prefix(".paddock/").unwrap_or(d)) else {
+                    continue;
+                };
                 let Some(action) = self.actions.get(dir) else {
                     if uses.starts_with("./.gitea/actions/") {
                         self.problems
@@ -1002,7 +1027,16 @@ impl Walker<'_> {
             }
             return;
         }
-        let status = Self::status(acc, unresolved || cwd.is_none() || expanded.contains("${{"), report, conditional);
+        let in_command_position = expanded
+            .split_whitespace()
+            .next()
+            .is_some_and(|w| w.trim_start_matches(['"', '\'']).starts_with('\u{2039}'));
+        let status = Self::status(
+            acc,
+            unresolved || cwd.is_none() || expanded.contains("${{") || in_command_position,
+            report,
+            conditional,
+        );
         let key: LineKey = (
             file.to_string(),
             line,
@@ -1156,6 +1190,7 @@ pub fn build(src: &Sources) -> CiModel {
     let mut lines: BTreeMap<LineKey, RunLine> = BTreeMap::new();
     let mut workflows = Reach::new();
     let mut action_reach = Reach::new();
+    let mut called = Reach::new();
     for (path, w) in &wf {
         let ctxs = contexts(w);
         if ctxs.is_empty() {
@@ -1172,6 +1207,7 @@ pub fn build(src: &Sources) -> CiModel {
                 lines: BTreeMap::new(),
                 workflows: Reach::new(),
                 action_reach: Reach::new(),
+                called: Reach::new(),
                 problems: Vec::new(),
             };
             let inputs: BTreeMap<String, Val> = ctx.inputs.iter().map(|(k, v)| (k.clone(), Val::Str(v.clone()))).collect();
@@ -1190,7 +1226,11 @@ pub fn build(src: &Sources) -> CiModel {
                     }
                 }
             }
-            for (from, into) in [(walker.workflows, &mut workflows), (walker.action_reach, &mut action_reach)] {
+            for (from, into) in [
+                (walker.workflows, &mut workflows),
+                (walker.action_reach, &mut action_reach),
+                (walker.called, &mut called),
+            ] {
                 for (p, lv) in from {
                     for (l, s) in lv {
                         Walker::mark(into, &p, l, s);
@@ -1205,6 +1245,7 @@ pub fn build(src: &Sources) -> CiModel {
     model.lines = lines.into_values().collect();
     model.workflows = workflows;
     model.actions = action_reach;
+    model.called = called;
     model
 }
 
