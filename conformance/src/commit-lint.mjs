@@ -2,7 +2,10 @@
 // (AGENTS.md, rule 8). Exported as a library, a CLI sub-command (`paddock-conformance commit-lint`) and used by C23.
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathMatches } from './util/fs.mjs';
+import { applyWaivers, parseWaivers } from './util/waivers.mjs';
 
 export const TYPES = ['feat', 'fix', 'perf', 'refactor', 'test', 'docs', 'ci', 'chore', 'build', 'style', 'revert'];
 const HEADER = new RegExp(`^(${TYPES.join('|')})(\\([a-z0-9][a-z0-9._/-]*(?:,[a-z0-9][a-z0-9._/-]*)*\\))?!?: \\S.*$`);
@@ -46,8 +49,25 @@ export function messagesInRange(range, cwd = process.cwd(), git = (args) => exec
     });
 }
 
-/** CLI: `commit-lint --file <path>` (commit-msg hook) or `--range <rev-range>` (CI). Returns the exit status. */
-export function commitLintMain(argv, cwd = process.cwd(), log = console.error) {
+/**
+ * The C23 waivers of `paddock.waivers.toml` in `cwd` (the file and loader the conformance run uses): `path = "commit <sha>"`,
+ * the sha being the 10 characters the run prints or the full one. Returns { waivers, problems }.
+ */
+function c23Waivers(cwd) {
+  const file = join(cwd, 'paddock.waivers.toml');
+  const parsed = existsSync(file) ? parseWaivers(readFileSync(file, 'utf8')) : { waivers: [], problems: [] };
+  const waivers = parsed.waivers
+    .filter((w) => w.check === 'C23')
+    .map((w) => ({ ...w, path: (w.path ?? '').replace(/^(commit )([0-9a-f]{11,40})$/, (_, c, sha) => c + sha.slice(0, 10)) }));
+  return { waivers, problems: parsed.problems };
+}
+
+/**
+ * CLI: `commit-lint --file <path>` (commit-msg hook) or `--range <rev-range>` (CI). Returns the exit status. With `--range`, a
+ * commit named by a live C23 waiver in paddock.waivers.toml is printed as "waived: ..." and does not fail; an expired or
+ * malformed waiver applies to nothing and only warns, and a waiver for a commit outside the range is ignored.
+ */
+export function commitLintMain(argv, cwd = process.cwd(), log = console.error, now = new Date()) {
   const [flag, value] = argv;
   let items;
   try {
@@ -61,12 +81,29 @@ export function commitLintMain(argv, cwd = process.cwd(), log = console.error) {
     log(`commit-lint: ${e.message}`);
     return 2;
   }
-  let bad = 0;
+  const findings = [];
+  const subjects = new Map();
   for (const { id, message } of items) {
-    for (const p of lint(message)) {
-      log(`${id}: ${p}`);
-      bad++;
+    subjects.set(id, message.split('\n')[0].trim());
+    for (const p of lint(message)) findings.push({ check: 'C23', severity: 'error', file: flag === '--range' ? `commit ${id}` : id, id, message: p });
+  }
+  let bad = 0;
+  let kept = findings;
+  if (flag === '--range') {
+    const { waivers, problems } = c23Waivers(cwd);
+    const applied = applyWaivers({ findings, waivers, problems, now, pathMatches });
+    kept = applied.findings.filter((f) => f.check === 'C23');
+    for (const f of applied.findings.filter((f) => f.check !== 'C23')) log(`warning: ${f.file}:${f.line}: ${f.message}`);
+    const seen = new Set();
+    for (const f of applied.waived) {
+      if (seen.has(f.id)) continue;
+      seen.add(f.id);
+      log(`waived: ${f.id} ${subjects.get(f.id)} (${f.waiver.reason})`);
     }
+  }
+  for (const f of kept) {
+    log(`${f.id}: ${f.message}`);
+    bad++;
   }
   return bad ? 1 : 0;
 }
