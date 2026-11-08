@@ -424,7 +424,7 @@ fn only_the_five_newest_cached_tools_are_kept() {
     for i in 0..7 {
         write_script(&home.join(format!("bin/old-{i}/paddock-dev-test-host")), "exit 0");
         // Older directories get older times so the order is certain.
-        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(1000 - i * 100);
+        let t = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 86_400 - i * 100);
         std::fs::File::open(home.join(format!("bin/old-{i}")))
             .unwrap()
             .set_modified(t)
@@ -646,14 +646,14 @@ fn a_cache_hit_counts_as_use_and_a_build_folder_without_a_published_tool_goes_wh
         &home.join("bin").join(&hash).join("paddock-dev-test-host"),
         "if [ \"$1\" = \"--version\" ]; then echo 0; fi",
     );
-    set(&home.join("bin").join(&hash), hours(3));
+    set(&home.join("bin").join(&hash), hours(72));
     // Five newer tools push it past the keep count; build folders: one orphaned and old, one orphaned and fresh, one with a tool.
     for i in 0..5 {
         write_script(&home.join(format!("bin/newer-{i}/paddock-dev-test-host")), "exit 0");
-        set(&home.join(format!("bin/newer-{i}")), hours(2));
+        set(&home.join(format!("bin/newer-{i}")), hours(48));
     }
     let kept_target = format!("target-{hash}");
-    for (name, age) in [("target-orphan-old", 3), ("target-orphan-new", 0), (kept_target.as_str(), 3)] {
+    for (name, age) in [("target-orphan-old", 72), ("target-orphan-new", 0), (kept_target.as_str(), 72)] {
         std::fs::create_dir_all(home.join(name)).unwrap();
         set(&home.join(name), hours(age));
     }

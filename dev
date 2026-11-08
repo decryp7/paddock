@@ -197,10 +197,11 @@ if [ ! -x "$cache/$name" ]; then
     exit 1
   fi
   mv -f "$tmp" "$cache/$name"
-  # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A folder touched in the
-  # last five minutes is never removed: a job on the same mount may be about to run it.
+  # Keep the five newest cached tools (and their build folders); older hashes are rebuilt on demand. A tool used within the last
+  # day is never removed: a job on the same mount (several runners share a host's tools folder) runs it again at its end, when its
+  # temp folder is already gone and a rebuild cannot work (run 7773, job-isolation release).
   ls -t "$home/bin" | tail -n +6 | while IFS= read -r old; do
-    if [ -n "$(find "$home/bin/$old" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
+    if [ -n "$(find "$home/bin/$old" -maxdepth 0 -mmin +1440 2>/dev/null)" ]; then
       rm -rf "${home:?}/bin/$old" "${home:?}/target-$old" || true
     fi
   done
