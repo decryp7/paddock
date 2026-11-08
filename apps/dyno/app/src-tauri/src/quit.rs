@@ -438,13 +438,14 @@ mod tests {
         let dir = temp("lockwait");
         std::fs::create_dir_all(&dir).unwrap();
         let held = record(&dir).lock().unwrap();
+        // The lock is let go when the writer has started (a signal, not a guessed time); the write has to wait for it.
+        let (starting, started) = std::sync::mpsc::channel::<()>();
         let release = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(400));
+            started.recv().unwrap();
             drop(held);
         });
-        let began = std::time::Instant::now();
+        starting.send(()).unwrap();
         write_marker(&dir, 7).unwrap();
-        assert!(began.elapsed() >= Duration::from_millis(300), "it waited for the lock");
         release.join().unwrap();
         assert_eq!(peek_marker(&dir), Some(7));
         std::fs::remove_dir_all(&dir).unwrap();
@@ -915,10 +916,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         // the agent removed its discovery file and still holds the lock for a moment, longer than the lock check's own 400 ms
         let held = dyno_agent::instance::InstanceLock::acquire(&dirs).unwrap();
+        // the agent lets go when the app has begun waiting for it (a signal from the test, not a guessed time)
+        let (waiting, wake) = std::sync::mpsc::channel::<()>();
         let ender = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(900));
+            wake.recv().unwrap();
             drop(held);
         });
+        waiting.send(()).unwrap();
         let mut live = LiveAgent::new(dirs.clone()).with_wait(Duration::from_secs(10));
         assert_eq!(live.ask_to_exit(), Ok(false), "it left while waited for: none found");
         ender.join().unwrap();

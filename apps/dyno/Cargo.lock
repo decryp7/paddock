@@ -1330,6 +1330,7 @@ dependencies = [
  "paddock-setup",
  "paddock-shell",
  "paddock-startup",
+ "paddock-testkit",
  "paddock-updater",
  "paddock-widgets",
  "paddock-window",

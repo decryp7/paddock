@@ -959,10 +959,7 @@ mod tests {
         worker
             .start(ops, register_switch(registry), move |cancel| {
                 begun.send(()).unwrap();
-                let began = std::time::Instant::now();
-                while !cancel.is_cancelled() && began.elapsed() < std::time::Duration::from_secs(5) {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
+                paddock_testkit::holds_within(std::time::Duration::from_secs(5), || cancel.is_cancelled());
                 Ok(())
             })
             .unwrap();
@@ -1063,13 +1060,18 @@ mod tests {
     fn quit_waits_for_the_start_repair_up_to_its_bound() {
         let ops = ServiceOps::default();
         let done = ops.track_repair();
+        // The repair ends when the test says so (a signal, not a sleep) and records that it ended before it reports done.
+        let (finish, finished_rx) = std::sync::mpsc::channel::<()>();
+        let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ended_by_repair = ended.clone();
         let slow = std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            finished_rx.recv().unwrap();
+            ended_by_repair.store(true, std::sync::atomic::Ordering::SeqCst);
             done.send(()).ok();
         });
-        let began = std::time::Instant::now();
+        finish.send(()).unwrap();
         assert!(ops.join_repair(std::time::Duration::from_secs(5)), "it ended within the bound");
-        assert!(began.elapsed() >= std::time::Duration::from_millis(250), "quit waited for it");
+        assert!(ended.load(std::sync::atomic::Ordering::SeqCst), "quit returned only after the repair reported done");
         slow.join().unwrap();
         // A repair that does not end within the bound is given up on, and nothing registered is nothing to wait for.
         let _kept = ops.track_repair();
