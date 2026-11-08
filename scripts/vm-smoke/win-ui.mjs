@@ -9,9 +9,9 @@ import { importScreenshotRules } from './screenshot-rules.mjs';
 import { snapCheck } from './win-snap.mjs';
 import { domTour } from './win-dom-tour.mjs';
 import { trayCountdownStep, trayMenuStep } from './win-tray.mjs';
+import { VMWIN } from './vm-win-path.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 /** Windows's own firewall rule names (`@{MicrosoftWindows.Client.OOBE_1000...}`) are printed unchanged in the Firewall page's name column: not a Dyno raw identifier (friendly names come in 1.1.1). */
 const SCREENSHOT_OPTIONS = { allow: [/@\{[^}]+\}/] };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

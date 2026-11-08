@@ -13,7 +13,6 @@ import { mcpStep } from './mcp-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
 import { judgeJobsRestart, parseConsent, judgeConsentAfterAnswer, installEvents, installOutcomeSince, attemptProbe, judgeControl, judgeExploitPrecondition, judgeInstallOutcome, judgeRefusal, judgeServed, judgeTrayCount, judgeWear } from './win-judges.mjs';
 
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let runPassword = null; // the per-run random password of paddock-admin (reverted with the VM); never stored or printed
@@ -271,6 +270,7 @@ import { discoveryStep, windowsDiscoveryPrims } from './discovery-row.mjs';
 import { loginSwitchStep } from './login-start-rows.mjs';
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
 import { scopingStep } from './win-scoping.mjs';
+import { VMWIN } from './vm-win-path.mjs';
 const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
 
 

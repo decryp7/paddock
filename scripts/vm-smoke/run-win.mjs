@@ -21,10 +21,10 @@ import { selectRows } from './win-rows.mjs';
 import { afterQuitSteps, afterRowSteps } from './win-machine.mjs';
 import { runRebootPhase } from './win-reboot.mjs';
 import { stripVnc, withVnc, fixDiskName, vmxCheck } from './vmx-edit.mjs';
+import { VMWIN } from './vm-win-path.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const VMDIR = process.env.PADDOCK_WIN_VM_DIR ?? '/Volumes/d7sst7/vms/paddock-win11-test';
 const SNAPSHOT = process.env.PADDOCK_WIN_SNAPSHOT ?? 'gui-session-tools';
 const VMX = process.env.PADDOCK_WIN_VMX ?? '/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx';

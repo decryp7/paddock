@@ -9,9 +9,9 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { VMWIN } from './vm-win-path.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const VMDIR = process.env.PADDOCK_WIN_VM_DIR ?? '/Volumes/d7sst7/vms/paddock-win11-test';
 const LOCAL = 19222;
 

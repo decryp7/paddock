@@ -4,7 +4,7 @@
 #   PLOCK_DIR=/private/tmp/claude-501/vm-lock PLOCK_PAR_LOAD=0 plock run <name> -- scripts/vm-smoke/make-no-dyno-snapshot.sh
 # The VM is reverted to gui-session-tools, started, cleaned over SSH, stopped, snapshotted; nothing edits the vmx.
 set -euo pipefail
-VMWIN="${PADDOCK_VM_WIN:-/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh}"
+VMWIN="${PADDOCK_VM_WIN:-$(cd "$(dirname "$0")/.." && pwd)/vm-win.sh}" # the repo copy unless overridden (ADR 0040 §1)
 FROM=gui-session-tools; NEW=gui-session-tools-no-dyno
 VMRUN="/Applications/VMware Fusion.app/Contents/Public/vmrun"
 VMX="${PADDOCK_WIN_VMX:-/Volumes/d7sst7/vms/paddock-win11-test/vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx}"

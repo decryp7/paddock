@@ -6,8 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { makeResult } from './verdict.mjs';
 import { judgeNativeMenu, parseMenuWatch, rightClicksInLog } from './win-judges.mjs';
 import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog } from './win-tray-icons.mjs';
+import { VMWIN } from './vm-win-path.mjs';
 
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ssh = (cmd, ms = 60_000) => spawnSync('bash', [VMWIN, 'ssh', cmd], { encoding: 'utf8', timeout: ms }).stdout.split('\n').filter((l) => !l.startsWith('**')).join('\n').trim();
 const result = makeResult;

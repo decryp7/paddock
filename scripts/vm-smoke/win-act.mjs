@@ -3,8 +3,8 @@
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { evidenceFile } from './evidence.mjs';
+import { VMWIN } from './vm-win-path.mjs';
 
-const VMWIN = process.env.PADDOCK_VM_WIN ?? '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh';
 const DIR = 'C:\\paddock-test\\vmcheck\\act';
 const run = (cmd, timeoutMs = 60_000) => spawnSync('bash', [VMWIN, 'ssh', cmd], { encoding: 'utf8', timeout: timeoutMs }).stdout.split('\n').filter((l) => !l.startsWith('**')).join('\n').trim();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
