@@ -955,35 +955,47 @@ async fn live(State(st): S, h: HeaderMap) -> Response {
         .unwrap_or_default()
 }
 
-/// The neutral chat request for a playground request: text messages (with the tool calls and results of a tool loop), the
-/// tools the caller offers and its tool choice.
-fn playground_chat_request(req: &PlaygroundRequest) -> ChatRequest {
-    use pitwall_core::chat::{Part, Role, Tool, ToolCall, ToolChoice};
+/// The parts of a playground message: its images first (checked: a known type and valid base64), then its text. An assistant
+/// message that only calls tools has none.
+fn playground_parts(m: &mgmt::PlaygroundMessage) -> Result<Vec<pitwall_core::chat::Part>, CommandError> {
+    use pitwall_core::chat::{Image, ImageMime, Part, Role};
+    let mut parts = Vec::with_capacity(m.images.len() + 1);
+    for i in &m.images {
+        let mime = ImageMime::parse(&i.mime).ok_or_else(|| err(mgmt::ErrorCode::BadRequest, "an image must be PNG, JPEG, WebP or GIF"))?;
+        let image = Image::from_base64(mime, &i.data).map_err(|e| err(mgmt::ErrorCode::BadRequest, e.to_string()))?;
+        parts.push(Part::Image(image));
+    }
+    if !(m.content.is_empty() && m.role == Role::Assistant && !m.tool_calls.is_empty()) {
+        parts.push(Part::Text(m.content.clone()));
+    }
+    Ok(parts)
+}
+
+/// The neutral chat request for a playground request: text messages (with the tool calls and results of a tool loop) and their
+/// images, the tools the caller offers and its tool choice. A bad image is the caller's error.
+fn playground_chat_request(req: &PlaygroundRequest) -> Result<ChatRequest, CommandError> {
+    use pitwall_core::chat::{Tool, ToolCall, ToolChoice};
     use pitwall_core::mgmt::PlaygroundToolChoice;
-    ChatRequest {
+    let mut messages = Vec::with_capacity(req.messages.len());
+    for m in &req.messages {
+        messages.push(Message {
+            role: m.role,
+            parts: playground_parts(m)?,
+            tool_calls: m
+                .tool_calls
+                .iter()
+                .map(|c| ToolCall {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    arguments: c.arguments.clone(),
+                })
+                .collect(),
+            tool_call_id: m.tool_call_id.clone(),
+        });
+    }
+    Ok(ChatRequest {
         model: ModelRef::Named(req.model_id.clone()),
-        messages: req
-            .messages
-            .iter()
-            .map(|m| Message {
-                role: m.role,
-                parts: if m.content.is_empty() && m.role == Role::Assistant && !m.tool_calls.is_empty() {
-                    vec![]
-                } else {
-                    vec![Part::Text(m.content.clone())]
-                },
-                tool_calls: m
-                    .tool_calls
-                    .iter()
-                    .map(|c| ToolCall {
-                        id: c.id.clone(),
-                        name: c.name.clone(),
-                        arguments: c.arguments.clone(),
-                    })
-                    .collect(),
-                tool_call_id: m.tool_call_id.clone(),
-            })
-            .collect(),
+        messages,
         tools: req
             .tools
             .iter()
@@ -1003,7 +1015,7 @@ fn playground_chat_request(req: &PlaygroundRequest) -> ChatRequest {
         max_tokens: Some(req.max_tokens),
         stream: true,
         ..Default::default()
-    }
+    })
 }
 
 fn playground_frame(e: &PlaygroundEvent) -> Bytes {
@@ -1016,16 +1028,19 @@ const LOADING_TICK: std::time::Duration = std::time::Duration::from_secs(1);
 /// Runs one playground chat and sends its frames: the response has already started, so the wait for a cold model load is a
 /// labelled phase (ER-18) and not a silent one. Ends when the answer ends or when the client goes away (`tx` closed), which drops
 /// the run and cancels the work.
-async fn drive_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: tokio::sync::mpsc::Sender<Bytes>) {
+async fn drive_playground_chat(st: Arc<AppState>, req: ChatRequest, tx: tokio::sync::mpsc::Sender<Bytes>) {
     let started = std::time::Instant::now();
+    let model = match &req.model {
+        ModelRef::Named(m) => m.clone(),
+        other => format!("{other:?}"),
+    };
     log::info!(
         target: "pitwall_chat",
-        "chat started: model {}, {} messages, {} tools",
-        req.model_id,
+        "chat started: model {model}, {} messages, {} images, {} tools",
         req.messages.len(),
+        req.messages.iter().map(|m| m.images().count()).sum::<usize>(),
         req.tools.len()
     );
-    let model = req.model_id.clone();
     let mut outcome = ChatOutcome::ClientGone;
     run_playground_chat(st, req, tx, &mut outcome).await;
     let ms = started.elapsed().as_millis();
@@ -1066,7 +1081,7 @@ enum ChatOutcome {
     ClientGone,
 }
 
-async fn run_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: tokio::sync::mpsc::Sender<Bytes>, outcome: &mut ChatOutcome) {
+async fn run_playground_chat(st: Arc<AppState>, req: ChatRequest, tx: tokio::sync::mpsc::Sender<Bytes>, outcome: &mut ChatOutcome) {
     use pitwall_core::chat::Finish;
     use pitwall_core::mgmt::{PlaygroundFinish, PlaygroundPhase};
     let started = std::time::Instant::now();
@@ -1090,7 +1105,7 @@ async fn run_playground_chat(st: Arc<AppState>, req: PlaygroundRequest, tx: toki
     {
         return;
     }
-    let start = st.start_chat(&Principal::Admin, meta, playground_chat_request(&req));
+    let start = st.start_chat(&Principal::Admin, meta, req);
     tokio::pin!(start);
     let mut tick = tokio::time::interval(LOADING_TICK);
     tick.tick().await;
@@ -1221,6 +1236,11 @@ async fn chat(State(st): S, h: HeaderMap, body: Bytes) -> Response {
     let req: PlaygroundRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(e) => return command_response(&err(mgmt::ErrorCode::BadRequest, e.to_string())),
+    };
+    // A bad image is refused before the stream starts (ADR 0023 WP-5).
+    let req = match playground_chat_request(&req) {
+        Ok(r) => r,
+        Err(e) => return command_response(&e),
     };
     let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(64);
     tokio::spawn(drive_playground_chat(st.clone(), req, tx));

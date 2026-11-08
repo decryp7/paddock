@@ -1048,7 +1048,18 @@ pub struct PlaygroundToolCall {
     pub arguments: String,
 }
 
-/// A playground message (`PlaygroundMessage`). Text only; images and audio come with their own work packages.
+/// An image a playground message carries (`PlaygroundImage`): inline data only, never a URL (ADR 0001). The app prepared it
+/// (ADR 0023 WP-5: checked, downscaled to the model's budget, re-encoded); the server checks the type and the base64 again.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaygroundImage {
+    /// `image/png`, `image/jpeg`, `image/webp` or `image/gif`.
+    pub mime: String,
+    /// Standard base64.
+    pub data: String,
+}
+
+/// A playground message (`PlaygroundMessage`): text, and the images of a user message (WP-5). Audio comes with WP-7.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaygroundMessage {
@@ -1056,6 +1067,9 @@ pub struct PlaygroundMessage {
     pub role: crate::chat::Role,
     /// Text.
     pub content: String,
+    /// The images of a user message, sent to the model before its text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<PlaygroundImage>,
     /// The tool calls of an assistant message.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<PlaygroundToolCall>,
@@ -1070,6 +1084,7 @@ impl PlaygroundMessage {
         PlaygroundMessage {
             role,
             content: content.into(),
+            images: vec![],
             tool_calls: vec![],
             tool_call_id: None,
         }
@@ -1571,6 +1586,22 @@ mod tests {
                 .content,
             "x"
         );
+        // Images are additive (ADR 0023 WP-5): a text message carries none, an image message names its type and base64 data.
+        let with_image = PlaygroundMessage {
+            images: vec![PlaygroundImage {
+                mime: "image/png".into(),
+                data: "iVBORw0KGgo=".into(),
+            }],
+            ..PlaygroundMessage::text(crate::chat::Role::User, "what is this?")
+        };
+        assert_eq!(
+            serde_json::to_value(&with_image).unwrap(),
+            json!({"role": "user", "content": "what is this?", "images": [{"mime": "image/png", "data": "iVBORw0KGgo="}]})
+        );
+        assert!(serde_json::to_value(PlaygroundMessage::text(crate::chat::Role::User, "x"))
+            .unwrap()
+            .get("images")
+            .is_none());
         // Tool fields are additive: an old request still parses, a new one keeps its tools and choice.
         let old: PlaygroundRequest =
             serde_json::from_value(json!({"modelId": "m", "messages": [], "temperature": 0.5, "maxTokens": 8})).unwrap();

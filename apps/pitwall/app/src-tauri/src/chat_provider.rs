@@ -127,6 +127,7 @@ fn wire_message(m: &ChatMessage, read: &dyn Fn(&str) -> KeptFile) -> PlaygroundM
             Role::Tool => WireRole::Tool,
         },
         content,
+        images: vec![],
         tool_calls: m
             .tool_calls
             .iter()

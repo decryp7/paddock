@@ -771,9 +771,18 @@ export interface PlaygroundToolCall {
   arguments: string;
 }
 
+/** An image a playground message carries: inline base64 only, never a URL (ADR 0001; ADR 0023 WP-5). */
+export interface PlaygroundImage {
+  mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  /** Standard base64. */
+  data: string;
+}
+
 export interface PlaygroundMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  /** The images of a user message, sent to the model before its text. */
+  images?: PlaygroundImage[];
   /** The tool calls of an assistant message. */
   toolCalls?: PlaygroundToolCall[];
   /** The call a `tool` message answers. */

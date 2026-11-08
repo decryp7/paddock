@@ -245,7 +245,8 @@ impl Engine for FakeEngine {
                 port: l.port,
                 props: pitwall_core::llama::Props {
                     n_ctx: Some(4096),
-                    vision: Some(false),
+                    // Unknown, as from an engine that does not say: a model reads images when it has its projector.
+                    vision: None,
                     ..Default::default()
                 },
             })

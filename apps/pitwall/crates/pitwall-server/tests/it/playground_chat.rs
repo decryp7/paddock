@@ -2,7 +2,7 @@
 //! reach the engine, tool calls and reasoning reach the client, and the time to first token is the first token's, not the end's.
 
 use crate::common;
-use common::{harness, Harness};
+use common::{harness, harness_in, Harness};
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -125,4 +125,53 @@ async fn time_to_first_token_is_the_first_tokens_not_the_whole_answers() {
     let done = events.last().unwrap();
     let ttft = done["ttftMs"].as_u64().unwrap();
     assert!(ttft < 300, "the first token came long before the end, ttft {ttft} ms: {done}");
+}
+
+/// A one-pixel PNG, base64.
+const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+/// ADR 0023 WP-5: an image the chat attached reaches a vision model's engine as an inline `image_url` before the question's text.
+#[tokio::test]
+async fn an_image_reaches_a_vision_models_engine_before_the_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let models = pitwall_server::paths::Dirs::at(dir.path()).models().join("o/r");
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::write(models.join("tiny-Q4_K_M.gguf"), common::gguf("llama")).unwrap();
+    std::fs::write(models.join("mmproj-tiny-f16.gguf"), common::gguf("clip")).unwrap();
+    let h = harness_in(dir, false).await;
+    let messages = json!([{"role": "user", "content": "what is this?", "images": [{"mime": "image/png", "data": PIXEL}]}]);
+    let events = all(open(&h, request(json!({"messages": messages}))).await).await;
+    assert_eq!(events.last().unwrap()["kind"], "done", "{events:?}");
+    let sent = h.bodies.lock().unwrap()[0].clone();
+    let content = &sent["messages"][0]["content"];
+    assert_eq!(content[0]["type"], "image_url", "{sent}");
+    assert_eq!(content[0]["image_url"]["url"], format!("data:image/png;base64,{PIXEL}"), "{sent}");
+    assert_eq!(
+        (content[1]["type"].as_str(), content[1]["text"].as_str()),
+        (Some("text"), Some("what is this?")),
+        "{sent}"
+    );
+}
+
+/// A model without a projector is never sent an image: the stream fails in words, and a bad image is refused before any work.
+#[tokio::test]
+async fn an_image_for_a_model_without_vision_or_a_bad_image_is_refused_in_words() {
+    let h = harness(false).await;
+    let messages = json!([{"role": "user", "content": "what is this?", "images": [{"mime": "image/png", "data": PIXEL}]}]);
+    let events = all(open(&h, request(json!({"messages": messages}))).await).await;
+    let last = events.last().unwrap();
+    assert_eq!(last["kind"], "error", "{events:?}");
+    assert!(last["error"]["message"].as_str().unwrap().contains("image"), "{last}");
+    assert!(h.bodies.lock().unwrap().is_empty(), "nothing reached the engine");
+
+    for bad in [
+        json!({"mime": "image/tiff", "data": PIXEL}),
+        json!({"mime": "image/png", "data": "***"}),
+    ] {
+        let messages = json!([{"role": "user", "content": "x", "images": [bad]}]);
+        let r = open(&h, request(json!({"messages": messages}))).await;
+        assert_eq!(r.status, 400, "a bad image is the caller's error");
+        let body: Value = serde_json::from_slice(&r.bytes(1 << 16).await.unwrap()).unwrap();
+        assert!(body["message"].as_str().unwrap().contains("image"), "{body}");
+    }
 }
