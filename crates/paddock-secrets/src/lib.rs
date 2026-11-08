@@ -2,7 +2,7 @@
 //!
 //! - [`Secret`]: a value that never prints (`Debug` and `Display` are redacted) and is zeroized on drop.
 //! - [`Name`]: the one naming scheme. The service is the app's display name; the account is `<scope>:<key>`.
-//! - [`Secrets`]: the port an app's engine codes against; [`MemorySecrets`] for tests.
+//! - [`Secrets`]: the port an app's engine codes against; [`MemorySecrets`], an ephemeral store for tests and demos.
 //! - [`Vault`]: one raw `(service, account)` store; [`VaultSecrets`] puts the naming scheme and the checks over it.
 //!   With the `keyring` feature, [`KeyringSecrets`] is that over the OS credential store.
 //! - [`FileSecrets`] and [`WithFileFallback`]: the owner-only file fallback, only when the app opts in.

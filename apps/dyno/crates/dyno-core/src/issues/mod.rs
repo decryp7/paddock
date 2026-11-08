@@ -247,6 +247,10 @@ pub fn fnv1a(text: &str) -> u64 {
 /// is a [`PlatformError`] with a reason the user can read (it becomes an "unavailable: reason" entry, never an error for
 /// the page); external tools run with timeouts; at most [`MAX_PER_READ`] issues are returned, newest first.
 pub trait IssueSource: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Which source this is.
     fn id(&self) -> IssueSourceId;
     /// The issues that happened in `[since, until]`.

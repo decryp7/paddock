@@ -51,6 +51,10 @@ impl Timestamp {
 /// local day, hour and minute the engine computes (the day an issue counts for, quiet hours, "until tomorrow",
 /// maintenance windows, the slots a baseline learns, the local time in a backup's name) goes through it.
 pub trait LocalZone: Send + Sync + std::fmt::Debug {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// The minutes to add to UTC to get the local wall time at `at` (+480 for UTC+8, -300 for New York in winter).
     fn offset_minutes(&self, at: Timestamp) -> i32;
 

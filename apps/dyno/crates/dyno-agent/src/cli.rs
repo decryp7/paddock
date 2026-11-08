@@ -222,6 +222,8 @@ fn reveal() -> crate::agent::Reveal {
 fn platforms(dirs: &Dirs) -> (dyno_platform::Platform, Box<dyn dyno_core::ports::ProcessSource>) {
     let secrets = dirs.secrets_folder();
     let platform = dyno_platform::platform(&secrets);
+    // What the support bundle needs to tell a real reader from a gap: the adapter behind every port (ADR 0033, ER-27).
+    log::info!(Ports = platform.wired_line().as_str(); "Platform wired");
     let details = dyno_platform::platform(&secrets).processes;
     (platform, details)
 }

@@ -190,6 +190,10 @@ pub fn plan_schedule(pending: &[WakeEntry], tag: &WakeTag, at_utc: i64, now: i64
 /// The helper's side of the wake requests: the OS's wake events, only those Dyno tagged. An implementation never touches an event
 /// that does not carry Dyno's prefix.
 pub trait WakeScheduler: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Sets the wake `tag` at `at_utc`, replacing one with the same tag.
     fn schedule(&self, tag: &WakeTag, at_utc: i64) -> Result<(), PlatformError>;
     /// Cancels the wake `tag`; `false` when there was none.

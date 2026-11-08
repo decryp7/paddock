@@ -116,8 +116,8 @@ paddock-shell = { path = "../../../../crates/paddock-shell", features = ["tray",
 paddock-menu = { path = "../../../../crates/paddock-menu", features = ["tauri"] }
 # The user-files service the shell manages, to check About's releases link has its state.
 paddock-files = { path = "../../../../crates/paddock-files", features = ["tauri"] }
-# Tests start an in-process agent over the fake platform (never the real sensors).
-dyno-platform.workspace = true
+# Tests start an in-process agent over the fake platform (never the real sensors); the doubles exist only here (ADR 0033).
+dyno-platform = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [lints]

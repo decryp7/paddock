@@ -35,6 +35,8 @@ toml.workspace = true
 libc = "0.2"
 
 [dev-dependencies]
+# The test doubles (ADR 0033): only here, so a build without test targets cannot name them.
+dyno-platform = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [lints]

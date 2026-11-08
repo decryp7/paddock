@@ -26,7 +26,8 @@ serde_json.workspace = true
 
 [dev-dependencies]
 dyno-agent.workspace = true
-dyno-platform.workspace = true
+# The test doubles (ADR 0033): only here, so a build without test targets cannot name them.
+dyno-platform = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [lints]

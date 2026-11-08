@@ -3760,6 +3760,7 @@ name = "paddock-power"
 version = "0.1.0"
 dependencies = [
  "log",
+ "paddock-power",
  "paddock-workspace-hack",
  "serde",
  "serde_json",

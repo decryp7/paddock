@@ -1,7 +1,7 @@
 //! Readers for the hardware's own reports (WP-23, WP-24): the OS's CPU speed limit, SSD wear and battery capacity, each
 //! behind a small port from `dyno_core::ports`. Observe-only: they read, never change a setting. External tools run
 //! through [`crate::process`] with timeouts; anything missing or refused is an unavailable reading that says why and
-//! what would help. The `Fake*` readers are for tests and for the other OSes' tests.
+//! what would help. The `Fake*` readers are for tests only (feature `test-support`, ADR 0033).
 #![cfg_attr(
     not(test),
     deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
@@ -59,7 +59,10 @@ pub fn battery_capacity() -> Box<dyn BatteryCapacitySource> {
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
-        Box::new(FakeBattery(Reading::unavailable("Battery capacity is not read on this OS yet.")))
+        Box::new(crate::unsupported::NotReadHere::new(
+            "Battery capacity",
+            "Battery capacity is not read on this OS yet.",
+        ))
     }
 }
 
@@ -558,8 +561,10 @@ impl BatteryCapacitySource for WindowsBattery {
 // ------------------------------------------------------------------------------------------------------- fakes
 
 /// A throttle reader that answers what it was given, then repeats the last answer.
+#[cfg(any(test, feature = "test-support"))]
 pub struct FakeThrottle(pub Vec<Reading<OsThrottle>>);
 
+#[cfg(any(test, feature = "test-support"))]
 impl ThrottleSignals for FakeThrottle {
     fn read(&mut self) -> Reading<OsThrottle> {
         if self.0.len() > 1 {
@@ -571,8 +576,10 @@ impl ThrottleSignals for FakeThrottle {
 }
 
 /// An SSD wear reader that answers what it was given.
+#[cfg(any(test, feature = "test-support"))]
 pub struct FakeWear(pub Reading<Vec<DiskWear>>);
 
+#[cfg(any(test, feature = "test-support"))]
 impl DiskWearSource for FakeWear {
     fn read(&mut self) -> Reading<Vec<DiskWear>> {
         self.0.clone()
@@ -580,8 +587,10 @@ impl DiskWearSource for FakeWear {
 }
 
 /// A battery reader that answers what it was given.
+#[cfg(any(test, feature = "test-support"))]
 pub struct FakeBattery(pub Reading<BatteryCapacity>);
 
+#[cfg(any(test, feature = "test-support"))]
 impl BatteryCapacitySource for FakeBattery {
     fn read(&mut self) -> Reading<BatteryCapacity> {
         self.0.clone()

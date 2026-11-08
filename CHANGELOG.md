@@ -4,6 +4,12 @@ Conventional Commits; one semver tag for the whole repo.
 
 ## Unreleased
 
+### `paddock-power`: the doubles exist only for tests (Dyno ADR 0033, D2)
+
+- `FakePower` and `FakeEvents` are behind `cfg(any(test, feature = "test-support"))`; a consumer enables `test-support` in `[dev-dependencies]` only.
+  Breaking: a normal dependency can no longer name them. The crate's own `tests/it` has a self dev-dependency for it. `paddock-secrets`:
+  `MemorySecrets` stays public (the workbench demo uses it in production); its doc now says it is an ephemeral store, not only a test double.
+
 ### `paddock-limits` (new): limits that explain themselves and replies that report what they left out
 
 - A new shared crate (ADR 0019, Debrief ADR 0065; plan 1.4 and B1), a leaf (serde; ts-rs behind `ts`): `LimitId`, `Quantity` with units, `Scope`,

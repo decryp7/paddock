@@ -48,3 +48,15 @@ pub fn reveal(path: &Path) -> Result<(), PlatformError> {
     cmd.arg("-R").arg(path);
     crate::process::run_with_timeout(cmd, Duration::from_secs(10)).map(|_| ())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_macos_platform_wires_no_fake() {
+        let dir = tempfile::tempdir().unwrap();
+        let found = crate::wiring::fakes_in(&platform(dir.path()).adapters());
+        assert!(found.is_empty(), "the macOS platform wires test doubles: {found:?}");
+    }
+}

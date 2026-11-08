@@ -7,6 +7,10 @@ license.workspace = true
 repository.workspace = true
 publish = ["decryp7"]
 
+[features]
+# FakePower and FakeEvents, for tests only. Enable it in [dev-dependencies] only (Dyno ADR 0033).
+test-support = []
+
 [dependencies]
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
@@ -21,3 +25,5 @@ zbus = { version = "5", features = ["blocking-api"] }
 
 [dev-dependencies]
 serde_json = "1"
+# The integration tests (tests/it) build the library without cfg(test), so they ask for the doubles themselves.
+paddock-power = { path = ".", features = ["test-support"] }

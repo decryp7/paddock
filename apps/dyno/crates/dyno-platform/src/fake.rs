@@ -1,15 +1,9 @@
 //! In-memory implementations of every port for the agent's tests: scriptable samples and processes, recorded
 //! actions and injectable failures. All handles of one [`Fake`] share its state.
 //!
-//! ```
-//! use dyno_platform::fake::{Fake, FakeOp};
-//! use dyno_core::ports::PlatformError;
-//! let fake = Fake::new();
-//! fake.add_process(dyno_platform::fake::process(42, "busy.exe", 80.0));
-//! fake.fail(FakeOp::Details, PlatformError::AccessDenied("no".into()));
-//! let mut p = fake.platform();
-//! assert_eq!(p.processes.processes().len(), 1);
-//! ```
+//! This module exists only for tests (`cfg(test)` or the `test-support` feature, enabled in `[dev-dependencies]` only: ADR 0033), so
+//! a build that ships cannot name it. Its example is the unit test `the_documented_example_works` below: a doctest compiles against
+//! the library without its own `test-support`.
 
 use crate::counters::Entry;
 use crate::{HardwareReaders, NetworkPorts, Platform};
@@ -504,6 +498,17 @@ pub fn details_of(process: ProcessSample) -> ProcessDetails {
 mod tests {
     use super::*;
     use dyno_core::startup::{ImpactRating, StartupImpact, StartupLocation};
+
+    #[test]
+    fn the_documented_example_works() {
+        use super::{Fake, FakeOp};
+        use dyno_core::ports::PlatformError;
+        let fake = Fake::new();
+        fake.add_process(super::process(42, "busy.exe", 80.0));
+        fake.fail(FakeOp::Details, PlatformError::AccessDenied("no".into()));
+        let mut p = fake.platform();
+        assert_eq!(p.processes.processes().len(), 1);
+    }
 
     fn entry(id: &str, location: StartupLocation) -> StartupEntry {
         StartupEntry {

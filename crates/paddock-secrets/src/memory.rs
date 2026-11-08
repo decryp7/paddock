@@ -56,7 +56,7 @@ impl Vault for MemoryVault {
     }
 }
 
-/// In-memory [`Secrets`] for tests, with the same naming as the real store.
+/// An in-memory [`Secrets`] store that forgets on exit (tests, demos), with the same naming as the real store.
 pub struct MemorySecrets(VaultSecrets<MemoryVault>);
 
 impl MemorySecrets {

@@ -55,12 +55,14 @@ fn real_wake_timer() -> Option<Arc<dyn dyno_core::wake::WakeScheduler>> {
 
 /// A wake timer that only records (ER-14: a test never sets a real wake). Pending wakes are kept, soonest first.
 #[derive(Default)]
+#[cfg(any(test, feature = "test-support"))]
 pub struct FakeWakeTimer {
     pending: std::sync::Mutex<Vec<dyno_core::wake::WakeEntry>>,
     /// When set, every schedule is refused with this message (the OS said no).
     pub refuse: std::sync::Mutex<Option<String>>,
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl dyno_core::wake::WakeScheduler for FakeWakeTimer {
     fn schedule(&self, tag: &dyno_core::wake::WakeTag, at_utc: i64) -> Result<(), dyno_core::ports::PlatformError> {
         if let Some(m) = self.refuse.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone() {
@@ -128,6 +130,7 @@ impl WolPorts {
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 impl WolPorts {
     /// Fakes that record and script and touch no socket, table or process (ER-14): one card on a documentation network, no
     /// neighbours, nothing answering ping, nothing readable. The fake platform wires these.

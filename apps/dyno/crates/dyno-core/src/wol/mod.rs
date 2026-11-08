@@ -5,6 +5,7 @@
 //! Devices are added only by the user: picked from the neighbour table or typed by hand. Nothing is stored without a click.
 //! Relaying through another Dyno is not built (D8).
 
+#[cfg(any(test, feature = "test-support"))]
 pub mod fake;
 pub mod mac;
 pub mod neighbours;
@@ -32,6 +33,10 @@ pub const MAX_NAME_CHARS: usize = 64;
 
 /// The clock a wake runs on: a monotonic reading and a sleep, so a test drives time without waiting (ER-12).
 pub trait WolClock: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Time since an arbitrary origin; never goes backwards.
     fn now(&self) -> std::time::Duration;
     /// Waits `d` (a fake only advances its own time).
@@ -40,12 +45,20 @@ pub trait WolClock: Send + Sync {
 
 /// The network cards of this computer (IPv4 only: a magic packet is an IPv4 broadcast).
 pub trait Interfaces: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Each card's addresses; empty when none is connected.
     fn ipv4(&self) -> Vec<NetIf>;
 }
 
 /// This PC's wake settings, read from the OS.
 pub trait ReadinessSource: Send + Sync {
+    /// The concrete adapter behind this port (for the wiring test and the agent's start log). Nobody overrides it.
+    fn adapter(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
     /// Reads them now; what cannot be read is a "can't tell" item, never an error.
     fn read(&self) -> ThisPcWol;
 }
