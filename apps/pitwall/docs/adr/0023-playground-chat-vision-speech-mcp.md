@@ -486,6 +486,10 @@ From building WP-2a and WP-4a (`pitwall/1.1-wp2a` `9dc147e24`, `pitwall/1.1-wp4a
 - Known gap: the fit is checked once, before the turn is sent (`Assistant::send`). Tool results that grow the context during the
   turn are not re-checked before the later model calls of that turn (`run.rs` `run_turn`); the engine then refuses the call
   that overflows.
+- The fit is an estimate of about four characters a token (files about four bytes a token), so it may undercount code or
+  non-Latin text. With `--no-context-shift` an undercount ends in the server's refusal of that model call, in words, never in
+  silent trimming. The window is read again before each measure and send (`chat_refresh_window`), so a change of the context
+  per slot or a reload with other slots is followed.
 
 ## Consequences
 
