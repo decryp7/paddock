@@ -35,6 +35,7 @@ pub mod staging;
 pub mod stop;
 pub mod versioncheck;
 pub mod versionres;
+pub mod wiring;
 
 #[cfg(windows)]
 pub mod native;

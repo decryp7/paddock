@@ -57,6 +57,9 @@ function UninstallWait($dir, [int]$lockMs = 0) {
 Remove-Item (Join-Path $env:TEMP 'PaddockHarness-setup-refused.log') -ErrorAction SilentlyContinue   # a leftover of an older include
 Remove-Item -Recurse -Force (Join-Path $Root 'run') -ErrorAction SilentlyContinue
 $base = Join-Path $Root 'run'; New-Item -ItemType Directory -Force $base | Out-Null
+# The uninstaller trusts a folder only when it is the registered one directly under Program Files; the harness installs below $base, so it names that
+# folder as the root (compiled into the include only with PADDOCK_TEST_HARNESS). A folder outside $base is untrusted by this rule too.
+[Environment]::SetEnvironmentVariable('PADDOCK_STUB_ROOT', $base)
 $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PaddockHarness'
 $key32 = 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\PaddockHarness'   # the 32-bit harness installer writes here
 if ($Cold) {
@@ -102,7 +105,7 @@ $r = Run "$a\uninstall.exe" "/S" @{ PADDOCK_STUB_EXIT_SAME_FOLDER = '1' }
 WaitGone $a
 $lines = @(Get-Content $log -ErrorAction SilentlyContinue)
 Check 'F uninstall removed the folder' (-not (Test-Path $a)) (Get-ChildItem $a -Name -ErrorAction SilentlyContinue)
-Check 'F uninstall calls' (($lines -match '^same-folder') -and ($lines -match '^stop-all') -and ($lines -match 'clean-run --dir .* --scope all')) ($lines -join '|')
+Check 'F uninstall calls' (($lines -match '^same-folder') -and ($lines -match '^check-dir') -and ($lines -match '^SERVER uninstall') -and ($lines -match '^stop-all') -and ($lines -match 'clean-run --dir .* --scope all')) ($lines -join '|')
 Check 'F uninstall removed the key' (-not (Test-Path $key)) 'key still there'
 
 # H: the uninstaller without paddock-setup.exe next to it (deleted by hand): the uninstall still works, says what it skipped,
@@ -127,6 +130,34 @@ $u = UninstallWait $h
 Check 'H no setup: the uninstaller reached its last step' ($null -eq $u.Why) $u.Why
 Check 'H no setup: a real uninstall removes the folder (removed, or removed after retries)' ((-not (Test-Path $h)) -and $u.Outcome -in 'removed', 'removed-after-retries') "outcome $($u.Outcome); left: $((Get-ChildItem $h -Force -Name -ErrorAction SilentlyContinue) -join ',')"
 Remove-Item $key -ErrorAction SilentlyContinue
+
+# P: a copied uninstaller (P1-1 of the B6b review). The attacker's folder holds a copy of uninstall.exe, a planted paddock-setup.exe
+# (the logging stub: it exits 0 and would "accept" anything) and a planted service program. Run elevated, nothing of that folder may
+# run: not the tool, not the service verb. The folder is not the one HKLM registers (and not under the root).
+$p = Join-Path $base 'p'
+$r = Run $installer "/S /D=$p" @{}
+$planted = Join-Path $Root 'planted'
+Remove-Item -Recurse -Force $planted -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $planted | Out-Null
+Copy-Item "$p\uninstall.exe", "$p\paddock-setup.exe", "$p\harness-server.exe" $planted
+$u = UninstallWait $planted
+Check 'P copied uninstaller reached its last step' ($null -eq $u.Why) $u.Why
+Check 'P copied uninstaller: the planted tool never ran' (-not ($u.Lines -match '^(hold-installing|check-dir|same-folder|stop-all|clean-run|clean-staging|guard)')) ($u.Lines -join '|')
+Check 'P copied uninstaller: the planted service program never ran' (-not ($u.Lines -match '^SERVER')) ($u.Lines -join '|')
+Check 'P copied uninstaller: says it trusts nothing there' ($u.Lines -match '^NOTE untrusted uninstall folder') ($u.Lines -join '|')
+Remove-Item -Recurse -Force $planted -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $p -ErrorAction SilentlyContinue
+Remove-Item $key, $key32 -ErrorAction SilentlyContinue
+
+# Q: the tool refuses the folder (check-dir exits 3): the service verb must not run, and the uninstall goes on.
+$q = Join-Path $base 'q'
+$r = Run $installer "/S /D=$q" @{}
+[Environment]::SetEnvironmentVariable('PADDOCK_STUB_EXIT_CHECK_DIR', '3')
+try { $u = UninstallWait $q } finally { [Environment]::SetEnvironmentVariable('PADDOCK_STUB_EXIT_CHECK_DIR', $null) }
+Check 'Q refused folder: reached the last step' ($null -eq $u.Why) $u.Why
+Check 'Q refused folder: asked check-dir' ($u.Lines -match '^check-dir') ($u.Lines -join '|')
+Check 'Q refused folder: the service program never ran' (-not ($u.Lines -match '^SERVER')) ($u.Lines -join '|')
+Remove-Item $key, $key32 -ErrorAction SilentlyContinue
 
 # B: check-dir refused
 $b = Join-Path $base 'b'

@@ -16,6 +16,8 @@
 ; and nothing else ($R6 and $R7 also by the test harness's log lines). The
 ; template's pages use $R0 to $R7 but do not run inside a section; its CheckIfAppIsRunning uses $R0 to $R3. $PaddockHaveSetup (1 or 0) says whether paddock-setup.exe was available to this run.
 ;
+; $PaddockTrusted (1 or 0) says whether the uninstaller may use the contents of $INSTDIR; with 0 no step runs a program of it.
+;
 ; Where paddock-setup.exe runs from: the installer extracts its embedded copy to $PLUGINSDIR; the uninstaller cannot `File`, so
 ; it copies the installed one to $PLUGINSDIR. Both run it from there, never from $INSTDIR: stop-all then never has to end its own
 ; process, and the uninstaller can delete $INSTDIR\paddock-setup.exe. When the installed copy is missing, the uninstaller says so
@@ -45,7 +47,7 @@
 
 !ifndef PADDOCK_PER_MACHINE_INCLUDED
 !define PADDOCK_PER_MACHINE_INCLUDED
-!define PADDOCK_INCLUDE_VERSION "3"
+!define PADDOCK_INCLUDE_VERSION "5"
 ; Readable in the built installer's version resource: the artifact gate (ADR 0039) compares it with this file.
 !ifndef PADDOCK_TEST_HARNESS ; Tauri's template sets VIProductVersion; the harness has none
   VIAddVersionKey "PaddockInclude" "${PADDOCK_INCLUDE_VERSION}"
@@ -81,6 +83,9 @@
 !define PADDOCK_SETUP "$PLUGINSDIR\paddock-setup.exe"
 
 Var PaddockHaveSetup
+; 1 when this run may use the install folder's contents: always in the installer (it carries its own paddock-setup.exe), and in
+; the uninstaller only when $INSTDIR is the folder the checked installer registered (see _PADDOCK_TRUST_FOLDER).
+Var PaddockTrusted
 
 ; A path for a command line inside quotes: a trailing backslash (a drive root) would escape the closing quote, so it is doubled.
 !macro _PADDOCK_ARG _OUT _IN
@@ -129,23 +134,87 @@ Var PaddockHaveSetup
   !endif
 !macroend
 
+; The uninstaller's trust decision, made in NSIS alone before anything of $INSTDIR is copied or run (an uninstall.exe can be copied
+; to a folder the user controls, next to a planted paddock-setup.exe, and run elevated). $PaddockTrusted is 1 only when BOTH hold:
+; $INSTDIR (trailing backslash trimmed, case-insensitive) is the folder the installer registered in HKLM (administrators write
+; there: the quoted UninstallString is "<folder>\uninstall.exe"), and it is a direct child of $PROGRAMFILES64 (no ".", "..", ":" or
+; further backslash in the name). The test harness may name another root in PADDOCK_STUB_ROOT (compiled only with
+; PADDOCK_TEST_HARNESS). Uses $0 to $3 and $R6 to $R9.
+!macro _PADDOCK_TRUST_FOLDER
+  StrCpy $PaddockTrusted 0
+  StrCpy $R9 "$INSTDIR"
+  StrCpy $R8 $R9 1 -1
+  ${If} $R8 == "\"
+    StrCpy $R9 $R9 -1
+  ${EndIf}
+  ; The registered folder.
+  ReadRegStr $R7 HKLM "${UNINSTKEY}" "UninstallString"
+  StrCpy $R8 $R7 1
+  ${If} $R8 == '"'
+    StrCpy $R7 $R7 "" 1
+    StrCpy $R8 $R7 1 -1
+    ${If} $R8 == '"'
+      StrCpy $R7 $R7 -1
+    ${EndIf}
+  ${EndIf}
+  ${If} $R7 == "$R9\uninstall.exe"
+    StrCpy $R6 "$PROGRAMFILES64"
+    !ifdef PADDOCK_TEST_HARNESS
+      ReadEnvStr $R8 PADDOCK_STUB_ROOT
+      ${If} $R8 != ""
+        StrCpy $R6 $R8
+      ${EndIf}
+    !endif
+    StrLen $R8 $R6
+    IntOp $R8 $R8 + 1
+    StrCpy $R7 $R9 $R8
+    ${If} $R7 == "$R6\"
+      StrCpy $R7 $R9 "" $R8
+      StrLen $1 $R7
+      StrCpy $2 $R7 1
+      ${If} $1 > 0
+      ${AndIf} $2 != "."
+        StrCpy $PaddockTrusted 1
+        StrCpy $0 0
+        ${While} $0 < $1
+          StrCpy $3 $R7 1 $0
+          ${If} $3 == "\"
+          ${OrIf} $3 == ":"
+            StrCpy $PaddockTrusted 0
+          ${EndIf}
+          IntOp $0 $0 + 1
+        ${EndWhile}
+      ${EndIf}
+    ${EndIf}
+  ${EndIf}
+!macroend
+
 ; The created mutex is held until the process exits (ADR 4.1 step 4). Installer: extract the embedded paddock-setup.exe.
 ; Uninstaller: copy the installed one (see the header). Both run it from $PLUGINSDIR. Must be the first macro of PREINSTALL /
 ; PREUNINSTALL.
 !macro PADDOCK_INSTALLING
   InitPluginsDir
   StrCpy $PaddockHaveSetup 0
+  StrCpy $PaddockTrusted 0
   !ifndef __UNINSTALL__
     File "/oname=$PLUGINSDIR\paddock-setup.exe" "${PADDOCK_SETUP_DIR}\paddock-setup.exe"
     StrCpy $PaddockHaveSetup 1
+    StrCpy $PaddockTrusted 1
   !else
-    ClearErrors
-    CopyFiles /SILENT "$INSTDIR\paddock-setup.exe" "$PLUGINSDIR\paddock-setup.exe"
-    ${IfNot} ${Errors}
-      StrCpy $PaddockHaveSetup 1
+    !insertmacro _PADDOCK_TRUST_FOLDER
+    ${If} $PaddockTrusted == 1
+      ClearErrors
+      CopyFiles /SILENT "$INSTDIR\paddock-setup.exe" "$PLUGINSDIR\paddock-setup.exe"
+      ${IfNot} ${Errors}
+        StrCpy $PaddockHaveSetup 1
+      ${Else}
+        DetailPrint "NOTE paddock-setup.exe is missing from $INSTDIR: its steps are skipped (see the include's header for the fallbacks)"
+        !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing from the uninstaller's folder: steps skipped"
+      ${EndIf}
     ${Else}
-      DetailPrint "NOTE paddock-setup.exe is missing from $INSTDIR: its steps are skipped (see the include's header for the fallbacks)"
-      !insertmacro _PADDOCK_TEST_LOG "NOTE paddock-setup.exe is missing from the uninstaller's folder: steps skipped"
+      ; Nothing of this folder is copied or run: it is not the folder the installer registered, or not directly under Program Files.
+      DetailPrint "NOTE $INSTDIR is not the install folder registered by the installer: nothing in it is run"
+      !insertmacro _PADDOCK_TEST_LOG "NOTE untrusted uninstall folder: nothing in it is run"
     ${EndIf}
   !endif
   ${If} $PaddockHaveSetup == 1
@@ -159,6 +228,14 @@ Var PaddockHaveSetup
   ${If} $0 != 0
     !insertmacro PADDOCK_ABORT "Install ${PRODUCTNAME} in Program Files. The folder $INSTDIR is not allowed." ${PADDOCK_LEVEL_BAD_DIR} ""
   ${EndIf}
+!macroend
+
+; Asks check-dir without aborting: $0 is 0 when $INSTDIR is accepted (a direct child of Program Files, owned and protected by
+; administrators), "nosetup" without paddock-setup.exe or in an uninstaller that does not trust its folder ($PaddockTrusted 0: nothing
+; is run then), any other value when refused. For an app step that must not run a program of
+; the install folder unless the folder is accepted, in a place that cannot abort (the uninstaller). PREINSTALL has PADDOCK_CHECK_DIR.
+!macro PADDOCK_DIR_ACCEPTED
+  !insertmacro _PADDOCK_RUN 'check-dir --dir "$R5"'
 !macroend
 
 ; The per-user guard (ADR 5): a fresh install only, i.e. no HKLM uninstall key.

@@ -389,3 +389,66 @@ fn the_uninstall_finish_retries_without_recursion_or_reboot_flags() {
         assert!(body.contains(outcome), "{outcome}");
     }
 }
+
+/// An app step that runs a program of the install folder in the uninstaller asks the include (a public macro), never the
+/// include's underscore macros, and the question cannot abort (an uninstaller must stay usable).
+#[test]
+fn the_include_offers_a_non_aborting_folder_question() {
+    let t = canonical_include();
+    let start = t
+        .find("!macro PADDOCK_DIR_ACCEPTED")
+        .expect("the macro exists");
+    let body = &t[start..start + t[start..].find("!macroend").unwrap()];
+    assert!(body.contains("check-dir --dir"), "{body}");
+    assert!(
+        !body.contains("PADDOCK_ABORT") && !body.contains("Quit"),
+        "{body}"
+    );
+}
+
+/// Review P1-1 of B6b: an uninstaller copied to a folder the user controls, next to a planted paddock-setup.exe, ran elevated and
+/// "accepted" its own folder. The uninstaller decides trust in NSIS alone, before it copies or runs anything of `$INSTDIR`: the
+/// folder must be the one HKLM registers and a direct child of Program Files, and an untrusted folder leaves `$PaddockHaveSetup` 0.
+#[test]
+fn the_uninstaller_decides_trust_before_it_copies_anything_of_its_folder() {
+    let t = canonical_include();
+    let installing = t
+        .find("!macro PADDOCK_INSTALLING")
+        .expect("the macro exists");
+    let body = &t[installing..installing + t[installing..].find("!macroend").unwrap()];
+    let trust = body
+        .find("_PADDOCK_TRUST_FOLDER")
+        .expect("the uninstaller asks for trust first");
+    let copy = body
+        .find("CopyFiles")
+        .expect("it copies the tool after that");
+    let run = body
+        .find("hold-installing")
+        .expect("it holds the lock after that");
+    assert!(trust < copy && copy < run, "{body}");
+    assert!(body.contains("${If} $PaddockTrusted == 1"), "{body}");
+    let uninstall_part = &body[body.find("!else").unwrap()..];
+    assert!(
+        !uninstall_part[..uninstall_part.find("${If} $PaddockTrusted == 1").unwrap()]
+            .contains("CopyFiles"),
+        "nothing is copied before the decision"
+    );
+    let start = t
+        .find("!macro _PADDOCK_TRUST_FOLDER")
+        .expect("the decision macro exists");
+    let decision = &t[start..start + t[start..].find("!macroend").unwrap()];
+    assert!(
+        decision.contains(r#"ReadRegStr $R7 HKLM "${UNINSTKEY}" "UninstallString""#),
+        "HKLM, written by administrators only"
+    );
+    assert!(
+        decision.contains("$PROGRAMFILES64"),
+        "directly under Program Files"
+    );
+    assert!(
+        !decision.contains("nsExec")
+            && !decision.contains("Exec ")
+            && !decision.contains("CopyFiles"),
+        "the decision runs nothing"
+    );
+}
