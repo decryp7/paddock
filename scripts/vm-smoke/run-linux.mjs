@@ -248,14 +248,18 @@ async function main(argv) {
       // The card lives in the Settings window, which the reboot closed: open it the way a user does (File > Settings…), as at the first step.
       await sleep(3000);
       press('^File$', 'menu item'); await sleep(1000); press('^Settings…$', 'menu item'); await sleep(4000);
+      // Settings opens on the section it showed last: the card is in the "Dyno" section (as at the first step, which presses it before reading the card).
+      press('^Dyno$'); await sleep(1500);
       // Both reads wait for their text (the page and the card appear a little after the window under Rosetta).
       let cardTxt = '';
-      for (let i = 0; i < 4 && !cardTxt; i++) { cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim(); if (!cardTxt) { press('^File$', 'menu item'); await sleep(1000); press('^Settings…$', 'menu item'); await sleep(5000); } }
+      for (let i = 0; i < 4 && !cardTxt; i++) { cardTxt = atspi('tree dyno 60 2>&1 | grep -i -E "Administrator readings|Turn on|Turn off" | head -6').stdout.trim(); if (!cardTxt) { press('^File$', 'menu item'); await sleep(1000); press('^Settings…$', 'menu item'); await sleep(5000); press('^Dyno$'); await sleep(1500); } }
       press('^Processes$', 'link');
+      // The page is up when the main window's document is the Processes page (the AT-SPI name of the document is "Processes – Dyno"); the "N processes" subtitle is not on a line of its own.
+      const PAGE_UP = /document web\s+Processes\b/;
       let procPage = '';
-      for (let i = 0; i < 10 && !/Processes\s+\d+ processes/.test(procPage); i++) { await sleep(3000); procPage = atspi('tree dyno 80').stdout; }
+      for (let i = 0; i < 10 && !PAGE_UP.test(procPage); i++) { await sleep(3000); procPage = atspi('tree dyno 80 text').stdout; }
       // The chip is judged only when the Processes page was read at all; a window that never came up is the measurement's (the tree is kept as evidence).
-      const pageRead = /Processes\s+\d+ processes/.test(procPage);
+      const pageRead = PAGE_UP.test(procPage);
       steps.push(result('Restart check: card and a helper reading after the reboot', [judgeCard(cardTxt), { ok: /Read by the administrator helper/i.test(procPage), ...(pageRead ? {} : { kind: 'check' }), detail: !pageRead ? `the Processes page was not read (the window did not come up for AT-SPI): ${atspi('tree dyno 6 2>&1 | head -6').stdout.replace(/\s+/g, ' ').slice(0, 200)}` : /Read by the administrator helper/i.test(procPage) ? 'Processes shows "Read by the administrator helper"' : 'Processes does not show the helper chip after the reboot' }], [cardTxt], 'card On and a reading works'));
       void t0;
     }
@@ -318,7 +322,12 @@ async function main(argv) {
 
     // Row 5a: the Start at login change in the Jobs list with Cancel (Settings is open here).
     if (want(19)) {
-      push(await loginJobsRow(linuxLoginJobsDriver(atspi, parseSwitchState), { now: () => Date.now(), sleep }));
+      // The Settings section with the switch is the "Dyno" one (the Turn off step used to select it before this row).
+      press('^Dyno$'); await sleep(1500);
+      const s19 = push(await loginJobsRow(linuxLoginJobsDriver(atspi, parseSwitchState), { now: () => Date.now(), sleep }));
+      // ER-27: Dyno's own log lines about jobs (app and agent logs, with their time), so a "The jobs could not be read" in the list has its cause beside it.
+      const jobLog = g('for f in $(find ~/.local ~/.cache -name "*.log" -path "*yno*" 2>/dev/null); do echo "== $f"; grep -i -E "job" "$f" | tail -n 60; done; echo "== now: $(date +%T)"').stdout.split('\n');
+      s19.evidence = [...(s19.evidence ?? []), '--- Dyno log lines about jobs (every Dyno log in the guest)', ...jobLog];
       press('^Dyno$'); await sleep(1000);
     }
 
