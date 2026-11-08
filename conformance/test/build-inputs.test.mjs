@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ensureInput, readInventory, seedTauri, storeUrl, tauriToolsDir } from '../ci/build-inputs.mjs';
+import { ensureInput, installTool, readInventory, seedTauri, storeUrl, tauriToolsDir } from '../ci/build-inputs.mjs';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const root = fileURLToPath(new URL('../..', import.meta.url));
@@ -53,7 +53,7 @@ const apprun = () => readInventory(linuxInventory).find((x) => x.id === 'apprun'
 
 test('the real inventory parses, and every platform has a 64-hex SHA-256 and a positive size', () => {
   const inv = readInventory(readFileSync(join(root, 'build-inputs.toml'), 'utf8'));
-  assert.deepEqual(inv.map((e) => e.id).sort(), ['apprun', 'appimage-type2-runtime', 'linuxdeploy', 'linuxdeploy-plugin-appimage', 'nsis', 'nsis-tauri-utils'].sort());
+  assert.deepEqual(inv.map((e) => e.id).sort(), ['apprun', 'appimage-type2-runtime', 'cargo-about', 'cargo-cyclonedx', 'git-cliff', 'linuxdeploy', 'linuxdeploy-plugin-appimage', 'nsis', 'nsis-tauri-utils'].sort());
   for (const e of inv) {
     assert.ok(e.platforms.length > 0, e.id);
     for (const p of e.platforms) {
@@ -178,4 +178,26 @@ test('tauri_verbose turns --verbose on only for the AppImage bundle', () => {
   const [a, b] = r.stdout.trim().split('\n');
   assert.equal(b, '[]');
   assert.equal(a, process.platform === 'linux' ? '[--verbose]' : '[]');
+});
+
+test('installTool unpacks a hashed archive and puts the executable in the bin folder', async () => {
+  const src = tmp();
+  mkdirSync(join(src, 'pkg-1.0'));
+  writeFileSync(join(src, 'pkg-1.0', 'mytool'), '#!/bin/sh\necho hi\n');
+  const archive = join(src, 'mytool.tar.gz');
+  assert.equal(spawnSync('tar', ['-czf', archive, '-C', src, 'pkg-1.0']).status, 0);
+  const bytes = readFileSync(archive);
+  const inv = readInventory(`format = 1\n[[input]]\nid = "mytool"\nversion = "1.0"\npackage = "mytool"\nfile = "mytool.tar.gz"\nbin = "mytool"\n\n  [[input.platform]]\n  key = "linux-x86_64"\n  url = "https://example.invalid/x"\n  size = ${bytes.length}\n  sha256 = "${sha(bytes)}"\n`);
+  const store = await fakeStore({ 'mytool.tar.gz': bytes });
+  const binDir = join(tmp(), 'bin');
+  const r = await installTool({ id: 'mytool', inventory: inv, binDir, store: store.base, token: 't' });
+  assert.equal(r.dest, join(binDir, 'mytool'));
+  assert.ok(statSync(r.dest).mode & 0o100);
+  assert.match(readFileSync(r.dest, 'utf8'), /echo hi/);
+});
+
+test('installTool rejects an archive whose hash is not the pin', async () => {
+  const inv = readInventory(`format = 1\n[[input]]\nid = "mytool"\nversion = "1.0"\npackage = "mytool"\nfile = "mytool.tar.gz"\nbin = "mytool"\n\n  [[input.platform]]\n  key = "linux-x86_64"\n  url = "https://example.invalid/x"\n  size = 3\n  sha256 = "${'0'.repeat(64)}"\n`);
+  const store = await fakeStore({ 'mytool.tar.gz': Buffer.from('abc') });
+  await assert.rejects(installTool({ id: 'mytool', inventory: inv, binDir: join(tmp(), 'bin'), store: store.base, token: 't' }), /SHA-256 mismatch/);
 });

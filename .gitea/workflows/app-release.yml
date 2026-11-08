@@ -373,9 +373,10 @@ jobs:
 
       - uses: ./.paddock/.gitea/actions/setup-rust
 
-      # git-cliff comes with the Paddock CI image; other images build it once.
+      # git-cliff: the pinned, hashed prebuilt binary from the private build-inputs store (ADR 0062), never `cargo install`.
       - name: Changelog of this release
         env:
+          BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
           CONFIG: ${{ inputs.cliff-config }}
           PATHS: ${{ inputs.cliff-paths }}
           PREFIX: ${{ inputs.tag-prefix }}
@@ -386,7 +387,8 @@ jobs:
           # The first release of an app has no earlier tag: its notes are the CHANGELOG section of that version.
           OUT=release/CHANGELOG-latest.md bash .paddock/conformance/ci/first-release-notes.sh || exit 1
           if [ -s release/CHANGELOG-latest.md ]; then exit 0; fi
-          command -v git-cliff >/dev/null || cargo install git-cliff --locked
+          installed="$(node .paddock/conformance/ci/build-inputs.mjs install-tool git-cliff)"
+          eval "$installed"
           args=(--latest --strip header -o release/CHANGELOG-latest.md)
           if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi
           if [ -n "$PREFIX" ]; then args+=(--tag-pattern "${PREFIX}v.*"); fi

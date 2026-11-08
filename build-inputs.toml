@@ -139,3 +139,69 @@ used_by = "conformance/ci/tauri-bundle.sh scripts/demo/bundle.sh .gitea/workflow
   size = 34304
   sha256 = "5ba143b5db4a87d32d6e7802e033330aae56cbceabe0d1e3ba41948385ad4709"
   checked = "downloaded 2026-11-08; SHA-1 75197fee3c6a814fe035788d1c34ead39349b860 equals Tauri 2.10.3's pin"
+
+# --- Release tools (ADR 0062 WP-1b): prebuilt, hashed, replacing `cargo install` and taiki-e/install-action. `bin` is the
+# executable inside the archive; the archive is unpacked into a folder that is put on PATH.
+
+[[input]]
+id = "git-cliff"
+kind = "tool"
+version = "2.14.2"
+source = "https://github.com/orhun/git-cliff"
+licence = "MIT OR Apache-2.0"
+ships = false
+redistribute = true
+package = "git-cliff"
+file = "git-cliff-2.14.2-x86_64-unknown-linux-musl.tar.gz"
+bin = "git-cliff"
+release_path = true
+used_by = ".gitea/workflows/app-release.yml#bundle .gitea/workflows/debrief.yml#release"
+
+  [[input.platform]]
+  key = "linux-x86_64"
+  url = "https://github.com/orhun/git-cliff/releases/download/v2.14.2/git-cliff-2.14.2-x86_64-unknown-linux-musl.tar.gz"
+  size = 7955124
+  sha256 = "fa21e2fc70046fcfd0e43e5e4613873ab799aff3d9dc8559c00d31b270e417d0"
+  checked = "downloaded 2026-11-08; the published .sha512 matches"
+
+[[input]]
+id = "cargo-cyclonedx"
+kind = "tool"
+version = "0.5.9"
+source = "https://github.com/CycloneDX/cyclonedx-rust-cargo"
+licence = "MIT OR Apache-2.0"
+ships = false
+redistribute = true
+package = "cargo-cyclonedx"
+file = "cargo-cyclonedx-x86_64-unknown-linux-musl.tar.xz"
+bin = "cargo-cyclonedx"
+release_path = true
+used_by = ".gitea/workflows/debrief.yml#release"
+
+  [[input.platform]]
+  key = "linux-x86_64"
+  url = "https://github.com/CycloneDX/cyclonedx-rust-cargo/releases/download/cargo-cyclonedx-0.5.9/cargo-cyclonedx-x86_64-unknown-linux-musl.tar.xz"
+  size = 1766496
+  sha256 = "9bd3e599314f50810c9d98b8b68a617ff9d3cc20873968d90b29d121f6b226ff"
+  checked = "downloaded 2026-11-08; the published .sha256 matches"
+
+[[input]]
+id = "cargo-about"
+kind = "tool"
+version = "0.9.2"
+source = "https://github.com/EmbarkStudios/cargo-about"
+licence = "MIT OR Apache-2.0"
+ships = false
+redistribute = true
+package = "cargo-about"
+file = "cargo-about-0.9.2-x86_64-unknown-linux-musl.tar.gz"
+bin = "cargo-about"
+release_path = true
+used_by = ".gitea/actions/app-gates/action.yml .gitea/workflows/debrief.yml#licences scripts/notices.sh"
+
+  [[input.platform]]
+  key = "linux-x86_64"
+  url = "https://github.com/EmbarkStudios/cargo-about/releases/download/0.9.2/cargo-about-0.9.2-x86_64-unknown-linux-musl.tar.gz"
+  size = 6732751
+  sha256 = "9099a59e820c38a68b9d65f300662a567d56562f9a10f6aa4c7e86c17c2566af"
+  checked = "downloaded 2026-11-08; the published .sha256 matches"

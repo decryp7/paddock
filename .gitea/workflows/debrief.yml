@@ -383,9 +383,13 @@ jobs:
       # cargo-deny comes with the image; cargo-about does not. Pinned: the committed notices are its output, and a new
       # release can find more licence texts (0.9.3 found five more than 0.9.2 on 2026-10-28); bump it together with
       # scripts/notices/generate.sh's output.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-about@0.9.2
+      - name: Install cargo-about 0.9.2 (the pinned, hashed prebuilt binary from the private build-inputs store, ADR 0062)
+        env:
+          BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+        run: |
+          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs.mjs" install-tool cargo-about)"
+          eval "$installed"
+          # The next steps are separate shells: the tool folder reaches them through $GITHUB_PATH.
 
       # cargo about reads every crate's licence from its sources and cargo deny clones the advisory database: without a
       # cache both download everything on every run. The image's CARGO_HOME is /usr/local/cargo. Saved on every run (a
@@ -1075,10 +1079,13 @@ jobs:
         with:
           path: apps/debrief/artifacts
 
-      # git-cliff comes with the image.
+      # git-cliff: the pinned, hashed prebuilt binary from the private build-inputs store (ADR 0062), never `cargo install`.
       - name: Release notes (git-cliff)
+        env:
+          BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
-          command -v git-cliff >/dev/null || cargo install git-cliff --locked
+          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs.mjs" install-tool git-cliff)"
+          eval "$installed"
           # Debrief's commits and the shared ones it ships (ADR 0014 §4), between its own debrief-v* tags.
           git cliff -r ../.. --config cliff.toml --tag-pattern 'debrief-v.*' --include-path 'apps/debrief/**' \
             --include-path 'crates/**' --include-path 'ui/**' --latest --strip header -o artifacts/RELEASE_NOTES.md
@@ -1095,13 +1102,16 @@ jobs:
           - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
           FIRST_LAUNCH
 
-      # cargo-cyclonedx comes with the image.
+      # cargo-cyclonedx: the pinned, hashed prebuilt binary (ADR 0062); @cyclonedx/cyclonedx-npm runs from the root lock.
       - name: SBOMs (CycloneDX)
+        env:
+          BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
-          command -v cargo-cyclonedx >/dev/null || cargo install cargo-cyclonedx --locked
+          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs.mjs" install-tool cargo-cyclonedx)"
+          eval "$installed"
           cargo cyclonedx --manifest-path app/src-tauri/Cargo.toml --format json --override-filename debrief-rust.cdx
           cp app/src-tauri/debrief-rust.cdx.json artifacts/
-          (cd ../.. && npm ci && npx --yes @cyclonedx/cyclonedx-npm --workspace debrief-app --omit dev --output-file apps/debrief/artifacts/debrief-ui.cdx.json)
+          (cd ../.. && npm ci && npx --no-install cyclonedx-npm --workspace debrief-app --omit dev --output-file apps/debrief/artifacts/debrief-ui.cdx.json)
 
       # latest.json for the updater (the shared conformance/release/latest-json.mjs, tested there): version, notes from RELEASE_NOTES.md, pub_date and, per platform, the
       # installer's URL in this release, its signature (.sig) and size. Installed apps fetch

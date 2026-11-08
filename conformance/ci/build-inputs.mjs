@@ -6,14 +6,15 @@
 //
 //   node conformance/ci/build-inputs.mjs seed-tauri     prints `export NAME='value'` lines for `eval` (LDAI_RUNTIME_FILE) and
 //                                                       one summary line per input (stderr); appends to $GITHUB_ENV when set
+//   node conformance/ci/build-inputs.mjs install-tool <id>   installs a prebuilt tool (git-cliff, ...) and prints `export PATH=...`
 //   node conformance/ci/build-inputs.mjs scan <logfile> prints the last `Downloading https://...` URL of a failed build
 //
 // Environment: BUILD_INPUTS_TOKEN (a read-only token for the private store; a secret), BUILD_INPUTS_STORE (default below).
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_STORE = 'https://dev.decryptology.net/api/packages/paddock-build-inputs/generic';
@@ -49,7 +50,7 @@ export function readInventory(text) {
       const s = num(line, 'size');
       if (s !== undefined) platform.size = Number(s);
     } else if (entry) {
-      for (const n of ['id', 'kind', 'version', 'source', 'licence', 'package', 'file', 'tied_to', 'used_by']) {
+      for (const n of ['id', 'kind', 'version', 'source', 'licence', 'package', 'file', 'bin', 'tied_to', 'used_by']) {
         const v = str(line, n);
         if (v !== undefined) entry[n] = v;
       }
@@ -183,6 +184,39 @@ export async function seedTauri({ platform = process.platform, env = process.env
   return out;
 }
 
+/** The first file named `name` under `dir` (an unpacked release archive), or null. */
+function findFile(dir, name) {
+  for (const f of readdirSync(dir)) {
+    const p = join(dir, f);
+    if (statSync(p).isDirectory()) {
+      const hit = findFile(p, name);
+      if (hit) return hit;
+    } else if (f === name || f === `${name}.exe`) return p;
+  }
+  return null;
+}
+
+/**
+ * Installs a prebuilt tool (`tool` kind: an archive with one executable, `bin`) from the store into `binDir`, verified, and
+ * returns the `PATH` entry to add. Replaces `cargo install` / taiki-e/install-action on release paths (ADR 0062 WP-1b).
+ */
+export async function installTool({ id, inventory, binDir, platformKey = 'linux-x86_64', store, token, backoffMs }) {
+  const e = byId(inventory, id);
+  const work = mkdtempSync(join(tmpdir(), `build-input-${id}-`));
+  const archive = join(work, e.file);
+  const r = await ensureInput(e, platformKey, archive, { store, token, backoffMs });
+  const x = spawnSync('tar', ['-xf', archive, '-C', work], { encoding: 'utf8' });
+  if (x.status !== 0) throw fail(e, `could not unpack ${e.file}: tar exited ${x.status}: ${(x.stderr ?? '').slice(-300)}. Next: check that tar (and xz for .tar.xz) is installed.`);
+  const bin = findFile(work, e.bin ?? id);
+  if (!bin) throw fail(e, `${e.file} holds no executable named ${e.bin ?? id}. Next: fix \`bin\` in build-inputs.toml.`);
+  mkdirSync(binDir, { recursive: true });
+  const dest = join(binDir, basename(bin));
+  copyFileSync(bin, dest);
+  chmodSync(dest, 0o755);
+  rmSync(work, { recursive: true, force: true });
+  return { dest, summary: line(e, r) };
+}
+
 /** The last `Downloading https://...` URL in a build log, or null (ADR 0062 section 5: a failed build names the fetch). */
 export function lastDownload(log) {
   const urls = [...log.matchAll(/Downloading (https?:\/\/\S+)/g)].map((m) => m[1]);
@@ -200,6 +234,17 @@ async function main(argv) {
       appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### Build inputs\n\n${summary.map((s) => `- ${s}`).join('\n')}\n`);
     }
     for (const [k, v] of Object.entries(env)) console.log(`export ${k}='${v.replace(/'/g, "'\\''")}'`);
+    return 0;
+  }
+  if (cmd === 'install-tool') {
+    const inventory = readInventory(readFileSync(fileURLToPath(new URL('../../build-inputs.toml', import.meta.url)), 'utf8'));
+    const store = process.env.BUILD_INPUTS_STORE || DEFAULT_STORE;
+    const binDir = process.env.BUILD_INPUTS_BIN || join(process.env.RUNNER_TEMP || tmpdir(), 'build-inputs-bin');
+    const { summary } = await installTool({ id: arg, inventory, binDir, store, token: process.env.BUILD_INPUTS_TOKEN });
+    console.error(`build input: ${summary}`);
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `- build input: ${summary}\n`);
+    if (process.env.GITHUB_PATH) appendFileSync(process.env.GITHUB_PATH, `${binDir}\n`);
+    console.log(`export PATH='${binDir.replace(/'/g, "'\\''")}':"$PATH"`);
     return 0;
   }
   if (cmd === 'scan') {

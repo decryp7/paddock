@@ -677,6 +677,7 @@ jobs:
       - uses: ./.gitea/actions/app-gates
         with:
           app: ${{ matrix.app }}
+          build-inputs-token: ${{ secrets.BUILD_INPUTS_TOKEN }}
           cargo: ${{ matrix.cargo }}
           nextest-config: ${{ matrix.nextest_config }}
           prepare: ${{ matrix.prepare }}
