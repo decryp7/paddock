@@ -169,6 +169,12 @@ mod tests {
         };
         assert_eq!((index_threads(&four, 14), index_heap_mb(&four, 14)), (4, 256));
         assert_eq!(index_threads(&four, 3), 2, "3 cores, one left free");
+        // An explicit count below the automatic one is kept (auto would take 4 here).
+        let two = PerformanceSettings {
+            index_writer_threads: 2,
+            ..d.clone()
+        };
+        assert_eq!(index_threads(&two, 14), 2);
     }
 
     #[test]

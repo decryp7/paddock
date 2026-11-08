@@ -1424,6 +1424,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn low_memory_mode_shrinks_every_memory_knob() {
+        let low = StoreOptions::low_memory();
+        let normal = StoreOptions::default();
+        assert_eq!(low.memory_limit, LOW_MEMORY_LIMIT);
+        assert_eq!(low.import_memory_limit, LOW_MEMORY_LIMIT);
+        assert_eq!(low.duck_threads, 2);
+        assert!((1..=LOW_MEMORY_PARSE_THREADS).contains(&low.parse_threads), "{}", low.parse_threads);
+        assert_eq!((low.index.heap, low.index.threads), (16 << 20, 1));
+        assert!(low.parse_threads <= normal.parse_threads && low.index.heap < normal.index.heap);
+        assert_ne!(low.import_memory_limit, normal.import_memory_limit);
+    }
+
+    #[test]
     fn database_failures_become_typed_errors() {
         let locked = classify("IO Error: Could not set lock on file \"x/catalog.duckdb\": Conflicting lock is held".into());
         assert!(
