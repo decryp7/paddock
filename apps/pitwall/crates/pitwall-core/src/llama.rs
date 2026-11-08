@@ -68,6 +68,8 @@ pub fn args(l: &Launch) -> Vec<String> {
         l.cache_ram_mib.to_string(),
         "--offline".into(),
         "--no-webui".into(),
+        // A request over a slot's context is refused, never shifted (dropping the start of a conversation silently).
+        "--no-context-shift".into(),
         "--log-verbosity".into(),
         "1".into(),
     ];
@@ -400,6 +402,15 @@ mod tests {
         .join(" ");
         assert!(e.contains("--embeddings") && e.contains("--n-gpu-layers 10") && e.contains("--threads 6") && !e.contains("--mmproj"));
         assert!(args(&launch(ServeKind::Rerank)).contains(&"--reranking".to_string()));
+    }
+
+    #[test]
+    fn the_server_never_drops_the_start_of_a_conversation_to_make_room() {
+        // A request over a slot's context is refused, never shifted: the chat checks the window before sending and says so in
+        // words (user decision 2026-11-08). llama.cpp b11669 has the flag (`llama-server --help`, checked 2026-11-08).
+        for kind in [ServeKind::Chat, ServeKind::Embedding, ServeKind::Rerank] {
+            assert!(args(&launch(kind)).contains(&"--no-context-shift".to_string()), "{kind:?}");
+        }
     }
 
     #[test]

@@ -395,7 +395,7 @@ export class MockBackend implements PitwallBackend {
       const quant = /-(Q\d\w*|F16|BF16)(?:-|\.)/i.exec(d.name)?.[1] ?? null;
       const id = d.name.replace(/\.gguf$/i, '').toLowerCase();
       if (!this.library.some((m) => m.id === id)) {
-        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, fit: demoFit(d.bytesTotal) });
+        this.library.push({ id, repo: d.host, file: d.name, name: d.name.replace(/\.gguf$/i, '').replace(/-/g, ' '), quant, sizeBytes: d.bytesTotal, paramsB: null, contextMax: null, architecture: null, capabilities: ['chat'], projector: null, addedAt: now, lastUsedAt: null, loaded: false, pinned: false, idleSecs: null, slots: DEFAULT_SLOTS, slotsCustom: false, loadedSlots: null, contextPerSlot: 8192, fit: demoFit(d.bytesTotal) });
       }
     } else {
       const engine = this.engineOfBuild(d.id.replace(/^eng-\d+-/, ''));

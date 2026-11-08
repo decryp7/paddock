@@ -228,6 +228,7 @@ async fn call(st: &Arc<AppState>, method: &str, a: &Value) -> R<Value> {
                     crate::library::to_dto(
                         f,
                         st.serving.loaded_slots(&f.id),
+                        st.serving.context_per_slot(&f.id),
                         &s.prefs(&f.id),
                         (s.models.default_context, s.models.default_slots),
                         &room,
