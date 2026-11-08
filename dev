@@ -120,7 +120,15 @@ hash=$({ git -C "$root" ls-tree HEAD -- $inputs; printf '%s\n%s\n' "$compiler" "
 # shellcheck disable=SC2086
 dirty=$(git -C "$root" status --porcelain --untracked-files=all -- $inputs)
 
+# The inputs of the hash that are not the tracked files, one line, so a miss (a binary published under another hash) can be
+# explained from the logs alone (ER-27): the compiler release, the names (never the values) of the hashed environment variables,
+# and the digests of the cargo config files.
+explain_hash() {
+  echo "dev: hash $hash inputs: $(printf '%s' "$compiler" | tr '\n' ' ')| env: $(printf '%s\n' "$flags" | grep -v '^config-file ' | sed 's/=.*//' | tr '\n' ' ')| configs: $(printf '%s\n' "$configs" | tr '\n' ' ')| digests: $(printf '%s\n' "$flags" | sed -n 's/^config-file //p' | cut -c1-8 | tr '\n' ' ')" >&2
+}
+
 if [ "${1:-}" = "--wrapper-hash" ]; then
+  explain_hash
   echo "$hash"
   [ -n "$dirty" ] && echo dirty || echo clean
   exit 0
@@ -185,6 +193,7 @@ download_prebuilt() {
       200) ;;
       404)
         echo "::notice::./dev: paddock-dev $hash is not published for $host (HTTP 404 for $_f); building it." >&2
+        explain_hash
         rm -rf "$_dl"
         return 1
         ;;
