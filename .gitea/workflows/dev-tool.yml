@@ -40,11 +40,10 @@ concurrency:
 jobs:
   publish:
     name: publish (${{ matrix.os }})
-    if: ${{ matrix.os != 'macos-latest' || github.event.inputs.macos != 'false' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.os == 'ubuntu-latest' && 'dev.decryptology.net/decryp7/paddock-ci:v2' || '' }}
     defaults:
@@ -61,6 +60,36 @@ jobs:
         run: |
           if not exist "%ProgramFiles%\Git\bin\bash.exe" (echo Git for Windows is not installed on this runner & exit /b 1)
           echo %ProgramFiles%\Git\bin>>"%GITHUB_PATH%"
+
+      - uses: ./.gitea/actions/build-jobs
+
+      # A slot of the host (job isolation): its kept folders (the compile cache) and temp folder are this job's alone.
+      - uses: ./.gitea/actions/job-isolation
+
+      - uses: ./.gitea/actions/setup-rust
+
+      - name: Build and publish the tool for this runner
+        env:
+          PUBLISH_TOKEN: ${{ secrets.DEV_TOOL_PUBLISH_TOKEN }}
+        run: bash conformance/ci/dev-tool-publish.sh
+
+      - uses: ./.gitea/actions/job-isolation
+        if: always()
+        with:
+          mode: release
+
+  publish-macos:
+    name: publish (macos-latest)
+    # A manual run can leave this leg out while the macOS runner is busy (macos: false).
+    if: ${{ github.event.inputs.macos != 'false' }}
+    runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      PADDOCK_DEV_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
 
       - uses: ./.gitea/actions/build-jobs
 
