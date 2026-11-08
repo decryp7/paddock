@@ -375,6 +375,10 @@ cmd_acquire() {
   read -r slot token <<< "$said"
   [[ "$slot" =~ ^s[1-9][0-9]*$ ]] && [ -n "$token" ] || die "paddock-dev answered '$said', not a slot and a token"
   export_slot "$out" "$slot" "$token" "$temp"
+  # Pin the tool this job started with. The wrapper's hash covers files a job writes itself (the paddock-dev job's
+  # tools/paddock-dev/.cargo/ci.toml), so at the end the release would want another build, with the job's temp folder already
+  # gone (sccache then fails); the pinned binary needs none.
+  if bin="$(dev_tool --print-binary 2>/dev/null)" && [ -n "$bin" ]; then echo "PADDOCK_DEV=$bin" >> "$out"; fi
   echo "job-isolation: slot $slot (kept folders end in -$slot); temp folders in $temp" >&2
   sweep "$home"
   floor="${PADDOCK_CI_MIN_FREE_GB:-30}"

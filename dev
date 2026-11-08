@@ -164,6 +164,7 @@ fi
 
 if [ -n "$dirty" ]; then
   build "${PADDOCK_DEV_TARGET_DIR:-$tool/target}" dirty
+  if [ "${1:-}" = --print-binary ]; then printf '%s\n' "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe"; exit 0; fi
   exec "${PADDOCK_DEV_TARGET_DIR:-$tool/target}/release/paddock-dev$exe" "$@"
 fi
 
@@ -215,4 +216,7 @@ if [ ! -x "$cache/$name" ]; then
 fi
 # A hit counts as use: the prune keeps the newest-used tools, so main's hash outlives a stream of branch hashes.
 touch "$cache" 2>/dev/null || true
+# `--print-binary`: where the tool is (built if need be), without running it. job-isolation pins it for the whole job: the hash
+# covers files the job itself writes (tools/paddock-dev/.cargo/ci.toml), so at the job's end ./dev would want another build.
+if [ "${1:-}" = --print-binary ]; then printf '%s\n' "$cache/$name"; exit 0; fi
 exec "$cache/$name" "$@"

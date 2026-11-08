@@ -23,6 +23,7 @@ const read = (p) => readFileSync(p, 'utf8');
 const FAKE_DEV = `#!/usr/bin/env bash
 set -u
 echo "$*" >> "$FAKE_DEV_LOG"
+[ "$1" = --print-binary ] && { echo "$0"; exit 0; }
 [ "$1 $2" = "ci slot" ] || exit 2
 cmd=$3; shift 3
 max= owner= root= slot= token= run=()
@@ -541,4 +542,13 @@ test('the tables read the same with Windows line ends (a checkout there turns ke
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('acquire pins the tool the job started with, so release never rebuilds it (the job\'s own .cargo/ci.toml changes the wrapper\'s hash)', () => {
+  const h = host();
+  const a = h.job('c'.repeat(16));
+  const r = a.exec(['acquire']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(a.exported().PADDOCK_DEV, 'the env lines name the tool binary for the later steps and the release');
+  assert.match(h.log(), /--print-binary/);
 });

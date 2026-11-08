@@ -753,3 +753,38 @@ fn a_cached_tool_touched_in_the_last_minutes_is_never_pruned() {
         "a job on the same mount may be about to run them"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn print_binary_names_the_cached_tool_without_running_it() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
+    let (code, out, err) = {
+        let mut cmd = Command::new("sh");
+        write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(0));
+        let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+        cmd.arg(f.root().join("dev"))
+            .arg("--print-binary")
+            .current_dir(f.root())
+            .env("PATH", path)
+            .env("PADDOCK_DEV_HOME", &home)
+            .env("PADDOCK_DEV_TARGET_DIR", f.cargo_home.path().join("target"))
+            .env("CARGO_HOME", f.cargo_home.path())
+            .env("RUSTC", rustc);
+        let o = cmd.output().unwrap();
+        (
+            o.status.code().unwrap(),
+            String::from_utf8_lossy(&o.stdout).trim().to_string(),
+            String::from_utf8_lossy(&o.stderr).into_owned(),
+        )
+    };
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(
+        out,
+        home.join("bin").join(&hash).join("paddock-dev-test-host").display().to_string()
+    );
+    assert!(Path::new(&out).exists(), "built and cached, not run");
+}
