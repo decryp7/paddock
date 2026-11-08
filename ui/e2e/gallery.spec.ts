@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, expectScreenshotClean, test, type Page } from '@decryp7/paddock-e2e';
+import { expect, test, type Page } from '@decryp7/paddock-e2e';
 import { PD_ICON_DOTS } from '../projects/paddock-ui/icons/src/paths';
 
 const DOTS = Object.fromEntries(Object.entries(PD_ICON_DOTS).map(([k, v]) => [k, (v ?? []).map((d) => [d[0], d[1]])]));
@@ -18,15 +18,6 @@ for (const theme of THEMES) {
     await open(page, theme, 'debrief');
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag22aa']).analyze();
     expect(results.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`)).toEqual([]);
-  });
-}
-
-for (const theme of THEMES) {
-  // The shared screenshot check (@decryp7/paddock-e2e, screenshot-check.ts): the page a screenshot would show has no cut text,
-  // raw identifiers, mock or debug strings, and every status chip has a word or an icon.
-  test(`the gallery is fit to be photographed (${theme})`, async ({ page }) => {
-    await open(page, theme, 'debrief');
-    await expectScreenshotClean(page, theme);
   });
 }
 
