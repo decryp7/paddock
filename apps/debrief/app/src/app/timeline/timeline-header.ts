@@ -29,6 +29,9 @@ import { isMac } from '../extensions/keybinding';
   host: { style: 'display: contents' },
   template: `
     <div class="head">
+      <!-- Left: whatever can change width (title, headline counts, hint, loading). It takes the free space and clips, so
+           nothing in it can move the controls on the right. -->
+      <div class="lead">
       @if (renaming()) {
         <input class="input title-input" debriefAutoFocus aria-label="Timeline title" i18n-aria-label="@@timeline.panel.titleAria" maxlength="80" [value]="src.title()" (keydown)="renameKey($event)" (blur)="commitRename($event)" />
       } @else {
@@ -48,7 +51,9 @@ import { isMac } from '../extensions/keybinding';
       <span class="loading-slot">
         @if (src.loading()) { <span class="spinner" role="status" aria-label="Loading" i18n-aria-label="@@timeline.panel.loading"></span> }
       </span>
-      <span class="spacer"></span>
+      </div>
+      <!-- Right: anchored to the pane's edge, never shrunk, so a chip or input that grows only pushes the lead. -->
+      <div class="tools">
       @if (src.main) { <debrief-live-window-controls /> }
       <div class="zoom" role="group" debriefRoving="button" rovingAxis="horizontal" aria-label="Zoom" i18n-aria-label="@@timeline.panel.zoom">
         <button class="icon-btn" title="Previous range (Alt+←)" i18n-title="@@timeline.panel.back.title" aria-label="Previous range" i18n-aria-label="@@timeline.panel.back.aria" [disabled]="!zoom.canBack()" (click)="zoom.back()">←</button>
@@ -58,6 +63,7 @@ import { isMac } from '../extensions/keybinding';
         <button class="btn" title="Fit all (double-click)" i18n-title="@@timeline.panel.fit.title" [disabled]="!zoom.isZoomed()" (click)="zoom.fit()" i18n="@@timeline.panel.fit"><debrief-icon name="zoomOut" [size]="13" /> Fit</button>
       </div>
       <button class="icon-btn" type="button" title="Timeline menu" i18n-title="@@timeline.panel.menu.title" aria-label="Timeline menu" i18n-aria-label="@@timeline.panel.menu.aria" aria-haspopup="menu" (click)="openMenu($event)"><debrief-icon name="chevronDown" [size]="13" /></button>
+      </div>
     </div>
     @if (inst; as s) {
       <div class="config" role="group" aria-label="Timeline settings" i18n-aria-label="@@timeline.config.aria">
@@ -99,10 +105,12 @@ import { isMac } from '../extensions/keybinding';
     }
   `,
   styles: `
-    .head { height: 32px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; }
+    .head { --loading-size: 10px; height: 32px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 14px; }
+    .lead { flex: 1 1 0; min-width: 0; overflow: hidden; display: flex; align-items: center; gap: 12px; }
+    .tools { flex: none; display: flex; align-items: center; gap: 12px; }
     .hint-help { flex: none; margin-left: -8px; }
     .hint { min-width: 0; font-size: var(--fs-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .section-title { white-space: nowrap; }
+    .section-title { white-space: nowrap; flex: none; }
     .title-input { width: 200px; height: 24px; padding: 0 6px; }
     .unlinked { flex: none; font-size: var(--fs-xs); padding: 0 6px; border-radius: 8px; border: 1px dashed var(--border-3); color: var(--text-2); }
     .config { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 0 14px 6px; font-size: var(--fs-sm); }
@@ -110,8 +118,8 @@ import { isMac } from '../extensions/keybinding';
     .config .select { height: 24px; }
     .config .ql { flex: 1 1 260px; min-width: 160px; height: 24px; padding: 0 6px; }
     .spacer { flex: 1; }
-    .loading-slot { flex: none; width: 10px; height: 10px; }
-    .spinner { display: block; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--border-3); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex: none; }
+    .loading-slot { flex: none; width: var(--loading-size); height: var(--loading-size); }
+    .spinner { display: block; width: var(--loading-size); height: var(--loading-size); border-radius: 50%; border: 2px solid var(--border-3); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex: none; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .zoom { display: flex; align-items: center; gap: 2px; }
     .zoom .icon-btn:disabled { opacity: 0.35; cursor: default; }

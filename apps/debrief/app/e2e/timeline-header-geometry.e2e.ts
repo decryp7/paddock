@@ -1,0 +1,59 @@
+import { expect, Page, test } from '@playwright/test';
+import { openAppWith } from './mock-url';
+
+/** Live tail at 40 events/s: the timeline reloads (loading indicator), the health headline counts, the hint changes. */
+const LIVE = '?mockLive=1&mockLiveRate=40&mockLiveRotateMs=0&mockLiveAlertMs=0';
+const BUTTONS = ['Zoom in', 'Zoom out', 'Timeline menu'] as const;
+
+/**
+ * The distinct left edges each button had on every animation frame for `ms`. A button that is clicked must stay put
+ * between the mouse press and its release, so each must have exactly one.
+ */
+function edgesOver(page: Page, ms: number): Promise<Record<string, number[]>> {
+  return page.evaluate(
+    ([names, span]) =>
+      new Promise<Record<string, number[]>>((resolve) => {
+        const seen: Record<string, Set<number>> = Object.fromEntries(names.map((n) => [n, new Set<number>()]));
+        const began = performance.now();
+        const frame = () => {
+          for (const n of names) {
+            const box = document.querySelector(`debrief-timeline-panel [aria-label="${n}"]`)?.getBoundingClientRect();
+            if (box) seen[n]?.add(Math.round(box.left));
+          }
+          if (performance.now() - began < span) requestAnimationFrame(frame);
+          else resolve(Object.fromEntries(names.map((n) => [n, [...(seen[n] ?? [])]])));
+        };
+        requestAnimationFrame(frame);
+      }),
+    [[...BUTTONS], ms] as const,
+  );
+}
+
+for (const width of [1100, 760]) {
+  test.describe(`timeline header geometry at ${width} px`, () => {
+    test.use({ viewport: { width, height: 800 } });
+
+    test('the zoom and menu buttons stay put while live data loads, counts and pauses following', async ({ page }) => {
+      await openAppWith(page, LIVE);
+      await page.locator('debrief-status-bar').getByRole('button', { name: 'Live tail', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Live window' }).selectOption('5m');
+      await expect(page.getByTestId('follow-toggle')).toBeVisible();
+
+      const following = await edgesOver(page, 4_000);
+      for (const n of BUTTONS) expect(following[n], `${n} while following`).toHaveLength(1);
+
+      // The first zoom pauses following and the chip becomes "Paused — Resume following", about 150 px wider.
+      const before = following['Zoom in']?.[0];
+      await page.locator('debrief-timeline-panel').getByRole('button', { name: 'Zoom in' }).click();
+      await expect(page.getByTestId('resume-following')).toBeVisible();
+      const paused = await edgesOver(page, 1_500);
+      for (const n of BUTTONS) expect(paused[n], `${n} while paused`).toEqual(following[n]);
+      expect(paused['Zoom in']?.[0]).toBe(before);
+
+      // The menu button stays inside the panel (an overfull row must not push it past the edge).
+      const panel = await page.locator('debrief-timeline-panel').boundingBox();
+      const menu = await page.locator('debrief-timeline-panel').getByRole('button', { name: 'Timeline menu' }).boundingBox();
+      expect(menu && panel && menu.x + menu.width <= panel.x + panel.width).toBe(true);
+    });
+  });
+}
