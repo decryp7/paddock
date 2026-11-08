@@ -30,7 +30,10 @@ const NO_ANSWER = (): string => $localize`:@@pd.startup.recovery-no-answer:The a
 export const RecoveryStore = signalStore(
   { protectedState: true },
   withState<RecoveryState>({ report: null, acting: null }),
-  withRequestStatus(),
+  withRequestStatus({
+    retry: false,
+    why: 'asked once at start, and a failed question shows nothing (a window that cannot be asked is not in a crash); the status also carries the notice actions',
+  }),
   withComputed((store) => ({
     /** This run is in safe mode (the title bar shows it). */
     safeMode: computed(() => store.report()?.safeMode ?? false),

@@ -1,7 +1,7 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { toCommandError, type CommandError } from '@decryp7/paddock-ui/ipc';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { StorageClearResult, StorageEvent, StorageTree, StorageUsage } from '../generated/storage';
 import { StorageBackend, type StorageProgress, type Unlisten } from './backend';
 import { clearRequest } from './wire';
@@ -35,7 +35,8 @@ interface StorageState {
  */
 export const StorageStore = signalStore(
   withState<StorageState>({ usage: null, working: null, progress: null, result: null, failure: null, trees: {}, cancelling: false }),
-  withRequestStatus(),
+  // A failed read retries itself; a snapshot event ends the error at once (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ usage }) => ({
     /** The rows of the table. */
     categories: computed(() => usage()?.categories ?? []),
@@ -57,17 +58,21 @@ export const StorageStore = signalStore(
         return false;
       }
     };
+    const reads = store._reads.define({
+      read: () => backend.last(),
+      // Without a measurement yet, measure now (load waits until the scan started).
+      apply: (usage: StorageUsage | null) => {
+        if (usage) patchState(store, { usage });
+        else return start('scan', () => backend.scan());
+        return undefined;
+      },
+      message: (e) => errorMessage(e, $localize`:@@pd.storage.no-usage:What the app keeps could not be read.`),
+      quiet: () => store.usage() !== null,
+    });
     return {
       /** Shows the last measurement if the engine has one, else measures. Also the Retry of a failed ask. */
       async load(): Promise<void> {
-        if (!store.usage()) patchState(store, setLoading());
-        try {
-          const usage = await backend.last();
-          patchState(store, usage ? { usage } : {}, setLoaded());
-          if (!usage) await start('scan', () => backend.scan());
-        } catch (e) {
-          patchState(store, setError(errorMessage(e, $localize`:@@pd.storage.no-usage:What the app keeps could not be read.`)));
-        }
+        await reads.load();
       },
       /** Measures again. */
       scan(): Promise<boolean> {
@@ -112,7 +117,8 @@ export const StorageStore = signalStore(
       _event(event: StorageEvent): void {
         switch (event.state) {
           case 'usage':
-            patchState(store, { usage: event.usage, working: null, progress: null, cancelling: false, trees: {} }, setLoaded());
+            patchState(store, { usage: event.usage, working: null, progress: null, cancelling: false, trees: {} });
+            reads.received();
             break;
           case 'cleared':
             patchState(store, { result: event.result, working: null, progress: null, cancelling: false, usage: null, trees: {} });

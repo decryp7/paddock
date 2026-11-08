@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { AiSnapshot, NextStep } from '../generated/pitwall';
 import { PitwallBackend, type Unlisten } from './backend';
 import { groupCode, pitwallMessage } from './wire';
@@ -27,7 +27,8 @@ interface PitwallState {
  */
 export const PitwallStore = signalStore(
   withState<PitwallState>({ snapshot: null, action: { kind: 'idle' } }),
-  withRequestStatus(),
+  // A failed read retries itself; a snapshot event ends the error at once (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ snapshot, action }) => ({
     /** The state's kind, or `null` before the first answer. */
     kind: computed(() => snapshot()?.state.kind ?? null),
@@ -64,20 +65,23 @@ export const PitwallStore = signalStore(
       try {
         const answer = await call();
         patchState(store, typeof answer === 'boolean' ? { action: { kind: 'idle' } } : { snapshot: answer, action: { kind: 'idle' } });
+        // A snapshot in the reply: Pitwall answers, so a failed read's error ends.
+        if (typeof answer !== 'boolean') reads.received();
       } catch (e) {
         patchState(store, { action: { kind: 'failed', message: pitwallMessage(e, fallback) } });
       }
     };
+    const reads = store._reads.define({
+      read: () => backend.snapshot(),
+      apply: (snapshot: AiSnapshot) => patchState(store, { snapshot }),
+      message: (e) => pitwallMessage(e, $localize`:@@pd.pitwall.no-state:Pitwall's state could not be read.`),
+      // A refresh keeps the last answer on screen; only the first one shows as loading.
+      quiet: () => store.snapshot() !== null,
+    });
     return {
       /** Asks the engine for its state (also the Retry of a failed first load and "Try again"). */
       async load(): Promise<void> {
-        // A refresh keeps the last answer on screen; only the first one shows as loading.
-        if (!store.snapshot()) patchState(store, setLoading());
-        try {
-          patchState(store, { snapshot: await backend.snapshot() }, setLoaded());
-        } catch (e) {
-          patchState(store, setError(pitwallMessage(e, $localize`:@@pd.pitwall.no-state:Pitwall's state could not be read.`)));
-        }
+        await reads.load();
       },
       /** The user chose to connect: the engine starts the pairing and the code appears in the snapshot. */
       connect: () => run('connecting', () => backend.connect(), $localize`:@@pd.pitwall.connect-failed:Pitwall could not be reached to connect.`),
@@ -87,7 +91,8 @@ export const PitwallStore = signalStore(
       useBuiltIn: () => run('switching', () => backend.useBuiltIn(), $localize`:@@pd.pitwall.builtin-failed:The built-in engine could not be switched on.`),
       /** The engine announced a new snapshot. */
       _announced(snapshot: AiSnapshot): void {
-        patchState(store, { snapshot }, setLoaded());
+        patchState(store, { snapshot });
+        reads.received();
       },
       /** The user saw the failure. */
       dismissError(): void {

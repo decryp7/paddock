@@ -43,7 +43,7 @@ export function withLiveFeed<S extends object, D>(config: LiveFeedConfig<S, D>) 
   const start = initialFolded(config.empty);
   return signalStoreFeature(
     withState<LiveFeedState<S>>({ live: start.state, liveSeq: start.seq, liveLink: start.link }),
-    withRequestStatus(),
+    withRequestStatus({ retry: false, why: 'not adopted yet (ADR 0058 rollout step 3): a gap or Retry resyncs, and liveLink shows the link state' }),
     withComputed(({ liveLink }) => ({
       /** The link is up and the state is live. */
       liveConnected: computed(() => liveLink().state === 'connected'),

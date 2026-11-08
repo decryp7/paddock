@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { ServiceCommandError, ServiceStatus, ServiceUpdate } from '../generated/service';
 import { ServiceBackend, type Unlisten } from './backend';
 import { asServiceError, serviceMessage } from './wire';
@@ -31,7 +31,8 @@ interface ServiceState {
  */
 export const ServiceStore = signalStore(
   withState<ServiceState>({ status: null, requested: null, failure: null }),
-  withRequestStatus(),
+  // A failed read retries itself; a snapshot event ends the error at once (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ status, requested, failure }) => {
     const working = computed(() => requested() !== null || status()?.repair?.state === 'working' || status()?.condition === 'repairing');
     return {
@@ -52,15 +53,15 @@ export const ServiceStore = signalStore(
     };
   }),
   withMethods((store, backend = inject(ServiceBackend)) => {
-    const load = async (): Promise<void> => {
+    const reads = store._reads.define({
+      read: () => backend.status(),
+      apply: (status: ServiceStatus) => patchState(store, { status }),
+      message: (e) => serviceMessage(e, $localize`:@@pd.service.no-status:The service could not be asked how it is doing.`),
       // A refresh keeps the status on screen; only the first ask shows as loading.
-      if (!store.status()) patchState(store, setLoading());
-      try {
-        const status = await backend.status();
-        patchState(store, { status }, setLoaded());
-      } catch (e) {
-        patchState(store, setError(serviceMessage(e, $localize`:@@pd.service.no-status:The service could not be asked how it is doing.`)));
-      }
+      quiet: () => store.status() !== null,
+    });
+    const load = async (): Promise<void> => {
+      await reads.load();
     };
     const start = async (action: 'repair' | 'install'): Promise<void> => {
       if (store.working()) return;
@@ -114,7 +115,8 @@ export const ServiceStore = signalStore(
       _update(update: ServiceUpdate): void {
         // Another window may have asked: Retry then runs what fits the status.
         const action = store.requested() ?? (update.status.canInstall ? 'install' : 'repair');
-        patchState(store, { status: update.status, requested: null, failure: update.error ? { action, error: update.error } : null }, setLoaded());
+        patchState(store, { status: update.status, requested: null, failure: update.error ? { action, error: update.error } : null });
+        reads.received();
       },
     };
   }),

@@ -1,5 +1,6 @@
-import { computed } from '@angular/core';
-import { signalStoreFeature, withComputed, withState } from '@ngrx/signals';
+import { computed, DestroyRef, inject } from '@angular/core';
+import { signalStoreFeature, withComputed, withProps, withState } from '@ngrx/signals';
+import { READ_RETRY_CLOCK, readControl, type ReadPolicy } from './read-retry';
 
 /**
  * Where a store's last request is (rule 30): one union, never separate `loading`/`error` flags that can disagree. An
@@ -16,8 +17,15 @@ export interface RequestStatusState {
  * The shared SignalStore feature of every shell and app store that loads something (rule 30): `requestStatus` (starts
  * `'idle'`) plus `isLoading`, `isLoaded` and `requestError` (the message, or null). Change it only from the store's own
  * methods, with `patchState(store, setLoading())`, `setLoaded()` or `setError(message)` (rule 31).
+ *
+ * `policy` is the store's declaration of what happens after a failed read (ADR 0058). `{ retry: true }`: the store runs
+ * its read through the private `_reads` prop (`store._reads.define({ read, apply, message })` in its `withMethods`), which
+ * retries a failed read on its own with backoff and ends an error when an event shows the engine answers again; then
+ * `requestStatus` is changed only through that handle and `setError` is for failures that are not the read. `{ retry:
+ * false, why }`: nothing retries; `why` says why the status is not a read of engine state. `request-status-stores.spec.ts`
+ * checks every declaration against the store's behaviour.
  */
-export function withRequestStatus() {
+export function withRequestStatus(policy: ReadPolicy) {
   return signalStoreFeature(
     withState<RequestStatusState>({ requestStatus: 'idle' }),
     withComputed(({ requestStatus }) => ({
@@ -27,6 +35,9 @@ export function withRequestStatus() {
         const s = requestStatus();
         return typeof s === 'object' ? s.error : null;
       }),
+    })),
+    withProps((store) => ({
+      _reads: readControl(store, policy.retry ? inject(policy.clock ?? READ_RETRY_CLOCK) : null, inject(DestroyRef)),
     })),
   );
 }

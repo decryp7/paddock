@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { AuditRow, McpSettings, McpView } from '../generated/mcp';
 import { McpBackend, type Unlisten } from './backend';
 import { mcpMessage } from './wire';
@@ -27,7 +27,8 @@ interface McpState {
  */
 export const McpStore = signalStore(
   withState<McpState>({ view: null, saveStatus: 'idle', audit: [], auditStatus: 'loading' }),
-  withRequestStatus(),
+  // A failed read of the settings retries itself; an activity event while in error reads them again (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ view, saveStatus, auditStatus }) => ({
     settings: computed(() => view()?.settings ?? null),
     readOnlyTools: computed(() => (view()?.tools ?? []).filter((t) => !t.action)),
@@ -52,12 +53,20 @@ export const McpStore = signalStore(
     auditLoaded: computed(() => auditStatus() === 'loaded'),
   })),
   withMethods((store, backend = inject(McpBackend)) => {
+    const reads = store._reads.define({
+      read: () => backend.get(),
+      apply: (view: McpView) => patchState(store, { view }),
+      message: (e) => mcpMessage(e, $localize`:@@pd.mcp.load-failed:The AI access settings could not be read.`),
+      // A refresh keeps the page on screen; only the first ask shows as loading.
+      quiet: () => store.view() !== null,
+    });
     const change = async (next: (s: McpSettings) => McpSettings): Promise<boolean> => {
       const current = store.settings();
       if (!current) return false;
       patchState(store, { saveStatus: 'saving' });
       try {
-        patchState(store, { view: await backend.save(next(current)), saveStatus: 'idle' }, setLoaded());
+        patchState(store, { view: await backend.save(next(current)), saveStatus: 'idle' });
+        reads.received();
         return true;
       } catch (e) {
         patchState(store, { saveStatus: { error: mcpMessage(e, $localize`:@@pd.mcp.save-failed:The change could not be saved.`) } });
@@ -75,19 +84,14 @@ export const McpStore = signalStore(
     return {
       /** Asks the engine for the settings and the activity log (also the Retry of a failed ask). */
       async load(): Promise<void> {
-        // A refresh keeps the page on screen; only the first ask shows as loading.
-        if (!store.view()) patchState(store, setLoading());
-        try {
-          patchState(store, { view: await backend.get() }, setLoaded());
-        } catch (e) {
-          patchState(store, setError(mcpMessage(e, $localize`:@@pd.mcp.load-failed:The AI access settings could not be read.`)));
-        }
+        await reads.load();
         await loadAudit();
       },
       /** Re-reads the view quietly (after the key dialog issued a key in its own window). */
       async refresh(): Promise<void> {
         try {
           patchState(store, { view: await backend.get() });
+          reads.received();
         } catch {
           // The view on screen stays; a failed refresh is not worth hiding it.
         }
@@ -111,6 +115,7 @@ export const McpStore = signalStore(
         patchState(store, { saveStatus: 'saving' });
         try {
           patchState(store, { view: await backend.revokeKey(id), saveStatus: 'idle' });
+          reads.received();
           return true;
         } catch (e) {
           patchState(store, { saveStatus: { error: mcpMessage(e, $localize`:@@pd.mcp.revoke-failed:The key could not be revoked.`) } });
@@ -132,8 +137,9 @@ export const McpStore = signalStore(
       dismissSaveError(): void {
         patchState(store, { saveStatus: 'idle' });
       },
-      /** An event from the engine: the log changed, read it again. */
+      /** An event from the engine: the log changed, read it again (and the settings, while they are in error). */
       _event(): void {
+        reads.event();
         void loadAudit();
       },
     };

@@ -1,7 +1,7 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { ContributionRegistry } from '@decryp7/paddock-ui/shell';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import { ServiceHealthBackend, type Unlisten } from './backends';
 import { EMPTY_HEALTH, isServing, type ServiceHealth, type ServiceHealthSnapshot } from './wire.types';
 
@@ -24,7 +24,8 @@ const FALLBACK = (): string => $localize`:@@pd.health.no-answer:The service-heal
 export const ServiceHealthStore = signalStore(
   { protectedState: true },
   withState<HealthState>({ snapshot: EMPTY_HEALTH, detailsRequested: 0, repairErrors: {} }),
-  withRequestStatus(),
+  // A failed read retries itself; a snapshot (event or repair reply) ends the error at once (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed((store, registry = inject(ContributionRegistry, { optional: true })) => ({
     /**
      * Every service as the engine reports it, named by the app's `defineHealthService` label when it registered one: that
@@ -45,9 +46,15 @@ export const ServiceHealthStore = signalStore(
   })),
   withMethods((store, backend = inject(ServiceHealthBackend)) => {
     // Events and answers can cross: a window keeps the newest revision.
-    const apply = (next: ServiceHealthSnapshot): void => {
+    const take = (next: ServiceHealthSnapshot): void => {
       if (next.revision >= store.snapshot().revision) patchState(store, { snapshot: next });
     };
+    /** A whole snapshot from an event or a repair's reply: the engine answers, so a failed read's error ends. */
+    const apply = (next: ServiceHealthSnapshot): void => {
+      take(next);
+      reads.received();
+    };
+    const reads = store._reads.define({ read: () => backend.snapshot(), apply: take, message: (e) => errorMessage(e, FALLBACK()) });
     return {
       /** The service now, or null while the window has not heard of it. */
       health(service: string): ServiceHealth | null {
@@ -63,14 +70,7 @@ export const ServiceHealthStore = signalStore(
       apply,
       /** Asks the engine for every service's state (when the window starts, and to try again). */
       async load(): Promise<void> {
-        patchState(store, setLoading());
-        try {
-          const next = await backend.snapshot();
-          apply(next);
-          patchState(store, setLoaded());
-        } catch (e) {
-          patchState(store, setError(errorMessage(e, FALLBACK())));
-        }
+        await reads.load();
       },
       /** The Repair button: the shell repairs the service (never through the service); its state follows by event. */
       async repair(service: string): Promise<void> {

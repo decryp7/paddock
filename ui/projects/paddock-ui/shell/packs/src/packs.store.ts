@@ -1,7 +1,7 @@
 import { inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
 import { computed } from '@angular/core';
-import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { KindView, PacksView } from '../generated/packs';
 import { PacksBackend, type Unlisten } from './backend';
 import { packsMessage } from './wire';
@@ -23,38 +23,44 @@ interface PacksState {
  */
 export const PacksStore = signalStore(
   withState<PacksState>({ view: null, reloading: false, reloadError: null }),
-  withRequestStatus(),
+  // A failed read retries itself; a snapshot event ends the error at once (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ view }) => ({
     /** The kinds the app registered. */
     kinds: computed<readonly KindView[]>(() => view()?.kinds ?? []),
     /** The number of refused packs across the kinds. */
     problemCount: computed(() => (view()?.kinds ?? []).reduce((n, k) => n + k.problems.length, 0)),
   })),
-  withMethods((store, backend = inject(PacksBackend)) => ({
-    /** Asks the engine what is in use (also the Retry of a failed ask). */
-    async load(): Promise<void> {
-      if (!store.view()) patchState(store, setLoading());
-      try {
-        patchState(store, { view: await backend.status() }, setLoaded());
-      } catch (e) {
-        patchState(store, setError(packsMessage(e, $localize`:@@pd.packs.no-status:The packs could not be listed.`)));
-      }
-    },
-    /** Reads the pack folders again. */
-    async reload(): Promise<void> {
-      if (store.reloading()) return;
-      patchState(store, { reloading: true, reloadError: null });
-      try {
-        patchState(store, { view: await backend.reload(), reloading: false }, setLoaded());
-      } catch (e) {
-        patchState(store, { reloading: false, reloadError: packsMessage(e, $localize`:@@pd.packs.reload-failed:The packs could not be reloaded.`) });
-      }
-    },
-    /** An update from the engine's event. */
-    _update(view: PacksView): void {
-      patchState(store, { view }, setLoaded());
-    },
-  })),
+  withMethods((store, backend = inject(PacksBackend)) => {
+    const reads = store._reads.define({
+      read: () => backend.status(),
+      apply: (view: PacksView) => patchState(store, { view }),
+      message: (e) => packsMessage(e, $localize`:@@pd.packs.no-status:The packs could not be listed.`),
+      quiet: () => store.view() !== null,
+    });
+    return {
+      /** Asks the engine what is in use (also the Retry of a failed ask). */
+      async load(): Promise<void> {
+        await reads.load();
+      },
+      /** Reads the pack folders again. */
+      async reload(): Promise<void> {
+        if (store.reloading()) return;
+        patchState(store, { reloading: true, reloadError: null });
+        try {
+          patchState(store, { view: await backend.reload(), reloading: false });
+          reads.received();
+        } catch (e) {
+          patchState(store, { reloading: false, reloadError: packsMessage(e, $localize`:@@pd.packs.reload-failed:The packs could not be reloaded.`) });
+        }
+      },
+      /** An update from the engine's event. */
+      _update(view: PacksView): void {
+        patchState(store, { view });
+        reads.received();
+      },
+    };
+  }),
   withHooks((store, backend = inject(PacksBackend)) => {
     let off: Unlisten | undefined;
     let destroyed = false;

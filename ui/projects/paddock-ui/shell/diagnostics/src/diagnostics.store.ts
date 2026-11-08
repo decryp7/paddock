@@ -1,6 +1,6 @@
 import { computed, inject } from '@angular/core';
 import { patchState, signalStore, withComputed, withHooks, withMethods, withState } from '@ngrx/signals';
-import { errorMessage, injectTrackLoad, setError, setLoaded, setLoading, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
+import { errorMessage, injectTrackLoad, withRequestStatus } from '@decryp7/paddock-ui/shell/store';
 import type { PreviewReply, RedactionCounts, Saved, SaveOutcome } from '../generated/diagnostics';
 import { DiagnosticsBackend, type Unlisten } from './backend';
 import { asDiagError, diagMessage } from './wire';
@@ -47,7 +47,8 @@ export function redactionSummary(c: RedactionCounts): string[] {
  */
 export const DiagnosticsStore = signalStore(
   withState<DiagnosticsState>({ reply: null, description: '', saveState: { kind: 'idle' } }),
-  withRequestStatus(),
+  // A failed collection retries itself; a save outcome while in error collects again (ADR 0058).
+  withRequestStatus({ retry: true }),
   withComputed(({ reply, saveState }) => ({
     files: computed(() => reply()?.preview.files ?? []),
     notes: computed(() => reply()?.preview.notes ?? []),
@@ -56,19 +57,18 @@ export const DiagnosticsStore = signalStore(
     saving: computed(() => saveState().kind === 'saving'),
   })),
   withMethods((store, backend = inject(DiagnosticsBackend)) => {
-    const load = async (token: string | null): Promise<boolean> => {
-      // Reads before the first await (rule 29).
-      const description = store.description();
+    // The description is read before the first await (rule 29): `read` runs synchronously up to the backend call.
+    const reads = store._reads.define({
+      read: () => backend.preview(null, store.description()),
+      apply: (reply: PreviewReply) => patchState(store, { reply }),
+      message: (e) => diagMessage(e, $localize`:@@pd.diag.no-preview:The report could not be put together.`),
       // A refresh keeps the list on screen; only the first collection shows as loading.
-      if (!store.reply()) patchState(store, setLoading());
-      try {
-        const reply = await backend.preview(token, description);
-        patchState(store, { reply }, setLoaded());
-        return true;
-      } catch (e) {
-        patchState(store, setError(diagMessage(e, $localize`:@@pd.diag.no-preview:The report could not be put together.`)));
-        return false;
-      }
+      quiet: () => store.reply() !== null,
+    });
+    /** Collects (`token` null) or assembles the report `token` names again with the description. */
+    const load = (token: string | null): Promise<boolean> => {
+      const description = store.description();
+      return reads.load(() => backend.preview(token, description));
     };
     return {
       /** Collects the report (also the Retry of a failed one, and the refresh after the engine says the preview is out of date). */
@@ -107,6 +107,8 @@ export const DiagnosticsStore = signalStore(
       },
       /** An outcome from the engine's event. */
       _outcome(o: SaveOutcome): void {
+        // The engine answers again: while the report is in error, collect it again.
+        reads.event();
         switch (o.state) {
           case 'saved': {
             const { state: _state, ...saved } = o;
