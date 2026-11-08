@@ -243,8 +243,10 @@ export async function winHung() {
     suspend: async () => { const out = ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtSuspendProcess((Get-Process -Id $i).Handle) }; $ids.Count`, { admin: true }); if (!(Number(out.trim().split('\\n').at(-1)) > 0)) throw new Error(`no WebView2 renderer of dyno-app was found (dyno processes: ${ssh("Get-CimInstance Win32_Process | Where-Object { $_.Name -match '^dyno' } | ForEach-Object { $_.Name + ' pid=' + $_.ProcessId + ' session=' + $_.SessionId + ' ' + $_.CommandLine }", { admin: true }).replace(/\s*\n\s*/g, ' | ').slice(0, 500) || 'none'}; WebView2 processes: ${ssh(WEBVIEW_LISTING_PS, { admin: true }).replace(/\s*\n\s*/g, ' | ').slice(0, 600) || 'none'})`); },
     resume: async () => { ssh(`${NT}${renderers}foreach ($i in $ids) { [void][N.P]::NtResumeProcess((Get-Process -Id $i).Handle) }`, { admin: true }); },
     // Only the watchdog's lines, filtered in the guest: reading the whole log three times over SSH took longer than the watchdog's questions come (0ad round 6: the line was in the log, the poll never returned it).
-    logLines: async () => ssh(`Get-ChildItem -Path "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | Sort-Object Name | Select-Object -Last 1 | ForEach-Object { Select-String -Path $_.FullName -Pattern 'stopped responding|has not answered for a long time|Not-responding question|responds again' | ForEach-Object { $_.Line } }`, { ms: 120_000 }).split('\\n'),
+    logLines: async () => ssh(`Get-ChildItem -Path "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | Sort-Object Name | Select-Object -Last 3 | ForEach-Object { Select-String -Path $_.FullName -Pattern 'stopped responding|has not answered for a long time|Not-responding question|responds again' | ForEach-Object { $_.Line } }`, { ms: 120_000 }).split('\\n'),
     questions: async (phase) => { const n = (await actor.send('windows').catch(() => '')).split('\\n').filter((l) => /not responding|Keep Waiting/i.test(l)).length; return phase === 'open' && n === 0 ? null : n; },
+    // After the run: the whole filtered log once more, so a line the polls missed is named in the evidence.
+    finalLines: async () => ssh(`Get-ChildItem -Path "$env:LOCALAPPDATA\\Dyno","$env:APPDATA\\Dyno" -Recurse -Depth 3 -Filter 'dyno.*.log' -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'dyno-agent*' } | ForEach-Object { Select-String -Path $_.FullName -Pattern 'has not answered for a long time' | ForEach-Object { $_.Line } }`, { ms: 120_000 }).split('\\n'),
     keepWaiting: async () => false, shot: async (name) => actor.shot(name),
   }, ROW_TITLES.hungPage);
   await actor.send('quit', 5000).catch(() => {});
@@ -262,11 +264,16 @@ export async function winQuitStop() {
     trigger: async () => {
       // The hidden-start row before this left a Dyno without the DevTools port running; a launch would hand over to it. Start a fresh one with the port.
       ssh('Get-Process dyno-app,dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(4000);
-      launch(); await sleep(25_000);
+      launch();
       const t = tunnel();
       try {
-        const browser = await connect();
-        const main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+        // Condition wait (up to 120 s) for the DevTools port and the app's main page, not a fixed 25 s (0ad round 7: no page yet on a loaded VM, "reading 'evaluate'" of undefined).
+        let browser = null; let main = null;
+        for (let i = 0; i < 40 && !main; i++) {
+          await sleep(3000);
+          try { browser = await connect(); main = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id=') && p.url() !== 'about:blank') ?? null; } catch { main = null; }
+        }
+        if (!main) throw new Error('the app\'s main page did not appear on the DevTools port within 120 s');
         const clicked = await main.evaluate(async () => {
           const items = () => [...document.querySelectorAll('[role=menuitem]')];
           if (!items().some((e) => e.textContent.trim().startsWith('Quit and stop'))) { [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'File')?.click(); await new Promise((r) => setTimeout(r, 600)); }

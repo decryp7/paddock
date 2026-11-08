@@ -184,8 +184,11 @@ export async function helperOff(browser) {
   let gone = false;
   for (let i = 0; i < 30 && !gone; i++) { await sleep(3000); gone = ssh('if (Get-Service DynoHelper -ErrorAction SilentlyContinue) { "present" } else { "gone" }', { admin: true }) === 'gone'; }
   checks.push({ ok: gone, detail: gone ? 'the DynoHelper service is removed' : 'the DynoHelper service is still there 90 s after Turn off' });
-  const folder = ssh(`Test-Path "${HELPER}"`, { admin: true });
-  checks.push({ ok: folder === 'False', detail: folder === 'False' ? 'the helper data folder is removed' : 'the helper data folder remains after Turn off' });
+  // The folder goes after the service (the uninstall removes the service, then its data): a condition wait of up to 40 s, and what is left if it stays.
+  let folder = ''; let waited = 0;
+  for (let i = 0; i < 20; i++) { folder = ssh(`Test-Path "${HELPER}"`, { admin: true }); if (folder === 'False') break; await sleep(2000); waited = (i + 1) * 2; }
+  const left = folder === 'False' ? '' : ssh(`Get-ChildItem "${HELPER}" -Recurse -Force -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object { $_.FullName + ' ' + $_.Length }`, { admin: true }).replace(/\n/g, ' | ');
+  checks.push({ ok: folder === 'False', detail: folder === 'False' ? `the helper data folder is removed${waited ? ` (${waited} s after the service)` : ''}` : `the helper data folder still exists 40 s after the service was removed: ${left.slice(0, 400)}` });
   return result('Windows: admin helper Turn off removes the service', checks, [], 'service and folder removed');
 }
 
@@ -372,7 +375,8 @@ export async function winMcpStep() {
     os: 'windows', dyno: 'C:\\Program Files\\Dyno\\dyno.exe', sh,
     configDir: async () => ssh('foreach ($d in "$env:LOCALAPPDATA\\Dyno", "$env:APPDATA\\Dyno") { if (Test-Path "$d\\settings.json") { $d; break } }').trim() || null,
     stopApp: async () => { ssh('Get-Process dyno-app -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(3000); }, startApp,
-    killAgent: async () => { ssh('Get-Process dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force'); },
+    // The app supervises its agent and starts a new one within seconds, so the app is ended first: the call "with the agent gone" must find no agent (0ad round 7: a respawned agent, "not tested").
+    killAgent: async () => { ssh('Get-Process dyno-app -ErrorAction SilentlyContinue | Stop-Process -Force; Get-Process dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(2000); },
     agentAlive: async () => ssh('[bool](Get-Process dyno-agent -ErrorAction SilentlyContinue)') === 'True',
     quitApp: async () => { ssh('Get-Process dyno-app -ErrorAction SilentlyContinue | Stop-Process -Force'); await sleep(3000); },
     pidAlive: async (pid) => ssh(`[bool](Get-Process -Id ${pid} -ErrorAction SilentlyContinue)`) === 'True',

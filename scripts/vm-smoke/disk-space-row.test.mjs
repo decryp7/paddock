@@ -74,3 +74,10 @@ test('the Windows write is fresh random data per megabyte and flushed', () => {
   assert.match(c, /for\(\$i=0;\$i -lt 1000;\$i\+\+\)\{\$r\.NextBytes\(\$b\);/);
   assert.match(c, /Flush\(\$true\)/);
 });
+
+test('the delete is judged against the OS figure at the same moment', () => {
+  const f = { ...base, osBaseline: 50 * GB, osAfterWrite: 49 * GB, afterWriteFree: 49 * GB, afterDeleteFree: 49.6 * GB, deleteSecs: 20 };
+  assert.ok(judgeDisk({ ...f, osBeforeDelete: 49 * GB, osAfterDelete: 49.6 * GB }).every((c) => c.ok), 'Dyno followed the OS, which gave back only 0.6 GB');
+  assert.ok(judgeDisk({ ...f, osBeforeDelete: 49 * GB, osAfterDelete: 50 * GB }).some((c) => !c.ok && !c.kind), 'the OS gave back 1 GB, Dyno only 0.6');
+  assert.ok(judgeDisk({ ...f, osBeforeDelete: 49 * GB, osAfterDelete: 49.01 * GB }).some((c) => c.kind === 'check'), 'the OS figure did not rise: a broken control');
+});

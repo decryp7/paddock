@@ -194,6 +194,7 @@ $d = if (Test-Path $sf) { Get-Content $sf -Raw | ConvertFrom-Json } else { [pscu
 if (-not $d.power) { $d | Add-Member -NotePropertyName power -NotePropertyValue ([pscustomobject]@{}) -Force }
 $rule = [pscustomobject]@{ enabled = $true; action = 'sleep'; afterSecs = 60; countdownSecs = 90; acOnly = $false; exceptions = [pscustomobject]@{ audio = $true; otherStayAwake = $false; fullScreen = $false; cpuPct = $null; diskBytesPerS = $null; netBytesPerS = $null; programs = @() } }
 $d.power | Add-Member -NotePropertyName idle -NotePropertyValue $rule -Force
+$d.power | Add-Member -NotePropertyName keepAwake -NotePropertyValue ([pscustomobject]@{ enabled = $true; trayItem = $true }) -Force   # the tray menu's Keep awake submenu is off by default
 Write-Json $sf $d
 Start-App -Cdp; $r = Ready; Check $s ([bool]$r) 'Dyno started with the idle rule'
 [void]$s.evidence.Add('settings.json power section as written: ' + (Get-Content $sf -Raw | ConvertFrom-Json | Select-Object -ExpandProperty power | ConvertTo-Json -Depth 6 -Compress))

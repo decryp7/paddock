@@ -61,7 +61,8 @@ export function judgeHung(f) {
 export async function hungPageStep(g, title) {
   const events = [];
   const seen = new Set();
-  const poll = async () => { for (const l of await g.logLines()) { const k = eventOf(l); if (k && !seen.has(l)) { seen.add(l); events.push({ t: g.now(), kind: k }); } } };
+  let polls = 0, lastLines = [];
+  const poll = async () => { polls++; lastLines = await g.logLines(); for (const l of lastLines) { const k = eventOf(l); if (k && !seen.has(l)) { seen.add(l); events.push({ t: g.now(), kind: k }); } } };
   await poll(); // lines from before the stop are not this stop's
   events.length = 0;
   const suspendedAt = g.now();
@@ -81,5 +82,7 @@ export async function hungPageStep(g, title) {
   }
   let resumedAt = null, questionsAfterResume = null;
   try { await g.resume(); resumedAt = g.now(); for (let i = 0; i < 10 && !events.some((e) => e.kind === 'recovered' && e.t >= resumedAt); i++) { await g.sleep(3000); await poll(); } await g.sleep(2000); questionsAfterResume = await g.questions('resumed'); } catch { /* reported by the judge */ }
-  return makeResult(title, judgeHung({ suspendedAt, resumedAt, events, questionsWhileOpen, questionsAfterResume, keepWaitingAt, secondAskAt }), shot ? [`screenshot: ${shot}`] : [], 'one question about 60 s after the stop, Keep Waiting doubled the wait, it cleared on resume');
+  const lateAsk = (g.finalLines ? await g.finalLines() : []).filter((l) => eventOf(l) === 'asked');
+  const diag = [`polls: ${polls}; last poll returned ${lastLines.length} line(s)`, ...(lateAsk.length && !events.some((e) => e.kind === 'asked') ? [`the log DOES hold an asking line the polls did not return: ${lateAsk[0].slice(0, 160)}`] : [])];
+  return makeResult(title, judgeHung({ suspendedAt, resumedAt, events, questionsWhileOpen, questionsAfterResume, keepWaitingAt, secondAskAt }), [...(shot ? [`screenshot: ${shot}`] : []), ...diag], 'one question about 60 s after the stop, Keep Waiting doubled the wait, it cleared on resume');
 }

@@ -60,7 +60,13 @@ export function judgeDisk(f) {
   } else checks.push(chk(false, 'Dyno\'s free figure was not read after the write', 'check'));
   if (Number.isFinite(f.afterDeleteFree)) {
     const rise = f.afterDeleteFree - (f.afterWriteFree ?? f.baselineFree);
-    checks.push(ctl(chk(rise >= w * 0.9 && f.deleteSecs <= REFRESH_LIMIT_S, rise >= w * 0.9 ? `after deleting the file the figure rose by ${rise} bytes after ${f.deleteSecs} s (limit 60 s plus 5 s of polling slack)` : `after deleting the file the figure rose by only ${rise} bytes in ${f.deleteSecs} s`)));
+    // The OS's own figure at the same moment is the measure when it was read (0ad round 7: two files of 1 GB made the OS figure fall 1.08 GB and a delete gave back 0.58 GB: Dyno
+    // followed the OS, which does not return a delete at once): Dyno must show 90 % of what the OS shows rose, and the OS must have risen at all (else the control is broken).
+    const osRise = Number.isFinite(f.osAfterDelete) && Number.isFinite(f.osBeforeDelete) ? f.osAfterDelete - f.osBeforeDelete : NaN;
+    if (Number.isFinite(osRise)) {
+      if (osRise < w * 0.1) checks.push(chk(false, `control: the OS's own figure rose by only ${osRise} bytes after the delete, so Dyno's rise (${rise} bytes) cannot be judged`, 'check'));
+      else checks.push(chk(rise >= osRise * 0.9 && f.deleteSecs <= REFRESH_LIMIT_S, rise >= osRise * 0.9 ? `after deleting the file(s) Dyno's figure rose by ${rise} bytes after ${f.deleteSecs} s; the OS's own figure rose by ${osRise} bytes (Dyno follows it, limit 60 s plus 5 s of polling slack)` : `after deleting the file(s) Dyno's figure rose by only ${rise} bytes in ${f.deleteSecs} s while the OS's own figure rose by ${osRise} bytes`));
+    } else checks.push(ctl(chk(rise >= w * 0.9 && f.deleteSecs <= REFRESH_LIMIT_S, rise >= w * 0.9 ? `after deleting the file the figure rose by ${rise} bytes after ${f.deleteSecs} s (limit 60 s plus 5 s of polling slack)` : `after deleting the file the figure rose by only ${rise} bytes in ${f.deleteSecs} s`)));
   }
   return checks;
 }
@@ -104,7 +110,8 @@ export async function diskSpaceStep({ exec, sleep, now, adapter }) {
     await exec(adapter.deleteCmd);
     const t1 = now(); let afterDeleteFree = NaN, deleteSecs = NaN;
     for (;;) { afterDeleteFree = freeOf(await read()); deleteSecs = Math.round((now() - t1) / 1000); if (afterDeleteFree - afterWriteFree >= WRITE_BYTES * 0.9 || now() - t1 >= REFRESH_WAIT_MS) break; await sleep(3000); }
-    const checks = judgeDisk({ disks, volumeName, osFreeBytes: os.bytes, osSource: os.source, osAltFreeBytes: alt?.bytes, osAltSource: alt?.source, statusText, baselineFree, afterWriteFree, writeSecs, afterDeleteFree, deleteSecs, osBaseline: osBeforeWrite, osAfterWrite: Math.min(osAfterWrite, Number.isFinite(osAfterWait) ? osAfterWait : osAfterWrite) });
+    const osAfterDelete = (await adapter.osFree(exec)).bytes;
+    const checks = judgeDisk({ osAfterDelete, osBeforeDelete: osAfterWait, disks, volumeName, osFreeBytes: os.bytes, osSource: os.source, osAltFreeBytes: alt?.bytes, osAltSource: alt?.source, statusText, baselineFree, afterWriteFree, writeSecs, afterDeleteFree, deleteSecs, osBaseline: osBeforeWrite, osAfterWrite: Math.min(osAfterWrite, Number.isFinite(osAfterWait) ? osAfterWait : osAfterWrite) });
     return makeResult(TITLE_DISK, checks, [`OS: ${os.source} ${os.bytes}`, ...(writeFacts ? [`written file(s): ${writeFacts.replace(/\s+/g, ' ').slice(0, 400)}`] : []), ...topUps, `status: ${statusText.split('\n').filter((l) => /^\s*Disk/.test(l)).join(' | ')}`], 'the disk figures match the OS, use decimal units and follow a 1 GB write and delete within 60 s');
   } catch (e) {
     await exec(adapter.deleteCmd).catch(() => {});
