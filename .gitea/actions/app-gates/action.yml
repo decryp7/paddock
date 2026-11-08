@@ -87,7 +87,7 @@ runs:
         BUILD_INPUTS_TOKEN: ${{ inputs.build-inputs-token }}
       run: |
         # ADR 0062: the pinned, hashed prebuilt binary from the private build-inputs store; its folder reaches later steps through $GITHUB_PATH.
-        node "${{ github.action_path }}/../../../conformance/ci/build-inputs.mjs" install-tool cargo-about >/dev/null
+        node "${{ github.action_path }}/../../../conformance/ci/build-inputs-reader.mjs" install-tool cargo-about >/dev/null
 
     - name: Check the notices (${{ inputs.app }})
       if: ${{ !cancelled() && steps.prepare.outcome != 'failure' && inputs.notices == 'true' && runner.os == 'Linux' }}

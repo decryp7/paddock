@@ -387,7 +387,7 @@ jobs:
         env:
           BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
-          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs.mjs" install-tool cargo-about)"
+          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs-reader.mjs" install-tool cargo-about)"
           eval "$installed"
           # The next steps are separate shells: the tool folder reaches them through $GITHUB_PATH.
 
@@ -1090,7 +1090,7 @@ jobs:
         env:
           BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
-          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs.mjs" install-tool git-cliff)"
+          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs-reader.mjs" install-tool git-cliff)"
           eval "$installed"
           # Debrief's commits and the shared ones it ships (ADR 0014 §4), between its own debrief-v* tags.
           git cliff -r ../.. --config cliff.toml --tag-pattern 'debrief-v.*' --include-path 'apps/debrief/**' \
@@ -1113,7 +1113,7 @@ jobs:
         env:
           BUILD_INPUTS_TOKEN: ${{ secrets.BUILD_INPUTS_TOKEN }}
         run: |
-          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs.mjs" install-tool cargo-cyclonedx)"
+          installed="$(node "$GITHUB_WORKSPACE/conformance/ci/build-inputs-reader.mjs" install-tool cargo-cyclonedx)"
           eval "$installed"
           cargo cyclonedx --manifest-path app/src-tauri/Cargo.toml --format json --override-filename debrief-rust.cdx
           cp app/src-tauri/debrief-rust.cdx.json artifacts/

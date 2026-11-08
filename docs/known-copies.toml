@@ -1004,7 +1004,7 @@ status = "planned"
   note = "Chrome for Testing, Spotter's own copy. WP-4."
 
   [[mechanism.copy]]
-  paths = ["conformance/ci/build-inputs.mjs"]
+  paths = ["conformance/ci/build-inputs-reader.mjs"]
   owner = "paddock"
   delete_by = "v0.5.0"
   note = "The interim reader of build-inputs.toml (WP-1); WP-3's `./dev inputs` replaces it."

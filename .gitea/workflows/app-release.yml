@@ -184,6 +184,11 @@ jobs:
           workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ inputs.cargo-dir }}
           name: ${{ inputs.app-id }}-bundle
 
+      # ADR 0062 WP-1e: a cargo home kept between Linux container jobs (a slot of the runner's /sccache mount), so the crates are not
+      # downloaded again in every release run.
+      - uses: ./.paddock/.gitea/actions/cargo-home-slot
+        if: runner.os == 'Linux'
+
       - uses: ./.paddock/.gitea/actions/setup-rust
 
       - uses: ./.paddock/.gitea/actions/setup-node
@@ -387,7 +392,7 @@ jobs:
           # The first release of an app has no earlier tag: its notes are the CHANGELOG section of that version.
           OUT=release/CHANGELOG-latest.md bash .paddock/conformance/ci/first-release-notes.sh || exit 1
           if [ -s release/CHANGELOG-latest.md ]; then exit 0; fi
-          installed="$(node .paddock/conformance/ci/build-inputs.mjs install-tool git-cliff)"
+          installed="$(node .paddock/conformance/ci/build-inputs-reader.mjs install-tool git-cliff)"
           eval "$installed"
           args=(--latest --strip header -o release/CHANGELOG-latest.md)
           if [ -n "$CONFIG" ]; then args+=(--config "$CONFIG"); fi

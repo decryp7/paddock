@@ -53,6 +53,7 @@ eval "$(node "$here/../release/strip-keys.mjs")"
 [ -n "${APPLE_SIGNING_IDENTITY:-}" ] || unset APPLE_SIGNING_IDENTITY
 
 (cd "$root" && npm ci)
+if [ -n "$prepare" ]; then (cd "$root" && bash -euo pipefail -c "$prepare"); fi
 # ADR 0062: nothing here reaches GitHub: seed Tauri's tools folder and the AppImage runtime from the private store.
 . "$here/tauri-build-lib.sh"
 dead_proxy_on   # nightly and manual runs: any other fetch is refused (ADR 0062 section 6)

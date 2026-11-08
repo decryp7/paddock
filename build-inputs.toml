@@ -4,7 +4,7 @@
 # (or the mirror workflow) contacts a publisher, once per version, and uploads the verified file.
 #
 # Interim file of ADR 0062 WP-1: it holds the Tauri bundler helpers. WP-2 completes it with every other input and the
-# parser shared with paddock-runtime's catalogue; conformance/ci/build-inputs.mjs (the interim reader, registered in
+# parser shared with paddock-runtime's catalogue; conformance/ci/build-inputs-reader.mjs (the interim reader, registered in
 # docs/known-copies.toml) reads the subset below line by line and WP-3's `./dev inputs` replaces it.
 #
 # Entry keys: id, kind, version, source, licence (SPDX), ships (bytes end up inside an installer, so notices list it),

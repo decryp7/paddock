@@ -1,0 +1,7 @@
+name: cargo-home-slot
+description: "A cargo home kept between Linux container jobs, one of a fixed number of slots on the runner's /sccache mount, held by a lock for the whole job (ADR 0062 WP-1e). Sets CARGO_HOME; a container without the mount, or with all slots taken, keeps the image's cargo home and says so. Does nothing on a host runner."
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: bash "${{ github.action_path }}/../../../conformance/ci/cargo-home-slot.sh"

@@ -10,7 +10,7 @@ seed_build_inputs() {
     echo "::warning::PADDOCK_BUILD_INPUTS_SKIP=1: tauri build may download its helpers from GitHub."
     return 0
   fi
-  seeded="$(node "$here/build-inputs.mjs" seed-tauri)" || return 1
+  seeded="$(node "$here/build-inputs-reader.mjs" seed-tauri)" || return 1
   eval "$seeded"
 }
 
@@ -27,7 +27,7 @@ tauri_build() {
   local log url
   log="$(mktemp)"
   if "$@" 2>&1 | tee "$log"; then rm -f "$log"; return 0; fi
-  url="$(node "$here/build-inputs.mjs" scan "$log" || true)"
+  url="$(node "$here/build-inputs-reader.mjs" scan "$log" || true)"
   echo "::error title=tauri build failed::tauri build failed${url:+ after starting a download from $url (a build input that is not in the store: see build-inputs.toml)}. Next: read the first error above."
   rm -f "$log"
   return 1

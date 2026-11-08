@@ -39,18 +39,23 @@ runs:
       run: |
         set -euo pipefail
         command -v rustup >/dev/null || { echo "::error::rustup is not installed on this runner"; exit 1; }
-        # In the Paddock CI image (it writes /etc/paddock-ci-release) the stable toolchain and its components are already
-        # there: skip the network round trip unless this job asks for extra targets or a component the image lacks.
-        if [ -f /etc/paddock-ci-release ] && [ "$TOOLCHAIN" = stable ] && [ -z "$TARGETS" ]; then
-          installed=$(rustup component list --installed 2>/dev/null || true)
-          missing=0
-          for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing=1; done
-          if [ "$missing" = 0 ]; then
-            echo "Rust toolchain from the Paddock CI image (components: ${COMPONENTS:-none})"
+        # ADR 0062 D2 (a): a gate or release never reaches static.rust-lang.org when the toolchain, its components and the targets are
+        # already there (the Paddock CI image, or a host a warm-up has updated): `rustup toolchain install` is skipped. Floating `stable`
+        # (ADR 0022) is updated on the hosts by running `rustup update stable` there, not by every job.
+        if rustup toolchain list 2>/dev/null | grep -q "^$TOOLCHAIN"; then
+          installed=$(rustup component list --installed --toolchain "$TOOLCHAIN" 2>/dev/null || true)
+          have_targets=$(rustup target list --installed --toolchain "$TOOLCHAIN" 2>/dev/null || true)
+          missing=""
+          for c in $COMPONENTS; do printf '%s\n' "$installed" | grep -q "^$c-" || missing="$missing $c"; done
+          for t in $TARGETS; do printf '%s\n' "$have_targets" | grep -qx "$t" || missing="$missing $t"; done
+          if [ -z "$missing" ]; then
+            rustup default "$TOOLCHAIN" >/dev/null 2>&1 || true
+            echo "Rust toolchain $TOOLCHAIN already installed (components: ${COMPONENTS:-none}; targets: ${TARGETS:-none}); no download"
             rustc --version
             cargo --version
             exit 0
           fi
+          echo "Rust toolchain $TOOLCHAIN lacks:$missing; installing them"
         fi
         args=(--profile minimal)
         for c in $COMPONENTS; do args+=(--component "$c"); done

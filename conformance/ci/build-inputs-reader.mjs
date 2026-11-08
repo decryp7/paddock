@@ -4,10 +4,10 @@
 // SHA-256, and seeds what `tauri build` would otherwise download from GitHub: the Linux AppImage helpers and the Windows
 // NSIS toolset. It never contacts a publisher; a miss is a named error (ER-27), not a fallback.
 //
-//   node conformance/ci/build-inputs.mjs seed-tauri     prints `export NAME='value'` lines for `eval` (LDAI_RUNTIME_FILE) and
+//   node conformance/ci/build-inputs-reader.mjs seed-tauri     prints `export NAME='value'` lines for `eval` (LDAI_RUNTIME_FILE) and
 //                                                       one summary line per input (stderr); appends to $GITHUB_ENV when set
-//   node conformance/ci/build-inputs.mjs install-tool <id>   installs a prebuilt tool (git-cliff, ...) and prints `export PATH=...`
-//   node conformance/ci/build-inputs.mjs scan <logfile> prints the last `Downloading https://...` URL of a failed build
+//   node conformance/ci/build-inputs-reader.mjs install-tool <id>   installs a prebuilt tool (git-cliff, ...) and prints `export PATH=...`
+//   node conformance/ci/build-inputs-reader.mjs scan <logfile> prints the last `Downloading https://...` URL of a failed build
 //
 // Environment: BUILD_INPUTS_TOKEN (a read-only token for the private store; a secret), BUILD_INPUTS_STORE (default below).
 import { spawnSync } from 'node:child_process';
@@ -16,6 +16,7 @@ import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, mkdtemp
 import { homedir, tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from '../src/util/is-main.mjs';
 
 export const DEFAULT_STORE = 'https://dev.decryptology.net/api/packages/paddock-build-inputs/generic';
 
@@ -252,11 +253,11 @@ async function main(argv) {
     if (url) console.log(url);
     return url ? 0 : 1;
   }
-  console.error('usage: build-inputs.mjs seed-tauri | scan <logfile>');
+  console.error('usage: build-inputs-reader.mjs seed-tauri | scan <logfile>');
   return 2;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).then(
     (c) => process.exit(c),
     (err) => {

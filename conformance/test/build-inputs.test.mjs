@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ensureInput, installTool, readInventory, seedTauri, storeUrl, tauriToolsDir } from '../ci/build-inputs.mjs';
+import { ensureInput, installTool, readInventory, seedTauri, storeUrl, tauriToolsDir } from '../ci/build-inputs-reader.mjs';
 
 const sha = (b) => createHash('sha256').update(b).digest('hex');
 const root = fileURLToPath(new URL('../..', import.meta.url));

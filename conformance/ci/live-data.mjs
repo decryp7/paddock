@@ -15,6 +15,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMain } from '../src/util/is-main.mjs';
 
 const STORE = 'https://dev.decryptology.net/api/packages/paddock-build-inputs/generic';
 const MIRROR_API = 'https://dev.decryptology.net/api/v1/repos/paddock-mirrors/advisory-db';
@@ -156,6 +157,6 @@ async function main(argv, env = process.env) {
   return 2;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).then((c) => process.exit(c));
 }
