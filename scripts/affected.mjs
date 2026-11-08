@@ -308,9 +308,30 @@ export const C100_INPUTS = [
   /^(scripts|conformance|tools|apps\/[^/]+\/scripts)\/(.*\/)?(check-[^/]*\.(mjs|sh|ps1)|[^/]*\.test\.mjs)$/,
 ];
 
-/** The number of ignore attributes and environment guards in a test file's text. */
-const GUARD = /#\[ignore|cfg_attr\([^)\n]*ignore|env::var|process\.env/g;
-export const guardCount = (text) => (text ? (text.match(GUARD) ?? []).length : 0);
+/**
+ * The ignore attributes and environment guards of a test file, each paired with the function (Rust) or test title (TypeScript) it
+ * belongs to: moving an ignore from one test to another changes the set even though the count stays.
+ */
+const GUARD = /#\[ignore|cfg_attr\([^)\n]*ignore|env::var|process\.env/;
+export function guardSet(text) {
+  const set = new Set();
+  if (!text) return set;
+  const lines = text.split('\n');
+  lines.forEach((l, i) => {
+    const m = GUARD.exec(l);
+    if (!m) return;
+    let name = '';
+    for (let k = i; k < Math.min(lines.length, i + 8) && !name; k++) name = /\bfn\s+(\w+)/.exec(lines[k])?.[1] ?? '';
+    for (let k = i; k >= 0 && k > i - 40 && !name; k--) name = /\b(?:test|it)(?:\.\w+)?\(\s*['"`]([^'"`]+)/.exec(lines[k])?.[1] ?? '';
+    set.add(`${m[0]}|${name}`);
+  });
+  return set;
+}
+export const guardsChanged = (before, after) => {
+  const a = guardSet(before);
+  const b = guardSet(after);
+  return a.size !== b.size || [...a].some((x) => !b.has(x));
+};
 
 /** Top-level folders and the projects that own them (apps/<name>/ is app:<name>). */
 const OWNERS = [
@@ -603,7 +624,7 @@ export function affected(files, { cargo, npm, apps }, { lockBefore = null, lockA
       continue;
     }
     if (C100_INPUTS.some((r) => r.test(f))) mark('conformance', `C100 reads ${f} (./dev gates inputs)`);
-    if (content && /\.(rs|ts)$/.test(f) && !f.includes('node_modules/') && guardCount(content.before(f)) !== guardCount(content.after(f))) {
+    if (content && /\.(rs|ts)$/.test(f) && !f.includes('node_modules/') && guardsChanged(content.before(f), content.after(f))) {
       mark('conformance', `C100: an ignore attribute or an environment guard changed in ${f}`);
     }
     // The apps whose own checks run paddock-conformance (C13 and others, ADR 0060) rerun those checks when conformance changes.

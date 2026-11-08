@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import { tmpdir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import { describe, test } from 'node:test';
-import { C100_INPUTS, guardCount, adoptsPerMachine, affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
+import { C100_INPUTS, guardSet, adoptsPerMachine, affected, appOfWorkflow, cargoGraph, changedJobs, chooseBase, ciOutputs, commitLintRange, planFor, scriptImporters, workflowJobs, DOC_INPUTS, DOCS, LINUX, lockDiff, matrix, npmGraph, onlyApp, owners, parseArgs, readApps, repoRelative, ROOT, summary, trackedFiles, wantsWebkit } from './affected.mjs';
 
 /**
  * A paddock.ci.json process pattern as host-cleanup runs it: {tmp}, {build} and {slot} filled in by the real
@@ -1097,9 +1097,11 @@ describe('C100 inputs (ADR 0060): the planner runs conformance for what `./dev g
   test('a test file that adds or removes an ignore attribute or an environment guard marks conformance (content rule)', () => {
     const f = 'crates/paddock-jobs/tests/it/x.rs';
     const plan = (before, after) => affected([f], graph, { content: { before: () => before, after: () => after } });
-    assert.equal(guardCount('#[test]\n#[ignore = "slow"]\nfn a() {}'), 1);
+    assert.deepEqual([...guardSet('#[test]\n#[ignore = "slow"]\nfn a() {}')], ['#[ignore|a']);
     assert.equal(plan('#[test]\nfn a() {}', '#[test]\n#[ignore]\nfn a() {}').conformance, true, 'an ignore was added');
     assert.equal(plan('#[test]\nfn a() { if std::env::var("X").is_err() { return; } }', '#[test]\nfn a() {}').conformance, true, 'a guard was removed');
     assert.equal(plan('#[test]\nfn a() {}', '#[test]\nfn a() { assert!(true); }').conformance, false, 'an ordinary edit');
+    assert.equal(plan('#[test]\n#[ignore]\nfn a() {}\n#[test]\nfn b() {}', '#[test]\nfn a() {}\n#[test]\n#[ignore]\nfn b() {}').conformance, true, 'an ignore moved to another test: same count, different set');
+    assert.equal(plan('#[test]\n#[ignore]\nfn a() {}', '// moved\n#[test]\n#[ignore]\nfn a() {}').conformance, false, 'the same ignore on the same test');
   });
 });
