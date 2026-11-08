@@ -92,32 +92,37 @@ fn env_var(k: &str) -> Option<String> {
 pub fn command(args: &[String], root: Option<PathBuf>) -> Result<Report, CliError> {
     let root = repo_root(root)?;
     let env = env_var;
-    if args.first().is_some_and(|a| a == "--commit-range") {
+    if let Some(mode) = args.first().filter(|a| *a == "--commit-range" || *a == "--commit-flags") {
         let lint = |name: &str| env(name).unwrap_or_default();
-        let (event, reference, before, sha, base, base_ref, app) = (
+        let (event, reference, before, base, base_ref, app) = (
             lint("EVENT"),
             lint("REF"),
             lint("BEFORE"),
-            lint("SHA"),
             lint("PLAN_BASE"),
             lint("BASE_REF"),
             lint("INPUT_APP"),
         );
+        let sha = env("SHA");
         let known = |c: &str| git_text(&root, &["cat-file", "-e", &format!("{c}^{{commit}}")]).is_some();
         let range = commit_lint_range(
             &LintInput {
                 event: &event,
                 reference: &reference,
                 before: &before,
-                sha: &sha,
+                sha: sha.as_deref(),
                 base: &base,
                 base_ref: &base_ref,
                 app: &app,
             },
             &known,
-        );
-        let text = range.unwrap_or_else(|| "skip".into());
-        return Ok(Report::new(serde_json::json!({ "range": text }), text));
+        )
+        .map_err(fail)?;
+        let text = if mode == "--commit-flags" {
+            range.map(|r| r.flags.join(" ")).unwrap_or_default()
+        } else {
+            range.map(|r| r.range).unwrap_or_else(|| "skip".into())
+        };
+        return Ok(Report::new(serde_json::json!({ "output": text }), text));
     }
     let a = parse_args(args).map_err(fail)?;
     if a.ci {

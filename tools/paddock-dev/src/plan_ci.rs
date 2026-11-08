@@ -385,8 +385,8 @@ pub struct LintInput<'a> {
     pub reference: &'a str,
     /// The commit before a push.
     pub before: &'a str,
-    /// The pushed commit (default `HEAD`).
-    pub sha: &'a str,
+    /// The pushed commit; `None` (the variable is not set) means `HEAD`.
+    pub sha: Option<&'a str>,
     /// The plan's base of a manual run.
     pub base: &'a str,
     /// The pull request's target branch.
@@ -395,27 +395,90 @@ pub struct LintInput<'a> {
     pub app: &'a str,
 }
 
-/// The commits the commit lint checks, as a git revision range, or `None` to skip it. Only what a change adds is linted, so an
-/// old bad commit never keeps main red: a pull request lints since its target branch, a push the commits it added
-/// (`before..sha`; a new branch, an all-zero `before`, lints the head commit only), a manual run from the plan's base (the head
-/// commit alone without one); `known(commit)` says whether a commit is in the clone. Tags and a call with an `app` (an app's
-/// tag gates, ER-15) and every other event skip it: a release must not fail on an old commit's subject.
-pub fn commit_lint_range(i: &LintInput, known: &dyn Fn(&str) -> bool) -> Option<String> {
-    if !i.app.is_empty() || i.reference.starts_with("refs/tags/") {
-        return None;
+/// What the commit lint is asked: `git log` options and one revision range, kept apart so no value is ever split into arguments.
+#[derive(Debug, PartialEq)]
+pub struct LintRange {
+    /// Zero or one fixed option (`--first-parent`).
+    pub flags: Vec<String>,
+    /// The revision range.
+    pub range: String,
+}
+
+fn lint_range(flags: &[&str], range: String) -> Option<LintRange> {
+    Some(LintRange {
+        flags: flags.iter().map(|f| f.to_string()).collect(),
+        range,
+    })
+}
+
+/// A commit id of the event: `HEAD` or 7 to 40 lower-case hex digits (it ends up as a git argument).
+fn commit_id(value: &str, what: &str) -> Result<(), String> {
+    let hex = (7..=40).contains(&value.len()) && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    if value != "HEAD" && !hex {
+        return Err(format!(
+            "commit range: {what} \"{value}\" is not a commit id (7 to 40 lower-case hex digits)"
+        ));
     }
-    let sha = if i.sha.is_empty() { "HEAD" } else { i.sha };
-    let head = format!("{sha}^!");
+    Ok(())
+}
+
+/// A branch name of the event: the same shape as `/^[A-Za-z0-9_][A-Za-z0-9._/-]*$/`.
+fn branch_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '/' | '-'))
+}
+
+/// The commits the commit lint checks, as flags and a git revision range, or `None` to skip it. (From branch
+/// `ci/commit-lint-first-parent`, inside `debrief/1.2-batch1`; compatible with the script on main for every valid input.)
+/// Only what a change adds is linted, so an old bad commit never keeps main red: a pull request lints since its target branch, a
+/// push the commits it added (`before..sha`; a new branch, an all-zero `before`, lints the head commit only), a manual run from the
+/// plan's base (the head commit alone without one). On main a push lints only the first-parent commits (`--first-parent`: what main
+/// itself adds, the landing merge included; the commits a merge brought in from a branch were linted when the branch landed).
+/// `known(commit)` says whether a commit is in the clone. Tags and a call with an `app` (an app's tag gates, ER-15) and every
+/// other event skip it: a release must not fail on an old commit's subject. `before`, `sha` and `base` must be commit ids and
+/// `base_ref` a branch name: they come from the event and end up as git arguments.
+pub fn commit_lint_range(i: &LintInput, known: &dyn Fn(&str) -> bool) -> Result<Option<LintRange>, String> {
+    if !i.app.is_empty() || i.reference.starts_with("refs/tags/") {
+        return Ok(None);
+    }
+    let tip = i.sha.unwrap_or("HEAD");
+    commit_id(tip, "sha")?;
+    let head = || lint_range(&[], format!("{tip}^!"));
     match i.event {
-        "pull_request" => (!i.base_ref.is_empty()).then(|| format!("origin/{}..HEAD", i.base_ref)),
+        "pull_request" => {
+            if i.base_ref.is_empty() {
+                return Ok(None);
+            }
+            if !branch_name(i.base_ref) {
+                return Err(format!("commit range: base ref \"{}\" is not a branch name", i.base_ref));
+            }
+            Ok(lint_range(&[], format!("origin/{}..HEAD", i.base_ref)))
+        }
         // A `before` missing from the history (after a force push) lints the head commit only.
-        "push" => Some(if !i.before.is_empty() && !i.before.chars().all(|c| c == '0') && known(i.before) {
-            format!("{}..{sha}", i.before)
-        } else {
-            head
-        }),
-        "workflow_dispatch" => Some(if i.base.is_empty() { head } else { format!("{}..{sha}", i.base) }),
-        _ => None,
+        "push" => {
+            if i.before.is_empty() || i.before.chars().all(|c| c == '0') {
+                return Ok(head());
+            }
+            commit_id(i.before, "before")?;
+            if !known(i.before) {
+                return Ok(head());
+            }
+            let flags: &[&str] = if i.reference == "refs/heads/main" {
+                &["--first-parent"]
+            } else {
+                &[]
+            };
+            Ok(lint_range(flags, format!("{}..{tip}", i.before)))
+        }
+        "workflow_dispatch" => {
+            if i.base.is_empty() {
+                return Ok(head());
+            }
+            commit_id(i.base, "base")?;
+            Ok(lint_range(&[], format!("{}..{tip}", i.base)))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -887,51 +950,137 @@ mod tests {
         assert!(is_ci_yml("ci.yml@refs/heads/main") && is_ci_yml("ci.yaml@x") && !is_ci_yml("canary.yml@x"));
     }
 
-    #[test]
-    fn the_commit_lint_range_covers_only_what_a_change_adds_and_skips_tags_and_app_gates() {
-        let zero = "0".repeat(40);
-        let range = |i: LintInput, known: bool| commit_lint_range(&i, &move |_| known);
-        let li = |event, reference, before, sha, base, base_ref, app| LintInput {
+    fn lint(i: LintInput, known: bool) -> Result<Option<(Vec<String>, String)>, String> {
+        commit_lint_range(&i, &move |_| known).map(|r| r.map(|r| (r.flags, r.range)))
+    }
+
+    fn event<'a>(event: &'a str, reference: &'a str, before: &'a str, sha: &'a str) -> LintInput<'a> {
+        LintInput {
             event,
             reference,
             before,
-            sha,
-            base,
-            base_ref,
-            app,
+            sha: Some(sha),
+            ..LintInput::default()
+        }
+    }
+
+    fn just(range: &str) -> Result<Option<(Vec<String>, String)>, String> {
+        Ok(Some((vec![], range.to_string())))
+    }
+
+    #[test]
+    fn the_commit_lint_range_covers_only_what_a_change_adds_and_skips_tags_and_app_gates() {
+        let zero = "0".repeat(40);
+        let (a, b, c) = ("aaaaaaa", "bbbbbbb", "ccccccc");
+        let pr = LintInput {
+            event: "pull_request",
+            base_ref: "main",
+            ..LintInput::default()
         };
+        assert_eq!(lint(pr, true), just("origin/main..HEAD"));
+        let no_target = LintInput {
+            event: "pull_request",
+            ..LintInput::default()
+        };
+        assert_eq!(lint(no_target, true), Ok(None));
         assert_eq!(
-            range(li("pull_request", "", "", "", "", "main", ""), true).as_deref(),
-            Some("origin/main..HEAD")
-        );
-        assert_eq!(range(li("pull_request", "", "", "", "", "", ""), true), None);
-        assert_eq!(
-            range(li("push", "refs/heads/main", "aaa", "bbb", "", "", ""), true).as_deref(),
-            Some("aaa..bbb")
-        );
-        assert_eq!(
-            range(li("push", "refs/heads/x", &zero, "bbb", "", "", ""), true).as_deref(),
-            Some("bbb^!")
+            lint(event("push", "refs/heads/main", a, b), true),
+            Ok(Some((vec!["--first-parent".to_string()], format!("{a}..{b}")))),
+            "main: what main itself adds"
         );
         assert_eq!(
-            range(li("push", "refs/heads/x", "", "bbb", "", "", ""), true).as_deref(),
-            Some("bbb^!")
+            lint(event("push", "refs/heads/x", a, b), true),
+            just(&format!("{a}..{b}")),
+            "another branch: every commit it adds"
         );
         assert_eq!(
-            range(li("push", "refs/heads/main", "gone", "bbb", "", "", ""), false).as_deref(),
-            Some("bbb^!")
+            lint(event("push", "refs/heads/x", &zero, b), true),
+            just(&format!("{b}^!")),
+            "a new branch: the head commit"
         );
+        assert_eq!(lint(event("push", "refs/heads/x", "", b), true), just(&format!("{b}^!")));
         assert_eq!(
-            range(li("workflow_dispatch", "", "", "bbb", "ccc", "", ""), true).as_deref(),
-            Some("ccc..bbb")
+            lint(event("push", "refs/heads/main", "abcdef0", b), false),
+            just(&format!("{b}^!")),
+            "a force push: before is not in the clone"
         );
+        let manual = LintInput {
+            event: "workflow_dispatch",
+            base: c,
+            sha: Some(b),
+            ..LintInput::default()
+        };
+        assert_eq!(lint(manual, true), just(&format!("{c}..{b}")));
+        let manual_no_base = LintInput {
+            event: "workflow_dispatch",
+            sha: Some(b),
+            ..LintInput::default()
+        };
+        assert_eq!(lint(manual_no_base, true), just(&format!("{b}^!")));
+        assert_eq!(lint(event("push", "refs/tags/v1.0.0", &zero, b), true), Ok(None), "a tag");
+        assert_eq!(lint(event("push", "refs/tags/dyno-v1.0.0", a, b), true), Ok(None));
+        let gates = LintInput {
+            app: "dyno",
+            ..event("push", "refs/heads/main", a, b)
+        };
+        assert_eq!(lint(gates, true), Ok(None), "an app tag call");
+        assert_eq!(lint(event("schedule", "", "", b), true), Ok(None));
         assert_eq!(
-            range(li("workflow_dispatch", "", "", "bbb", "", "", ""), true).as_deref(),
-            Some("bbb^!")
+            lint(
+                LintInput {
+                    event: "push",
+                    reference: "refs/heads/main",
+                    before: a,
+                    sha: None,
+                    ..LintInput::default()
+                },
+                true
+            ),
+            Ok(Some((vec!["--first-parent".to_string()], format!("{a}..HEAD")))),
+            "an unset SHA is HEAD"
         );
-        assert_eq!(range(li("push", "refs/tags/v1.0.0", &zero, "bbb", "", "", ""), true), None);
-        assert_eq!(range(li("push", "refs/heads/main", "aaa", "bbb", "", "", "dyno"), true), None);
-        assert_eq!(range(li("schedule", "", "", "bbb", "", "", ""), true), None);
+    }
+
+    #[test]
+    fn values_that_are_not_commits_or_branch_names_are_refused_because_they_become_git_arguments() {
+        let b = "bbbbbbb";
+        for bad in ["HEAD --output=/tmp/x", "--output=/tmp/x", "abc", "zzzzzzz", "a..b"] {
+            let manual = LintInput {
+                event: "workflow_dispatch",
+                base: bad,
+                sha: Some(b),
+                ..LintInput::default()
+            };
+            assert!(lint(manual, true).unwrap_err().contains("is not a commit id"), "{bad}");
+            assert!(
+                lint(event("push", "refs/heads/main", bad, b), true)
+                    .unwrap_err()
+                    .contains("is not a commit id"),
+                "{bad}"
+            );
+            assert!(
+                lint(event("push", "refs/heads/main", b, bad), true)
+                    .unwrap_err()
+                    .contains("is not a commit id"),
+                "{bad}"
+            );
+        }
+        for bad in ["--output=/tmp/x", "a b"] {
+            let pr = LintInput {
+                event: "pull_request",
+                base_ref: bad,
+                ..LintInput::default()
+            };
+            assert!(lint(pr, true).unwrap_err().contains("is not a branch name"), "{bad}");
+        }
+        let full = "a".repeat(40);
+        let manual = LintInput {
+            event: "workflow_dispatch",
+            base: &full,
+            sha: Some("HEAD"),
+            ..LintInput::default()
+        };
+        assert_eq!(lint(manual, true), just(&format!("{full}..HEAD")));
     }
 
     #[test]
