@@ -30,6 +30,7 @@ import { NOT_DRIVEN, ROW_TITLES, btmState, keychainOtherBuildStep, judgeLifecycl
 import { hungPageStep } from './hung-page.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
 import { loginSwitchStep, parseBtm } from './login-start-rows.mjs';
+import { jobsStoppedStep } from './jobs-stopped-row.mjs';
 import { jobsRestartStep } from './jobs-restart-row.mjs';
 import { onlyRequired, parseOnly, rowWanted } from './only.mjs';
 
@@ -442,8 +443,40 @@ async function main(argv) {
             agentUp: async () => (await exec('p=$(cat /tmp/dyno-killed-jobs.pid); n=$(pgrep -x dyno-agent | head -1); [ -n "$n" ] && [ "$n" != "$p" ] && "' + bundle + '/Contents/MacOS/dyno-agent" status >/dev/null 2>&1')).code === 0,
           }, { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }, { settleMs: 25_000 }); // the fix retries after 2/4/8 s, then every 15 s: clear within about 20 s
         };
-        const rowFns = o.only ? [...(rowWanted(o.only, 'mac-reopen') || rowWanted(o.only, 'hung-page') || rowWanted(o.only, 'mac-lifecycle-log') ? [macRows] : []), ...(o.only.includes('login-jobs') ? [async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) })] : []), ...(o.only.includes('jobs-restart') ? [macJobsRestart] : []), ...(o.only.includes('disk-space') ? [async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) })] : [])] : o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
-          macJobsRestart,
+        // Release row: the error state forced deterministically (quit, kill the agent, SIGSTOP the supervisor's new agent, launch, hold, SIGCONT), then a measurement of
+        // how the Jobs list's Cancel is exposed (AX roles) for the benchmark row.
+        const macJobsStopped = async () => {
+          const ld = macLoginJobsDriver(gui);
+          const stopStep = await jobsStoppedStep({
+            quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; pkill -x dyno-app; true`); await sleepMs(4000); },
+            // kill the agent, then stop the supervisor's NEW agent the moment its pid appears; the identity (pid and start time) is read in the same command
+            killAgentAndStopNew: async () => {
+              const r = await exec('old=$(pgrep -x dyno-agent | head -1); [ -n "$old" ] && kill -9 $old; for i in $(seq 1 500); do n=$(pgrep -x dyno-agent | head -1); if [ -n "$n" ] && [ "$n" != "$old" ]; then kill -STOP $n; echo "$n|$(ps -o lstart= -p $n)|$(ps -o stat= -p $n)"; exit 0; fi; sleep 0.02; done; exit 1', { timeoutMs: 60_000 });
+              const m = r.code === 0 ? /^(\d+)\|(.+)\|(.*)$/m.exec(r.stdout) : null;
+              return m ? { pid: Number(m[1]), start: m[2].trim() } : null;
+            },
+            launchApp: async () => { await exec(`open -a ${bundle}`); await sleepMs(3000); },
+            openJobs: () => ld.openJobs(), jobsText: () => ld.jobsText(),
+            // rule 53: continue only the process whose pid AND start time are the ones that were stopped
+            cont: async ({ pid, start }) => { await exec(`[ "$(ps -o lstart= -p ${pid} | sed 's/^ *//')" = '${start}' ] && kill -CONT ${pid}; echo "state after CONT: $(ps -o stat= -p ${pid})" >> /tmp/jobs-stopped.log`); },
+            guestClock: async () => (await exec('date +%T')).stdout.trim(),
+          }, { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) });
+          // Measurement (not a release row): is the Jobs list's Cancel a real button? Start a benchmark, dump the AX tree around it, end it.
+          await exec(`open -a ${bundle}`); await sleepMs(15_000);
+          let meas;
+          try {
+            const st = await ld.startLongJob();
+            await ld.openJobs(); await sleepMs(4000);
+            const dump = (await exec(`/usr/local/bin/axdrive tree Dyno 80 > /tmp/jobs-ax-tree.txt 2>&1; grep -n -i -E "cancel|running benchmarks|AXList|AXButton" /tmp/jobs-ax-tree.txt | head -60`)).stdout;
+            const full = await fetch('/tmp/jobs-ax-tree.txt');
+            const btns = (dump.match(/AXButton[^\n]*Cancel/gi) ?? []).length;
+            meas = { title: 'Measurement (not a release row): the Cancel of a running benchmark in the Jobs list is exposed as a button', status: 'not-measured', cls: 'check', summary: `not a verdict: ${btns} AXButton(s) named Cancel in the AX tree while the benchmark runs (started: ${st === true || st?.ok === true}); lines and the full tree are in the evidence`, checks: [{ ok: false, kind: 'check', detail: 'measurement only' }], evidence: [`AX lines (cancel, running benchmarks, lists, buttons):\n${dump}`, `full AX tree saved at: ${full}`] };
+          } catch (e) { meas = { title: 'Measurement (not a release row): the Cancel of a running benchmark in the Jobs list is exposed as a button', status: 'not-measured', cls: 'check', summary: `not measured: ${e.message}`, checks: [{ ok: false, kind: 'check', detail: String(e.message) }], evidence: [] }; }
+          await ld.stopLongJob?.().catch(() => {});
+          return [stopStep, meas];
+        };
+        const rowFns = o.only ? [...(rowWanted(o.only, 'mac-reopen') || rowWanted(o.only, 'hung-page') || rowWanted(o.only, 'mac-lifecycle-log') ? [macRows] : []), ...(o.only.includes('login-jobs') ? [async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) })] : []), ...(o.only.includes('jobs-restart') ? [macJobsRestart] : []), ...(o.only.includes('jobs-stopped') ? [macJobsStopped] : []), ...(o.only.includes('disk-space') ? [async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) })] : [])] : o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
+          macJobsRestart, macJobsStopped,
           async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) }),
           async () => discoveryStep(unixDiscoveryPrims({ exec: (c) => guest.exec(c), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), file: '$HOME/Library/Application Support/Dyno/agent.json', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }))] : [];
         const suite = await runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', only: o.only, manual: o.suite === 'helper' ? [] : undefined });

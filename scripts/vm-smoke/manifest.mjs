@@ -32,7 +32,7 @@ const MAC_POWER = [
   row('install', /^Install$/), BUILD, row('cold-start', /^Cold start for the power checks/), row('helper-on', /^Admin helper: Turn on/),
   row('keep-awake', /^Keep awake: held by the OS/), row('scheduled-wake', /^Scheduled wake: listed by the OS/), row('wake-on-lan', /^Wake-on-LAN: magic packet/),
   row('tour-menu-bar', /^GUI: menu-bar items/), row('tour-dashboard', /^GUI: dashboard customize/), row('tour-benchmark', /^GUI: short benchmark/),
-  row('idle-action', /^Idle action: countdown/), row('login-switch', /^Launch at login: on by default/), row('login-jobs', /^Row 5a:/), row('jobs-restart', /^Release row: the Jobs panel recovers after the agent is killed/), row('disk-space', /^Release row: disk space matches/), row('discovery', /^Release row: a deleted or foreign agent.json/), row('helper-off', /^Admin helper: Turn off/), row('helper-log', /^macOS helper lines in the unified log/),
+  row('idle-action', /^Idle action: countdown/), row('login-switch', /^Launch at login: on by default/), row('login-jobs', /^Row 5a:/), row('jobs-restart', /^Release row: the Jobs panel recovers after the agent is killed/), row('jobs-stopped', /^Release row: the Jobs panel clears by itself after the first read failed/), row('disk-space', /^Release row: disk space matches/), row('discovery', /^Release row: a deleted or foreign agent.json/), row('helper-off', /^Admin helper: Turn off/), row('helper-log', /^macOS helper lines in the unified log/),
   row('quit', /^Quit after the power checks/),
 ];
 const MAC_HELPER = [
