@@ -2,7 +2,7 @@ import { inject, Injectable, provideZonelessChangeDetection } from '@angular/cor
 import { TestBed } from '@angular/core/testing';
 import { patchState, signalStore, withHooks, withMethods, withState } from '@ngrx/signals';
 import { FakeClock } from '@decryp7/paddock-ui/shell/testing';
-import { READ_RETRY_CLOCK } from './read-retry';
+import { READ_RETRY_CLOCK, READ_RETRY_STEADY_MS } from './read-retry';
 import { errorMessage, setError, withRequestStatus } from './request-status';
 
 /** Every read waits for the test to answer it; `reads` holds them in order. */
@@ -290,6 +290,23 @@ describe('withRequestStatus({ retry: true }): a failed read ends on its own (ADR
     expect(store.requestError()).toBe('still down');
     clock.advance(4_000);
     expect(backend.reads).toHaveLength(5);
+  });
+
+  it('a stale re-read that settles late does not unblock a second read beside the current one', async () => {
+    const { backend, clock, store } = await failedFirst();
+    clock.advance(2_000);
+    // Read 1 (a timer re-read) hangs; the Retry (read 2) fails; the next timer starts read 3, which runs.
+    void store.load();
+    await failRead(backend, clock, 2);
+    clock.advance(2_000);
+    expect(backend.reads).toHaveLength(4);
+    // The stale read 1 rejects: its clean-up must not clear read 3's marker.
+    backend.reads[1]?.reject(new Error('late'));
+    await drained();
+    clock.advance(SPACING_MS);
+    store.change();
+    clock.advance(READ_RETRY_STEADY_MS);
+    expect(backend.reads).toHaveLength(4);
   });
 
   it('re-arms when the timer finds the current re-read still running, so a hang cannot end the retrying', async () => {
