@@ -10,8 +10,12 @@ import type { ProviderPhase } from '../generated/assistant';
 import { PdAssistantRichText, type CitationOpened } from './rich-text';
 import { ASSISTANT_CITATIONS, injectToolRenderers, PdAssistantToolCard, rendererFor } from './tool-cards';
 
-/** A window this short folds the composer's files tray to two rows (review 2 P2-A; the styles use the same height). */
-const SHORT_WINDOW = '(max-height: 760px)';
+/**
+ * A pane shorter than this (px) is short: the files tray folds to two rows behind its "N files" chip, the question box is two
+ * lines, the empty state gives up its icon and a refusal's banner is tighter (review 2 P2-A). It is the pane's own height
+ * (review 3 P2-2), so a pane docked in a tall window folds too; a host may hide its own extras at the same height.
+ */
+export const ASSISTANT_SHORT_PANE_PX = 440;
 
 /** How close to the bottom (px) the user must be for the log to follow the streaming text. */
 const SCROLL_STICK_PX = 24;
@@ -26,6 +30,7 @@ const SCROLL_STICK_PX = 24;
  */
 @Component({
   selector: 'pd-assistant',
+  host: { class: 'pd-assistant', '[class.short]': 'short()' },
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [AssistantStore],
   imports: [PdStatusGlyph, NgComponentOutlet, PdGlyph, PdAssistantRichText, PdAssistantToolCard, PdNeedsAi],
@@ -240,6 +245,7 @@ const SCROLL_STICK_PX = 24;
           class="chips files-tray"
           [class.folded]="short() && !filesOpen()"
           [class.open]="short() && filesOpen()"
+          [class.scrolls]="trayOverflows() && !(short() && !filesOpen())"
           [attr.aria-label]="t.files"
           data-testid="assistant-files"
         >
@@ -455,25 +461,27 @@ const SCROLL_STICK_PX = 24;
     .allow { display: inline-flex; align-items: center; gap: var(--pd-space-1); font-size: var(--pd-text-label); color: var(--pd-text-muted); }
     .chip.file { cursor: default; padding-right: 2px; }
     /* Many files wrap into rows; past about three rows the tray scrolls, so the question box and the log keep their room. */
-    .files-tray { max-height: 92px; overflow-y: auto; padding-block: 1px; }
+    .files-tray { box-sizing: border-box; max-height: 92px; overflow-y: auto; padding-block: 1px; }
     /*
-     * A short window (under about 760 px) folds the tray to two rows (24 px chips, a 4 px gap, 1 px padding each side) behind
-     * an "N files" chip that opens it, the question box to two lines and a refusal to a tighter banner, and the empty state
-     * gives up its icon (review 2 P2-A). The log takes 120 px before anything else grows; in a pane too short for that and the
-     * composer, the log gives way first, so the question and Send are never cut off.
+     * A short pane (under ASSISTANT_SHORT_PANE_PX) folds the tray to two rows (24 px chips, a 4 px gap, 1 px padding each side)
+     * behind an "N files" chip that opens it, the question box to two lines and a refusal to a tighter banner, and the empty
+     * state gives up its icon (review 2 P2-A). The log takes 120 px before anything else grows; in a pane too short for that and
+     * the composer it gives way first, down to a 56 px floor (two lines of text), so it never collapses (review 3 P2-3).
      */
     .files-tray.folded { max-height: 54px; overflow: hidden; }
+    /* Opened in a short pane it shows about two and a half rows, so the question, Send and the log's floor keep their room. */
+    .files-tray.open { max-height: 82px; }
+    /* A tray that scrolls says so: its foot fades, and the padding under the last row is the fade, so at the end it is clear. */
+    .files-tray.scrolls { --tray-fade: 16px; padding-bottom: var(--tray-fade); mask-image: linear-gradient(to bottom, var(--pd-surface-1) calc(100% - var(--tray-fade)), transparent); }
     .summary { font-weight: var(--pd-weight-medium); background: var(--pd-surface-1); }
     .summary:hover { background: var(--pd-hover); }
     .summary-chev { transition: transform var(--pd-duration-fast, 120ms); }
     .summary-chev.up { transform: rotate(180deg); }
-    .log { flex: 1 1 120px; }
-    @media (max-height: 760px) {
-      .empty-state { gap: 0; }
-      .empty-icon { display: none; }
-      .log { padding-block: var(--pd-space-2); }
-      .banner { padding-block: var(--pd-space-1); }
-    }
+    .log { flex: 1 1 120px; min-height: 56px; }
+    :host(.short) .empty-state { gap: 0; }
+    :host(.short) .empty-icon { display: none; }
+    :host(.short) .log { padding-block: var(--pd-space-2); }
+    :host(.short) .banner { padding-block: var(--pd-space-1); }
     @media (prefers-reduced-motion: reduce) { .summary-chev { transition: none; } }
     .chip.static.file { padding-right: var(--pd-space-2); }
     .chip-detail { color: var(--pd-text-muted); white-space: nowrap; }
@@ -610,9 +618,10 @@ export class PdAssistant {
     contextUsed: $localize`:@@pd.wb.assistant.context.label:Context used`,
   };
 
-  /** The window is short (under about 760 px tall): the files tray folds to two rows behind its "N files" chip. */
+  /** The pane is short (under `ASSISTANT_SHORT_PANE_PX` tall): the files tray folds to two rows behind its "N files" chip. */
   protected readonly short = signal(false);
-  /** The folded files tray holds more than its two rows (measured after it renders). */
+  /** The files tray holds more than it shows: folded, more than its two rows; open, more than it shows before it scrolls
+   *  (measured after it renders). */
   protected readonly trayOverflows = signal(false);
   /** The user opened the folded files tray; it folds again when the files go (sent or removed). */
   protected readonly filesOpen = linkedSignal({ source: () => this.store.attached().length === 0, computation: () => false });
@@ -635,21 +644,24 @@ export class PdAssistant {
   });
 
   constructor() {
-    // A short window folds the files tray (DOM only: the media query is not a signal).
-    if (typeof matchMedia === 'function') {
-      const query = matchMedia(SHORT_WINDOW);
-      this.short.set(query.matches);
-      const change = (e: MediaQueryListEvent): void => this.short.set(e.matches);
-      query.addEventListener('change', change);
-      inject(DestroyRef).onDestroy(() => query.removeEventListener('change', change));
+    // A short pane folds the files tray (DOM only: the pane's height is a measurement, not a signal).
+    if (typeof ResizeObserver !== 'undefined') {
+      const host = inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
+      const watch = new ResizeObserver(() => {
+        const height = host.clientHeight;
+        this.short.set(height > 0 && height < ASSISTANT_SHORT_PANE_PX);
+      });
+      watch.observe(host);
+      inject(DestroyRef).onDestroy(() => watch.disconnect());
     }
-    // effect-state: whether the folded tray overflows is a measurement of the rendered DOM (wrapping), not derivable state.
+    // effect-state: whether the files tray overflows is a measurement of the rendered DOM (wrapping), not derivable state.
     effect((onCleanup) => {
       this.store.attached();
       this.store.attaching();
-      const folded = this.short() && !this.filesOpen();
+      this.short();
+      this.filesOpen();
       const el = this.tray()?.nativeElement;
-      if (!el || !folded) return;
+      if (!el) return;
       const measure = (): void => this.trayOverflows.set(el.scrollHeight > el.clientHeight + 1);
       afterNextRender(measure, { injector: this.injector });
       if (typeof ResizeObserver === 'undefined') return;

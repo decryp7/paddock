@@ -15,7 +15,7 @@
  *
  * Context chips are the app's `defineAssistantContext` contributions; tools stay in Rust.
  */
-export { PdAssistant } from './src/assistant';
+export { ASSISTANT_SHORT_PANE_PX, PdAssistant } from './src/assistant';
 export { ASSISTANT_VIEW, ASSISTANT_VIEW_ID, ASSISTANT_ACTIVITY, ASSISTANT_CONTRIBUTIONS, ASSISTANT_FOCUS_COMMAND } from './src/assistant.contributions';
 export { provideAssistant, type AssistantOptions } from './src/provide-assistant';
 export { AssistantStore, type ActionsGate, type AssistantStoreType, type AssistantRun, type ContextChip, type PendingApproval } from './src/assistant.store';
