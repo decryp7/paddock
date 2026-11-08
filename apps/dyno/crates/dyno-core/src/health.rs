@@ -125,7 +125,7 @@ fn not_checked(facts: &SystemFacts) -> Vec<NotChecked> {
         (FactKind::Disks, "Disk health", facts.disks.unavailable_reason()),
         (
             FactKind::RestartPending,
-            "Pending restart",
+            "Restart needed",
             facts.restart_pending.unavailable_reason(),
         ),
         (
@@ -492,7 +492,7 @@ mod tests {
         assert_eq!(
             r.not_checked,
             [NotChecked {
-                what: vec!["Disk health".into(), "Pending restart".into(), "Pending updates".into()],
+                what: vec!["Disk health".into(), "Restart needed".into(), "Pending updates".into()],
                 why: "Not checked yet".into(),
                 kind: NotCheckedKind::CouldNotRead,
             }],

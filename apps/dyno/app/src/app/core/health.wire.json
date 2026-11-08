@@ -20,7 +20,7 @@
     {
       "kind": "notReadYet",
       "what": [
-        "Pending restart",
+        "Restart needed",
         "Startup items"
       ],
       "why": "Dyno does not check this yet"

@@ -16,7 +16,7 @@ const report: HealthReport = {
   notChecked: [
     { what: ['Disk health'], why: 'Needs administrator rights', kind: 'couldNotRead' },
     { what: ['Pending updates'], why: 'Dyno does not check for updates', kind: 'notReadHere' },
-    { what: ['Pending restart', 'Startup items'], why: 'Dyno does not check this yet', kind: 'notReadYet' },
+    { what: ['Restart needed', 'Startup items'], why: 'Dyno does not check this yet', kind: 'notReadYet' },
   ],
 };
 

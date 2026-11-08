@@ -57,7 +57,7 @@ import { MatTooltip } from '@angular/material/tooltip';
           <div class="gap">
             <span class="eyebrow">Not checked</span>
             <ul aria-label="Not checked">
-              @for (g of gaps(); track g.why) {
+              @for (g of gaps(); track g.kind + g.why) {
                 <li>
                   <span class="t">{{ list(g.what, true) }}</span>
                   <span class="d">{{ g.why }}</span>
@@ -126,10 +126,9 @@ export class HealthHero {
     const n = this.gaps().reduce((a, g) => a + g.what.length, 0);
     return n === 0 ? '' : `, ${n} ${n === 1 ? 'fact' : 'facts'} not checked`;
   });
-  protected readonly list = (items: string[], capitalise = false) => {
-    const text = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(capitalise ? items.map((x, i) => (i === 0 ? x : x.toLowerCase())) : items);
-    return text;
-  };
+  /** "A, b, and c": the first item keeps its capital when `sentenceStart`, the rest are lowercased. */
+  protected readonly list = (items: string[], sentenceStart = false) =>
+    new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(sentenceStart ? items.map((x, i) => (i === 0 ? x : x.toLowerCase())) : items);
   protected readonly trend = computed(() => {
     const w = this.store.weekly();
     const r = this.store.report();

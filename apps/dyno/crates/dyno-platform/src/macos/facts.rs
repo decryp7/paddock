@@ -87,12 +87,12 @@ impl FactsSource for MacFacts {
             }),
             None => Reading::unavailable("This Mac has no Low Power Mode setting"),
         };
-        f.visual_effects_full = Reading::unavailable("Reduce Motion and Transparency are not read yet");
+        f.declare_not_read_yet(FactKind::VisualEffects, "Reduce Motion and Transparency are not read yet");
         f.declare_not_read_here(FactKind::BackgroundApps, "macOS has no per-app background permission to count");
         if let Some(h) = &self.home {
             f.dev_folders = scan(h, ScanLimits::default());
         }
-        f.last_boot_secs = Reading::unavailable("Boot time is not measured yet");
+        f.declare_not_read_yet(FactKind::LastBoot, "Boot time is not measured yet");
         f
     }
 }
@@ -133,7 +133,11 @@ mod tests {
             [FactKind::RestartPending, FactKind::PendingUpdates, FactKind::BackgroundApps],
             "what macOS never reads, by design; disk health is read, so a failure there is a failed read"
         );
-        assert!(f.not_read_yet.is_empty());
+        assert_eq!(
+            f.not_read_yet,
+            [FactKind::VisualEffects, FactKind::LastBoot],
+            "readers that do not exist yet, unscored"
+        );
     }
 
     #[test]

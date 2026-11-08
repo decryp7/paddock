@@ -215,7 +215,7 @@ describe('HealthHero', () => {
     vi.spyOn(mock, 'health').mockResolvedValue({
       ...report([]),
       notChecked: [
-        { what: ['Disk health', 'Pending restart', 'Pending updates'], why: 'Dyno does not check this on Windows yet.', kind: 'notReadYet' },
+        { what: ['Disk health', 'Restart needed', 'Pending updates'], why: 'Dyno does not check this on Windows yet.', kind: 'notReadYet' },
         { what: ['Startup items'], why: 'Dyno does not read Windows startup items yet.', kind: 'notReadYet' },
       ],
     });
@@ -226,7 +226,7 @@ describe('HealthHero', () => {
     expect(el.querySelector('.clear')?.textContent).toContain('Nothing found in what Dyno could check');
     const rows = [...el.querySelectorAll('ul[aria-label="Not checked"] li')].map((l) => [...l.children].map((c) => c.textContent).join(' | '));
     expect(rows).toEqual([
-      'Disk health, pending restart, and pending updates | Dyno does not check this on Windows yet.',
+      'Disk health, restart needed, and pending updates | Dyno does not check this on Windows yet.',
       'Startup items | Dyno does not read Windows startup items yet.',
     ]);
     expect(el.querySelector('.cover')).toBeNull();
@@ -237,7 +237,7 @@ describe('HealthHero', () => {
     const { mock } = env();
     vi.spyOn(mock, 'health').mockResolvedValue({
       ...report([]),
-      notChecked: [{ what: ['Pending updates', 'Pending restart'], why: 'Dyno does not check for updates', kind: 'notReadHere' }],
+      notChecked: [{ what: ['Pending updates', 'Restart needed'], why: 'Dyno does not check for updates', kind: 'notReadHere' }],
     });
     const f = TestBed.createComponent(HealthHero);
     await TestBed.inject(HealthStore).loadReport();
@@ -245,7 +245,7 @@ describe('HealthHero', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('.clear')?.textContent).toContain('Nothing needs your attention');
     expect(el.querySelector('.gap')).toBeNull();
-    expect(el.querySelector('.cover')?.textContent).toBe('Dyno does not check pending updates and pending restart on this OS.');
+    expect(el.querySelector('.cover')?.textContent).toBe('Dyno does not check pending updates and restart needed on this OS.');
     expect(el.querySelector('dy-ring')?.getAttribute('aria-label')).toBe('Health score 100 of 100, Good');
   });
 });

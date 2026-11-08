@@ -30,7 +30,7 @@ fn report() -> HealthReport {
             gap(&["Disk health"], "Needs administrator rights", NotCheckedKind::CouldNotRead),
             gap(&["Pending updates"], "Dyno does not check for updates", NotCheckedKind::NotReadHere),
             gap(
-                &["Pending restart", "Startup items"],
+                &["Restart needed", "Startup items"],
                 "Dyno does not check this yet",
                 NotCheckedKind::NotReadYet,
             ),
@@ -91,4 +91,4 @@ fn a_report_written_by_protocol_7_is_refused_not_read_wrongly() {
 
 /// Reply::Health (0b), at 1, score 100, Good, performance 100, no cap, no reasons, then three entries: what (count, strings), why,
 /// kind (0 could not read, 1 not read here, 2 not read yet).
-const EXPECTED: &str = "0b02640064000003010b4469736b206865616c74681a4e656564732061646d696e6973747261746f722072696768747300010f50656e64696e6720757064617465731f44796e6f20646f6573206e6f7420636865636b20666f72207570646174657301020f50656e64696e6720726573746172740d53746172747570206974656d731c44796e6f20646f6573206e6f7420636865636b20746869732079657402";
+const EXPECTED: &str = "0b02640064000003010b4469736b206865616c74681a4e656564732061646d696e6973747261746f722072696768747300010f50656e64696e6720757064617465731f44796e6f20646f6573206e6f7420636865636b20666f72207570646174657301020e52657374617274206e65656465640d53746172747570206974656d731c44796e6f20646f6573206e6f7420636865636b20746869732079657402";
