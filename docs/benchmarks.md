@@ -256,6 +256,8 @@ Quoted by `conformance/ci/build-jobs.sh` (the macOS layout) and the fix/main-aft
   | dyno lib tests (439, without the model tests) at 14 / 8 / 4 test threads | 20.8 / 15.7 / 47.8 s wall, about 1 s CPU |
   | The probe in CI, from job logs of runs 7690–7782 | 7–27 s; 60 s TIMEOUT in run 7775 (job 32410) |
 
+- **Used for:** the macOS class defaults in `conformance/ci/build-jobs.sh`: 3 jobs per host, 2 cores kept (4 build
+  jobs per job) and 8 test threads (`NEXTEST_TEST_THREADS`), the fewest threads that matched 14 in the dyno lib run.
 - **Notes:** 3 jobs × 4 rustc plus about 10 agent threads is 22 busy threads, which slowed the probe by about 1.5 times, not
   the 20 times seen in run 7775; so the share is not what timed it out, and that timeout is not reproduced here. In the
   job logs the probe took 15–26 s every time its run overlapped dyno-bench's all-core tests (4 of 4) and about 7 s when it

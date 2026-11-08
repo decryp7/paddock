@@ -26,17 +26,18 @@
 #                                                 2026-10-30). Left unset: cargo's default is its 8 cores, the 8 the
 #                                                 workflows spelled before; the share (4 each) waits for the same A/B.
 #        macOS    3          2           32 GB    d7-mac-mini, -2 and -3 (2026-11-08), three runners of capacity 1 on the
-#                                                 developer Mac its agents share: (14 - 2) / 3 = 4 build jobs and 4 test
-#                                                 threads per job, the 4 build jobs each job had before. Measured
+#                                                 developer Mac its agents share: (14 - 2) / 3 = 4 build jobs per job,
+#                                                 the 4 each job had before, and 8 test threads (below). Measured
 #                                                 2026-11-09 (docs/benchmarks.md, "CI share on the shared Mac"): 23 busy
 #                                                 threads besides a CPU-bound test (3 x 4 rustc plus 10 for the agents)
 #                                                 slowed it from 2.7 to 4.0 s; the 60 s timeouts of run 7775 came from
 #                                                 all-core benchmarks in the same job, not from the share.
 #
-# NEXTEST_TEST_THREADS: the job's core share ((cores - kept) / jobs per host, not capped by RAM: that ceiling is per rustc)
-# divided by <split>, written with CARGO_BUILD_JOBS wherever that is computed from the share; PADDOCK_CI_TEST_THREADS (a
-# runner's runner.envs) replaces the share, PADDOCK_CI_BUILD_JOBS stands in for it. Left unset where CARGO_BUILD_JOBS is
-# (nextest then runs the profile's num-cpus).
+# NEXTEST_TEST_THREADS, written with CARGO_BUILD_JOBS and divided by <split>: a runner's PADDOCK_CI_TEST_THREADS
+# (runner.envs), else the class's measured number (macOS 8: the tests mostly wait, so the 4 cores of the share made a dyno
+# run 2.3 times longer than 14 threads, and 8 matched 14; docs/benchmarks.md, "CI share on the shared Mac"), else the job's
+# core share ((cores - kept) / jobs per host, not capped by RAM: that ceiling is per rustc; PADDOCK_CI_BUILD_JOBS stands in
+# for it). Left unset where CARGO_BUILD_JOBS is (nextest then runs the profile's num-cpus).
 #      A Linux or Windows runner that sets PADDOCK_CI_JOBS_PER_HOST gets the formula (0 cores and 2 GB kept unless set).
 #
 # Cores: nproc (Linux and Git Bash; honours the container's cpuset), else sysctl hw.ncpu (macOS), else NUMBER_OF_PROCESSORS,
@@ -102,9 +103,11 @@ class_default() { # <share|cores|ram>
   case "${RUNNER_OS:-}:$1" in
     Linux:share) echo - ;;
     Windows:share) echo - ;;
+    macOS:threads) echo 8 ;;
     macOS:share) echo 3 ;;
     macOS:cores) echo 2 ;;
     macOS:ram) echo 32768 ;;
+    *:threads) echo - ;;
     *:share) echo 1 ;;
     *:cores) echo 0 ;;
     *:ram) echo 2048 ;;
@@ -116,13 +119,17 @@ put() { # <name> <value> <why>
   if [ -n "${GITHUB_ENV:-}" ]; then echo "$1=$2" >>"$GITHUB_ENV"; else echo "$1=$2"; fi
 }
 emit() { put CARGO_BUILD_JOBS "$@"; }
-# emit_threads <threads> <why>: nextest's test threads (NEXTEST_TEST_THREADS overrides the profile's num-cpus), or the
-# runner's PADDOCK_CI_TEST_THREADS divided by the split.
+# emit_threads <threads> <why>: nextest's test threads (NEXTEST_TEST_THREADS overrides the profile's num-cpus): the
+# runner's PADDOCK_CI_TEST_THREADS, else the class's measured number, else the given share; divided by the split.
 emit_threads() {
-  local t="$1" why="$2"
+  local t="$1" why="$2" class
+  class="$(class_default threads)"
   if [ -n "${PADDOCK_CI_TEST_THREADS:-}" ]; then
     t=$((PADDOCK_CI_TEST_THREADS / split))
     why="the runner's PADDOCK_CI_TEST_THREADS / $split test runs at once"
+  elif [ "$class" != - ]; then
+    t=$((class / split))
+    why="the ${RUNNER_OS} class's measured test threads / $split test runs at once"
   fi
   [ "$t" -ge 1 ] || t=1
   put NEXTEST_TEST_THREADS "$t" "$why"
