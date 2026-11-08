@@ -31,3 +31,19 @@ test('parseArgs --only needs the power suite and marks the run partial', () => {
   assert.throws(() => parseArgs([...base, '--only', 'mac-reopen']), /needs --suite power/);
   assert.throws(() => parseArgs([...base, '--suite', 'power', '--only', 'x']), /unknown row/);
 });
+
+test('--only takes idle-action, whose required row is in the power manifest', () => {
+  assert.deepEqual(parseOnly('idle-action'), ['idle-action']);
+  assert.ok(onlyRequired(['idle-action']).some((r) => r.id === 'idle-action'));
+});
+
+test('parseArgs --audio-probe-pkg needs its sha256 and the power suite', () => {
+  const base = ['--app', 'dyno', '--installer', '/x.dmg', '--suite', 'power'];
+  const sha = 'a'.repeat(64);
+  const o = parseArgs([...base, '--audio-probe-pkg', '/b.pkg', '--audio-probe-sha256', sha]);
+  assert.equal(o.audioProbePkg, '/b.pkg');
+  assert.equal(o.audioProbeSha256, sha);
+  assert.throws(() => parseArgs([...base, '--audio-probe-pkg', '/b.pkg']), /--audio-probe-sha256/);
+  assert.throws(() => parseArgs([...base, '--audio-probe-pkg', '/b.pkg', '--audio-probe-sha256', 'zz']), /64 hex/);
+  assert.throws(() => parseArgs(['--app', 'dyno', '--installer', '/x.dmg', '--audio-probe-pkg', '/b.pkg', '--audio-probe-sha256', sha]), /needs --suite power/);
+});

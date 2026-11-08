@@ -275,8 +275,9 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
     for (const fn of extra) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // a function may return several steps
     if (gui && !only) push(await gui.helperOff());
     for (const fn of only ? [] : post) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // after Turn off: steps that read what the helper left behind
-    if (idle && !helperOnly && !only) { push(await idle.run()); if (idle.audioStep) push(idle.audioStep); }
+    if (idle && !helperOnly && (!only || only.includes('idle-action'))) { push(await idle.run()); if (idle.audioStep) push(idle.audioStep); }
   }
+  if (only) check.loginOn = false; // a subset run started the agent itself; Quit is judged without the login supervision claim
   push(await check.quit('Quit after the power checks'));
   for (const m of only ? [] : manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
   return { steps, version: check.version };

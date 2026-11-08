@@ -60,12 +60,19 @@ export function parseArgs(argv) {
     else if (a === '--reboot-check') o.reboot = true;
     else if (a === '--expect-commit') o.expectCommit = take(i++, a);
     else if (a === '--partial') o.partial = true;
+    else if (a === '--audio-probe-pkg') o.audioProbePkg = take(i++, a);
+    else if (a === '--audio-probe-sha256') o.audioProbeSha256 = take(i++, a);
     else if (a === '--only') o.only = parseOnly(take(i++, a));
     else if (a === '--keep-vm') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!['start', 'power', 'helper'].includes(o.suite)) throw new Error(`--suite ${o.suite}: start (default), power or helper`);
   if (o.only && o.suite !== 'power') throw new Error('--only (run just these release rows) needs --suite power');
+  if (o.audioProbePkg) {
+    if (o.suite !== 'power') throw new Error('--audio-probe-pkg (a virtual audio driver for the guest only) needs --suite power');
+    if (!o.audioProbeSha256) throw new Error('--audio-probe-pkg needs --audio-probe-sha256 <64 hex>: the driver is verified before it is installed');
+    if (!/^[0-9a-f]{64}$/.test(o.audioProbeSha256)) throw new Error('--audio-probe-sha256 must be 64 hex digits');
+  }
   if (o.only) o.partial = true; // a subset is never a release verdict
   if (!o.app) throw new Error('--app <id> is needed (dyno, spotter, pitcrew, pitwall, debrief)');
   if (!/^[a-z][a-z-]*$/.test(o.app)) throw new Error(`--app ${o.app} is not an app id`);
@@ -195,6 +202,7 @@ async function main(argv) {
         if (c.code !== 0) throw new Error(`swiftc failed for axdrive: ${c.stderr.trim().slice(0, 300)}`);
       }
       cpSync(bin, join(stage, 'axdrive'));
+      if (o.audioProbePkg) { cpSync(resolve(o.audioProbePkg), join(stage, 'audio-driver.pkg')); cpSync(join(HERE, 'guest', 'set-default-output.swift'), join(stage, 'set-default-output.swift')); }
     }
 
     // A VM slot, host-wide, the same one tools/macos-vm-smoke.sh takes (`./dev ci slot`, an OS lock the kernel frees with its holder).
@@ -264,6 +272,12 @@ async function main(argv) {
     if (o.suite === 'power' || o.suite === 'helper') {
       const i = await exec(`sudo cp '${SHARE}/axdrive' /usr/local/bin/axdrive && sudo chmod 755 /usr/local/bin/axdrive && /usr/local/bin/axdrive trusted; echo trusted=$?`);
       log(`axdrive installed in the guest (${i.stdout.trim().split('\n').at(-1)})`);
+      if (o.audioProbePkg) { // test tooling inside this clone only (ER-14: the host is never used): a virtual output the guest can play to, verified by hash first
+        const ap = await exec(`set -e; echo '${o.audioProbeSha256}  ${SHARE}/audio-driver.pkg' | shasum -a 256 -c - >/dev/null; sudo installer -pkg '${SHARE}/audio-driver.pkg' -target / >/tmp/audio-driver.log 2>&1; sudo killall coreaudiod || true; sleep 6; cp '${SHARE}/set-default-output.swift' /tmp/ && cd /tmp && swiftc set-default-output.swift -o set-default-output && ./set-default-output set; system_profiler SPAudioDataType | grep -B1 -A8 'BlackHole' | grep -E 'BlackHole|Default Output'`, { timeoutMs: 240_000 });
+        const okDev = ap.code === 0 && /Default Output Device: Yes/.test(ap.stdout);
+        log(`audio probe driver: ${okDev ? 'installed, BlackHole is the default output' : 'NOT ready'} (${ap.stdout.trim().replace(/\s+/g, ' ').slice(0, 200)}${ap.code ? ' exit ' + ap.code : ''})`);
+        if (!okDev) throw new Error('check broken: the guest virtual audio driver is not the default output');
+      }
     }
     const check = new Check(guest, config, { log });
     const started = new Date().toISOString();
@@ -284,7 +298,7 @@ async function main(argv) {
         const pw = process.env.PADDOCK_VM_PASSWORD ?? 'admin'; // the pinned image's admin account; never printed
         const gui = new MacGui(guest, { password: pw, fetch, log });
         power.ui = gui;
-        const idle = new MacIdleChecks(guest, power, check, { log, ui: gui, audioDevice: false });
+        const idle = new MacIdleChecks(guest, power, check, { log, ui: gui, audioDevice: o.audioProbePkg ? null : false });
         const { loadRules, MacTour } = await import('./mac-tour.mjs');
         const { macHelperLogStep } = await import('./mac-helper-log.mjs');
         const tour = new MacTour(guest, gui, await loadRules(), { log, check });

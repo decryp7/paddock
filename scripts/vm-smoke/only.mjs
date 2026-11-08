@@ -3,7 +3,7 @@
 import { requiredSteps } from './manifest.mjs';
 
 /** The rows `--only` can pick on macOS (the power suite's release rows driven by `macRows`). */
-export const MAC_ONLY_ROWS = ['mac-reopen', 'mac-lifecycle-log', 'hung-page'];
+export const MAC_ONLY_ROWS = ['mac-reopen', 'mac-lifecycle-log', 'hung-page', 'idle-action'];
 /** The steps every `--only` run keeps: nothing is installed or started without them. */
 export const MAC_ONLY_BASE = ['install', 'build-binding', 'cold-start', 'quit'];
 
