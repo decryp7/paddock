@@ -57,6 +57,16 @@ const CREDIT: u32 = 4;
 /// Writes one phase line to stderr with the time since the first one in this process (ER-27): a nextest-terminated test
 /// still prints its captured stderr, so a stall shows which phase it was in.
 pub(crate) fn phase(what: impl std::fmt::Display) {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    // Quiet for a person running `cargo debrief-plugin`; on in CI and under nextest, or with DEBRIEF_PLUGIN_TEST_LOG set.
+    let on = *ON.get_or_init(|| {
+        ["DEBRIEF_PLUGIN_TEST_LOG", "CI", "NEXTEST"]
+            .iter()
+            .any(|k| std::env::var_os(k).is_some())
+    });
+    if !on {
+        return;
+    }
     static START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
     let ms = START.get_or_init(Instant::now).elapsed().as_millis();
     eprintln!("[debrief-plugin-test +{ms} ms] {what}");
@@ -77,6 +87,12 @@ pub struct Launch {
     /// How long the conformance checks wait for one import before they call the plugin hung (default 20 s). A plugin that
     /// hangs makes the checks wait this long, so the harness's own tests shorten it.
     pub import_timeout: Duration,
+    /// How long the cancellation check lets the plugin's read of its input make no progress before it calls the plugin
+    /// hung (default 20 s).
+    pub read_stall: Duration,
+    /// Test hook: once the plugin has read this many bytes the host stops answering its reads (until the plugin is
+    /// dropped), to exercise the stall guard. `None` serves everything.
+    pub stall_reads_after: Option<u64>,
 }
 
 impl Default for Launch {
@@ -91,6 +107,8 @@ impl Default for Launch {
                 day_first: None,
             },
             import_timeout: Duration::from_secs(20),
+            read_stall: Duration::from_secs(20),
+            stall_reads_after: None,
         }
     }
 }
@@ -166,6 +184,7 @@ impl PluginUnderTest {
         let copied = bin.join(name);
         std::fs::copy(exe, &copied).with_context(|| format!("cannot copy {}", exe.display()))?;
         let host = Arc::new(FakeHost::default());
+        host.stall_reads_after(launch.stall_reads_after);
         // First in the strictest sandbox, to learn what it is and asks for (as Debrief does when installing).
         let probe = start(&copied, &unknown_manifest(), &[], &launch, home.path(), &host)?;
         let json: Json = probe.peer().request(&PluginRequest::Manifest, Some(CALL_TIMEOUT)).map_err(ipc)?;
@@ -457,6 +476,7 @@ impl PluginUnderTest {
 
 impl Drop for PluginUnderTest {
     fn drop(&mut self) {
+        self.host.release_reads();
         self.child.stop();
     }
 }

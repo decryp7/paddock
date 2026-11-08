@@ -304,10 +304,11 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
         // Waits for the host's signal that the whole file was read (a loaded machine reads it late, and cancelling
         // before the importer has it all ends the read, not the importer's own work). The slice only bounds how
         // long to wait before looking at the stream again. The guard fails a plugin whose read made no progress for
-        // `READ_STALL` (the bytes read so far are in the message), so the check ends with a cause long before a
+        // the read stall limit (the bytes read so far are in the message), so the check ends with a cause long before a
         // test runner's kill; a slow read that keeps advancing is waited for.
         let read_before = p.host.bytes_read.load(std::sync::atomic::Ordering::Relaxed);
         let target = read_before + content.len() as u64;
+        let stall = p.launch_options().read_stall;
         let mut seen = read_before;
         let mut moved = Instant::now();
         let mut reported = Instant::now();
@@ -331,7 +332,7 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
                     waiting.elapsed().as_millis()
                 ));
             }
-            if moved.elapsed() >= READ_STALL {
+            if moved.elapsed() >= stall {
                 phase(format_args!(
                     "cancellation: read stalled at {} of {} bytes",
                     seen - read_before,
@@ -342,7 +343,7 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
                     importer.id,
                     seen - read_before,
                     content.len(),
-                    READ_STALL.as_secs()
+                    stall.as_millis() as f64 / 1000.0
                 ));
             }
         }
@@ -395,9 +396,6 @@ fn cancellation(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<Str
     Ok(detail)
 }
 
-/// How long a plugin may read its input without the bytes read advancing before the cancellation check calls it hung.
-const READ_STALL: Duration = Duration::from_secs(20);
-
 /// The frame limit of the `oversized-frames` check.
 const SMALL_FRAME: usize = 64 * 1024;
 
@@ -419,10 +417,12 @@ fn oversized(p: &PluginUnderTest, inputs: &[(String, Vec<u8>)]) -> Result<String
     }
     // Its reads and answer cannot fit in 64 KiB frames: a typed error (or an import that produced nothing) is fine, a crash or
     // a hang is not. The request itself is small: the content is read back through the host in chunks.
-    let started = Instant::now();
     let r = small.import_within(&importer.id, &name, &big, p.launch_options().import_timeout);
-    if started.elapsed() > p.launch_options().import_timeout + CANCEL_GRACE {
-        return Err("the import hung on a small frame limit".into());
+    // Hung is what the call says (it did not answer), never a stopwatch reading taken around it.
+    if let Err(e) = &r {
+        if e.to_string().contains("did not answer") {
+            return Err(format!("the import hung on a small frame limit: {e:#}"));
+        }
     }
     if !small.alive() {
         return Err(format!("the plugin died when its answer did not fit a frame ({:?})", r.err()));

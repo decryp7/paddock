@@ -71,6 +71,31 @@ fn a_hung_import_is_cut_off_and_the_conformance_checks_report_it() {
     let cancel = by_name("cancellation");
     assert!(!cancel.passed && cancel.detail.contains("kept running"), "{report}");
     assert!(by_name("manifest").passed && by_name("typed-errors").passed, "{report}");
+    // On the small-frame connection the plugin's read of its 2 MiB input is refused before the importer runs, so the
+    // hang is never reached: a typed error, whatever the timing (a hang would be judged on the "did not answer" error).
+    let oversized = by_name("oversized-frames");
+    assert!(
+        oversized.passed && oversized.detail.contains("refused with a typed error"),
+        "{report}"
+    );
+}
+
+#[test]
+fn a_read_that_stops_advancing_fails_the_cancellation_check_with_what_was_read() {
+    let fresh = PluginUnderTest::launch_with(
+        FIXTURE,
+        Launch {
+            import_timeout: Duration::from_secs(1),
+            read_stall: Duration::from_secs(1),
+            // The host stops answering the plugin's reads after 1 MiB of the 16 MiB the check lends.
+            stall_reads_after: Some(1 << 20),
+            ..Launch::default()
+        },
+    )
+    .unwrap();
+    let report = fresh.conformance();
+    let cancel = report.checks.iter().find(|c| c.name == "cancellation").unwrap();
+    assert!(!cancel.passed && cancel.detail.contains("made no progress"), "{report}");
 }
 
 #[cfg(windows)]
