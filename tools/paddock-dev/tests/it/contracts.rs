@@ -125,7 +125,10 @@ fn scoped(pattern: &str, app: &str, os: &str) -> Option<Regex> {
     // The script prints a separator class as `[/\\]`; where one backslash reaches it (`[/\]`) JavaScript took that for the class
     // closing, so it is read here as the same separator class.
     out.status.success().then(|| {
-        let text = String::from_utf8_lossy(&out.stdout).trim().replace("[/\\]", "[/\\\\]");
+        let text = String::from_utf8_lossy(&out.stdout)
+            .trim()
+            .replace("[/\\]", "[/\\\\]")
+            .replace("[^/\\]", "[^/\\\\]");
         Regex::new(&text).unwrap()
     })
 }
