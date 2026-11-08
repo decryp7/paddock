@@ -973,9 +973,7 @@ mod tests {
         start_a_waiting_change(&worker, &ops, &registry, begun);
         wake.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         worker.cancel();
-        paddock_testkit::wait_until("the cancelled change to end", || {
-            !worker.busy.load(std::sync::atomic::Ordering::SeqCst)
-        });
+        paddock_testkit::wait_until("the cancelled change to end", || !worker.busy.load(std::sync::atomic::Ordering::SeqCst));
         let (done, seen) = std::sync::mpsc::channel();
         worker
             .start(&ops, register_switch(&registry), move |cancel| {
