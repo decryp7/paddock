@@ -1896,6 +1896,7 @@ dependencies = [
  "ctrlc",
  "debrief-core",
  "globset",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "sysinfo",
@@ -2276,6 +2277,7 @@ dependencies = [
  "libc",
  "log",
  "paddock-proc",
+ "paddock-testkit",
  "serde",
  "serde_json",
  "sysinfo",
@@ -5235,6 +5237,7 @@ dependencies = [
  "paddock-dialogs",
  "paddock-env",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-log",
  "paddock-settings",
  "paddock-workspace-hack",
@@ -5270,10 +5273,21 @@ version = "0.2.0"
 dependencies = [
  "croner",
  "jiff",
+ "log",
  "paddock-env",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "sha2 0.10.9",
+]
+
+[[package]]
+name = "paddock-limits"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
 ]
 
 [[package]]
@@ -5313,6 +5327,17 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "paddock-limits",
+ "paddock-workspace-hack",
+ "socket2",
+ "tempfile",
 ]
 
 [[package]]

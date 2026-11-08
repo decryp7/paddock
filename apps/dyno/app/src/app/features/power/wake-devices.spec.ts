@@ -6,6 +6,7 @@ import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { WolStore } from '../../state/wol.store';
 import { WakeDevices } from './wake-devices';
+import { settle, untilResolved, useSettleClock } from '../../../testing/settle';
 
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
@@ -17,14 +18,6 @@ function render(options: ConstructorParameters<typeof MockBackend>[0] = {}, prep
   f.detectChanges();
   return { f, el: f.nativeElement as HTMLElement, mock, store: TestBed.inject(WolStore) };
 }
-const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
-  for (let i = 0; i < 6; i++) {
-    await f.whenStable();
-    await new Promise((r) => setTimeout(r, 2));
-    await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    f.detectChanges();
-  }
-};
 const ROW = '[role="row"][data-key]';
 const btn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
 const type = async (f: Parameters<typeof settle>[0], el: HTMLElement, label: string, value: string) => {
@@ -35,8 +28,7 @@ const type = async (f: Parameters<typeof settle>[0], el: HTMLElement, label: str
 };
 
 describe('dy-wake-devices', () => {
-  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
-  afterEach(() => vi.useRealTimers());
+  useSettleClock(NOW);
 
   it('lists the saved computers with their last wake in words, and two ways to add one', async () => {
     const { f, el } = render();
@@ -142,7 +134,7 @@ describe('dy-wake-devices', () => {
     await settle(f);
     expect(el.querySelector('[aria-label="Wake of Media PC"]')?.textContent).toContain('Wake packets sent.');
     expect(el.querySelector('details')?.textContent).toContain('Through en0 to 255.255.255.255: 3 of 3 sent');
-    await store.wake(1, true);
+    await untilResolved(store.wake(1, true));
     await settle(f);
     expect(el.querySelector('[aria-label="Wake of Media PC"]')?.textContent).toContain('Test wake: Media PC');
     expect(el.querySelector('[aria-label="Wake of Media PC"]')?.textContent).toContain('Awake after 23 s (answered ping).');
@@ -151,7 +143,7 @@ describe('dy-wake-devices', () => {
   it('a test wake that gets no answer says what to check', async () => {
     const { f, el, store } = render({ wol: 'timeout' });
     await settle(f);
-    await store.wake(1, true);
+    await untilResolved(store.wake(1, true));
     await settle(f);
     expect(el.querySelector('[aria-label="Wake of Media PC"]')?.textContent).toContain('off at the wall');
   });

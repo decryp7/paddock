@@ -251,7 +251,8 @@ mod tests {
             "a block-storage driver is listed"
         );
         assert!(!p.iokit_failed, "IOKit read the statistics, no ioreg fallback");
-        std::thread::sleep(Duration::from_millis(300));
+        // No wait is needed: `busy_percent` takes its wall time from the second reading's own `Instant`, which is later than the
+        // first reading's (the IOKit read between them takes microseconds), so the percentage can be worked out at once.
         p.ticks = 0;
         p.enrich(&mut sample);
         let busy = sample.disk_io.busy.value().copied();

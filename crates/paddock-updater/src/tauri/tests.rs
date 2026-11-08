@@ -17,7 +17,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::mpsc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 type App = ::tauri::App<MockRuntime>;
 
@@ -643,19 +643,39 @@ fn the_wait_log_fires_once_per_bound_and_never_spins() {
     );
 }
 
+/// A lock held by a running installer until `finish`: `wait` blocks on a condition variable for the slice the product gives it, as
+/// the real lock blocks on the installer's mutex, so the background loop is paced by the fake and not by a test sleep.
 struct SlowLock {
-    installing: std::sync::atomic::AtomicBool,
+    installing: Mutex<bool>,
+    ended: std::sync::Condvar,
     waits: std::sync::atomic::AtomicUsize,
+}
+
+impl SlowLock {
+    fn held() -> Arc<Self> {
+        Arc::new(SlowLock {
+            installing: Mutex::new(true),
+            ended: std::sync::Condvar::new(),
+            waits: 0.into(),
+        })
+    }
+    fn finish(&self) {
+        *self.installing.lock().unwrap() = false;
+        self.ended.notify_all();
+    }
 }
 
 impl crate::InstallerLock for SlowLock {
     fn installing(&self) -> bool {
-        self.installing.load(std::sync::atomic::Ordering::SeqCst)
+        *self.installing.lock().unwrap()
     }
-    fn wait(&self, _bound: Duration) -> bool {
+    fn wait(&self, bound: Duration) -> bool {
         self.waits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        std::thread::sleep(Duration::from_millis(2));
-        !self.installing.load(std::sync::atomic::Ordering::SeqCst)
+        let held = self.installing.lock().unwrap();
+        // The product's slice is long; the fake gives it back after 5 ms at most so a test sees several slices.
+        let slice = bound.min(Duration::from_millis(5));
+        let (held, _) = self.ended.wait_timeout_while(held, slice, |h| *h).unwrap();
+        !*held
     }
 }
 
@@ -670,10 +690,7 @@ fn a_per_machine_start_keeps_waiting_off_the_thread_until_the_installer_is_gone(
         r#"{"version":1,"handoff":{"version":"9.9.9"}}"#,
     )
     .unwrap();
-    let lock = Arc::new(SlowLock {
-        installing: true.into(),
-        waits: 0.into(),
-    });
+    let lock = SlowLock::held();
     let a = app(Some(
         json!({ "endpoints": [MANIFEST], "pubkey": fixture("key.pub") }),
     ));
@@ -694,21 +711,15 @@ fn a_per_machine_start_keeps_waiting_off_the_thread_until_the_installer_is_gone(
     assert!(matches!(status.phase, UpdatePhase::InstallerRunning { .. }));
     let handle = background(updates.clone(), Duration::from_millis(5)).unwrap();
     // More than one wait slice passes while the installer runs: the thread does not give up after one bound.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while lock.waits.load(Ordering::SeqCst) < 3 && Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    assert!(lock.waits.load(Ordering::SeqCst) >= 3, "kept waiting");
+    paddock_testkit::wait_until("three wait slices", || lock.waits.load(Ordering::SeqCst) >= 3);
     assert!(matches!(
         updates.updater.status().phase,
         UpdatePhase::InstallerRunning { .. }
     ));
-    lock.installing.store(false, Ordering::SeqCst);
-    while !matches!(updates.updater.status().phase, UpdatePhase::Failed { .. })
-        && Instant::now() < deadline
-    {
-        std::thread::sleep(Duration::from_millis(2));
-    }
+    lock.finish();
+    paddock_testkit::wait_until("the stopped-installer failure", || {
+        matches!(updates.updater.status().phase, UpdatePhase::Failed { .. })
+    });
     let UpdatePhase::Failed { error, .. } = updates.updater.status().phase else {
         panic!("expected the stopped-installer failure")
     };

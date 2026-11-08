@@ -1,5 +1,6 @@
 {
   "app": "paddock",
+  "timingLint": true,
   "limitSkip": ["paddock-limits"],
   "screenshotDirs": [
     "ui/docs/screenshots"

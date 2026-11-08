@@ -35,6 +35,7 @@ toml.workspace = true
 libc = "0.2"
 
 [dev-dependencies]
+paddock-testkit = { path = "../../../../crates/paddock-testkit" }
 tempfile.workspace = true
 
 [lints]

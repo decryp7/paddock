@@ -112,6 +112,7 @@ fn interactive_operations_at_scale() {
                     let used = store.store_memory().map(|m| m.duck_used_bytes >> 20).unwrap_or(0);
                     eprintln!("idle +{t:>3} s: RSS {} MB, DuckDB uses {used} MB", current() >> 20);
                     if t < secs {
+                        // conformance: hang-guard — an idle observation window of 60 s or more (DEBRIEF_BENCH_IDLE_SECS), sampled every 5 s: a manual memory benchmark, not a settle
                         std::thread::sleep(Duration::from_secs(5));
                     }
                 }

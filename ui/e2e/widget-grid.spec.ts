@@ -1,5 +1,5 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Locator, type Page } from '@decryp7/paddock-e2e';
+import { expect, startFrameCost, stopFrameCost, test, type Locator, type Page } from '@decryp7/paddock-e2e';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -239,27 +239,12 @@ test('Widget grid: a drag across a 32-widget board stays under the frame budget'
   await first.scrollIntoViewIfNeeded();
   const a = (await first.boundingBox())!;
   const p = { col: a.width / 3, row: a.height / 3 };
-  // Frame cost: the time from a frame's rAF callback to the first task after rendering (style, layout, paint included), per frame.
-  await page.evaluate(() => {
-    const w = window as unknown as { __frames: number[]; __stop: boolean };
-    w.__frames = [];
-    w.__stop = false;
-    const tick = () => {
-      if (w.__stop) return;
-      const t0 = performance.now();
-      const ch = new MessageChannel();
-      ch.port1.onmessage = () => w.__frames.push(performance.now() - t0);
-      ch.port2.postMessage(0);
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
+  await startFrameCost(page);
   await page.mouse.move(a.x + 20, a.y + 20);
   await page.mouse.down();
   await page.mouse.move(a.x + 20 + p.col * 6, a.y + 20 + p.row * 6, { steps: 30 });
   await page.mouse.up();
-  await page.evaluate(() => ((window as unknown as { __stop: boolean }).__stop = true));
-  const frames = await page.evaluate(() => (window as unknown as { __frames: number[] }).__frames);
+  const frames = await stopFrameCost(page);
   // The budget is 16.7 ms a frame (ADR 0044 §7). CI noise makes the single worst frame a poor gate, so the p95 over the drag is asserted.
   const sorted = [...frames].sort((x, y) => x - y);
   const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] as number;

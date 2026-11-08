@@ -147,21 +147,29 @@ mod tests {
                 }
             }
             let _stop_on_exit = StopOnDrop(stop.clone());
+            let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let worker = {
-                let (log, stop) = (log.clone(), stop.clone());
+                let (log, stop, attempts) = (log.clone(), stop.clone(), attempts.clone());
                 std::thread::spawn(move || {
                     let mut at = 1;
                     while !stop.load(Ordering::SeqCst) {
                         // An audited request: it is told "recorded" whether the file took the line or not.
                         log.record(&entry(at, "racing", AuditVerdict::Refused)).unwrap();
                         at += 1;
+                        attempts.fetch_add(1, Ordering::SeqCst);
                     }
                 })
             };
             std::thread::yield_now();
             log.gate().quiesce();
             let size = std::fs::metadata(&path).map_or(0, |m| m.len());
-            std::thread::sleep(std::time::Duration::from_millis(3));
+            // The window is the worker's own attempts, not a time: it must have tried to record again, after the quiesce, before
+            // the size is read once more.
+            let after_quiesce = attempts.load(Ordering::SeqCst);
+            paddock_testkit::wait_until("the worker to try again after the quiesce", || {
+                attempts.load(Ordering::SeqCst) >= after_quiesce + 3 || worker.is_finished()
+            });
+            assert!(!worker.is_finished(), "round {round}: the worker is still recording");
             assert_eq!(
                 std::fs::metadata(&path).map_or(0, |m| m.len()),
                 size,

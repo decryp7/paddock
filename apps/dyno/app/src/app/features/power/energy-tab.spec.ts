@@ -4,6 +4,7 @@ import { MockBackend } from '../../core/mock-backend';
 import type { EnergyReport, ReadVia } from '../../core/api.types';
 import { provideIcons } from '../../shared/icons';
 import { EnergyTab } from './energy-tab';
+import { settle, useSettleClock } from '../../../testing/settle';
 
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
@@ -13,17 +14,12 @@ async function render(configure: (m: MockBackend) => Promise<void> = async () =>
   TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
   const f = TestBed.createComponent(EnergyTab);
   f.detectChanges();
-  for (let i = 0; i < 4; i++) {
-    await f.whenStable();
-    await new Promise((r) => setTimeout(r, 2));
-    f.detectChanges();
-  }
+  await settle(f, 4);
   return { f, el: f.nativeElement as HTMLElement, mock };
 }
 
 describe('dy-energy-tab', () => {
-  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
-  afterEach(() => vi.useRealTimers());
+  useSettleClock(NOW);
 
   it('says there are no figures until the person enters watts, and still shows the time', async () => {
     const { el } = await render();
@@ -101,10 +97,7 @@ describe('dy-energy-tab', () => {
     const spy = vi.spyOn(mock, 'energyReport');
     const toggles = [...el.querySelectorAll<HTMLButtonElement>('mat-button-toggle button')];
     toggles.find((b) => b.textContent?.includes('30 days'))!.click();
-    for (let i = 0; i < 3; i++) {
-      await f.whenStable();
-      f.detectChanges();
-    }
+    await settle(f, 3);
     expect(spy).toHaveBeenCalledWith(30);
     expect(el.querySelectorAll('tbody tr')).toHaveLength(30);
   });
@@ -115,17 +108,11 @@ describe('dy-energy-tab', () => {
     TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
     const f = TestBed.createComponent(EnergyTab);
     f.detectChanges();
-    for (let i = 0; i < 4; i++) {
-      await f.whenStable();
-      f.detectChanges();
-    }
+    await settle(f, 4);
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('[role="alert"]')?.textContent).toContain('Dyno could not read its power log.');
     [...el.querySelectorAll('button')].find((b) => b.textContent?.includes('Retry'))!.click();
-    for (let i = 0; i < 4; i++) {
-      await f.whenStable();
-      f.detectChanges();
-    }
+    await settle(f, 4);
     expect(el.querySelectorAll('tbody tr').length).toBeGreaterThan(0);
   });
 });

@@ -14,6 +14,7 @@ use dyno_core::time::day_start;
 use dyno_core::time::{Timestamp, HOUR, MINUTE};
 use dyno_platform::fake::{process, Fake};
 use paddock_ipc::BodyPeer;
+use paddock_testkit::wait_until;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -331,16 +332,6 @@ fn issues_export_as_json_lines_to_a_chosen_file_only() {
             "{bad}"
         );
     }
-}
-
-fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
-    for _ in 0..200 {
-        if f() {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-    panic!("timed out waiting for {what}");
 }
 
 fn unusual(peer: &BodyPeer<Message>) -> dyno_core::unusual::UnusualOverview {

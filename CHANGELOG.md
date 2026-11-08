@@ -179,6 +179,16 @@ Conventional Commits; one semver tag for the whole repo.
   transition on the main thread and logs one line each. The Windows, Linux and macOS edges read the DPI, the visible frame and the user-resize signal. `SizeLoop` (one measure function, last-sent baseline, at most two sends per change)
   replaces the handshake measure and the frame's own watch baseline. `data-fit-seq` and `data-size-mode` are set on `<html>`.
 
+### Conformance C71: tests do not settle on real time
+- New in `paddock-testkit`: the `wait` module (`wait_until`, `wait_for`, `wait_until_within`, `wait_for_within`, `poll_for`, `poll_until_within`, `retry_within`, `HANG_GUARD`): a bounded poll on a condition instead of a sleep, with a hang guard of 40 s that names what was waited for. `retry_within` runs an action that changes things at its own interval.
+- New in `@decryp7/paddock-e2e`: `startFrameCost(page)` / `stopFrameCost(page)`, the per-frame cost sampler of the grid drag spec (a measurement, not a wait).
+- New check **C71** (ADR 0041 §4, first slice; ER-12, rule 49), opt-in with `"timingLint": true` in `paddock.conformance.json` (the Paddock repo is on, and scans every app): errors on
+  `waitForTimeout(`, a `setTimeout`/`sleep`/`delay` wait, a wait on `requestAnimationFrame` turns and a locator `.count()` used later to `.nth(..)` in spec, test and e2e
+  files, and on `thread::sleep` / `tokio::time::sleep` in the `#[cfg(test)]` items and test files of Rust. Exempt per call: `// conformance: hang-guard — <why>` naming a bound of at least 10 s,
+  a TypeScript call under `useTestClock()` / `frozenClock(`, a Rust call that takes a `FakeClock` / `ManualPace` / `TestSeams`. The known sites are in `conformance/baselines/C71.json`
+  (file and hash of the line; no expiry; the check errors on any entry the baseline at the merge base lacks); `node conformance/bin/paddock-timing-baseline.mjs` lists them, `--shrink` removes stale entries.
+
+
 ### `paddock-shell`: `files_*` commands always have their service
 
 An app that did not call `Builder::files` registered `files_open_url` (About's "See all releases") without its state, so the link failed with "state not managed for field `state` on command `files_open_url`". The shell now manages a service that only opens web addresses (http, https, mailto) when the app set up none: no dropped files are granted, no folders, no recent lists, and the storage commands do not use it (`paddock_files::tauri::install_open_url_only`).

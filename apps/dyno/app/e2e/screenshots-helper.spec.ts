@@ -1,6 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { dialogWindowUrl } from '@decryp7/paddock-e2e';
+import { dialogWindowUrl, settleTransitions } from '@decryp7/paddock-e2e';
 
 // The Administrator readings card in every state, light and dark, for the independent review (ER-23). Only on request:
 // `SCREENSHOTS=1 HELPER_SHOTS_DIR=<dir> npx playwright test --project=screenshots e2e/screenshots-helper.spec.ts`.
@@ -40,13 +40,15 @@ test.describe('Administrator readings card screenshots', () => {
         mkdirSync(OUT, { recursive: true });
         await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.setViewportSize({ width: 880, height: 760 });
-        await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: '?latency=400&helper=off&jobsteps=40' }));
+        await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: '?latency=400&helper=off&jobsteps=16' }));
         await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
         await page.getByText('Dyno', { exact: true }).first().click();
         const card = page.getByRole('region', { name: 'Administrator readings' });
         await card.getByRole('button', { name: 'Turn on administrator readings' }).click();
         await expect(card.locator('pd-status-pill')).toContainText('Turning on');
-        await page.waitForTimeout(2500);
+        // The job is at its permission prompt (the phase the shot is about), and the card has stopped moving.
+        await expect(card).toContainText("Waiting for the system's permission prompt");
+        await settleTransitions(page);
         await card.screenshot({ path: `${OUT}/card-turning-on-${scheme}.png` });
       });
     });

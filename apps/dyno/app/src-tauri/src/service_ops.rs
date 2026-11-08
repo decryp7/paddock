@@ -69,6 +69,13 @@ impl ServiceOps {
         tx
     }
 
+    /// How many tracked operations a [`join_repair`](Self::join_repair) has not yet taken over (a test reads it to know that a
+    /// joiner has begun waiting: `join_repair` takes them all as its first step).
+    #[cfg(test)]
+    pub(crate) fn tracked(&self) -> usize {
+        self.repair_done.lock().unwrap_or_else(|p| p.into_inner()).len()
+    }
+
     /// Waits up to `bound` in all for the tracked operations to end (after [`quit`](Self::quit)); `true` when they all ended or
     /// none ran.
     pub fn join_repair(&self, bound: std::time::Duration) -> bool {

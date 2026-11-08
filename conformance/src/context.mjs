@@ -21,6 +21,7 @@ export const DEFAULT_CONFIG = {
   parserSkip: [],
   nonGates: [],
   commitRange: null,
+  timingLint: false,
 };
 
 /** `paddock.conformance.json` merged over the defaults. A file that exists but cannot be read is an error, not a default. */

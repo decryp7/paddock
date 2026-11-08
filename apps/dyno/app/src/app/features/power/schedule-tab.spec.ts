@@ -6,6 +6,7 @@ import { jobsProviders, mockWithJobs } from '../../../testing/job-test-support';
 import { provideIcons } from '../../shared/icons';
 import { HelperStore } from '../../state/helper.store';
 import { ScheduleTab } from './schedule-tab';
+import { settle, useSettleClock } from '../../../testing/settle';
 
 const NOW = new Date(2026, 9, 22, 14, 30).getTime();
 
@@ -16,14 +17,6 @@ function render(options: ConstructorParameters<typeof MockBackend>[0] = {}) {
   f.detectChanges();
   return { f, el: f.nativeElement as HTMLElement, mock };
 }
-const settle = async (f: { detectChanges(): void; whenStable(): Promise<unknown> }) => {
-  for (let i = 0; i < 6; i++) {
-    await f.whenStable();
-    await new Promise((r) => setTimeout(r, 2));
-    await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    f.detectChanges();
-  }
-};
 const ROW = '[role="row"][data-key]';
 const btn = (el: HTMLElement, text: string) => [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
 const type = async (f: Parameters<typeof settle>[0], el: HTMLElement, label: string, value: string) => {
@@ -34,8 +27,7 @@ const type = async (f: Parameters<typeof settle>[0], el: HTMLElement, label: str
 };
 
 describe('dy-schedule-tab', () => {
-  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
-  afterEach(() => vi.useRealTimers());
+  useSettleClock(NOW);
 
   it('lists the schedules with their time, what follows, the last run and a status in words', async () => {
     const { f, el } = render({ wake: 'on' });

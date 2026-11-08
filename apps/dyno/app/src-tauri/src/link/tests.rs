@@ -1526,9 +1526,7 @@ fn an_agent_of_another_build_of_the_same_version_is_asked_to_exit_and_the_new_on
     let asked = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let ended = asked.clone();
     let process = std::thread::spawn(move || {
-        while !old.stopped() {
-            std::thread::sleep(Duration::from_millis(2));
-        }
+        paddock_testkit::wait_until("the old agent to be asked to exit", || old.stopped());
         ended.store(true, Ordering::SeqCst);
         old.stop();
     });

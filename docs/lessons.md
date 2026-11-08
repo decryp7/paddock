@@ -1523,3 +1523,15 @@ Harness: first hypothesis a regression from the paddock-ipc merge, refuted (the 
 Layout: first hypotheses (zoom ignored because the summary or view is null; the live window not yet resolved; the follow effect dropping the range) were each refuted by a log. Root cause, from document-level mousedown/mouseup/click logs plus the header children's boxes: the header row was full on a narrow pane, so a 22 px spinner appearing between mouse press and release moved the Zoom in button and the click never reached it. Rate 10 to 15 % in 6 workers under `taskpolicy -b`. The spinner slot alone left the class open (the paused chip alone moves Zoom in 107 px), so the header is now a `.lead` that takes the free space and clips and a `.tools` group that is `flex: none` and anchored right, with a geometry e2e that samples the buttons' edges every animation frame (it failed on the old layout). After the slot-only fix 1 of 120 runs still failed; no trace was kept, so whether it was the same symptom is unclassified. After the restructure 60 of 60 runs were green at the default workers and 60 of 60 under starvation; load 21 to 69. Known limit: while paused, or on panes narrower than about 1100 px, the headline's own width no longer fits and its end is clipped (still tabbable).
 
 Why the logs did not show it: neither the harness nor the app logged the phase or the click; both were found by adding probes. Class: a test or control whose verdict or target depends on something that moves or waits (fixed waits in a budget, a control that shifts under the pointer). Debrief's Playwright retries were 2 on CI, so a failure could still go green; now 1 with `failOnFlakyTests`, and traces are kept on failure. Other apps' retry settings and Debrief's local nextest retries are left to a separate change.
+
+## A rule that counts sites needs a baseline by text, not by count (2026-11-04, C71)
+
+C71 (tests do not settle on real time, ADR 0041) found 654 sites on `main` the day it ran: 339 Rust sleeps in test code, 181
+`setTimeout` waits, 57 `sleep`/`wait(n)` helpers, 35 `waitForTimeout`, 30 `requestAnimationFrame` waits and 12 `.count()`-then-`.nth()`
+uses. They sit in `conformance/baselines/C71.json` as file plus a hash of the whitespace-collapsed line, so moving a line keeps it
+known, editing it makes it new, and a second copy of a known line is new too (a per-file count would let a new site hide behind
+a fixed old one). A shrink-only rule that only the baseline tool enforced was not enforced: the check itself now compares the file with
+the merge base's and errors on an added entry, and the baseline has no expiry (the migration is open-ended, ADR 0041 WP-6). A Rust "test code" scope of
+"everything after the first `#[cfg(test)]`" and a masker that kept string contents flagged 27 non-sites; scope the region to its item and blank strings.
+**Lesson:** when a check is added to a codebase with existing violations, make the allowance a shrink-only list keyed by
+what the line says, with a date, and say in the check's fix text how to waive a real case.

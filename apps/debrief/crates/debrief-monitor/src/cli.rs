@@ -204,13 +204,8 @@ mod tests {
         let result = std::thread::scope(|s| {
             s.spawn(|| {
                 // Waits on the condition (the event in the file), not on a clock; stops when `run` returned early.
-                let start = Instant::now();
-                while !stop.load(Ordering::Relaxed) && !has_stats() {
-                    if start.elapsed() >= CAP {
-                        gave_up.store(true, Ordering::Relaxed);
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(20));
+                if !paddock_testkit::poll_until_within(CAP, || stop.load(Ordering::Relaxed) || has_stats()) {
+                    gave_up.store(true, Ordering::Relaxed);
                 }
                 stop.store(true, Ordering::Relaxed);
             });
