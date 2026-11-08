@@ -251,8 +251,8 @@ Outcomes of each step (`n` is a non-zero exit code; "registered" is `_PADDOCK_SV
 program of the folder, and:
 
 - trusted, the tool missing: the `sc` fallback when `fallback` is `sc-delete`, with the message "Windows removed `<label>`
-  without the installer's checking tool, because the tool was missing." plus `leftBehind`; with `none` the message "`<label>`
-  was not removed. Remove it in Windows Services.";
+  without the installer's checking tool, because the tool was missing." plus `leftBehind`; with `none` the message "Windows did not
+  remove `<label>`. Remove it in Windows Services.";
 - **trusted, the tool present, `check-dir` refused** (an owner or reparse point changed in the registered folder; Q2,
   decided): the same `sc` fallback and messages. A LocalSystem service whose program failed the folder check is a standing
   risk, and `sc.exe` from System32 runs nothing of the folder. **This branch is marked for explicit security re-review**
