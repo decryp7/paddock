@@ -1432,6 +1432,7 @@ dependencies = [
  "paddock-ipc",
  "paddock-jobs",
  "paddock-service",
+ "paddock-testkit",
  "paddock-watch",
  "serde",
  "serde_json",
