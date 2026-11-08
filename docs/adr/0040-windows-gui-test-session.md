@@ -238,3 +238,41 @@ The user accepted the reviewer's recommendations on 2026-11-03. The delta re-rev
 - **D2:** the Windows GUI result **gates the Dyno 1.1.0 tag now**; it gates another app's tags once C70 shows that app's
   `windows.gui` block (not `null`, every tray item and dialog covered or listed as manual).
 - **D3:** the **150 % dialog pass runs in every run**.
+
+## Amendment (2026-11-08, proposed): §1 and §3 built on ADR 0042's `vm-smoke` home and probe kit
+
+- Status: **Proposed** (2026-11-08), together with ADR [0042](0042-one-owner-per-harness-and-small-batches.md)'s
+  amendment of the same date, which holds the evidence and the mechanism. Draft on branch `docs/adr-vm-harness`, not yet
+  reviewed.
+- What was built, read 2026-11-08 on `test/dyno-vm-harness-1.1-win` (`330b7e356`): the Windows rows of Dyno 1.1.0 run in
+  the session of `paddock-test` through an in-session actor (`win-act.ps1`: `SendInput` clicks, keys, foreground, window
+  rectangles, screenshots, tray icons) and the webview's DevTools port (`win-cdp.mjs`), judged by Windows-only judges
+  (`win-judges.mjs`), from the snapshot `gui-session-tools`. Not built: §1 (`vm-win.sh` is not in git; the runner defaults
+  to a scratch path that does not exist), the image stamp and self-check of §2, `gui.ps1` and `gui-win.mjs` of §3, the
+  shared judges of §3, dialogs at 150 % (`run-win.mjs:234` lists them as manual), C70 and the `windows.gui` blocks of §5.
+  In the 111 VM reports of 2026-11-05 to 11-08, Windows had 115 check-broken steps of 833 (macOS 51 of 867, Linux 21 of 440).
+
+**What changes.**
+- **§1** is done by ADR 0042's WP-V1: `scripts/vm-win.sh` and `scripts/vm-win/` from `tools/win-update-test`, with the
+  scratch copy's 59-line difference reconciled, enter the `vm-smoke` home; the six `PADDOCK_VM_WIN` defaults become the
+  repo path. The refusal of any VM other than `paddock-win11-test` stays.
+- **§3**: the shared PowerShell library is ADR 0042 §8's `scripts/vm-smoke/kit/guest.psm1`, not a separate `gui.ps1`. It
+  takes the verbs of §3 and of `win-act.ps1` and unified's `uia.ps1`, and the kit's in-guest verbs (`Wait-Until`,
+  `Get-ProcIdentity`, `Stop-ByIdentity`, `Read-LinesSince`, `Register-Undo`). The in-session actor stays the executor;
+  every wait in it is the kit's.
+- **§4's steps** become rows of the app's registry (ADR 0042 §9) with `needs` (`desktop-session` is "GUI session ready")
+  and are selected with the one `--only` (ADR 0042 §10). Their judges move to the shared `judge.mjs`/`gui-judge.mjs` as §3
+  asked, Windows-only judges only for consoles, shortcuts and DPI.
+
+**Work packages, re-estimated** (agent-days):
+
+| WP | Status | Days |
+|---|---|---|
+| WP-1 merge `vm-win` | not built; becomes ADR 0042 WP-V1 | (in V1) |
+| WP-2 image hardening, stamp, self-check, `--refresh` | not built | 0.75 |
+| WP-3 `gui.ps1` verbs, tray tree, screenshots, runner log | partly built in `win-act.ps1`; becomes ADR 0042 WP-V5 | (in V5) |
+| WP-4 steps on the shared judges, `gui-win.test.mjs` | rows exist with Windows-only judges; the move onto the kit is in WP-V6; left here: the shared judges and the fake-guest test | 1.5 |
+| WP-5 dialogs at 100 % and 150 % | not built (manual) | 1.5 |
+| WP-6 C70, `windows.gui` blocks, rule 54 (c), ADR 0039 leg | not built | 1.5 |
+| WP-7 first full run with the new steps, lesson | Dyno 1.1.0's rounds ran without them; one run after WP-5 | 0.5 |
+| **Left here** | | **5.75** |
