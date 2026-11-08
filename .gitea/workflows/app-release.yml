@@ -336,15 +336,15 @@ jobs:
         with:
           mode: release
 
-  # Conformance C99 (ADR 0057 §3.4, rule 72): a release never ships a build that can reach the macOS Keychain. The same command
-  # as ci.yml's `c99` job, over the very commit being released; the release waits for it.
+  # Conformance C99 (ADR 0057 §3.4, rule 72): a release never ships a build that can reach the macOS Keychain. The shared
+  # keychain action, scoped to this app's folder and crates/ (ER-31); tags and manual runs only (ci.yml's c99 job covers the
+  # rest). The release waits for it.
   keychain:
     name: C99 (no Keychain in a macOS build)
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     container:
       image: dev.decryptology.net/decryp7/paddock-ci:v2
-    env:
-      RUSTC_WRAPPER: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -354,8 +354,10 @@ jobs:
           ref: ${{ inputs.paddock-ref }}
           path: .paddock
 
-      - name: C99
-        run: node .paddock/conformance/bin/paddock-conformance.mjs --app paddock --root . --only C99
+      - uses: ./.paddock/.gitea/actions/keychain
+        with:
+          scope: ${{ inputs.cargo-dir }}
+          paddock: .paddock
 
   release:
     name: release

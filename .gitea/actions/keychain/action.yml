@@ -1,0 +1,28 @@
+name: keychain
+description: "Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. The one copy of the command, used by ci.yml's c99 job and by every release path (app-release.yml, debrief.yml, the two demo release workflows)."
+inputs:
+  scope:
+    description: "The app folder (apps/<app>) a release judges: its workspaces and crates/ only (ER-31), so another app's finding cannot block it. Empty: the whole repository (ci.yml)."
+    default: ""
+  paddock:
+    description: "Folder of the Paddock checkout that holds conformance/ (. in the monorepo, .paddock when the job checked it out there)."
+    default: "."
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        SCOPE: ${{ inputs.scope }}
+        PADDOCK: ${{ inputs.paddock }}
+        RUSTC_WRAPPER: ""
+      run: |
+        set -euo pipefail
+        args=(--app paddock --root . --only C99)
+        if [ -n "$SCOPE" ]; then args+=(--scope "$SCOPE"); fi
+        echo "C99: node $PADDOCK/conformance/bin/paddock-conformance.mjs ${args[*]}"
+        start=$(date +%s)
+        if ! node "$PADDOCK/conformance/bin/paddock-conformance.mjs" "${args[@]}"; then
+          echo "::error::C99 found a way to the macOS Keychain, or could not look (see the findings above). Fix the finding, or read 'check broken' / 'not measured' as a failed check, not a pass (ADR 0057 §3)."
+          exit 1
+        fi
+        echo "C99 took $(( $(date +%s) - start )) s"
