@@ -359,6 +359,16 @@ named here. Estimates are agent-days, not yet planned by an app's planner.
 | WP-8 | **What the deleted workflows used to give.** A nightly job over `crates/` and the apps running the never-panics properties with `PROPTEST_CASES=10000` in release mode (C36 requires the tests to exist; nothing ran them hard once `app-never-panics.yml` went), a record that no CI mutation gate exists outside `debrief-core` (a monorepo version of `app-mutants.yml` is a later decision), and one `npm audit --omit=dev` over the root lock in `ci.yml`. | 1.5 |
 | WP-9 | **Ignored and env-gated tests.** Give every file of the baseline a real gate: measurements into results blocks (rule 48), VM rows into the `vm-smoke` harness (the 27 `paddock-setup` Windows rows test hostile files, junctions and signatures and are run by nothing: a release-readiness question, ER-33), the documentation screenshot captures into one on-demand job. | 3 |
 
+### Accepted gaps (recorded at the review, 2026-11-08)
+
+- **Unverified plan outputs.** "Runs when planned" (§2.4) is verified for the outputs of `ci.yml`'s plan job (`crates`, `ui`, `eslint`,
+  `conformance`, `tools`, `icons`, `paddock_dev`, `any_app`) with the planner as oracle (`scripts/affected-marks.mjs`). The `run`
+  output of an app workflow's plan job and of the nightly gate is taken as satisfied: it says "this app is affected" or "main
+  changed since the last green night", and its planner call (`affected.mjs --ci --app <app>`) has no per-file oracle yet.
+- **C30 and C15** mix `error()` and `warn()` outcomes under one `mode: gate`; only C29 and the all-warning checks are report-only.
+- **`Scope::Both`** is satisfied by the root run alone, on the assumption that it reads each app's files; **`$GITHUB_ENV`** writes are
+  invisible to the model.
+
 **Rollback.** C100 can become a warning by one flag on its CI line (`./dev gates check --warn`, which still prints every
 finding, and which the model itself counts as report-only). The register stays as documentation.
 

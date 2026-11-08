@@ -606,6 +606,36 @@ pub fn evaluate(input: &Input) -> Outcome {
         }
     }
 
+    // Known defects behind a lint allowance: each source file that says KNOWN DEFECT has a dated entry, and each entry still has its file.
+    let marked: BTreeSet<String> = input
+        .tree
+        .files()
+        .iter()
+        .filter(|p| {
+            p.ends_with(".rs") && !p.starts_with("tools/paddock-dev/") && input.tree.read(p).is_some_and(|t| t.contains("KNOWN DEFECT"))
+        })
+        .cloned()
+        .collect();
+    for p in marked.iter().filter(|p| !reg.defects.iter().any(|d| &d.path == *p)) {
+        finding(
+            &mut out,
+            Some(p),
+            None,
+            "defect",
+            "says KNOWN DEFECT in a lint allowance but has no [[defect]] entry".into(),
+            "Add a [[defect]] entry (reason, owner, since, review_by) to docs/gates.toml, or fix the defect.",
+        );
+    }
+    for d in reg.defects.iter().filter(|d| !marked.contains(&d.path)) {
+        finding(
+            &mut out,
+            Some(REGISTER),
+            None,
+            "defect",
+            format!("[[defect]] {} is stale: the file no longer says KNOWN DEFECT", d.path),
+            "Remove the entry.",
+        );
+    }
     // Docs (§5).
     let conformance_commands: Option<BTreeSet<String>> = input
         .conformance_commands
@@ -835,6 +865,26 @@ mod tests {
             m.iter().any(|x| x.contains("not measured: the register at the base revision")),
             "{m:?}"
         );
+    }
+
+    #[test]
+    fn a_known_defect_allowance_needs_a_dated_entry_and_a_stale_entry_is_a_finding() {
+        let files = [(
+            "apps/dyno/crates/a/src/paths.rs",
+            "#[expect(clippy::disallowed_methods, reason = \"KNOWN DEFECT, not a justification\")]\nfn f() {}\n",
+        )];
+        let m = messages(&run(Some(REG_HEAD), &files, &[]));
+        assert!(
+            m.iter().any(|x| x.contains("says KNOWN DEFECT") && x.starts_with("defect")),
+            "{m:?}"
+        );
+        let reg = format!(
+            "{REG_HEAD}\n[[defect]]\npath = \"apps/dyno/crates/a/src/paths.rs\"\nreason = \"shared /tmp folder\"\nowner = \"Dyno security fix (fix/dyno-no-shared-tmp-fallback)\"\nsince = 2026-11-08\nreview_by = 2026-12-06\napproved = \"coordinator\"\n"
+        );
+        assert!(run(Some(&reg), &files, &[]).findings.is_empty());
+        // the defect is fixed (the marker is gone) but the entry stays
+        let fixed = [("apps/dyno/crates/a/src/paths.rs", "fn f() {}\n")];
+        assert!(messages(&run(Some(&reg), &fixed, &[])).iter().any(|x| x.contains("is stale")));
     }
 
     #[test]

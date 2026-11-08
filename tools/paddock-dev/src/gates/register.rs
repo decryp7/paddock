@@ -137,6 +137,15 @@ pub struct IgnoredEntry {
     pub stamp: Stamp,
 }
 
+/// An entry of `defect`: a source file whose lint allowance is a known defect, not a justification (`KNOWN DEFECT` in its reason).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Defect {
+    /// The source file.
+    pub path: String,
+    /// The common fields; the owner is whoever fixes it (a branch or a work package).
+    pub stamp: Stamp,
+}
+
 /// A ratchet: an adoption list that may only shrink.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ratchet {
@@ -148,6 +157,8 @@ pub struct Ratchet {
     pub not_yet: Vec<String>,
     /// Who works on it.
     pub owner: String,
+    /// Clippy `disallowed-methods` paths the app's clippy.toml may lack while its call sites are cleaned up (C13); also only shrinks.
+    pub clippy_not_yet: Vec<String>,
     /// The release whose tag is refused while the list is not empty (`debrief-v1.3.0`).
     pub target: String,
 }
@@ -190,6 +201,8 @@ pub struct Register {
     pub ignored: Vec<IgnoredEntry>,
     /// Adoption lists.
     pub ratchet: Vec<Ratchet>,
+    /// Known defects behind a lint allowance.
+    pub defects: Vec<Defect>,
 }
 
 fn text(t: &toml::Table, k: &str) -> Option<String> {
@@ -358,9 +371,17 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
             id,
             app,
             not_yet: strings(e, "not_yet"),
+            clippy_not_yet: strings(e, "clippy_not_yet"),
             owner,
             target,
         });
+    }
+    for (i, e) in tables(&table, "defect").into_iter().enumerate() {
+        let path = text(e, "path").unwrap_or_default();
+        let ctx = format!("[[defect]] #{} ({path})", i + 1);
+        if let Some(stamp) = stamp(e, &ctx, &mut errors) {
+            r.defects.push(Defect { path, stamp });
+        }
     }
     (r, errors)
 }
@@ -414,6 +435,9 @@ pub fn check_dates(r: &Register, today: Date) -> Vec<Problem> {
     for p in &r.planned {
         stamp_problems("planned", &p.id, &p.stamp, today, &mut out);
     }
+    for d in &r.defects {
+        stamp_problems("defect", &d.path, &d.stamp, today, &mut out);
+    }
     for e in &r.ignored {
         if e.gate == Gate::NotGated {
             stamp_problems("ignored", &e.path, &e.stamp, today, &mut out);
@@ -454,6 +478,9 @@ fn dated(r: &Register) -> BTreeMap<String, Date> {
     }
     for e in &r.ignored {
         m.insert(e.path.clone(), e.stamp.review_by);
+    }
+    for d in &r.defects {
+        m.insert(format!("defect:{}", d.path), d.stamp.review_by);
     }
     m
 }
@@ -526,6 +553,16 @@ pub fn check_ratchets(r: &Register, base: Option<&Register>, release_tag: Option
                     fix: "A new member opts in from its first commit; remove it from not_yet.".into(),
                 });
             }
+            let before_paths: BTreeSet<&String> = b.clippy_not_yet.iter().collect();
+            for p in rt.clippy_not_yet.iter().filter(|p| !before_paths.contains(p)) {
+                out.push(Problem {
+                    message: format!(
+                        "[[ratchet]] {} {}: clippy path `{p}` was added to clippy_not_yet (the list may only shrink)",
+                        rt.id, rt.app
+                    ),
+                    fix: "Add the path to the app's clippy.toml and justify its call sites instead.".into(),
+                });
+            }
             if b.target != rt.target {
                 out.push(Problem {
                     message: format!(
@@ -537,7 +574,7 @@ pub fn check_ratchets(r: &Register, base: Option<&Register>, release_tag: Option
             }
         }
         if let Some(tag) = release_tag
-            && !rt.not_yet.is_empty()
+            && !(rt.not_yet.is_empty() && rt.clippy_not_yet.is_empty())
             && version_at_least(tag, &rt.target)
         {
             out.push(Problem {
@@ -705,6 +742,15 @@ approved = "user"
         let grown = GOOD.replace("[\"xtask\", \"examples/x\"]", "[\"xtask\", \"examples/x\", \"newcrate\"]");
         let (now, _) = parse(&grown);
         assert!(check_ratchets(&now, Some(&base), None)[0].message.contains("`newcrate` was added"));
+        let with_path = GOOD.replace("not_yet = [", "clippy_not_yet = [\"std::env::temp_dir\"]\nnot_yet = [");
+        let (base_c, _) = parse(&with_path);
+        let more = with_path.replace("[\"std::env::temp_dir\"]", "[\"std::env::temp_dir\", \"reqwest::Client::new\"]");
+        assert!(
+            check_ratchets(&parse(&more).0, Some(&base_c), None)[0]
+                .message
+                .contains("clippy path `reqwest::Client::new` was added")
+        );
+        assert!(check_ratchets(&base_c, Some(&base_c), None).is_empty());
         let shrunk = GOOD.replace("[\"xtask\", \"examples/x\"]", "[\"xtask\"]");
         assert!(check_ratchets(&parse(&shrunk).0, Some(&base), None).is_empty());
         // the tag of the target release (or a later one) is refused while the list is not empty
@@ -716,6 +762,12 @@ approved = "user"
         assert!(!check_ratchets(&base, None, Some("debrief-v1.4.2")).is_empty());
         assert!(check_ratchets(&base, None, Some("debrief-v1.2.9")).is_empty());
         assert!(check_ratchets(&base, None, Some("dyno-v9.0.0")).is_empty());
+        // the clippy list alone also keeps the tag refused
+        let clippy_only = GOOD.replace(
+            "not_yet = [\"xtask\", \"examples/x\"]",
+            "not_yet = []\nclippy_not_yet = [\"std::env::temp_dir\"]",
+        );
+        assert!(!check_ratchets(&parse(&clippy_only).0, None, Some("debrief-v1.3.0")).is_empty());
         let empty = GOOD.replace("[\"xtask\", \"examples/x\"]", "[]");
         assert!(check_ratchets(&parse(&empty).0, None, Some("debrief-v1.3.0")).is_empty());
     }

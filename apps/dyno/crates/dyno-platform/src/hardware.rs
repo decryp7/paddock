@@ -532,9 +532,9 @@ pub struct WindowsBattery;
 
 #[cfg(windows)]
 impl BatteryCapacitySource for WindowsBattery {
-    #[allow(
+    #[expect(
         clippy::disallowed_methods,
-        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, tracked in docs/gates.toml)"
+        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
     )]
     fn read(&mut self) -> Reading<BatteryCapacity> {
         let windir = std::env::var_os("WINDIR").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);

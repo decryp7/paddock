@@ -64,9 +64,9 @@ approved = "coordinator"
 
 [[not_gated]]
 id = "C13"
-apps = ["debrief", "shell-demo", "workbench-demo"]
-reason = "Debrief never adopted the lint preset (46 members, 158 temp_dir sites: DBR-LINT, Debrief 1.2); the demos lack the workspace lint tables, their opt-ins and a clippy.toml (unwrap and expect would fail clippy)"
-owner = "ADR 0060 WP-6 (demos), Debrief 1.2 DBR-LINT (Debrief)"
+apps = ["shell-demo", "workbench-demo"]
+reason = "the demos lack the workspace lint tables, their opt-ins and a clippy.toml (unwrap and expect would fail clippy)"
+owner = "ADR 0060 WP-6"
 since = 2026-11-08
 review_by = 2027-01-07
 approved = "coordinator"
@@ -345,7 +345,7 @@ approved = "coordinator"
 path = "apps/debrief/app/src-tauri/src/ai/tests.rs"
 tests = ["real_worker_set_up_with_a_local_model_answers_through_the_commands"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "a real-model test: needs a local GGUF model (DEBRIEF_TEST_GGUF) and the AI worker binary; run by hand"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -365,7 +365,7 @@ approved = "coordinator"
 path = "apps/debrief/app/src-tauri/src/lib.rs"
 tests = ["a_test_process_stopped_by_sigterm_leaves_no_folders_in_a_lone_process", "a_test_process_that_ends_while_a_plugin_starts_leaves_no_endpoint_folder_in_a_lone_process", "plugin_processes_do_not_outlive_the_test_that_started_them_in_a_lone_process"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "a child probe: its parent test re-runs the binary with DEBRIEF_TEMP_KILL_PROBE set; it returns at once otherwise"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -385,7 +385,7 @@ approved = "coordinator"
 path = "apps/debrief/crates/debrief-ai-worker/tests/it/server_backend.rs"
 tests = ["the_real_llama_server_answers", "the_real_model_reads_an_image"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "the real llama-server end-to-end test: needs DEBRIEF_LLAMA_E2E=1 (downloads the runtime) or DEBRIEF_LLAMA_SERVER with a model; run by hand"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -445,7 +445,7 @@ approved = "coordinator"
 path = "apps/debrief/crates/debrief-core/tests/it/properties.rs"
 tests = ["a_property_folder_whose_removal_fails_is_gone_when_its_process_ends_in_a_lone_process"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "a child probe: its parent test re-runs the binary with DEBRIEF_PROP_LEAK_PROBE set; it returns at once otherwise"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -475,7 +475,7 @@ approved = "coordinator"
 path = "apps/debrief/crates/debrief-pdf/tests/it/pdf.rs"
 tests = ["dump_for_review"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "dump_for_review writes the report PDF for a person to look at; a review aid with no assertion"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -575,7 +575,7 @@ approved = "coordinator"
 path = "apps/debrief/crates/debrief-store-duck/tests/it/layout_bakeoff.rs"
 tests = ["storage_layouts"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "storage layout bake-off measurement (DEBRIEF_BENCH_COPIES, DEBRIEF_THREADS): its results block (rule 48) is not written"
 owner = "Debrief 1.2"
 since = 2026-11-08
 review_by = 2027-01-07
@@ -775,7 +775,7 @@ approved = "coordinator"
 path = "apps/dyno/crates/dyno-platform/src/access.rs"
 tests = ["the_real_probe_answers_without_changing_anything"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "reads the real machine (Full Disk Access): DYNO_REAL_MACHINE_TESTS=1, run by hand on the Mac"
 owner = "Dyno 1.1.1"
 since = 2026-11-08
 review_by = 2026-12-20
@@ -825,7 +825,7 @@ approved = "coordinator"
 path = "apps/dyno/crates/dyno-platform/src/volumes.rs"
 tests = ["real_mounts_are_listed"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "reads the real machine (its mounts): DYNO_REAL_MACHINE_TESTS=1, run by hand"
 owner = "Dyno 1.1.1"
 since = 2026-11-08
 review_by = 2026-12-20
@@ -885,7 +885,7 @@ approved = "coordinator"
 path = "crates/paddock-pitwall/tests/contract.rs"
 tests = ["pitwalls_router_still_has_every_route_of_the_contract"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "wire contract: checks that the router source (PADDOCK_PITWALL_HTTP_RS) has every route of the contract; it returns at once without the variable, so nothing guards the contract in CI (ER-33 question for the coordinator)"
 owner = "ADR 0060 WP-9"
 since = 2026-11-08
 review_by = 2026-12-20
@@ -905,7 +905,7 @@ approved = "coordinator"
 path = "crates/paddock-service/tests/it/model.rs"
 tests = ["the_crash_model_explores_the_configuration_named_in_the_environment", "replay_one_path_from_the_environment"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "model-check depth knobs (MODEL_DEPTH, MODEL_DEEP, MODEL_REAL_CRASHES): the default depth runs in CI, the deep and real-crash runs are by hand"
 owner = "ADR 0060 WP-9"
 since = 2026-11-08
 review_by = 2026-12-20
@@ -925,7 +925,7 @@ approved = "coordinator"
 path = "crates/paddock-slots/tests/it/holder.rs"
 tests = ["killed_holder_child"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "a child probe: a parent test starts it with PADDOCK_SLOTS_TEST_ROOT and _OWNER set; it returns at once otherwise"
 owner = "ADR 0060 WP-9"
 since = 2026-11-08
 review_by = 2026-12-20
@@ -935,7 +935,7 @@ approved = "coordinator"
 path = "tools/paddock-dev/src/fds.rs"
 tests = ["last_resort_child"]
 gate = "not-gated"
-reason = "ignored or env-gated; no CI line runs it"
+reason = "a child probe: a parent test starts it with PADDOCK_DEV_FDS_CHILD set; it returns at once otherwise"
 owner = "ADR 0060 WP-9"
 since = 2026-11-08
 review_by = 2026-12-20
@@ -1039,8 +1039,34 @@ since = 2026-11-08
 review_by = 2026-12-20
 approved = "coordinator"
 
-# Known defect behind a lint allow (not a justification): Dyno falls back to a fixed, shared folder under the OS temp dir when no
-# user home is known (agent data folder and the CLI's copy of the rule, /tmp/Dyno with its agent.json discovery file; the Linux
-# autostart fallback /tmp/dyno-no-home; the Windows battery report in %TEMP%\Dyno). Another local user can create the folder first
-# (rule 53). Their `#[allow(clippy::disallowed_methods)]` reasons say KNOWN DEFECT. Owner: the Dyno security fix, routed by the
-# coordinator; the allows go when the fix lands (a per-user 0700 folder from paddock-env, or an error with a next step).
+[[defect]]
+path = "apps/dyno/crates/dyno-agent/src/paths.rs"
+reason = "the agent falls back to the fixed, shared folder /tmp/Dyno (with its agent.json discovery file) when no user home is known; another local user can create it first (rule 53)"
+owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"
+
+[[defect]]
+path = "apps/dyno/crates/dyno-cli/src/connection.rs"
+reason = "the CLI repeats the agent rule: without a home it reads agent.json from /tmp/Dyno, which another local user can create first and point at their own port"
+owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"
+
+[[defect]]
+path = "apps/dyno/crates/dyno-platform/src/linux/startup.rs"
+reason = "without a home the Linux autostart folder falls back to the shared /tmp/dyno-no-home"
+owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"
+
+[[defect]]
+path = "apps/dyno/crates/dyno-platform/src/hardware.rs"
+reason = "the Windows battery report is written to %TEMP%\\Dyno\\battery-report.xml, a shared folder, and its doc comment wrongly says only Dyno writes there"
+owner = "Dyno security fix (fix/dyno-no-shared-tmp-fallback)"
+since = 2026-11-08
+review_by = 2026-11-22
+approved = "coordinator"

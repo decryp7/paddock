@@ -58,9 +58,9 @@ impl LinuxStartup {
     }
 
     /// The real folders: `$XDG_CONFIG_HOME/autostart` (or `~/.config/autostart`) and `/etc/xdg/autostart`.
-    #[allow(
+    #[expect(
         clippy::disallowed_methods,
-        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, tracked in docs/gates.toml)"
+        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, owner and review date in docs/gates.toml [[defect]])"
     )]
     pub fn for_this_user(tools: Arc<dyn Tools>) -> Self {
         let config = std::env::var_os("XDG_CONFIG_HOME")
