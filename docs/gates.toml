@@ -1075,7 +1075,7 @@ approved = "coordinator"
 id = "C62"
 reason = "warnings only until the Debrief limit list is reasoned (ADR 0019 phases it); no CI line runs it"
 owner = "Debrief 1.2 (ADR 0019 limits)"
-since = 2026-11-09
+since = 2026-11-08
 review_by = 2027-01-07
 approved = "coordinator"
 
@@ -1085,7 +1085,7 @@ tests = ["import_until_search_is_ready"]
 gate = "not-gated"
 reason = "import-until-search-ready measurement on a real log folder (DEBRIEF_READY_CORPUS, DEBRIEF_READY_STORE): its results block (rule 48) is in apps/debrief/docs/performance.md, run by hand"
 owner = "Debrief 1.2"
-since = 2026-11-09
+since = 2026-11-08
 review_by = 2027-01-07
 approved = "coordinator"
 
