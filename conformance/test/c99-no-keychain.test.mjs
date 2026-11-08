@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import { manifestFindings, sourceFindings } from '../src/checks/C99-no-keychain.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
+// Layers 1 and 2 only: the graph layers have their own tests (c99-graph.test.mjs).
+const OFF = { options: { graph: 'off' } };
 const app = (deps) => `[package]\nname = "demo-app"\nversion = "0.1.0"\n\n${deps}`;
 const lines = (found) => found.map((f) => [f.line, f.what]);
 
@@ -56,7 +58,7 @@ test('C99 through the runner: findings per file, the shared crate passes, and an
     'crates/cli/src/main.rs': 'fn main() {\n    let _ = std::process::Command::new("security").arg("delete-generic-password");\n}\n',
     'fuzz/Cargo.toml': app('[dependencies]\nkeyring = "4.2"\n'),
   });
-  const f = await findingsOf('C99', root);
+  const f = await findingsOf('C99', root, OFF);
   assert.deepEqual(f.map((x) => [x.file, x.line, x.severity]), [
     ['app/src-tauri/Cargo.toml', 6, 'error'],
     ['crates/cli/src/main.rs', 2, 'error'],
@@ -65,22 +67,22 @@ test('C99 through the runner: findings per file, the shared crate passes, and an
   assert.match(f[0].fix, /paddock-secrets/);
   assert.match(f[1].fix, /owner-only file/);
   const clean = makeApp({ 'Cargo.toml': app('[dependencies]\npaddock-secrets = { path = "x" }\n'), 'src/lib.rs': 'pub fn f() {}\n' });
-  assert.deepEqual(await findingsOf('C99', clean), []);
+  assert.deepEqual(await findingsOf('C99', clean, OFF), []);
   const empty = makeApp({ 'Cargo.toml': app('[dependencies]\n') });
-  const broken = await findingsOf('C99', empty);
+  const broken = await findingsOf('C99', empty, OFF);
   assert.deepEqual(broken.map((x) => x.severity), ['error']);
   assert.match(broken[0].message, /check broken/);
   // Review P2-6 (ER-33): no manifest at all is a broken check, unless the app's CI contract says it has no Rust.
-  const none = await findingsOf('C99', makeApp({ 'README.md': 'no Rust\n' }));
+  const none = await findingsOf('C99', makeApp({ 'README.md': 'no Rust\n' }), OFF);
   assert.deepEqual(none.map((x) => x.severity), ['error']);
   assert.match(none[0].message, /check broken.*no Cargo\.toml/);
-  assert.deepEqual(await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"checks": []}\n' })), [], 'no `cargo` in the CI contract: no Rust');
-  assert.equal((await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"cargo": "."}\n' }))).length, 1, 'a contract with Rust and no manifest is broken');
+  assert.deepEqual(await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"checks": []}\n' }), OFF), [], 'no `cargo` in the CI contract: no Rust');
+  assert.equal((await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"cargo": "."}\n' }), OFF)).length, 1, 'a contract with Rust and no manifest is broken');
 });
 
 test('C99: a file that cannot be read is a broken check, not a pass (ER-33)', async () => {
   const root = makeApp({ 'Cargo.toml': app('[dependencies]\n'), 'src/lib.rs': 'pub fn f() {}\n', 'src/gone.rs': 'x\n' });
-  const f = await findingsOf('C99', root, { options: { readFile: (p) => (p === 'src/gone.rs' ? null : undefined) } });
+  const f = await findingsOf('C99', root, { options: { graph: 'off', readFile: (p) => (p === 'src/gone.rs' ? null : undefined) } });
   assert.deepEqual(f.map((x) => [x.file, x.severity]), [['src/gone.rs', 'error']]);
   assert.match(f[0].message, /check broken: .*could not be read/);
 });

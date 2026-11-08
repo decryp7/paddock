@@ -286,3 +286,21 @@ check = "C99"
 path = "apps/dyno/crates/dyno-platform/tests/no_keychain_on_macos.rs"
 reason = "Dyno's own no-Keychain test names the security subcommands it forbids; ADR 0057 WP-2 deletes it once C99 has all its layers"
 expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/debrief/Cargo.lock"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/Cargo.lock"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
+expires = "2027-01-31"
