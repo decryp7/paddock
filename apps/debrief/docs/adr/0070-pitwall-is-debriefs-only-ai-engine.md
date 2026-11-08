@@ -1,8 +1,9 @@
 # 70. Pitwall is Debrief's only AI engine: the built-in engine is removed, every AI feature stays
 
-- Status: **Accepted** (decisions by the user, 2026-11-08: Q1 engine only, every AI feature stays, which keeps the AI
-  browser over Pitwall (the note's Q3); Q2 keep Model2Vec; Q5 a one-time notice and no migration; Q4, Q6, Q7, Q8 and Q9 as
-  recommended). Revision 2 answers the independent review of `b1872a1c5` (4 P1s, P2s).
+- Status: **Accepted 2026-11-08: user decisions, independent review.** User decisions of 2026-11-08: Q1 engine only,
+  every AI feature stays, which keeps the AI browser over Pitwall (the note's Q3); Q2 keep Model2Vec; Q5 a one-time notice
+  and no migration; Q4, Q6, Q7, Q8 and Q9 as recommended. Revision 2 answered the independent review of `b1872a1c5`
+  (4 P1s, P2s); revision 3 the re-review of `52f03d649` (1 P1, P2s), which approves it once fixed.
 - Date: 2026-11-08
 - Supersedes: ADR 0009 (prebuilt llama-server runtimes), ADR 0015 (AI update checks), and in ADR 0059 the engine choice,
   the built-in fallback and "Built-in downloads while Pitwall is used".
@@ -81,8 +82,8 @@ AI feature stays in Debrief and runs on Pitwall. Facts that make this a deletion
   every Qwen3.5 size and Gemma 4 (`pitwall-core/src/packs/starter.models.toml`) [V]. Pitwall reports vision when a
   projector file sits next to the model (`pitwall-server/src/library.rs:68-97`, `serving.rs:934`) [V]. The projector comes
   along when the user downloads from Discover, whose "Include the vision projector" toggle is on by default
-  (`app/src/app/features/models/discover-tab.ts:144-148`, `:388`, `:447`) [V]; one-click recommendations download it too,
-  and `pitwall pull` sends no projector [review, not re-checked].
+  (`app/src/app/features/models/discover-tab.ts:144-148`, `:388`, `:447`) [V]; one-click recommendations download it too
+  (`models.store.ts:178-190`) [V], and `pitwall pull` sends `"projector": null` (`crates/pitwall-cli/src/run.rs:210`) [V].
 
 ## Decision
 
@@ -152,10 +153,16 @@ does not need a model keeps working.
 - It answers from a per-`Caps` cache filled by `select` with the same `ModelSel` the request will use (D1). The cache
   holds at most 8 entries (one per distinct capability set; Debrief has three: chat, chat+json, chat+vision). An entry
   is dropped when the probe sees a change (models, pairing, serving state) and refreshed on the Link's existing
-  background probe, never on the UI or an IPC thread (rule 10). A cold call returns the app-wide state until its first
-  answer lands and then publishes the `paddock://pitwall` event again.
+  background probe, never on the UI or an IPC thread (rule 10). A cold call for capabilities not yet probed returns a
+  checking state (`Unavailable` with "Checking Pitwall…" and the `Wait` step), never `Ready`, and publishes the
+  `paddock://pitwall` event again when the answer lands.
+- In the preset path (Pitwall lists a `debrief` preset, D1), `state_for` compares the preset model's capabilities
+  (`/x/v1/models`, `ModelInfo::can`) with the feature's `caps`: a preset on a text model gives
+  `NoSuitableModel { needs.vision }` for a vision feature and stays `Ready` for chat.
 - `NoModelFits` from that `select` (`error.rs:71`, `:259`) becomes `NoSuitableModel { needs: caps }`, so the sentence
-  names what is missing ("…no model with vision that suits Debrief…", `status.rs:137-140`).
+  names what is missing ("…no model with vision that suits Debrief…", `status.rs:137-140`). A `NoModelFits` on a request
+  (the model went away between the check and the call) drops the cache entry and opens the feature's card in that state,
+  never a toast.
 - `Ready` carries the model and context for those capabilities. A chat-ready link with a text model no longer makes a
   vision feature ready, and a vision-capable model that the chat pick passed over no longer produces a false "no vision"
   card.
@@ -362,10 +369,14 @@ is its own question].
   The later Model2Vec model (D8) is never stored in these folders, so it can never be counted or removed here. The
   category uses the existing walk, budget and confinement (`storage/walk.rs`), so sizes, Settings ▸ Storage and the
   notice show the same numbers from one mechanism.
-- **Links and junctions (deletion safety).** Before acting, each path component from `<data>` (or `<config>/ai`) down
-  to the target is checked with `symlink_metadata`, which also sees Windows junctions as reparse points. If a component
-  is a link or junction, the link itself is removed and nothing behind it is followed. If the link is the category's root
-  (`<data>/models` itself a link), the target is treated as a folder the user chose: listed, never deleted inside.
+- **Links and junctions (deletion safety).** `<data>` and `<config>` are canonicalised first, so a `<data>` that is
+  itself a link (or sits under one) works normally. Then each path component strictly **below** the canonical `<data>`
+  or `<config>` down to an item is checked with `symlink_metadata`, which also sees Windows junctions as reparse points:
+  - A category root that is itself a link or junction (`<data>/models`, `<data>/ai`, `<data>/ai/runtimes`,
+    `<config>/ai`) is listed only, as a folder the user chose: never deleted inside.
+  - A link or junction between a root and an item means that item is skipped and logged as "link".
+  - A link is removed (the link only, never its target) only when it is itself a listed item, or an entry directly
+    inside a root that is not a link.
 - **Folders the user chose.** If the 1.1 `ai.json` names a `models_dir` or a `llama_server_path` outside the data folder,
   the category lists it and its size but never deletes in it: "In a folder you chose: delete these yourself", with *Show
   in folder*. Debrief reads those two keys raw, for this notice only. Their size is not part of the notice's number.
@@ -396,6 +407,10 @@ port 11435, the credential store or an installed Pitwall).
      `state_for(chat)` is `Ready`.
    - The request for a feature asks the same `ModelSel` that `state_for` checked (a JSON feature asks
      `auto:chat,json,8k`).
+   - With a `debrief` preset on a text model: `state_for(chat+vision)` is `NoSuitableModel { needs.vision }`,
+     `state_for(chat)` is `Ready`; on a vision model, both are `Ready`.
+   - A cold call for unprobed capabilities returns the checking state, never `Ready`.
+   - A `NoModelFits` on a request opens the card in `NoSuitableModel` and drops the cache entry (no toast).
    - The cache holds at most 8 entries, is dropped on a probe change, and no call runs on the caller's thread.
 2. **Feature table (Debrief, Rust).** For every `AiFeature` variant (an exhaustive `match`) and every `AiState`,
    `ai_feature_state` gives the expected `NeedsAiView`. Safe mode gives `Disabled`. The `ts-rs` export lists every
@@ -409,8 +424,13 @@ port 11435, the credential store or an installed Pitwall).
 5. **Old files (D6).** A temporary data folder with invented files (a few-byte `.gguf`, a projector, a runtime folder)
    gives the category's size.
    - Delete removes only inside the data folder.
-   - A symlink to a file outside: the link goes, the target stays. A symlinked `models` root: listed, nothing deleted
-     inside. On Windows, a junction in the path: the junction goes, its target stays (on the Windows runner).
+   - A symlink entry inside `models` to a file outside: the link goes, the target stays. A symlinked `models` root:
+     listed, nothing deleted inside. A link inside a subfolder path (`runtimes/<build>` a link): the items behind it
+     are skipped and logged "link".
+   - `<config>/ai` as a link: after Delete, `ai.json` and `knowledge/` are still reachable and unchanged, and nothing
+     inside was deleted.
+   - `<data>` as a symlink to another folder: the category works normally (sizes, Delete) after canonicalisation.
+   - On the Windows runner, the same cases with junctions.
    - An unknown file in `<config>/ai` survives; `ai.json` and `knowledge/` survive.
    - A `models_dir` and a `llama_server_path` outside are listed, never touched, and not in `<N>`.
    - A capped walk says "at least". Cancel mid-way leaves a consistent folder.
@@ -546,8 +566,7 @@ The plan's owner makes the edit on the plan branch. This ADR does not touch the 
    with 1.0.3 and 1.0.4 (`apiVersion` 1); only the re-pair flag is 1.1-only. Debrief 1.2's release checklist gains a row:
    a released Pitwall exists for each OS.
 2. **Vision depends on a model in Pitwall.** Eight of Pitwall's ten starter models read images [V]. The projector comes
-   with a Discover download by default [V] and with one-click recommendations [review], but not with `pitwall pull`
-   [review]. A user who pulled from the CLI sees the vision state on *Find related logs* and the video frame features
+   with a Discover download by default and with one-click recommendations, but not with `pitwall pull` [V]. A user who pulled from the CLI sees the vision state on *Find related logs* and the video frame features
    until they add the projector in Pitwall; `state_for` makes that state truthful. Debrief adds no workaround.
 3. **The shared changes wait for T and L1.** `state_for` and the `[view]` input are both in AI-3. If L1 slips, AI-3
    slips with it. There is no safe partial: without `state_for`, a vision feature can be called ready on a text model.
@@ -584,7 +603,7 @@ From the note, now settled or narrowed:
 - `X-Pitwall-Job-Id` on streamed answers: **verified present** on `pitwall/1.1-final` (`http.rs:129-133`,
   `tests/jobs.rs`).
 - A vision model in Pitwall's starter set: **10 models, 8 with vision** [V]. The Discover projector toggle is verified;
-  the one-click recommendation and `pitwall pull` behaviour come from the review and were not re-checked here.
+  so are one-click recommendations (`models.store.ts:178-190`) and `pitwall pull` sending no projector (`run.rs:210`).
 
 Found while writing or revising this ADR:
 
