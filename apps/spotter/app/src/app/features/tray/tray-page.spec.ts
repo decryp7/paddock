@@ -91,6 +91,9 @@ describe('TrayPage', () => {
     expect(Array.from(foot.children).map((c) => text(c as HTMLElement))).toEqual(['Mark all seen', '', 'Open Spotter']);
     expect(foot.querySelector('.pd-tray-primary')?.textContent?.trim()).toBe('Open Spotter');
     expect(foot.querySelector('.pd-tray-more')).toBeNull();
+    const markAll = foot.children[0] as HTMLElement;
+    expect(markAll.classList, 'a Material text button').toContain('mat-mdc-button');
+    expect(markAll.classList).not.toContain('btn');
   });
 
   it('does not hide itself when the main window could not be shown, or when hiding fails', async () => {

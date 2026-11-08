@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, afterNextRender, computed, inject } from '@angular/core';
+import { MatButton } from '@angular/material/button';
 import { MatIcon } from '@angular/material/icon';
 import { SuTrayPopover, type SuTrayPlatform } from '@decryp7/paddock-ui';
 import { BACKEND } from '../../core/backend';
@@ -15,7 +16,7 @@ import { WatchesStore } from '../../state/watches.store';
  */
 @Component({
   selector: 'sp-tray-page',
-  imports: [MatIcon, SuTrayPopover, AgoShortPipe, Avatar, Version],
+  imports: [MatButton, MatIcon, SuTrayPopover, AgoShortPipe, Avatar, Version],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <pd-tray-popover label="Spotter" [platform]="platform" primaryLabel="Open Spotter" (primary)="openMain()" (dismissed)="close()">
@@ -63,7 +64,7 @@ import { WatchesStore } from '../../state/watches.store';
         </div>
       }
       @if (unseen().length > 1) {
-        <button slot="footer" type="button" class="btn ghost sm" (click)="store.acknowledgeAll()">Mark all seen</button>
+        <button slot="footer" type="button" matButton (click)="store.acknowledgeAll()">Mark all seen</button>
       }
     </pd-tray-popover>
   `,
