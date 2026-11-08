@@ -196,23 +196,187 @@ pub fn check_data_folder(folder: &Path, what: &str) -> Result<(), Refusal> {
     r
 }
 
-/// What the last [`check_data_folder`] said, so only a change is logged.
-static LAST_REASON: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+/// What the last [`check_data_folder`] said for each `what`, so only a change is logged (two folders checked in one process do not
+/// hide each other's changes).
+static LAST_REASON: std::sync::Mutex<Vec<(String, &'static str)>> =
+    std::sync::Mutex::new(Vec::new());
 
 fn note_result(what: &str, r: &Result<(), Refusal>) {
     let now = r.as_ref().err().map(Refusal::reason);
-    let mut last = LAST_REASON
+    let mut seen = LAST_REASON
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if *last == now {
+    let at = seen.iter().position(|(w, _)| w == what);
+    let before = at.map(|i| seen[i].1);
+    if before == now {
         return;
     }
-    *last = now;
+    match (at, now) {
+        (Some(i), Some(reason)) => seen[i].1 = reason,
+        (Some(i), None) => {
+            seen.remove(i);
+        }
+        (None, Some(reason)) => seen.push((what.to_owned(), reason)),
+        (None, None) => {}
+    }
     match now {
         Some(reason) => {
-            log::warn!(Why = reason; "Not trusting {what}: the data folder is not safe ({reason}); the account must own the folder and no one else may change it")
+            log::warn!(Why = reason; "Not trusting {what}: the data folder is not safe ({reason}); it must belong to this account and no one else may change it (chmod go-w)")
         }
-        None => log::info!("The data folder is trusted again"),
+        None => log::info!("The data folder is trusted again for {what}"),
+    }
+}
+
+/// Makes `path` and its parents with mode 0700 where the OS has modes, whatever the umask: a data folder is private from the
+/// moment it exists.
+///
+/// # Errors
+/// The folder could not be made.
+pub fn create_private_dir_all(path: &Path) -> std::io::Result<()> {
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(path)
+}
+
+/// What [`tighten_group_write`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tightened {
+    /// The folder already passed; nothing changed.
+    NotNeeded,
+    /// Group write was removed from the user's own folder (a folder made under umask 002 in a private group).
+    GroupWriteRemoved,
+}
+
+/// The pure part of [`tighten_group_write`]: whether group write may be removed from a folder with these facts. Only the
+/// account's own folder, with group write alone (no world write), whose group is the account's own primary group with no other
+/// member, qualifies: nobody else could have put anything in it. A world-writable or foreign folder never does.
+pub fn may_remove_group_write(
+    facts: FolderFacts,
+    gid: u32,
+    uid: u32,
+    egid: u32,
+    group_has_others: bool,
+) -> bool {
+    facts.uid == uid
+        && facts.mode & 0o002 == 0
+        && facts.mode & 0o020 != 0
+        && gid == egid
+        && !group_has_others
+}
+
+/// For the agent at start: a data folder that the account owns and that only its private group can write (Dyno 1.1.0 and older
+/// made it with the umask, 0775 under umask 002) gets its group write bit removed, through the handle it opened, once. Anything
+/// else that fails the check is refused as it is, with the reason; the next step is `chmod go-w <data folder>`.
+///
+/// `group_has_others(gid)` says whether the group has any member besides the account (inject it in tests).
+///
+/// # Errors
+/// The folder is not the account's, is open to the world, or its group is shared.
+#[cfg(unix)]
+pub fn tighten_group_write(
+    folder: &Path,
+    group_has_others: impl FnOnce(u32) -> bool,
+) -> Result<Tightened, Refusal> {
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let unreadable = |what, e: std::io::Error| Refusal::Unreadable {
+        what,
+        cause: e.to_string(),
+    };
+    let handle = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY)
+        .open(folder)
+        .map_err(|e| unreadable("open the folder", e))?;
+    let meta = handle
+        .metadata()
+        .map_err(|e| unreadable("fstat the folder", e))?;
+    let facts = FolderFacts {
+        uid: meta.uid(),
+        mode: meta.mode(),
+    };
+    let me = current_uid();
+    let refusal = match decide(facts, me) {
+        Ok(()) => return Ok(Tightened::NotNeeded),
+        Err(r) => r,
+    };
+    // SAFETY: getegid has no arguments and cannot fail.
+    let egid = unsafe { libc::getegid() };
+    let gid = meta.gid();
+    if !may_remove_group_write(facts, gid, me, egid, group_has_others(gid)) {
+        return Err(refusal);
+    }
+    let mode = meta.mode() & 0o7777 & !0o020;
+    // SAFETY: the descriptor is open for the call; fchmod changes the folder this handle names, not a path looked up again.
+    let rc = unsafe {
+        libc::fchmod(
+            std::os::fd::AsRawFd::as_raw_fd(&handle),
+            mode as libc::mode_t,
+        )
+    };
+    if rc != 0 {
+        return Err(unreadable(
+            "remove group write",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    log::info!(
+        "Removed group write from the data folder (it belongs to this account's private group)"
+    );
+    Ok(Tightened::GroupWriteRemoved)
+}
+
+/// Whether the group `gid` has a member other than the account `uid` (`getgrgid_r` and `getpwuid_r`); an unreadable group counts as
+/// shared, so nothing is tightened on a doubt.
+#[cfg(unix)]
+pub fn group_has_other_members(gid: u32, uid: u32) -> bool {
+    use std::ffi::CStr;
+    // u64 elements: the group lookup stores pointers in the buffer, which must be aligned.
+    let mut buf = vec![0u64; 2 * 1024];
+    // SAFETY: zeroed passwd/group are plain-old-data out parameters that the calls fill; the buffers outlive the reads below.
+    unsafe {
+        let mut pw: libc::passwd = std::mem::zeroed();
+        let mut pw_out: *mut libc::passwd = std::ptr::null_mut();
+        let own = if libc::getpwuid_r(
+            uid,
+            &mut pw,
+            buf.as_mut_ptr().cast(),
+            buf.len() * 8,
+            &mut pw_out,
+        ) == 0
+            && !pw_out.is_null()
+        {
+            Some(CStr::from_ptr(pw.pw_name).to_owned())
+        } else {
+            None
+        };
+        let mut gr: libc::group = std::mem::zeroed();
+        let mut gr_out: *mut libc::group = std::ptr::null_mut();
+        if libc::getgrgid_r(
+            gid,
+            &mut gr,
+            buf.as_mut_ptr().cast(),
+            buf.len() * 8,
+            &mut gr_out,
+        ) != 0
+            || gr_out.is_null()
+        {
+            return true;
+        }
+        // The member list may sit unaligned in the buffer on some systems: read each pointer unaligned.
+        let mut at = gr.gr_mem;
+        while !at.is_null() {
+            let member = std::ptr::read_unaligned(at);
+            if member.is_null() {
+                break;
+            }
+            if own.as_deref() != Some(CStr::from_ptr(member)) {
+                return true;
+            }
+            at = at.add(1);
+        }
+        false
     }
 }
 
@@ -242,19 +406,139 @@ mod tests {
         move |_, _| Ok(FolderFacts { uid, mode })
     }
 
+    fn noted(what: &str) -> Option<&'static str> {
+        LAST_REASON
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(w, _)| w == what)
+            .map(|(_, r)| *r)
+    }
+
     #[test]
-    fn a_refusal_is_noted_once_per_change() {
-        // The note keeps the last reason: the same refusal twice changes nothing, a different state does.
-        note_result("x", &Err(Refusal::Symlink));
-        assert_eq!(*LAST_REASON.lock().unwrap(), Some("it is a symbolic link"));
-        note_result("x", &Err(Refusal::Symlink));
-        note_result("x", &Err(Refusal::NotAFolder));
-        assert_eq!(*LAST_REASON.lock().unwrap(), Some("it is not a folder"));
-        note_result("x", &Ok(()));
-        assert_eq!(*LAST_REASON.lock().unwrap(), None);
+    fn a_refusal_is_noted_once_per_change_and_per_caller() {
+        note_result("note-a", &Err(Refusal::Symlink));
+        note_result("note-b", &Err(Refusal::NotAFolder));
+        assert_eq!(noted("note-a"), Some("it is a symbolic link"));
+        assert_eq!(
+            noted("note-b"),
+            Some("it is not a folder"),
+            "another caller's state is separate"
+        );
+        note_result("note-a", &Err(Refusal::Symlink));
+        note_result("note-a", &Err(Refusal::NotAFolder));
+        assert_eq!(noted("note-a"), Some("it is not a folder"));
+        note_result("note-a", &Ok(()));
+        assert_eq!(noted("note-a"), None);
+        note_result("note-a", &Ok(()));
         let t = tempfile::tempdir().unwrap();
-        assert_eq!(check_data_folder(t.path(), "x"), Ok(()));
-        assert!(check_data_folder(&t.path().join("none"), "x").is_err());
+        assert_eq!(check_data_folder(t.path(), "note-c"), Ok(()));
+        assert!(check_data_folder(&t.path().join("none"), "note-c").is_err());
+        assert!(noted("note-c").is_some());
+    }
+
+    #[test]
+    fn group_write_may_be_removed_only_from_the_accounts_own_private_group_folder() {
+        let f = |uid, mode| FolderFacts { uid, mode };
+        assert!(may_remove_group_write(f(501, 0o40775), 20, 501, 20, false));
+        assert!(
+            !may_remove_group_write(f(501, 0o40775), 20, 501, 20, true),
+            "the group has other members"
+        );
+        assert!(
+            !may_remove_group_write(f(501, 0o40775), 99, 501, 20, false),
+            "not the account's own group"
+        );
+        assert!(
+            !may_remove_group_write(f(501, 0o40777), 20, 501, 20, false),
+            "world-writable is never tightened"
+        );
+        assert!(
+            !may_remove_group_write(f(501, 0o40757), 20, 501, 20, false),
+            "world write alone is not group write"
+        );
+        assert!(
+            !may_remove_group_write(f(0, 0o40775), 20, 501, 20, false),
+            "foreign owner"
+        );
+        assert!(
+            !may_remove_group_write(f(501, 0o40755), 20, 501, 20, false),
+            "nothing to remove"
+        );
+    }
+
+    #[cfg(unix)]
+    mod tighten {
+        use super::*;
+        use std::os::unix::fs::PermissionsExt;
+
+        fn mode(p: &Path) -> u32 {
+            std::fs::metadata(p).unwrap().permissions().mode() & 0o7777
+        }
+
+        #[test]
+        fn a_new_data_folder_is_private_whatever_the_umask() {
+            let t = tempfile::tempdir().unwrap();
+            let deep = t.path().join("a").join("b");
+            create_private_dir_all(&deep).unwrap();
+            assert_eq!(mode(&deep), 0o700);
+            assert_eq!(mode(&t.path().join("a")), 0o700);
+            create_private_dir_all(&deep).unwrap();
+        }
+
+        #[test]
+        fn an_own_group_writable_folder_loses_group_write_once() {
+            let t = tempfile::tempdir().unwrap();
+            std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
+            assert_eq!(
+                tighten_group_write(t.path(), |_| false),
+                Ok(Tightened::GroupWriteRemoved)
+            );
+            assert_eq!(mode(t.path()), 0o755);
+            assert_eq!(
+                tighten_group_write(t.path(), |_| false),
+                Ok(Tightened::NotNeeded)
+            );
+        }
+
+        #[test]
+        fn a_shared_group_a_world_writable_folder_and_a_foreign_folder_are_refused_untouched() {
+            let t = tempfile::tempdir().unwrap();
+            std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
+            assert_eq!(
+                tighten_group_write(t.path(), |_| true),
+                Err(Refusal::OpenToOthers { mode: 0o40775 })
+            );
+            assert_eq!(mode(t.path()), 0o775, "not changed");
+            std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+            assert!(matches!(
+                tighten_group_write(t.path(), |_| false),
+                Err(Refusal::OpenToOthers { .. })
+            ));
+            assert_eq!(
+                mode(t.path()),
+                0o777,
+                "a world-writable folder is never tightened"
+            );
+            if current_uid() != 0 {
+                assert_eq!(
+                    tighten_group_write(Path::new("/"), |_| false),
+                    Err(Refusal::OtherOwner { uid: 0 })
+                );
+            }
+            assert!(matches!(
+                tighten_group_write(&t.path().join("none"), |_| false),
+                Err(Refusal::Unreadable { .. })
+            ));
+        }
+
+        #[test]
+        fn the_real_group_lookup_answers_for_this_account() {
+            // Whatever the machine's groups are, the lookup answers without failing.
+            let _ = group_has_other_members(0, current_uid());
+            // SAFETY: getegid has no arguments and cannot fail.
+            let _ = group_has_other_members(unsafe { libc::getegid() }, current_uid());
+        }
     }
 
     #[test]
