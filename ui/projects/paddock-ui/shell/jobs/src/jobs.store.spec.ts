@@ -189,9 +189,14 @@ describe('JobsStore', () => {
       clock.advance(2_000);
       expect(backend.reads).toHaveLength(2);
       TestBed.resetTestingModule();
-      backend.reads[1]?.reject(new Error('late'));
-      // A macrotask: every promise continuation of the failed read has run once it fires (not a count of turns).
-      await new Promise<void>((resolve) => setTimeout(resolve));
+      // Fake timers for the flush only: advancing them by 0 runs every promise continuation of the failed read (not a count of turns).
+      vi.useFakeTimers();
+      try {
+        backend.reads[1]?.reject(new Error('late'));
+        await vi.advanceTimersByTimeAsync(0);
+      } finally {
+        vi.useRealTimers();
+      }
       expect(clock.ticking).toBe(0);
     });
 
