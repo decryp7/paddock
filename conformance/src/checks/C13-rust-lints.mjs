@@ -1,6 +1,6 @@
 // C13: the Rust lint preset (plan X11, lint/). The workspace's `[workspace.lints]` has every lint of lint/workspace-lints.toml
 // at that level or stricter, every member crate opts in with `[lints] workspace = true`, and the root clippy.toml lists
-// every `disallowed-methods` path of lint/clippy.toml (an app may add paths and reword reasons, not drop a path).
+// every `disallowed-methods` and `disallowed-types` path of lint/clippy.toml (an app may add paths and reword reasons, not drop a path).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { error, warn } from '../finding.mjs';
@@ -25,13 +25,13 @@ function tableLevels(text, name) {
   return t ? lintLevels(t.lines.slice(1)) : null;
 }
 
-/** Disallowed paths listed in a clippy.toml text. */
-export function disallowedPaths(text) {
-  const start = text.indexOf('disallowed-methods');
+/** Disallowed paths listed in a clippy.toml text, from its `disallowed-methods` array or (`key`) another one. */
+export function disallowedPaths(text, key = 'disallowed-methods') {
+  const start = text.search(new RegExp(`^${key}\\s*=`, 'm'));
   if (start < 0) return [];
   const end = text.indexOf('\n]', start);
   const region = text.slice(start, end < 0 ? text.length : end);
-  return [...region.matchAll(/\bpath\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
+  return [...region.matchAll(/^\s*\{[^}\n]*?\bpath\s*=\s*"([^"]+)"/gm)].map((m) => m[1]);
 }
 
 export default {
@@ -65,11 +65,14 @@ export default {
       if (!optIn) out.push(error('C13', 40, file, 1, `${file} does not opt in to the workspace lints`, 'Add `[lints]` with `workspace = true`.'));
     }
     const clippy = ctx.read('clippy.toml') ?? ctx.read('.clippy.toml');
-    const have = new Set(clippy === null ? [] : disallowedPaths(clippy));
     if (clippy === null) out.push(error('C13', 40, 'clippy.toml', 1, 'clippy.toml is missing', 'Copy paddock/lint/clippy.toml and word the reasons for this app.'));
     else {
-      for (const p of disallowedPaths(readFileSync(join(paddock, 'lint', 'clippy.toml'), 'utf8'))) {
-        if (!have.has(p)) out.push(error('C13', 40, 'clippy.toml', 1, `disallowed-methods lacks ${p}`, 'Add the entry from paddock/lint/clippy.toml (the reason may name this app\'s helper).'));
+      const preset = readFileSync(join(paddock, 'lint', 'clippy.toml'), 'utf8');
+      for (const key of ['disallowed-methods', 'disallowed-types']) {
+        const have = new Set(disallowedPaths(clippy, key));
+        for (const p of disallowedPaths(preset, key)) {
+          if (!have.has(p)) out.push(error('C13', 40, 'clippy.toml', 1, `${key} lacks ${p}`, 'Add the entry from paddock/lint/clippy.toml (the reason may name this app\'s helper).'));
+        }
       }
     }
     return out;
