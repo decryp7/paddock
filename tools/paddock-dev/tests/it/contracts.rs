@@ -1,14 +1,13 @@
 //! The repository contracts `scripts/affected.test.mjs` also held, moved so the script can be retired (ADR 0022 R4): the
 //! apps' CI contracts (`paddock.ci.json`) and the host-cleanup process patterns they hand to `job-isolation.sh`, the markdown
 //! that code reads (declared doc inputs), CODEOWNERS, Renovate and the one npm workspace.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::plan::{is_declared_doc_input, is_docs, read_graph};
 use paddock_repo_graph::GitHistory;
 use regex::Regex;
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 fn root() -> PathBuf {
@@ -16,7 +15,11 @@ fn root() -> PathBuf {
 }
 
 fn tracked() -> Vec<String> {
-    let out = Command::new("git").current_dir(root()).args(["ls-files"]).output().unwrap();
+    let out = paddock_proc::command("git")
+        .current_dir(root())
+        .args(["ls-files"])
+        .output()
+        .unwrap();
     String::from_utf8_lossy(&out.stdout).lines().map(String::from).collect()
 }
 
@@ -108,7 +111,7 @@ const OTHER_TMP: &str = "/Users/x/gitea-runner/work/fedcba9876543210/tmp";
 /// `None` when the script refuses it (not anchored on a folder of the job).
 fn scoped(pattern: &str, app: &str, os: &str) -> Option<Regex> {
     let win = if os == "Windows" { "C:" } else { "" };
-    let out = Command::new("bash")
+    let out = paddock_proc::command("bash")
         .arg(root().join("conformance/ci/job-isolation.sh"))
         .args(["pattern", pattern])
         .env_clear()
@@ -316,7 +319,7 @@ fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
         scoped("fake_runner", "pitcrew", "macOS").is_none(),
         "an exact name matches every job"
     );
-    let out = Command::new("bash")
+    let out = paddock_proc::command("bash")
         .arg(root().join("conformance/ci/job-isolation.sh"))
         .args(["pattern", "{tmp}/x"])
         .env_clear()
@@ -331,7 +334,7 @@ fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
 fn every_markdown_file_that_code_reads_is_a_declared_doc_input() {
     // include_str!("rel.md") is resolved from its file; quoted repo paths ('docs/x.md', "apps/a/README.md") are taken as is.
     let pattern = r#"include_str!\("[^"]+\.md"\)|['"](docs|apps|crates|ui)/[A-Za-z0-9_./-]+\.md['"]"#;
-    let out = Command::new("git")
+    let out = paddock_proc::command("git")
         .current_dir(root())
         .args(["grep", "-E", pattern, "--", "*.rs", "*.mjs", "*.ts", "*.cjs"])
         .output()

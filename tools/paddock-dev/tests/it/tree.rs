@@ -1,14 +1,13 @@
 //! The planner's rules on this repository's real graph, and the plan read from git: the cases of `scripts/affected.test.mjs`
 //! (the ones about the plan itself) moved here so they outlive the script (ADR 0022 R4). The synthetic `.gitea` trees and the
 //! pure parts (base choice, matrix legs, lock diff, command line) are unit tests of `plan`, `plan_gitea` and `plan_ci`.
-#![allow(clippy::disallowed_methods, clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use paddock_dev::plan::{Options, RepoGraph, Request, affected, per_machine_apps, plan_for, read_graph};
 use paddock_dev::plan_ci::{LINUX, MatrixOpts, matrix, only_app};
 use paddock_dev::plan_repo::files_naming_generated;
 use paddock_repo_graph::GitHistory;
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -58,7 +57,11 @@ fn legs(plan: &Value, opts: MatrixOpts) -> Vec<Value> {
 }
 
 fn tracked() -> Vec<String> {
-    let out = Command::new("git").current_dir(root()).args(["ls-files"]).output().unwrap();
+    let out = paddock_proc::command("git")
+        .current_dir(root())
+        .args(["ls-files"])
+        .output()
+        .unwrap();
     String::from_utf8_lossy(&out.stdout).lines().map(String::from).collect()
 }
 
@@ -600,7 +603,7 @@ fn a_tags_gates_keep_one_app_both_halves_and_no_other_project() {
 // ----------------------------------------------------------------------------------------- the plan read from git
 
 fn sh(dir: &Path, args: &[&str]) -> String {
-    let out = Command::new("git")
+    let out = paddock_proc::command("git")
         .arg("-C")
         .arg(dir)
         .args([
