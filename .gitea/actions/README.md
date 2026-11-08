@@ -36,10 +36,11 @@ Composite actions and reusable workflows of the Paddock apps (plan X10). An app'
 | `host-cleanup` | this job's stray processes (patterns anchored on `{tmp}`, `{build}` or `{slot}`), temp folders and build outputs on a host runner, never another job's | Pitwall `macos-cleanup.sh` |
 | `prune-build-folder` | caps the job's kept build folder (of its own slot) on a host runner (incremental caches first, then the folder) | Dyno `ci-prune.sh` |
 
-Reusable workflow: `app-release.yml` (bundles on three platforms, verify, publish; in the monorepo called from `<app>-release.yml`, see below). The
-repositories that once called `app-fuzz.yml`, `app-mutants.yml`, `app-never-panics.yml`, `app-e2e.yml` and `app-licences.yml` were merged into
-this one (ADR 0014), so those five workflows and the `licences`, `cache-restore` and `cache-save` actions behind them were deleted (ADR 0060: a check
-no reachable CI line runs is deleted or registered); `git log` has them.
+Reusable workflows: `app-release.yml` (bundles on three platforms, verify, publish; in the monorepo called from `<app>-release.yml`, see below) and
+`app-fuzz.yml` (cargo-fuzz in shards for a fuzz folder; `nightly.yml` calls it for the shared crates). The repositories that once called
+`app-mutants.yml`, `app-never-panics.yml`, `app-e2e.yml` and `app-licences.yml` were merged into this one (ADR 0014), so those four workflows and
+the `licences`, `cache-restore` and `cache-save` actions behind them were deleted (ADR 0060: a check no reachable CI line runs is deleted or
+registered); `git log` has them.
 
 Scripts the actions run live in `conformance/ci/` and `conformance/release/` (tested with `node --test`); the actions only wire
 inputs to them.

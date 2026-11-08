@@ -376,8 +376,8 @@ The LLM-use packages N0-N8 (about 10.5 agent-days after dropping the names curat
 | P (performance) | A1, P0-P5, NR1, BP1, J1, B1 | 19 | 3 |
 | SR (search ready, waves 3-5) | SR1, SR3, SR4, SR5 (SR2 superseded, 0) | 6 | 2.5 |
 | IX (index during the import, wave 8 slot) | IX-ADR, IX-B1, IX-B2, IX-C, IX-M, IX-S (IX0 and IX-A merged into SR1, 0) | 13.25 | 5.25 |
-| DBR-LINT (lint preset, LINT-1 to LINT-3, beside the waves) | LINT-1, LINT-2, LINT-3 | 23.5 | 1.5 |
-| **Total** | 65 packages + SR, IX and DBR-LINT | **about 206.5 agent-days** (164 without SR, IX and DBR-LINT, plus 19.25 for SR and IX, plus 23.5 for DBR-LINT), plus ±20 % for review rounds and CI fixes: **about 237-248** | |
+| DBR-LINT (lint preset, beside the waves) | LINT-1, LINT-2 (46 member steps), LINT-3 | 23.5 | 1.5 (LINT-1; a LINT-2 member step is under a day) |
+| **Total** | 65 packages + SR, IX and DBR-LINT | **about 207 agent-days** (164 without SR, IX and DBR-LINT, plus 19.25 for SR and IX, plus 23.5 for DBR-LINT = 206.75), plus +15-20 % for review rounds and CI fixes on the 183.25 without DBR-LINT (DBR-LINT carries its own review allowance, LINT-3): **about 234-243** | |
 
 Against the first version of this plan (112 agent-days) the plugin move adds PH1-PH4 (11 days, after the 2026-10-30 ADR revision moved the OS sandbox into PH1 and the
 user dropped all legacy support from PH3) and removes the Debrief-only plugin patches it replaces (about 3 days): net +8. The 2026-10-30 re-estimate of package 2.6
