@@ -1,21 +1,25 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { graphFindings, readGraph, sourceScan } from '../src/util/keychain-graph.mjs';
+import { parseArgs } from '../src/cli.mjs';
+import { crateBinaries, crateSources, graphFindings, MACOS_TARGETS, probeWorkspace, readGraph, series, sourceScan } from '../src/util/keychain-graph.mjs';
 import { findingsOf, makeApp } from './helpers.mjs';
 
-// A probe result: `crates` is { name: { deps: [names] } }; the first is the workspace member. The tree is the text of
-// `cargo tree --prefix depth` (a repeated package is printed once with "(*)" and no children, as cargo does).
+// A probe result: `crates` is { name: { deps: [names], features: 'a,b', version } }; the first is the workspace member. The
+// tree is the text of `cargo tree --prefix depth --format "{p}|{f}"` (a repeated package is printed once with "(*)").
+const ver = (c) => c?.version ?? '1.0.0';
 function metadata(crates) {
-  const id = (n) => `${n} 1.0.0 (registry+x)`;
-  const packages = Object.keys(crates).map((name, i) => ({ id: id(name), name, version: '1.0.0', source: i === 0 ? null : 'registry+x', manifest_path: `/reg/${name}/Cargo.toml` }));
+  const id = (n) => `${n} ${ver(crates[n])} (registry+x)`;
+  const packages = Object.keys(crates).map((name, i) => ({ id: id(name), name, version: ver(crates[name]), source: i === 0 ? null : 'registry+x', manifest_path: `/reg/${name}/Cargo.toml` }));
   return { packages, workspace_members: [id(Object.keys(crates)[0])] };
 }
 function tree(crates) {
   const out = [];
   const shown = new Set();
   const walk = (n, d) => {
-    out.push(`${d}${n} v1.0.0${shown.has(n) ? ' (*)' : ''}`);
+    out.push(`${d}${n} v${ver(crates[n])}|${crates[n].features ?? 'default'}${shown.has(n) ? ' (*)' : ''}`);
     if (shown.has(n)) return;
     shown.add(n);
     for (const c of crates[n].deps ?? []) walk(c, d + 1);
@@ -23,82 +27,177 @@ function tree(crates) {
   walk(Object.keys(crates)[0], 0);
   return out.join('\n');
 }
-const probe = (crates) => ({ meta: metadata(crates), tree: tree(crates) });
-const found = (crates, sources = () => [{ file: 'src/lib.rs', text: 'fn ok() {}' }]) => {
+const probe = (crates) => ({ meta: metadata(crates), runs: MACOS_TARGETS.map((target) => ({ target, tree: tree(crates) })) });
+const found = (crates, scanOptions = { readSources: () => [{ file: 'src/lib.rs', text: 'fn ok() {}' }], listBinaries: () => [] }) => {
   const g = readGraph(metadata(crates), tree(crates));
-  return { graph: graphFindings(g).map((f) => f.what), scan: sourceScan(g, sources) };
+  return { graph: graphFindings(g), scan: sourceScan(g, scanOptions) };
 };
+const whats = (r) => r.graph.map((f) => f.what);
+const keys = (r) => r.graph.map((f) => f.key);
 
-// Positive controls (ER-33): the probe must see each of these, or it cannot see what it is for.
+// Positive controls (ADR 0057 §3, ER-33): each of these must be found, or the probe cannot see what it is for.
 test('C99 graph: a keyring crate anywhere in the macOS graph is found, with who pulled it in', () => {
   const r = found({ app: { deps: ['mid'] }, mid: { deps: ['keyring'] }, keyring: {} });
-  assert.deepEqual(r.graph, ['keyring@1.0.0 is in the macOS build (pulled in by mid); only paddock-secrets may use it, and only off macOS']);
-  for (const k of ['keyring-core', 'apple-native-keyring-store']) assert.equal(found({ app: { deps: [k] }, [k]: {} }).graph.length, 1, k);
+  assert.deepEqual(whats(r), ['keyring@1.0.0 is in the macOS build (pulled in by mid@1.0.0); only paddock-secrets may use it, and only off macOS'.replace('mid@1.0.0', 'mid')]);
+  assert.deepEqual(keys(r), ['keyring']);
+  for (const k of ['keyring-core', 'apple-native-keyring-store']) assert.deepEqual(keys(found({ app: { deps: [k] }, [k]: {} })), [k]);
 });
 
-test('C99 graph: a Keychain binding crate needs a reviewed dependent', () => {
-  assert.equal(found({ app: { deps: ['sneaky'] }, sneaky: { deps: ['security-framework'] }, 'security-framework': { deps: ['security-framework-sys'] }, 'security-framework-sys': {} }).graph.length, 1, 'security-framework below sneaky');
-  assert.match(found({ app: { deps: ['sneaky'] }, sneaky: { deps: ['objc2-security'] }, 'objc2-security': {} }).graph[0], /objc2-security@1\.0\.0 .* below sneaky/);
-  assert.deepEqual(found({ app: { deps: ['rustls-platform-verifier'] }, 'rustls-platform-verifier': { deps: ['security-framework'] }, 'security-framework': { deps: ['security-framework-sys'] }, 'security-framework-sys': {} }).graph, [], 'TLS trust is reviewed');
-  assert.deepEqual(found({ app: { deps: ['objc2-service-management'] }, 'objc2-service-management': { deps: ['objc2-security'] }, 'objc2-security': {} }).graph, [], 'login items are reviewed');
+test('C99 graph: a Keychain binding crate is allowed only below a parent reviewed for it, at the reviewed series', () => {
+  const sf = { 'security-framework': { deps: ['security-framework-sys'], version: '3.7.0' }, 'security-framework-sys': { version: '2.17.0' } };
+  assert.deepEqual(keys(found({ app: { deps: ['sneaky'] }, sneaky: { deps: ['security-framework'] }, ...sf })), ['security-framework<-sneaky']);
+  assert.deepEqual(keys(found({ app: { deps: ['rustls-platform-verifier'] }, 'rustls-platform-verifier': { deps: ['security-framework'], version: '0.7.1' }, ...sf })), [], 'TLS trust at 0.7 is reviewed');
+  assert.deepEqual(keys(found({ app: { deps: ['rustls-platform-verifier'] }, 'rustls-platform-verifier': { deps: ['security-framework'], version: '0.8.0' }, ...sf })), ['security-framework<-rustls-platform-verifier'], 'another series is not');
+  assert.match(whats(found({ app: { deps: ['rustls-platform-verifier'] }, 'rustls-platform-verifier': { deps: ['security-framework'], version: '0.8.0' }, ...sf }))[0], /only the 0\.7 series of rustls-platform-verifier was reviewed/);
+  // The row is per binding: objc2-service-management is reviewed for objc2-security, not for security-framework.
+  assert.deepEqual(keys(found({ app: { deps: ['objc2-service-management'] }, 'objc2-service-management': { deps: ['security-framework'], version: '0.3.2' }, ...sf })), ['security-framework<-objc2-service-management']);
+  assert.deepEqual(keys(found({ app: { deps: ['objc2-service-management'] }, 'objc2-service-management': { deps: ['objc2-security'], version: '0.3.2' }, 'objc2-security': { version: '0.3.2', features: 'Authorization,objc2' } })), []);
+  assert.deepEqual(keys(found({ app: { deps: ['rustls-platform-verifier'] }, 'rustls-platform-verifier': { deps: ['objc2-security'], version: '0.7.1' }, 'objc2-security': { version: '0.3.2' } })), ['objc2-security<-rustls-platform-verifier']);
+  assert.equal(series('0.7.1'), '0.7');
+  assert.equal(series('3.7.0'), '3');
 });
 
-test('C99 graph: the dependency source scan finds the Keychain symbols, in a dependency but not in the bindings', () => {
+test('C99 graph: objc2-security with a Keychain feature on is found, with Authorization alone it is not', () => {
+  const base = (features) => ({ app: { deps: ['objc2-service-management'] }, 'objc2-service-management': { deps: ['objc2-security'], version: '0.3.2' }, 'objc2-security': { version: '0.3.2', features } });
+  assert.deepEqual(keys(found(base('Authorization,bitflags,objc2'))), []);
+  assert.deepEqual(keys(found(base('Authorization,SecItem,SecKeychain'))), ['objc2-security:features']);
+  assert.match(whats(found(base('SecKeychainItem')))[0], /Keychain features SecKeychainItem on/);
+});
+
+test('C99 graph: the dependency source scan finds the Keychain symbols in a dependency, and in a binding crate only when asked', () => {
   const src = { sneaky: [{ file: 'src/store.rs', text: 'unsafe { SecItemAdd(q, std::ptr::null_mut()) };\nSecItemAdd(q, p);\nlet _ = SecKeychainFindGenericPassword;' }] };
-  const r = found({ app: { deps: ['sneaky', 'security-framework-sys'] }, sneaky: {}, 'security-framework-sys': {} }, (m) => src[m.split('/')[2]] ?? [{ file: 'src/lib.rs', text: 'pub fn SecItemAdd() {}' }]);
+  const readSources = (m) => src[m.split('/')[2]] ?? [{ file: 'src/lib.rs', text: 'pub fn SecKeychainSetUserInteractionAllowed() {}' }];
+  const crates = { app: { deps: ['sneaky', 'security-framework-sys'] }, sneaky: {}, 'security-framework-sys': { version: '2.17.0' } };
+  const r = found(crates, { readSources, listBinaries: () => [] });
   assert.deepEqual(r.scan.findings.map((f) => f.what), ['sneaky@1.0.0 (src/store.rs) uses SecItemAdd', 'sneaky@1.0.0 (src/store.rs) uses SecKeychainFindGenericPassword']);
-  assert.equal(found({ app: { deps: ['tls'] }, tls: {} }, () => [{ file: 'src/lib.rs', text: 'SecTrustEvaluateWithError(); // SecItem is not a call' }]).scan.findings.length, 0, 'TLS trust is not a keychain item');
+  const all = found(crates, { readSources, listBinaries: () => [], scanBindings: true });
+  assert.ok(all.scan.findings.some((f) => /security-framework-sys@2\.17\.0 .* uses SecKeychainSetUserInteractionAllowed/.test(f.what)), 'the control sees the symbol in a binding');
+  assert.equal(found({ app: { deps: ['tls'] }, tls: {} }, { readSources: () => [{ file: 'src/lib.rs', text: 'SecTrustEvaluateWithError(); // SecItem is not a call' }], listBinaries: () => [] }).scan.findings.length, 0, 'TLS trust is not a keychain item');
+  assert.deepEqual(found({ app: { deps: ['blob'] }, blob: {} }, { readSources: () => [{ file: 'src/lib.rs', text: '' }], listBinaries: () => ['libx.a'] }).scan.binaries, ['blob@1.0.0: libx.a']);
+});
+
+test('C99 graph: crate files of every language are read, root tests are not, a nested tests folder is, binaries are listed', (t) => {
+  const root = makeApp({
+    'src/a.swift': 'SecItemAdd', 'src/b.mm': 'SecItemAdd', 'src/c.cc': 'x', 'src/d.cpp': 'x', 'src/e.m': 'x', 'src/f.c': 'x', 'src/g.h': 'x',
+    'src/tests/inner.rs': 'x', 'tests/outer.rs': 'x', 'examples/e.rs': 'x', 'benches/b.rs': 'x', 'README.md': 'x',
+    'prebuilt/libz.a': 'x', 'vendor.framework/Versions/A/Sec': 'x',
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  assert.deepEqual(crateSources(root), ['src/a.swift', 'src/b.mm', 'src/c.cc', 'src/d.cpp', 'src/e.m', 'src/f.c', 'src/g.h', 'src/tests/inner.rs']);
+  assert.deepEqual(crateBinaries(root), ['prebuilt/libz.a', 'vendor.framework']);
 });
 
 test('C99 graph: an unusable document is broken, an unread dependency is unfetched', () => {
   assert.match(readGraph({ packages: [], workspace_members: [] }, 'x').broken, /no workspace member/);
   assert.match(readGraph(metadata({ app: {} }), 'garbage').broken, /cannot read/);
-  assert.match(readGraph(metadata({ app: {} }), '0app v1.0.0\n1ghost v1.0.0').broken, /ghost@1\.0\.0 is in the cargo tree but not in the cargo metadata/);
+  assert.match(readGraph(metadata({ app: {} }), '0app v1.0.0|default\n1ghost v1.0.0|default').broken, /ghost@1\.0\.0 is in the cargo tree but not in the cargo metadata/);
   assert.match(readGraph(metadata({ app: {} }), '').broken, /no workspace member/);
-  const r = found({ app: { deps: ['dep'] }, dep: {} }, () => []);
-  assert.deepEqual(r.scan.unfetched, ['dep@1.0.0']);
+  const dup = metadata({ app: {}, dep: {} });
+  dup.packages.push({ ...dup.packages[1], id: 'dep 1.0.0 (git+y)' });
+  assert.match(readGraph(dup, tree({ app: { deps: ['dep'] }, dep: {} })).broken, /two packages are named dep@1\.0\.0/);
+  assert.deepEqual(found({ app: { deps: ['dep'] }, dep: {} }, { readSources: () => [], listBinaries: () => [] }).scan.unfetched, ['dep@1.0.0']);
 });
 
+const CI = '{"cargo": "."}\n';
 const fixture = (extra = {}) =>
   makeApp({
-    'paddock.ci.json': '{"cargo": "."}\n',
+    'paddock.ci.json': CI,
     'Cargo.toml': '[package]\nname = "demo-app"\nversion = "0.1.0"\n',
     'Cargo.lock': '# lock\n',
     'src/lib.rs': 'pub fn f() {}\n',
     ...extra,
   });
-const probeOf = (crates, sources) => ({ options: { probe: () => probe(crates), readSources: sources ?? (() => [{ file: 'src/lib.rs', text: 'fn ok() {}' }]) } });
+const make = (t, files) => {
+  const root = fixture(files);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  return root;
+};
+const probeOf = (crates, scan) => ({ options: { probe: () => probe(crates), readSources: scan?.readSources ?? (() => [{ file: 'src/lib.rs', text: 'fn ok() {}' }]), listBinaries: () => [] } });
+const waiver = (path) => `[[waiver]]\ncheck = "C99"\npath = "${path}"\nreason = "moves to files in its work package"\nexpires = "2099-01-01"\n`;
 
-test('C99 through the runner: findings from the graph land on the Cargo.lock; a clean graph passes', async () => {
-  const bad = await findingsOf('C99', fixture(), probeOf({ app: { deps: ['mid'] }, mid: { deps: ['keyring'] }, keyring: {} }, () => [{ file: 'src/lib.rs', text: 'SecItemAdd();' }]));
-  assert.deepEqual(bad.map((f) => [f.file, f.severity]), [['Cargo.lock', 'error'], ['Cargo.lock', 'error'], ['Cargo.lock', 'error']]);
+test('C99 through the runner: every graph finding has its own path and a clean graph passes', async (t) => {
+  const bad = await findingsOf('C99', make(t, {}), probeOf({ app: { deps: ['mid'] }, mid: { deps: ['keyring'] }, keyring: {} }, { readSources: () => [{ file: 'src/lib.rs', text: 'SecItemAdd();' }] }));
+  assert.deepEqual(bad.map((f) => f.file), ['Cargo.lock#keyring', 'Cargo.lock#src:mid@1.0.0:SecItemAdd', 'Cargo.lock#src:keyring@1.0.0:SecItemAdd']);
   assert.match(bad[0].message, /keyring@1\.0\.0 is in the macOS build \(pulled in by mid\)/);
-  assert.match(bad.map((f) => f.message).join('\n'), /dependency mid@1\.0\.0 \(src\/lib\.rs\) uses SecItemAdd/);
-  assert.deepEqual(await findingsOf('C99', fixture(), probeOf({ app: { deps: ['ok'] }, ok: {} })), []);
+  assert.deepEqual(await findingsOf('C99', make(t, {}), probeOf({ app: { deps: ['ok'] }, ok: {} })), []);
 });
 
-test('C99 through the runner: a failed probe, an unfetched dependency and a missing lock are never a pass', async () => {
-  const failed = await findingsOf('C99', fixture(), { options: { probe: () => ({ broken: 'cargo fetch failed: exit 101' }) } });
+test('C99 waivers: a waived lock still reports a broken check and any finding the waiver does not name', async (t) => {
+  const crates = { app: { deps: ['keyring'] }, keyring: {} };
+  const w = { 'paddock.waivers.toml': waiver('Cargo.lock#keyring') };
+  const waived = await findingsOf('C99', make(t, w), probeOf(crates));
+  assert.deepEqual(waived, [], 'the named finding is waived');
+  // A new SecItem finding in the same lock is not covered by the keyring waiver.
+  const added = await findingsOf('C99', make(t, w), probeOf(crates, { readSources: () => [{ file: 'src/lib.rs', text: 'SecItemAdd();' }] }));
+  assert.deepEqual(added.map((f) => f.file), ['Cargo.lock#src:keyring@1.0.0:SecItemAdd']);
+  // A new keyring-family crate is not covered either.
+  const more = await findingsOf('C99', make(t, w), probeOf({ app: { deps: ['keyring', 'keyring-core'] }, keyring: {}, 'keyring-core': {} }));
+  assert.deepEqual(more.map((f) => f.file), ['Cargo.lock#keyring-core']);
+  // Even a waiver for the whole lock (a glob) never hides a broken check or a missing measurement.
+  for (const path of ['Cargo.lock', 'Cargo.lock*', '*']) {
+    const glob = { 'paddock.waivers.toml': waiver(path) };
+    const broken = await findingsOf('C99', make(t, glob), { options: { probe: () => ({ broken: 'cargo fetch failed: exit 101' }) } });
+    assert.match(broken[0].message, /check broken/, path);
+    assert.equal(broken[0].severity, 'error');
+    const unfetched = await findingsOf('C99', make(t, glob), probeOf({ app: { deps: ['dep'] }, dep: {} }, { readSources: () => [] }));
+    assert.match(unfetched.map((f) => f.message).join('\n'), /check broken.*not downloaded/, path);
+    const nolock = makeApp({ ...glob, 'paddock.ci.json': CI, 'Cargo.toml': '[package]\nname = "a"\n', 'src/lib.rs': '' });
+    t.after(() => rmSync(nolock, { recursive: true, force: true }));
+    assert.match((await findingsOf('C99', nolock))[0].message, /not measured/, path);
+  }
+});
+
+test('C99 through the runner: a failed probe, an unfetched dependency and a missing lock are errors', async (t) => {
+  const failed = await findingsOf('C99', make(t, {}), { options: { probe: () => ({ broken: 'cargo fetch failed: exit 101' }) } });
   assert.deepEqual(failed.map((f) => f.severity), ['error']);
   assert.match(failed[0].message, /check broken.*cargo fetch failed/);
-  const unfetched = await findingsOf('C99', fixture(), probeOf({ app: { deps: ['dep'] }, dep: {} }, () => []));
+  const unfetched = await findingsOf('C99', make(t, {}), probeOf({ app: { deps: ['dep'] }, dep: {} }, { readSources: () => [] }));
   assert.match(unfetched[0].message, /check broken.*not downloaded/);
-  const noLock = fixture();
-  const lockless = await findingsOf('C99', makeApp({ 'paddock.ci.json': '{"cargo": "."}\n', 'Cargo.toml': '[package]\nname = "a"\n', 'src/lib.rs': '' }));
-  assert.deepEqual(lockless.map((f) => f.severity), ['warn']);
-  assert.match(lockless[0].message, /not measured/);
-  assert.ok(noLock);
-  // The crates/ library workspace is not a build: its Cargo.lock is not probed.
-  const lib = makeApp({ 'paddock.ci.json': '{"cargo": "."}\n', 'crates/Cargo.toml': '[package]\nname = "a"\n', 'crates/Cargo.lock': '', 'crates/src/lib.rs': '' });
-  assert.match((await findingsOf('C99', lib, { options: { probe: () => assert.fail('crates/ must not be probed') } }))[0].message, /not measured/);
+  // ADR 0057 §3.4: no Cargo.lock to probe is an error ("not measured"), not a warning.
+  const lockless = makeApp({ 'paddock.ci.json': CI, 'Cargo.toml': '[package]\nname = "a"\n', 'src/lib.rs': '' });
+  t.after(() => rmSync(lockless, { recursive: true, force: true }));
+  const r = await findingsOf('C99', lockless);
+  assert.deepEqual(r.map((f) => f.severity), ['error']);
+  assert.match(r[0].message, /not measured: Cargo\.lock does not exist/);
+  // No paddock.ci.json names a workspace: nothing was probed.
+  const unnamed = makeApp({ 'Cargo.toml': '[package]\nname = "a"\n', 'Cargo.lock': '', 'src/lib.rs': '' });
+  t.after(() => rmSync(unnamed, { recursive: true, force: true }));
+  assert.match((await findingsOf('C99', unnamed))[0].message, /not measured: no paddock\.ci\.json names a Cargo workspace/);
 });
 
-// The whole path with a real cargo and no network: path dependencies, one named keyring, one calling SecItemAdd.
-const hasCargo = spawnSync('cargo', ['--version']).status === 0;
-test('C99 with a real cargo: a planted keyring crate and a planted SecItemAdd call are found', { skip: hasCargo ? false : 'cargo is not installed here: run the conformance tests where cargo is (CI image)' }, async () => {
-  const pkg = (name, deps = '') => `[package]\nname = "${name}"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\n${deps}`;
+test('C99 through the runner: only the named workspaces and crates/ are probed, not a vendored lock', async (t) => {
   const root = makeApp({
-    'paddock.ci.json': '{"cargo": "."}\n',
+    'apps/a/paddock.ci.json': '{"cargo": "src-tauri"}\n', 'apps/a/src-tauri/Cargo.toml': '[package]\nname = "a"\n', 'apps/a/src-tauri/Cargo.lock': '', 'apps/a/src-tauri/src/lib.rs': '',
+    'crates/Cargo.toml': '[package]\nname = "c"\n', 'crates/Cargo.lock': '', 'crates/src/lib.rs': '',
+    'apps/a/vendor/dep/Cargo.toml': '[package]\nname = "v"\n', 'apps/a/vendor/dep/Cargo.lock': '',
+  });
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const seen = [];
+  const f = await findingsOf('C99', root, { options: { probe: (d) => (seen.push(d.slice(root.length)), probe({ app: {} })), readSources: () => [], listBinaries: () => [] } });
+  assert.deepEqual(seen.sort(), ['/apps/a/src-tauri', '/crates']);
+  assert.deepEqual(f.map((x) => x.severity), []);
+});
+
+test('C99: --no-graph is a switch of the command line and says the graph was not measured', async (t) => {
+  assert.equal(parseArgs(['--app', 'x', '--no-graph'])['no-graph'], true);
+  const r = await findingsOf('C99', make(t, {}), { options: { graph: 'skipped' } });
+  assert.deepEqual(r.map((f) => f.severity), ['warn']);
+  assert.match(r[0].message, /not measured.*--no-graph/);
+});
+
+// The whole path with a real cargo and no network: path dependencies.
+const hasCargo = spawnSync('cargo', ['--version']).status === 0;
+const skipCargo = hasCargo ? false : 'cargo is not installed here: run the conformance tests where cargo is (CI image)';
+const env = { ...process.env, RUSTC_WRAPPER: '' };
+const pkg = (name, deps = '', extra = '') => `[package]\nname = "${name}"\nversion = "0.1.0"\nedition = "2021"\n${extra}\n[dependencies]\n${deps}`;
+const lockfile = (dir) => {
+  const r = spawnSync('cargo', ['generate-lockfile', '--offline'], { cwd: dir, encoding: 'utf8', env });
+  assert.equal(r.status, 0, r.stderr);
+};
+
+test('C99 with a real cargo: a planted keyring crate and a planted SecItemAdd call are found', { skip: skipCargo }, async (t) => {
+  const root = makeApp({
+    'paddock.ci.json': CI,
     'Cargo.toml': pkg('demo-app', 'planted = { path = "vendor/planted" }\nkeyring = { path = "vendor/keyring" }\n'),
     'src/lib.rs': 'pub fn f() {}\n',
     'vendor/planted/Cargo.toml': pkg('planted'),
@@ -106,23 +205,47 @@ test('C99 with a real cargo: a planted keyring crate and a planted SecItemAdd ca
     'vendor/keyring/Cargo.toml': pkg('keyring'),
     'vendor/keyring/src/lib.rs': '',
   });
-  const lock = spawnSync('cargo', ['generate-lockfile', '--offline'], { cwd: root, encoding: 'utf8' });
-  assert.equal(lock.status, 0, lock.stderr);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  lockfile(root);
   const f = await findingsOf('C99', root, { options: { cargoArgs: ['--offline'] } });
   const msg = f.map((x) => x.message).join('\n');
   assert.match(msg, /keyring@0\.1\.0 is in the macOS build \(pulled in by demo-app\)/);
   assert.match(msg, /dependency planted@0\.1\.0 \(src\/lib\.rs\) uses SecItemAdd/);
-  // Without the two planted crates the same fixture is clean.
-  // A keyring that only Windows builds is not in the macOS graph (features resolve per target; cargo metadata would say otherwise).
-  const clean = makeApp({
-    'paddock.ci.json': '{"cargo": "."}\n',
-    'Cargo.toml': `${pkg('demo-app')}\n[target.'cfg(windows)'.dependencies]\nwinonly = { path = "harness/winonly" }\n`,
+  assert.ok(f.some((x) => x.file === 'Cargo.lock#keyring'));
+});
+
+// The paddock-secrets pattern: a shared crate with an optional `keyring` feature that the app enables off macOS only.
+test('C99 with a real cargo: a keyring feature enabled off macOS is not in the macOS graph, and is in the Windows graph', { skip: skipCargo }, async (t) => {
+  const root = makeApp({
+    'paddock.ci.json': CI,
+    'Cargo.toml': `${pkg('demo-app', 'secrets = { path = "vendor/secrets", package = "paddock-secrets" }\n')}\n[target.'cfg(not(target_os = "macos"))'.dependencies]\nsecrets = { path = "vendor/secrets", package = "paddock-secrets", features = ["keyring"] }\n`,
     'src/lib.rs': 'pub fn f() {}\n',
-    'harness/winonly/Cargo.toml': pkg('winonly', 'keyring = { path = "../../vendor/keyring" }\n'),
-    'harness/winonly/src/lib.rs': '',
+    'vendor/secrets/Cargo.toml': `${pkg('paddock-secrets', 'keyring = { path = "../keyring", optional = true }\n')}\n[features]\nkeyring = ["dep:keyring"]\n`,
+    'vendor/secrets/src/lib.rs': '',
     'vendor/keyring/Cargo.toml': pkg('keyring'),
     'vendor/keyring/src/lib.rs': '',
   });
-  assert.equal(spawnSync('cargo', ['generate-lockfile', '--offline'], { cwd: clean }).status, 0);
-  assert.deepEqual(await findingsOf('C99', clean, { options: { cargoArgs: ['--offline'] } }), []);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  lockfile(root);
+  assert.deepEqual(await findingsOf('C99', root, { options: { cargoArgs: ['--offline'] } }), [], 'the macOS graph is clean (cargo metadata alone would say otherwise)');
+  // The control: the same probe on the Windows triple does show keyring, so a clean macOS result is not a blind probe.
+  const win = probeWorkspace(root, { extra: ['--offline'], targets: ['x86_64-pc-windows-msvc'], env });
+  assert.ok(!win.broken, win.broken);
+  const g = readGraph(win.meta, win.runs[0].tree);
+  assert.deepEqual(keys({ graph: graphFindings(g) }), ['keyring']);
+  // And for both Apple triples the probe ran.
+  const mac = probeWorkspace(root, { extra: ['--offline'], env });
+  assert.deepEqual(mac.runs.map((r) => r.target), MACOS_TARGETS);
+});
+
+// A positive control on a real binding crate (needs the registry sources, fetched by the probe in CI).
+test('C99 dependency scan finds SecKeychainSetUserInteractionAllowed in the real security-framework, then the binding is allowed', (t) => {
+  const dir = join(import.meta.dirname, '..', '..', 'apps', 'pitwall');
+  const p = hasCargo ? probeWorkspace(dir, { extra: ['--offline'], targets: [MACOS_TARGETS[0]], env }) : { broken: 'no cargo' };
+  if (p.broken) return t.skip(`the Pitwall dependencies are not fetched here (${p.broken.slice(0, 80)}): run where cargo fetch has run`);
+  const g = readGraph(p.meta, p.runs[0].tree);
+  const scan = sourceScan(g, { scanBindings: true });
+  assert.ok(scan.read > 0 && scan.findings.some((f) => /security-framework@.*SecKeychainSetUserInteractionAllowed/.test(f.what)), 'the scan sees the real call');
+  assert.ok(!sourceScan(g).findings.some((f) => /security-framework/.test(f.what)), 'with the binding allowed it is not reported');
+  assert.deepEqual(graphFindings(g), [], 'and Pitwall has no unreviewed parent');
 });

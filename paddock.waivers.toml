@@ -284,23 +284,77 @@ expires = "2027-01-31"
 [[waiver]]
 check = "C99"
 path = "apps/dyno/crates/dyno-platform/tests/no_keychain_on_macos.rs"
-reason = "Dyno's own no-Keychain test names the security subcommands it forbids; ADR 0057 WP-2 deletes it once C99 has all its layers"
+reason = "Dyno's own no-Keychain test names the security subcommands it forbids; delete this waiver and the test only after C99 (all five layers) has gated green in CI on main (ADR 0057 WP-2)"
 expires = "2027-03-31"
 
 [[waiver]]
 check = "C99"
-path = "apps/debrief/Cargo.lock"
+path = "apps/debrief/Cargo.lock#keyring"
 reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
 expires = "2027-06-30"
 
 [[waiver]]
 check = "C99"
-path = "apps/pitcrew/Cargo.lock"
+path = "apps/debrief/Cargo.lock#keyring-core"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds keyring-core until then)"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/debrief/Cargo.lock#apple-native-keyring-store"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds apple-native-keyring-store until then)"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/debrief/Cargo.lock#security-framework<-apple-native-keyring-store"
+reason = "Debrief: the Pitwall API key still uses keyring::Entry; ADR 0057 WP-5 (Debrief 1.2) moves it to FileSecrets (its macOS graph, C99 layer 4, holds security-framework until then)"
+expires = "2027-06-30"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/Cargo.lock#keyring"
 reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
 expires = "2027-03-31"
 
 [[waiver]]
 check = "C99"
-path = "apps/spotter/Cargo.lock"
+path = "apps/pitcrew/Cargo.lock#keyring-core"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring-core until then)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/Cargo.lock#apple-native-keyring-store"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds apple-native-keyring-store until then)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/pitcrew/Cargo.lock#security-framework<-apple-native-keyring-store"
+reason = "Pitcrew: tokens and channel secrets still use keyring::Entry; ADR 0057 WP-6 (Pitcrew 1.1) moves them to FileSecrets (its macOS graph, C99 layer 4, holds security-framework until then)"
+expires = "2027-03-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock#keyring"
 reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring until then)"
+expires = "2027-01-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock#keyring-core"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds keyring-core until then)"
+expires = "2027-01-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock#apple-native-keyring-store"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds apple-native-keyring-store until then)"
+expires = "2027-01-31"
+
+[[waiver]]
+check = "C99"
+path = "apps/spotter/Cargo.lock#security-framework<-apple-native-keyring-store"
+reason = "Spotter: credentials still use keyring::Entry; ADR 0057 WP-3 (Spotter 1.0) moves them to FileSecrets (its macOS graph, C99 layer 4, holds security-framework until then)"
 expires = "2027-01-31"
