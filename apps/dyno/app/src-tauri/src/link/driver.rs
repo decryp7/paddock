@@ -5,6 +5,10 @@
 //! Workers: one *launcher* thread takes launch and end in order (an end never overtakes the launch it follows, so no child
 //! is left behind); one *notifier* thread delivers the sink's notifications in order (the sink may block on the UI); a short
 //! thread per look, connect, ask and connection watch. The connection is watched by waiting for its close, not by polling.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use super::machine::{Command, Event, Generation, Launch, PeerId, Purpose, Seq};
 use super::ports::{self, now_ms};
@@ -85,13 +89,12 @@ impl Executor {
                             }
                             Err(e) => log::error!(LaunchMs = launch_ms, Via = l.launcher.via(), Error = e.as_str(); "Agent launch failed"),
                         }
-                        if result.is_err() {
-                            let mut held = lock(&h);
-                            if *held == Some(child) {
-                                *held = None;
-                            }
+                        // The look reads the launcher's child as this generation's only once it exists: until then the launcher still reports
+                        // the process of the one before (exited, after a Retry), which a look must not take for this one's.
+                        if result.is_ok() {
+                            *lock(&h) = Some(child);
                         }
-                        let _ = ev.send(Event::Launched { child, result });
+                        deliver(&ev, Event::Launched { child, result });
                     }
                     LauncherJob::End(child) => {
                         l.launcher.finish(END_GRACE);
@@ -104,7 +107,7 @@ impl Executor {
                             *held = None;
                         }
                         drop(held);
-                        let _ = ev.send(Event::ChildEnded { child, code });
+                        deliver(&ev, Event::ChildEnded { child, code });
                     }
                 }
             }
@@ -147,11 +150,12 @@ impl Executor {
                 let gate = self.look_gate.clone();
                 spawn("dyno-look", move || {
                     let began = std::time::Instant::now();
+                    let wanted = link.wanted_key();
                     let probe = if service { link.probe() } else { None };
                     let (look, found, service_ms) = ports::look(
                         seq,
                         &link.dirs,
-                        &link.app_version,
+                        &wanted,
                         link.launcher.as_ref(),
                         held,
                         ports::Ask {
@@ -162,6 +166,8 @@ impl Executor {
                             recheck,
                         },
                     );
+                    let mut look = look;
+                    look.app_updated = link.app_updated(); // after `wanted_key` above, which updates it
                     *lock(&seen) = found.map(|d| (seq, d));
                     let took = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX);
                     if let Some(line) = ports::describe_look(&look, deciding, took, service_ms) {
@@ -178,17 +184,16 @@ impl Executor {
                             logging::info(&line);
                         }
                     }
-                    let _ = events.send(Event::Looked(look));
+                    deliver(&events, Event::Looked(look));
                 });
             }
             Command::Launch { child, .. } => {
                 logging::info("starting the agent");
-                *lock(&self.held) = Some(child);
-                let _ = self.launcher_jobs.send(LauncherJob::Launch(child));
+                deliver(&self.launcher_jobs, LauncherJob::Launch(child));
             }
             Command::EndHeldChild { child } => {
                 logging::info("ending the agent this app started");
-                let _ = self.launcher_jobs.send(LauncherJob::End(child));
+                deliver(&self.launcher_jobs, LauncherJob::End(child));
             }
             Command::Connect { seq, look, purpose } => {
                 let (link, events, peers, ids, seen) = (
@@ -213,20 +218,27 @@ impl Executor {
                     let current = Discovery::read(&link.dirs.discovery()).or(tagged);
                     let Some(d) = current else {
                         failed("there is no discovery file");
-                        let _ = events.send(Event::ConnectFailed {
-                            seq,
-                            why: "There is no discovery file.".into(),
-                        });
+                        deliver(
+                            &events,
+                            Event::ConnectFailed {
+                                seq,
+                                why: "There is no discovery file.".into(),
+                            },
+                        );
                         return;
                     };
                     // A file of another build is never used, and one of this build is never asked to exit: the decision was
                     // taken from a file that may have been replaced.
-                    if ports::hint_of(&d, &link.app_version).same_build != (purpose == Purpose::Use) {
+                    let wanted = link.wanted_key();
+                    if ports::hint_of(&d, &wanted).same_build != (purpose == Purpose::Use) {
                         failed("the discovery file changed");
-                        let _ = events.send(Event::ConnectFailed {
-                            seq,
-                            why: "The discovery file changed.".into(),
-                        });
+                        deliver(
+                            &events,
+                            Event::ConnectFailed {
+                                seq,
+                                why: "The discovery file changed.".into(),
+                            },
+                        );
                         return;
                     }
                     let handshake = std::time::Instant::now();
@@ -237,7 +249,10 @@ impl Executor {
                                 Attempts = done.attempts,
                                 SinceBeginMs = done.since_begin_ms,
                                 AgentRun = paddock_log::fingerprint(&d.endpoint),
-                                AgentPid = d.pid;
+                                AgentPid = d.pid,
+                                AgentVersion = d.version.as_str(),
+                                AgentBuild = d.build.as_str(),
+                                AppBuildKey = wanted.as_str();
                                 "{}",
                                 ports::describe_connect(purpose, u64::try_from(handshake.elapsed().as_millis()).unwrap_or(u64::MAX))
                             );
@@ -262,12 +277,12 @@ impl Executor {
                                     ConnectedMs = u64::try_from(connected_at.elapsed().as_millis()).unwrap_or(u64::MAX);
                                     "Agent connection closed"
                                 );
-                                let _ = watcher.0.send(Event::PeerClosed { peer: id });
+                                deliver(&watcher.0, Event::PeerClosed { peer: id });
                             });
                         }
                         Err(why) => {
                             failed(&why);
-                            let _ = events.send(Event::ConnectFailed { seq, why });
+                            deliver(&events, Event::ConnectFailed { seq, why });
                         }
                     }
                 });
@@ -277,7 +292,10 @@ impl Executor {
                 logging::info("asking the agent on this connection to exit");
                 if let Some(p) = peer {
                     spawn("dyno-ask", move || {
-                        let _ = p.call(Message::Request(Box::new(Request::Shutdown)), REQUEST_TIMEOUT);
+                        paddock_proc::cleanup::logged(
+                            "asking the agent to exit",
+                            p.call(Message::Request(Box::new(Request::Shutdown)), REQUEST_TIMEOUT),
+                        );
                         p.close();
                     });
                 }
@@ -308,17 +326,18 @@ impl Executor {
                 spawn("dyno-connected", move || link.on_connected());
             }
             Command::Report(status) => {
-                let _ = self.notices.send(Notice::Agent(status));
+                deliver(&self.notices, Notice::Agent(status));
             }
             Command::Stall { stall, message, .. } => {
                 logging::info(&format!("still waiting: {message}"));
-                let _ = self
-                    .notices
-                    .send(Notice::Agent(AgentStatus::new(crate::dto::AgentState::Starting, Some(message))));
-                let _ = self.notices.send(Notice::Stalled(Some(stall)));
+                deliver(
+                    &self.notices,
+                    Notice::Agent(AgentStatus::new(crate::dto::AgentState::Starting, Some(message))),
+                );
+                deliver(&self.notices, Notice::Stalled(Some(stall)));
             }
             Command::ClearStall => {
-                let _ = self.notices.send(Notice::Stalled(None));
+                deliver(&self.notices, Notice::Stalled(None));
             }
             Command::Done(outcome) => {
                 // Closing never blocks (an atomic), so a launch queued before the quit sees it and does not run.
@@ -346,5 +365,14 @@ impl Drop for Executor {
 }
 
 fn spawn(name: &str, f: impl FnOnce() + Send + 'static) {
-    let _ = std::thread::Builder::new().name(name.into()).spawn(f);
+    if let Err(e) = std::thread::Builder::new().name(name.into()).spawn(f) {
+        logging::warn(&format!("the {name} thread could not be started: {e}"));
+    }
+}
+
+/// Tells a channel's reader something. The reader is gone once the link has shut down, and there is nothing left to tell then.
+pub(super) fn deliver<T>(tx: &Sender<T>, item: T) {
+    // silent: the receiver is gone once the link has shut down; nobody is left to tell
+    #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
+    let _ = tx.send(item);
 }

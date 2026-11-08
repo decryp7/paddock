@@ -6,22 +6,13 @@ use dyno_core::metrics::DiskSample;
 
 const DATA: &str = "/System/Volumes/Data";
 
-/// Whether a mount is plumbing the user never manages: system helper volumes, snapshot and Time Machine mounts.
-fn is_plumbing(mount: &str) -> bool {
-    (mount.starts_with("/System/Volumes/") && mount != DATA)
-        || mount.starts_with("/Volumes/.timemachine")
-        || mount.starts_with("/Volumes/com.apple.")
-        || mount.starts_with("/private/var/vm")
-        || mount.starts_with("/Library/Developer/CoreSimulator")
-}
-
 /// Drops plumbing volumes and shows the Data volume as the startup disk (under the name of `/`).
 pub fn tidy(disks: Vec<DiskSample>) -> Vec<DiskSample> {
     let root_name = disks.iter().find(|d| d.mount == "/").map(|d| d.name.clone());
     let has_data = disks.iter().any(|d| d.mount == DATA);
     disks
         .into_iter()
-        .filter(|d| !is_plumbing(&d.mount) && !(has_data && d.mount == "/"))
+        .filter(|d| !dyno_core::disk::volume::is_plumbing_mount(&d.mount) && !(has_data && d.mount == "/"))
         .map(|mut d| {
             if d.mount == DATA {
                 d.name = root_name

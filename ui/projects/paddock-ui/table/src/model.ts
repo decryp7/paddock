@@ -269,7 +269,8 @@ export function fitColumns<T>(shown: readonly PdColumn<T>[], width: number, acti
     const cols = out.length + (actions ? 1 : 0);
     // A required column's floor is the track's: 128 px, or 40 % of a phone-width table (columnTrack).
     const floor = Math.min(PD_PRIMARY_MIN_PX, 0.4 * width);
-    const fixed = out.reduce((a, c) => a + (c.required ? floor : minPx(c)), 0);
+    // ...or the column's own px minimum when that is larger (`minmax(180px, 320px)`): the track keeps it, so the count must too.
+    const fixed = out.reduce((a, c) => a + (c.required ? Math.max(floor, minPx(c)) : minPx(c)), 0);
     return fixed + actions + gap * Math.max(0, cols - 1) + padding;
   };
   while (need() > width) {
@@ -303,4 +304,23 @@ export const PD_FOLD_EXTRA = 12;
 /** The row height for a density: the token's value when it is one of the family's, else Standard. */
 export function rowHeightFor(token: number): number {
   return (PD_ROW_HEIGHTS as readonly number[]).includes(token) ? token : 32;
+}
+
+/** The least height of a table body in `fill` and `window` mode, in pixels: a few rows stay readable in a small window. */
+export const PD_TABLE_FILL_MIN = 240;
+
+/**
+ * The tallest a `window` table's body grows: the scroll area's height less the table's own chrome (toolbar, header, gaps), so a long
+ * table is never taller than the area the user sees; never below {@link PD_TABLE_FILL_MIN}.
+ */
+export function windowBodyMax(areaHeight: number, chrome: number): number {
+  return Math.max(PD_TABLE_FILL_MIN, Math.floor(areaHeight - chrome));
+}
+
+/** The nearest ancestor of `el` that scrolls vertically (`overflow-y` auto, scroll or overlay), or null. */
+export function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    if (/^(auto|scroll|overlay)$/.test(getComputedStyle(p).overflowY)) return p;
+  }
+  return null;
 }

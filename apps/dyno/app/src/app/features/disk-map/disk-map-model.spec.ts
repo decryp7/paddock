@@ -1,5 +1,6 @@
 import type { DiskChildren, DiskNode, RingNode, DiskScanStatus, ScanProgress, Volume } from '../../core/api.types';
 import { mockVolumes } from '../../core/mock/disk-map';
+import { formatClock } from '../../shared/format';
 import {
   capacityStrip,
   failureText,
@@ -24,7 +25,7 @@ import {
   volumeMeta,
 } from './disk-map-model';
 
-const GB = 1024 ** 3;
+const GB = 1000 ** 3;
 const progress = (o: Partial<ScanProgress> = {}): ScanProgress => ({ bytes: 0, items: 0, folders: 0, totalBytes: null, unreadable: 0, ...o });
 const node = (id: number, name: string, bytes: number, o: Partial<DiskNode> = {}): DiskNode => ({ id, name, kind: 'folder', bytes, logicalBytes: bytes, items: 3, newestChange: 1000 + id, complete: true, hasChildren: true, unreadableReason: null, ...o });
 const level = (): DiskChildren => ({
@@ -49,6 +50,13 @@ describe('volumes', () => {
 
   it('says what it cannot know', () => {
     expect(volumeFree({ ...network, reachable: false })).toBe('Not answering');
+    // The agent stamps when the figures were read and how old that is; the words come from that, not from a clock here.
+    const at = Date.UTC(2026, 10, 7, 14, 5);
+    const clock = formatClock(at);
+    expect(volumeFree({ ...network, reachable: false, measuredAt: at })).toBe(`Not answering since ${clock}`);
+    expect(volumeFree({ ...internal, measuredAt: at, freshness: 'late' })).toMatch(new RegExp(` free · As of ${clock}$`));
+    expect(volumeFree({ ...internal, measuredAt: at, freshness: 'stale' })).toMatch(new RegExp(` free · Not updating, as of ${clock}$`));
+    expect(volumeFree({ ...internal, measuredAt: at, freshness: 'fresh' })).toMatch(/ free$/);
     expect(volumeFree({ ...internal, free: null })).toBe('Free space not reported');
     expect(volumeFree(network)).toMatch(/free on the server$/);
     expect(volumeFree(internal)).toMatch(/ free$/);

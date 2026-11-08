@@ -27,5 +27,6 @@ describe('seriesFor', () => {
 
   it('keeps the network in bytes a second (its reading is a rate, not a percentage)', () => {
     expect(seriesFor('networkDown', series())).toEqual({ values: [1e6, 2e6], values2: null });
+    expect(seriesFor('networkBoth', series())).toMatchObject({ values: [1e6, 2e6], values2: expect.any(Array) });
   });
 });

@@ -3,11 +3,15 @@
 
 pub mod activity;
 pub mod counters;
+pub mod firewall_com;
+pub mod indirect;
 pub mod net;
 pub mod nt_query;
 pub mod pdh;
+pub mod power;
 pub mod topology;
 pub mod traffic;
+pub mod wake_timer;
 
 use crate::processes::{NoDetails, SysinfoProcesses};
 use crate::sensors::SysinfoSensors;
@@ -16,7 +20,7 @@ use dyno_core::ports::PlatformError;
 use std::path::{Path, PathBuf};
 
 /// The ports for Windows.
-pub fn platform() -> Platform {
+pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     let fake = crate::fake::Fake::new();
     let f = fake.platform();
     Platform {
@@ -29,6 +33,8 @@ pub fn platform() -> Platform {
         counters: std::sync::Arc::new(crate::counters::OsCounters),
         network: crate::NetworkPorts::os(),
         hardware: crate::HardwareReaders::os(),
+        power: crate::PowerPorts::os(),
+        wol: crate::wol::WolPorts::os(secrets_dir),
         ..f
     }
 }

@@ -2,6 +2,14 @@
 //! reads the discovery file, connects to a live companion of this build, replaces one of another build, ignores a stale
 //! file, starts a companion when none runs (with a [`Launcher`]), and reconnects with back-off when the link drops. Every
 //! wait is on the injected [`Clock`], so tests drive the back-off with a `FakeClock`.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use super::discovery::{self, Discovery, Found};
 use crate::error::IpcError;
@@ -279,7 +287,7 @@ impl LinkClient {
             p.close();
         }
         if let Some(t) = self.thread.take() {
-            let _ = t.join();
+            paddock_proc::cleanup::join("the link client thread", t);
         }
         self.shared.set(LinkState::Stopped, None);
     }
@@ -306,6 +314,8 @@ impl Runner {
     /// Waits `d` on the clock; false when the client is stopping. A Retry ends the wait early.
     fn pause(&self, d: Duration) -> bool {
         let retry = lock(&self.shared.retry).clone();
+        // silent: Err(Cancelled) is the wake-up (stop or Retry); the state is read right after
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = self.config.clock.wait(d, &retry);
         if retry.is_cancelled() {
             *lock(&self.shared.retry) = CancelToken::new();

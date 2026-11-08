@@ -14,7 +14,7 @@ Rules for a crate here:
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (`--ignore-filename-regex` in the `crates` job of
   `.gitea/workflows/ci.yml`). Native glue is never logic: each function hands over to tested code or makes one platform
-  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-panels/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`, `paddock-build/src/native.rs`, `paddock-siblings/src/native.rs`.
+  call, and it is reviewed by hand. Today: `paddock-window/src/tauri/native.rs`, `paddock-panels/src/tauri/native.rs`, `paddock-updater/src/tauri/native.rs`, `paddock-secrets/src/os/native.rs`, `paddock-diag/src/tauri/native.rs`, `paddock-service/src/native.rs`, `paddock-metrics/src/native.rs`, `paddock-build/src/native.rs`, `paddock-siblings/src/native.rs`, `paddock-setup/src/native/` (a folder of glue modules).
 - A pure core with no Tauri dependency, and a `tauri` feature for the adapter (`src/tauri.rs`, `pub mod tauri` behind
   `#[cfg(feature = "tauri")]`). Tauri comes from `[workspace.dependencies]` without default features (the app enables
   the runtime); CI builds every crate with `--all-features` on Linux, Windows and macOS.
@@ -100,6 +100,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-plugin-package` | the `.paddockplugin` archive, the plugin manifest model (permissions, contributions, namespaces), Ed25519 signing, keys, trust levels and store, installed-binary verification (ADR 0001, plan X51) | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-view` | the declarative view model plugins return (ADR 0002, plan X51): `ViewDoc`, nodes, actions, patches, JSON + postcard, the limits validator, generated TypeScript | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-api` | what an out-of-process plugin links (ADR 0001, plan X51): platform protocol 2.0 (`PlatformRequest`, `HostCall`), `Plugin` and `Contributions` (tools with checked schemas, settings, views, MCP tools), the `Extension` mechanism for an app's own contract, version rules with refusal texts that say who must update, host files, output files, `serve` | yes (Debrief, Pacenotes, Dyno tier 3); built |
+| `paddock-power` | power (Dyno ADR 0032, D3): `KeepAwake` guard over the OS's own sleep-prevention object (macOS `IOPMAssertion`, Windows power request, Linux logind inhibitor; the OS releases it when the process ends), `PowerEvent` sleep and wake notifications, `FakePower`/`FakeEvents` for tests; real adapters in `native.rs` run only in VMs (ER-14) | Dyno; Debrief, Sighter, Pitwall and Pitcrew plausibly (rule of three open); built |
 | `paddock-plugin-host` | what an app links to run plugins (ADR 0001, plan X51): installed `.paddockplugin` packages (verified before every start), grants (default deny) and the pure `sandbox_for` mapping, a `Supervisor` per plugin (restart with back-off, quarantine through `paddock-guard`), guarded `Remote<C>` proxies, grant-checked host files, outputs and elevated operations, status for the UI | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-test` | testing plugins (ADR 0001, plan X51): `FakeHost` (a plugin in this process over a real IPC pair), the conformance checks every plugin runs, golden helpers, and `paddock-plugin-fixture`, the sample plugin the host's tests start as a process | yes (every plugin, the host's tests); built |
 | `cargo-paddock-plugin` | the plugin author's tool (ADR 0001, plan X51): `cargo paddock-plugin new / build / pack / keygen / sign / verify / run / test` on `paddock-cli` conventions; a project that depends on `paddock-plugin-api` alone, a deterministic optionally Ed25519-signed `.paddockplugin`, verification against trusted keys, and the built program started against `FakeHost` for the conformance checks (from Debrief `cargo-debrief-plugin`) | yes (every plugin author, plugin CI); built |
@@ -132,7 +133,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-net` | outbound HTTP policy: one `Egress` door with https only (plain http to this computer), reach limits (public / LAN / loopback) checked on every address and redirect hop and on the addresses the socket connects to, link-local/metadata never reachable, body and redirect caps, host allow-list, offline switch, per-host gap, conditional requests; `Wire`/`Lookup` ports, `Egress::check_host`/`check_host_with` (the door for connections that are not HTTP; `PublicAccess::Deny` leaves this computer and private networks only), a slim build (`default-features = false`: address classes, `Lookup`, `check_host`, no ureq or rustls), `UreqWire` on paddock-download's TLS and proxy set-up with connection reuse, fakes, `paddock_download::Transport` adapter (plan X16) | yes (Pitwall, Spotter, Pitcrew, Debrief, channels); built |
 | `paddock-proc` | child processes: no console window, timeouts, output caps, kill-tree, supervised children with a memory cap, process memory (PSS), login `PATH` (plan X6) | yes (all apps); built |
 | `paddock-window` | native window feel, tray, single instance | yes |
-| `paddock-widgets` | widget layouts (ADR 0035): a closed catalogue per app and surface, placements with limits, versioned lenient reading (`Stored`), edits as pure commands with one level of undo, the ready/empty/error state envelope; generated TypeScript | yes (Dyno first; Pitwall, Spotter later); built |
+| `paddock-widgets` | widget layouts (ADR 0035): a closed catalogue per app and surface, placements with limits, versioned lenient reading (`Stored`), edits as pure commands with 20-step undo and redo, grid surfaces (ADR 0044: rectangles, gravity, swap and push, key gestures, derived narrow arrangements, previews), the ready/empty/error state envelope; generated TypeScript | yes (Dyno first; Pitwall, Spotter later); built |
 | `paddock-panels` | pop-out panel windows, drag ghost, UI-state forwarding (X50 W3) | yes |
 | `paddock-notify` | OS notifications | borderline (two to three) |
 | `paddock-chromium` | the one Chromium driver: discovery (tests only `CHROMIUM_TEST_PATH`), one command-line builder with the start page last, `Sandbox::decide`, supervised launch with a time limit on an injected clock and a memory cap, DevTools client, pages, readiness and challenge rules, AI cue, the pinned Chrome for Testing runtime, a fake browser for tests (plan X14) | yes (Debrief, Spotter; Sighter later); built |
@@ -292,7 +293,7 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   command is a compile error, and the table's rules (ids, a modal required choice, widths, heights, duplicates) are
   checked when the `static` is built. `Contracts::from_tables(&[...])` builds the run-time contracts;
   `Contracts::allows(dialog, command)` covers `BASE_COMMANDS` (`dialog_take_input`, `dialog_close`,
-  `dialog_ready`, `dialog_fit`, `notifications_post`, `notifications_list`), the tables' `base` and the dialog's own list.
+  `dialog_ready`, `dialog_measure`, `notifications_post`, `notifications_list`), the tables' `base` and the dialog's own list.
   `Kind::policy()` is the kind table of ADR 0026 §1 (default width and height, viewer floor 680x560 and grows only,
   `fits`, what each kind remembers), generated into `shell/generated/dialog-kinds.ts`; `ts::contracts_module` writes
   each owner's `dialog-contracts.ts` (`DIALOG_CONTRACTS`, `DialogId`, `DialogCommandOf`, `DIALOG_BASE`), checked by a
@@ -307,15 +308,15 @@ Dialogs as real OS windows (ADR 0009, rule 17), ported from Debrief's `dialog_co
   (`grant_of(label)`, the `paddock_commands::DialogGrant`) and decides close requests (`close_request(label, now)`:
   forwarded as the dialog's Close/Cancel, closed when it did not answer within 1.5 s, a required choice kept unless the
   watchdog marked its page unresponsive).
-- `window`: the wire `Measure { content, minContent, viewportHeight?, devicePixelRatio? }` (TS `DialogMeasureWire`; the page reports CSS px: `devicePixelRatio` is its `window.devicePixelRatio`, 0.25..=8, and the fit converts content, minimum and viewport to logical px with the webview zoom `zoom_of` = ratio / window scale factor, 1 when either is missing; `viewportHeight` is the page's `innerHeight`, 1..=4096: the fit adds `viewport_delta` = the window's inner height less it, clamped to 0..=400, to the content and minimum heights, for a webview shorter than its window; the delta is taken once, at the first fit (`dialog_ready`), kept on the registry entry and reused by later fits), `plan_fit` (the cap is 75 % of the work
+- `window`: the wire `Measure { content, minContent, viewportHeight?, devicePixelRatio?, overflow }` (TS `DialogMeasureWire`; the page reports CSS px: `devicePixelRatio` is its `window.devicePixelRatio`, 0.25..=8, and the fit converts content, minimum and viewport to logical px with the webview zoom `zoom_of` = ratio / window scale factor, 1 when either is missing; `viewportHeight` is the page's `innerHeight`, 1..=4096: the fit adds `viewport_delta` = the window's inner height less it, clamped to 0..=400, to the content and minimum heights, for a webview shorter than its window; the delta is taken once, at the first fit (`dialog_ready`), kept on the registry entry and reused by later fits), `plan_fit` (the cap is 75 % of the work
   area less the window's own outer-minus-inner decorations and limits the preferred size only, never below `minContent`,
   which becomes the OS minimum; decisions and forms shrink and grow, a viewer only grows, a tool keeps its size) and
   **`show_mechanism(os)`, the one place the way of keeping a window unseen is chosen** (`ReadyThenShow`: hidden,
   shown on `dialog_ready`, method d of the 1.1-0 spike, measured on macOS, Linux and Windows).
 - `tauri` feature: `open` (window by kind, created **hidden** at the placed size on the dialog shell's surface colour,
   no title-bar buttons, owned or independent per OS, `WindowHooks` for the app's webview settings), the commands
-  `dialog_open`, `dialog_take_input`, `dialog_close`, `dialog_ready { measure }` (sizes, then shows and focuses the
-  pending window), `dialog_fit { measure }` (refits), `on_window_event` (close request, move/resize, scale-factor change
+  `dialog_open`, `dialog_take_input`, `dialog_close`, `dialog_measure { epoch, seq, measure }` (the one way a window is sized: the size state of `size.rs` decides, on the main thread),
+  `dialog_ready { epoch, seq }` (shows and focuses the pending window once that measure is applied and its `Resized` arrived), `on_window_event` (close request, move/resize, scale-factor change
   refits from the last measure, destroyed dialog or host), `page_unresponsive`, `close_all_of`, `set_visible`, `grant_of` for `Guard::dialog_grants`. Events
   `paddock://dialog-result`, `paddock://dialog-closed` (to the opener), `paddock://dialog-close-requested` and `paddock://dialog-inputs` (to the
   dialog; the opener's page sends the second with `emitTo` when it opens an open dialog again with new inputs). The lifecycle: a window is pending until `dialog_ready`, or until `Dialogs::show_deadline` (1 s;
@@ -331,7 +332,7 @@ paddock_commands::command_table! {
     Query [DIALOG] => paddock_dialogs::tauri::dialog_take_input,
     Mutation [DIALOG] limit 2 * MIB => paddock_dialogs::tauri::dialog_close,
     Quiet [DIALOG] => paddock_dialogs::tauri::dialog_ready,
-    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_fit,
+    Quiet [DIALOG] => paddock_dialogs::tauri::dialog_measure,
     // ... the app's commands
 }
 tauri::Builder::default()
@@ -625,8 +626,14 @@ feature (the commands stay in the app, which owns where settings live).
   `NewerLayout`), a damaged or oversized one is replaced by the first edit; each invalid, unknown,
   duplicate or surplus entry is dropped on its own with a count (at most twice the limit is looked at). `Stored<C>` is
   the same as a `#[serde(default)]` settings field.
-- `Edit` (add, remove, move, resize, replace, apply/save/delete preset, reset, undo) and `apply::<C>(&layout, edit)`,
-  a pure `Layout -> Result<Layout, WidgetError>`; remove, apply preset and reset keep one undo level.
+- `Edit` (add, remove, move, resize, replace, arrange, apply/save/delete preset, reset, undo, redo) and
+  `apply::<C>(&layout, edit)`, a pure `Layout -> Result<Layout, WidgetError>`; every placement edit is an undo step (20).
+- Two arrangements (ADR 0044): `Catalogue::Place` is `Span` (flow: popup, menu bar) or `Cells` (grid: rectangles of
+  cells, `SizeRule` per kind, gravity, swap and push on a drop, `Edit::Arrange(GridGesture)`; `grid::arrange`, `derive`,
+  `moves`). `Stored` has a revision (`edit_at`, `preview`: `WidgetError::Stale`), `Catalogue::upgrade` and
+  `spans_to_cells` bring version 1 span layouts up (`Read::upgraded`, `Read::legacy`), and `Previews` answers the
+  webview's preview requests from the last relayed view, in the app's own process.
+- Golden cases for the UI's mock backend: `ui/projects/paddock-ui/widgets/generated/grid-cases.json`.
 - `info`, `view` -> `LayoutView` for the chooser; `WidgetState` (ready, working, empty, error), `PlacementState`,
   `SurfaceValues` for values. The `ts` feature derives `TS` for apps' own catalogue types.
 - Generated TypeScript: `ui/projects/paddock-ui/widgets/generated/widgets.ts`
@@ -808,7 +815,16 @@ Updates, About and What's New. With the `tauri` feature (and `install` for the i
 .run(|app, e| if let tauri::RunEvent::Exit = e { paddock_updater::tauri::on_exit(app); })
 ```
 
-The release address is `plugins.updater.endpoints[0]` (the `stable` channel) unless the builder names channels. Checks
+The release address is `plugins.updater.endpoints[0]` (the `stable` channel) unless the builder names channels.
+
+**Per-machine Windows install (ADR 0053).** `Installer::install(&Package, relaunch)`; the app declares
+`UpdatesBuilder::install_scope(InstallScope::PerMachine, Some(install_dir), Some(is_administrator))`, sets the installer to
+`ElevatedHandoff::new(install_dir, Arc::new(ShellElevator), contract)?` (an `Err` means no hand-off: nothing is elevated from a
+folder that fails the contract) and `installer_lock(..)`. `SetupContract` and `InstallerLock` are implemented by the app over
+`paddock-setup` (which depends on this crate): `check_install_dir` (the `check-dir` rule), `check_download` (a plain local path, no
+link above it), `sentence` (`apply-update`'s own exit codes only; any other code is an unknown outcome). A per-machine copy
+refuses install on quit, records a hand-off before it installs, never relaunches itself, and at the next start waits for a
+running installer (phase `InstallerRunning`, `settle_handoff`) and then shows "The installer stopped before it finished". Checks
 and downloads are jobs on the app's `paddock-jobs` registry and use the app's `paddock-download` downloader; the UI is
 `@decryp7/paddock-ui/shell/about`.
 
@@ -866,7 +882,7 @@ rules sit on top and are not relaxed. `client` has the request builders and type
 shared. The contract test pins the message shapes against the specification's JSON Schema. `notifications/cancelled` stops a running call; a
 connection runs up to 4 tool calls at once and answers them as they finish. With the `tauri` feature, `McpControl` + `paddock_mcp::tauri`
 are the settings page's engine (`Builder::mcp` in the shell): the on/off switch, tools shown, actions allowed by name, client keys (issued
-once, only the hash kept, the list persisted through `paddock-secrets`), the audit log and its `paddock://mcp` event. Not built: `prompts`, subscriptions,
+once, only the hash kept, the list in an owner-only `KeyListStore` file (`FileKeys`), never the credential store; a damaged, unreadable, newer or world-writable file leaves no key working and `McpView.keysProblem` says why), the audit log and its `paddock://mcp` event. Not built: `prompts`, subscriptions,
 sampling, HTTP transport (stdio and loopback only, as ADR 0007 decides).
 ## `paddock-archive` (plan X24)
 
@@ -1412,7 +1428,7 @@ paddock_log::log_from_webview(window, level, message);               // the webv
 ```
 
 - Files: `<id>.<day>.log` (process `app`) or `<id>-<process>.<day>.log` in `AppDirs::logs()`; `LogSettings` = level, `max_file_mb`
-  (20; after it only errors, with a one-time notice) and `keep_files` (7 older days). An unusable folder never stops the app:
+  (20; after it only errors, with a one-time notice; Debug and Trace may use half of it) and `keep_files` (30 older days, and 100 MB in all per process: the oldest days go first). An unusable folder never stops the app:
   lines are dropped, `LogHandle::file_problem()` says why (for a health entry), the open is retried every 30 s.
 - Privacy: the default `Redactor` masks secret-like keys, replaces content-like keys (`Content`, `Body`, `Line`, `Text`,
   `Query`, `Prompt`, ...) by `<omitted: N characters>` and bounds every value; apps add `with_hook` rules (paths, user names);
@@ -1585,19 +1601,32 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   unregister → evict (`launchctl bootout`) → wait until gone (bounded) → register → check, retried with a growing pause,
   then a bounded wait for the service; approval, elevation, a declined prompt and "unavailable" stop at once; a cancel is
   honoured only where nothing is left unregistered. Every phase is a `Step` for the log and `RepairTracker` (the UI).
-- **The registered version** is `service-<label>.json` in the data folder (`VersionedFile`; C21's
-  `service_registered_version`), written only after a registration took; a lock beside it keeps two copies from repairing
-  at once (a dead copy's lock is taken over after 10 minutes).
+- **The record is one declared state** (ADR 0056). `service-<label>.json` holds the registered version, the program, the
+  stop marker (`resume_pending`, read and cleared only when the resume is done) and one `State`: `Idle`, `Attempting`
+  (`version`, `attempts`, `phase`: `RemovingOld`, `Registering`, `Awaiting`, `RegisterFailed`) or `Removing`. The phase is
+  written before each OS step, so a crash or a quit leaves what is safe next; if the record cannot be written nothing is
+  changed (`Hold::RecordUnavailable`). A lock beside it keeps two copies from repairing at once and is not held across a
+  wait for the service.
+- **Holds** are derived from the attempts, never stored, and each has its own words and a way out: `Unanswered(n)` (the
+  service never answered), `Refused(n)` (the OS refused to start it), `RegisterFailed(n)` (the register call failed; nothing
+  is registered), `RecordUnavailable`, `NewerOwner`, `NeedsApproval`, `SwitchedOff`. Three unattended registers per version
+  at most; Repair and Install asked run past the cap. `Started::Removed` says an unfinished uninstall was completed.
+  `Manager::pending()` is true while a start waits for a registration or one is under way (and false when nothing is going
+  to happen), so an app's link neither starts nor retires an agent of its own meanwhile.
+- **Entry points never queue behind a start.** `ServiceControl::run`, the health repair and `request` answer `Busy` at
+  once while a start or a repair holds the manager (its words say so); `on_start` reports a record it could not save to the
+  UI with the next step.
 - **The program's side.** `watch::ExeWatch` exits a supervised program whose executable changed once it is idle (the OS
   starts the new one); `supervised::supervised_path` merges the login shell's `PATH` (`paddock_proc::login_path`, R05);
   `Verb` is the shared first argument (`install`, `uninstall`, `status`, `stop`, `print-unit`, `print-plist`, `--service`).
 - **Launch at login.** `login::launch_at_login_section` (`pd.login`, one switch, off by default) and
-  `apply_launch_at_login` (the app's own `Autostart` and the service together, each tried, one message).
+  `apply_launch_at_login` / `apply_launch_at_login_with` (the app's own `Autostart` and a `LoginService` together, each tried, one message; a place that will not exist after the next login registers neither: `launch::refuse_unstable_location`), `login::MainAppItem` (`SMAppService.mainApp`), `login::AppItem::for_this_os` (the app's own item on every OS: `MainAppItem`, the per-user `UserRunEntry`, an `XdgAutostart` file), `login::apply_first_run_with` (a default-on switch registers once, behind a `FirstRunMarker`), `login::LegacyLaunchAgent` (deletes only the plist `tauri-plugin-autostart` wrote and registers the new item), and the start reason (`launch::launch_reason`, `apple_event::open_event`).
+- **After a stop on request.** `Manager::resume` (a light register of an enabled item of this version, otherwise the full repair; never touches an item switched off in Login Items, one the OS has no record of, or one whose switch list could not be read; never opens System Settings), `Manager::supervises`, `Manager::installed` and `Manager::stop_mechanism` (the launchd job while it is held; `stop::stop` judges it by read-back). The raw readings behind them are `Inspection::login_item` (`LoginItemFacts`).
 - **The Windows service host (X4b).** `scm_host::supervise` is the `--service` supervisor over a `Sessions` port: the
   logged-on user's session (connected before disconnected, console first, never session 0; Remote Desktop users are
   found), the program started there with the user's token and environment plus the supervised variable, restarted after
   a pause, moved when the session changes, stopped gracefully (its `stop` verb, a grace period, then ended).
-  `native::run_as_service(spec, exe)` is the SCM dispatcher and the Win32 side. Pitcrew's pipe SDDL is the app ↔ service
+  `native::host_program(spec, exe)` runs it under `service_main` (the one entry point: SCM dispatcher, OS log from the first line, exit codes), with the Win32 side in `native`. Pitcrew's pipe SDDL is the app ↔ service
   link and stays with `paddock-ipc` (X13).
 - **In the app** (`tauri` feature, `control::ServiceControl`): `service_status`, `service_repair`, `service_install`,
   `open_login_items` and the `paddock://service` event (`ServiceUpdate { status, error }`); requests run on their own
@@ -1612,6 +1641,39 @@ service.repair(&cancel)?;                       // the Repair button (never depe
   plist and NSIS hooks, so the page, the health entry and
   `scripts/shell-demo/smoke-service-update.sh` (C21: build N, then N+1; disposable Macs only, rule 7) have something real.
 - Not here: Task Scheduler entries (no app uses them).
+
+## `paddock-setup` (family ADR 0053, plan S2 and S3)
+
+The installer's work for per-machine Windows installs. A library (pure core, tested on any host) and one binary,
+`paddock-setup.exe`, which each app's Windows bundle job builds with the app's constants compiled in
+(`PADDOCK_SETUP_IDENTIFIER`, `PADDOCK_SETUP_PRODUCT`, `PADDOCK_SETUP_MAIN`, `PADDOCK_SETUP_UPDATE_KEY`, and for the version
+resource `PADDOCK_SETUP_PRODUCT` and `PADDOCK_SETUP_VERSION`: `FileDescription` becomes "<App> update").
+
+- **Commands** (`paddock-setup <command> [--option value]`, exit codes in `exit::Exit`): `guard` (per-user copy guard),
+  `check-dir`, `same-folder`, `stop-all` (over `paddock_proc::installed::stop_all_here`), `clean-run`,
+  `clean-staging`, `apply-update --file <local drive-letter path> --signature <base64 text, at most 1 KiB> --version <v> [--size <n>] --restart` (the elevated hand-off, trust model of ADR section 4.2; a path that is not a plain local drive-letter path is exit 4 before anything is opened), `hold-installing` (the installer
+  include's `Global\<identifier>.setup` mutex with its explicit descriptor), `self-test` (the ADR 0039 gate reads it).
+- **No console window.** `paddock-setup.exe` is a GUI-subsystem program (`windows_subsystem = "windows"`): the installer, the
+  uninstaller and the updater start it, and a console program opens a command prompt there. Redirected standard handles
+  (`nsExec`, a pipe, a file, the release gate's `spawnSync`) still carry its output; run by hand it attaches to the terminal's
+  console (`paddock_proc::console`); started without either it prints nothing, and `setup.log` is the record. The release gate
+  fails a staged program whose PE subsystem is not 2.
+- **Pure core:** `args` (typed command line), `guard` (`decide` over `InstallFacts`, `per_user_copy` for the app's own start),
+  `checkdir` (the install-folder and `updates\` rules), `samefolder`, `runvalues`, `staging`, `apply` (the sequence over
+  `UpdatePort`, `Refusal` with exit codes and sentences, `Layout`), `handoff` (the mutex name, its descriptor, the owner rule against squatting
+  and `still_installing`), `localpath` (the only kind of path the elevated process opens), `log` (`setup.log`, 1 MiB, one rotation, openable only with a
+  `CheckedDir`), `stop`, `selftest`, `versionres` (a `.res` writer, no resource compiler needed).
+- **Native glue:** `src/native/` (Windows only, left out of the coverage job), tested on the Windows test VM by
+  `tests/vm/windows.rs`.
+- **No features.** `stop-all` calls `paddock_proc::installed` when that module is in the tree (build.rs sets the cfg
+  `has_proc_installed`), so `--workspace --all-features` builds before and after plan S1 merges.
+- **Windows tests** (`tests/vm`): every test is `#[ignore]` and refuses to run without `PADDOCK_SETUP_VM=1`; they create folders
+  under Program Files and HKLM values and run only on the Windows test VM (ER-14), never in CI.
+- **App side:** `paddock_setup::installer_probe` / `wait_for_installer` (Windows), `handoff::still_installing`, `checkdir::check`
+  with `native::RealDirs` for the app's own install folder, and `versioncheck::compare` with `native::fileversion::file_version`
+  for the start-up check of `paddock-setup.exe`'s `FileVersion` (`check-version` is the installer's).
+- **Used by:** the apps' installer hooks (S4) and `paddock-updater`'s `ElevatedHandoff` (S5); the app also calls
+  `guard::per_user_copy`.
 
 ## `paddock-diag` (plan X2)
 

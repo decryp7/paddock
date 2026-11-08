@@ -5,6 +5,14 @@
 //! Every limit runs on the injected [`Clock`]: the accept wait, and each handshake, which a watchdog ends by closing the
 //! stream when its time is up (so a silent client holds only its own handshake, never the listener). An
 //! [`Authenticator`] is cheap to clone, so a server authenticates each client on a thread of its own.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::endpoint::{Access, Listener, Stream};
 use crate::error::{IpcError, RemoteError, codes};
@@ -104,7 +112,7 @@ fn bounded<T>(
         .map_err(|e| IpcError::Spawn(format!("cannot start a handshake watchdog: {e}")))?;
     let result = f(stream);
     done.cancel();
-    let _ = watchdog.join();
+    paddock_proc::cleanup::join("the handshake watchdog", watchdog);
     if fired.load(Ordering::SeqCst) {
         return Err(IpcError::Timeout);
     }
@@ -239,7 +247,10 @@ impl Authenticator {
             id: 0,
             error: RemoteError::new(code, message),
         };
-        let _ = frame::write_frame(stream, &fail, self.limit);
+        paddock_proc::cleanup::logged(
+            "telling the peer why the handshake was refused",
+            frame::write_frame(stream, &fail, self.limit),
+        );
     }
 
     fn check_hello(

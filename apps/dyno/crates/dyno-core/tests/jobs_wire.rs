@@ -65,13 +65,15 @@ fn sample() -> Value {
         "requests": [
             spec(JobSpec::FindFiles { query: FinderQuery { folder: "/Users/alex/Projects".into(), mode: FinderMode::Both, min_bytes: 1_048_576 } }),
             spec(JobSpec::RescanIssues { query: IssuesQuery { days: 14 } }),
-            spec(JobSpec::RefreshBackup),
             spec(JobSpec::FileHash { source: HashSource::Path("/Applications/Slack.app/slack".into()) }),
             spec(JobSpec::FileHash { source: HashSource::Process(ProcessRef { pid: 3, started: Some(Timestamp(4)) }) }),
             spec(JobSpec::SleepBlockers),
             spec(JobSpec::BootAnalysis),
             spec(JobSpec::AppUsage),
             spec(JobSpec::SoftwareInventory),
+            spec(JobSpec::Helper { action: dyno_core::helper_wire::HelperAction::TurnOn }),
+            spec(JobSpec::Helper { action: dyno_core::helper_wire::HelperAction::TurnOff }),
+            to_value(Request::HelperStatus).unwrap(),
             to_value(Request::Jobs).unwrap(),
             to_value(Request::CancelJob { id: 3 }).unwrap(),
             to_value(Request::JobResult { id: 3 }).unwrap(),
@@ -83,7 +85,6 @@ fn sample() -> Value {
         },
         "outputs": [
             Reply::JobOutput(Box::new(JobOutput::FileHash(FileHashInfo { path: "/a".into(), bytes: 3, sha256: "0".repeat(64) }))).into_json().unwrap(),
-            Reply::JobOutput(Box::new(JobOutput::Backup(Box::default()))).into_json().unwrap(),
             Reply::JobCancelled(true).into_json().unwrap(),
         ],
     })

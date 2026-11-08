@@ -52,8 +52,8 @@ pub fn exclude_from_backup(path: &Path) -> std::io::Result<bool> {
 }
 
 /// Reads the attribute back (tests): the bytes set, or `None`.
-#[cfg(all(test, target_os = "macos"))]
-fn read_exclusion(path: &Path) -> Option<Vec<u8>> {
+#[cfg(target_os = "macos")]
+pub fn read_exclusion(path: &Path) -> Option<Vec<u8>> {
     use std::os::unix::ffi::OsStrExt;
     let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
     let name = c"com.apple.metadata:com_apple_backup_excludeItem";

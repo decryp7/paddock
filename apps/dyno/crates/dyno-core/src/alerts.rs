@@ -6,7 +6,7 @@ use crate::grouping::AppGroup;
 use crate::health::Severity;
 use crate::metrics::{derive_pressure, percent, MemoryPressure, SystemSample};
 use crate::time::{Timestamp, HOUR, MINUTE, SECOND};
-use crate::units::bytes;
+use crate::units::{bytes, storage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -132,7 +132,7 @@ impl Alerts {
                     AlertKind::LowDisk,
                     sev,
                     format!("{} is almost full", d.name),
-                    format!("{} free ({free:.0}%).", bytes(d.free)),
+                    format!("{} free ({free:.0}%).", storage(d.free)),
                 );
             }
         }

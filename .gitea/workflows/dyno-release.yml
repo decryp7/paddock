@@ -87,9 +87,11 @@ jobs:
       # Dyno's UI imports the shared library from ui/dist, which the app build (Tauri's beforeBuildCommand) needs.
       prepare: npm run build -w ui
       cliff-config: apps/dyno/cliff.toml
-      # The first release has no earlier dyno-v* tag, and crates/** and ui/** reach back through the whole monorepo: its notes
-      # are the CHANGELOG's [1.0.0] section. From dyno-v1.0.1 on git-cliff lists the commits since the previous tag.
+      # The first release had no earlier dyno-v* tag, and crates/** and ui/** reach back through the whole monorepo: its notes were
+      # the CHANGELOG's [1.0.0] section. Since 1.1.0 every release's notes are the CHANGELOG section of its version (the history
+      # behind a release is landing commits, which git-cliff cannot tell apart); notes-from-changelog keeps that after the first tag.
       first-release-changelog: apps/dyno/CHANGELOG.md
+      notes-from-changelog: true
       cliff-paths: |
         apps/dyno/**
         crates/**
@@ -100,11 +102,15 @@ jobs:
         dyno-agent:--version
         dyno:--version
         dyno-bench:--version
+        dyno-bench-gpu:--version
+        dyno-helper:--version
       # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
       # also measures once from the built app (read-only).
       bundle-check: apps/dyno/scripts/check-bundle.sh
       # dyno-agent.exe is a GUI-subsystem program (the login entry starts it without a command prompt window); the dyno command is a console one.
       windows-bundle-check: node apps/dyno/scripts/check-pe-subsystem.mjs --dir
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app dyno
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/dyno/app/src-tauri/tauri.conf.json --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     secrets:
@@ -133,9 +139,11 @@ jobs:
       # Dyno's UI imports the shared library from ui/dist, which the app build (Tauri's beforeBuildCommand) needs.
       prepare: npm run build -w ui
       cliff-config: apps/dyno/cliff.toml
-      # The first release has no earlier dyno-v* tag, and crates/** and ui/** reach back through the whole monorepo: its notes
-      # are the CHANGELOG's [1.0.0] section. From dyno-v1.0.1 on git-cliff lists the commits since the previous tag.
+      # The first release had no earlier dyno-v* tag, and crates/** and ui/** reach back through the whole monorepo: its notes were
+      # the CHANGELOG's [1.0.0] section. Since 1.1.0 every release's notes are the CHANGELOG section of its version (the history
+      # behind a release is landing commits, which git-cliff cannot tell apart); notes-from-changelog keeps that after the first tag.
       first-release-changelog: apps/dyno/CHANGELOG.md
+      notes-from-changelog: true
       cliff-paths: |
         apps/dyno/**
         crates/**
@@ -146,11 +154,15 @@ jobs:
         dyno-agent:--version
         dyno:--version
         dyno-bench:--version
+        dyno-bench-gpu:--version
+        dyno-helper:--version
       # Run paths of the packaged binaries, and the executables a package must carry, on Linux and macOS; on macOS the agent
       # also measures once from the built app (read-only).
       bundle-check: apps/dyno/scripts/check-bundle.sh
       # dyno-agent.exe is a GUI-subsystem program (the login entry starts it without a command prompt window); the dyno command is a console one.
       windows-bundle-check: node apps/dyno/scripts/check-pe-subsystem.mjs --dir
+      windows-pre-bundle: node scripts/stage-paddock-setup.mjs --app dyno
+      windows-installer-check: node conformance/release/check-per-machine-installer.mjs --conf apps/dyno/app/src-tauri/tauri.conf.json --dir
       setup-node: false
       image: dev.decryptology.net/decryp7/paddock-ci:v2
     secrets:

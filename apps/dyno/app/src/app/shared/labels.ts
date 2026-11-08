@@ -149,6 +149,7 @@ export const ISSUE_KIND_LABEL: Record<IssueKind, string> = {
   memoryExhaustion: 'Out of memory',
   updateFailure: 'Update failure',
   driverFailure: 'Driver failure',
+  stoppedFromOutside: 'Stopped from outside',
 };
 
 /** Every issue kind, in the order the engine lists them. */

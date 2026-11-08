@@ -164,7 +164,7 @@ ADR, not a field.
 |---|---|---|
 | `decision` | `Height { shrink: Always }` | width `narrow` 400 or `medium` 560; remembers only its offset (D3) |
 | `form` | `Height { shrink: Always }` | no declared height (unchanged from ADR 0026); remembers only its offset (D3) |
-| `viewer` | `Height { shrink: Never }` | opens at `min(content, preferred)`, grows to the cap (D2); remembers only its offset (D3) |
+| `viewer` | `Height { shrink: Never }` | opens at `min(content, preferred)`, grows to the cap (D2); remembers only its offset (D3). Its kind floor, `VIEWER_MIN` 680 x 560, is its OS minimum (`min = max(kind floor, measured min content)`), so it never opens below 560 px high: in practice at `max(560, min(content, cap))` (2026-11-04, from the kind table) |
 | `tool` | `Manual` | default 960x680, OS minimum = measured minimum content; keeps its remembered size, clamped to the minimum content (the one exception, D3) |
 
 WPF's `Width` and `WidthAndHeight` are not adopted now (see Alternatives); the enum is closed and a variant is added by

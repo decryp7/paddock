@@ -43,14 +43,14 @@ export function resolveSize(def: Pick<DialogDef, 'kind' | 'width' | 'height'>): 
   };
 }
 
-/** Whether the dialog's window is fitted to its content: the kind table's `fits` (decisions, forms and viewers; never a tool). */
-export function fitsContent(def: Pick<DialogDef, 'kind'>): boolean {
-  return DIALOG_KIND_TABLE[def.kind].fits;
+/** How the dialog's window follows its content (ADR 0043 §1): the kind table's `sizeMode`, `height` for decisions, forms and viewers, `manual` for a tool. */
+export function sizeModeOf(def: Pick<DialogDef, 'kind'>): 'height' | 'manual' {
+  return DIALOG_KIND_TABLE[def.kind].sizeMode;
 }
 
-/** Whether a refit of the kind only grows (a viewer: a result being read does not shrink under the reader). */
+/** Whether a `height` window never shrinks below its size (a viewer: a result being read does not shrink under the reader). */
 export function growsOnly(def: Pick<DialogDef, 'kind'>): boolean {
-  return DIALOG_KIND_TABLE[def.kind].growsOnly;
+  return DIALOG_KIND_TABLE[def.kind].shrink === 'never';
 }
 
 /** A remembered size raised to the kind's floor (a remembered viewer smaller than 680x560 is made 680x560). */

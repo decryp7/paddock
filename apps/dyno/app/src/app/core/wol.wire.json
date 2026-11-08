@@ -1,0 +1,255 @@
+{
+  "candidates": [
+    {
+      "interface": "en0",
+      "ip": "192.0.2.50",
+      "mac": "02:00:5e:10:00:02",
+      "name": "laptop.example",
+      "state": "reachable"
+    },
+    {
+      "interface": "en0",
+      "ip": "192.0.2.51",
+      "mac": "02:00:5e:10:00:03",
+      "name": null,
+      "state": "stale"
+    },
+    {
+      "interface": "en1",
+      "ip": "2001:db8::4",
+      "mac": "02:00:5e:10:00:04",
+      "name": null,
+      "state": "probe"
+    },
+    {
+      "interface": "en0",
+      "ip": "192.0.2.52",
+      "mac": "02:00:5e:10:00:05",
+      "name": null,
+      "state": "permanent"
+    },
+    {
+      "interface": "en0",
+      "ip": "192.0.2.53",
+      "mac": "02:00:5e:10:00:06",
+      "name": null,
+      "state": "unknown"
+    }
+  ],
+  "outcome": {
+    "wol": {
+      "answered": {
+        "afterSecs": 23,
+        "how": "ping",
+        "newIp": "192.0.2.41"
+      },
+      "cancelled": false,
+      "elapsedSecs": 23,
+      "message": "Awake after 23 s (answered ping). Its address changed; Dyno saved the new one.",
+      "sent": [
+        {
+          "bytes": 102,
+          "dest": "255.255.255.255",
+          "error": null,
+          "interface": "en0",
+          "sent": 3
+        }
+      ],
+      "tested": true,
+      "timedOut": false
+    }
+  },
+  "outcomeTimedOut": {
+    "wol": {
+      "answered": null,
+      "cancelled": false,
+      "elapsedSecs": 120,
+      "message": "No answer in 120 s: it may be off at the wall, have Wake-on-LAN off, or block ping.",
+      "sent": [
+        {
+          "bytes": 102,
+          "dest": "255.255.255.255",
+          "error": null,
+          "interface": "en0",
+          "sent": 3
+        }
+      ],
+      "tested": true,
+      "timedOut": true
+    }
+  },
+  "readiness": {
+    "items": [
+      {
+        "kind": "osSetting",
+        "state": {
+          "ok": {
+            "note": "Wake for network access is on."
+          }
+        },
+        "subject": null
+      },
+      {
+        "kind": "nicWake",
+        "state": {
+          "problem": {
+            "fix": "Allow it in Device Manager.",
+            "note": "The card may not wake the computer."
+          }
+        },
+        "subject": "Ethernet"
+      },
+      {
+        "kind": "fastStartup",
+        "state": {
+          "cantTell": {
+            "reason": "Dyno could not read it."
+          }
+        },
+        "subject": null
+      },
+      {
+        "kind": "sleepMode",
+        "state": {
+          "ok": {
+            "note": "Classic sleep."
+          }
+        },
+        "subject": null
+      },
+      {
+        "kind": "firmware",
+        "state": {
+          "cantTell": {
+            "reason": "The BIOS is not readable."
+          }
+        },
+        "subject": null
+      }
+    ]
+  },
+  "requests": [
+    "wolDevices",
+    "wolCandidates",
+    "wolReadiness",
+    {
+      "wolSave": {
+        "device": {
+          "id": 1,
+          "interface": null,
+          "lastIp": "192.0.2.40",
+          "mac": "02:00:5e:10:00:01",
+          "name": "Test box",
+          "secureOn": "keep"
+        }
+      }
+    },
+    {
+      "wolSave": {
+        "device": {
+          "id": 1,
+          "interface": null,
+          "lastIp": "192.0.2.40",
+          "mac": "02:00:5e:10:00:01",
+          "name": "Test box",
+          "secureOn": "clear"
+        }
+      }
+    },
+    {
+      "wolSave": {
+        "device": {
+          "id": 1,
+          "interface": null,
+          "lastIp": "192.0.2.40",
+          "mac": "02:00:5e:10:00:01",
+          "name": "Test box",
+          "secureOn": {
+            "set": {
+              "password": "01:02:03:04"
+            }
+          }
+        }
+      }
+    },
+    {
+      "wolRemove": {
+        "id": 1
+      }
+    },
+    {
+      "wolWake": {
+        "id": 1,
+        "test": true
+      }
+    },
+    {
+      "startJob": {
+        "spec": {
+          "wolWake": {
+            "id": 1,
+            "test": false
+          }
+        }
+      }
+    }
+  ],
+  "views": {
+    "cantSend": {
+      "canSend": {
+        "cantTell": {
+          "reason": "No network card is connected."
+        }
+      },
+      "devices": [
+        {
+          "id": 1,
+          "interface": "en0",
+          "lastIp": "192.0.2.40",
+          "lastWake": {
+            "at": 1700000000000,
+            "ok": true,
+            "summary": "Awake after 23 s (answered ping).",
+            "tested": true
+          },
+          "mac": "02:00:5e:10:00:01",
+          "name": "Test box",
+          "port": 9,
+          "secureOn": true
+        }
+      ],
+      "enabled": true
+    },
+    "empty": {
+      "canSend": "known",
+      "devices": [],
+      "enabled": true
+    },
+    "list": {
+      "canSend": "known",
+      "devices": [
+        {
+          "id": 1,
+          "interface": "en0",
+          "lastIp": "192.0.2.40",
+          "lastWake": {
+            "at": 1700000000000,
+            "ok": true,
+            "summary": "Awake after 23 s (answered ping).",
+            "tested": true
+          },
+          "mac": "02:00:5e:10:00:01",
+          "name": "Test box",
+          "port": 9,
+          "secureOn": true
+        }
+      ],
+      "enabled": true
+    },
+    "off": {
+      "canSend": "known",
+      "devices": [],
+      "enabled": false
+    }
+  }
+}

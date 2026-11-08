@@ -8,9 +8,9 @@ import { LiveStore } from '../../state/live.store';
 import { MatButton } from '@angular/material/button';
 
 /**
- * The home screen, made of widgets: the default layout shows how the computer is doing right now, what is using it, how it
- * got here and what Dyno noticed; the user edits, saves and resets it. Every widget owns its loading, empty and error
- * state, so one failed request never blanks the page.
+ * The home screen, made of widgets on the shared grid: the default layout shows how the computer is doing right now, what is
+ * using it, how it got here and what Dyno noticed; the user arranges it in edit mode. Each widget's frame draws its loading,
+ * empty and error state, so one failed request never blanks the page.
  */
 @Component({
   selector: 'dy-dashboard',
@@ -32,7 +32,7 @@ import { MatButton } from '@angular/material/button';
     </div>
   `,
   styles: `
-    :host { display: block; container-type: inline-size; container-name: dash; }
+    :host { display: block; }
     .page-head { align-items: center; margin-bottom: var(--sp-4); }
     .page-head p { color: var(--text-3); }
   `,

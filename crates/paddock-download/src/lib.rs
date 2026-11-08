@@ -68,6 +68,7 @@ mod proxy;
 mod proxy_os;
 mod request;
 mod resume;
+pub mod schedule;
 mod transport;
 
 pub mod limits;

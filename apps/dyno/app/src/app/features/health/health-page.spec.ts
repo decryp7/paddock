@@ -1,5 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
+import type { ReadVia } from '../../core/api.types';
 import { BACKEND } from '../../core/backend';
 import { MockBackend } from '../../core/mock-backend';
 import { ViewPrefs } from '../../core/view-prefs';
@@ -36,6 +37,25 @@ describe('dy-health-page', () => {
     await settle(f);
     expect(el.querySelectorAll('dy-switch, [role="switch"]')).toHaveLength(0);
     expect(el.textContent).not.toContain('Delay');
+  });
+
+  it('says who read the login items: the helper chip, or the reason once with the button to turn the helper on', async () => {
+    const { f, el, mock } = render();
+    await settle(f);
+    const real = mock.startupOverview.bind(mock);
+    vi.spyOn(mock, 'startupOverview').mockImplementation(async (filter) => ({ ...(await real(filter)), btmVia: 'helper' }));
+    await TestBed.inject(HealthStore).loadStartup(TestBed.inject(ViewPrefs).startupFilter());
+    await settle(f);
+    expect(el.querySelector('[data-testid="reading-source-helper"]')?.textContent).toContain('administrator helper');
+    const reason = 'Login items (System Settings > Login Items & Extensions) need administrator rights to read.';
+    const via: ReadVia = { needsHelper: { reason, next: { openSettings: 'helper' } } };
+    vi.spyOn(mock, 'startupOverview').mockImplementation(async (filter) => ({ ...(await real(filter)), btmVia: via, unavailable: [reason, 'The user launch agents folder could not be read.'] }));
+    await TestBed.inject(HealthStore).loadStartup(TestBed.inject(ViewPrefs).startupFilter());
+    await settle(f);
+    expect(el.querySelector('[data-testid="reading-source-needs"]')?.textContent).toContain('administrator rights');
+    expect(el.querySelector('[data-testid="reading-source-turn-on"]')?.textContent).toContain('Turn on administrator readings');
+    const notes = [...el.querySelectorAll('.shown[role="status"]')].map((n) => n.textContent);
+    expect(notes).toEqual(['Not shown: The user launch agents folder could not be read.']);
   });
 
   it('lists the startup items with the highest impact first', async () => {

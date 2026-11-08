@@ -1,4 +1,4 @@
-import { byteAxis, niceAxis } from './axis';
+import { byteAxis, niceAxis, storageAxis } from './axis';
 
 describe('byteAxis', () => {
   const GB = 1024 ** 3;
@@ -21,5 +21,18 @@ describe('niceAxis', () => {
   it('survives an empty or odd maximum', () => {
     expect(niceAxis(0).interval).toBeGreaterThan(0);
     expect(niceAxis(Number.NaN).interval).toBeGreaterThan(0);
+  });
+});
+
+describe('storageAxis', () => {
+  const GB = 1000 ** 3;
+  it('steps in round numbers of the decimal unit the axis is read in', () => {
+    expect(storageAxis(373 * GB)).toEqual({ max: 400 * GB, interval: 100 * GB });
+    expect(storageAxis(1204 * GB)).toEqual({ max: 1.5 * 1000 * GB, interval: 0.5 * 1000 * GB });
+    expect(storageAxis(90 * GB)).toEqual({ max: 100 * GB, interval: 25 * GB });
+  });
+  it('survives an empty or odd maximum', () => {
+    expect(storageAxis(0).interval).toBeGreaterThan(0);
+    expect(storageAxis(Number.NaN).interval).toBeGreaterThan(0);
   });
 });

@@ -1,15 +1,5 @@
-/** "1.2 MB" (decimal units, as the operating systems show sizes). */
-export function formatBytes(n: number): string {
-  const units: readonly [number, string][] = [
-    [1e9, 'GB'],
-    [1e6, 'MB'],
-    [1e3, 'KB'],
-  ];
-  for (const [size, unit] of units) {
-    if (n >= size) return `${(n / size).toFixed(n >= size * 10 ? 0 : 1).replace(/\.0$/, '')} ${unit}`;
-  }
-  return `${n} bytes`;
-}
+// A bundle or a file is storage: sizes come from the one formatter (decimal steps, like the operating systems show them).
+export { formatStorage } from '@decryp7/paddock-ui/format';
 
 /**
  * `text` cut in the middle to at most `max` characters (`/Users/you/…/report.zip`): the start and the end of a path or a

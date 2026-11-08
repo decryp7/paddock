@@ -11,7 +11,7 @@ use dyno_core::protocol::LiveUpdate;
 use dyno_core::tray::text::TextRaster;
 use dyno_core::tray::{menu_bar, pixel};
 use dyno_core::widgets::menu_bar::MAX_ITEMS;
-use dyno_core::widgets::{read_metric, MenuBarItem, Metric, NumberFormat, Thresholds};
+use dyno_core::widgets::{read_metric, MenuBarItem, Metric, MetricReading, NumberFormat, Thresholds};
 use paddock_widgets::Placement;
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -140,7 +140,7 @@ pub fn parse_items(text: &str) -> Vec<ItemSpec> {
             Some("memory") => Metric::Memory,
             Some("swap") => Metric::Swap,
             Some("disk") => Metric::DiskActivity,
-            Some("network") => Metric::NetworkDown,
+            Some("network") => Metric::NetworkBoth,
             Some("gpu") => Metric::GpuLoad,
             Some("temp") => Metric::Temperature,
             Some("battery") => Metric::Battery,
@@ -206,6 +206,62 @@ pub fn paint_ops(previous: &str, tooltip: &str, picture_changed: bool, count: u6
         tooltip: previous != tooltip,
         save_position: crate::tray_identity::should_save_position(count),
     }
+}
+
+/// The longest tooltip in UTF-16 units that every platform shows whole: the Windows notification area keeps 127 (its `szTip` holds 128
+/// with the terminating zero); macOS and the status-notifier hosts have no such limit but a long tip is unreadable anyway.
+pub const TOOLTIP_MAX_UNITS: usize = 127;
+
+/// What an item's tooltip says about its metric.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TipState {
+    /// The reading, as drawn on the icon (for example "34%").
+    Value(String),
+    /// The reading while its alarm (or fallback limit) is active.
+    Alert(String),
+    /// The metric cannot be measured on this computer.
+    Unavailable,
+    /// The agent is not running, so there is no reading.
+    AgentAway,
+    /// The per-core bars: the total and the busiest core, in percent.
+    Cores {
+        /// The CPU total.
+        total: f32,
+        /// The busiest core.
+        busiest: f32,
+    },
+}
+
+/// The tooltip of one tray item: the metric's name first (the app name is the menu's, not the tip's), then the reading and, when its
+/// alarm is active, the state in words (below 24 px alerts on different metrics differ only by their order). Cut to
+/// [`TOOLTIP_MAX_UNITS`] with an ellipsis. Pure: the same inputs give the same text, so a changed tip is a changed reading.
+pub fn item_tooltip(name: &str, state: &TipState) -> String {
+    let text = match state {
+        TipState::Value(v) => format!("{name} {v}"),
+        TipState::Alert(v) => format!("{name} {v} (alert: above its limit)"),
+        TipState::Unavailable => format!("{name} is not available on this computer"),
+        TipState::AgentAway => format!("{name}: the agent is not running"),
+        TipState::Cores { total, busiest } => format!("{name} {total:.0}% · busiest core {busiest:.0}%"),
+    };
+    fit_units(&text, TOOLTIP_MAX_UNITS)
+}
+
+/// `text` cut to at most `max` UTF-16 units, ending in an ellipsis when it was cut (never inside a character).
+fn fit_units(text: &str, max: usize) -> String {
+    if text.encode_utf16().count() <= max {
+        return text.to_string();
+    }
+    let mut out = String::new();
+    let mut units = 0;
+    for c in text.chars() {
+        units += c.len_utf16();
+        if units > max - 1 {
+            break;
+        }
+        out.push(c);
+    }
+    out.push('…');
+    out
 }
 
 /// A picture in device pixels: straight RGBA bytes.
@@ -324,6 +380,7 @@ pub fn metric_name(m: &Metric) -> String {
         Metric::DiskFree => "Free space".into(),
         Metric::NetworkUp => "Upload".into(),
         Metric::NetworkDown => "Download".into(),
+        Metric::NetworkBoth => "Network".into(),
         Metric::GpuLoad => "GPU".into(),
         Metric::Temperature => "Temperature".into(),
         Metric::Fan => "Fan".into(),
@@ -384,7 +441,7 @@ impl TrayItems {
                         &Sample::default(),
                         Visual::Unavailable,
                         dark,
-                        format!("Dyno — {name}: the agent is not running"),
+                        item_tooltip(&name, &TipState::AgentAway),
                     ),
                 )
             })
@@ -424,6 +481,11 @@ impl TrayItems {
         let scale = match (r.percent, m) {
             (Some(p), _) => p,
             (None, Metric::NetworkUp | Metric::NetworkDown) => ((value / self.net_peak) * 100.0).clamp(0.0, 100.0) as f32,
+            // The combined item scales by its busier direction against the busiest second seen in either.
+            (None, Metric::NetworkBoth) => {
+                let (rx, tx) = u.system.network_totals();
+                ((rx.max(tx) / self.net_peak) * 100.0).clamp(0.0, 100.0) as f32
+            }
             (None, Metric::MemoryPressure) => match u.pressure {
                 dyno_core::metrics::MemoryPressure::Normal => 20.0,
                 dyno_core::metrics::MemoryPressure::Elevated => 60.0,
@@ -431,10 +493,21 @@ impl TrayItems {
             },
             (None, _) => (value as f32).clamp(0.0, 100.0),
         };
-        let text = match r.unit.as_str() {
+        let words = |r: MetricReading| match r.unit.as_str() {
             "" => r.text,
             "%" => format!("{}%", r.text),
             unit => format!("{} {unit}", r.text),
+        };
+        let text = if *m == Metric::NetworkBoth {
+            // The item draws both rates, so its words give both, not the total the engine reads for other consumers.
+            let t = Thresholds::default();
+            format!(
+                "{} up, {} down",
+                words(read_metric(&Metric::NetworkUp, u, &t)),
+                words(read_metric(&Metric::NetworkDown, u, &t))
+            )
+        } else {
+            words(r)
         };
         Some(Measured { scale, raw: value, text })
     }
@@ -515,13 +588,19 @@ impl TrayItems {
                 cores,
                 ..Sample::default()
             };
-            let tooltip = format!("Dyno — {name} {:.0}% · busiest core {busiest:.0}%", u.system.cpu.total);
+            let tooltip = item_tooltip(
+                &name,
+                &TipState::Cores {
+                    total: u.system.cpu.total,
+                    busiest,
+                },
+            );
             return self.frame(&spec, &s, Visual::Normal, dark, tooltip);
         }
-        let network = matches!(spec.metric, Metric::NetworkUp | Metric::NetworkDown);
+        let network = matches!(spec.metric, Metric::NetworkUp | Metric::NetworkDown | Metric::NetworkBoth);
         let Some(m) = self.measure(u, &spec.metric) else {
             self.state[i].alert = AlertGate::default();
-            let tooltip = format!("Dyno — {name} is not available on this computer");
+            let tooltip = item_tooltip(&name, &TipState::Unavailable);
             return self.frame(&spec, &Sample::default(), Visual::Unavailable, dark, tooltip);
         };
         let history = &mut self.state[i].history;
@@ -564,9 +643,9 @@ impl TrayItems {
         };
         // Below 24 px alerts on different metrics differ only by their order, so the tooltip says it in words.
         let tooltip = if alert {
-            format!("Dyno — {name} {text} · alert: above its limit")
+            item_tooltip(&name, &TipState::Alert(text))
         } else {
-            format!("Dyno — {name} {text}")
+            item_tooltip(&name, &TipState::Value(text))
         };
         self.frame(&spec, &s, if alert { Visual::Alert } else { Visual::Normal }, dark, tooltip)
     }
@@ -598,7 +677,7 @@ mod tests {
     use dyno_core::time::Timestamp;
     use dyno_core::widgets::MenuBarCatalogue;
     use dyno_platform::fake::quiet_sample;
-    use paddock_widgets::{assign_ids, Catalogue};
+    use paddock_widgets::{assign_spans, Catalogue};
 
     fn mac_env() -> Env {
         Env {
@@ -633,6 +712,7 @@ mod tests {
             processes: None,
             groups: None,
             other_users: None,
+            via: Default::default(),
         }
     }
 
@@ -656,7 +736,7 @@ mod tests {
         assert_eq!((default[0].glyph, &default[0].metric), (Glyph::Number, &Metric::CpuTotal));
         assert_eq!(default[0].id, "number");
         assert_eq!(default[1].id, "number-2");
-        let s = assign_ids([
+        let s = assign_spans([
             (
                 1,
                 MenuBarItem::VerticalBars {
@@ -706,7 +786,7 @@ mod tests {
             Metric::Temperature,
             Metric::Battery,
         ];
-        let s = assign_ids(metrics.iter().cloned().map(|metric| (1, MenuBarItem::Ring { metric })));
+        let s = assign_spans(metrics.iter().cloned().map(|metric| (1, MenuBarItem::Ring { metric })));
         let specs = items_from_settings(&s);
         assert_eq!(specs.len(), 8);
         let ids: std::collections::HashSet<&str> = specs.iter().map(|i| i.id.as_str()).collect();
@@ -995,7 +1075,7 @@ mod tests {
         assert_eq!(first.len(), all.len());
         assert!(first
             .iter()
-            .all(|(_, f)| f.look.width == 32 && f.look.height == 32 && f.look.pictures.len() == 1 && f.tooltip.starts_with("Dyno")));
+            .all(|(_, f)| f.look.width == 32 && f.look.height == 32 && f.look.pictures.len() == 1 && f.tooltip.starts_with("CPU")));
         // Only the graph glyphs move with their history when the number stays the same.
         let again = m.frames(&update(40.0), true);
         assert!(
@@ -1048,11 +1128,105 @@ mod tests {
             win_env(32),
         );
         let f = m.frames(&u, true);
-        assert_eq!(f[0].1.tooltip, "Dyno — CPU 100%");
-        assert_eq!(f[1].1.tooltip, "Dyno — Download 5.0 MB/s");
+        assert_eq!(f[0].1.tooltip, "CPU 100%");
+        assert_eq!(f[1].1.tooltip, "Download 5.0 MB/s");
         assert!(f[2].1.tooltip.contains("Upload 1.0 MB/s"));
         assert!(f[3].1.tooltip.contains("Normal"));
         assert!(f[4].1.tooltip.contains("Swap 0%"), "{}", f[4].1.tooltip);
+    }
+
+    #[test]
+    fn the_combined_network_item_says_both_rates_and_follows_either() {
+        let mut u = update(250.0);
+        u.system.network[0].rx_bps = 5_000_000.0;
+        u.system.network[0].tx_bps = 1_000_000.0;
+        let mut m = TrayItems::new(vec![item("n", Metric::NetworkBoth, Glyph::Number)], win_env(32));
+        let first = m.frames(&u, true);
+        assert!(
+            first[0].1.tooltip.contains("Network 1.0 MB/s up, 5.0 MB/s down"),
+            "{}",
+            first[0].1.tooltip
+        );
+        u.system.network[0].tx_bps = 3_000_000.0;
+        assert_eq!(m.frames(&u, true).len(), 1, "an upload change redraws the item");
+        u.system.network[0].rx_bps = 2_000_000.0;
+        assert_eq!(m.frames(&u, true).len(), 1, "a download change redraws the item");
+    }
+
+    #[test]
+    fn the_legacy_network_setting_that_showed_both_maps_to_the_combined_metric() {
+        let items = parse_items("network:number");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].metric, Metric::NetworkBoth);
+    }
+
+    // Windows keeps 127 UTF-16 units of a tip (128 with the terminating zero); a longer name must be cut by us, visibly, not
+    // by the shell. Failing first: the tooltip was the raw text, 200+ units for a long process name.
+    #[test]
+    fn a_tooltip_fits_the_windows_limit_and_still_names_the_metric() {
+        let long = "x".repeat(300);
+        let mut m = TrayItems::new(vec![item("p", Metric::Process(long), Glyph::Number)], win_env(32));
+        let tip = m.frames(&update(10.0), true)[0].1.tooltip.clone();
+        assert!(
+            tip.encode_utf16().count() <= TOOLTIP_MAX_UNITS,
+            "{} units",
+            tip.encode_utf16().count()
+        );
+        assert!(tip.starts_with("xxx") && tip.ends_with('…'), "{tip}");
+    }
+
+    #[test]
+    fn the_tooltip_builder_names_the_metric_its_value_and_the_alarm() {
+        assert_eq!(item_tooltip("CPU", &TipState::Value("34%".into())), "CPU 34%");
+        assert_eq!(
+            item_tooltip("Disk C:", &TipState::Alert("81%".into())),
+            "Disk C: 81% (alert: above its limit)"
+        );
+        assert_eq!(item_tooltip("GPU", &TipState::Unavailable), "GPU is not available on this computer");
+        assert_eq!(item_tooltip("CPU", &TipState::AgentAway), "CPU: the agent is not running");
+        assert_eq!(
+            item_tooltip(
+                "CPU",
+                &TipState::Cores {
+                    total: 34.4,
+                    busiest: 95.2
+                }
+            ),
+            "CPU 34% · busiest core 95%"
+        );
+    }
+
+    // The users own label is the name in every state (the icon is often too small to draw it, so the tooltip is where it shows).
+    #[test]
+    fn the_users_label_is_the_name_in_every_tooltip_state() {
+        let mut spec = item("t", Metric::GpuLoad, Glyph::Number);
+        spec.label = "Hot".into();
+        let mut m = TrayItems::new(vec![spec.clone()], win_env(32));
+        assert!(m.unavailable_frames(true)[0].1.tooltip.starts_with("Hot"), "agent away");
+        let mut u = update(40.0);
+        u.system.gpu = Reading::Unavailable("x".into());
+        assert!(m.frames(&u, true)[0].1.tooltip.starts_with("Hot is not available"));
+        let mut m = TrayItems::new(
+            vec![ItemSpec {
+                metric: Metric::CpuTotal,
+                ..spec
+            }],
+            win_env(32),
+        );
+        m.set_policy(AlertPolicy {
+            covered: vec![],
+            fallback_percent: 50.0,
+            enabled: true,
+        });
+        let tips: Vec<String> = (0..5)
+            .map(|i| {
+                m.frames(&at(update(95.0), i * 1000), true)
+                    .pop()
+                    .map(|(_, f)| f.tooltip)
+                    .unwrap_or_default()
+            })
+            .collect();
+        assert!(tips.iter().any(|t| t.starts_with("Hot ") && t.contains("alert")), "{tips:?}");
     }
 
     #[test]
@@ -1061,7 +1235,7 @@ mod tests {
         spec.label = "Proc".into();
         spec.unit = "pct".into();
         let mut m = TrayItems::new(vec![spec], win_env(32));
-        assert_eq!(m.frames(&update(42.0), true)[0].1.tooltip, "Dyno — Proc 42pct");
+        assert_eq!(m.frames(&update(42.0), true)[0].1.tooltip, "Proc 42pct");
     }
 
     #[test]

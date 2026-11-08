@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PD_TABLE_FILL_MIN,
+  scrollParent,
+  windowBodyMax,
   actionColumnWidth,
   parentIndex,
   treePlaces,
@@ -177,6 +180,19 @@ describe('table model', () => {
     expect(fitColumns([wide[0]!], 100, 28).map((c) => c.key)).toEqual(['name']);
   });
 
+  it('counts a required column at its own px minimum when that is above the primary floor', () => {
+    // Remote's track is minmax(180px, 320px): 180 + 70 + 68 + 96 + 72 + 28 (actions) + 5 gaps of 12 + 24 padding = 598, so Since goes at 560.
+    const cols: PdColumn<unknown>[] = [
+      { key: 'remote', header: 'Remote', value: () => '', required: true, width: 'minmax(180px, 320px)' },
+      { key: 'service', header: 'Service', value: () => '', width: 'minmax(70px, 1fr)' },
+      { key: 'proto', header: 'Protocol', value: () => '', width: '68px' },
+      { key: 'state', header: 'State', value: () => '', width: '96px' },
+      { key: 'since', header: 'Since', value: () => '', width: '72px' },
+    ];
+    expect(fitColumns(cols, 560, 28).map((c) => c.key)).toEqual(['remote', 'service', 'proto', 'state']);
+    expect(fitColumns(cols, 598, 28)).toHaveLength(5);
+  });
+
   it('counts the minimum of a minmax track, so the last column drops out before the row grows wider than its table (re-review P2)', () => {
     const cols: PdColumn<{ a: string }>[] = [
       { key: 'name', header: 'Name', value: (r) => r.a, required: true },
@@ -185,7 +201,7 @@ describe('table model', () => {
       { key: 'when', header: 'When', value: (r) => r.a, width: 'minmax(7.5rem, 1fr)' },
     ];
     // 128 + 92 + 96 + 120 (7.5rem) + 28 + 4 gaps (48) + 24 = 536: at 525 px the last column must go, so the action column stays inside the table.
-    expect(fitColumns(cols, 540, 28).map((c) => c.key)).toEqual(['name', 'state', 'jobs', 'when']);
+    expect(fitColumns(cols, 560, 28).map((c) => c.key)).toEqual(['name', 'state', 'jobs', 'when']);
     expect(fitColumns(cols, 525, 28).map((c) => c.key)).toEqual(['name', 'state', 'jobs']);
   });
 
@@ -242,5 +258,31 @@ describe('tree rows', () => {
     expect(parentIndex(levels, 5, level)).toBe(4);
     expect(parentIndex(levels, 4, level)).toBe(-1);
     expect(parentIndex(levels, 0, level)).toBe(-1);
+  });
+});
+
+describe('table height modes', () => {
+  it('caps a window-sized body at the scroll area minus the table chrome, never below the minimum', () => {
+    expect(windowBodyMax(800, 100)).toBe(700);
+    expect(windowBodyMax(800.7, 100.2)).toBe(700);
+    expect(windowBodyMax(300, 100)).toBe(PD_TABLE_FILL_MIN);
+    expect(windowBodyMax(0, 0)).toBe(PD_TABLE_FILL_MIN);
+  });
+
+  it('finds the nearest ancestor that scrolls vertically, or null', () => {
+    const outer = document.createElement('div');
+    outer.style.overflowY = 'auto';
+    const hidden = document.createElement('div');
+    hidden.style.overflowY = 'hidden';
+    const inner = document.createElement('div');
+    outer.append(hidden);
+    hidden.append(inner);
+    document.body.append(outer);
+    expect(scrollParent(inner)).toBe(outer);
+    const solo = document.createElement('div');
+    document.body.append(solo);
+    expect(scrollParent(solo)).toBeNull();
+    outer.remove();
+    solo.remove();
   });
 });

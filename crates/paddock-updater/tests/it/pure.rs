@@ -410,6 +410,18 @@ fn dates_and_notes_are_checked_and_bounded() {
 // ---- the signature ----
 
 #[test]
+fn the_trusted_comment_of_a_signature_is_readable_and_garbage_has_none() {
+    let comment = signature::trusted_comment(&signature("update.bin.sig")).expect("a comment");
+    assert_eq!(
+        comment,
+        "timestamp:1792821970\tfile:p-9.9.9.bin\tversion:9.9.9"
+    );
+    assert_eq!(signature::trusted_comment("not base64!"), None);
+    assert_eq!(signature::trusted_comment(""), None);
+    assert_eq!(signature::trusted_comment("aGVsbG8="), None);
+}
+
+#[test]
 fn a_package_signed_for_the_announced_version_passes() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("p");
@@ -1052,4 +1064,27 @@ fn whats_new_at_start_is_decided_once_and_recorded() {
     let w = at("1.3.0").whats_new();
     assert_eq!((w.version.as_str(), w.release), ("1.3.0", None));
     let _ = JobError::Failed(String::new());
+}
+
+#[test]
+fn bytes_are_checked_against_a_signature_without_a_version_and_a_wrong_one_is_refused() {
+    // The helper's signature (Dyno's elevated install, security review F2) is a plain `tauri signer sign` of the bytes: no
+    // announced version, the same key and the same pre-hashed format.
+    let comment =
+        signature::verify_bytes(&key(), &package(), &signature("update.bin.sig")).unwrap();
+    assert!(!comment.is_empty());
+    let mut tampered = package();
+    tampered.push(0);
+    assert!(matches!(
+        signature::verify_bytes(&key(), &tampered, &signature("update.bin.sig")),
+        Err(signature::VerifyError::Invalid(_))
+    ));
+    assert!(matches!(
+        signature::verify_bytes(&key(), &package(), &signature("other-key.sig")),
+        Err(signature::VerifyError::Invalid(_))
+    ));
+    assert!(matches!(
+        signature::verify_bytes(&key(), &package(), "not base64 !!"),
+        Err(signature::VerifyError::Invalid(_))
+    ));
 }

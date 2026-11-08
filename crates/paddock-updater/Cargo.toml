@@ -10,10 +10,10 @@ publish = ["decryp7"]
 [features]
 # The Tauri adapter (`paddock_updater::tauri`: managed state, commands, the `paddock://updates` event, the automatic check
 # and the exit hook); the core never depends on Tauri.
-tauri = ["dep:tauri", "dep:log", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-download/tauri", "paddock-download/http"]
+tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-download/tauri", "paddock-download/http"]
 # The installer over `tauri-plugin-updater` (`paddock_updater::tauri::PluginInstaller`): the plugin verifies the signature
 # again and installs the platform's package. The app registers the plugin.
-install = ["tauri", "dep:tauri-plugin-updater"]
+install = ["tauri", "dep:tauri-plugin-updater", "dep:windows-sys"]
 
 [dependencies]
 paddock-limits = { workspace = true }
@@ -30,11 +30,22 @@ semver = "1"
 base64 = "0.22"
 minisign-verify = "0.3"
 tauri = { workspace = true, optional = true }
-log = { version = "0.4", features = ["kv"], optional = true }
+log = { version = "0.4", features = ["kv"] }
 # Without the `zip` feature (zip 4 has RUSTSEC-2026-0367/0368/0369; Tauri 2 updater packages are .exe/.msi, .app.tar.gz and
 # .AppImage, none zipped) and without `system-proxy` (the plugin downloads nothing here: `paddock-download` does).
 tauri-plugin-updater = { version = "2.14", optional = true, default-features = false, features = ["rustls-tls"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+# The per-machine hand-off's native glue (`tauri::native`, feature `install`): ShellExecuteExW with the verb `runas`, and the
+# administrator check (ADR 0053 section 4.1).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tempfile = "3"

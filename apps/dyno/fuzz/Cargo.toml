@@ -1,0 +1,30 @@
+[package]
+name = "dyno-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# A separate workspace: fuzzing needs nightly and libFuzzer and must not affect the main build.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+dyno-agent = { path = "../crates/dyno-agent", features = ["testdb"] }
+dyno-core = { path = "../crates/dyno-core" }
+
+[[bin]]
+name = "fuzz_geo_db"
+path = "fuzz_targets/fuzz_geo_db.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_list_text"
+path = "fuzz_targets/fuzz_list_text.rs"
+test = false
+doc = false
+bench = false

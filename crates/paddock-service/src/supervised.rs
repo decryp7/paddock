@@ -2,6 +2,14 @@
 //! minimal `PATH`, so tools in Homebrew, nvm or a venv are not found. It asks the user's login shell for the `PATH` a
 //! terminal has (`paddock_proc::login_path`: bounded, with a timeout) and merges it in front, once, before its threads
 //! read the environment. A program started by hand already has the terminal's `PATH` and is left alone.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::watch::is_supervised;
 

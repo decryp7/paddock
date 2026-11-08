@@ -1,0 +1,24 @@
+#!/bin/sh
+# Dyno's package, after install or upgrade (Dyno ADR 0027 section 1). The helper's unit ships disabled: turning the helper on
+# is the user's click in Settings (one polkit prompt that runs `dyno-helper install`). Without systemd (a container, a chroot)
+# there is nothing to set up and this script says so and succeeds.
+set -e
+
+if [ ! -d /run/systemd/system ]; then
+    echo "dyno-helper: systemd is not running here; the helper service is not set up." >&2
+    exit 0
+fi
+
+systemctl daemon-reload || true
+
+case "$1" in
+    configure)
+        # An upgrade starts the helper again only when the user turned it on. The old package's prerm stopped it, so this is a
+        # restart, not a try-restart (which does nothing to a stopped unit and left the helper off after every upgrade).
+        if systemctl is-enabled --quiet dyno-helper.service 2>/dev/null; then
+            systemctl restart dyno-helper.service || true
+        fi
+        ;;
+esac
+
+exit 0

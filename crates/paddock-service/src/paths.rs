@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 /// The per-user `Run` key (Windows).
 pub const WINDOWS_RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+/// The machine-wide `Run` key (Windows): what an elevated `tauri-plugin-autostart` once wrote; read and cleaned, never written.
+pub const WINDOWS_MACHINE_RUN_KEY: &str = r"HKLM\Software\Microsoft\Windows\CurrentVersion\Run";
 /// Where Task Manager > Startup (and Settings > Apps > Startup) records that the user switched a `Run` entry off.
 pub const WINDOWS_STARTUP_APPROVED_KEY: &str =
     r"HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run";

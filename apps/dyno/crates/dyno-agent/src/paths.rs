@@ -63,6 +63,11 @@ impl Dirs {
         &self.root
     }
 
+    /// Where the macOS agent keeps Wake-on-LAN passwords: owner-only files, never the Keychain (see `dyno_platform::wol::os_store`).
+    pub fn secrets_folder(&self) -> PathBuf {
+        self.root.join("secrets")
+    }
+
     /// The history database.
     pub fn database(&self) -> PathBuf {
         self.root.join("dyno.db")
@@ -78,6 +83,38 @@ impl Dirs {
     /// The saved-views cache database (ADR 0029): rebuildable, so never in the data folder.
     pub fn cache_db(&self) -> PathBuf {
         self.cache_folder().join("cache.db")
+    }
+
+    /// Where the fetched text of one list subscription (or one geo database) is kept: `<cache folder>/intel/<id>`. The id is
+    /// one of Dyno's own slugs (letters, digits and `-`), never user text; anything else is replaced.
+    pub fn intel_cache(&self, id: &str) -> PathBuf {
+        let slug: String = id
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
+            .take(64)
+            .collect();
+        self.cache_folder().join("intel").join(slug)
+    }
+
+    /// The user's own lists, subscriptions and allow entries (user data, so in the data folder, not in the cache).
+    pub fn intel_lists(&self) -> PathBuf {
+        self.root.join("intel-lists.json")
+    }
+
+    /// When each subscription and geo source was last tried: kept outside the cache, so clearing the cache cannot cause an early
+    /// fetch.
+    pub fn intel_fetch_state(&self) -> PathBuf {
+        self.root.join("intel-fetch.json")
+    }
+
+    /// Where Dyno keeps tools it extracted itself (`tools/smartmontools-<version>/`): its own folder, no administrator rights.
+    pub fn tools(&self) -> PathBuf {
+        self.root.join("tools")
+    }
+
+    /// Where a tool download is staged before the helper gets it (rebuildable, so never user data); the job empties it.
+    pub fn tool_staging(&self) -> PathBuf {
+        self.cache_folder().join("tools")
     }
 
     /// The user's settings.
@@ -178,6 +215,26 @@ mod tests {
         d.cache_folder = Some(PathBuf::from("/c/Dyno"));
         assert_eq!(d.cache_db(), Path::new("/c/Dyno/cache.db"));
         assert!(!d.cache_db().starts_with(d.root()), "never inside the data folder");
+    }
+
+    #[test]
+    fn rebuildable_intel_files_are_beside_the_data_in_tests_and_in_the_cache_folder_otherwise() {
+        let d = Dirs::at("/x/dyno");
+        assert_eq!(d.intel_cache("list-1"), Path::new("/x/dyno/cache/intel/list-1"));
+        assert_eq!(
+            d.intel_cache("../etc"),
+            Path::new("/x/dyno/cache/intel/___etc"),
+            "an id never leaves the folder"
+        );
+        let mut d = Dirs::at("/x/dyno");
+        d.cache_folder = Some(PathBuf::from("/c/Dyno"));
+        assert_eq!(d.intel_cache("a"), Path::new("/c/Dyno/intel/a"));
+        assert!(!d.intel_cache("a").starts_with(d.root()), "never inside the data folder");
+        assert!(
+            d.intel_fetch_state().starts_with(d.root()),
+            "the last fetch time is not in the cache"
+        );
+        assert!(d.intel_lists().starts_with(d.root()));
     }
 
     #[test]

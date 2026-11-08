@@ -1,7 +1,7 @@
 import { CdkListbox, CdkOption } from '@angular/cdk/listbox';
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, afterRenderEffect, inject, input, output, viewChild } from '@angular/core';
 import type { CaptureReason, RecorderSnapshotInfo } from '../../core/api.types';
-import { formatBytes, formatClock, formatDate } from '../../shared/format';
+import { formatStorage, formatClock, formatDate } from '../../shared/format';
 import { FullTextTip } from '../../shared/full-text-tip';
 
 /** What triggered a snapshot, as text: "Manual" or the alarm's title. */
@@ -61,7 +61,7 @@ export class SnapshotList {
   }
 
   protected readonly why = (s: RecorderSnapshotInfo) => reasonText(s.reason);
-  protected readonly size = (s: RecorderSnapshotInfo) => formatBytes(s.bytes);
+  protected readonly size = (s: RecorderSnapshotInfo) => formatStorage(s.bytes);
   protected when(at: number): string {
     return `${formatDate(at, Date.now())}, ${formatClock(at)}`;
   }

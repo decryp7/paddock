@@ -2,14 +2,34 @@
 //! Pure types and decisions: the helper crate and the agent do the I/O.
 //!
 //! The wire body is [`HelperMessage`] (postcard inside `paddock-ipc` frames). The helper accepts only
-//! [`HelperRequest`]s, only from its authorised user. None of them changes a setting of the machine.
+//! [`HelperRequest`]s, from any local account, each restricted by who asks (`helper_policy`, ADR 0027 section 2). None of
+//! them changes a setting of the machine. The request arguments and their caps are in `helper_requests`.
 
+use crate::btm::LoginItemsReply;
+use crate::firewall::FirewallSource;
 use crate::helper::HelperHost;
-use crate::network_traffic::TrafficCounter;
+use crate::helper_policy::{RequestKind, Visibility};
+use crate::helper_requests::{
+    validate_tool_bytes, CounterQuery, ExtrasKind, ProcessQuery, RequestError, SmartQuery, ToolKind, MAX_LOG_REPLY,
+};
+use crate::network_traffic::TrafficAnswer;
+use crate::smart::SmartReply;
+use crate::wake::{IfName, WakeEntry, WakeTag, WolReply};
 use serde::{Deserialize, Serialize};
 
 /// The version of the helper's request set. A different value is refused by the agent with "update the helper".
-pub const HELPER_API: u32 = 1;
+///
+/// Wire history (the helper wire is postcard, so a changed type is a changed wire):
+/// - 4: `SmartDisk` gained `wear_id`, `bytes_written` and `rated_bytes` (the helper's SMART reply carries the full wear reading).
+/// - 5: `FirewallSource` gained `via` (helper-wiring plan, WP-0). The helper writes `Local`; the agent always overwrites it with
+///   `Helper` on a helper reply. 1.1.0 is unreleased, so every dev machine with an older helper must Repair.
+/// - 6: `HelperReply::Counters(Vec<TrafficCounter>)` became `Traffic(TrafficAnswer)` (helper-wiring plan, WP-TRF): the helper
+///   scopes the counters to the asking account and adds the other accounts' programs as one total. A helper of API 5 would send a
+///   reply the agent cannot read, so every dev machine with an older helper must Repair.
+pub const HELPER_API: u32 = 6;
+
+/// The oldest helper build this Dyno accepts as `Ready`. Raised only when a helper fix must reach users (ADR 0027 section 4).
+pub const MIN_HELPER_VERSION: &str = "1.1.0";
 
 /// The major version the IPC handshake carries between the agent and the helper (the minor is 0).
 pub const WIRE_MAJOR: u16 = 1;
@@ -23,30 +43,169 @@ pub const MAX_AUDIT_REPLY: u32 = 100;
 /// The longest account id the install command accepts.
 const MAX_SID: usize = 184;
 
-/// What the agent may ask. A closed set: there is no "run this".
+/// What the agent may ask (`HELPER_API` 2, ADR 0027 section 5). A closed set: there is no "run this", and no variant carries
+/// a path, a descriptor or a process id chosen by the caller.
+///
+/// The enum is append-only within an API version: postcard numbers the variants in order.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HelperRequest {
-    /// Who are you? (version, API, host, the agent it serves).
+    /// Who are you? (version, API, host, this caller's scope, tool states).
     Info,
-    /// Per-program traffic counters (Windows: needs the TCP statistics switched on, which needs administrator rights).
+    /// One page of the process list, scoped to the caller.
+    Processes(ProcessQuery),
+    /// Per-program traffic counters (Windows), scoped to the caller.
     Traffic,
-    /// The last audit entries (at most [`MAX_AUDIT_REPLY`]), newest first.
+    /// Socket inode to owning program (Linux), scoped to the caller.
+    SocketOwners,
+    /// The programs holding the file with this device and inode (Linux). The helper never opens the file.
+    FileHolders {
+        /// Device number.
+        dev: u64,
+        /// Inode number.
+        ino: u64,
+    },
+    /// Login items of the caller's account plus system-wide ones (macOS).
+    LoginItems,
+    /// Thermal, energy and fan readings.
+    Counters(CounterQuery),
+    /// Memory modules from the DMI table (Linux).
+    MemoryModules,
+    /// SMART health of the disks the helper's own scan finds.
+    Smart(SmartQuery),
+    /// Puts a downloaded tool package, streamed as bytes, into the helper's tools folder. Owner and administrators only.
+    InstallTool {
+        /// Which tool; the helper checks the bytes against the SHA-256 and size it has pinned for it.
+        tool: ToolKind,
+        /// The package bytes (at most `MAX_TOOL_BYTES`).
+        bytes: Vec<u8>,
+    },
+    /// The firewall's state, and its rules for the owner and administrators.
+    Firewall,
+    /// Wake requests (Windows).
+    Extras(ExtrasKind),
+    /// The last audit entries (at most [`MAX_AUDIT_REPLY`]), newest first. Owner and administrators only.
     Audit(u32),
-    /// Removes the helper from this computer.
+    /// The last lines of the helper's log (at most `MAX_LOG_REPLY`). Owner and administrators only.
+    LogTail(u32),
+    /// Removes the helper from this computer. Owner and administrators only.
     Uninstall,
+    /// Sets a wake of the computer at a time (Dyno ADR 0032): a wake Dyno tagged, replacing one with the same tag. Owner and
+    /// administrators only; macOS and the Linux `.deb`.
+    ScheduleWake {
+        /// The wake's tag (`[a-z0-9-]{1,32}`).
+        tag: WakeTag,
+        /// When, seconds since 1970 (UTC): in the future and at most 31 days ahead.
+        at_utc: i64,
+    },
+    /// Cancels the wake with this tag (only Dyno's own). Owner and administrators only.
+    CancelWake {
+        /// The wake's tag.
+        tag: WakeTag,
+    },
+    /// Dyno's pending wakes. Owner and administrators only.
+    ListWakes,
+    /// The wake-on-LAN modes of an interface (Linux, read only, modes only). Any caller.
+    WolState {
+        /// The interface.
+        ifname: IfName,
+    },
+    /// The build id of the helper's own program file (the start of its SHA-256), so Dyno can tell two builds of one version
+    /// apart. Any caller. Appended (a minor wire change, no `HELPER_API` bump): a helper that does not know it cannot answer, and
+    /// Dyno then counts it as outdated.
+    Build,
+}
+
+impl HelperRequest {
+    /// The kind of this request, for the restriction table and the concurrency caps.
+    pub fn kind(&self) -> RequestKind {
+        match self {
+            HelperRequest::Info => RequestKind::Info,
+            HelperRequest::Processes(_) => RequestKind::Processes,
+            HelperRequest::Traffic => RequestKind::Traffic,
+            HelperRequest::SocketOwners => RequestKind::SocketOwners,
+            HelperRequest::FileHolders { .. } => RequestKind::FileHolders,
+            HelperRequest::LoginItems => RequestKind::LoginItems,
+            HelperRequest::Counters(_) => RequestKind::Counters,
+            HelperRequest::MemoryModules => RequestKind::MemoryModules,
+            HelperRequest::Smart(_) => RequestKind::Smart,
+            HelperRequest::InstallTool { .. } => RequestKind::InstallTool,
+            HelperRequest::Firewall => RequestKind::Firewall,
+            HelperRequest::Extras(_) => RequestKind::Extras,
+            HelperRequest::Audit(_) => RequestKind::Audit,
+            HelperRequest::LogTail(_) => RequestKind::LogTail,
+            HelperRequest::Uninstall => RequestKind::Uninstall,
+            HelperRequest::ScheduleWake { .. } => RequestKind::ScheduleWake,
+            HelperRequest::CancelWake { .. } => RequestKind::CancelWake,
+            HelperRequest::ListWakes => RequestKind::ListWakes,
+            HelperRequest::WolState { .. } => RequestKind::WolState,
+            HelperRequest::Build => RequestKind::Build,
+        }
+    }
+
+    /// The helper's own check of a decoded request (the agent checks too, but the helper never relies on it).
+    /// `Audit` and `LogTail` are clamped to their caps by [`HelperRequest::audit_len`] and [`HelperRequest::log_len`].
+    pub fn validate(&self) -> Result<(), RequestError> {
+        match self {
+            HelperRequest::Processes(q) => q.validate(),
+            HelperRequest::Counters(q) => q.validate(),
+            HelperRequest::Smart(q) => q.validate(),
+            HelperRequest::InstallTool { bytes, .. } => validate_tool_bytes(bytes.len()),
+            _ => Ok(()),
+        }
+    }
+
+    /// How many audit entries an `Audit(n)` request gets.
+    pub fn audit_len(n: u32) -> usize {
+        n.min(MAX_AUDIT_REPLY) as usize
+    }
+
+    /// How many log lines a `LogTail(n)` request gets.
+    pub fn log_len(n: u32) -> usize {
+        n.min(MAX_LOG_REPLY) as usize
+    }
 }
 
 /// What the helper answers.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HelperReply {
-    /// Answer to `Info`.
-    About(HelperInfo),
-    /// Answer to `Traffic`.
-    Counters(Vec<TrafficCounter>),
+    /// Answer to `Info`: who the helper is, and what this caller sees of it.
+    About(HelperInfo, CallerView),
+    /// Answer to `Traffic`, scoped to the caller: its own programs and the system's, and other accounts' as the policy says.
+    Traffic(TrafficAnswer),
     /// Answer to `Audit`.
     Entries(Vec<AuditEntry>),
+    /// Answer to `Firewall`, already reduced to what the caller may have.
+    Firewall(FirewallSource),
+    /// Answer to `ScheduleWake` and `ListWakes`: Dyno's pending wakes, soonest first.
+    Wakes(Vec<WakeEntry>),
+    /// Answer to `CancelWake`: whether there was one to cancel.
+    WakeCancelled(bool),
+    /// Answer to `WolState`.
+    Wol(WolReply),
+    /// Answer to `Counters`: one outcome per requested id.
+    CounterValues(Vec<crate::helper_counters::CounterAnswer>),
+    /// Answer to `MemoryModules`: the slots and what sits in them (no serial numbers).
+    Memory(crate::inventory::MemoryLayout),
+    /// Answer to `SocketOwners`: the sockets of programs the caller may see.
+    SocketOwners(crate::helper_holders::SocketOwners),
+    /// Answer to `FileHolders`: the programs holding the file that the caller may see.
+    FileHolders(crate::helper_holders::FileHolders),
+    /// Answer to `Extras` (Windows): detail for the owner and administrators, counts for others.
+    Extras(crate::helper_extras::ExtrasAnswer),
+    /// Answer to `Processes`: one page, scoped to the caller.
+    Processes(crate::helper_processes::ProcessPage),
+    /// Answer to `Smart`.
+    Smart(SmartReply),
+    /// Answer to `InstallTool`: the tool is now installed.
+    Installed(ToolStatus),
+    /// Answer to `LoginItems`.
+    LoginItems(LoginItemsReply),
+    /// Answer to `LogTail`: the last lines, oldest first.
+    Log(Vec<String>),
     /// Answer to `Uninstall`: the helper is going away.
     Bye,
+    /// Answer to `Build`: the helper's build id. Appended.
+    Build(String),
 }
 
 /// The IPC body: one type for both directions (`paddock_ipc::BodyPeer` carries a single body type).
@@ -69,6 +228,24 @@ pub struct HelperInfo {
     pub host: HelperHost,
     /// The agent program it serves (full path).
     pub agent_exe: String,
+}
+
+/// What the helper tells one caller about its own standing (attached to the `Info` answer by the handler).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CallerView {
+    /// What the asking account sees of other accounts' processes and traffic.
+    pub scope: Visibility,
+    /// The tools in the helper's tools folder.
+    pub tools: Vec<ToolStatus>,
+}
+
+/// One tool the helper can hold.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolStatus {
+    /// Which tool.
+    pub tool: ToolKind,
+    /// The installed version, or `None` when it is not installed.
+    pub installed: Option<String>,
 }
 
 /// How an audited call ended.
@@ -104,25 +281,56 @@ pub fn parse_audit_line(line: &str) -> Option<AuditEntry> {
     serde_json::from_str(line.trim()).ok()
 }
 
-/// Whether the helper is installed and usable, as the app shows it.
+/// Whether the helper is turned on and usable, as the app shows it (ADR 0027 section 8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum HelperState {
-    /// This system cannot install it (no polkit, no helper file next to the agent).
-    Unsupported,
-    /// Not installed; Dyno works in observe mode and installs it only when asked.
-    NotInstalled,
+    /// This build or system has no helper (an AppImage, no polkit): the readings say so, with no button.
+    NotIncluded,
+    /// Never turned on: "Turn on administrator readings", with the one prompt.
+    Off,
+    /// Installed but not answering (stopped, or switched off in Login Items on macOS).
+    NotRunning,
+    /// Something is wrong with the installation (damaged, a file missing or not protected): Repair.
+    Missing,
+    /// Another program answers where the helper should be: Dyno does not trust it and sends it nothing. Repair takes the place back.
+    Foreign,
+    /// Another API, or older than [`MIN_HELPER_VERSION`]: "Update the helper".
+    Outdated,
     /// Installed and answering.
     Ready,
-    /// Installed but built by another version of Dyno.
-    Outdated,
-    /// Installed but not answering.
-    Unreachable,
-    /// The system's permission prompt is open or the install is running (poll `HelperStatus` until it changes).
-    Installing,
+    /// Installed and starting (a start in progress after Windows started, or one Dyno just began): not a fault; Dyno looks
+    /// again by itself. Appended last: the enum travels as a postcard index (protocol.rs).
+    Starting,
 }
 
-/// The helper for the Settings page and the "install the helper" dialog.
+/// What the user asked of the helper in Settings; each runs as a job with phases (ADR 0027 section 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HelperAction {
+    /// Turn on administrator readings (the install through the OS's one prompt).
+    TurnOn,
+    /// Install again over a helper that is missing something (one prompt).
+    Repair,
+    /// Install the bundled newer helper (one prompt).
+    Update,
+    /// Turn the helper off (it removes itself; the prompt only when it cannot answer).
+    TurnOff,
+}
+
+impl HelperAction {
+    /// The sentence for the job card.
+    pub fn title(self) -> &'static str {
+        match self {
+            HelperAction::TurnOn => "Turning on administrator readings",
+            HelperAction::Repair => "Repairing the helper",
+            HelperAction::Update => "Updating the helper",
+            HelperAction::TurnOff => "Turning off administrator readings",
+        }
+    }
+}
+
+/// The helper for the Settings page and the "turn on" dialog.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HelperStatus {
@@ -136,79 +344,310 @@ pub struct HelperStatus {
     pub prompt: String,
     /// The last audit entries, newest first.
     pub recent: Vec<AuditEntry>,
-    /// Why the last install, update or removal did not work (with what to do), until the next attempt.
+    /// What the helper shows, for the card's list (the same list whether it is off or on); empty where the helper cannot exist.
+    pub readings: Vec<String>,
+    /// Technical details for a "Details" disclosure (versions, an owner's account id, the OS's words); never the headline.
+    pub detail: Option<String>,
+    /// Why the last turn on, update or removal did not work (with what to do), until the next attempt.
     pub error: Option<String>,
 }
 
 /// What the agent found out about the helper.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Probe {
-    /// Nothing is installed (no endpoint or no token).
+    /// Nothing is installed (no endpoint).
     Absent,
     /// It answered `Info`.
     Answered(HelperInfo, Vec<AuditEntry>),
     /// The endpoint exists but nobody answered, with the reason.
     Silent(String),
+    /// The helper's service is starting (just after Windows started, or just started by the agent) and does not answer yet:
+    /// not a fault, and Dyno looks again by itself.
+    Starting(String),
+    /// Something that is not Dyno's helper owns the endpoint (pipe squatting): the owner's account id (or uid).
+    Foreign(String),
+    /// It answered `Info` with an API and version this Dyno accepts, but it is another build than the one Dyno ships
+    /// ([`BuildVerdict::Other`]): the id it reported (`None`: it cannot answer `Build`, so it is older than that request) and the id
+    /// of the bundled program.
+    AnsweredOtherBuild {
+        /// What it said about itself.
+        info: HelperInfo,
+        /// Recent audit entries.
+        recent: Vec<AuditEntry>,
+        /// The build id the installed helper reported.
+        installed: Option<String>,
+        /// The build id of the helper program that ships with this Dyno.
+        bundled: String,
+    },
+}
+
+/// Whether the installed helper is the build Dyno ships.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildVerdict {
+    /// The same build.
+    Same,
+    /// Another build of whatever version (or one that cannot say): update it.
+    Other,
+    /// The bundled program could not be read, so nothing can be compared: the helper is taken as it is.
+    NotJudged,
+}
+
+/// Compares the build the installed helper reported (`None`: it did not answer `Build`) with the bundled program's.
+pub fn judge_build(installed: Option<&str>, bundled: Option<&str>) -> BuildVerdict {
+    match (installed, bundled) {
+        (_, None) | (_, Some("")) => BuildVerdict::NotJudged,
+        (Some(i), Some(b)) if i == b => BuildVerdict::Same,
+        _ => BuildVerdict::Other,
+    }
+}
+
+/// Whether `have` ("1.2.3", a pre-release suffix is ignored) is at least `min`. An unreadable version is not.
+pub fn version_at_least(have: &str, min: &str) -> bool {
+    fn parts(v: &str) -> Option<[u64; 3]> {
+        let core = v.split(['-', '+']).next()?;
+        let mut it = core.split('.');
+        let mut out = [0u64; 3];
+        for slot in &mut out {
+            *slot = it.next()?.parse().ok()?;
+        }
+        it.next().is_none().then_some(out)
+    }
+    match (parts(have), parts(min)) {
+        (Some(h), Some(m)) => h >= m,
+        _ => false,
+    }
 }
 
 /// What the OS asks for on `host`, in words.
-pub fn prompt_text(host: HelperHost) -> &'static str {
+pub fn prompt_text(host: HelperHost, verb: &str) -> String {
     match host {
-        HelperHost::Windows => "Windows asks you to allow Dyno to make changes to your device (User Account Control).",
-        HelperHost::Macos => "macOS asks for your account password to let Dyno install its helper.",
-        HelperHost::Linux => "Your desktop asks you to authenticate (polkit) so Dyno can install its helper.",
+        HelperHost::Windows => {
+            "Windows will ask whether to let an app from an unknown publisher (dyno-helper.exe) make changes to your device. That is expected: Dyno's helper is not signed. Choose Yes."
+                .to_string()
+        }
+        HelperHost::Macos => format!("macOS asks for your account password, in a window titled by osascript, to let Dyno {verb} its helper."),
+        HelperHost::Linux => format!("Your desktop asks you to authenticate (polkit) so Dyno can {verb} its helper."),
+    }
+}
+
+/// One line the helper's card promises: the words shown, and the request kinds that deliver it.
+///
+/// The kinds are what `dyno-agent/tests/helper_wiring.rs` checks against production code: a promise whose kind no code sends is a
+/// reading that is advertised and never delivered (ADR 0052 section 1.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Advertised {
+    /// The words the card, the user guide and the changelog use.
+    pub text: &'static str,
+    /// The request kinds the reading is made of (never empty).
+    pub kinds: &'static [RequestKind],
+}
+
+/// What the helper shows once it is on, per system: the one list the card uses both for "turning it on adds" and "Dyno now also shows".
+pub fn readings(host: HelperHost) -> &'static [Advertised] {
+    const PROCESSES: Advertised = Advertised {
+        text: "Every process of every account",
+        kinds: &[RequestKind::Processes],
+    };
+    match host {
+        HelperHost::Windows => &[
+            PROCESSES,
+            Advertised {
+                text: "Per-program network traffic",
+                kinds: &[RequestKind::Traffic],
+            },
+            Advertised {
+                text: "Disk health",
+                kinds: &[RequestKind::Smart],
+            },
+            Advertised {
+                text: "What is keeping the computer awake",
+                kinds: &[RequestKind::Extras],
+            },
+        ],
+        HelperHost::Macos => &[
+            PROCESSES,
+            Advertised {
+                text: "Login items and background tasks",
+                kinds: &[RequestKind::LoginItems],
+            },
+            Advertised {
+                text: "Firewall (pf) rules",
+                kinds: &[RequestKind::Firewall],
+            },
+            Advertised {
+                text: "Temperature and energy readings",
+                kinds: &[RequestKind::Counters],
+            },
+        ],
+        HelperHost::Linux => &[
+            PROCESSES,
+            Advertised {
+                text: "Which program owns each socket and file",
+                kinds: &[RequestKind::SocketOwners, RequestKind::FileHolders],
+            },
+            Advertised {
+                text: "Firewall (nft) rules",
+                kinds: &[RequestKind::Firewall],
+            },
+            Advertised {
+                text: "Memory modules",
+                kinds: &[RequestKind::MemoryModules],
+            },
+        ],
     }
 }
 
 /// The text shown when an action needs a helper that is not there.
 pub const HELPER_MISSING: &str =
-    "This reading needs Dyno's helper, which is not installed. Install it under Settings > Helper (the system asks for your \
+    "This reading needs Dyno's helper, which is not installed. Install it under Settings > Dyno > Administrator readings (the system asks for your \
      permission once); nothing else in Dyno needs it.";
 
-/// Decides what to tell the user. `supported` is `Err(reason)` when this system cannot install the helper at all.
+/// The verb the system's prompt uses for what the card offers in `state`.
+fn verb_for(state: HelperState) -> &'static str {
+    match state {
+        HelperState::Off => "install",
+        HelperState::Outdated => "update",
+        HelperState::NotRunning | HelperState::Missing | HelperState::Foreign => "repair",
+        _ => "change",
+    }
+}
+
+/// Decides what to tell the user. `supported` is `Err(reason)` when this build or system has no helper at all. The headline
+/// (`message`) is plain words with the next step; versions, owners and the OS's own words go in `detail`.
 pub fn assess(host: HelperHost, supported: Result<(), String>, probe: Probe, our_version: &str) -> HelperStatus {
-    let prompt = prompt_text(host).to_string();
-    let status = |state, message: String, version: Option<String>, recent| HelperStatus {
+    let status = |state, message: String, version: Option<String>, recent, detail: Option<String>| HelperStatus {
         state,
         message,
         version,
-        prompt: prompt.clone(),
+        prompt: prompt_text(host, verb_for(state)).to_string(),
         recent,
+        readings: if state == HelperState::NotIncluded {
+            Vec::new()
+        } else {
+            readings(host).iter().map(|r| r.text.to_string()).collect()
+        },
+        detail,
         error: None,
     };
     match probe {
         Probe::Absent => match supported {
-            Err(reason) => status(HelperState::Unsupported, reason, None, vec![]),
+            Err(reason) => status(HelperState::NotIncluded, reason, None, vec![], None),
             Ok(()) => status(
-                HelperState::NotInstalled,
-                "The helper is not installed. Dyno works without it; install it to read the few things that need administrator rights (for example programs' network traffic on Windows)."
+                HelperState::Off,
+                "Administrator readings are not turned on. Dyno works without them."
                     .into(),
                 None,
                 vec![],
+                None,
             ),
         },
         Probe::Silent(why) => status(
-            HelperState::Unreachable,
-            format!("The helper is installed but did not answer ({why}). Install it again from Settings to repair it."),
+            HelperState::NotRunning,
+            "The helper is installed but did not answer. Repair it to start it again.".into(),
             None,
             vec![],
+            Some(why),
         ),
-        Probe::Answered(info, recent) if info.api != HELPER_API || info.version != our_version => status(
+        Probe::Starting(why) => status(
+            HelperState::Starting,
+            "The helper is starting. This takes a moment after Windows starts; Dyno looks again by itself.".into(),
+            None,
+            vec![],
+            Some(why),
+        ),
+        Probe::Foreign(owner) => status(
+            HelperState::Foreign,
+            "Another program is answering where Dyno's helper should be. Dyno does not trust it and sends it nothing. Repair the helper to take its place back.".into(),
+            None,
+            vec![],
+            Some(owner),
+        ),
+        Probe::Answered(info, recent) if info.api != HELPER_API || !version_at_least(&info.version, MIN_HELPER_VERSION) => status(
             HelperState::Outdated,
-            format!(
-                "The installed helper is version {} and this Dyno is {our_version}. Update the helper (the system asks for permission once).",
-                info.version
-            ),
-            Some(info.version),
+            format!("This Dyno needs helper version {MIN_HELPER_VERSION} or newer, and the installed one is older. Update the helper."),
+            Some(info.version.clone()),
             recent,
+            Some(format!("Installed: version {} (API {}). Needed: API {HELPER_API}, version {MIN_HELPER_VERSION} or newer.", info.version, info.api)),
+        ),
+        Probe::AnsweredOtherBuild {
+            info,
+            recent,
+            installed,
+            bundled,
+        } => status(
+            HelperState::Outdated,
+            "The installed helper is another build than the one this Dyno ships. Update the helper.".into(),
+            Some(info.version.clone()),
+            recent,
+            Some(format!(
+                "Installed: version {} build {} (API {}). This Dyno ships build {bundled}.",
+                info.version,
+                installed.as_deref().unwrap_or("unknown (it does not answer the build request)"),
+                info.api
+            )),
         ),
         Probe::Answered(info, recent) => status(
             HelperState::Ready,
-            "The helper is installed and ready. It only reads and changes nothing on this computer.".into(),
-            Some(info.version),
+            "Administrator readings are on.".to_string(),
+            Some(info.version.clone()),
             recent,
+            Some(format!("Helper version {}, Dyno {our_version}.", info.version)),
         ),
     }
+}
+
+/// Why the helper service stopped at its own start, as the service-specific exit code the Service Control Manager keeps (`sc
+/// query`: `SERVICE_EXIT_CODE`). The service writes the code when it refuses to start, the agent reads it back and says
+/// why the helper is down (ER-27), so the two agree on one table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartFailure {
+    /// Anything not listed below.
+    Other,
+    /// A protected-location check failed: the program, the data folder or something in it is not protected.
+    NotProtected,
+    /// The configuration is missing, damaged or not protected.
+    BadConfig,
+    /// The endpoint (pipe or socket) could not be opened.
+    Endpoint,
+}
+
+impl StartFailure {
+    /// The service-specific exit code (never 0, which means a clean stop).
+    pub fn code(self) -> u32 {
+        match self {
+            StartFailure::Other => 1,
+            StartFailure::NotProtected => 3,
+            StartFailure::BadConfig => 4,
+            StartFailure::Endpoint => 5,
+        }
+    }
+
+    /// The failure a service-specific exit code means; `None` for a code this table does not know.
+    pub fn from_code(code: u32) -> Option<StartFailure> {
+        [
+            StartFailure::Other,
+            StartFailure::NotProtected,
+            StartFailure::BadConfig,
+            StartFailure::Endpoint,
+        ]
+        .into_iter()
+        .find(|f| f.code() == code)
+    }
+
+    /// Plain words with the next step.
+    pub fn words(self) -> &'static str {
+        match self {
+            StartFailure::Other => "the helper could not start (see the DynoHelper entries in the Windows Event Log)",
+            StartFailure::NotProtected => "a folder or file of the helper is not protected; Repair puts it right",
+            StartFailure::BadConfig => "the helper's configuration is missing or damaged; Repair writes it again",
+            StartFailure::Endpoint => "the helper could not open its endpoint; another program may hold it, Repair takes it back",
+        }
+    }
+}
+
+/// [`StartFailure::words`] for a service-specific exit code the agent read from the Service Control Manager.
+pub fn start_exit_words(code: u32) -> Option<&'static str> {
+    StartFailure::from_code(code).map(StartFailure::words)
 }
 
 /// The codes a refused or failed helper call carries (`RemoteError::code`).
@@ -225,6 +664,8 @@ pub mod codes {
     pub const TIMEOUT: &str = "timeout";
     /// It did not work.
     pub const FAILED: &str = "failed";
+    /// The account already has too many requests running; try again.
+    pub const BUSY: &str = "busy";
 }
 
 /// The wire code of a platform error.
@@ -247,12 +688,13 @@ pub fn platform_error(code: &str, message: String) -> crate::ports::PlatformErro
         codes::DENIED | codes::REFUSED => P::AccessDenied(message),
         codes::UNSUPPORTED => P::Unsupported(message),
         codes::TIMEOUT => P::Timeout(message),
+        codes::BUSY => P::Failed(message),
         _ => P::Failed(message),
     }
 }
 
 /// The account allowed to use the helper, as passed to `dyno-helper install --user`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum HelperUser {
     /// A Unix user id.
     Uid(u32),
@@ -310,18 +752,85 @@ mod tests {
             HelperMessage::Request(HelperRequest::Traffic),
             HelperMessage::Request(HelperRequest::Uninstall),
             HelperMessage::Request(HelperRequest::Audit(5)),
-            HelperMessage::Reply(HelperReply::Counters(vec![TrafficCounter {
-                pid: 4,
-                name: "x".into(),
-                bytes_in: 1,
-                bytes_out: 2,
-            }])),
-            HelperMessage::Reply(HelperReply::About(info("1", 1))),
+            HelperMessage::Reply(HelperReply::Traffic(TrafficAnswer {
+                counters: vec![crate::network_traffic::TrafficCounter {
+                    pid: 4,
+                    name: "x".into(),
+                    bytes_in: 1,
+                    bytes_out: 2,
+                }],
+                others: Some(crate::network_traffic::OthersTraffic {
+                    programs: 3,
+                    bytes_in: 4,
+                    bytes_out: 5,
+                }),
+            })),
+            HelperMessage::Reply(HelperReply::About(
+                info("1", 1),
+                CallerView {
+                    scope: Visibility::Full,
+                    tools: vec![],
+                },
+            )),
+            HelperMessage::Reply(HelperReply::Log(vec!["a".into()])),
+            HelperMessage::Reply(HelperReply::LoginItems(LoginItemsReply {
+                items: vec![],
+                truncated: 0,
+                other_accounts: 2,
+            })),
             HelperMessage::Reply(HelperReply::Bye),
         ];
         for m in all {
             let bytes = postcard::to_stdvec(&m).unwrap();
             assert_eq!(postcard::from_bytes::<HelperMessage>(&bytes).unwrap(), m);
+        }
+    }
+
+    /// A changed wire must never keep its API number: the history above names the current one, so a change that bumps the constant
+    /// without saying why (or says why without bumping) fails here.
+    #[test]
+    fn the_wire_history_names_the_current_api() {
+        let source = include_str!("helper_wire.rs");
+        let line = format!("/// - {HELPER_API}: ");
+        assert!(
+            source.contains(&line),
+            "add `{line}<what changed>` to the wire history of HELPER_API"
+        );
+        let newest = source
+            .lines()
+            .filter_map(|l| l.strip_prefix("/// - "))
+            .filter_map(|l| l.split_once(": "))
+            .filter_map(|(n, _)| n.parse::<u32>().ok())
+            .max();
+        assert_eq!(newest, Some(HELPER_API), "the newest history entry is the current API");
+    }
+
+    #[test]
+    fn every_advertised_reading_names_the_request_kinds_that_deliver_it() {
+        for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
+            let list = readings(host);
+            assert!(!list.is_empty(), "{host:?}");
+            for (i, a) in list.iter().enumerate() {
+                assert!(!a.text.is_empty() && !a.kinds.is_empty(), "{host:?}: {a:?}");
+                assert!(list[..i].iter().all(|b| b.text != a.text), "{host:?}: {} twice", a.text);
+                for k in a.kinds {
+                    // A reading is made of reads; the control requests (install, uninstall, wakes, audit) are not readings.
+                    assert!(
+                        !matches!(
+                            k,
+                            RequestKind::Info
+                                | RequestKind::InstallTool
+                                | RequestKind::Uninstall
+                                | RequestKind::Audit
+                                | RequestKind::ScheduleWake
+                                | RequestKind::CancelWake
+                                | RequestKind::ListWakes
+                        ),
+                        "{host:?}: {} names {k:?}",
+                        a.text
+                    );
+                }
+            }
         }
     }
 
@@ -334,31 +843,171 @@ mod tests {
     #[test]
     fn status_says_what_to_do_next() {
         let w = HelperHost::Windows;
-        let s = assess(w, Ok(()), Probe::Absent, "1.0.0");
-        assert_eq!(s.state, HelperState::NotInstalled);
-        assert!(s.message.contains("install"));
-        assert!(s.prompt.contains("User Account Control"));
-        let s = assess(
-            HelperHost::Linux,
-            Err("Install polkit (pkexec) first.".into()),
-            Probe::Absent,
-            "1.0.0",
+        let s = assess(w, Ok(()), Probe::Absent, "1.1.0");
+        assert_eq!(s.state, HelperState::Off);
+        assert!(s.message.contains("not turned on") && !s.readings.is_empty());
+        assert!(
+            s.prompt.contains("unknown publisher") && !s.prompt.contains("password"),
+            "Windows asks about the publisher, not a password"
         );
+        let s = assess(HelperHost::Linux, Err("This build has no helper.".into()), Probe::Absent, "1.1.0");
         assert_eq!(
             (s.state, s.message.as_str()),
-            (HelperState::Unsupported, "Install polkit (pkexec) first.")
+            (HelperState::NotIncluded, "This build has no helper.")
         );
-        let s = assess(w, Ok(()), Probe::Silent("timeout".into()), "1.0.0");
-        assert_eq!(s.state, HelperState::Unreachable);
-        assert!(s.message.contains("again"));
-        let s = assess(w, Ok(()), Probe::Answered(info("0.9.0", 1), vec![]), "1.0.0");
-        assert_eq!((s.state, s.version.as_deref()), (HelperState::Outdated, Some("0.9.0")));
-        let s = assess(w, Ok(()), Probe::Answered(info("1.0.0", 2), vec![]), "1.0.0");
+        let s = assess(w, Ok(()), Probe::Silent("timeout".into()), "1.1.0");
+        assert_eq!(s.state, HelperState::NotRunning);
+        assert!(s.message.contains("Repair it") && !s.message.contains("Settings") && !s.message.contains("timeout"));
+        assert_eq!(
+            s.detail.as_deref(),
+            Some("timeout"),
+            "the OS's words are in the details, not the headline"
+        );
+        let s = assess(w, Ok(()), Probe::Foreign("S-1-5-21-1-2-3-1001".into()), "1.1.0");
+        assert_eq!(s.state, HelperState::Foreign);
+        assert!(
+            s.message.contains("does not trust it") && s.message.contains("Repair") && !s.message.contains("S-1-5"),
+            "{}",
+            s.message
+        );
+        assert_eq!(s.detail.as_deref(), Some("S-1-5-21-1-2-3-1001"));
+        let s = assess(w, Ok(()), Probe::Answered(info("1.0.9", HELPER_API), vec![]), "1.1.0");
+        assert_eq!((s.state, s.version.as_deref()), (HelperState::Outdated, Some("1.0.9")));
+        assert!(
+            s.message.contains(MIN_HELPER_VERSION) && !s.message.contains("API"),
+            "only the needed version in the headline"
+        );
+        assert!(s.detail.as_deref().is_some_and(|d| d.contains("API")));
+        let s = assess(w, Ok(()), Probe::Answered(info("1.1.0", HELPER_API - 1), vec![]), "1.1.0");
         assert_eq!(s.state, HelperState::Outdated);
-        let s = assess(w, Ok(()), Probe::Answered(info("1.0.0", HELPER_API), vec![]), "1.0.0");
+        let s = assess(w, Ok(()), Probe::Answered(info("1.1.0", HELPER_API), vec![]), "1.1.0");
         assert_eq!(s.state, HelperState::Ready);
-        assert!(prompt_text(HelperHost::Macos).contains("password"));
-        assert!(prompt_text(HelperHost::Linux).contains("polkit"));
+        for host in [HelperHost::Windows, HelperHost::Macos, HelperHost::Linux] {
+            let ready = assess(host, Ok(()), Probe::Answered(info("1.1.0", HELPER_API), vec![]), "1.1.0");
+            assert!(
+                ready.readings.iter().map(String::as_str).eq(readings(host).iter().map(|r| r.text)) && !ready.message.contains("1.1.0"),
+                "{host:?}: the readings now on, not the version"
+            );
+            let off = assess(host, Ok(()), Probe::Absent, "1.1.0");
+            assert_eq!(off.readings, ready.readings, "Off and On list the same readings");
+        }
+        // Another build of the same version is outdated, and so is a helper that cannot answer the build request.
+        let other = |installed: Option<&str>| Probe::AnsweredOtherBuild {
+            info: info("1.1.0", HELPER_API),
+            recent: vec![],
+            installed: installed.map(str::to_string),
+            bundled: "bbbb".into(),
+        };
+        for installed in [Some("aaaa"), None] {
+            let s = assess(w, Ok(()), other(installed), "1.1.0");
+            assert_eq!(s.state, HelperState::Outdated, "{installed:?}");
+            assert!(s.message.contains("Update the helper"), "{}", s.message);
+            let d = s.detail.unwrap();
+            assert!(
+                d.contains("bbbb") && d.contains(installed.unwrap_or("does not answer")),
+                "both builds are named: {d}"
+            );
+        }
+        // A newer or older-but-supported helper than the app is Ready: the update is offered, never forced.
+        let s = assess(w, Ok(()), Probe::Answered(info(MIN_HELPER_VERSION, HELPER_API), vec![]), "1.3.0");
+        assert_eq!(s.state, HelperState::Ready);
+        assert!(
+            prompt_text(HelperHost::Macos, "repair").contains("password")
+                && prompt_text(HelperHost::Macos, "repair").contains("repair its helper")
+        );
+        assert!(prompt_text(HelperHost::Linux, "update").contains("polkit"));
+    }
+
+    #[test]
+    fn the_installed_build_is_judged_against_the_bundled_one() {
+        use BuildVerdict::*;
+        // (installed, bundled, verdict)
+        let table = [
+            (Some("aaaa"), Some("aaaa"), Same),
+            (Some("aaaa"), Some("bbbb"), Other),
+            (None, Some("bbbb"), Other),
+            (Some(""), Some("bbbb"), Other),
+            (Some("aaaa"), None, NotJudged),
+            (None, None, NotJudged),
+            (Some("aaaa"), Some(""), NotJudged),
+        ];
+        for (installed, bundled, want) in table {
+            assert_eq!(judge_build(installed, bundled), want, "{installed:?} against {bundled:?}");
+        }
+    }
+
+    #[test]
+    fn versions_compare_by_number() {
+        assert!(version_at_least("1.10.0", "1.9.9"));
+        assert!(version_at_least("1.1.0-beta.1", "1.1.0"));
+        assert!(!version_at_least("1.0.99", "1.1.0"));
+        for bad in ["", "1.1", "1.1.0.1", "a.b.c", "1.1.x"] {
+            assert!(!version_at_least(bad, "1.1.0"), "{bad}");
+        }
+    }
+
+    #[test]
+    fn every_request_has_a_kind_and_the_caps_are_checked() {
+        use crate::helper_requests::*;
+        let reqs = vec![
+            HelperRequest::Info,
+            HelperRequest::Processes(ProcessQuery::default()),
+            HelperRequest::Traffic,
+            HelperRequest::SocketOwners,
+            HelperRequest::FileHolders { dev: 1, ino: 2 },
+            HelperRequest::LoginItems,
+            HelperRequest::Counters(CounterQuery {
+                ids: vec![CounterId::Thermal],
+                class: RequestClass::User,
+            }),
+            HelperRequest::MemoryModules,
+            HelperRequest::Smart(SmartQuery::default()),
+            HelperRequest::InstallTool {
+                tool: ToolKind::Smartmontools,
+                bytes: vec![1],
+            },
+            HelperRequest::Firewall,
+            HelperRequest::Extras(ExtrasKind::WakeRequests),
+            HelperRequest::Audit(5),
+            HelperRequest::LogTail(5),
+            HelperRequest::Uninstall,
+            HelperRequest::ScheduleWake {
+                tag: WakeTag::parse("nightly").unwrap(),
+                at_utc: 1_800_000_000,
+            },
+            HelperRequest::CancelWake {
+                tag: WakeTag::parse("nightly").unwrap(),
+            },
+            HelperRequest::ListWakes,
+            HelperRequest::WolState {
+                ifname: IfName::parse("eth0").unwrap(),
+            },
+            HelperRequest::Build,
+        ];
+        let kinds: Vec<_> = reqs.iter().map(|r| r.kind()).collect();
+        assert_eq!(kinds, RequestKind::ALL, "one kind per request, in the table's order");
+        for r in &reqs {
+            assert!(r.validate().is_ok(), "{r:?}");
+            let bytes = postcard::to_stdvec(&HelperMessage::Request(r.clone())).unwrap();
+            assert_eq!(
+                postcard::from_bytes::<HelperMessage>(&bytes).unwrap(),
+                HelperMessage::Request(r.clone())
+            );
+        }
+        assert!(HelperRequest::Processes(ProcessQuery {
+            limit: 0,
+            ..Default::default()
+        })
+        .validate()
+        .is_err());
+        assert!(HelperRequest::InstallTool {
+            tool: ToolKind::Smartmontools,
+            bytes: vec![0; MAX_TOOL_BYTES + 1]
+        }
+        .validate()
+        .is_err());
+        assert_eq!(HelperRequest::audit_len(u32::MAX), MAX_AUDIT_REPLY as usize);
+        assert_eq!(HelperRequest::log_len(u32::MAX), MAX_LOG_REPLY as usize);
     }
 
     #[test]
@@ -421,5 +1070,43 @@ mod tests {
         assert_eq!(parse_audit_line(&format!("{line}\n")), Some(e));
         assert_eq!(parse_audit_line("{not json"), None);
         assert_eq!(parse_audit_line(""), None);
+    }
+
+    #[test]
+    fn a_helper_that_is_still_starting_is_not_told_to_repair() {
+        let s = assess(
+            HelperHost::Windows,
+            Ok(()),
+            Probe::Starting("the service is StartPending".into()),
+            "1.1.0",
+        );
+        assert_eq!(s.state, HelperState::Starting);
+        assert!(s.message.contains("starting") && !s.message.contains("Repair"), "{}", s.message);
+        assert_eq!(s.detail.as_deref(), Some("the service is StartPending"));
+        let silent = assess(HelperHost::Windows, Ok(()), Probe::Silent("x".into()), "1.1.0");
+        assert!(
+            silent.message.contains("Repair"),
+            "a stopped service with an error still says Repair"
+        );
+    }
+
+    #[test]
+    fn start_failures_have_distinct_nonzero_exit_codes_that_read_back_into_words() {
+        let all = [
+            StartFailure::Other,
+            StartFailure::NotProtected,
+            StartFailure::BadConfig,
+            StartFailure::Endpoint,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for f in all {
+            assert_ne!(f.code(), 0, "0 is a clean stop");
+            assert!(seen.insert(f.code()), "{f:?} shares a code");
+            assert_eq!(StartFailure::from_code(f.code()), Some(f));
+            assert_eq!(start_exit_words(f.code()), Some(f.words()));
+            assert!(f.words().len() > 20);
+        }
+        assert_eq!(start_exit_words(0), None);
+        assert_eq!(start_exit_words(999), None);
     }
 }

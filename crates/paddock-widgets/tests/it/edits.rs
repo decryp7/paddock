@@ -36,10 +36,10 @@ fn empty() -> Layout<Gadget> {
 fn add_appends_with_the_default_span_and_a_derived_id() {
     let layout = run(&empty(), add(Gadget::Clock));
     assert_eq!(ids(&layout), ["clock"]);
-    assert_eq!(layout.placements[0].span, 1);
+    assert_eq!(layout.placements[0].place.span, 1);
     let layout = run(&layout, add(disk("all")));
     assert_eq!(ids(&layout), ["clock", "disk-space"]);
-    assert_eq!(layout.placements[1].span, 2);
+    assert_eq!(layout.placements[1].place.span, 2);
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn add_takes_a_span_the_kind_allows() {
             at: None,
         },
     );
-    assert_eq!(wide.placements.last().map(|p| p.span), Some(2));
+    assert_eq!(wide.placements.last().map(|p| p.place.span), Some(2));
     assert_eq!(
         fail(
             &base,
@@ -250,7 +250,7 @@ fn resize_and_its_errors() {
             span: 2,
         },
     );
-    assert_eq!(wide.placements[0].span, 2);
+    assert_eq!(wide.placements[0].place.span, 2);
     assert_eq!(
         fail(
             &defaults(),
@@ -315,7 +315,7 @@ fn replace_changes_options_not_the_kind() {
 fn apply_a_builtin_preset_and_a_saved_one() {
     let compact = run(&defaults(), Edit::ApplyPreset { id: pid("compact") });
     assert_eq!(ids(&compact), ["clock"]);
-    assert_eq!(compact.placements[0].span, 2);
+    assert_eq!(compact.placements[0].place.span, 2);
     let saved = run(
         &defaults(),
         Edit::SavePreset {
@@ -335,7 +335,7 @@ fn apply_refuses_an_unknown_preset_and_an_invalid_saved_one() {
     );
     let mut bad = run(&defaults(), Edit::SavePreset { name: "Bad".into() });
     bad.presets[0].placements =
-        paddock_widgets::assign_ids([(1, Gadget::Clock), (1, Gadget::Clock)]);
+        paddock_widgets::assign_spans([(1, Gadget::Clock), (1, Gadget::Clock)]);
     assert_eq!(
         fail(&bad, Edit::ApplyPreset { id: pid("bad") }),
         WidgetError::KindLimit {
@@ -575,12 +575,12 @@ fn a_bad_span_is_reported_before_a_duplicate_id() {
     layout.placements = vec![
         paddock_widgets::Placement {
             id: id("a"),
-            span: 1,
+            place: paddock_widgets::Span { span: 1 },
             widget: Gadget::Alarms { rows: 1 },
         },
         paddock_widgets::Placement {
             id: id("a"),
-            span: 3,
+            place: paddock_widgets::Span { span: 3 },
             widget: disk("x"),
         },
     ];

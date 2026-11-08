@@ -34,6 +34,7 @@ import { PdSelect } from '@decryp7/paddock-ui/select';
 import { GalData } from './data-sections';
 import { GalMaterial } from './material-section';
 import { GalView } from './view-section';
+import { GalWidgetGrid } from './widget-grid-section';
 import { GalWidgets } from './widgets-section';
 
 echarts.use([LineChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, CanvasRenderer]);
@@ -50,7 +51,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
 @Component({
   selector: 'gal-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PdStatusGlyph, SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, PdPathText, PdSelect, GalData, GalView, GalWidgets, GalMaterial],
+  imports: [PdStatusGlyph, SuCard, SuStatusPill, SuMetric, SuSparkline, SuEmptyState, SuErrorState, SuSkeleton, SuJob, SuSegmentedControl, SuTrayPopover, PdGlyph, PdPathText, PdSelect, GalData, GalView, GalWidgets, GalWidgetGrid, GalMaterial],
   template: `
     <main class="gal-page">
       <header class="gal-bar">
@@ -67,13 +68,13 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
             <svg slot="icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5" /></svg>
             <pd-status-pill slot="status" status="success" label="Normal" />
             <pd-metric value="45" unit="%" [delta]="3" deltaUnit=" pts" deltaLabel="vs last hour" goodDirection="down" />
-            <pd-sparkline slot="sparkline" label="CPU, last hour" [values]="cpu" [area]="true" [min]="0" [max]="100" />
+            <pd-sparkline slot="sparkline" label="CPU, last hour" [values]="cpu" [area]="true" scale="zero" [max]="100" />
             <span slot="caption">peak 61% at 14:20</span>
           </pd-card>
           <pd-card heading="Memory">
             <pd-status-pill slot="status" status="warning" label="High" />
             <pd-metric [value]="17.1" unit="GB" [decimals]="1" />
-            <pd-sparkline slot="sparkline" label="Memory, last hour" [values]="mem" [min]="0" [max]="100" />
+            <pd-sparkline slot="sparkline" label="Memory, last hour" [values]="mem" scale="zero" [max]="100" />
             <span slot="caption">72% of 24 GB</span>
           </pd-card>
           <pd-card heading="Network" [interactive]="true" (activated)="clicks.set(clicks() + 1)">
@@ -318,6 +319,7 @@ const NET = [4, 6, 5, 9, 22, 18, 12, 9, 7, 8, 30, 26, 14, 10, 8, 9];
       <gal-data />
       <gal-view />
       <gal-widgets />
+      <gal-widget-grid />
       @defer (on viewport) {
         <gal-material />
       } @placeholder {

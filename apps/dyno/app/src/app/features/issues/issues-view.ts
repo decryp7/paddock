@@ -54,10 +54,10 @@ interface IssueLine extends Issue {
         @if (o.apps.length || o.kinds.length) {
           <div class="boards">
             @if (o.apps.length) {
-              <pd-table [toolbar]="false" label="Apps with the most issues" [rows]="appBoard()" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [selectedKey]="filter().app" (rowActivate)="toggleApp($event)" />
+              <pd-table height="window" [toolbar]="false" label="Apps with the most issues" [rows]="appBoard()" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [selectedKey]="filter().app" (rowActivate)="toggleApp($event)" />
             }
             @if (o.kinds.length) {
-              <pd-table [toolbar]="false" label="Issues by kind" [rows]="o.kinds" [columns]="kindColumns" [rowKey]="kindKey" [filterable]="false" [selectedKey]="filter().kind" (rowActivate)="toggleKind($event.kind)" />
+              <pd-table height="window" [toolbar]="false" label="Issues by kind" [rows]="o.kinds" [columns]="kindColumns" [rowKey]="kindKey" [filterable]="false" [selectedKey]="filter().kind" (rowActivate)="toggleKind($event.kind)" />
             }
           </div>
         }
@@ -81,7 +81,7 @@ interface IssueLine extends Issue {
                 <span>{{ o.total === 0 ? 'The system logs Dyno can read hold no crashes, hangs or other problems for this period.' : 'Clear the filter to see every issue again.' }}</span>
               </div>
             } @else {
-              <pd-table [toolbar]="false" label="Issues" [rows]="lines()" [columns]="columns" [rowKey]="lineKey" [filterable]="false" [maxHeight]="560" groupBy="day" [rowActions]="actions" [selectedKey]="selectedId()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="selectedId.set(null)">
+              <pd-table [toolbar]="false" label="Issues" [rows]="lines()" [columns]="columns" [rowKey]="lineKey" [filterable]="false" height="fill" groupBy="day" [rowActions]="actions" [selectedKey]="selectedId()" (rowActivate)="select($event)" (action)="run($event)" (keydown.escape)="selectedId.set(null)">
                 <ng-template pdCell="kind" let-i><span class="dot" [attr.data-tone]="dotTone(i)" aria-hidden="true"></span>{{ kindLabel(i.kind) }}</ng-template>
               </pd-table>
             }
@@ -114,9 +114,11 @@ interface IssueLine extends Issue {
     </dy-async>
   `,
   styles: `
-    :host { display: grid; gap: var(--sp-3); align-content: start; }
+    :host { display: flex; flex-direction: column; min-height: 0; }
     .chev { width: 22px; height: 22px; padding: 0; flex: none; --icon-size: 14px; }
-    dy-async { display: grid; gap: var(--sp-3); }
+    dy-async { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; gap: var(--sp-3); }
+    dy-async > * { flex: none; }
+    dy-async > .layout { flex: 1 1 0; }
     .hero { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-6); align-items: center; padding: var(--sp-4) var(--sp-5); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); }
     .score { display: flex; align-items: center; gap: var(--sp-4); min-width: 200px; }
     .big { font-size: 44px; font-weight: var(--fw-semibold); line-height: 1; letter-spacing: -0.02em; }
@@ -133,9 +135,9 @@ interface IssueLine extends Issue {
     .bar { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; min-height: 44px; }
     .grow { flex: 1; }
     .src { font-size: var(--fs-xs); }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: var(--sp-3); align-items: stretch; min-height: 320px; }
     .layout.with-detail { grid-template-columns: minmax(0, 1fr) 340px; }
-    .tablewrap { min-width: 0; }
+    .tablewrap { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
     .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: var(--sp-2); flex: none; background: var(--text-3); }
     .dot[data-tone='bad'] { background: var(--bad); }
     .dot[data-tone='warn'] { background: var(--warn); }
@@ -146,7 +148,7 @@ interface IssueLine extends Issue {
     .none { display: grid; justify-items: center; gap: var(--sp-2); padding: var(--sp-8) var(--sp-5); text-align: center; color: var(--text-3); }
     .none dy-icon { --icon-size: 32px; }
     .none strong { color: var(--text-1); font-size: 15px; font-weight: var(--fw-semibold); }
-    .detail { border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
+    .detail { align-self: start; max-height: 100%; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-2); padding: var(--sp-3) var(--sp-4); display: grid; gap: var(--sp-2); }
     .dhead { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--sp-2); }
     .dhead strong { overflow-wrap: anywhere; }
     h3 { margin: var(--sp-2) 0 0; font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--text-2); }

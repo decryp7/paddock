@@ -1,0 +1,110 @@
+diff --git a/src/lib.rs b/src/lib.rs
+index f5b028ea5..9a4f1459a 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -458,6 +458,19 @@ impl TrayIcon {
+         }
+     }
+ 
++    /// Paddock patch: how many `TaskbarCreated` messages this icon saw (Explorer restarted or finished creating its taskbar) and the
++    /// outcome of the last re-add. Elsewhere `(0, None)`.
++    pub fn taskbar_restarts(&self) -> (u32, Option<GuidStatus>) {
++        #[cfg(windows)]
++        {
++            self.tray.borrow().taskbar_restarts()
++        }
++        #[cfg(not(windows))]
++        {
++            (0, None)
++        }
++    }
++
+     /// Returns the id associated with this tray icon.
+     pub fn id(&self) -> &TrayIconId {
+         &self.id
+@@ -772,6 +785,18 @@ pub fn set_guid_provider(provider: GuidProvider) {
+     let _ = GUID_PROVIDER.set(provider);
+ }
+ 
++/// Paddock patch (see `apps/dyno/vendor/PATCHES.md`): maps a tray icon id to the autosave name its macOS status item gets before
++/// it connects to the menu bar.
++pub type AutosaveNameProvider = fn(&str) -> Option<String>;
++
++static AUTOSAVE_NAME_PROVIDER: OnceCell<AutosaveNameProvider> = OnceCell::new();
++
++/// Registers the provider of the macOS autosave name of every icon, by id (once per process; later calls are ignored). Only macOS
++/// uses the result.
++pub fn set_autosave_name_provider(provider: AutosaveNameProvider) {
++    let _ = AUTOSAVE_NAME_PROVIDER.set(provider);
++}
++
+ type TrayIconEventHandler = Box<dyn Fn(TrayIconEvent) + Send + Sync + 'static>;
+ 
+ static TRAY_CHANNEL: Lazy<(Sender<TrayIconEvent>, TrayIconEventReceiver)> = Lazy::new(unbounded);
+diff --git a/src/platform_impl/macos/mod.rs b/src/platform_impl/macos/mod.rs
+index 0458a2ae5..3023aabc8 100644
+--- a/src/platform_impl/macos/mod.rs
++++ b/src/platform_impl/macos/mod.rs
+@@ -53,6 +53,11 @@ impl TrayIcon {
+     ) -> crate::Result<(Retained<NSStatusItem>, Retained<TrayTarget>)> {
+         let ns_status_item =
+             NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
++        // Paddock patch: the autosave name before anything else touches the item, so ControlCenter sees one stable identity
++        // (it logged `Host id changed from ...Item-0... to ...menubar.<n>` when the name came after the first draw).
++        if let Some(name) = crate::AUTOSAVE_NAME_PROVIDER.get().and_then(|provider| provider(&id.0)) {
++            ns_status_item.setAutosaveName(Some(&NSString::from_str(&name)));
++        }
+ 
+         set_icon_for_ns_status_item_button(
+             &ns_status_item,
+diff --git a/src/platform_impl/windows/mod.rs b/src/platform_impl/windows/mod.rs
+index 250df2f20..3b91e8b4c 100644
+--- a/src/platform_impl/windows/mod.rs
++++ b/src/platform_impl/windows/mod.rs
+@@ -68,6 +68,9 @@ struct TrayUserData {
+     visible: bool,
+     /// Paddock patch: whether the shell accepted the last add (false when Explorer's notification area was not ready).
+     added: bool,
++    /// Paddock patch: how many times the shell announced `TaskbarCreated`, and the outcome of the last re-add.
++    restarts: u32,
++    last_restart: Option<crate::GuidStatus>,
+ }
+ 
+ impl TrayUserData {
+@@ -127,6 +130,8 @@ impl TrayIcon {
+                 menu_on_right_click: attrs.menu_on_right_click,
+                 visible: true,
+                 added: false,
++                restarts: 0,
++                last_restart: None,
+             };
+ 
+             let hwnd = CreateWindowExW(
+@@ -200,6 +205,18 @@ impl TrayIcon {
+         }
+     }
+ 
++    /// Paddock patch: how many `TaskbarCreated` messages the icon saw and what the last re-add came to (for the app's log).
++    pub fn taskbar_restarts(&self) -> (u32, Option<crate::GuidStatus>) {
++        unsafe {
++            let userdata = util::get_window_long(self.hwnd, GWL_USERDATA) as *const TrayUserData;
++            if userdata.is_null() {
++                (0, None)
++            } else {
++                ((*userdata).restarts, (*userdata).last_restart)
++            }
++        }
++    }
++
+     pub fn set_icon(&mut self, icon: Option<Icon>) -> crate::Result<()> {
+         unsafe {
+             let mut nid = NOTIFYICONDATAW {
+@@ -394,6 +411,8 @@ unsafe extern "system" fn tray_proc(
+                 userdata.visible,
+             );
+             userdata.added = status != crate::GuidStatus::NotAdded;
++            userdata.restarts += 1;
++            userdata.last_restart = Some(status);
+         }
+         WM_USER_SHOW_MENU_ON_LEFT_CLICK => {
+             userdata.menu_on_left_click = wparam != 0;

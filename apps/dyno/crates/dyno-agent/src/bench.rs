@@ -13,11 +13,14 @@
 
 use crate::agent::{lock, now};
 use crate::bench_child::{self, ChildEvents, ChildProcess, ChildRequest, ProcessChild, Stop, UnitControl, UnitHandle};
+use crate::bench_scratch;
 use crate::files;
 use dyno_core::bench::unit::{self, UnitCommand, UnitRecord};
-use dyno_core::bench::wire::{battery_preflight, plan_bound, stop_for_battery, Liveness, PhaseProgress, Preflight, BATTERY_STOP_REASON};
+use dyno_core::bench::wire::{
+    battery_preflight, plan_bound_full, stop_for_battery, Liveness, PhaseProgress, Preflight, BATTERY_STOP_REASON,
+};
 use dyno_core::bench::{
-    BenchHistory, BenchKind, BenchOverview, BenchPhase, BenchProgress, BenchRun, BenchStatus, KindResult, LoadAtRun, RunPlan,
+    BenchHistory, BenchKind, BenchMetric, BenchOverview, BenchPhase, BenchProgress, BenchRun, BenchStatus, KindResult, LoadAtRun, RunPlan,
     HISTORY_VERSION,
 };
 use dyno_core::protocol::{AgentError, ErrorCode};
@@ -28,9 +31,11 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::bench_disk_target as disk_target;
+
 /// The executables the agent starts by name for benchmarks, declared once: each must be in `bundle.externalBin`
 /// (`scripts/check-shipped.mjs` reads this list and fails when one is not bundled, ADR 0030 B0).
-pub const RUNNER_NAMES: &[&str] = &["dyno-bench"];
+pub const RUNNER_NAMES: &[&str] = &["dyno-bench", "dyno-bench-gpu"];
 
 /// What the person sees when the runner is not in the installation (an older install, or a damaged one).
 pub const RUNNER_MISSING: &str =
@@ -51,6 +56,11 @@ pub trait BenchLauncher: Send + Sync {
     /// Cleans up what an earlier agent left behind (Linux: units it started). Called once when the history is loaded.
     fn cleanup_leftovers(&self) {}
 
+    /// The graphics adapters the GPU runner lists, for the picker.
+    fn gpu_adapters(&self) -> Result<Vec<dyno_core::bench::gpu::GpuAdapter>, String> {
+        Err("This agent has no graphics runner.".into())
+    }
+
     /// Set when this launcher cannot give the full-confidence conditions (Linux without a user manager): recorded with the run.
     fn limited(&self) -> Option<String> {
         None
@@ -63,6 +73,22 @@ pub trait BenchEnv: Send + Sync {
     fn register_job(&self, title: &str, subject: Option<&str>) -> Option<JobContext>;
     /// Whether the machine runs on battery now (`None` when unknown or no battery).
     fn on_battery(&self) -> Option<bool>;
+    /// The volumes mounted now (the disk map's list); empty where the agent has none.
+    fn volumes(&self) -> Vec<dyno_core::disk::volume::Volume> {
+        Vec::new()
+    }
+    /// Memory available to start new work now, bytes (`None` when the agent has no reading).
+    fn available_memory(&self) -> Option<u64> {
+        None
+    }
+    /// The latest reading of clock, temperature and power for the throttle judgement (`None` when the agent has none).
+    fn throttle_input(&self) -> Option<dyno_core::throttle::ThrottleInput> {
+        None
+    }
+    /// Capacity and free bytes of the volume mounted at `mount` as of now (`None` when the OS will not say).
+    fn space(&self, _mount: &str) -> Option<(u64, u64)> {
+        None
+    }
 }
 
 struct NoEnv;
@@ -267,8 +293,25 @@ impl ProcessLauncher {
         }
     }
 
+    /// The program that measures `kind`: `dyno-bench`, or its sibling `dyno-bench-gpu` for graphics.
+    fn exe_for(&self, kind: BenchKind) -> PathBuf {
+        if kind != BenchKind::Gpu {
+            return self.exe.clone();
+        }
+        let name = if cfg!(windows) {
+            format!("{}.exe", RUNNER_NAMES[1])
+        } else {
+            RUNNER_NAMES[1].to_string()
+        };
+        self.exe.with_file_name(name)
+    }
+
     /// The command line for a kind (the runner's own arguments).
     fn runner_args(req: &ChildRequest) -> Vec<String> {
+        // The graphics runner is its own program and takes no kind (ADR 0030 D2); the default adapter is the discrete one.
+        if req.kind == BenchKind::Gpu {
+            return req.gpu_adapter.map_or_else(Vec::new, |i| vec!["--adapter".into(), i.to_string()]);
+        }
         let mut args = vec![req.kind.name().to_string()];
         if req.kind == BenchKind::Disk {
             args.extend([
@@ -277,14 +320,39 @@ impl ProcessLauncher {
                 "--disk-mib".into(),
                 req.disk_mib.to_string(),
             ]);
+            if req.rotational {
+                args.push("--rotational".into());
+            }
+        }
+        if let (BenchKind::Memory, Some(mib)) = (req.kind, req.available_mib) {
+            args.extend(["--avail-mib".into(), mib.to_string()]);
+        }
+        if req.kind == BenchKind::Disk && req.sustained_write_mib > 0 {
+            args.extend(["--sustained-write-mib".into(), req.sustained_write_mib.to_string()]);
+        }
+        if let (BenchKind::Cpu, Some(secs)) = (req.kind, req.sustained_secs) {
+            args.extend(["--sustained-secs".into(), secs.to_string()]);
         }
         args
     }
 }
 
 impl BenchLauncher for ProcessLauncher {
+    fn gpu_adapters(&self) -> Result<Vec<dyno_core::bench::gpu::GpuAdapter>, String> {
+        let exe = self.exe_for(BenchKind::Gpu);
+        if !exe.is_file() {
+            return Err(RUNNER_MISSING.into());
+        }
+        let mut cmd = dyno_platform::process::command(&exe);
+        cmd.arg("--list");
+        let out = dyno_platform::process::run_with_timeout(cmd, Duration::from_secs(20))
+            .map_err(|e| format!("The graphics runner did not answer ({e})."))?;
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("The graphics runner's list could not be read ({e})."))
+    }
+
     fn run(&self, req: &ChildRequest, events: &dyn ChildEvents) -> BenchStatus {
-        if !self.exe.is_file() {
+        let exe = self.exe_for(req.kind);
+        if !exe.is_file() {
             log::warn!("dyno-agent: benchmark {}: the runner is not in the installation", req.kind.name());
             return BenchStatus::Unavailable {
                 reason: RUNNER_MISSING.into(),
@@ -295,20 +363,30 @@ impl BenchLauncher for ProcessLauncher {
         let (cmd, shown) = match &unit_name {
             Some(name) => {
                 args.push("--wait-go".into());
-                let c = unit::run_command(name, &self.exe, &args);
+                let c = unit::run_command(name, &exe, &args);
                 let mut cmd = dyno_platform::process::command(c.program);
                 cmd.args(&c.args);
                 (cmd, c.display())
             }
             None => {
-                let mut cmd = dyno_platform::process::command(&self.exe);
+                let mut cmd = dyno_platform::process::command(&exe);
                 cmd.args(&args);
-                (cmd, format!("{} {}", RUNNER_NAMES[0], args.join(" ")))
+                (
+                    cmd,
+                    format!(
+                        "{} {}",
+                        exe.file_name().map_or_else(|| RUNNER_NAMES[0].into(), |n| n.to_string_lossy()),
+                        args.join(" ")
+                    ),
+                )
             }
         };
         // Neither the program's folder nor the scratch folder goes into the log (they may be under the user's home).
         let shown = shown
-            .replace(self.exe.to_string_lossy().as_ref(), RUNNER_NAMES[0])
+            .replace(
+                exe.to_string_lossy().as_ref(),
+                RUNNER_NAMES[usize::from(req.kind == BenchKind::Gpu)],
+            )
             .replace(req.scratch.to_string_lossy().as_ref(), "<scratch>");
         log::info!("dyno-agent: run {} {}: starting `{shown}`", req.run_id, req.kind.name());
         let handle = unit_name.as_ref().map(|name| {
@@ -360,7 +438,19 @@ impl BenchLauncher for ProcessLauncher {
                 log::warn!("dyno-agent: run {}: could not tell the runner to go: {e}", req.run_id);
             }
         }
-        let status = bench_child::drive(&mut child, events, &SystemClock::new(), plan_bound(&[req.kind]), req.kind);
+        let status = bench_child::drive(
+            &mut child,
+            events,
+            &SystemClock::new(),
+            plan_bound_full(
+                &[req.kind],
+                req.disk_mib,
+                1,
+                req.sustained_secs,
+                req.sustained_write_mib.div_ceil(1024),
+            ),
+            req.kind,
+        );
         if let Some(name) = &unit_name {
             forget_record(&self.records, name);
         }
@@ -435,6 +525,69 @@ struct RunEvents {
     on_battery: Mutex<Option<bool>>,
     /// Why a safety stop ended the run, once one did.
     safety: Mutex<Option<String>>,
+    /// The sustained run's points, with what the agent read beside each.
+    trace: Mutex<Vec<dyno_core::bench::cpu::TracePoint>>,
+    /// Heat watch and the same throttle judgement as monitoring (ADR 0018), fed once a second during a sustained run.
+    heat: Mutex<dyno_core::bench::cpu::HeatWatch>,
+    tracker: Mutex<dyno_core::throttle::ThrottleTracker>,
+    /// The episodes the tracker closed or still has open.
+    episodes: Mutex<Vec<dyno_core::throttle::ThrottleEpisode>>,
+    /// What the child said about how it measured.
+    notes: Mutex<Vec<String>>,
+    /// A heat stop decided by a sample, delivered by the next `stop`.
+    heat_stop: Mutex<Option<String>>,
+}
+
+impl RunEvents {
+    fn new(centre: BenchCentre, kind: BenchKind, job: Option<JobContext>, consent: bool) -> RunEvents {
+        RunEvents {
+            centre,
+            kind,
+            job,
+            consent,
+            phase_id: Mutex::new(String::new()),
+            ticks: AtomicU32::new(0),
+            on_battery: Mutex::new(None),
+            safety: Mutex::new(None),
+            trace: Mutex::new(Vec::new()),
+            heat: Mutex::new(dyno_core::bench::cpu::HeatWatch::new()),
+            tracker: Mutex::new(dyno_core::throttle::ThrottleTracker::new()),
+            episodes: Mutex::new(Vec::new()),
+            heat_stop: Mutex::new(None),
+            notes: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The trace so far, emptied.
+    fn take_trace(&self) -> Vec<dyno_core::bench::cpu::TracePoint> {
+        std::mem::take(&mut lock(&self.trace))
+    }
+
+    /// Adds what the throttle tracker found to a finished sustained run: the number of episodes, and a word per episode in the log.
+    fn finish_sustained(&self, status: BenchStatus) -> BenchStatus {
+        let BenchStatus::Done { mut metrics } = status else { return status };
+        let mut episodes = std::mem::take(&mut *lock(&self.episodes));
+        if let Some(open) = lock(&self.tracker).current() {
+            episodes.retain(|e| e.id != open.id);
+            episodes.push(open);
+        }
+        for e in &episodes {
+            log::info!(
+                "dyno-agent: sustained run: throttling from {} for {} s, cause {}, lost {:.0}% on average",
+                e.start.millis(),
+                e.duration_ms(e.end.unwrap_or(e.start)) / 1000,
+                e.cause.label(),
+                e.avg_lost_percent
+            );
+        }
+        metrics.push(BenchMetric::lower(
+            "cpu-sustained-episodes",
+            "Throttling episodes",
+            episodes.len() as f64,
+            "episodes",
+        ));
+        BenchStatus::Done { metrics }
+    }
 }
 
 impl ChildEvents for RunEvents {
@@ -463,7 +616,53 @@ impl ChildEvents for RunEvents {
         self.centre.touch();
     }
 
+    fn note(&self, text: &str) {
+        let mut n = lock(&self.notes);
+        if n.len() < 20 {
+            n.push(text.to_string());
+        }
+    }
+
+    fn sample(&self, secs: u32, throughput: f64) {
+        let env = lock(&self.centre.inner.env).clone();
+        let input = env.throttle_input();
+        let point = dyno_core::bench::cpu::TracePoint {
+            secs,
+            throughput,
+            freq_mhz: input.as_ref().map(|i| i.frequency_mhz).filter(|f| *f > 0),
+            temp_c: input.as_ref().and_then(|i| i.temperature_c),
+        };
+        if let Some(i) = &input {
+            let why = lock(&self.heat).push(
+                secs,
+                i.temperature_c,
+                i.critical_c,
+                dyno_core::bench::cpu::os_critical(&i.os),
+                dyno_core::throttle::HOT_MARGIN_C,
+                dyno_core::throttle::HOT_DEFAULT_C,
+            );
+            if let Some(why) = why {
+                *lock(&self.heat_stop) = Some(why.to_string());
+            }
+            for ev in lock(&self.tracker).push(*i) {
+                let (dyno_core::throttle::TrackerEvent::Ended(e) | dyno_core::throttle::TrackerEvent::Started(e)) = ev;
+                let mut all = lock(&self.episodes);
+                all.retain(|x| x.id != e.id);
+                all.push(e);
+            }
+        }
+        lock(&self.trace).push(point);
+        if let Some(r) = lock(&self.centre.inner.state).running.as_mut() {
+            r.trace = lock(&self.trace).clone();
+        }
+        self.centre.touch();
+    }
+
     fn stop(&self) -> Option<Stop> {
+        if let Some(why) = lock(&self.heat_stop).clone() {
+            *lock(&self.safety) = Some(why.clone());
+            return Some(Stop::Safety(why));
+        }
         if self.centre.inner.cancel.load(Ordering::SeqCst) || self.job.as_ref().is_some_and(|j| j.cancel_token().is_cancelled()) {
             return Some(Stop::Cancelled);
         }
@@ -486,6 +685,9 @@ impl BenchCentre {
     pub fn load(file: PathBuf, scratch_root: PathBuf, launcher: Box<dyn BenchLauncher>) -> (BenchCentre, Option<String>) {
         let (history, warning) = files::load(&file, BenchHistory::parse);
         launcher.cleanup_leftovers();
+        for gone in bench_scratch::cleanup_leftovers(&bench_scratch::records_file(&file)) {
+            log::info!("dyno-agent: removed a scratch folder an earlier agent left: {gone}");
+        }
         let centre = BenchCentre {
             inner: Arc::new(Inner {
                 changed: std::sync::Condvar::new(),
@@ -509,6 +711,11 @@ impl BenchCentre {
         *lock(&self.inner.env) = env;
     }
 
+    /// The graphics adapters, listed by the graphics runner (the request starts it for a moment).
+    pub fn gpu_adapters(&self) -> Result<Vec<dyno_core::bench::gpu::GpuAdapter>, String> {
+        self.inner.launcher.gpu_adapters()
+    }
+
     /// The history and the run in progress.
     pub fn overview(&self) -> BenchOverview {
         let s = lock(&self.inner.state);
@@ -516,6 +723,7 @@ impl BenchCentre {
             running: s.running.clone(),
             runs: s.history.runs.clone(),
             disk_test_enabled: dyno_core::bench::DISK_TEST_ENABLED,
+            estimates: dyno_core::bench::estimate::standard(),
         }
     }
 
@@ -557,6 +765,7 @@ impl BenchCentre {
             running: s.running.clone(),
             runs: s.history.runs.clone(),
             disk_test_enabled: dyno_core::bench::DISK_TEST_ENABLED,
+            estimates: dyno_core::bench::estimate::standard(),
         };
         let guard = lock(&self.inner.state);
         let (guard, _) = self
@@ -588,6 +797,13 @@ impl BenchCentre {
             log::info!("dyno-agent: a benchmark was asked for on battery without consent; asking first");
             return Err(AgentError::new(ErrorCode::NeedsConsent, BATTERY_CONSENT));
         }
+        if let Some(minutes) = plan.sustained_minutes {
+            let readable = lock(&self.inner.env)
+                .clone()
+                .throttle_input()
+                .is_some_and(|i| i.temperature_c.is_some());
+            dyno_core::bench::cpu::check_length(minutes, readable).map_err(|e| AgentError::new(ErrorCode::BadRequest, e))?;
+        }
         let started = now();
         let run_id = {
             let mut s = lock(&self.inner.state);
@@ -608,6 +824,7 @@ impl BenchCentre {
                 phase: None,
                 liveness: Liveness::Running,
                 limited: self.inner.launcher.limited(),
+                trace: Vec::new(),
             });
             id
         };
@@ -690,71 +907,96 @@ impl BenchCentre {
         );
     }
 
-    /// Every kind in order; returns the results and how the run ended.
+    /// Every kind in order (the disk test once per chosen drive); returns the results and how the run ended.
     fn run_kinds(&self, run_id: &str, plan: &RunPlan, job: Option<&JobContext>, consent: bool) -> RunOutcome {
         let mut results: Vec<KindResult> = Vec::new();
         let mut stopped = false;
         let mut safety = None;
         for kind in &plan.kinds {
-            // Cancel from the page or from the Jobs view (the job's token).
-            let cancelled = self.inner.cancel.load(Ordering::SeqCst) || job.is_some_and(|j| j.cancel_token().is_cancelled());
-            if stopped || cancelled {
-                stopped = true;
+            // The disk test is one measurement per drive; every other kind runs once.
+            let targets: Vec<Option<disk_target::Target>> = if *kind == BenchKind::Disk {
+                let env = lock(&self.inner.env).clone();
+                disk_target::resolve(plan, &env.volumes(), &self.inner.scratch_root)
+                    .into_iter()
+                    .map(Some)
+                    .collect()
+            } else {
+                vec![None]
+            };
+            let last = targets.len().saturating_sub(1);
+            for (i, target) in targets.into_iter().enumerate() {
+                // Cancel from the page or from the Jobs view (the job's token).
+                let cancelled = self.inner.cancel.load(Ordering::SeqCst) || job.is_some_and(|j| j.cancel_token().is_cancelled());
+                let device = target.as_ref().map(|t| t.name.clone());
+                if stopped || cancelled {
+                    stopped = true;
+                    results.push(KindResult {
+                        kind: *kind,
+                        millis: 0,
+                        method: kind.method_version(),
+                        device,
+                        needs_folder: false,
+                        trace: Vec::new(),
+                        details: Vec::new(),
+                        status: BenchStatus::Stopped {
+                            reason: "Cancelled before it started.".into(),
+                        },
+                    });
+                    continue;
+                }
+                if let Some(r) = lock(&self.inner.state).running.as_mut() {
+                    r.current = Some(*kind);
+                    r.phase = None;
+                    r.liveness = Liveness::Running;
+                }
+                self.touch();
+                let t = Instant::now();
+                let events = RunEvents::new(self.clone(), *kind, job.cloned(), consent);
+                let (status, needs_folder) = match &target {
+                    Some(t) => self.measure_disk(run_id, t, plan, &events),
+                    None => (self.measure(run_id, *kind, plan, &events), false),
+                };
+                if let Some(why) = lock(&events.safety).take() {
+                    safety = Some(why);
+                }
+                let millis = u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX);
+                let outcome = match &status {
+                    BenchStatus::Done { metrics } => format!("done, {} metrics", metrics.len()),
+                    BenchStatus::Unavailable { reason } => format!("unavailable ({reason})"),
+                    BenchStatus::Stopped { reason } => format!("stopped ({reason})"),
+                    BenchStatus::Failed { reason } => format!("failed ({reason})"),
+                };
+                log::info!(
+                    "dyno-agent: run {run_id} {}{}: {outcome} in {millis} ms",
+                    kind.name(),
+                    device.as_deref().map_or(String::new(), |d| format!(" on {d}"))
+                );
+                // A safety stop ends the run, not only the kind: the rest never start.
+                if matches!(&status, BenchStatus::Stopped { .. }) {
+                    stopped = true;
+                }
                 results.push(KindResult {
                     kind: *kind,
-                    millis: 0,
+                    millis,
                     method: kind.method_version(),
-                    status: BenchStatus::Stopped {
-                        reason: "Cancelled before it started.".into(),
-                    },
+                    device,
+                    needs_folder,
+                    trace: events.take_trace(),
+                    details: disk_target::facts(target.as_ref())
+                        .into_iter()
+                        .chain(std::mem::take(&mut *lock(&events.notes)))
+                        .collect(),
+                    status,
                 });
-                continue;
+                if i == last {
+                    if let Some(r) = lock(&self.inner.state).running.as_mut() {
+                        r.current = None;
+                        r.phase = None;
+                        r.done.push(*kind);
+                    }
+                }
+                self.touch();
             }
-            if let Some(r) = lock(&self.inner.state).running.as_mut() {
-                r.current = Some(*kind);
-                r.phase = None;
-                r.liveness = Liveness::Running;
-            }
-            self.touch();
-            let t = Instant::now();
-            let events = RunEvents {
-                centre: self.clone(),
-                kind: *kind,
-                job: job.cloned(),
-                consent,
-                phase_id: Mutex::new(String::new()),
-                ticks: AtomicU32::new(0),
-                on_battery: Mutex::new(None),
-                safety: Mutex::new(None),
-            };
-            let status = self.measure(run_id, *kind, plan.disk_mib, &events);
-            if let Some(why) = lock(&events.safety).take() {
-                safety = Some(why);
-            }
-            let millis = u64::try_from(t.elapsed().as_millis()).unwrap_or(u64::MAX);
-            let outcome = match &status {
-                BenchStatus::Done { metrics } => format!("done, {} metrics", metrics.len()),
-                BenchStatus::Unavailable { reason } => format!("unavailable ({reason})"),
-                BenchStatus::Stopped { reason } => format!("stopped ({reason})"),
-                BenchStatus::Failed { reason } => format!("failed ({reason})"),
-            };
-            log::info!("dyno-agent: run {run_id} {}: {outcome} in {millis} ms", kind.name());
-            // A safety stop ends the run, not only the kind: the rest never start.
-            if matches!(&status, BenchStatus::Stopped { .. }) {
-                stopped = true;
-            }
-            results.push(KindResult {
-                kind: *kind,
-                millis,
-                method: kind.method_version(),
-                status,
-            });
-            if let Some(r) = lock(&self.inner.state).running.as_mut() {
-                r.current = None;
-                r.phase = None;
-                r.done.push(*kind);
-            }
-            self.touch();
         }
         RunOutcome {
             results,
@@ -763,35 +1005,124 @@ impl BenchCentre {
         }
     }
 
-    /// One kind, with its scratch folder made and removed here.
-    fn measure(&self, run_id: &str, kind: BenchKind, disk_mib: u32, events: &RunEvents) -> BenchStatus {
-        let scratch = self.inner.scratch_root.join(format!("dyno-bench-{run_id}"));
-        if kind == BenchKind::Disk {
-            if let Err(e) = std::fs::create_dir_all(&scratch) {
-                return BenchStatus::Failed {
-                    reason: format!("Dyno could not make a scratch folder for the disk test ({e})."),
-                };
-            }
-        }
+    /// One kind other than disk.
+    fn measure(&self, run_id: &str, kind: BenchKind, plan: &RunPlan, events: &RunEvents) -> BenchStatus {
+        let sustained_secs = (kind == BenchKind::Cpu).then_some(plan.sustained_minutes).flatten().map(|m| m * 60);
         let req = ChildRequest {
             run_id: run_id.to_string(),
             kind,
-            scratch: scratch.clone(),
-            disk_mib,
+            scratch: PathBuf::new(),
+            disk_mib: plan.disk_mib,
+            rotational: false,
+            sustained_secs,
+            sustained_write_mib: 0,
+            available_mib: (kind == BenchKind::Memory)
+                .then(|| lock(&self.inner.env).clone().available_memory())
+                .flatten()
+                .map(|b| b / (1024 * 1024)),
+            gpu_adapter: (kind == BenchKind::Gpu).then_some(plan.gpu_adapter).flatten(),
         };
+        let status = self.launch(&req, events);
+        if sustained_secs.is_some() {
+            events.finish_sustained(status)
+        } else {
+            status
+        }
+    }
+
+    /// The disk test on one drive: refusals and free space first, then the scratch folder (recorded before anything is written),
+    /// the runner, and the folder removed whatever the runner did. The numbers get the drive in their ids and labels, so runs
+    /// are compared drive by drive.
+    fn measure_disk(&self, run_id: &str, target: &disk_target::Target, plan: &RunPlan, events: &RunEvents) -> (BenchStatus, bool) {
+        let disk_mib = plan.disk_mib;
+        if let Some(reason) = &target.refusal {
+            log::info!("dyno-agent: run {run_id}: disk {}: not tested: {reason}", target.name);
+            return (BenchStatus::Unavailable { reason: reason.clone() }, false);
+        }
+        let file_bytes = u64::from(disk_mib) * dyno_core::bench::disk::MIB;
+        // The numbers as of now, not as of the last listing.
+        let now_space = lock(&self.inner.env).clone().space(&target.mount.to_string_lossy());
+        let (cap, free) = now_space.map_or((target.capacity, target.free), |(c, f)| (Some(c), Some(f)));
+        if let Err(reason) = dyno_core::bench::disk::check_free(&target.name, file_bytes, cap, free) {
+            log::info!("dyno-agent: run {run_id}: disk {}: not tested: {reason}", target.name);
+            return (BenchStatus::Unavailable { reason }, false);
+        }
+        let records = bench_scratch::records_file(&self.inner.file);
+        let folder = match bench_scratch::ScratchFolder::create(&target.folder(run_id), &records) {
+            Ok(f) => f,
+            Err(e) => {
+                log::warn!("dyno-agent: run {run_id}: disk {}: no scratch folder: {e}", target.name);
+                return (
+                    BenchStatus::Unavailable {
+                        reason: format!(
+                            "Dyno could not make a folder to test {} ({e}). Choose a folder on that drive that you can write to, or on a Mac allow Dyno under System Settings > Privacy & Security > Files and Folders, then run again.",
+                            target.name
+                        ),
+                    },
+                    wants_folder(&e, target),
+                );
+            }
+        };
+        // A permission prompt belongs here, before the run, while the person is looking at the screen.
+        if let Err(e) = folder.probe() {
+            log::warn!("dyno-agent: run {run_id}: disk {}: the probe was refused: {e}", target.name);
+            return (
+                BenchStatus::Unavailable {
+                    reason: format!(
+                        "{} did not let Dyno write to it ({e}). Choose a folder on that drive that you can write to, or on a Mac allow Dyno under System Settings > Privacy & Security > Files and Folders, then run again.",
+                        target.name
+                    ),
+                },
+                wants_folder(&e, target),
+            );
+        }
+        // The sustained write the person confirmed, cut to what this drive can take (the smaller of 25 % of its free space and 64 GiB).
+        let sustained_write_mib = plan.sustained_write_gib.map_or(0, |asked| {
+            let cap = dyno_core::bench::disk::sustained_write_cap_gib(free.unwrap_or(0));
+            if cap < asked {
+                log::info!(
+                    "dyno-agent: run {run_id}: disk {}: sustained write cut from {asked} to {cap} GiB by the free space",
+                    target.name
+                );
+            }
+            asked.min(cap) * 1024
+        });
+        let req = ChildRequest {
+            run_id: run_id.to_string(),
+            kind: BenchKind::Disk,
+            scratch: folder.path().to_path_buf(),
+            disk_mib,
+            rotational: target.rotational == Some(true),
+            sustained_secs: None,
+            sustained_write_mib,
+            available_mib: None,
+            gpu_adapter: None,
+        };
+        let status = self.launch(&req, events);
+        drop(folder);
+        (disk_target::mark(status, target), false)
+    }
+
+    /// Hands the request to the launcher; a panic in it is one failed kind.
+    fn launch(&self, req: &ChildRequest, events: &RunEvents) -> BenchStatus {
         let launcher = &self.inner.launcher;
-        let status = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| launcher.run(&req, events))).unwrap_or_else(|_| {
-            log::error!("dyno-agent: run {run_id} {}: the launcher panicked", kind.name());
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| launcher.run(req, events))).unwrap_or_else(|_| {
+            log::error!("dyno-agent: run {} {}: the launcher panicked", req.run_id, req.kind.name());
             BenchStatus::Failed {
                 reason: "The benchmark runner crashed.".into(),
             }
-        });
-        if kind == BenchKind::Disk {
-            let removed = std::fs::remove_dir_all(&scratch);
-            log::info!("dyno-agent: run {run_id}: scratch folder removed: {}", removed.is_ok());
-        }
-        status
+        })
     }
+}
+
+/// Whether a refusal to write is one a folder chosen by the person can cure: the drive's top is not writable, no folder was chosen yet,
+/// and this is not the system drive (whose scratch folder is in the temp folder).
+fn wants_folder(e: &std::io::Error, t: &disk_target::Target) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+    ) && !t.is_system
+        && t.folder_root.is_none()
 }
 
 /// The file version written next to the history (kept for the schema test).
@@ -812,6 +1143,10 @@ mod tests {
         talk: bool,
         /// Waits for the run to be stopped instead of answering.
         until_stopped: bool,
+        /// The scratch folders the disk test was given, in order.
+        seen: Arc<Mutex<Vec<PathBuf>>>,
+        /// A sustained run reports a sample a second for this many seconds (zero: it answers at once).
+        sustained_for: u32,
     }
 
     impl Fake {
@@ -822,6 +1157,8 @@ mod tests {
                 panic_on: None,
                 talk: false,
                 until_stopped: false,
+                seen: Arc::default(),
+                sustained_for: 0,
             }
         }
     }
@@ -829,6 +1166,9 @@ mod tests {
     impl BenchLauncher for Fake {
         fn run(&self, req: &ChildRequest, events: &dyn ChildEvents) -> BenchStatus {
             self.calls.fetch_add(1, Ordering::SeqCst);
+            if req.kind == BenchKind::Disk {
+                lock(&self.seen).push(req.scratch.clone());
+            }
             if let Some(g) = &self.gate {
                 let mut open = lock(&g.0);
                 while !*open {
@@ -849,6 +1189,17 @@ mod tests {
                 });
                 events.liveness(Liveness::NotResponding);
             }
+            if req.sustained_secs.is_some() && self.sustained_for > 0 {
+                for s in 1..=self.sustained_for {
+                    events.sample(s, 100.0);
+                    if let Some(Stop::Safety(reason)) = events.stop() {
+                        return BenchStatus::Stopped { reason };
+                    }
+                }
+                return BenchStatus::Done {
+                    metrics: vec![BenchMetric::higher("cpu-sustained-peak", "Peak", 100.0, "GFLOPS")],
+                };
+            }
             if self.until_stopped {
                 loop {
                     match events.stop() {
@@ -867,13 +1218,53 @@ mod tests {
                 std::fs::write(req.scratch.join("left-behind"), b"x").unwrap();
             }
             BenchStatus::Done {
-                metrics: vec![BenchMetric::higher("m", "M", 1.0, "u")],
+                metrics: vec![BenchMetric::higher(
+                    if req.kind == BenchKind::Disk { "disk-seq1m-t1-read" } else { "m" },
+                    "M",
+                    1.0,
+                    "u",
+                )],
             }
         }
     }
 
+    /// An environment with a chosen volume list and room (or not) on every drive; no jobs, no battery.
+    struct Roomy {
+        volumes: Vec<dyno_core::disk::volume::Volume>,
+        space: Option<(u64, u64)>,
+    }
+
+    impl BenchEnv for Roomy {
+        fn register_job(&self, _: &str, _: Option<&str>) -> Option<JobContext> {
+            None
+        }
+
+        fn on_battery(&self) -> Option<bool> {
+            None
+        }
+
+        fn volumes(&self) -> Vec<dyno_core::disk::volume::Volume> {
+            self.volumes.clone()
+        }
+
+        fn space(&self, _: &str) -> Option<(u64, u64)> {
+            self.space
+        }
+    }
+
+    const TB: u64 = 1_000_000_000_000;
+
+    fn roomy() -> Arc<Roomy> {
+        Arc::new(Roomy {
+            volumes: Vec::new(),
+            space: Some((TB, TB / 2)),
+        })
+    }
+
     fn centre_with(dir: &Path, fake: Fake) -> BenchCentre {
-        BenchCentre::load(dir.join("bench.json"), dir.to_path_buf(), Box::new(fake)).0
+        let c = BenchCentre::load(dir.join("bench.json"), dir.to_path_buf(), Box::new(fake)).0;
+        c.attach(roomy());
+        c
     }
 
     fn centre(dir: &Path, gate: Option<Arc<(Mutex<bool>, std::sync::Condvar)>>, panic_on: Option<BenchKind>) -> BenchCentre {
@@ -975,6 +1366,10 @@ mod tests {
         fn on_battery(&self) -> Option<bool> {
             *lock(&self.battery)
         }
+
+        fn space(&self, _: &str) -> Option<(u64, u64)> {
+            Some((TB, TB / 2))
+        }
     }
 
     #[test]
@@ -991,7 +1386,9 @@ mod tests {
         assert!(!o.runs[0].old_way);
         let leftovers: Vec<_> = std::fs::read_dir(tmp.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
         assert!(
-            leftovers.iter().all(|n| !n.to_string_lossy().starts_with("dyno-bench-")),
+            leftovers
+                .iter()
+                .all(|n| !n.to_string_lossy().contains("dyno-bench-") && n != "bench-scratch.json"),
             "{leftovers:?}"
         );
         // The history survives a restart.
@@ -1003,6 +1400,271 @@ mod tests {
         assert!(warn.is_none());
         assert_eq!(again.overview().runs.len(), 1);
         assert!(again.run(&o.runs[0].id).is_some());
+    }
+
+    fn volume(mount: &Path, name: &str) -> dyno_core::disk::volume::Volume {
+        dyno_core::disk::volume::Volume {
+            id: mount.to_string_lossy().into_owned(),
+            name: name.into(),
+            mount: mount.to_string_lossy().into_owned(),
+            fs: "apfs".into(),
+            location: dyno_core::disk::volume::VolumeLocation::External { bus: Some("USB".into()) },
+            capacity: Some(TB),
+            free: Some(TB / 2),
+            rotational: Some(false),
+            read_only: false,
+            reachable: true,
+            whole_volume: true,
+            measured_at: None,
+            freshness: Default::default(),
+        }
+    }
+
+    fn disk_centre(tmp: &Path, volumes: Vec<dyno_core::disk::volume::Volume>, space: Option<(u64, u64)>, fake: Fake) -> BenchCentre {
+        let c = BenchCentre::load(tmp.join("bench.json"), tmp.to_path_buf(), Box::new(fake)).0;
+        c.attach(Arc::new(Roomy { volumes, space }));
+        c
+    }
+
+    fn start_disk(c: &BenchCentre, drives: &[&Path]) {
+        let ids: Vec<String> = drives.iter().map(|d| d.to_string_lossy().into_owned()).collect();
+        let plan = plan_with(&[BenchKind::Disk], None, "disk", None, true)
+            .unwrap()
+            .with_drives(&ids, false)
+            .unwrap();
+        c.start(plan, None, LoadAtRun::default(), "m".into(), false).unwrap();
+    }
+
+    #[test]
+    fn the_disk_test_runs_once_per_chosen_drive_in_its_own_folder_and_marks_the_numbers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let fake = Fake::plain();
+        let seen = fake.seen.clone();
+        let c = disk_centre(
+            tmp.path(),
+            vec![volume(a.path(), "Alpha"), volume(b.path(), "Beta")],
+            Some((TB, TB / 2)),
+            fake,
+        );
+        start_disk(&c, &[b.path(), a.path()]);
+        let o = wait_idle(&c);
+        let r = &o.runs[0].results;
+        assert_eq!(
+            r.iter().map(|k| k.device.as_deref()).collect::<Vec<_>>(),
+            [Some("Beta"), Some("Alpha")]
+        );
+        assert!(r.iter().all(|k| matches!(k.status, BenchStatus::Done { .. })));
+        let ids: Vec<String> = o.runs[0].metrics().map(|(_, m)| m.id.clone()).collect();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1], "two drives never share a metric id");
+        assert!(ids.iter().all(|i| i.starts_with("disk-") && i.ends_with("-seq1m-t1-read")));
+        // Each drive's folder is at its own top; both are gone, with what the runner left in them.
+        let seen = lock(&seen);
+        assert_eq!(seen[0].parent(), Some(b.path()));
+        assert_eq!(seen[1].parent(), Some(a.path()));
+        assert!(seen.iter().all(|p| !p.exists()));
+        assert_eq!(
+            std::fs::read_dir(a.path()).unwrap().count() + std::fs::read_dir(b.path()).unwrap().count(),
+            0
+        );
+        assert!(!tmp.path().join("bench-scratch.json").exists(), "nothing is recorded any more");
+    }
+
+    #[test]
+    fn a_refused_or_cramped_or_vanished_drive_is_unavailable_with_its_reason_and_the_others_still_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (ok, ro) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let mut readonly = volume(ro.path(), "Frozen");
+        readonly.read_only = true;
+        let fake = Fake::plain();
+        let seen = fake.seen.clone();
+        let c = disk_centre(tmp.path(), vec![readonly, volume(ok.path(), "Fine")], Some((TB, TB / 2)), fake);
+        let gone = Path::new("/Volumes/not-here");
+        start_disk(&c, &[ro.path(), gone, ok.path()]);
+        let r = wait_idle(&c).runs[0].results.clone();
+        assert!(
+            matches!(&r[0].status, BenchStatus::Unavailable { reason } if reason.contains("read-only")),
+            "{:?}",
+            r[0]
+        );
+        assert!(matches!(&r[1].status, BenchStatus::Unavailable { reason } if reason.contains("not connected")));
+        assert!(matches!(r[2].status, BenchStatus::Done { .. }));
+        assert_eq!(lock(&seen).len(), 1, "the runner started only for the drive that can be tested");
+
+        // Too little free space: refused before anything is written.
+        let tmp2 = tempfile::tempdir().unwrap();
+        let fake = Fake::plain();
+        let seen = fake.seen.clone();
+        let c = disk_centre(tmp2.path(), vec![volume(ok.path(), "Fine")], Some((TB, 1_000_000)), fake);
+        start_disk(&c, &[ok.path()]);
+        let r = wait_idle(&c).runs[0].results.clone();
+        assert!(
+            matches!(&r[0].status, BenchStatus::Unavailable { reason } if reason.contains("free") && reason.contains("Fine")),
+            "{:?}",
+            r[0]
+        );
+        assert!(lock(&seen).is_empty());
+
+        // The OS cannot say how much is free: the test does not write blind.
+        let tmp3 = tempfile::tempdir().unwrap();
+        let mut unknown = volume(ok.path(), "Fine");
+        (unknown.capacity, unknown.free) = (None, None);
+        let c = disk_centre(tmp3.path(), vec![unknown], None, Fake::plain());
+        start_disk(&c, &[ok.path()]);
+        assert!(matches!(&wait_idle(&c).runs[0].results[0].status, BenchStatus::Unavailable { reason } if reason.contains("cannot tell")));
+    }
+
+    #[test]
+    fn cancel_during_the_first_drive_removes_its_folder_and_the_second_never_starts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let fake = Fake {
+            until_stopped: true,
+            ..Fake::plain()
+        };
+        let seen = fake.seen.clone();
+        let c = disk_centre(
+            tmp.path(),
+            vec![volume(a.path(), "Alpha"), volume(b.path(), "Beta")],
+            Some((TB, TB / 2)),
+            fake,
+        );
+        start_disk(&c, &[a.path(), b.path()]);
+        wait_current(&c);
+        c.cancel();
+        let r = wait_idle(&c).runs[0].results.clone();
+        assert!(matches!(&r[0].status, BenchStatus::Stopped { .. }));
+        assert!(matches!(&r[1].status, BenchStatus::Stopped { reason } if reason.contains("before it started")));
+        assert_eq!(lock(&seen).len(), 1);
+        assert_eq!(std::fs::read_dir(a.path()).unwrap().count(), 0, "the folder is gone after Cancel");
+        assert!(!tmp.path().join("bench-scratch.json").exists());
+    }
+
+    #[test]
+    fn a_crash_of_the_agent_is_cleaned_up_at_the_next_start_by_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let drive = tempfile::tempdir().unwrap();
+        let folder = drive.path().join(".dyno-bench-crashed");
+        // An earlier agent made the folder and its record, then died (no drop).
+        std::mem::forget(
+            bench_scratch::ScratchFolder::create(&folder, &bench_scratch::records_file(&tmp.path().join("bench.json"))).unwrap(),
+        );
+        std::fs::write(folder.join("dyno-bench.tmp"), b"x").unwrap();
+        let _ = BenchCentre::load(tmp.path().join("bench.json"), tmp.path().to_path_buf(), Box::new(Fake::plain()));
+        assert!(!folder.exists());
+    }
+
+    /// Readings that advance a second per ask, at a fixed temperature.
+    struct Readings {
+        temp: Option<f32>,
+        at: std::sync::atomic::AtomicI64,
+    }
+
+    impl BenchEnv for Readings {
+        fn register_job(&self, _: &str, _: Option<&str>) -> Option<JobContext> {
+            None
+        }
+
+        fn on_battery(&self) -> Option<bool> {
+            None
+        }
+
+        fn throttle_input(&self) -> Option<dyno_core::throttle::ThrottleInput> {
+            Some(dyno_core::throttle::ThrottleInput {
+                at: dyno_core::time::Timestamp(self.at.fetch_add(1000, Ordering::SeqCst)),
+                load: 100.0,
+                frequency_mhz: 3000,
+                expected_mhz: 3000,
+                temperature_c: self.temp,
+                critical_c: self.temp.map(|_| 100.0),
+                on_battery: Some(false),
+                power_saver: None,
+                os: dyno_core::hardware::OsThrottle::default(),
+            })
+        }
+    }
+
+    fn readings(temp: Option<f32>) -> Arc<Readings> {
+        Arc::new(Readings {
+            temp,
+            at: std::sync::atomic::AtomicI64::new(1_000_000),
+        })
+    }
+
+    fn start_sustained(c: &BenchCentre, minutes: u32) -> Result<BenchOverview, AgentError> {
+        let plan = plan_with(&[BenchKind::Cpu], None, "hot", None, true)
+            .unwrap()
+            .with_sustained(Some(minutes), None)
+            .unwrap();
+        c.start(plan, None, LoadAtRun::default(), "m".into(), false)
+    }
+
+    #[test]
+    fn a_sustained_run_keeps_its_trace_with_what_the_agent_read_beside_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = centre_with(
+            tmp.path(),
+            Fake {
+                sustained_for: 30,
+                ..Fake::plain()
+            },
+        );
+        c.attach(readings(Some(60.0)));
+        start_sustained(&c, 5).unwrap();
+        let o = wait_idle(&c);
+        let r = &o.runs[0].results[0];
+        assert_eq!(r.trace.len(), 30);
+        assert_eq!(
+            (r.trace[0].secs, r.trace[0].freq_mhz, r.trace[0].temp_c),
+            (1, Some(3000), Some(60.0))
+        );
+        let BenchStatus::Done { metrics } = &r.status else {
+            panic!("{:?}", r.status)
+        };
+        assert!(
+            metrics.iter().any(|m| m.id == "cpu-sustained-episodes"),
+            "the tracker's verdict is part of the result"
+        );
+    }
+
+    #[test]
+    fn staying_near_the_critical_temperature_stops_the_run_with_the_reason_and_keeps_the_trace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = centre_with(
+            tmp.path(),
+            Fake {
+                sustained_for: 60,
+                ..Fake::plain()
+            },
+        );
+        c.attach(readings(Some(97.0)));
+        start_sustained(&c, 5).unwrap();
+        let o = wait_idle(&c);
+        let r = &o.runs[0].results[0];
+        assert!(
+            matches!(&r.status, BenchStatus::Stopped { reason } if reason.contains("critical temperature")),
+            "{:?}",
+            r.status
+        );
+        // Ten seconds hot, then the stop: the points up to it are kept.
+        assert_eq!(r.trace.len(), 11);
+    }
+
+    #[test]
+    fn where_no_temperature_can_be_read_the_sustained_run_is_limited_to_five_minutes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let c = centre_with(tmp.path(), Fake::plain());
+        c.attach(readings(None));
+        let e = start_sustained(&c, 10).unwrap_err();
+        assert_eq!(e.code, ErrorCode::BadRequest);
+        assert!(e.message.contains("limited to 5 minutes"));
+        assert!(start_sustained(&c, 5).is_ok());
+        wait_idle(&c);
+        // With a sensor the longer choices are open.
+        c.attach(readings(Some(50.0)));
+        assert!(start_sustained(&c, 10).is_ok());
+        wait_idle(&c);
     }
 
     #[test]
@@ -1265,6 +1927,11 @@ mod tests {
             kind: BenchKind::Cpu,
             scratch: tmp.path().to_path_buf(),
             disk_mib: 16,
+            rotational: false,
+            sustained_secs: None,
+            sustained_write_mib: 0,
+            available_mib: None,
+            gpu_adapter: None,
         };
         struct Silent;
         impl ChildEvents for Silent {
@@ -1285,6 +1952,11 @@ mod tests {
             kind,
             scratch: PathBuf::from("/s"),
             disk_mib: 64,
+            rotational: false,
+            sustained_secs: None,
+            sustained_write_mib: 0,
+            available_mib: None,
+            gpu_adapter: None,
         };
         assert_eq!(ProcessLauncher::runner_args(&req(BenchKind::Cpu)), vec!["cpu"]);
         assert_eq!(

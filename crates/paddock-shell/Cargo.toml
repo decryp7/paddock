@@ -54,6 +54,9 @@ serde_json = "1"
 log = { version = "0.4", features = ["kv"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
+# Time since boot for the first line of a run: a login start is seconds after boot, a start by hand is not.
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+
 [build-dependencies]
 tauri-plugin = { version = "2.7", features = ["build"] }
 

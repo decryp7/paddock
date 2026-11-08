@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, inject } from '@angular/core';
+import { PdPathText, SuSparkline } from '@decryp7/paddock-ui';
 import { PdTable, type PdColumn } from '@decryp7/paddock-ui/table';
 import type { Consumer } from '../../core/api.types';
 import { AsyncState } from '../../shared/async-state';
-import { formatBytes, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
+import { formatBytes, formatStorage, formatCount, formatDayTime, formatPercent, plural } from '../../shared/format';
 import { Icon } from '../../shared/icon';
 import { SEVERITY_LABEL } from '../../shared/labels';
-import { Sparkline } from '../../shared/sparkline';
 import { ReportsStore } from '../../state/reports.store';
 import { diskForecast, scoreChangeText, weekOptions, weekRange } from './reports-model';
 import { MatButton } from '@angular/material/button';
@@ -17,7 +17,7 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
  */
 @Component({
   selector: 'dy-reports-page',
-  imports: [AsyncState, Icon, Sparkline, PdTable, PdSelect, MatButton],
+  imports: [AsyncState, Icon, PdPathText, SuSparkline, PdTable, PdSelect, MatButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -75,23 +75,27 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
             @if (r.scoreTrend.length > 1) {
               <section class="card" aria-label="Health score trend">
                 <div class="card-head"><h2><dy-icon name="health" /> Health score</h2></div>
-                <div class="spark"><dy-sparkline [values]="trend()" [max]="100" [capacity]="trend().length" [zoom]="true" label="Health score over the week" /></div>
+                <div class="spark"><pd-sparkline [values]="trend()" [max]="100" [capacity]="trend().length" scale="zoom" [area]="true" [pad]="0" [dot]="false" [height]="72" color="var(--text-3)" label="Health score over the week" /></div>
               </section>
             }
             @if (r.topApps.length) {
               <section class="card" aria-label="Busiest apps">
                 <div class="card-head"><h2><dy-icon name="processes" /> Busiest apps</h2></div>
                 <div class="tablewrap">
-                  <pd-table [toolbar]="false" label="Busiest apps of the week" [rows]="r.topApps" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" [maxHeight]="360" />
+                  <pd-table [toolbar]="false" label="Busiest apps of the week" [rows]="r.topApps" [columns]="appColumns" [rowKey]="appKey" [filterable]="false" height="window" />
                 </div>
               </section>
             }
             @if (r.disks.length) {
               <section class="card" aria-label="Disks">
                 <div class="card-head"><h2><dy-icon name="disk" /> Disks</h2></div>
-                <ul class="rows">
+                <ul class="rows" data-testid="report-disks">
                   @for (d of r.disks; track d.disk) {
-                    <li><span class="k">{{ d.disk }}</span><span class="num">{{ bytes(d.free) }} free of {{ bytes(d.total) }}</span><span class="faint">{{ forecast(d) }}</span></li>
+                    <li data-testid="report-disk">
+                      <span class="k"><pd-path-text [value]="d.disk" [plain]="true" /></span>
+                      <span class="num">{{ bytes(d.free) }} free of {{ bytes(d.total) }}</span>
+                      <span class="faint">{{ forecast(d) }}</span>
+                    </li>
                   }
                 </ul>
               </section>
@@ -149,15 +153,18 @@ import { PdSelect, type PdSelectOption } from '@decryp7/paddock-ui/select';
     .stats small { display: block; font: var(--fw-regular) var(--fs-xs) / 1.3 var(--font-sans); color: var(--text-3); }
     .plain { margin: 0; padding: var(--sp-3) var(--sp-4) var(--sp-4) var(--sp-8); display: grid; gap: var(--sp-1); font-size: var(--fs-base); }
     .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: var(--sp-4); align-items: start; }
-    .spark { padding: var(--sp-3) var(--sp-4) var(--sp-4); --spark-h: 72px; }
+    .cols > .card { min-width: 0; }
+    .spark { padding: var(--sp-3) var(--sp-4) var(--sp-4); }
     .ell { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 240px; }
     .tablewrap { margin-top: var(--sp-2); }
-    .rows { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-4) var(--sp-3); display: grid; }
-    .rows li { display: flex; gap: var(--sp-3); align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-base); }
+    /* One grid for the whole list so the numbers and the forecast line up in columns; the path takes what is left and shortens in the middle. */
+    .rows { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-4) var(--sp-3); display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content; column-gap: var(--sp-3); }
+    .rows li { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: baseline; padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-base); min-width: 0; }
     .rows li:first-child { border-top: 0; }
-    .rows .k { font-weight: var(--fw-medium); min-width: 56px; }
+    .rows .k { font-weight: var(--fw-medium); min-width: 0; display: flex; }
+    .rows .num { text-align: end; white-space: nowrap; }
     .rows .faint, .faint { color: var(--text-3); font-size: var(--fs-sm); }
-    .rows .faint { margin-left: auto; }
+    .rows .faint { text-align: end; white-space: nowrap; }
     .card-head .count { margin-left: auto; }
     .events { list-style: none; margin: 0; padding: var(--sp-2) var(--sp-4) var(--sp-3); display: grid; }
     .events li { display: flex; gap: var(--sp-4); padding: var(--sp-2) 0; border-top: 1px solid var(--border-subtle); font-size: var(--fs-base); }
@@ -182,7 +189,7 @@ export class ReportsPage implements OnInit {
     { key: 'cpu', header: 'CPU (average)', value: (a) => a.cpuAvg, text: (a) => formatPercent(a.cpuAvg, 0), align: 'end', sortable: false, width: '150px' },
     { key: 'memory', header: 'Memory (average)', value: (a) => a.memoryAvg, text: (a) => formatBytes(a.memoryAvg), align: 'end', sortable: false, width: '150px' },
   ];
-  protected readonly bytes = formatBytes;
+  protected readonly bytes = formatStorage;
   protected readonly pct = (v: number) => formatPercent(v, 0);
   protected readonly plural = plural;
   protected readonly count = formatCount;

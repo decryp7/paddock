@@ -7,6 +7,8 @@
   (taming proof, file removal in Extras) lose their writing parts with them; commit 952990c57 ("Dyno is a read-only
   monitor")
 
+- Status note (2026-11-06): superseded in part. Power actions (ADR 0032) and the administrator helper of 1.1.0 (ADR 0027) change the machine on the owner's request; this record is kept as written.
+
 ## Context
 
 Dyno grew from a monitor into a tool that also calms programs, cleans files and tunes settings. Every one of those writes

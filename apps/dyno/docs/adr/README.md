@@ -24,9 +24,9 @@ so the numbering is fixed.
 | [0017](0017-issues-and-the-program-baseline.md) | Issues from the OS logs behind a port; a baseline of programs that explains, never accuses |
 | [0018](0018-throttling-lifespan-and-baselines.md) | Throttling episodes, hardware life forecasts as ranges and learned baselines: pure judging, read-only readers, evidence before alarms |
 | [0019](0019-watched-folders-and-browser-lookups.md) | Sweeps superseded by 0021. Watched folders sweep into the quarantine only, previewed first; web and hash searches are browser hand-offs |
-| [0020](0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver; taming rules that expire and prove their effect |
-| [0021](0021-monitoring-only.md) | Monitoring only; any privileged helper is read-only and there is none in 1.0 (supersedes 0004 and 0005, amends 0006, 0007, 0016, 0018) |
-| [0022](0022-helper-installed-with-the-app.md) | Proposed for Dyno 1.1 (1.0 ships without the helper): the helper is installed with the app on all three OS (per-machine NSIS, an unsigned .pkg, .deb scripts), runs nothing from a user-writable place, installs Dyno's signed updates itself, and reads all processes in bounded, scoped shapes |
+| [0020](0020-extras-backup-checks-and-taming-proof.md) | Extras and backup health behind a ToolRunner; the login-shell PATH resolver; taming rules that expire and prove their effect; backup health removed in 1.1.0 |
+| [0021](0021-monitoring-only.md) | Monitoring only; any privileged helper is read-only and there is none in 1.0 (supersedes 0004 and 0005, amends 0006, 0007, 0016, 0018). Superseded in part (2026-11-06) by 0027 and 0032 |
+| [0022](0022-helper-installed-with-the-app.md) | Proposed for Dyno 1.1; ADR 0027 adopts parts of it for 1.1.0 (helper-installed updates are not built): the helper is installed with the app on all three OS (per-machine NSIS, an unsigned .pkg, .deb scripts), runs nothing from a user-writable place, installs Dyno's signed updates itself, and reads all processes in bounded, scoped shapes |
 | [0023](0023-paddock-app-shell.md) | The UI runs on the Paddock app shell and the shared dialog API: pages as contributions, OS-window dialogs with declared actions, the shell's settings, notifications and tray popover, a token bridge over `--pd-*` |
 | [0024](0024-local-days-through-a-zone-port.md) | Local days, hours and minutes come from a time-zone port read from the OS (daylight saving included), never a stored offset |
 | [0025](0025-supervisor-state-machine.md) | The agent supervisor is a pure state machine with one owner thread: explicit phases, numbered answers, quit decided once, a bounded model check with the five historical bugs as mutants |
@@ -36,6 +36,7 @@ so the numbering is fixed.
 | [0029](0029-saved-views-disk-map-cache.md) | Saved views: disk-map scans (and the counter catalog and software list) kept in a rebuildable `cache.db` with one writer thread, shown at once with their age, refreshed on demand and swapped when done (Accepted) |
 | [0030](0030-benchmark-tool.md) | The benchmark tool (Accepted): per-drive disk with direct I/O and a wear budget, CPU with a sustained run, STREAM-style memory and a latency sweep, GPU through wgpu in its own runner; runs as a cancellable job, at normal priority (rule 52), with repetitions, spread and method versions (amends 0015) |
 | [0031](0031-network-threat-lists-world-map-and-firewall-view.md) | Network threat lists, the connections world map and a read-only firewall view: core features over opt-in downloaded data (Accepted) |
+| [0032](0032-power-keep-awake-wake-on-lan-idle-actions-energy.md) | Power: keep awake, Wake-on-LAN, idle and timed sleep or shut down, scheduled wake and an energy report; amends 0021 and 0027 (Accepted 2026-11-03) |
 
 New records: copy the shape of an existing one (status, related, context, decision, consequences). ADR numbers are
 allocated at merge time; renumber on a clash and fix the code comments that cite them.

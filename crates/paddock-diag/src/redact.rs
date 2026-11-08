@@ -38,6 +38,38 @@ impl std::fmt::Display for PatternError {
 
 impl std::error::Error for PatternError {}
 
+/// The names a host answers to: as given and its first label (`Alexs-MBP.local` and `Alexs-MBP`).
+fn host_name_forms(name: &str) -> Vec<String> {
+    let name = name.trim();
+    let first = name.split('.').next().unwrap_or(name);
+    let mut forms = vec![name.to_string()];
+    if first != name {
+        forms.push(first.to_string());
+    }
+    forms
+}
+
+/// The machine's name from the OS (`gethostname`). A GUI app's environment has no `HOSTNAME`, so the variables alone miss it.
+/// Windows keeps `COMPUTERNAME` in every process's environment, so only Unix needs the call.
+fn os_host_name() -> Option<String> {
+    #[cfg(unix)]
+    {
+        let mut buf = [0u8; 256];
+        // SAFETY: `buf` is writable for its whole length, which is passed; the call writes at most that many bytes.
+        let rc = unsafe { libc::gethostname(buf.as_mut_ptr().cast(), buf.len()) };
+        if rc != 0 {
+            return None;
+        }
+        let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
+        let name = String::from_utf8_lossy(&buf[..end]).into_owned();
+        (!name.is_empty()).then_some(name)
+    }
+    #[cfg(not(unix))]
+    {
+        None
+    }
+}
+
 /// Removes secrets, personal data and file contents from what goes into a report. Cheap to clone.
 #[derive(Clone)]
 pub struct Redactor {
@@ -72,6 +104,11 @@ impl Redactor {
     /// The default rules plus the user, home folder and machine name found in `vars` (`USER`/`USERNAME`, `HOME`/`USERPROFILE`,
     /// `HOSTNAME`/`COMPUTERNAME`/`HOST`); a variable that is not set is skipped.
     pub fn for_machine(vars: &dyn Vars) -> Self {
+        Redactor::for_machine_named(vars, os_host_name().as_deref())
+    }
+
+    /// [`Redactor::for_machine`] with the machine's name given (tests; the name an app got from its own OS call).
+    pub fn for_machine_named(vars: &dyn Vars, host_name: Option<&str>) -> Self {
         let get = |names: &[&str]| -> Vec<String> {
             names
                 .iter()
@@ -82,7 +119,11 @@ impl Redactor {
         Redactor::new().with_personal(
             &get(&["USER", "USERNAME", "LOGNAME"]),
             &get(&["HOME", "USERPROFILE"]),
-            &get(&["HOSTNAME", "COMPUTERNAME", "HOST"]),
+            &{
+                let mut machines = get(&["HOSTNAME", "COMPUTERNAME", "HOST"]);
+                machines.extend(host_name.into_iter().flat_map(host_name_forms));
+                machines
+            },
         )
     }
 
@@ -156,6 +197,11 @@ impl Redactor {
             Value::Object(map) => {
                 let mut out = Map::new();
                 for (key, v) in map {
+                    if is_secret_name(key) && !paddock_log::is_secret_key(key) {
+                        counts.fields += 1;
+                        out.insert(key.clone(), Value::from(paddock_log::SECRET));
+                        continue;
+                    }
                     let nested = matches!(v, Value::Object(_) | Value::Array(_));
                     // A container under an ordinary key is walked; under a secret or content key the rules take it whole.
                     let walked = if nested
@@ -209,27 +255,61 @@ impl Redactor {
     pub fn log_line(&self, line: &str) -> (String, RedactionCounts) {
         let mut counts = RedactionCounts::default();
         if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(line) {
-            let mut out = Map::new();
-            for (key, v) in map {
-                let v = match v {
-                    Value::String(s) if is_secret_key(&key) && s != paddock_log::SECRET => {
-                        counts.fields += 1;
-                        Value::from(paddock_log::SECRET)
-                    }
-                    Value::String(s) => {
-                        let (t, c) = self.text(&s);
-                        counts.add(&c);
-                        Value::String(t)
-                    }
-                    other => other,
-                };
-                out.insert(key, v);
-            }
+            let out = self.log_object(map, &mut counts);
             return (Value::Object(out).to_string(), counts);
         }
         let (t, c) = self.text(line);
         (t, c)
     }
+
+    /// A CLEF object: a secret-named property is masked whatever its value (string, array or object), every other string is
+    /// redacted as text, and containers are walked to any depth.
+    fn log_object(
+        &self,
+        map: Map<String, Value>,
+        counts: &mut RedactionCounts,
+    ) -> Map<String, Value> {
+        let mut out = Map::new();
+        for (key, v) in map {
+            let v = if is_secret_name(&key)
+                && v.as_str() != Some(paddock_log::SECRET)
+                && !v.is_null()
+            {
+                counts.fields += 1;
+                Value::from(paddock_log::SECRET)
+            } else {
+                self.log_value(v, counts)
+            };
+            out.insert(key, v);
+        }
+        out
+    }
+
+    fn log_value(&self, v: Value, counts: &mut RedactionCounts) -> Value {
+        match v {
+            Value::String(s) => {
+                let (t, c) = self.text(&s);
+                counts.add(&c);
+                Value::String(t)
+            }
+            Value::Object(m) => Value::Object(self.log_object(m, counts)),
+            Value::Array(items) => Value::Array(
+                items
+                    .into_iter()
+                    .map(|i| self.log_value(i, counts))
+                    .collect(),
+            ),
+            other => other,
+        }
+    }
+}
+
+/// A key whose value is a secret: `paddock-log`'s rule plus the short names it leaves out on purpose (`pass`, `pw`, `sig`).
+fn is_secret_name(key: &str) -> bool {
+    is_secret_key(key)
+        || ["pass", "pw", "sig", "signature"]
+            .iter()
+            .any(|k| key.eq_ignore_ascii_case(k))
 }
 
 #[cfg(test)]

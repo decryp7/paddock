@@ -59,7 +59,8 @@ pub const MAX_FILE_MB_RANGE: (u32, u32) = (1, 100);
 /// Range of `keep_files`.
 pub const KEEP_FILES_RANGE: (u32, u32) = (1, 50);
 
-/// The "Diagnostics > Logging" settings: decision D2 gives seven days of at most 20 MB.
+/// The "Diagnostics > Logging" settings: a month of daily files (decision of 2026-11-05; D2 gave seven days), each at most 20 MB, and 100 MB in all per process
+/// ([`crate::TOTAL_CAP_BYTES`]; the oldest days go first, and Debug can use only half of a day's budget).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct LogSettings {
@@ -76,7 +77,7 @@ impl Default for LogSettings {
         LogSettings {
             level: LogLevel::Info,
             max_file_mb: 20,
-            keep_files: 7,
+            keep_files: 30,
         }
     }
 }
@@ -107,7 +108,7 @@ mod tests {
         let d = LogSettings::default();
         assert_eq!(
             (d.level, d.max_file_mb, d.keep_files),
-            (LogLevel::Info, 20, 7)
+            (LogLevel::Info, 20, 30)
         );
         let c = LogSettings {
             level: LogLevel::Debug,
@@ -128,10 +129,10 @@ mod tests {
     #[test]
     fn settings_round_trip_and_tolerate_missing_keys() {
         let s: LogSettings = serde_json::from_str(r#"{"level":"debug"}"#).unwrap();
-        assert_eq!((s.level, s.keep_files), (LogLevel::Debug, 7));
+        assert_eq!((s.level, s.keep_files), (LogLevel::Debug, 30));
         assert_eq!(
             serde_json::to_string(&LogSettings::default()).unwrap(),
-            r#"{"level":"info","maxFileMb":20,"keepFiles":7}"#
+            r#"{"level":"info","maxFileMb":20,"keepFiles":30}"#
         );
     }
 

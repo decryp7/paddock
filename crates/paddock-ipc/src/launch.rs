@@ -3,6 +3,14 @@
 //! drop, an optional memory cap),
 //! hands it the [`Bootstrap`] as one JSON line on stdin, keeps stdin open as its lifeline, and accepts its authenticated
 //! connection (token, protocol, and the pid of the process it started). The child side is [`crate::child`].
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::error::IpcError;
 use crate::frame::{FrameLimit, ProtocolVersion};
@@ -160,6 +168,8 @@ impl Child {
             if deadline.passed() {
                 return None;
             }
+            // silent: Err(Cancelled) is the wake-up; the loop re-reads the process and the deadline right after
+            #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
             let _ = self
                 .clock
                 .wait(Duration::from_millis(10), &CancelToken::new());

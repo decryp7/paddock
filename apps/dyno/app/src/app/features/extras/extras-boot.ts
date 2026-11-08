@@ -39,7 +39,7 @@ import { EXTRAS_STYLES } from './extras-styles';
 
           <h2 class="sec">What slowed start-up</h2>
           @if (b.slowest.length > 0) {
-            <pd-table [toolbar]="false" label="What slowed start-up" [rows]="b.slowest" [columns]="slowColumns" [rowKey]="slowKey" [filterable]="false" [maxHeight]="620" />
+            <pd-table [toolbar]="false" label="What slowed start-up" [rows]="b.slowest" [columns]="slowColumns" [rowKey]="slowKey" [filterable]="false" height="window" />
           } @else if (b.stepsUnavailable; as why) {
             <p class="note" role="status"><dy-icon name="info" /><span>{{ why }}</span></p>
           } @else {

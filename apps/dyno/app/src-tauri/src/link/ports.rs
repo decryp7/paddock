@@ -2,6 +2,10 @@
 //! (the discovery file, the agent lock, the login service, a connection) that answer a [`machine::Command`] with an event.
 //!
 //! Nothing here decides anything: a decision is a step of the pure machine. The adapters are thin and run on workers.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 
 use super::machine::{Generation, HintSeen, LockSeen, Look, Seq};
 use super::{plan, Plan, ServiceProbe, Sink};
@@ -181,8 +185,14 @@ impl Launcher for ProcessLauncher {
             match child.try_wait() {
                 Ok(Some(status)) => break Some(status),
                 _ if Instant::now() >= end => {
-                    let _ = child.kill();
-                    break child.wait().ok();
+                    paddock_proc::cleanup::logged("killing the child that did not stop in time", child.kill());
+                    break match child.wait() {
+                        Ok(status) => Some(status),
+                        Err(e) => {
+                            paddock_proc::cleanup::report("reaping the child that did not stop in time", &e);
+                            None
+                        }
+                    };
                 }
                 _ => std::thread::sleep(Duration::from_millis(50)),
             }
@@ -233,6 +243,53 @@ pub fn agent_exe(app_exe: &std::path::Path, env_override: Option<&std::ffi::OsSt
     }
 }
 
+/// The build key the app wants, read from the agent program `program` names: its version and the file's build id. The id is
+/// hashed again only when the file's stamp changed (a `stat` per call), so the answer follows a replaced file. A file that cannot
+/// be read keeps the last answer (a replacement in progress must not turn the key into a different one), and with no answer yet it
+/// is the version alone, which accepts any build of that version.
+pub fn wanted_key_source<P>(version: &str, program: P) -> super::WantedKey
+where
+    P: Fn() -> Result<std::path::PathBuf, String> + Send + Sync + 'static,
+{
+    use dyno_agent::build_id::{build_key, file_build_id, FileStamp};
+    let version = version.to_string();
+    // The last good answer, and the last fallback reason that was logged (a reason is logged once per change, ER-27).
+    type Last = Option<(FileStamp, String)>;
+    let state: std::sync::Mutex<(Last, Option<String>)> = std::sync::Mutex::new((None, None));
+    std::sync::Arc::new(move || {
+        let mut state = state.lock().unwrap_or_else(|e| e.into_inner());
+        let (last, told) = &mut *state;
+        let mut fall_back = |last: &Last, why: String| {
+            if told.as_deref() != Some(why.as_str()) {
+                log::warn!(Kept = last.is_some(); "The agent program could not be read ({why}): the wanted key keeps its last answer, or is the version alone");
+                *told = Some(why);
+            }
+            last.as_ref().map_or_else(|| version.clone(), |(_, k)| k.clone())
+        };
+        let path = match program() {
+            Ok(p) => p,
+            Err(why) => return fall_back(last, format!("no program: {why}")),
+        };
+        let Some(stamp) = FileStamp::of(&path) else {
+            return fall_back(last, format!("{} cannot be read", path.display()));
+        };
+        if let Some((seen, key)) = last.as_ref() {
+            if *seen == stamp {
+                return key.clone();
+            }
+        }
+        let began = std::time::Instant::now();
+        let Some(id) = file_build_id(&path) else {
+            return fall_back(last, format!("{} cannot be hashed", path.display()));
+        };
+        let key = build_key(&version, &id);
+        log::info!(Build = id.as_str(), HashMs = u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX); "Agent program hashed");
+        *told = None;
+        *last = Some((stamp, key.clone()));
+        key
+    })
+}
+
 /// Now, in milliseconds since the epoch (what an agent writes as `started`).
 pub fn now_ms() -> i64 {
     std::time::SystemTime::now()
@@ -243,12 +300,14 @@ pub fn now_ms() -> i64 {
 
 /// The discovery file as a hint: what it names, and whether it is of this build.
 pub fn hint_of(d: &Discovery, app_version: &str) -> HintSeen {
+    let same_build = plan(Some(d), app_version, PROTOCOL_VERSION) == Plan::Connect;
     HintSeen {
         pid: d.pid,
         started_ms: d.started,
         version: d.version.clone(),
         protocol: d.protocol,
-        same_build: plan(Some(d), app_version, PROTOCOL_VERSION) == Plan::Connect,
+        same_build,
+        of_disk_file: !same_build && dyno_agent::build_id::key_build(app_version).is_some_and(|b| b == d.build),
     }
 }
 
@@ -319,6 +378,7 @@ pub fn look(
         lock,
         child,
         cpu,
+        app_updated: false,
     };
     (look, found, service_ms)
 }
@@ -369,6 +429,8 @@ fn ask_watching(
     let (tx, rx) = std::sync::mpsc::channel();
     let ask = probe.clone();
     let spawned = std::thread::Builder::new().name("dyno-service-ask".into()).spawn(move || {
+        // silent: the receiver is gone when the caller stopped waiting for the answer; nobody reads it then
+        #[allow(clippy::let_underscore_must_use, clippy::let_underscore_untyped)]
         let _ = tx.send(ask());
     });
     if spawned.is_err() {
@@ -440,12 +502,9 @@ pub fn describe_connect(purpose: super::machine::Purpose, handshake_ms: u64) -> 
     }
 }
 
-/// Connects to the agent a discovery file names and starts the peer that fans its pushes out to the sink.
-pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<BodyPeer<Message>>, String> {
-    let token = d.token().ok_or("The discovery file is damaged.")?;
-    let conn = dyno_agent::wire::connect(&d.endpoint, &token).map_err(|e| format!("The agent did not answer ({e})."))?;
-    let sink = sink.clone();
-    let opts = BodyOptions::new("the agent").on_push(move |m| match m {
+/// Hands one pushed message to the sink.
+pub(super) fn deliver(sink: &dyn Sink, m: Message) {
+    match m {
         Message::Live(l) => sink.live(*l),
         Message::Alert(a) => sink.alert(a),
         Message::Activity(a) => sink.activity(a),
@@ -454,8 +513,20 @@ pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<BodyPeer<Messa
         Message::Job(j) => sink.job(*j),
         Message::DiskVolumes(v) => sink.disk_volumes(v),
         Message::WidgetLayoutChanged(surface) => sink.widget_layout_changed(surface),
+        Message::PowerChanged(view) => sink.power_changed(*view),
+        Message::WolChanged(view) => sink.wol_changed(*view),
+        Message::WakesChanged(view) => sink.wakes_changed(*view),
+        Message::EventsLost(lost) => sink.events_lost(lost),
         _ => {}
-    });
+    }
+}
+
+/// Connects to the agent a discovery file names and starts the peer that fans its pushes out to the sink.
+pub fn connect(d: &Discovery, sink: &Arc<dyn Sink>) -> Result<Arc<BodyPeer<Message>>, String> {
+    let token = d.token().ok_or("The discovery file is damaged.")?;
+    let conn = dyno_agent::wire::connect(&d.endpoint, &token).map_err(|e| format!("The agent did not answer ({e})."))?;
+    let sink = sink.clone();
+    let opts = BodyOptions::new("the agent").on_push(move |m| deliver(sink.as_ref(), m));
     BodyPeer::start(conn, opts).map(Arc::new).map_err(|e| e.to_string())
 }
 
@@ -477,6 +548,7 @@ mod tests {
             version: "1.0.0".into(),
             protocol: 1,
             same_build,
+            of_disk_file: false,
         }
     }
 
@@ -520,6 +592,7 @@ mod tests {
             super::super::ServiceState {
                 installed: true,
                 supervises: true,
+                pending: false,
             }
         });
         let reads = std::cell::Cell::new(0);
@@ -555,6 +628,7 @@ mod tests {
         let probe: ServiceProbe = Arc::new(|| super::super::ServiceState {
             installed: true,
             supervises: true,
+            pending: false,
         });
         let (answer, seen) = ask_watching(
             Some(&probe),
@@ -590,6 +664,7 @@ mod tests {
             super::super::ServiceState {
                 installed: true,
                 supervises: true,
+                pending: false,
             }
         });
         assert!(ask(Some(&probe), Some(&hint(true)), Some(LockSeen::Free), true, false).is_some());
@@ -615,6 +690,7 @@ mod tests {
             super::super::ServiceState {
                 installed: true,
                 supervises: true,
+                pending: false,
             }
         });
         // Held, with or without the file: not asked.
@@ -636,6 +712,7 @@ mod tests {
             service,
             child: None,
             cpu: Cpu::NotRead,
+            app_updated: false,
         }
     }
 
@@ -646,6 +723,7 @@ mod tests {
         let service = super::super::ServiceState {
             installed: true,
             supervises: true,
+            pending: false,
         };
         let look = seen_look(
             Some(HintSeen {

@@ -11,7 +11,7 @@ use crate::metrics::{derive_pressure, MemoryPressure, SystemSample};
 use crate::process::ProcessSample;
 use crate::throttle::{self, ThrottleInput};
 use crate::time::Timestamp;
-use crate::units::bytes;
+use crate::units::{bytes, storage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -470,7 +470,7 @@ fn space_cause(input: &Input<'_>, out: &mut Vec<Cause>) {
                       save."
             .into(),
         confidence: if d.free < 1 << 30 { 0.8 } else { 0.5 },
-        evidence: vec![Evidence::new("Free", format!("{} ({})", bytes(d.free), pct(free_pct)))],
+        evidence: vec![Evidence::new("Free", format!("{} ({})", storage(d.free), pct(free_pct)))],
         hints: vec![],
         involved: vec![],
     });

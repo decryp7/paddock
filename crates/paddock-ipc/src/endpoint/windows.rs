@@ -4,6 +4,14 @@
 //! path), so the `OVERLAPPED` and the buffer outlive the operation. Overlapped handles let one thread read while
 //! another writes; a synchronous pipe handle would serialise them and deadlock a peer. A shared "shutdown" event ends
 //! blocked operations from any thread.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 #![allow(unsafe_code)]
 
 use crate::token::random_hex;
@@ -261,7 +269,16 @@ impl Listener {
             .ok_or_else(|| io::Error::other("the endpoint already has its connection"))?;
         // The next client needs a fresh instance of the same pipe; until it exists a connecting client sees "busy" and
         // waits. If it cannot be made, later accepts report that, this connection still works.
-        self.pipe = create_instance(&self.name, false, &self.sddl).ok();
+        self.pipe = match create_instance(&self.name, false, &self.sddl) {
+            Ok(next) => Some(next),
+            Err(e) => {
+                paddock_proc::cleanup::report(
+                    "making the next pipe instance (later accepts report it)",
+                    &e,
+                );
+                None
+            }
+        };
         Ok((Stream::new(connected)?, pid))
     }
 }

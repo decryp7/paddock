@@ -4,21 +4,20 @@ use paddock_jobs::FakeClock;
 use paddock_log::Redactor;
 use paddock_mcp::{
     AuditLog, Emit, ErrorCode, FileSettings, KeyStore, KeyVerifier, MAX_KEYS, McpControl, McpEvent,
-    McpSettings, MemorySettings, Server, Session, SettingsStore, ToolDef, ToolOutput,
+    McpSettings, MemoryKeys, MemorySettings, Server, Session, SettingsStore, ToolDef, ToolOutput,
 };
-use paddock_secrets::{MemorySecrets, Name, Secret, Secrets};
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 
 struct Rig {
     control: McpControl,
     server: Arc<Server>,
-    secrets: Arc<MemorySecrets>,
+    key_list: Arc<MemoryKeys>,
     store: Arc<MemorySettings>,
     events: Arc<Mutex<Vec<McpEvent>>>,
 }
 
-fn build(secrets: Arc<MemorySecrets>, store: Arc<MemorySettings>) -> Rig {
+fn build(key_list: Arc<MemoryKeys>, store: Arc<MemorySettings>) -> Rig {
     let events: Arc<Mutex<Vec<McpEvent>>> = Arc::default();
     let sink_events = events.clone();
     let emit: Emit = Arc::new(move |e: &McpEvent| sink_events.lock().unwrap().push(e.clone()));
@@ -60,14 +59,14 @@ fn build(secrets: Arc<MemorySecrets>, store: Arc<MemorySettings>) -> Rig {
         log,
         Arc::new(KeyStore::new()),
         store.clone(),
-        secrets.clone(),
+        key_list.clone(),
         emit,
         Arc::new(|| 42),
     );
     Rig {
         control,
         server,
-        secrets,
+        key_list,
         store,
         events,
     }
@@ -75,7 +74,7 @@ fn build(secrets: Arc<MemorySecrets>, store: Arc<MemorySettings>) -> Rig {
 
 fn rig() -> Rig {
     build(
-        Arc::new(MemorySecrets::new("Demo")),
+        Arc::new(MemoryKeys::default()),
         Arc::new(MemorySettings::default()),
     )
 }
@@ -130,7 +129,7 @@ fn saving_applies_to_the_running_server_and_actions_need_their_permission() {
     r.control.save(settings(false, &[], &["change"])).unwrap();
     assert!(!r.server.policy().enabled);
     // The saved settings are in force after a restart.
-    let again = build(r.secrets.clone(), r.store.clone());
+    let again = build(r.key_list.clone(), r.store.clone());
     assert_eq!(again.control.get().settings, r.store.load());
 }
 
@@ -178,8 +177,8 @@ fn keys_are_issued_once_persisted_listed_without_the_key_and_revoked() {
         r.control.keys().verify(&issued.key).as_deref(),
         Some("Pitwall")
     );
-    // A restart finds the key again, from the credential store.
-    let again = build(r.secrets.clone(), r.store.clone());
+    // A restart finds the key again, from the key list.
+    let again = build(r.key_list.clone(), r.store.clone());
     assert_eq!(
         again.control.keys().verify(&issued.key).as_deref(),
         Some("Pitwall")
@@ -187,7 +186,7 @@ fn keys_are_issued_once_persisted_listed_without_the_key_and_revoked() {
     let view = r.control.revoke_key(issued.id).unwrap();
     assert!(view.keys[0].revoked);
     assert_eq!(
-        build(r.secrets.clone(), r.store.clone())
+        build(r.key_list.clone(), r.store.clone())
             .control
             .keys()
             .verify(&issued.key),
@@ -223,13 +222,13 @@ fn bad_client_names_the_key_limit_and_unknown_ids_are_refused() {
 }
 
 #[test]
-fn an_unavailable_credential_store_fails_the_key_commands_and_keeps_the_old_list() {
+fn an_unavailable_key_file_fails_the_key_commands_and_keeps_the_old_list() {
     let r = rig();
     let kept = r.control.issue_key("keeps").unwrap();
-    r.secrets.set_unavailable(true);
+    *r.key_list.fail.lock().unwrap() = Some("read-only folder".into());
     let e = r.control.issue_key("lost").unwrap_err();
     assert_eq!((e.code, e.retryable), (ErrorCode::StoreUnavailable, true));
-    assert!(e.message.contains("credential store"));
+    assert!(e.message.contains("read-only folder") && e.message.contains("settings folder"));
     assert_eq!(
         r.control.get().keys.len(),
         1,
@@ -243,22 +242,8 @@ fn an_unavailable_credential_store_fails_the_key_commands_and_keeps_the_old_list
         !r.control.get().keys[0].revoked,
         "and the revoke was rolled back"
     );
-    r.secrets.set_unavailable(false);
+    *r.key_list.fail.lock().unwrap() = None;
     assert!(r.control.revoke_key(kept.id).is_ok());
-}
-
-#[test]
-fn a_damaged_key_entry_fails_closed() {
-    let secrets = Arc::new(MemorySecrets::new("Demo"));
-    secrets
-        .set(
-            &Name::new("mcp", "keys").unwrap(),
-            &Secret::new("{not json").unwrap(),
-        )
-        .unwrap();
-    let r = build(secrets, Arc::new(MemorySettings::default()));
-    assert!(r.control.get().keys.is_empty());
-    assert_eq!(r.control.keys().verify("pmk_anything"), None);
 }
 
 #[test]

@@ -9,7 +9,7 @@ export const MCP_STYLES = `
   .pd-mc__master { padding: var(--pd-space-3) var(--pd-space-4); border: 1px solid var(--pd-hairline); border-radius: var(--pd-radius-card); background: var(--pd-surface-1); }
   .pd-mc__label { min-width: 0; display: flex; flex-direction: column; }
   .pd-mc__master strong { font-weight: var(--pd-weight-semibold); }
-  .pd-mc__check { min-width: 0; margin-inline-start: calc((var(--pd-control-height) - 18px) / -2); }
+  .pd-mc__check { min-width: 0; }
   .pd-mc__check strong { font-weight: var(--pd-weight-medium); overflow-wrap: anywhere; }
   .pd-mc__tools { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
   .pd-mc__tools li { padding: var(--pd-space-2) 0; border-bottom: 1px solid var(--pd-hairline); }

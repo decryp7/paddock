@@ -12,6 +12,7 @@ pub mod choices;
 pub mod dashboard;
 pub mod menu_bar;
 pub mod metric;
+pub mod number_support;
 pub mod popover;
 pub mod popover_values;
 pub mod reading;
@@ -25,6 +26,7 @@ pub use choices::{widget_choices, DashboardKindChoices, MenuBarKindChoices, Metr
 pub use dashboard::{DashboardCatalogue, DashboardKind, DashboardWidget, Thresholds, WidgetOptions};
 pub use menu_bar::{MenuBarCatalogue, MenuBarItem, MenuBarKind, NumberFormat};
 pub use metric::Metric;
+pub use number_support::{number_support, NumberSupport, TrayPlatform};
 pub use popover::{PopoverCatalogue, PopoverKind, PopoverWidget, VolumeChoice};
 pub use reading::{read_all, read_metric, with_dashboard_thresholds, MetricReading, ReadingQuery};
 pub use wire::{edit_layout, layout_view, JsonOnLink, SurfaceEdit, SurfaceView};

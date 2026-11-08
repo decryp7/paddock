@@ -139,12 +139,13 @@ export interface Summary {
   exposed: number;
 }
 
-export function summarise(connections: readonly ConnectionRow[], listeners: readonly ListenerRow[]): Summary {
+export function summarise(connections: readonly ConnectionRow[], listeners: readonly ListenerRow[], tab?: 'connections' | 'listening'): Summary {
   return {
     listening: listeners.length,
     unknown: listeners.filter((l) => l.owner.kind === 'unknown').length,
     connections: connections.length,
-    programs: new Set([...connections.map((c) => ownerName(c.owner)), ...listeners.map((l) => ownerName(l.owner))]).size,
+    // On a tab the count is of what that tab lists (so a country filter's "4 programs" matches the four it shows).
+    programs: new Set([...(tab === 'listening' ? [] : connections.map((c) => ownerName(c.owner))), ...(tab === 'connections' ? [] : listeners.map((l) => ownerName(l.owner)))]).size,
     hosts: new Set(connections.map((c) => c.remote)).size,
     exposed: listeners.filter((l) => l.exposure === 'allInterfaces').length,
   };

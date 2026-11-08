@@ -72,6 +72,7 @@ fn tag_error_code(v: &ErrorCode) -> &'static str {
         ErrorCode::Busy => "Busy",
         ErrorCode::Internal => "Internal",
         ErrorCode::NeedsConsent => "NeedsConsent",
+        ErrorCode::Stale => "Stale",
     }
 }
 
@@ -95,6 +96,10 @@ fn tag_message(v: &Message) -> &'static str {
         Message::DiskVolumes(_) => "DiskVolumes",
         Message::Job(_) => "Job",
         Message::WidgetLayoutChanged(_) => "WidgetLayoutChanged",
+        Message::PowerChanged(_) => "PowerChanged",
+        Message::WolChanged(_) => "WolChanged",
+        Message::WakesChanged(_) => "WakesChanged",
+        Message::EventsLost(_) => "EventsLost",
     }
 }
 
@@ -102,12 +107,17 @@ fn tag_job_spec(v: &JobSpec) -> &'static str {
     match v {
         JobSpec::FindFiles { .. } => "FindFiles",
         JobSpec::RescanIssues { .. } => "RescanIssues",
-        JobSpec::RefreshBackup => "RefreshBackup",
         JobSpec::FileHash { .. } => "FileHash",
         JobSpec::SleepBlockers => "SleepBlockers",
         JobSpec::BootAnalysis => "BootAnalysis",
         JobSpec::AppUsage => "AppUsage",
         JobSpec::SoftwareInventory => "SoftwareInventory",
+        JobSpec::Helper { .. } => "Helper",
+        JobSpec::WolWake { .. } => "WolWake",
+        JobSpec::UpdateList { .. } => "UpdateList",
+        JobSpec::UpdateGeo => "UpdateGeo",
+        JobSpec::RebuildIntel => "RebuildIntel",
+        JobSpec::InstallTool { .. } => "InstallTool",
     }
 }
 
@@ -115,12 +125,15 @@ fn tag_job_output(v: &JobOutput) -> &'static str {
     match v {
         JobOutput::Finder(_) => "Finder",
         JobOutput::Issues(_) => "Issues",
-        JobOutput::Backup(_) => "Backup",
         JobOutput::FileHash(_) => "FileHash",
         JobOutput::Sleep(_) => "Sleep",
         JobOutput::Boot(_) => "Boot",
         JobOutput::AppUsage(_) => "AppUsage",
         JobOutput::Software(_) => "Software",
+        JobOutput::Helper(_) => "Helper",
+        JobOutput::Wol(_) => "Wol",
+        JobOutput::Intel(_) => "Intel",
+        JobOutput::Tool(_) => "Tool",
     }
 }
 
@@ -130,15 +143,46 @@ fn tag_helper_request(v: &HelperRequest) -> &'static str {
         HelperRequest::Traffic => "Traffic",
         HelperRequest::Audit(_) => "Audit",
         HelperRequest::Uninstall => "Uninstall",
+        HelperRequest::Processes(_) => "Processes",
+        HelperRequest::SocketOwners => "SocketOwners",
+        HelperRequest::FileHolders { .. } => "FileHolders",
+        HelperRequest::LoginItems => "LoginItems",
+        HelperRequest::Counters(_) => "Counters",
+        HelperRequest::MemoryModules => "MemoryModules",
+        HelperRequest::Smart(_) => "Smart",
+        HelperRequest::InstallTool { .. } => "InstallTool",
+        HelperRequest::Firewall => "Firewall",
+        HelperRequest::Extras(_) => "Extras",
+        HelperRequest::LogTail(_) => "LogTail",
+        HelperRequest::ScheduleWake { .. } => "ScheduleWake",
+        HelperRequest::CancelWake { .. } => "CancelWake",
+        HelperRequest::ListWakes => "ListWakes",
+        HelperRequest::WolState { .. } => "WolState",
+        HelperRequest::Build => "Build",
     }
 }
 
 fn tag_helper_reply(v: &HelperReply) -> &'static str {
     match v {
-        HelperReply::About(_) => "About",
-        HelperReply::Counters(_) => "Counters",
+        HelperReply::About(..) => "About",
+        HelperReply::Traffic(_) => "Traffic",
         HelperReply::Entries(_) => "Entries",
         HelperReply::Bye => "Bye",
+        HelperReply::Build(_) => "Build",
+        HelperReply::Firewall(_) => "Firewall",
+        HelperReply::Wakes(_) => "Wakes",
+        HelperReply::WakeCancelled(_) => "WakeCancelled",
+        HelperReply::Wol(_) => "Wol",
+        HelperReply::CounterValues(_) => "CounterValues",
+        HelperReply::Memory(_) => "Memory",
+        HelperReply::SocketOwners(_) => "SocketOwners",
+        HelperReply::FileHolders(_) => "FileHolders",
+        HelperReply::Extras(_) => "Extras",
+        HelperReply::Processes(_) => "Processes",
+        HelperReply::Smart(_) => "Smart",
+        HelperReply::Installed(_) => "Installed",
+        HelperReply::LoginItems(_) => "LoginItems",
+        HelperReply::Log(_) => "Log",
     }
 }
 
@@ -182,8 +226,7 @@ fn tag_request(v: &Request) -> &'static str {
         Request::Capture => "Capture",
         Request::RecorderSnapshots => "RecorderSnapshots",
         Request::RecorderSnapshot { .. } => "RecorderSnapshot",
-        Request::DiagnosticsPreview => "DiagnosticsPreview",
-        Request::SaveDiagnostics { .. } => "SaveDiagnostics",
+        Request::DiagnosticsFiles => "DiagnosticsFiles",
         Request::Network { .. } => "Network",
         Request::LookupIp { .. } => "LookupIp",
         Request::Benchmarks => "Benchmarks",
@@ -213,7 +256,6 @@ fn tag_request(v: &Request) -> &'static str {
         Request::GpuProcesses => "GpuProcesses",
         Request::SaveInventoryReport { .. } => "SaveInventoryReport",
         Request::Maintenance => "Maintenance",
-        Request::Backup => "Backup",
         Request::StartJob { .. } => "StartJob",
         Request::Jobs => "Jobs",
         Request::CancelJob { .. } => "CancelJob",
@@ -222,6 +264,31 @@ fn tag_request(v: &Request) -> &'static str {
         Request::StartDiskScan { .. } => "StartDiskScan",
         Request::ForgetSavedDiskMap { .. } => "ForgetSavedDiskMap",
         Request::ForgetSavedDiskMaps => "ForgetSavedDiskMaps",
+        Request::HelperStatus => "HelperStatus",
+        Request::PowerState => "PowerState",
+        Request::PowerWakes => "PowerWakes",
+        Request::PowerSetWake { .. } => "PowerSetWake",
+        Request::PowerCancelWake { .. } => "PowerCancelWake",
+        Request::WolDevices => "WolDevices",
+        Request::WolCandidates => "WolCandidates",
+        Request::WolSave { .. } => "WolSave",
+        Request::WolRemove { .. } => "WolRemove",
+        Request::WolWake { .. } => "WolWake",
+        Request::WolReadiness => "WolReadiness",
+        Request::PowerKeepAwake { .. } => "PowerKeepAwake",
+        Request::PowerStopKeepAwake => "PowerStopKeepAwake",
+        Request::PowerIdleCancel => "PowerIdleCancel",
+        Request::PowerIdleSnooze { .. } => "PowerIdleSnooze",
+        Request::EnergyReport { .. } => "EnergyReport",
+        Request::SaveBenchmarks { .. } => "SaveBenchmarks",
+        Request::BenchGpuAdapters => "BenchGpuAdapters",
+        Request::BenchEstimate { .. } => "BenchEstimate",
+        Request::IntelStatus => "IntelStatus",
+        Request::IntelEdit { .. } => "IntelEdit",
+        Request::GeoSummary => "GeoSummary",
+        Request::Firewall => "Firewall",
+        Request::ToolOffer => "ToolOffer",
+        Request::RemoveTool => "RemoveTool",
         Request::CancelDiskScan { .. } => "CancelDiskScan",
         Request::DiskScans => "DiskScans",
         Request::DiskChildren { .. } => "DiskChildren",
@@ -264,8 +331,7 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::Captured(_) => "Captured",
         Reply::RecorderSnapshots(_) => "RecorderSnapshots",
         Reply::RecorderSnapshot(_) => "RecorderSnapshot",
-        Reply::DiagnosticsPreview(_) => "DiagnosticsPreview",
-        Reply::DiagnosticsSaved(_) => "DiagnosticsSaved",
+        Reply::DiagnosticsFiles(_) => "DiagnosticsFiles",
         Reply::Url(_) => "Url",
         Reply::Network(_) => "Network",
         Reply::Benchmarks(_) => "Benchmarks",
@@ -289,7 +355,6 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::Gpu(_) => "Gpu",
         Reply::InventorySaved(_) => "InventorySaved",
         Reply::Maintenance(_) => "Maintenance",
-        Reply::Backup(_) => "Backup",
         Reply::DiskVolumes(_) => "DiskVolumes",
         Reply::DiskScan(_) => "DiskScan",
         Reply::DiskScans(_) => "DiskScans",
@@ -302,6 +367,20 @@ fn tag_reply(v: &Reply) -> &'static str {
         Reply::JobOutput(_) => "JobOutput",
         Reply::WidgetLayout(_) => "WidgetLayout",
         Reply::PopoverValues(_) => "PopoverValues",
+        Reply::HelperStatus(_) => "HelperStatus",
+        Reply::Power(_) => "Power",
+        Reply::PowerWakes(_) => "PowerWakes",
+        Reply::Wol(_) => "Wol",
+        Reply::WolCandidates(_) => "WolCandidates",
+        Reply::WolReadiness(_) => "WolReadiness",
+        Reply::Energy(_) => "Energy",
+        Reply::GpuAdapters(_) => "GpuAdapters",
+        Reply::BenchEstimate(_) => "BenchEstimate",
+        Reply::Intel(_) => "Intel",
+        Reply::IntelEdited(_) => "IntelEdited",
+        Reply::Geo(_) => "Geo",
+        Reply::Firewall(_) => "Firewall",
+        Reply::ToolOffer(_) => "ToolOffer",
     }
 }
 
@@ -319,6 +398,7 @@ fn error_code_samples() -> Vec<ErrorCode> {
         Busy,
         Internal,
         NeedsConsent,
+        Stale,
     ]
 }
 
@@ -345,7 +425,6 @@ fn job_spec_samples() -> Vec<JobSpec> {
         JobSpec::RescanIssues {
             query: IssuesQuery::default(),
         },
-        JobSpec::RefreshBackup,
         JobSpec::FileHash {
             source: HashSource::Process(process_ref()),
         },
@@ -353,6 +432,14 @@ fn job_spec_samples() -> Vec<JobSpec> {
         JobSpec::BootAnalysis,
         JobSpec::AppUsage,
         JobSpec::SoftwareInventory,
+        JobSpec::Helper {
+            action: dyno_core::helper_wire::HelperAction::TurnOn,
+        },
+        JobSpec::UpdateList { id: "list-1".into() },
+        JobSpec::UpdateGeo,
+        JobSpec::WolWake { id: 1, test: true },
+        JobSpec::RebuildIntel,
+        JobSpec::InstallTool { tool: zero() },
     ]
 }
 
@@ -360,12 +447,15 @@ fn job_output_samples() -> Vec<JobOutput> {
     vec![
         JobOutput::Finder(zero()),
         JobOutput::Issues(zero()),
-        JobOutput::Backup(zero()),
         JobOutput::FileHash(zero()),
         JobOutput::Sleep(zero()),
         JobOutput::Boot(zero()),
         JobOutput::AppUsage(zero()),
         JobOutput::Software(zero()),
+        JobOutput::Helper(Box::new(zero())),
+        JobOutput::Wol(Box::new(zero())),
+        JobOutput::Intel(Box::default()),
+        JobOutput::Tool(Box::new(zero())),
     ]
 }
 
@@ -375,15 +465,77 @@ fn helper_request_samples() -> Vec<HelperRequest> {
         HelperRequest::Traffic,
         HelperRequest::Audit(25),
         HelperRequest::Uninstall,
+        HelperRequest::Processes(zero()),
+        HelperRequest::SocketOwners,
+        HelperRequest::FileHolders { dev: 7, ino: 9 },
+        HelperRequest::LoginItems,
+        HelperRequest::Counters(zero()),
+        HelperRequest::MemoryModules,
+        HelperRequest::Smart(zero()),
+        HelperRequest::InstallTool {
+            tool: zero(),
+            bytes: vec![1, 2, 3],
+        },
+        HelperRequest::Firewall,
+        HelperRequest::Extras(zero()),
+        HelperRequest::LogTail(50),
+        HelperRequest::ScheduleWake {
+            tag: dyno_core::wake::WakeTag::parse("nightly-1").unwrap(),
+            at_utc: 1_700_000_000,
+        },
+        HelperRequest::CancelWake {
+            tag: dyno_core::wake::WakeTag::parse("nightly-1").unwrap(),
+        },
+        HelperRequest::ListWakes,
+        HelperRequest::WolState {
+            ifname: dyno_core::wake::IfName::parse("eth0").unwrap(),
+        },
+        HelperRequest::Build,
     ]
 }
 
 fn helper_reply_samples() -> Vec<HelperReply> {
     vec![
-        HelperReply::About(zero()),
-        HelperReply::Counters(vec![]),
+        HelperReply::About(zero(), zero()),
+        HelperReply::Traffic(zero()),
         HelperReply::Entries(vec![]),
         HelperReply::Bye,
+        HelperReply::Build("0123456789abcdef".into()),
+        HelperReply::Firewall(zero()),
+        HelperReply::Wakes(vec![]),
+        HelperReply::WakeCancelled(true),
+        HelperReply::Wol(zero()),
+        HelperReply::CounterValues(vec![]),
+        HelperReply::Memory(zero()),
+        HelperReply::SocketOwners(zero()),
+        HelperReply::FileHolders(zero()),
+        HelperReply::Extras(zero()),
+        HelperReply::Processes(zero()),
+        HelperReply::Smart(zero()),
+        HelperReply::Smart(dyno_core::smart::SmartReply {
+            disks: vec![dyno_core::smart::SmartDisk {
+                device: "/dev/nvme0".to_string(),
+                model: "EXAMPLE NVME".to_string(),
+                capacity: Some(1_000_000_000_000),
+                temperature_c: Some(40),
+                percent_used: Some(4),
+                media_errors: Some(0),
+                power_on_hours: Some(1200),
+                unsafe_shutdowns: Some(2),
+                passed: Some(true),
+                wear_id: Some("EXAMPLE NVME EX1".to_string()),
+                bytes_written: Some(84_800_000_000_000),
+                rated_bytes: Some(600_000_000_000_000),
+            }],
+            skipped: vec![dyno_core::smart::SmartSkip {
+                device: "/dev/sda".to_string(),
+                reason: "needs administrator rights".to_string(),
+            }],
+            not_visited: 1,
+        }),
+        HelperReply::Installed(zero()),
+        HelperReply::LoginItems(zero()),
+        HelperReply::Log(vec!["a line".into()]),
     ]
 }
 
@@ -448,8 +600,7 @@ fn request_samples() -> Vec<Request> {
         Request::Capture,
         Request::RecorderSnapshots,
         Request::RecorderSnapshot { id: 3 },
-        Request::DiagnosticsPreview,
-        Request::SaveDiagnostics { path: s("/d.zip") },
+        Request::DiagnosticsFiles,
         Request::Network { query: Default::default() },
         Request::LookupIp {
             ip: s("192.0.2.1"),
@@ -463,6 +614,27 @@ fn request_samples() -> Vec<Request> {
             phase: Some(bench::BenchPhase::Before),
             disk_mib: Some(64),
             allow_battery: true,
+            disk_volumes: vec![s("/")],
+            allow_network_drives: true,
+            disk_folders: vec![],
+            gpu_adapter: Some(1),
+            sustained_minutes: Some(5),
+            sustained_write_gib: Some(2),
+        },
+        Request::SaveBenchmarks {
+            path: s("/b.json"),
+            format: bench::export::ExportFormat::Json,
+            ids: vec![s("b1")],
+        },
+        Request::BenchGpuAdapters,
+        Request::BenchEstimate {
+            request: bench::estimate::EstimateRequest {
+                kinds: vec![bench::BenchKind::Cpu],
+                disk_mib: Some(64),
+                drives: 1,
+                sustained_minutes: None,
+                sustained_write_gib: None,
+            },
         },
         Request::CancelBenchmark,
         Request::DeleteBenchmark { id: s("b1") },
@@ -514,7 +686,6 @@ fn request_samples() -> Vec<Request> {
             format: extras::software::InventoryFormat::Markdown,
         },
         Request::Maintenance,
-        Request::Backup,
         Request::StartJob {
             spec: JobSpec::SoftwareInventory,
         },
@@ -528,6 +699,28 @@ fn request_samples() -> Vec<Request> {
         },
         Request::ForgetSavedDiskMap { scan: 1 },
         Request::ForgetSavedDiskMaps,
+        Request::HelperStatus,
+        Request::PowerState,
+        Request::PowerWakes,
+        Request::PowerSetWake { entry: zero() },
+        Request::PowerCancelWake { id: 2 },
+        Request::WolDevices,
+        Request::WolCandidates,
+        Request::WolSave { device: zero() },
+        Request::WolRemove { id: 1 },
+        Request::WolWake { id: 1, test: false },
+        Request::WolReadiness,
+        Request::PowerKeepAwake { spec: zero() },
+        Request::PowerStopKeepAwake,
+        Request::PowerIdleCancel,
+        Request::PowerIdleSnooze { minutes: 5 },
+        Request::EnergyReport { days: 30 },
+        Request::IntelStatus,
+        Request::IntelEdit { edit: zero() },
+        Request::GeoSummary,
+        Request::Firewall,
+        Request::ToolOffer,
+        Request::RemoveTool,
         Request::CancelDiskScan { scan: 1 },
         Request::DiskScans,
         Request::DiskChildren {
@@ -555,6 +748,7 @@ fn request_samples() -> Vec<Request> {
         },
         Request::EditWidgetLayout {
             edit: widgets::SurfaceEdit::Popover(paddock_widgets::Edit::ResetToDefaults),
+            base_revision: Some(3),
         },
         Request::PopoverValues {
             placements: vec![paddock_widgets::PlacementId::new("disk-space").unwrap()],
@@ -603,14 +797,14 @@ fn wire_job() -> paddock_jobs::wire::WireSnapshot {
 }
 
 fn reply_samples() -> Vec<Reply> {
-    use dyno_core::{counters, diagnostics, extras, issues, recorder, report, widgets};
+    use dyno_core::{counters, extras, issues, recorder, report, widgets};
     let index = dyno_core::disk::index::DiskIndex::new("r", dyno_core::disk::index::ScanLimits::default());
     vec![
         Reply::Ok,
         Reply::Details(zero()),
         Reply::Activity(zero()),
         Reply::Activities(vec![]),
-        Reply::Lockers(vec![]),
+        Reply::Lockers(dyno_core::process::LockerList::default()),
         Reply::Snapshot(zero()),
         Reply::Snapshots(vec![]),
         Reply::Diff(zero()),
@@ -640,12 +834,7 @@ fn reply_samples() -> Vec<Reply> {
             recorder::CaptureReason::Manual,
             vec![],
         ))),
-        Reply::DiagnosticsPreview(zero()),
-        Reply::DiagnosticsSaved(diagnostics::SavedDiagnostics {
-            path: "/x.zip".into(),
-            bytes: 1,
-            files: 1,
-        }),
+        Reply::DiagnosticsFiles(zero()),
         Reply::Url("https://example.com/".into()),
         Reply::Network(zero()),
         Reply::Benchmarks(zero()),
@@ -687,7 +876,6 @@ fn reply_samples() -> Vec<Reply> {
             bytes: 1,
         }),
         Reply::Maintenance(extras::maintenance::MaintenanceSettings::default().status(Timestamp(0), &dyno_core::time::FixedZone::UTC)),
-        Reply::Backup(zero()),
         Reply::DiskVolumes(vec![]),
         Reply::DiskScan(Box::new(disk_status())),
         Reply::DiskScans(vec![disk_status()]),
@@ -697,9 +885,23 @@ fn reply_samples() -> Vec<Reply> {
         Reply::Job(Box::new(wire_job())),
         Reply::Jobs(vec![wire_job()]),
         Reply::JobCancelled(true),
-        Reply::JobOutput(Box::new(JobOutput::Backup(zero()))),
+        Reply::JobOutput(Box::new(JobOutput::Sleep(zero()))),
         Reply::WidgetLayout(Box::new(widgets::layout_view(&Settings::default(), widgets::DynoSurface::Popover))),
         Reply::PopoverValues(widgets::JsonOnLink(vec![])),
+        Reply::HelperStatus(Box::new(zero())),
+        Reply::Power(Box::default()),
+        Reply::PowerWakes(Box::new(zero())),
+        Reply::Wol(Box::new(zero())),
+        Reply::WolCandidates(vec![]),
+        Reply::WolReadiness(Box::new(zero())),
+        Reply::Energy(Box::new(zero())),
+        Reply::GpuAdapters(vec![]),
+        Reply::BenchEstimate(None),
+        Reply::Intel(Box::default()),
+        Reply::IntelEdited(Box::new(zero())),
+        Reply::Geo(Box::default()),
+        Reply::Firewall(Box::new(zero())),
+        Reply::ToolOffer(Box::new(zero())),
     ]
 }
 
@@ -717,6 +919,7 @@ fn message_samples() -> Vec<Message> {
             processes: None,
             groups: Some(vec![]),
             other_users: None,
+            via: Default::default(),
         })),
         Message::Alert(zero()),
         Message::Activity(zero()),
@@ -725,6 +928,14 @@ fn message_samples() -> Vec<Message> {
         Message::DiskVolumes(vec![]),
         Message::Job(Box::new(wire_job())),
         Message::WidgetLayoutChanged(dyno_core::widgets::DynoSurface::Popover),
+        Message::PowerChanged(Box::default()),
+        Message::WolChanged(Box::new(zero())),
+        Message::WakesChanged(Box::new(zero())),
+        Message::EventsLost(LostEvents {
+            activity: 3,
+            alerts: 2,
+            alarms: 1,
+        }),
     ]
 }
 
@@ -837,6 +1048,7 @@ const JSON_ONLY: &[(&str, usize)] = &[
     ("bench.rs", 1),                      // StatusJson (mirrored by a binary form)
     ("bench/wire.rs", 1),                 // the JSON lines a dyno-bench child writes on stdout; never crosses the app-agent wire
     ("widgets/popover_values/mod.rs", 1), // PopoverSurfaceValues, carried by `JsonOnLink`
+    ("intel/mod.rs", 2),                  // MatchedBy and Verdict: Serialize-only, never decoded; the verdict reaches the UI as JSON
 ];
 
 fn rust_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {

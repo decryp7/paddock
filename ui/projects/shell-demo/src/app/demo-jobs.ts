@@ -27,6 +27,17 @@ interface Running {
 const TICK_MS = 100;
 
 /**
+ * `?jobs-step=manual`: the engine has no timer; the test calls `window.__sdJobsTick(n)` to run n ticks (100 ms of job time each), so
+ * a test sees each step for as long as it wants instead of racing the wall clock (a slow WebKit run overshot a whole job).
+ */
+function manualTicks(search: string = globalThis.location?.search ?? ''): boolean {
+  return new URLSearchParams(search).get('jobs-step') === 'manual';
+}
+
+/** Read once when the page loads: the router drops the query string from the address afterwards. */
+const MANUAL_TICKS = manualTicks();
+
+/**
  * The demo's stand-in for the engine (the browser build has no Rust): jobs with phases on their own scales, a step that
  * cannot be cancelled, and a quiet job that sends no events until cancelled. It plays `paddock-jobs`' part through
  * `MemoryJobsBackend`; the shell's jobs code is the same as in a real app.
@@ -61,7 +72,13 @@ export class DemoJobsEngine implements OnDestroy {
     this.jobs.set(job.id, job);
     this.emit(job, { state: 'queued' });
     this.enter(job, 0);
-    this.timer ??= setInterval(() => this.advance(), TICK_MS);
+    if (MANUAL_TICKS) {
+      (globalThis as { __sdJobsTick?: (n?: number) => void }).__sdJobsTick = (n = 1) => {
+        for (let i = 0; i < n; i++) this.advance();
+      };
+    } else {
+      this.timer ??= setInterval(() => this.advance(), TICK_MS);
+    }
     return job.id;
   }
 

@@ -1,4 +1,12 @@
 //! Unix: a socket in a fresh 0700 directory.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::let_underscore_must_use,
+        clippy::let_underscore_future,
+        clippy::let_underscore_untyped
+    )
+)]
 
 use crate::token::random_hex;
 use std::io::{self, Read, Write};
@@ -57,7 +65,7 @@ impl Listener {
                     });
                 }
                 Err(e) => {
-                    let _ = std::fs::remove_dir_all(&dir);
+                    paddock_proc::cleanup::remove_dir_all(&dir);
                     last = e;
                 }
             }
@@ -90,7 +98,7 @@ impl Listener {
         let ready = std::fs::set_permissions(path, std::fs::Permissions::from_mode(access.mode))
             .and_then(|_| listener.set_nonblocking(true));
         if let Err(e) = ready {
-            let _ = std::fs::remove_file(path);
+            paddock_proc::cleanup::remove_file(std::path::Path::new(path));
             return Err(e);
         }
         Ok(Listener {
@@ -140,10 +148,10 @@ impl Drop for Listener {
     fn drop(&mut self) {
         match &self.cleanup {
             Cleanup::Dir(d) => {
-                let _ = std::fs::remove_dir_all(d);
+                paddock_proc::cleanup::remove_dir_all(d);
             }
             Cleanup::File(f) => {
-                let _ = std::fs::remove_file(f);
+                paddock_proc::cleanup::remove_file(f);
             }
         }
     }
@@ -193,6 +201,16 @@ impl Stream {
         expected_uid: u32,
     ) -> Result<Stream, super::SystemConnectError> {
         use super::SystemConnectError::{Connect, Untrusted};
+        // No folder at all means nothing is listening (the service was never installed): that is not an untrusted server.
+        let parent = Path::new(name)
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        if let Err(e) = std::fs::symlink_metadata(parent)
+            && e.kind() == io::ErrorKind::NotFound
+        {
+            return Err(Connect(e));
+        }
         super::unix_peer::check_folder_of(name, expected_uid).map_err(Untrusted)?;
         let stream = Stream::connect(name, timeout).map_err(Connect)?;
         let uid = peer_uid(&stream.s).ok_or_else(|| {
@@ -320,7 +338,7 @@ pub(super) struct Closer(UnixStream);
 
 impl Closer {
     pub(super) fn close(&self) {
-        let _ = self.0.shutdown(Shutdown::Both);
+        paddock_proc::cleanup::logged("shutting the socket down", self.0.shutdown(Shutdown::Both));
     }
 }
 

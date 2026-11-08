@@ -22,6 +22,14 @@ struct Patterns {
     url_credentials: Regex,
     /// 13 to 19 digits that pass the Luhn check.
     card: Regex,
+    /// `pass=x`, `pw: x`, `&sig=x`: short key names that need `=` or `:` and a word boundary.
+    keyed_short: Regex,
+    /// `password: correct horse`: the rest of the line after a colon.
+    password_line: Regex,
+    /// A PEM private key block (or the rest of the text when its end is missing).
+    pem: Regex,
+    /// Tokens that carry their own prefix: `ghp_...`, `AKIA...`, `pw_...`, `sk-...`.
+    prefixed: Regex,
 }
 
 fn compile(pattern: &str) -> Regex {
@@ -33,14 +41,18 @@ fn patterns() -> &'static Patterns {
     static P: OnceLock<Patterns> = OnceLock::new();
     P.get_or_init(|| Patterns {
         keyed: compile(
-            r#"(?i)((?:token|password|passwd|pwd|secret|api[_-]?key|access[_-]?key|authorization|cookie)["']?\s*(?:[:=]\s*["']?|\s+))(?:(?:bearer|token|basic)\s+)?[^\s"',;&]+"#,
+            r#"(?i)((?:token|password|passwd|pwd|secret|api[_-]?key|access[_-]?key|session[_-]?key|authorization|cookie)["']?\s*(?:[:=]\s*["']?|\s+))(?:(?:bearer|token|basic)\s+)?[^\s"',;&]+"#,
         ),
         bearer: compile(r"(?i)(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}"),
         connection: compile(r#"(?i)((?:AccountKey|SharedAccessKey|SharedAccessSignature)\s*=\s*)[^;\s"']+"#),
         long_hex: compile(r"\b[0-9A-Fa-f]{32,}\b"),
         jwt: compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*"),
-        url_credentials: compile(r"(?i)(https?://)[^/\s:@]+:[^/\s@]+@"),
+        url_credentials: compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@"),
         card: compile(r"\b\d(?:[ -]?\d){12,18}\b"),
+        keyed_short: compile(r#"(?i)(\b(?:pass|pw|sig|signature)["']?\s*[:=]\s*["']?)[^\s"',;&]+"#),
+        password_line: compile(r#"(?i)(\b(?:password|passwd)\s*:\s*\[redacted\])[ \t]+[^\r\n"']+"#),
+        pem: compile(r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"),
+        prefixed: compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|(?:AKIA|ASIA)[A-Z0-9]{16}|(?:pw|pmk)_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{16,})"),
     })
 }
 
@@ -96,6 +108,12 @@ pub fn redact_secrets(text: &str) -> (String, u32) {
     out = replace(&p.keyed, out, &mut n, |c| {
         Some(format!("{}{REDACTED}", &c[1]))
     });
+    out = replace(&p.keyed_short, out, &mut n, |c| {
+        Some(format!("{}{REDACTED}", &c[1]))
+    });
+    out = replace(&p.password_line, out, &mut n, |c| Some(c[1].to_string()));
+    out = replace(&p.pem, out, &mut n, |_| Some(REDACTED.into()));
+    out = replace(&p.prefixed, out, &mut n, |_| Some(REDACTED.into()));
     out = replace(&p.bearer, out, &mut n, |c| {
         Some(format!("{}{REDACTED}", &c[1]))
     });

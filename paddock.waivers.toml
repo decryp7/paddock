@@ -262,7 +262,7 @@ expires = "2026-12-31"
 [[waiver]]
 check = "C54"
 path = "crates/paddock-service/src/render.rs"
-reason = "paddock-service: renders LowPriorityIO and IOSchedulingClass=idle for every low_priority() service; to follow ADR 0020's priority helper (the class decides the level)"
+reason = "paddock-service: renders LowPriorityIO for every low_priority() service (the systemd text is best effort 7, not idle); to follow ADR 0020's priority helper (the class decides the level)"
 expires = "2026-12-31"
 
 [[waiver]]

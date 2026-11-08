@@ -24,15 +24,14 @@ bash scripts/check-bundle.sh target/dist/bundle                                 
 
 ## 2. Install
 
-Open the `.dmg`, drag Dyno to Applications and open it from there; it is not notarised, so the first time macOS says "Not Opened": choose Done, then System Settings > Privacy & Security > **Open Anyway**, **Open Anyway** again, and enter an administrator's name and password (once). In
-**Settings**, turn on **Launch at login**: Dyno registers the agent with `SMAppService` and macOS may ask you to allow it under
+Open the `.dmg`, drag Dyno to Applications and open it from there; it is not notarised, so the first time macOS says "Not Opened": choose Done, then System Settings > Privacy & Security > **Open Anyway**, **Open Anyway** again, and enter an administrator's name and password (once). The first time it runs, Dyno turns on **Launch at login** by itself (Settings can turn it off): it registers the agent with `SMAppService` and macOS may ask you to allow it under
 **System Settings > General > Login Items & Extensions**. No administrator rights are needed.
 
 Why ad-hoc signing matters: `SMAppService` and launch agents refuse a linker-signed bundle (error -67056). After an update
 launchd may keep the previous code requirement and refuse the new agent ("needs LWCR update", spawn failed, exit 78 EX_CONFIG).
 Registering again over the old job does not help, so Dyno replaces it by itself: once after every version change, and whenever
 launchd reports it stale while the agent does not answer, it unregisters, runs `launchctl bootout`, waits until launchd has
-dropped the job, registers again and retries a bounded number of times (`app/src-tauri/src/service_repair.rs`; each step is in
+dropped the job, registers again and retries a bounded number of times (`paddock_service::repair::replace`, wired in `app/src-tauri/src/login.rs`; each step is in
 Dyno's log). An item you switched off in Login Items is left alone.
 
 ## 3. Verify
@@ -59,7 +58,7 @@ routes on one machine.
 - System processes (uid below 500) are listed one by one with name, path, owner and parent. macOS gives CPU, memory and disk only for
   your own processes, so for system processes those columns say *Unavailable: macOS shows this only for your own processes*. Other
   accounts' processes are one **Other users** row that shows how many there are; its CPU, memory and disk totals say *Unavailable* with the same reason.
-- Dyno 1.0 installs no helper and no LaunchDaemon. Dyno 1.0 runs only with your own rights; elevation is planned for 1.1 (ADR 0022).
+- Dyno installs no helper and no LaunchDaemon until you turn on Administrator readings (Dyno 1.1, ADR 0027), which asks for your password once and registers `net.decryptology.dyno.helper`. Without it Dyno runs only with your own rights.
 
 ## After updating Dyno
 

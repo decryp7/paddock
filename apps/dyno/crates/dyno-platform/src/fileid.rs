@@ -3,6 +3,10 @@
 //! bother, and the allocation size is what the file occupies on the volume (clusters, compression and sparseness
 //! included) next to its length. The numbers come from an open handle (`GetFileInformationByHandle` and
 //! `GetFileInformationByHandleEx`); folding them into [`FileFacts`] is pure and tested with invented numbers on every OS.
+#![cfg_attr(
+    not(test),
+    deny(clippy::let_underscore_must_use, clippy::let_underscore_future, clippy::let_underscore_untyped)
+)]
 #![allow(unsafe_code)]
 
 /// What the disk map needs to know about one file or folder.
@@ -95,7 +99,7 @@ pub fn file_facts(path: &std::path::Path) -> std::io::Result<FileFacts> {
         fn drop(&mut self) {
             // SAFETY: the handle was opened by `CreateFileW` below and is closed only here.
             unsafe {
-                let _ = CloseHandle(self.0);
+                paddock_proc::cleanup::logged("closing a file handle", CloseHandle(self.0));
             }
         }
     }

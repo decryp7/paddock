@@ -10,7 +10,7 @@ use crate::anomaly::Evidence;
 use crate::hardware::Confidence;
 use crate::stats::{robust_slope, RobustSlope};
 use crate::time::{Timestamp, DAY};
-use crate::units::bytes;
+use crate::units::storage;
 use serde::{Deserialize, Serialize};
 
 /// Forecasts further away than this are reported as "more than 10 years".
@@ -352,10 +352,10 @@ pub fn ssd_life(facts: &SsdFacts<'_>, readings: &[WearPoint], now: Timestamp) ->
         base.basis.push(Evidence::new("Used so far", format!("{p:.0}% of rated endurance")));
     }
     if let Some(w) = last.bytes_written {
-        base.basis.push(Evidence::new("Written so far", bytes(w)));
+        base.basis.push(Evidence::new("Written so far", storage(w)));
     }
     if let Some(r) = facts.rated_bytes {
-        base.basis.push(Evidence::new("Rated for", bytes(r)));
+        base.basis.push(Evidence::new("Rated for", storage(r)));
     }
     base.basis.push(Evidence::new("History", history_text(seg.len(), span)));
     let note = restart_note(restarted, "disk");
@@ -410,7 +410,7 @@ pub fn ssd_life(facts: &SsdFacts<'_>, readings: &[WearPoint], now: Timestamp) ->
                     let (l, m, h) = project(rated.saturating_sub(w) as f64, &p);
                     candidates.push((l, m, h, p.spread, "the bytes written against the rated endurance"));
                     base.basis
-                        .push(Evidence::new("Writing", format!("{}/day", bytes(r.slope.max(0.0) as u64))));
+                        .push(Evidence::new("Writing", format!("{}/day", storage(r.slope.max(0.0) as u64))));
                 }
             }
         }

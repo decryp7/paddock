@@ -31,7 +31,7 @@ use std::time::Duration;
 const LOCK_SCAN_BUDGET: Duration = Duration::from_secs(5);
 
 /// The ports for Linux.
-pub fn platform() -> Platform {
+pub fn platform(secrets_dir: &std::path::Path) -> Platform {
     let tools: Arc<dyn tools::Tools> = Arc::new(tools::SystemTools);
     let paths = paths::HostPaths::host();
     Platform {
@@ -54,6 +54,8 @@ pub fn platform() -> Platform {
         counters: std::sync::Arc::new(crate::counters::OsCounters),
         network: crate::NetworkPorts::os(),
         hardware: crate::HardwareReaders::os(),
+        power: crate::PowerPorts::os(),
+        wol: crate::wol::WolPorts::os(secrets_dir),
     }
 }
 
@@ -72,7 +74,7 @@ mod tests {
 
     #[test]
     fn the_linux_platform_runs_end_to_end_on_this_machine() {
-        let mut p = platform();
+        let mut p = platform(std::path::Path::new("unused"));
         let _ = p.sensors.sample(Timestamp(1));
         let s = p.sensors.sample(Timestamp(2));
         assert!(s.memory.total > 0);

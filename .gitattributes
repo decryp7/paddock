@@ -27,3 +27,8 @@ crates/*/fixtures/** -text
 # The ./dev wrapper and the tool's input list are read by sh: LF on every checkout.
 /dev text eol=lf
 /tools/paddock-dev/inputs.txt text eol=lf
+
+# Packaging files a Linux package ships (maintainer scripts run by sh, the systemd unit, the polkit rule, the macOS plists a test compares byte for
+# byte with a render): LF on every checkout. A Windows checkout with CRLF broke `#!/bin/sh\r` and the unit comparison in CI (run 7494).
+/apps/*/app/src-tauri/linux/** text eol=lf
+/apps/*/app/src-tauri/macos/*.plist text eol=lf

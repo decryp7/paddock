@@ -8,7 +8,7 @@ import { Notifier } from '../shared/notifier';
 /** The page asks again this often while it is open (the engine caches reads for a moment, so this stays cheap). */
 export const NETWORK_POLL_MS = 2000;
 
-export const DEFAULT_QUERY: NetworkQuery = { showLoopback: false, proto: null, state: null, exposedOnly: false, search: '' };
+export const DEFAULT_QUERY: NetworkQuery = { showLoopback: false, proto: null, state: null, exposedOnly: false, search: '', country: null };
 
 interface NetworkState {
   snapshot: NetworkSnapshot | null;
@@ -74,6 +74,14 @@ export const NetworkStore = signalStore(
       },
       stop,
       load,
+      /** "Try again" on the owners' source line: one read that asks the helper now (the poll keeps its own pace). */
+      async retryHelper(): Promise<void> {
+        try {
+          patchState(store, { snapshot: await backend.network({ ...store.query(), retryHelper: true }), error: null });
+        } catch (e) {
+          patchState(store, { error: toCommandError(e) });
+        }
+      },
       async setQuery(patch: Partial<NetworkQuery>): Promise<void> {
         patchState(store, (s) => ({ query: { ...s.query, ...patch } }));
         if (timer !== null) clearTimeout(timer);
@@ -95,7 +103,7 @@ export const NetworkStore = signalStore(
       },
       /** What one program has open now, without touching the page's own filters. */
       async forProcess(pid: number): Promise<ProcessNetwork> {
-        const snap = await backend.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '' });
+        const snap = await backend.network({ showLoopback: true, proto: null, state: null, exposedOnly: false, search: '', country: null });
         const mine = (o: { kind: string; pid?: number }) => o.kind === 'process' && o.pid === pid;
         return {
           connections: snap.connections.filter((c) => mine(c.owner)),
