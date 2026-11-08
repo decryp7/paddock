@@ -254,7 +254,7 @@ export const POWER_MANUAL = [
  * `makePower` builds the PowerChecks for it, `gui` (macOS) the MacGui that clicks the helper's password sheet, `idle` the idle checks.
  * The helper goes on first (a scheduled wake needs it on macOS) and off after the wake checks. Returns { steps, version }.
  */
-export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWER_MANUAL, gui = null, idle = null, tour = null, extra = [], post = [], helperOnly = false }) {
+export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWER_MANUAL, gui = null, idle = null, tour = null, extra = [], post = [], helperOnly = false, only = null }) {
   const steps = [];
   const push = (s) => { steps.push(s); check.log(`${s.status.toUpperCase()}  ${s.title}: ${s.summary}`); return s; };
   const install = push(await check.install(stagedDmg));
@@ -263,9 +263,9 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
   // A failed start judgement (for example a parent rule) does not stop the checks: each step fails by itself if the app is not there.
   {
     const power = makePower();
-    if (gui) { const h = push(await gui.helperOn()); power.helperOn = h.status === 'pass'; }
+    if (gui && !only) { const h = push(await gui.helperOn()); power.helperOn = h.status === 'pass'; }
     if (helperOnly && tour) push(await tour.menuBar()); // the tray: Dyno's menu-bar items
-    if (!helperOnly) {
+    if (!helperOnly && !only) {
       push(await power.keepAwake());
       push(await power.scheduledWake());
       push(await power.wakeOnLan());
@@ -273,11 +273,11 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
     }
     // Extension point: one function per wired helper reading (each `async (ctx) => step`), run while the helper is on.
     for (const fn of extra) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // a function may return several steps
-    if (gui) push(await gui.helperOff());
-    for (const fn of post) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // after Turn off: steps that read what the helper left behind
-    if (idle && !helperOnly) { push(await idle.run()); if (idle.audioStep) push(idle.audioStep); }
+    if (gui && !only) push(await gui.helperOff());
+    for (const fn of only ? [] : post) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // after Turn off: steps that read what the helper left behind
+    if (idle && !helperOnly && !only) { push(await idle.run()); if (idle.audioStep) push(idle.audioStep); }
   }
   push(await check.quit('Quit after the power checks'));
-  for (const m of manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
+  for (const m of only ? [] : manual) steps.push({ title: m.title, status: 'manual', summary: m.summary });
   return { steps, version: check.version };
 }

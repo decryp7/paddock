@@ -30,6 +30,7 @@ import { NOT_DRIVEN, ROW_TITLES, btmState, keychainOtherBuildStep, judgeLifecycl
 import { hungPageStep } from './hung-page.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
 import { loginSwitchStep, parseBtm } from './login-start-rows.mjs';
+import { onlyRequired, parseOnly, rowWanted } from './only.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -59,10 +60,13 @@ export function parseArgs(argv) {
     else if (a === '--reboot-check') o.reboot = true;
     else if (a === '--expect-commit') o.expectCommit = take(i++, a);
     else if (a === '--partial') o.partial = true;
+    else if (a === '--only') o.only = parseOnly(take(i++, a));
     else if (a === '--keep-vm') o.keep = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!['start', 'power', 'helper'].includes(o.suite)) throw new Error(`--suite ${o.suite}: start (default), power or helper`);
+  if (o.only && o.suite !== 'power') throw new Error('--only (run just these release rows) needs --suite power');
+  if (o.only) o.partial = true; // a subset is never a release verdict
   if (!o.app) throw new Error('--app <id> is needed (dyno, spotter, pitcrew, pitwall, debrief)');
   if (!/^[a-z][a-z-]*$/.test(o.app)) throw new Error(`--app ${o.app} is not an app id`);
   if (o.installerBefore && o.suite !== 'power') throw new Error('--installer-before (the build that makes the key, for the keychain other-build measurement) needs --suite power');
@@ -227,7 +231,7 @@ async function main(argv) {
       if (pf.status !== 'pass') {
         // Reported as a broken check (INCOMPLETE, exit 3) with the reason; nothing was cloned.
         const startedPf = new Date().toISOString();
-        const reqPf = requiredSteps({ os: 'macos', suite: o.suite, reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
+        const reqPf = o.only ? onlyRequired(o.only) : requiredSteps({ os: 'macos', suite: o.suite, reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
         const done = finalizeRun({ out, started: startedPf, meta: { label: o.suite === 'start' ? 'macos-start' : o.suite === 'power' ? 'macos-power' : o.reboot ? 'macos-helper-restart' : 'macos-helper', os: 'macos', suite: o.suite, run: o.run ?? null }, run: { app: config.app, installer: source, installerSha256: sha256File(dmg), source, partial: o.partial, required: reqPf, guest: `Tart ${base} (missing)`, started: startedPf, steps: [pf] } });
         log(`preflight: ${pf.summary}`); console.log(done.file);
         return done.exit;
@@ -336,7 +340,7 @@ async function main(argv) {
             quitApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; true`); await sleepMs(4000); },
             pidAlive: async (pid) => (await exec(`kill -0 ${pid} 2>/dev/null`)).code === 0,
           });
-          const mcp = await mcpStep(mg);
+          const mcp = rowWanted(o.only, 'mcp') ? await mcpStep(mg) : null;
           const lg = await exec(`sudo -u nobody head -5 '/Library/Application Support/Dyno/helper-lifecycle.log' 2>&1; echo "EXIT=$?"`);
           const m = /EXIT=(\d+)\s*$/.exec(lg.stdout);
           // Quit and stop measuring, then reopen (menu item over AX), with the Login Items state before and after and the Background Items notice from the unified log.
@@ -349,6 +353,11 @@ async function main(argv) {
           if ((await ld.readSwitch()) === 'on' && (await ld.pressSwitch())) { const a = await ld.apply(); switchedOff = a.ok; }
           await gui.closeSettings();
           const wasState = await btm();
+          if (o.only && wasState !== 'off') { // ER-33: the precondition is checked first; the Quit and the reopen are not run on a bad start
+            if (switchedOff && (await ld.readSwitch()) === 'off' && (await ld.pressSwitch())) await ld.apply();
+            await gui.closeSettings();
+            return [rowStep(ROW_TITLES.macReopen, [{ ok: false, kind: 'check', detail: `check broken: the Login Items entry is not off before the test (sfltool dumpbtm reads ${wasState}; switch ${switchedOff ? 'saved off' : 'not switched'})` }], 'unused')];
+          }
           const t0 = new Date(Date.now() - 5000).toISOString().replace('T', ' ').slice(0, 19);
           const qs = await quitStopStep({
             now: () => Date.now(), sleep: sleepMs,
@@ -364,16 +373,16 @@ async function main(argv) {
           if (switchedOff && (await ld.readSwitch()) === 'off' && (await ld.pressSwitch())) await ld.apply();
           await gui.closeSettings();
           // Hung or paused page: the WebContent process is stopped; the question is read through AX.
-          const hung = await hungPageStep({
+          const hung = !rowWanted(o.only, 'hung-page') ? null : await hungPageStep({
             now: () => Date.now() / 1000, sleep: sleepMs,
             suspend: async () => { if ((await exec('pgrep -f com.apple.WebKit.WebContent >/dev/null')).code !== 0) throw new Error('no WebContent process'); await exec('pkill -STOP -f com.apple.WebKit.WebContent'); },
             resume: async () => { await exec('pkill -CONT -f com.apple.WebKit.WebContent'); },
             logLines: async () => (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | tail -n 400')).stdout.split('\n'),
             questions: async () => (await gui.texts()).filter((t) => /Keep Waiting/.test(t.text)).length, keepWaiting: async () => gui.press(gui.app, '^Keep Waiting', 'AXButton'), shot: async (n) => gui.shot(n),
           }, ROW_TITLES.hungPage);
-          return [mcp, qs, reopen,
+          return [mcp, ...(o.only ? [] : [qs]), reopen,
             rowStep(ROW_TITLES.macLifecycleLog, judgeLifecycleLog({ code: m ? Number(m[1]) : null, out: lg.stdout.replace(/EXIT=\d+\s*$/, '') }), 'a standard user reads the lifecycle log'),
-            hung];
+            hung].filter((x) => x && rowWanted(o.only, x === reopen ? 'mac-reopen' : x === hung ? 'hung-page' : x === mcp ? 'mcp' : 'mac-lifecycle-log'));
         };
         // Launch at login switch (release row): the SMAppService login item (sfltool dumpbtm), the switch pressed and SAVED (Save changes), off then on.
         const macLoginSwitch = async () => {
@@ -382,13 +391,13 @@ async function main(argv) {
           return loginSwitchStep({ sleep: sleepMs, readSwitch: () => d.readSwitch(), pressSwitch: () => d.pressSwitch(), apply: () => d.apply(), readEntry,
             witness: async () => (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -i -E "login item|start at login|SMAppService" | tail -n 12')).stdout.split('\n') });
         };
-        const rowFns = o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
+        const rowFns = o.only ? [macRows] : o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
           async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) }),
           async () => discoveryStep(unixDiscoveryPrims({ exec: (c) => guest.exec(c), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), file: '$HOME/Library/Application Support/Dyno/agent.json', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }))] : [];
-        const suite = await runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', manual: o.suite === 'helper' ? [] : undefined });
+        const suite = await runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', only: o.only, manual: o.suite === 'helper' ? [] : undefined });
         // The keychain other-build measurement (not in the manifest, never a pass or a fail): build A (--installer-before) makes a key through the app's own UI, build B
         // (--installer) is installed over it. It runs last because it replaces the installed app.
-        if (o.installerBefore) {
+        if (o.installerBefore && !o.only) {
           const { macKeychainPrimitives } = await import('./mac-keychain-row.mjs');
           const prim = macKeychainPrimitives({ guest, gui, check, share: SHARE, bundle: `/Applications/${config.bundle}`, log });
           const km = await keychainOtherBuildStep(prim).catch((e) => ({ title: ROW_TITLES.keychainOtherBuild, status: 'not-measured', cls: 'check', summary: `not measured: ${e.message} (check broken)`, checks: [{ ok: false, kind: 'check', detail: String(e.message) }], evidence: [] }));
@@ -397,7 +406,7 @@ async function main(argv) {
           suite.steps.push(km);
         }
         // Release row: the new build installed over a RUNNING older one (needs the older .dmg as --installer-before). Last: it replaces the installed app.
-        if (o.suite === 'power') {
+        if (o.suite === 'power' && !o.only) {
           const sw = o.installerBefore
             ? await upgradeSwapStep(macSwapPrimitives({ guest, gui, check, share: SHARE, bundle: `/Applications/${config.bundle}` })).catch((e) => swapNotDriven(String(e.message ?? e)))
             : swapNotDriven('no older build was given (--installer-before <older .dmg>: the 1.0.0 .dmg or an older RC), so there is nothing to install over');
@@ -414,7 +423,7 @@ async function main(argv) {
     const probe = expected ? await exec(`grep -c -a -F -e ${expected} '/Applications/${config.bundle}/Contents/MacOS/${appSpec.name}' >/dev/null; exit $?`) : null;
     const allSteps = withBuildStep(steps, buildStep({ expected, found: probe ? foundFromGrep(probe.code) : null }));
     const label = o.suite === 'start' ? 'macos-start' : o.suite === 'power' ? 'macos-power' : o.reboot ? 'macos-helper-restart' : 'macos-helper';
-    const required = requiredSteps({ os: 'macos', suite: o.suite, reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
+    const required = o.only ? onlyRequired(o.only) : requiredSteps({ os: 'macos', suite: o.suite, reboot: Boolean(o.reboot), release: !o.partial, partial: Boolean(o.partial) });
     const { file, exit } = finalizeRun({
       out, started, meta: { label, os: 'macos', suite: o.suite, run: o.run ?? null },
       run: { app: config.app, version, installer: source, installerSha256: sha256File(dmg), source, expectedCommit: expected, partial: o.partial, required, guest: `Tart macOS (${base.startsWith('ghcr') ? 'pinned base image' : base}), fresh clone ${vm}, headless`, started, commit, steps: allSteps },
