@@ -711,7 +711,9 @@ fn a_per_machine_start_keeps_waiting_off_the_thread_until_the_installer_is_gone(
     assert!(matches!(status.phase, UpdatePhase::InstallerRunning { .. }));
     let handle = background(updates.clone(), Duration::from_millis(5)).unwrap();
     // More than one wait slice passes while the installer runs: the thread does not give up after one bound.
-    paddock_testkit::wait_until("three wait slices", || lock.waits.load(Ordering::SeqCst) >= 3);
+    paddock_testkit::wait_until("three wait slices", || {
+        lock.waits.load(Ordering::SeqCst) >= 3
+    });
     assert!(matches!(
         updates.updater.status().phase,
         UpdatePhase::InstallerRunning { .. }

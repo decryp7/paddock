@@ -64,7 +64,10 @@ pub fn wait_until(what: &str, f: impl FnMut() -> bool) {
 
 /// [`wait_until`] with a bound of the caller's.
 pub fn wait_until_within(what: &str, guard: Duration, f: impl FnMut() -> bool) {
-    assert!(poll_until_within(guard, f), "timed out after {guard:?} waiting for {what}");
+    assert!(
+        poll_until_within(guard, f),
+        "timed out after {guard:?} waiting for {what}"
+    );
 }
 
 /// Waits until `f` gives a value (at most [`HANG_GUARD`]) and returns it; panics naming `what` when it never does.
@@ -110,7 +113,10 @@ mod tests {
             false
         });
         assert!(!held);
-        assert!(calls.load(Ordering::SeqCst) >= 2, "polled at least at the start and after the bound");
+        assert!(
+            calls.load(Ordering::SeqCst) >= 2,
+            "polled at least at the start and after the bound"
+        );
     }
 
     #[test]
@@ -134,22 +140,35 @@ mod tests {
     #[test]
     #[should_panic(expected = "waiting for a value that never comes")]
     fn a_value_that_never_comes_panics_naming_what_was_waited_for() {
-        let _: u8 = wait_for_within("a value that never comes", Duration::from_millis(5), || None);
+        let _: u8 = wait_for_within("a value that never comes", Duration::from_millis(5), || {
+            None
+        });
     }
 
     #[test]
     fn a_retried_action_runs_at_once_then_at_its_own_interval() {
         let mut runs = 0;
-        assert!(retry_within(Duration::from_secs(5), Duration::from_millis(1), || {
-            runs += 1;
-            runs == 3
-        }));
+        assert!(retry_within(
+            Duration::from_secs(5),
+            Duration::from_millis(1),
+            || {
+                runs += 1;
+                runs == 3
+            }
+        ));
         assert_eq!(runs, 3);
         let mut never = 0;
-        assert!(!retry_within(Duration::from_millis(20), Duration::from_millis(10), || {
-            never += 1;
-            false
-        }));
-        assert!((2..=4).contains(&never), "a fixed interval, not a fast poll: {never}");
+        assert!(!retry_within(
+            Duration::from_millis(20),
+            Duration::from_millis(10),
+            || {
+                never += 1;
+                false
+            }
+        ));
+        assert!(
+            (2..=4).contains(&never),
+            "a fixed interval, not a fast poll: {never}"
+        );
     }
 }

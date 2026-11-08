@@ -233,7 +233,14 @@ describe('JobsStore', () => {
       await retry;
       backend.reads[1]?.reject(new Error('late failure'));
       // A macrotask: every promise continuation of the late read has run once it fires (not a count of turns).
-      await new Promise<void>((resolve) => setTimeout(resolve));
+      await new Promise<void>((resolve) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => {
+          channel.port1.close();
+          resolve();
+        };
+        channel.port2.postMessage(0);
+      });
       expect(store.requestStatus()).toBe('loaded');
       expect(store.jobs().map((j) => j.seq)).toEqual([5, 1]);
     });

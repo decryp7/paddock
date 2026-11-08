@@ -32,4 +32,7 @@ pub use hostile::{assert_never_panics, corpus, never_panics};
 pub use paddock_jobs::time::{Clock, FakeClock};
 pub use runner::{Call, FakeRunner, Reply};
 pub use scratch::{Leftovers, Scratch, ScratchError};
-pub use wait::{HANG_GUARD, poll_for, poll_until_within, retry_within, wait_for, wait_for_within, wait_until, wait_until_within};
+pub use wait::{
+    HANG_GUARD, poll_for, poll_until_within, retry_within, wait_for, wait_for_within, wait_until,
+    wait_until_within,
+};

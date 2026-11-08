@@ -63,7 +63,15 @@ const Plain = signalStore(
 );
 
 /** A macrotask: every promise continuation queued before it has run once it fires (not a count of turns). */
-const drained = (): Promise<void> => new Promise<void>((resolve) => setTimeout(resolve));
+const drained = (): Promise<void> =>
+  new Promise<void>((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      resolve();
+    };
+    channel.port2.postMessage(0);
+  });
 
 function bed() {
   const backend = new Backend();

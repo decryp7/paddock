@@ -78,13 +78,14 @@ impl Site {
 impl Drop for Site {
     fn drop(&mut self) {
         // Windows Defender may still be scanning a program that was just started; remove with a bounded retry.
-        let _ = paddock_testkit::retry_within(std::time::Duration::from_secs(20), RETRY_EVERY, || {
-            let _ = Command::new("cmd")
-                .args(["/c", "rmdir", "/s", "/q"])
-                .arg(&self.0)
-                .output();
-            !self.0.exists()
-        });
+        let _ =
+            paddock_testkit::retry_within(std::time::Duration::from_secs(20), RETRY_EVERY, || {
+                let _ = Command::new("cmd")
+                    .args(["/c", "rmdir", "/s", "/q"])
+                    .arg(&self.0)
+                    .output();
+                !self.0.exists()
+            });
         if self.0.exists() {
             eprintln!("could not remove the test folder {}", self.0.display());
         }
@@ -902,7 +903,8 @@ fn apply_update_starts_the_signed_installer_with_fixed_arguments_and_a_protected
     let run_dir = &runs[0];
     let record = run_dir.join("tmp").join("fake-installer.txt");
     // A wait on the file the child writes, not a fixed sleep: it ends when the file exists (bounded).
-    let _ = paddock_testkit::poll_until_within(std::time::Duration::from_secs(30), || record.exists());
+    let _ =
+        paddock_testkit::poll_until_within(std::time::Duration::from_secs(30), || record.exists());
     let text = std::fs::read_to_string(&record)
         .unwrap_or_else(|e| panic!("the installer did not run: {e}\n{}", site.log()));
     let tmp = run_dir.join("tmp").to_string_lossy().to_lowercase();

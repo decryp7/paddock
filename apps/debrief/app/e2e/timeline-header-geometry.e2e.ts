@@ -20,9 +20,11 @@ function edgesOver(page: Page, ms: number): Promise<Record<string, number[]>> {
             const box = document.querySelector(`debrief-timeline-panel [aria-label="${n}"]`)?.getBoundingClientRect();
             if (box) seen[n]?.add(Math.round(box.left));
           }
+          // conformance: hang-guard — a fixed sampling window that measures layout, not a wait on a condition; it ends by itself and the test timeout of 60 s bounds it
           if (performance.now() - began < span) requestAnimationFrame(frame);
           else resolve(Object.fromEntries(names.map((n) => [n, [...(seen[n] ?? [])]])));
         };
+        // conformance: hang-guard — a fixed sampling window that measures layout, not a wait on a condition; it ends by itself and the test timeout of 60 s bounds it
         requestAnimationFrame(frame);
       }),
     [[...BUTTONS], ms] as const,
