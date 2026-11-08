@@ -56,6 +56,10 @@ on:
         description: The Cargo workspace folder whose .cargo/config.toml includes ci.toml; the build folder is set there (build-folder action).
         type: string
         required: true
+      app-folder:
+        description: "The app's folder (apps/<app>) that the C99 keychain job judges with crates/. Empty: derived from cargo-dir (the action keeps its first two segments), which is right for every app whose workspace is apps/<app> or below it."
+        type: string
+        default: ""
       tag-prefix:
         description: "The app's tag prefix with the dash (pitcrew-): tags are <prefix>v1.2.3. Empty: plain v* tags."
         type: string
@@ -356,7 +360,7 @@ jobs:
 
       - uses: ./.paddock/.gitea/actions/keychain
         with:
-          scope: ${{ inputs.cargo-dir }}
+          scope: ${{ inputs.app-folder || inputs.cargo-dir }}
           paddock: .paddock
 
   release:

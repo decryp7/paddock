@@ -2,7 +2,7 @@ name: keychain
 description: "Conformance C99 (ADR 0057 §3, rule 72): no shipped process uses the macOS Keychain. The one copy of the command, used by ci.yml's c99 job and by every release path (app-release.yml, debrief.yml, the two demo release workflows)."
 inputs:
   scope:
-    description: "The app folder (apps/<app>) a release judges: its workspaces and crates/ only (ER-31), so another app's finding cannot block it. Empty: the whole repository (ci.yml)."
+    description: "The app a release judges, as apps/<app> or any path below it (reduced to apps/<app>): its workspaces, crates/ and its UI projects only (ER-31), so another app's finding cannot block it. Empty: the whole repository (ci.yml)."
     default: ""
   paddock:
     description: "Folder of the Paddock checkout that holds conformance/ (. in the monorepo, .paddock when the job checked it out there)."
@@ -18,6 +18,8 @@ runs:
       run: |
         set -euo pipefail
         args=(--app paddock --root . --only C99)
+        # A workspace in a subfolder of the app (apps/<app>/app/src-tauri) is still the app's: the scope is the app folder.
+        SCOPE=$(printf '%s' "$SCOPE" | sed -E 's#^(apps/[^/]+).*#\1#')
         if [ -n "$SCOPE" ]; then args+=(--scope "$SCOPE"); fi
         echo "C99: node $PADDOCK/conformance/bin/paddock-conformance.mjs ${args[*]}"
         start=$(date +%s)
