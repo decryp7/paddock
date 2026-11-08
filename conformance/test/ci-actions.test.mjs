@@ -86,7 +86,7 @@ test('the scripts the actions run are executable programs of this package', () =
 const workflows = readdirSync(WORKFLOWS).filter((f) => f.startsWith('app-') && f.endsWith('.yml')).sort();
 
 test('the reusable workflows are workflow_call workflows that use only actions, inputs and secrets that exist', () => {
-  assert.deepEqual(workflows, ['app-e2e.yml', 'app-fuzz.yml', 'app-licences.yml', 'app-mutants.yml', 'app-never-panics.yml', 'app-release.yml']);
+  assert.deepEqual(workflows, ['app-release.yml']);
   for (const w of workflows) {
     const text = read(join(WORKFLOWS, w));
     assert.match(text, /^on:\n {2}workflow_call:/m, `${w}: workflow_call`);
@@ -1791,7 +1791,7 @@ test('a job that builds several mutants at once splits its build jobs between th
       assert.equal(split[2], want, `${file} ${job.id}: the split is the --jobs number`);
     }
   }
-  assert.ok(seen >= 2, 'the mutants workflows are found');
+  assert.ok(seen >= 1, 'the mutants workflow is found');
 });
 
 test('every job that runs cargo sets its build jobs (build-jobs or setup-rust); a host job before it takes a slot', () => {

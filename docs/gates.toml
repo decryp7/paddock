@@ -326,31 +326,7 @@ review_by = 2026-12-06
 approved = "coordinator"
 
 [[not_gated]]
-id = "action:cache-restore"
-reason = "no workflow reaches this action (its only callers are the unreachable reusable workflows or nobody)"
-owner = "ADR 0060 WP-4"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[not_gated]]
-id = "action:cache-save"
-reason = "no workflow reaches this action (its only callers are the unreachable reusable workflows or nobody)"
-owner = "ADR 0060 WP-4"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[not_gated]]
 id = "action:conformance"
-reason = "no workflow reaches this action (its only callers are the unreachable reusable workflows or nobody)"
-owner = "ADR 0060 WP-4"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[not_gated]]
-id = "action:licences"
 reason = "no workflow reaches this action (its only callers are the unreachable reusable workflows or nobody)"
 owner = "ADR 0060 WP-4"
 since = 2026-11-08
@@ -360,46 +336,6 @@ approved = "coordinator"
 [[not_gated]]
 id = "action:strip-signing-keys"
 reason = "no workflow reaches this action (its only callers are the unreachable reusable workflows or nobody)"
-owner = "ADR 0060 WP-4"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[not_gated]]
-id = "workflow:app-e2e.yml"
-reason = "a reusable workflow from the separate repositories with no caller in this repository (ADR 0060 instance 4)"
-owner = "ADR 0060 WP-4"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[not_gated]]
-id = "workflow:app-fuzz.yml"
-reason = "a reusable workflow from the separate repositories with no caller in this repository (ADR 0060 instance 4)"
-owner = "ADR 0060 WP-4"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[not_gated]]
-id = "workflow:app-licences.yml"
-reason = "a reusable workflow from the separate repositories with no caller in this repository (ADR 0060 instance 4)"
-owner = "ADR 0060 WP-4"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[not_gated]]
-id = "workflow:app-mutants.yml"
-reason = "a reusable workflow from the separate repositories with no caller in this repository (ADR 0060 instance 4)"
-owner = "ADR 0060 WP-4"
-since = 2026-11-08
-review_by = 2026-12-06
-approved = "coordinator"
-
-[[not_gated]]
-id = "workflow:app-never-panics.yml"
-reason = "a reusable workflow from the separate repositories with no caller in this repository (ADR 0060 instance 4)"
 owner = "ADR 0060 WP-4"
 since = 2026-11-08
 review_by = 2026-12-06

@@ -141,8 +141,7 @@ side: `paddock_build::Build` (build.rs: the Windows manifest in every binary, em
 
 ## Hardening workflows (plan X41)
 
-Reusable workflows in `.gitea/workflows/`: `app-fuzz.yml` (nightly cargo-fuzz in shards, `shards` is a JSON list), `app-mutants.yml`
-(cargo-mutants weekly and on the changed lines of a pull request) and `app-never-panics.yml` (the proptest / `never_panics` tests with
-many cases, release mode). C36 finds parser crates without a fuzz target or a never-panics test; `paddock_testkit::{corpus,
+The reusable fuzz, mutation and never-panics workflows of the separate repositories were deleted when nothing called them (ADR 0060); Debrief's own
+`debrief-fuzz.yml` and `debrief-mutants.yml` run them for Debrief. C36 finds parser crates without a fuzz target or a never-panics test; `paddock_testkit::{corpus,
 never_panics}` is the dependency-free test for a parser. Debrief's `corpus.yml` stays in Debrief (its data and pins are its own); the
 `plan` and `nightly-mark` actions it hand-copied are the shared ones.
