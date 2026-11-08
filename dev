@@ -1,12 +1,12 @@
 #!/bin/sh
 # ./dev: runs paddock-dev, the Paddock developer and CI tool (ADR 0022). Works from any subfolder: it finds the repository
 # root with git and runs the tool in the folder you are in. The tool is a content-addressed binary: the hash of its inputs
-# (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache, the
-# prebuilt download (R0b: not wired yet), then a local build. A build also happens whenever an input has uncommitted
-# changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
+# (tools/paddock-dev/inputs.txt, from git, plus the compiler cargo will use) names it. Order: the per-user cache (on a CI runner the
+# kept mount, see below), the prebuilt download (R0b: not wired yet), then a local build. A build also happens whenever an input has
+# uncommitted changes, because then HEAD's hash cannot describe it. `./dev --wrapper-hash` prints the hash and stops.
 # Environment: PADDOCK_DEV_TARGET_DIR (build folder, default tools/paddock-dev/target, which is ignored by git),
-# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a
-# compiler wrapper, as release jobs do).
+# PADDOCK_DEV_HOME (cache, default ~/.paddock-dev), PADDOCK_CI_MOUNT (a CI runner's kept mount, default /sccache),
+# PADDOCK_DEV_FRESH=1 (build from source in a fresh folder without a compiler wrapper, as release jobs do).
 set -eu
 
 root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "dev: run this inside the Paddock repository." >&2; exit 2; }
@@ -21,6 +21,14 @@ inputs=$(grep -v '^[[:space:]]*#' "$tool/inputs.txt" | grep -v '^[[:space:]]*$' 
 # empty file as an empty script and call that success).
 runs() { [ -x "$1" ] && v=$("$1" --version 2>/dev/null) && [ -n "$v" ]; }
 
+# On a CI runner with a kept mount (a Linux container's /sccache, which the node-caches action also uses) the tool and its build
+# folder live there, so a plan job compiles the tool once per hash and not on every run. An explicit PADDOCK_DEV_HOME or
+# PADDOCK_DEV_TARGET_DIR wins.
+ci_mount="${PADDOCK_CI_MOUNT:-/sccache}"
+if [ "${GITHUB_ACTIONS:-}" = true ] && [ -d "$ci_mount" ] && [ -w "$ci_mount" ]; then
+  : "${PADDOCK_DEV_HOME:=$ci_mount/paddock-dev}"
+  : "${PADDOCK_DEV_TARGET_DIR:=$ci_mount/paddock-dev/target}"
+fi
 home="${PADDOCK_DEV_HOME:-${HOME:-/nonexistent}/.paddock-dev}"
 exe=
 case "$(uname -s)" in MINGW* | MSYS* | CYGWIN*) exe=.exe ;; esac

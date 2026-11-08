@@ -465,3 +465,51 @@ fn a_trace_of_the_wrapper_never_prints_what_a_config_holds() {
     std::fs::write(f.cargo_home.path().join("config.toml"), "[registry]\ntoken = \"another\"\n").unwrap();
     assert_ne!(f.both(&[]).0, before);
 }
+
+#[cfg(unix)]
+#[test]
+fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_home_still_wins() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let mount = scratch.path().join("mount");
+    std::fs::create_dir_all(&mount).unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
+    write_script(
+        &f.cargo_home.path().join("shims/cargo"),
+        r#"mkdir -p "$CARGO_TARGET_DIR/release"; printf '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0; exit 0; fi\necho built-by-shim\n' > "$CARGO_TARGET_DIR/release/paddock-dev"; chmod +x "$CARGO_TARGET_DIR/release/paddock-dev""#,
+    );
+    let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
+    let run = |extra: &[(&str, &Path)]| {
+        let mut cmd = Command::new("sh");
+        cmd.arg(f.root().join("dev"))
+            .arg("hello")
+            .current_dir(f.root())
+            .env_clear()
+            .env("PATH", &path)
+            .env("HOME", scratch.path().join("home"))
+            .env("CARGO_HOME", f.cargo_home.path())
+            .env("RUSTC", &rustc)
+            .env("GITHUB_ACTIONS", "true")
+            .env("PADDOCK_CI_MOUNT", &mount);
+        cmd.envs(extra.iter().map(|(k, v)| (*k, *v)));
+        let out = cmd.output().unwrap();
+        (out.status.code().unwrap(), String::from_utf8_lossy(&out.stdout).trim().to_string())
+    };
+    assert_eq!(run(&[]), (0, "built-by-shim".to_string()));
+    let cached = mount.join("paddock-dev/bin").join(&hash).join("paddock-dev-test-host");
+    assert!(cached.exists(), "the tool is kept on the mount: {cached:?}");
+    assert!(
+        mount.join("paddock-dev/target/release/paddock-dev").exists(),
+        "and so is its build folder"
+    );
+    assert!(!scratch.path().join("home/.paddock-dev").exists(), "nothing in the runner's home");
+    // The next run finds it without building.
+    std::fs::remove_dir_all(mount.join("paddock-dev/target")).unwrap();
+    assert_eq!(run(&[]), (0, "built-by-shim".to_string()));
+    assert!(!mount.join("paddock-dev/target").exists(), "no second build");
+    // An explicit home is used as given.
+    let own = scratch.path().join("own");
+    assert_eq!(run(&[("PADDOCK_DEV_HOME", own.as_path())]).0, 0);
+    assert!(own.join("bin").join(&hash).exists());
+}
