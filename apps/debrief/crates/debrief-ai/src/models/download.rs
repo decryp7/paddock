@@ -4,7 +4,6 @@
 use super::disk::DiskSpace;
 use super::segmented::{self, Coverage, HostGate, Tuning};
 use super::source::{ModelSource, Phase, Progress, RemoteFile};
-use crate::catalog::is_safe_file_name;
 use crate::error::{AiError, Result};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -44,6 +43,18 @@ impl Default for DownloadOptions {
             host_gate: Some(HostGate::shared()),
         }
     }
+}
+
+/// A file name that is safe to use inside the downloads folder (moved here from the model catalog, ADR 0070 D4).
+pub fn is_safe_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 200
+        && name.to_lowercase().ends_with(".gguf")
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_' | '+'))
+        && !name.contains("..")
 }
 
 /// SHA-256 computed over the bytes as they are written, with how many it has seen.

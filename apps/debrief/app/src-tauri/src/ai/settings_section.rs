@@ -11,26 +11,6 @@ use debrief_core::settings::{Configurable, EnumOption, FieldKind, SectionOwner, 
 use serde_json::Value;
 use std::sync::Arc;
 
-/// Schema keys that are not settings fields: the built-in engine's, which Pitwall's own settings replace (ADR 0070).
-const NOT_FIELDS: &[&str] = &[
-    "engine",
-    "active_model",
-    "autoload",
-    "idle_unload_minutes",
-    "gpu_offload",
-    "threads",
-    "hf_endpoint",
-    "download_proxy",
-    "max_download_gb",
-    "download_connections",
-    "models_dir",
-    "inference_build",
-    "runtime_updates",
-    "model_updates",
-    "update_check_hours",
-    "name_aliases",
-    "llama_server_path",
-];
 const MAX_TEXT: usize = 2048;
 
 pub struct AiSettingsSection {
@@ -44,9 +24,6 @@ fn num(v: &Value, k: &str) -> Option<f64> {
 /// One schema entry as a field, or `None` for entries that are not settings fields.
 fn field_of(f: &Value) -> Option<SettingField> {
     let key = f.get("key")?.as_str()?;
-    if NOT_FIELDS.contains(&key) {
-        return None;
-    }
     let label = f.get("label").and_then(Value::as_str).unwrap_or(key);
     let desc = f.get("description").and_then(Value::as_str).unwrap_or("");
     let default = f.get("default").cloned().unwrap_or(Value::Null);

@@ -92,6 +92,7 @@ describe('Settings ▸ Performance', () => {
 
   it('a health cause names the process its cap stopped, and "Raise the cap…" opens that cap with the suggestion', async () => {
     const { showView } = setup();
+    expect([capField({ kind: 'storeWorker' }), capField({ kind: 'plugin', pluginId: 'p' })]).toEqual(['storeCapMb', null]);
     expect([processOfTarget('storeWorker'), processOfTarget('plugin:net.x')]).toEqual([{ kind: 'storeWorker' }, { kind: 'plugin', pluginId: 'net.x' }]);
     expect([processOfTarget('plugin:'), processOfTarget('nope')]).toEqual([null, null]);
     const injector = TestBed.inject(Injector);

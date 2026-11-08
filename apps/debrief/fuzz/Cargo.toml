@@ -18,7 +18,6 @@ debrief-notes = { path = "../crates/debrief-notes" }
 debrief-plugin-api = { path = "../crates/debrief-plugin-api" }
 debrief-plugin-package = { path = "../crates/debrief-plugin-package" }
 debrief-ai = { path = "../crates/debrief-ai" }
-debrief-ai-worker = { path = "../crates/debrief-ai-worker" }
 debrief-plugin-registry = { path = "../crates/debrief-plugin-registry" }
 debrief-plugin-windows = { path = "../crates/debrief-plugin-windows" }
 debrief-plugin-web = { path = "../crates/debrief-plugin-web" }
@@ -258,20 +257,6 @@ bench = false
 [[bin]]
 name = "fuzz_plugin_reply"
 path = "fuzz_targets/fuzz_plugin_reply.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "fuzz_ai_request"
-path = "fuzz_targets/fuzz_ai_request.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "fuzz_worker_http"
-path = "fuzz_targets/fuzz_worker_http.rs"
 test = false
 doc = false
 bench = false

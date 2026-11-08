@@ -298,7 +298,7 @@ export class MockVideoBackend extends VideoBackend {
 
   async open(request: OpenVideoRequest): Promise<VideoView> {
     const file = name(request.path);
-    if (this.runtime.status.mode === 'none') throw fail('noRuntime', 'FFmpeg is not set up.', { hint: 'Set it up in Settings ▸ Video.' });
+    if (this.runtime.status.mode === 'none') throw fail('missing', 'FFmpeg is not set up.', { hint: 'Set it up in Settings ▸ Video.' });
     if (request.path.includes('missing-file')) throw fail('notFound', `${file} was not found.`);
     if (!(await this.sniff([request.path])).length) throw fail('unsupported', `${file} is not a video Debrief can read.`, { hint: 'Debrief reads MP4, MOV, MKV, WebM and AVI.' });
     const key = mockKey(file);

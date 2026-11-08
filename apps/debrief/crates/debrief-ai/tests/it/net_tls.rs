@@ -6,7 +6,6 @@
 //! `key.der` its PKCS#8 P-256 key; test-only, generated with
 //! `openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 36500 -subj /CN=localhost ...`.
 
-use debrief_ai::models::{HfConfig, HuggingFace, ModelSource};
 use debrief_ai::net::{self, HttpConfig, NetKind};
 use debrief_ai::AiError;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -88,23 +87,6 @@ fn an_unknown_root_certificate_is_refused_and_explained() {
         0,
         "no request may be sent over an unverified connection"
     );
-}
-
-#[test]
-fn the_model_download_reports_the_certificate_problem() {
-    let (port, served) = https_server();
-    // An https mirror endpoint on the interception server: the adapter's own request path.
-    let mut cfg = HfConfig::default();
-    cfg.endpoint = format!("https://localhost:{port}");
-    cfg.connect_timeout = Duration::from_secs(5);
-    cfg.api_timeout = Duration::from_secs(10);
-    let hf = HuggingFace::new(cfg).unwrap();
-    let e = hf.describe("org/repo", "m.gguf").unwrap_err();
-    assert!(
-        matches!(&e, AiError::Connection(n) if n.kind == NetKind::Tls && n.host == "localhost"),
-        "{e:?}"
-    );
-    assert_eq!(served.load(Ordering::SeqCst), 0);
 }
 
 #[test]

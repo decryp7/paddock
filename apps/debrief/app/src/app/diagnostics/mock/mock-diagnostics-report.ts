@@ -19,8 +19,8 @@ export function sampleReport(name: string): DiagnosticsReportView {
       files: [
         { name: 'system-info.json', kind: 'system-info', bytes: 1536 },
         { name: 'processes.json', kind: 'processes', bytes: 700 },
-        { name: 'logs/children/ai-worker.log', kind: 'child-log', bytes: 4096 },
-        { name: 'logs/children/llama-server.log', kind: 'child-log', bytes: 8192 },
+        { name: 'logs/children/store-worker.log', kind: 'child-log', bytes: 4096 },
+        { name: 'logs/children/plugin-host.log', kind: 'child-log', bytes: 8192 },
       ],
     },
     systemInfo: {
@@ -39,11 +39,11 @@ export function sampleReport(name: string): DiagnosticsReportView {
       ],
     },
     processes: [
-      { name: 'ai-worker', kind: 'ai-worker', version: '0.9.0', pid: 4120, state: 'running', starts: 1, restarts: 0, lastExit: null, lastExitAt: null, quarantined: false, quarantineReason: null },
+      { name: 'store-worker', kind: 'store-worker', version: '0.9.0', pid: 4120, state: 'running', starts: 1, restarts: 0, lastExit: null, lastExitAt: null, quarantined: false, quarantineReason: null },
       {
-        name: 'llama-server',
-        kind: 'llama-server',
-        version: 'b4567',
+        name: 'plugin-host',
+        kind: 'plugin-host',
+        version: '0.9.0',
         pid: 5312,
         state: 'crashed',
         starts: 2,

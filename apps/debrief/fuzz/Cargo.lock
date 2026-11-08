@@ -494,12 +494,9 @@ dependencies = [
 name = "debrief-ai"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "base64",
  "debrief-collect",
  "debrief-core",
- "debrief-ipc",
- "flate2",
  "getrandom 0.4.3",
  "image",
  "libc",
@@ -511,27 +508,10 @@ dependencies = [
  "serde_json",
  "sha2",
  "sysinfo",
- "tar",
  "thiserror 2.0.21",
- "tokio",
  "toml 1.1.8+spec-1.1.0",
  "ureq",
  "url",
- "windows",
- "zip",
-]
-
-[[package]]
-name = "debrief-ai-worker"
-version = "0.1.0"
-dependencies = [
- "debrief-ai",
- "debrief-core",
- "getrandom 0.4.3",
- "libc",
- "paddock-proc",
- "serde",
- "serde_json",
  "windows",
 ]
 
@@ -625,7 +605,6 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "debrief-ai",
- "debrief-ai-worker",
  "debrief-core",
  "debrief-dump",
  "debrief-etw",

@@ -236,10 +236,6 @@ impl AiCore {
     /// Applies new settings from the Settings screen. Pitwall is told what Debrief's prompts need.
     pub fn apply_settings(&self, next: AiSettings) -> AiResult<()> {
         let next = next.clamp();
-        let problems = next.validate();
-        if !problems.is_empty() {
-            return Err(AiCmdError::invalid(problems.join("; ")));
-        }
         self.update_settings(|s| *s = next.clone())?;
         self.pitwall_needs();
         Ok(())

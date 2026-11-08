@@ -17,7 +17,7 @@ describe('MockVideoBackend runtime', () => {
   it('installs, updates, rolls back and deletes a downloaded build', async () => {
     const b = new MockVideoBackend({ runtime: 'windows' });
     expect((await b.getRuntime()).status).toMatchObject({ mode: 'none', pinnedTag: 'autobuild-2026-09-30' });
-    await expect(open(b)).rejects.toMatchObject({ code: 'noRuntime' });
+    await expect(open(b)).rejects.toMatchObject({ code: 'missing' });
     const installed = await b.installRuntime();
     expect(installed.status).toMatchObject({ mode: 'managed', active: { tag: 'autobuild-2026-09-30' } });
     await expect(b.rollbackRuntime()).rejects.toMatchObject({ code: 'notFound' });

@@ -114,8 +114,9 @@ impl WindowNames {
     }
 
     /// The layer for the assistant: up to date, with the Settings switches applied.
-    pub fn for_assistant(&self, store: Option<&dyn Store>, ai_aliases: bool) -> Arc<Names> {
-        self.apply_settings(ai_aliases);
+    pub fn for_assistant(&self, store: Option<&dyn Store>) -> Arc<Names> {
+        // The aliases saved by earlier versions still match (nothing writes new ones any more).
+        self.apply_settings(true);
         if let Some(s) = store {
             self.ensure_fresh(s);
         }

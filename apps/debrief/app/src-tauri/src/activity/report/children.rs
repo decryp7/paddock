@@ -117,8 +117,8 @@ mod tests {
 
     #[test]
     fn sessions_are_read_from_file_names() {
-        assert_eq!(session_of("ai-worker.log"), Some(("ai-worker".into(), 0)));
-        assert_eq!(session_of("ai-worker.2.log"), Some(("ai-worker".into(), 2)));
+        assert_eq!(session_of("store-worker.log"), Some(("store-worker".into(), 0)));
+        assert_eq!(session_of("store-worker.2.log"), Some(("store-worker".into(), 2)));
         assert_eq!(
             session_of("plugin-host-net.decryptology.web.log"),
             Some(("plugin-host-net.decryptology.web".into(), 0))

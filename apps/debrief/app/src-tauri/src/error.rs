@@ -45,8 +45,7 @@ pub enum ErrorCode {
     Internal,
     // ---- the AI ----
     NoModel,
-    NoRuntime,
-    /// The active model cannot read images (no projector installed for it; ADR 0025).
+    /// The model Pitwall serves cannot read images (ADR 0025).
     NoVision,
     Engine,
     /// The research or agent browser failed (not open, a page that did not answer or changed): not a Debrief bug.
@@ -54,7 +53,6 @@ pub enum ErrorCode {
     ContextOverflow,
     Malformed,
     ToolLoopLimit,
-    ModelFile,
     Memory,
     Network,
     Tls,

@@ -3,8 +3,8 @@
 //! 14 Oct 2026 (an analyst looking into the samples' incident that afternoon), fixed pids, synthetic
 //! system information, and zip entries in a fixed order with a fixed time.
 //!
-//! Scenario: Debrief starts, the user opens the incident samples and runs a query; the AI engine starts and
-//! its llama-server crashes (exit code 3) and is restarted; the out-of-process plugin
+//! Scenario: Debrief starts, the user opens the incident samples and runs a query; the store worker starts and
+//! a plugin host crashes (exit code 3) and is restarted; the out-of-process plugin
 //! `com.example.orderaudit` crashes three times and is quarantined, which leaves an error snapshot.
 //!
 //! Regenerate: `DEBRIEF_REGEN_SAMPLES=1 cargo test -p debrief-app --lib activity::report::sample` (the test fails
@@ -161,7 +161,7 @@ fn debrief_log() -> String {
             332,
             "Error",
             "debrief_ai",
-            "AI engine call failed: the engine crashed and was restarted",
+            "Plugin host call failed: the host crashed and was restarted",
         ),
         activity(340, "ai.chat.send", "button", json!({ "View": "AI assistant", "Outcome": "ok" })),
     ];
@@ -171,11 +171,11 @@ fn debrief_log() -> String {
 fn child_logs(dir: &Path) -> Vec<debrief_ipc::child_log::ProcessSummary> {
     let worker = ChildLog::open(
         Some(dir),
-        &ChildLogSpec::new("ai-worker", ChildKind::AiWorker).with_version("0.1.0"),
+        &ChildLogSpec::new("store-worker", ChildKind::StoreWorker).with_version("0.1.0"),
     );
-    let llama = ChildLog::open(
+    let host = ChildLog::open(
         Some(dir),
-        &ChildLogSpec::new("llama-server", ChildKind::LlamaServer).with_version("b6500"),
+        &ChildLogSpec::new("plugin-host", ChildKind::PluginHost).with_version("0.1.0"),
     );
     let plugin = ChildLog::open(
         Some(dir),
@@ -208,24 +208,19 @@ fn child_logs(dir: &Path) -> Vec<debrief_ipc::child_log::ProcessSummary> {
         },
     );
 
-    // The AI engine and its llama-server, which crashes once and is started again.
+    // The store worker and a plugin host, which crashes once and is started again.
     worker.record_at(at(112, 0), &ChildEvent::Start { pid: 4242 });
-    llama.record_at(at(112, 400), &ChildEvent::Start { pid: 4243 });
-    out(&llama, 113, 0, "main: loading model");
-    out(&llama, 118, 500, "main: model loaded");
-    out(&llama, 118, 600, "main: HTTP endpoint ready on 127.0.0.1:52731");
-    out(
-        &llama,
-        331,
-        800,
-        "ggml_cuda_compute_forward: error: out of memory allocating 512.00 MiB on device 0",
-    );
-    out(&llama, 331, 900, "CUDA error: out of memory");
-    crash(&llama, 332, 4243, Exit::Code(3));
-    llama.record_at(at(334, 0), &ChildEvent::Start { pid: 4251 });
-    out(&llama, 334, 300, "main: loading model");
-    out(&llama, 339, 0, "main: model loaded");
-    vec![worker.status(), llama.status(), plugin.status()]
+    host.record_at(at(112, 400), &ChildEvent::Start { pid: 4243 });
+    out(&host, 113, 0, "host: loading plugins");
+    out(&host, 118, 500, "host: plugins loaded");
+    out(&host, 118, 600, "host: ready on the plugin socket");
+    out(&host, 331, 800, "memory allocation of 536870912 bytes failed");
+    out(&host, 331, 900, "thread 'main' panicked: out of memory");
+    crash(&host, 332, 4243, Exit::Code(3));
+    host.record_at(at(334, 0), &ChildEvent::Start { pid: 4251 });
+    out(&host, 334, 300, "host: loading plugins");
+    out(&host, 339, 0, "host: plugins loaded");
+    vec![worker.status(), host.status(), plugin.status()]
 }
 
 fn snapshot(dir: &Path, crumbs: &[crate::activity::Breadcrumb]) {
@@ -369,15 +364,15 @@ mod tests {
         // The panel: processes, steps, breadcrumbs, the snapshot.
         let v = &o.view;
         let p = |name: &str| v.processes.iter().find(|p| p.name == name).cloned().unwrap();
-        let llama = p("llama-server");
+        let host = p("plugin-host");
         assert_eq!(
-            (llama.state, llama.restarts, llama.last_exit.as_deref()),
+            (host.state, host.restarts, host.last_exit.as_deref()),
             (ChildRunState::Running, 1, Some("exit code 3"))
         );
         let plugin = p(&format!("plugin-{PLUGIN}"));
         assert!(plugin.quarantined && plugin.state == ChildRunState::Quarantined);
         assert_eq!(plugin.restarts, 2);
-        assert_eq!(p("ai-worker").state, ChildRunState::Running);
+        assert_eq!(p("store-worker").state, ChildRunState::Running);
         assert!(v.steps[0].starts_with("1. Opened files"), "{:?}", v.steps);
         assert_eq!(v.breadcrumbs.len(), 4);
         assert!(v.description.as_deref().is_some_and(|d| d.contains("order-audit")));
@@ -398,9 +393,9 @@ mod tests {
             names,
             [
                 "activity.log",
-                "children/ai-worker.log",
-                "children/llama-server.log",
                 &format!("children/plugin-{PLUGIN}.log"),
+                "children/plugin-host.log",
+                "children/store-worker.log",
                 "debrief.2026-10-14.log",
             ],
             "{:?}",
@@ -413,9 +408,9 @@ mod tests {
                 .filter(|r| r.markers & kind_bit(kind) != 0 && r.message.starts_with(starts))
                 .count()
         };
-        assert_eq!(marked("fatal", "Crashed: llama-server"), 1);
+        assert_eq!(marked("fatal", "Crashed: plugin-host"), 1);
         assert_eq!(marked("fatal", &format!("Crashed: plugin-{PLUGIN}")), 3);
-        assert_eq!(marked("start", "Started llama-server"), 2);
+        assert_eq!(marked("start", "Started plugin-host"), 2);
         assert_eq!(marked("start", &format!("Started plugin-{PLUGIN}")), 3);
         assert_eq!(marked("error", &format!("Quarantined plugin-{PLUGIN}")), 1);
         let _ = std::fs::remove_dir_all(work);

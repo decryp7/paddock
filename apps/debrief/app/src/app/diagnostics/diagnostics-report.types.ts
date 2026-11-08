@@ -23,7 +23,7 @@ export type ReportFileKind =
 
 /** One file listed in the manifest. */
 export interface ReportManifestFile {
-  /** Path inside the zip, e.g. `logs/children/ai-worker.log`. */
+  /** Path inside the zip, e.g. `logs/children/store-worker.log`. */
   name: string;
   kind: ReportFileKind;
   bytes: number;
@@ -40,14 +40,14 @@ export interface ReportManifest {
 }
 
 /** Kind of a child process Debrief supervises. */
-export type ChildKind = 'ai-worker' | 'llama-server' | 'plugin-host' | 'plugin' | 'store-worker';
+export type ChildKind = 'plugin-host' | 'plugin' | 'store-worker';
 
 /** `running`: alive when the report was made; `unknown`: the log ended without an exit line (Debrief itself stopped). */
 export type ChildRunState = 'running' | 'exited' | 'stopped' | 'crashed' | 'quarantined' | 'unknown';
 
 /** One child process in `processes.json`. */
 export interface ProcessSummary {
-  /** Log name, e.g. `ai-worker`, `plugin-net.decryptology.web`. */
+  /** Log name, e.g. `store-worker`, `plugin-net.decryptology.web`. */
   name: string;
   kind: ChildKind;
   version: string | null;

@@ -18,7 +18,7 @@ test('opening a diagnostics zip shows the report with processes, steps, breadcru
 
   const processes = view.getByTestId('diag-processes');
   await expect(processes.getByRole('columnheader', { name: 'State' })).toBeVisible();
-  await expect(processes.locator('tr[data-state=crashed]')).toContainText('llama-server');
+  await expect(processes.locator('tr[data-state=crashed]')).toContainText('plugin-host');
   await expect(processes.locator('tr[data-state=crashed]')).toContainText('exit code 3');
   await expect(processes.locator('tr[data-state=quarantined]')).toContainText('failed 3 times in a row');
   await expect(view.getByTestId('diag-steps').locator('li').first()).toContainText('Opened');
