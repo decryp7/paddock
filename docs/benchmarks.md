@@ -294,6 +294,28 @@ Quoted by [ADR 0041](adr/0041-deterministic-timing-in-tests.md) §5 (the starved
   and the repo's `.cargo/config.toml` already sets `linker = "rust-lld.exe"` for `x86_64-pc-windows-msvc`.
   Raw output: `/Volumes/d7sst7/dev-targets/linker-bench/` (`results.tsv`, `link-only*.tsv`).
 
+### VM run outcomes, Dyno 1.1.0 rounds, 2026-11-05 to 11-08
+
+A count, not a timing: the step outcomes of the local VM release checks, quoted by ADR 0042's amendment of 2026-11-08 as
+the baseline for its WP-V9 targets.
+- **Input:** every `20*-*.json` report under a `local-*` run folder in `/private/tmp/claude-501/**` and
+  `/Volumes/d7sst7/dev-targets/scratch/**` written 2026-11-05 to 2026-11-08, 111 files (list:
+  `/Volumes/d7sst7/dev-targets/scratch/adr-vm-harness/runs.txt`).
+- **Command:** `node scripts/vm-smoke/round-stats.mjs --list-unclassified $(cat runs.txt)` on `tools/vm-smoke` `7735f1bbd`.
+- **Machine and load:** not relevant (a count of existing reports).
+
+| OS, runs | Runs | Steps | check-broken (all) | not-measured | check-broken, harness-caused | check-broken, precondition |
+|---|---|---|---|---|---|---|
+| Windows, full | 20 | 587 | 87 | 23 | 66 (11.2 %) | 18 |
+| Windows, partial | 16 | 246 | 28 | 8 | 25 | 3 |
+| macOS, full | 26 | 700 | 42 | 39 | 2 (0.3 %) | 39 |
+| macOS, partial | 24 | 167 | 9 | 10 | 3 | 6 |
+| Linux, full | 10 | 248 | 15 | 22 | 10 (4.0 %) | 5 |
+| Linux, partial | 15 | 192 | 6 | 10 | 6 | 0 |
+
+The harness and precondition columns split the 183 required steps that ended check-broken by keyword (reports before the
+kit carry free text); 5 reasons stayed unclassified.
+
 ## Gaps
 
 These are ordered by impact.
