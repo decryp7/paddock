@@ -1,0 +1,6 @@
+# Installers staged on the setup disc of the local Windows 11 Arm test VM (docs/testing/windows-test-vm.md).
+# One per line: file name, URL, SHA-256. prepare.sh downloads each once into <vm dir>/payload and refuses a file whose hash
+# differs; firstlogon.ps1 checks the hash again inside the guest. Pick releases at least two weeks old.
+# Looked up 2026-10-29 through the GitHub releases API (asset digests).
+Git-arm64.exe https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/Git-2.56.0.2-arm64.exe b9ced78ce371577dc966f50ae571909d6731e36d31065d35c8efa21544c58bf0
+OpenSSH-ARM64.msi https://github.com/PowerShell/Win32-OpenSSH/releases/download/10.0.0.0p2-Preview/OpenSSH-ARM64-v10.0.0.0.msi 7a17d0e22d004fb47ca4bfd8fef926fa305de4ebf70a6f3c7a29c39aabef0023
