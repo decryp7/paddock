@@ -50,7 +50,7 @@ To keep your data, open Settings > Apps, uninstall Dyno and leave "Delete the ap
 - The window and tray no longer miss updates from the agent when they are busy (power, scheduled wakes, alarms, alerts, activity).
 - A scheduled wake saved while Dyno was syncing wakes is no longer cancelled.
 - Dyno lowers its background threads on Linux even when started under "nice".
-- Windows: if Windows Security removes a part of Dyno, paddock-setup.exe, as a false detection, the installer now stops and says how to restore it, instead of ending without a word with half an install. The uninstaller says so too.
+- Windows: if Windows Security removes a part of Dyno, paddock-setup.exe, as a false detection, the installer now stops with a message instead of ending as if all were well. It says to restore the file in Windows Security > Protection history, then run the installer again. The uninstaller says so too and goes on.
 - An update package is checked again right before it is installed.
 - macOS: memory in use matches Activity Monitor. Memory alarms can now fire on a Mac where they stayed quiet.
 - Lifespan on an Apple silicon Mac reads the internal SSD.

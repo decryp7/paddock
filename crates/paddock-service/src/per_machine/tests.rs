@@ -452,18 +452,42 @@ fn a_removed_paddock_setup_ends_the_install_with_guidance_never_a_success() {
         gone.contains("_PADDOCK_TEST_LOG") && gone.contains("DetailPrint"),
         "logged to the details and the test log"
     );
-    // POSTINSTALL verifies the installed copy after writing it and again as the last step.
-    let setup = body_of("PADDOCK_INSTALL_SETUP");
+    // POSTINSTALL verifies the installed copy only as its last step, so the app's own steps and the tool's calls finish first.
     assert!(
-        setup.find("File \"/oname=$INSTDIR").unwrap()
-            < setup.find("_PADDOCK_CHECK_INSTALLED").unwrap()
+        !body_of("PADDOCK_INSTALL_SETUP").contains("_PADDOCK_CHECK_INSTALLED"),
+        "no abort right after the file was written"
     );
-    assert!(body_of("PADDOCK_FINISH_INSTALL").contains("_PADDOCK_CHECK_INSTALLED"));
+    let finish = body_of("PADDOCK_FINISH_INSTALL");
+    assert!(
+        finish.find("clean-staging").unwrap() < finish.find("_PADDOCK_CHECK_INSTALLED").unwrap(),
+        "the check is last"
+    );
     let installed = body_of("_PADDOCK_CHECK_INSTALLED");
     assert!(
         installed.contains(r#"${FileExists} "$INSTDIR\paddock-setup.exe""#)
             && installed.contains("PADDOCK_LEVEL_TOOL_MISSING")
+            && installed.contains("PADDOCK_REMOVED_INSTALLED_MSG")
     );
+    assert!(t.contains("is installed, but Windows Security removed paddock-setup.exe"));
+    // The guard checks after its own nsExec as well (level 44, not 43).
+    let guard = body_of("PADDOCK_GUARD_PER_USER");
+    assert!(
+        guard.find("nsExec").unwrap() < guard.rfind("${AndIfNot} ${FileExists}").unwrap(),
+        "the guard checks after the call"
+    );
+    // A vanished tool in the uninstaller: the reinstall check falls back to the folder compare, stop-all to Restart Manager.
+    let reinstall = body_of("PADDOCK_REINSTALL_AS_UPDATE");
+    assert!(
+        reinstall.contains("${If} $PaddockHaveSetup != 1")
+            && reinstall.contains("${If} $EXEDIR == $INSTDIR"),
+        "the folder compare also runs when the tool vanished before the call"
+    );
+    let stop = body_of("PADDOCK_STOP_ALL");
+    assert!(
+        stop.contains(r#"${If} $0 == "nosetup""#) && stop.contains("_PADDOCK_STOP_FALLBACK"),
+        "a vanished tool falls back to Restart Manager"
+    );
+    assert!(!stop.contains(r#"${AndIf} $0 != "nosetup""#));
     // The uninstaller's notes name Windows Security too.
     assert!(t.matches("Windows Security").count() >= 5);
 }
