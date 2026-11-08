@@ -32,9 +32,16 @@ fn json(path: &str) -> Value {
     serde_json::from_str(&read(path)).unwrap()
 }
 
+/// Every app's `paddock.ci.json`, read once for the whole test binary: reading the graph runs `cargo metadata` over every workspace,
+/// and several tests doing that at once queue on cargo's package-cache lock (on the loaded macOS runner they passed 60 s).
 fn configs() -> Vec<(String, Value)> {
-    let g = read_graph(&root(), &GitHistory::new(root(), Duration::from_secs(120))).unwrap();
-    g.apps.iter().map(|a| (a.clone(), g.config(a).clone())).collect()
+    static CONFIGS: std::sync::OnceLock<Vec<(String, Value)>> = std::sync::OnceLock::new();
+    CONFIGS
+        .get_or_init(|| {
+            let g = read_graph(&root(), &GitHistory::new(root(), Duration::from_secs(120))).unwrap();
+            g.apps.iter().map(|a| (a.clone(), g.config(a).clone())).collect()
+        })
+        .clone()
 }
 
 #[test]
