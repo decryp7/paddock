@@ -120,6 +120,20 @@ fn declarations() -> String {
     out
 }
 
+/// Equal up to line endings: a Windows checkout may convert the golden file to CRLF.
+fn same_text(a: &str, b: &str) -> bool {
+    a.replace("\r\n", "\n") == b.replace("\r\n", "\n")
+}
+
+#[test]
+fn a_crlf_checkout_of_the_golden_file_still_matches() {
+    let now = declarations();
+    let crlf = now.replace('\n', "\r\n");
+    assert_ne!(crlf, now);
+    assert!(same_text(&crlf, &now));
+    assert!(!same_text(&crlf, &format!("{now}x")));
+}
+
 #[test]
 fn the_declarations_are_the_golden_file() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/limits.ts");
@@ -130,7 +144,7 @@ fn the_declarations_are_the_golden_file() {
     }
     let golden = std::fs::read_to_string(&path).unwrap_or_default();
     assert!(
-        golden == now,
+        same_text(&golden, &now),
         "{} is stale: regenerate with PADDOCK_WRITE_TS=1 cargo test -p paddock-limits --features ts ts_tests",
         path.display()
     );
