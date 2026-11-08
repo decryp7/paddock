@@ -106,7 +106,7 @@ impl DuckStore {
         if self.inner.importing.swap(true, Ordering::SeqCst) {
             return Err(StoreError::Busy("an import is running; wait for it or cancel it".into()));
         }
-        Ok(Importing(self.inner.clone()))
+        Ok(Importing::bulk(self.inner.clone()))
     }
 
     /// Re-imports every opened root (the files are read again).

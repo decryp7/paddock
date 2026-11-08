@@ -6,6 +6,7 @@ use crate::common::quiet;
 use anyhow::Result;
 use debrief_core::api::{ExportRequest, WorkspaceSummary};
 use debrief_core::export::{EventSink, ExportRow, Exporter};
+use debrief_core::guard::{Health, QUARANTINE_AFTER};
 use debrief_core::importers::{BinaryImporter, ImportCtx, Imported, Importer};
 use debrief_core::model::Record;
 use debrief_core::plugin::{Collector, PluginStatus, RecordTransform, TransformCtx, Verdict, WorkspaceHook};
@@ -163,6 +164,89 @@ fn chaos_quarantined(s: &WorkspaceSummary) -> bool {
         .any(|p| p.id == "test.chaos" && p.status == PluginStatus::Quarantined)
 }
 
+/// Whether a file that one of test.chaos's crashing importers claims ended in a contained state. Files import in
+/// parallel (order and timing vary with the machine's cores), so for each such file the plugin may crash on it (the
+/// reason names the plugin and `crash`), be quarantined between choosing its importer and importing (the reason says
+/// so), or be quarantined before the file is even sniffed, when its importer is skipped and the file gets the reason it
+/// would have without the plugin (`skipped`).
+fn import_contained(reason: &str, crash: &str, skipped: impl Fn(&str) -> bool, quarantined: bool) -> bool {
+    (reason.contains("test.chaos") && (reason.contains(crash) || reason.contains("disabled after repeated crashes")))
+        || (skipped(reason) && quarantined)
+}
+
+/// [`import_contained`] for bin.dat, which only the crashing binary importer reads.
+fn binary_import_contained(reason: &str, quarantined: bool) -> bool {
+    import_contained(reason, "binary exploded", |r| r == "binary file", quarantined)
+}
+
+/// A binary importer that claims `\x00BIN` files and, on its second sniff of one, records enough crashes of its plugin
+/// to quarantine it. An import sniffs twice (choosing the parser, then planning the read), so the plugin is quarantined
+/// after its importer was chosen and planned and before it imports, every time.
+struct QuarantinesWhilePlanning {
+    health: Arc<Health>,
+    sniffs: AtomicUsize,
+}
+impl BinaryImporter for QuarantinesWhilePlanning {
+    fn id(&self) -> &'static str {
+        "bad-bin"
+    }
+    fn sniff(&self, ctx: &ImportCtx, head: &[u8]) -> u8 {
+        let score = BadBinary.sniff(ctx, head);
+        if score > 0 && self.sniffs.fetch_add(1, Ordering::SeqCst) == 1 {
+            for _ in 0..QUARANTINE_AFTER {
+                self.health.fail("test.chaos", "crashed elsewhere while bin.dat was being planned");
+            }
+        }
+        score
+    }
+    fn import(&self, ctx: &ImportCtx, bytes: &[u8]) -> Result<Imported> {
+        BadBinary.import(ctx, bytes)
+    }
+}
+struct LateQuarantine(Arc<Health>);
+impl Plugin for LateQuarantine {
+    fn id(&self) -> &'static str {
+        "test.chaos"
+    }
+    fn name(&self) -> &'static str {
+        "Chaos"
+    }
+    fn version(&self) -> &'static str {
+        "6.6.6"
+    }
+    fn register(&self, r: &mut PluginRegistry) -> Result<()> {
+        r.add_binary_importer(Box::new(QuarantinesWhilePlanning {
+            health: self.0.clone(),
+            sniffs: AtomicUsize::new(0),
+        }));
+        Ok(())
+    }
+}
+
+/// One interleaving of the parallel import in `crashing_plugins_are_contained_and_quarantined`, forced: the plugin is
+/// quarantined between choosing its binary importer for bin.dat and importing it (CI run 7296 hit it by chance).
+#[test]
+fn a_plugin_quarantined_between_choosing_and_running_its_binary_importer_is_contained() {
+    quiet(|| {
+        let d = Dir::new("late");
+        std::fs::write(d.0.join("bin.dat"), b"\x00BIN\x01\x02").unwrap();
+        let mut registry = PluginRegistry::new();
+        let health = registry.health();
+        registry.install(&LateQuarantine(health)).unwrap();
+        let mut ws = Workspace::with_registry(Profile::default_profile(), registry).unwrap();
+        ws.open(std::slice::from_ref(&d.0)).unwrap();
+        let s = ws.summary();
+        let reason = s
+            .unrecognized
+            .iter()
+            .find(|u| u.name == "bin.dat")
+            .map(|u| u.reason.clone())
+            .unwrap_or_default();
+        assert!(reason.contains("disabled after repeated crashes"), "{reason}");
+        assert!(binary_import_contained(&reason, chaos_quarantined(&s)), "{reason}");
+    });
+}
+
 #[test]
 fn crashing_plugins_are_contained_and_quarantined() {
     quiet(|| {
@@ -200,23 +284,11 @@ fn crashing_plugins_are_contained_and_quarantined() {
                 .map(|u| u.reason.clone())
                 .unwrap_or_default()
         };
-        // Files import in parallel (order and timing vary with the machine's cores): the plugin may crash on bad.txt
-        // (the reason names it), be quarantined between choosing its importer and importing (the reason says so), or be
-        // quarantined before bad.txt is even sniffed, when its importer is skipped and nothing else recognises the file.
         let bad = reason("bad.txt");
-        assert!(
-            (bad.contains("test.chaos") && (bad.contains("import exploded") || bad.contains("disabled after repeated crashes")))
-                || ((bad == "no importer recognises this format" || bad.starts_with("no enabled parser reads this file"))
-                    && chaos_quarantined(&s)),
-            "{bad}"
-        );
-        // Likewise, if the plugin was quarantined before bin.dat's turn, its crashing binary importer is skipped and
-        // the file is simply an unrecognised binary file.
-        assert!(
-            reason("bin.dat").contains("binary exploded") || reason("bin.dat").contains("binary file"),
-            "{}",
-            reason("bin.dat")
-        );
+        let unread = |r: &str| r == "no importer recognises this format" || r.starts_with("no enabled parser reads this file");
+        assert!(import_contained(&bad, "import exploded", unread, chaos_quarantined(&s)), "{bad}");
+        let bin = reason("bin.dat");
+        assert!(binary_import_contained(&bin, chaos_quarantined(&s)), "{bin}");
 
         // Sniff + import + binary + transform + hook crashes: well past the threshold.
         let chaos = s.plugins.iter().find(|p| p.id == "test.chaos").unwrap();

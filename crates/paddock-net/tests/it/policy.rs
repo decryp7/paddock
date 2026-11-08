@@ -404,9 +404,21 @@ fn a_redirect_to_plain_http_too_many_redirects_and_bad_locations_are_refused() {
     let r = rig(Policy::default().max_redirects(3), loop_wire);
     assert_eq!(
         get(&r, "https://api.example.org/").unwrap_err(),
-        NetError::TooManyRedirects
+        NetError::TooManyRedirects(3)
     );
     assert_eq!(r.wire.sends(), 4);
+    // The limit the error names is the policy's (here 3), not the ceiling any policy may have (review of 1.4b).
+    let mut loop_wire = FakeWire::new();
+    for _ in 0..12 {
+        loop_wire = loop_wire.then(Reply::redirect(302, "/again"));
+    }
+    let r = rig(Policy::default().max_redirects(3), loop_wire);
+    let limit = get(&r, "https://api.example.org/")
+        .unwrap_err()
+        .limit()
+        .unwrap();
+    assert_eq!(limit.id, paddock_net::limits::REDIRECTS.id);
+    assert_eq!(limit.limit, paddock_limits::Quantity::Count(3));
     let r = rig(
         Policy::default().max_redirects(0),
         FakeWire::new().then(Reply::redirect(302, "/x")),
@@ -705,7 +717,7 @@ fn wire_errors_pass_through_and_say_whether_a_retry_can_help() {
         (NetError::Tls("h".into()), false),
         (NetError::Proxy("p".into()), false),
         (NetError::Cancelled, false),
-        (NetError::TooManyRedirects, false),
+        (NetError::TooManyRedirects(5), false),
         (NetError::NotAllowed("h".into()), false),
         (NetError::Scheme("h".into()), false),
         (NetError::BadRedirect("why".into()), false),

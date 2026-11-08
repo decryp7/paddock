@@ -90,9 +90,6 @@ pub struct AiSettings {
     pub model_updates: UpdatePolicy,
     /// Hours between automatic update checks.
     pub update_check_hours: u32,
-    /// Let Debrief's own local model suggest human names and aliases for the names in the logs (needs a model set up).
-    /// Nothing leaves this computer; suggestions are labelled AI-generated and can be removed.
-    pub name_aliases: bool,
     /// Which engine answers (ADR 0059): Pitwall when it is usable, else the built-in one (`auto`); or one of them.
     pub engine: crate::engine::EngineChoice,
 }
@@ -105,7 +102,7 @@ impl Default for AiSettings {
         AiSettings {
             version: SETTINGS_VERSION,
             active_model: None,
-            autoload: true,
+            autoload: false,
             idle_unload_minutes: 15,
             gpu_offload: GpuOffload::Auto,
             context_length: 8192,
@@ -122,7 +119,6 @@ impl Default for AiSettings {
             runtime_updates: UpdatePolicy::Ask,
             model_updates: UpdatePolicy::Ask,
             update_check_hours: DEFAULT_UPDATE_CHECK_HOURS,
-            name_aliases: true,
             engine: crate::engine::EngineChoice::Auto,
         }
     }
@@ -295,7 +291,6 @@ pub fn schema() -> Value {
         f("runtime_updates", "Inference runtime updates", "When Debrief pins a newer llama.cpp build than the one installed. Automatic downloads and verifies it in the background (the installed build keeps working until the new one is verified, and a running chat is never interrupted); Ask tells you and offers Update, Later and Skip this version; Manual only looks when you choose Check now.", "enum", json!(d.runtime_updates.as_str()), json!({"options": ["automatic", "ask", "manual"]}), false),
         f("model_updates", "Model updates", "When the model list has a newer revision or quantisation of an installed model. Automatic downloads and verifies it in the background and switches to it only when no chat is running; Ask tells you; Manual only looks when you choose Check now.", "enum", json!(d.model_updates.as_str()), json!({"options": ["automatic", "ask", "manual"]}), false),
         f("update_check_hours", "Check for AI updates every (hours)", "How often Debrief checks for runtime and model updates (not with Manual). A check that fails because the computer is offline or a proxy blocks it is retried later without interrupting you.", "int", json!(d.update_check_hours), json!({"min": 1, "max": 720}), false),
-        f("name_aliases", "AI aliases for names", "Suggest human names and aliases for names in the logs with your local AI model, in the background while it is idle. Suggestions are labelled AI-generated, are never used for events themselves, and you can remove any of them. Turn off to ignore them; nothing is ever sent off this computer.", "bool", json!(d.name_aliases), json!({}), false),
         f("llama_server_path", "Custom llama-server", "Advanced: a llama-server executable to use instead of the inference runtimes Debrief downloads. Empty uses the downloaded builds.", "file", Value::Null, json!({}), true),
     ])
 }
@@ -318,6 +313,14 @@ mod tests {
         // missing keys take defaults, unknown keys are ignored
         let p: AiSettings = serde_json::from_str("{\"autoload\": false, \"future\": 1}").unwrap();
         assert!(!p.autoload && p.context_length == 8192);
+    }
+
+    #[test]
+    fn autoload_is_off_by_default() {
+        // 1.2: the model loads on first use, not at start (memory the user saw, rule 46).
+        assert!(!AiSettings::default().autoload);
+        let missing: AiSettings = serde_json::from_str("{}").unwrap();
+        assert!(!missing.autoload);
     }
 
     #[test]

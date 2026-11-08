@@ -1,5 +1,7 @@
 import { CdkListbox, CdkOption } from '@angular/cdk/listbox';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { ConfirmDialog } from '../ui/confirm-dialog';
+import { DialogService } from '../ui/dialog.service';
 import { FrameImage } from './frame-image';
 import { formatVideoTime, frameName, parseOffsetSeconds } from './video-format';
 import { VIDEO_STYLES } from './video-styles';
@@ -23,7 +25,7 @@ import { VideoStore } from './video.store';
           <input type="text" inputmode="decimal" data-testid="video-add-at" [value]="shownAt()" (input)="atText.set(valueOf($event))" aria-label="Time in the video, in seconds" i18n-aria-label="@@video.strip.atLabel" />
         </label>
         <button class="btn" type="button" data-testid="video-add-frame" [disabled]="store.busy() !== null || atMs() === null" (click)="add()" i18n="@@video.strip.add">Add frame at player position</button>
-        <button class="btn" type="button" data-testid="video-describe-all" [disabled]="store.busy() !== null || !undescribed()" (click)="store.describe([])" i18n="@@video.strip.describeAll">Describe frames without a description</button>
+        <button class="btn" type="button" data-testid="video-describe-all" [disabled]="store.busy() !== null || !undescribed()" (click)="describeAll()" i18n="@@video.strip.describeAll">Describe frames without a description</button>
       </div>
       @if (store.busy() === 'describe') {
         <p class="muted" role="status" data-testid="video-describing" i18n="@@video.strip.describing">The model is describing the frames. Progress and Cancel are in Jobs.</p>
@@ -61,6 +63,7 @@ import { VideoStore } from './video.store';
 })
 export class FrameStrip {
   protected readonly store = inject(VideoStore);
+  private readonly dialogs = inject(DialogService);
   /** The player's position (ms), offered as the time of "Add frame". */
   readonly playerMs = input(0);
   readonly chosen = output<number>();
@@ -77,6 +80,27 @@ export class FrameStrip {
     const typed = this.atText();
     return typed === null ? this.playerMs() : parseOffsetSeconds(typed);
   });
+
+  /** Every model request costs time: ask first, naming how many frames, and send nothing on No (rule 46). */
+  protected async describeAll(): Promise<void> {
+    const plan = await this.store.describePlan();
+    if (!plan || plan.frames === 0) return;
+    const count = plan.frames;
+    const minutes = plan.estimateSeconds === null ? null : Math.max(1, Math.round(plan.estimateSeconds / 60));
+    const message =
+      minutes === null
+        ? $localize`:@@video.strip.describeAll.message:The model will describe ${count}:count: frames one by one. This can take a while; progress and Cancel are in Jobs.`
+        : $localize`:@@video.strip.describeAll.messageTimed:The model will describe ${count}:count: frames one by one, about ${minutes}:minutes: min by this computer's earlier runs. Progress and Cancel are in Jobs.`;
+    const ref = this.dialogs.open<boolean>(ConfirmDialog, {
+      title: $localize`:@@video.strip.describeAll.title:Describe all frames?`,
+      width: 420,
+      inputs: {
+        message,
+        confirmLabel: $localize`:@@video.strip.describeAll.confirm:Describe frames`,
+      },
+    });
+    if ((await ref.closed) === true) await this.store.describe([]);
+  }
 
   protected valueOf(e: Event): string {
     return (e.target as HTMLInputElement).value;

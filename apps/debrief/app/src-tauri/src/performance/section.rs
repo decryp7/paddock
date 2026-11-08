@@ -14,6 +14,13 @@ use std::sync::Arc;
 /// Smallest and largest per-plugin cap, MB (the bounds every plugin gets, `debrief_plugin_api::sandbox`).
 pub const MIN_PLUGIN_MB: u32 = 64;
 pub const MAX_PLUGIN_MB: u32 = 4096;
+/// Heap of each search index writer thread by default, MB (`debrief_store_duck::WRITER_HEAP_PER_THREAD`); and its range
+/// (Tantivy needs at least 15 MB a thread).
+pub const DEFAULT_INDEX_HEAP_PER_THREAD_MB: u32 = 64;
+pub const MIN_INDEX_HEAP_PER_THREAD_MB: u32 = 16;
+pub const MAX_INDEX_HEAP_PER_THREAD_MB: u32 = 1024;
+/// Most search index writer threads.
+pub const MAX_INDEX_WRITER_THREADS: u32 = 64;
 /// The store worker's own use before DuckDB's limit (its code, the catalog, buffers), MB: the query budget minus
 /// this is DuckDB's limit when none is chosen (300 → 192).
 pub const WORKER_BASE_MB: u32 = 108;
@@ -88,9 +95,30 @@ pub fn schema() -> SettingsSection {
                 .needs_restart(),
         )
         .field(
-            SettingField::new("indexThreads", "Search index threads", int(1, 8, None), d.index_threads)
-                .describe("How many cores build the word-search index after an import.")
-                .needs_restart(),
+            SettingField::new(
+                "indexWriterThreads",
+                "Search index threads",
+                int(0, i64::from(MAX_INDEX_WRITER_THREADS), None),
+                d.index_writer_threads,
+            )
+            .describe(
+                "How many cores build the word-search index after an import, at a lowered priority. 0 is Auto: every core \
+                 but the ones left free, at most 4, as many as fit their memory in the import memory.",
+            )
+            .needs_restart(),
+        )
+        .field(
+            SettingField::new(
+                "indexHeapPerThreadMb",
+                "Search index memory per thread",
+                mb(i64::from(MIN_INDEX_HEAP_PER_THREAD_MB), i64::from(MAX_INDEX_HEAP_PER_THREAD_MB)),
+                d.index_heap_per_thread_mb,
+            )
+            .describe(
+                "The memory each search index thread collects words in before it writes them out. More writes fewer, \
+                 bigger pieces; the threads' memory together must fit in the import memory.",
+            )
+            .needs_restart(),
         )
         .field(
             SettingField::new("pluginCpuPercent", "Plugin processor share", int(10, 100, Some("%")), d.plugin_cpu_percent)
@@ -186,6 +214,27 @@ pub fn check(s: &PerformanceSettings, cores: u32) -> Vec<FieldError> {
             ),
         );
     }
+    // Auto takes as many threads as fit, but at least one: one thread's heap must fit too.
+    if s.index_heap_per_thread_mb > s.import_budget_mb {
+        fail(
+            "indexHeapPerThreadMb",
+            format!(
+                "A search index thread's memory ({} MB) must fit in the import memory ({} MB).",
+                s.index_heap_per_thread_mb, s.import_budget_mb
+            ),
+        );
+    }
+    let index_mb = u64::from(s.index_writer_threads) * u64::from(s.index_heap_per_thread_mb);
+    if s.index_writer_threads > 0 && index_mb > u64::from(s.import_budget_mb) && s.index_heap_per_thread_mb <= s.import_budget_mb {
+        fail(
+            "indexWriterThreads",
+            format!(
+                "{} search index threads of {} MB need {index_mb} MB; they must fit in the import memory ({} MB). Choose \
+                 fewer threads, less memory per thread, or 0 (Auto).",
+                s.index_writer_threads, s.index_heap_per_thread_mb, s.import_budget_mb
+            ),
+        );
+    }
     if s.leave_cores_free > 0 && s.leave_cores_free >= cores {
         fail(
             "leaveCoresFree",
@@ -223,19 +272,21 @@ impl Preset {
                     "returnMemoryAtOnce": d.return_memory_at_once,
                     "parseThreads": d.parse_threads,
                     "queryThreads": d.query_threads,
-                    "indexThreads": d.index_threads,
+                    "indexWriterThreads": d.index_writer_threads,
+                    "indexHeapPerThreadMb": d.index_heap_per_thread_mb,
                     "duckMemoryLimitMb": d.duck_memory_limit_mb,
                     "allocatorFlushMb": d.allocator_flush_mb,
                 })
             }
-            // DuckDB 128 MB (236 − 108), 4 parse threads, 2 query threads, 1 index thread (StoreOptions::low_memory).
+            // DuckDB 128 MB (236 − 108), 4 parse threads, 2 query threads, 1 index thread of 16 MB (StoreOptions::low_memory).
             Preset::LowMemory => json!({
                 "importBudgetMb": 384,
                 "queryBudgetMb": 236,
                 "returnMemoryAtOnce": true,
                 "parseThreads": 4,
                 "queryThreads": 2,
-                "indexThreads": 1,
+                "indexWriterThreads": 1,
+                "indexHeapPerThreadMb": 16,
                 "duckMemoryLimitMb": 0,
                 "allocatorFlushMb": 8,
             }),
@@ -314,6 +365,68 @@ mod tests {
         );
         let cpu = s.find("pluginCpuPercent").unwrap();
         assert!(cpu.description.contains("Windows") && cpu.description.contains("lowest priority"));
+    }
+
+    #[test]
+    fn the_index_writer_threads_and_heap_per_thread_are_settings_checked_in_rust() {
+        let s = schema();
+        assert!(s.find("indexThreads").is_none(), "replaced by indexWriterThreads (0 is Auto)");
+        let threads = s.find("indexWriterThreads").expect("the writer's threads are a field");
+        let heap = s.find("indexHeapPerThreadMb").expect("the heap of each writer thread is a field");
+        assert!(threads.restart_required && heap.restart_required && !threads.advanced && !heap.advanced);
+        assert!(threads.description.contains("Auto") && heap.description.contains("each"));
+        let d = s.defaults().to_json();
+        assert_eq!(d["indexWriterThreads"], 0, "Auto by default");
+        assert_eq!(d["indexHeapPerThreadMb"], DEFAULT_INDEX_HEAP_PER_THREAD_MB);
+        for (value, ok) in [(-1, false), (0, true), (1, true), (13, true), (64, true), (65, false)] {
+            let r = debrief_core::settings::validate(&s, &json!({ "indexWriterThreads": value }));
+            assert_eq!(r.is_ok(), ok, "{value} threads");
+        }
+        // Tantivy needs at least 15 MB a thread.
+        for (value, ok) in [(15, false), (16, true), (64, true), (256, true), (1024, true), (1025, false)] {
+            let r = debrief_core::settings::validate(&s, &json!({ "indexHeapPerThreadMb": value }));
+            assert_eq!(r.is_ok(), ok, "{value} MB");
+        }
+    }
+
+    #[test]
+    fn explicit_index_threads_must_fit_their_heaps_in_the_import_memory() {
+        let fits = PerformanceSettings {
+            index_writer_threads: 12,
+            index_heap_per_thread_mb: 64,
+            ..PerformanceSettings::default()
+        };
+        assert!(check(&fits, 16).is_empty(), "12 x 64 MB = 768 MB, the import memory");
+        let over = PerformanceSettings {
+            index_writer_threads: 13,
+            ..fits.clone()
+        };
+        let e = check(&over, 16);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].key, "indexWriterThreads");
+        assert!(
+            e[0].message.contains("832 MB") && e[0].message.contains("768 MB"),
+            "{}",
+            e[0].message
+        );
+        // Auto takes as many threads as fit, at least one, so one thread's heap must fit as well.
+        let auto = PerformanceSettings {
+            index_heap_per_thread_mb: 1024,
+            ..PerformanceSettings::default()
+        };
+        let e = check(&auto, 16);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].key, "indexHeapPerThreadMb");
+        assert!(
+            e[0].message.contains("1024 MB") && e[0].message.contains("768 MB"),
+            "{}",
+            e[0].message
+        );
+        let fits = PerformanceSettings {
+            index_heap_per_thread_mb: 768,
+            ..PerformanceSettings::default()
+        };
+        assert!(check(&fits, 16).is_empty(), "one thread of 768 MB fits");
     }
 
     #[test]

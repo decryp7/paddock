@@ -1,5 +1,18 @@
 use std::sync::Arc;
 
+/// [`Limits::max_entries`] unless the caller sets another (the row `archive.entries`).
+pub const DEFAULT_MAX_ENTRIES: usize = 10_000;
+/// [`Limits::max_file_bytes`] unless the caller sets another (4 GiB; the row `archive.file_bytes`).
+pub const DEFAULT_MAX_FILE_BYTES: u64 = 4 << 30;
+/// [`Limits::max_total_bytes`] unless the caller sets another (8 GiB; the row `archive.total_bytes`).
+pub const DEFAULT_MAX_TOTAL_BYTES: u64 = 8 << 30;
+/// [`Limits::max_ratio`] unless the caller sets another (the row `archive.ratio`).
+pub const DEFAULT_MAX_RATIO: u64 = 200;
+/// [`Limits::max_depth`] unless the caller sets another (the row `archive.depth`).
+pub const DEFAULT_MAX_DEPTH: usize = 32;
+/// [`Limits::max_path_len`] unless the caller sets another (the row `archive.path_length`).
+pub const DEFAULT_MAX_PATH_LEN: usize = 1024;
+
 /// What a single archive may do. Defaults suit a runtime download (a few thousand files, a few gigabytes).
 #[derive(Debug, Clone)]
 pub struct Limits {
@@ -22,13 +35,13 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Limits {
-            max_entries: 10_000,
-            max_file_bytes: 4 << 30,
-            max_total_bytes: 8 << 30,
-            max_ratio: 200,
+            max_entries: DEFAULT_MAX_ENTRIES,
+            max_file_bytes: DEFAULT_MAX_FILE_BYTES,
+            max_total_bytes: DEFAULT_MAX_TOTAL_BYTES,
+            max_ratio: DEFAULT_MAX_RATIO,
             ratio_floor_bytes: 64 << 20,
-            max_depth: 32,
-            max_path_len: 1024,
+            max_depth: DEFAULT_MAX_DEPTH,
+            max_path_len: DEFAULT_MAX_PATH_LEN,
         }
     }
 }

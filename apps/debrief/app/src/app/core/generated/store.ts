@@ -165,7 +165,7 @@ runningJobs: Array<RunningJob>,
  */
 cachedAnalyses: number, cachedBytes: number, };
 
-export type MaintenanceAction = "compact" | "rebuildIndex" | "clearCachedAnalyses";
+export type MaintenanceAction = "compact" | "rebuildIndex" | "clearCachedAnalyses" | "orderEvents";
 
 export type MaintenanceReport = { action: MaintenanceAction, message: string, };
 

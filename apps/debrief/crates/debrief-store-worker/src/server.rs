@@ -396,6 +396,7 @@ fn tuned(base: StoreOptions, tuning: &StoreTuning) -> StoreOptions {
         parse_threads: tuning.parse_threads.unwrap_or(base.parse_threads),
         duck_threads: tuning.duck_threads.unwrap_or(base.duck_threads),
         memory_limit: tuning.memory_limit_mb.map(mb).unwrap_or(base.memory_limit),
+        import_memory_limit: tuning.import_memory_limit_mb.map(mb).unwrap_or(base.import_memory_limit),
         index: debrief_store_duck::WriterBudget {
             // Tantivy needs at least 15 MB per writer thread.
             heap: tuning.index_heap_mb.map_or(base.index.heap, |m| (m as usize) << 20),

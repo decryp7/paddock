@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- A job that a limit stopped now says which limit it was. The app and the agent of this version talk a new protocol, so an older Dyno app or agent is replaced at the next start instead of being read wrongly.
+
 ## [1.1.0] - 2026-11-06
 
 **On Windows, uninstall Dyno 1.0.0 first (keep your data), then install 1.1.0; 1.0.0 may offer this update but cannot install it.**

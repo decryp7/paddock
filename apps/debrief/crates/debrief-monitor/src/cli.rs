@@ -61,7 +61,8 @@ pub fn parse_args(args: &[String]) -> Result<Args> {
     })
 }
 
-/// Runs the monitor until `stop` is set or the optional duration elapses.
+/// Runs the monitor until `stop` is set or the optional duration elapses. The run ends with the monitor's
+/// "Monitoring stopped" event (see [`crate::STOPPED_TEMPLATE`]).
 pub fn run(args: &[String], stop: &AtomicBool) -> Result<()> {
     let args = parse_args(args)?;
     let text = std::fs::read_to_string(&args.config).with_context(|| format!("cannot read {}", args.config.display()))?;
@@ -145,15 +146,25 @@ mod tests {
             .contains("not valid JSON"));
     }
 
-    #[test]
-    fn run_stops_after_duration_and_writes_events() {
-        let dir = tempfile::tempdir().unwrap();
-        let cfg = dir.path().join("m.json");
+    /// A config that samples this test process every 250 ms.
+    fn own_process_config(dir: &std::path::Path) -> PathBuf {
+        let cfg = dir.join("m.json");
         std::fs::write(
             &cfg,
             format!(r#"{{"targets":[{{"pid":{}}}],"intervalMs":250}}"#, std::process::id()),
         )
         .unwrap();
+        cfg
+    }
+
+    /// `Process stats` needs a second sample (CPU and IO are deltas), one interval after the first. A run that ends
+    /// sooner writes only the start event; CI run 7287 hit this with a fixed 700 ms run on a busy runner, where the first
+    /// sample came too late. So the duration test asserts only that the run stops (how many samples fit depends on the
+    /// scheduler), and the events test waits for the events.
+    #[test]
+    fn run_stops_after_its_duration() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = own_process_config(dir.path());
         let out = dir.path().join("logs");
         let stop = AtomicBool::new(false);
         run(
@@ -163,16 +174,63 @@ mod tests {
                 "--out",
                 out.to_str().unwrap(),
                 "--duration",
-                "700ms",
+                "1ms",
             ]),
             &stop,
         )
         .unwrap();
         let text = std::fs::read_to_string(out.join("process-monitor.clef")).unwrap();
-        assert!(text.contains("Process stats"), "{text}");
+        assert!(text.lines().last().unwrap().contains("Monitoring stopped after"), "{text}");
         // An external stop also ends the run.
         let stop = AtomicBool::new(true);
         run(&v(&["--config", cfg.to_str().unwrap(), "--out", out.to_str().unwrap()]), &stop).unwrap();
+        let text = std::fs::read_to_string(out.join("process-monitor.clef")).unwrap();
+        assert!(text.lines().last().unwrap().contains(r#""StopReason":"stop requested""#), "{text}");
+    }
+
+    /// Runs until the output holds a `Process stats` event, however long the machine takes to get there (capped at
+    /// 60 s, far beyond the 250 ms the event needs, so a monitor that never samples fails with its output instead of
+    /// hanging the run).
+    #[test]
+    fn run_writes_events_until_stopped() {
+        const CAP: Duration = Duration::from_secs(60);
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = own_process_config(dir.path());
+        let out = dir.path().join("logs");
+        let file = out.join("process-monitor.clef");
+        let stop = AtomicBool::new(false);
+        let gave_up = AtomicBool::new(false);
+        let has_stats = || std::fs::read_to_string(&file).is_ok_and(|t| t.contains("Process stats"));
+        let result = std::thread::scope(|s| {
+            s.spawn(|| {
+                // Waits on the condition (the event in the file), not on a clock; stops when `run` returned early.
+                let start = Instant::now();
+                while !stop.load(Ordering::Relaxed) && !has_stats() {
+                    if start.elapsed() >= CAP {
+                        gave_up.store(true, Ordering::Relaxed);
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                stop.store(true, Ordering::Relaxed);
+            });
+            let result = run(&v(&["--config", cfg.to_str().unwrap(), "--out", out.to_str().unwrap()]), &stop);
+            stop.store(true, Ordering::Relaxed);
+            result
+        });
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        assert!(
+            !gave_up.load(Ordering::Relaxed),
+            "no Process stats event within {CAP:?}; the output:\n{text}"
+        );
+        result.unwrap();
+        assert!(text.contains("Now monitoring") && text.contains("Process stats"), "{text}");
+        let end = text.lines().last().unwrap();
+        assert!(
+            end.contains("Monitoring stopped after") && end.contains(r#""StopReason":"stop requested""#),
+            "{end}"
+        );
+        assert!(!end.contains(r#""StatsEvents":0"#), "{end}");
     }
 
     #[test]

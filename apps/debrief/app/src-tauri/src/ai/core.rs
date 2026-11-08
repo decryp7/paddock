@@ -403,16 +403,6 @@ impl AiCore {
         }
     }
 
-    /// Whether background work (the name aliases) may use the model without loading it by itself: it is in memory, or
-    /// it is loaded automatically anyway.
-    pub fn background_ready(&self) -> bool {
-        match self.status().state {
-            EngineStateDto::Ready => true,
-            EngineStateDto::Idle => self.settings().autoload,
-            _ => false,
-        }
-    }
-
     /// Ok when AI can be used in this run (by either engine); otherwise why not. A missing or broken built-in worker does
     /// not stop Pitwall (ADR 0059, rule 19); safe mode turns both off.
     pub fn availability(&self) -> AiResult<()> {
@@ -637,11 +627,6 @@ impl AiCore {
         self.pitwall()
             .and_then(|p| p.view().problem)
             .unwrap_or_else(|| "Pitwall is not ready for Debrief. Open Pitwall, or use the built-in engine (Settings ▸ AI).".into())
-    }
-
-    /// The model for background work (Pitwall queues it behind what the user waits for).
-    pub fn background_provider(&self) -> AiResult<Arc<dyn LlmProvider>> {
-        Ok(self.engine(Priority::Background)?.llm())
     }
 
     /// The model, for a use case or a chat turn.

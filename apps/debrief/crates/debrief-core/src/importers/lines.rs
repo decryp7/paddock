@@ -18,10 +18,10 @@ use super::json::to_record as json_to_record;
 use super::{first_lines, SNIFF_LINES};
 use crate::model::{auto_value, Level, Record};
 use crate::profile::CompiledProfile;
+use crate::profile::FormatCaptures;
 use crate::template::PROPERTIES_GROUP;
 use crate::time::TimestampParser;
 use chrono::NaiveDate;
-use regex::Captures;
 use serde_json::{Map, Value};
 
 /// A format lines of a text file can have.
@@ -111,12 +111,12 @@ pub fn json_event(profile: &CompiledProfile, line: &str) -> Option<Map<String, V
 
 /// The first text format in profile order that matches `line`, with its captures; `dominant` is tried
 /// first.
-fn text_match<'l>(profile: &CompiledProfile, dominant: LineFormat, line: &'l str) -> Option<(usize, Captures<'l>)> {
+fn text_match<'p, 'l>(profile: &'p CompiledProfile, dominant: LineFormat, line: &'l str) -> Option<(usize, FormatCaptures<'p, 'l>)> {
     let formats = &profile.text_formats;
     if let LineFormat::Text(d) = dominant {
-        if let Some(caps) = formats.get(d).and_then(|f| f.regex.captures(line)) {
+        if let Some(caps) = formats.get(d).and_then(|f| f.captures(line)) {
             return match formats[..d].iter().position(|f| f.regex.is_match(line)) {
-                Some(earlier) => formats[earlier].regex.captures(line).map(|c| (earlier, c)),
+                Some(earlier) => formats[earlier].captures(line).map(|c| (earlier, c)),
                 None => Some((d, caps)),
             };
         }
@@ -129,7 +129,7 @@ fn text_match<'l>(profile: &CompiledProfile, dominant: LineFormat, line: &'l str
         Some(set) => set.matches(line).iter().next(),
         None => formats.iter().position(|f| f.regex.is_match(line)),
     }?;
-    formats[i].regex.captures(line).map(|c| (i, c))
+    formats[i].captures(line).map(|c| (i, c))
 }
 
 /// Whether `line` begins an event (as [`LineParser::line`] would read it), for moving a parallel chunk's
@@ -244,12 +244,11 @@ impl<'p> LineParser<'p> {
         }
     }
 
-    fn text_event(&mut self, format: usize, caps: &Captures, number: u32) -> Record {
+    fn text_event(&mut self, format: usize, caps: &FormatCaptures, number: u32) -> Record {
         let time_only = self.profile.text_formats[format].time_only;
         let mut rec = Record::new(number);
         for name in &self.names[format] {
-            let Some(m) = caps.name(name) else { continue };
-            let v = m.as_str();
+            let Some(v) = caps.name(name) else { continue };
             match *name {
                 "timestamp" => rec.ts = self.clock.read(&self.parser, v, time_only),
                 "level" => rec.level = Level::parse(v).unwrap_or(Level::Information),
