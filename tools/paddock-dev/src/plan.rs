@@ -52,6 +52,9 @@ static GLOBAL: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     .into()
 });
 
+/// An app's `src-tauri/Cargo.toml` and `capabilities/`, which conformance C48 reads. Mirrors `APP_CAPABILITY_INPUT` in `scripts/affected.mjs`.
+static APP_CAPABILITY_INPUT: LazyLock<Regex> = LazyLock::new(|| re(r"^apps/[^/]+/(app/)?src-tauri/(Cargo\.toml|capabilities/)"));
+
 /// What conformance C99 (no macOS Keychain in a shipped build, ADR 0057 §3.4) reads; they run the dedicated `c99` job. Mirrors
 /// `C99_INPUT` in `scripts/affected.mjs`: every Cargo.toml and Cargo.lock under apps/ and crates/, the sources the check scans,
 /// the Tauri capability files, the paddock.ci.json files, the cargo registry configuration, the waivers and the check's code.
@@ -298,6 +301,9 @@ pub fn affected(files: &[String], graph: &RepoGraph, opts: &Options) -> Result<V
         }
         if META.iter().any(|r| r.is_match(f)) {
             continue;
+        }
+        if APP_CAPABILITY_INPUT.is_match(f) {
+            st.mark(Some("conformance".to_string()), format!("C48 reads {f}"));
         }
         if C99_INPUT.iter().any(|r| r.is_match(f)) {
             st.mark(Some("c99".to_string()), format!("C99 reads {f}"));
