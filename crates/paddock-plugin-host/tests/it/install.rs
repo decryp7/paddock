@@ -220,7 +220,7 @@ fn what_this_app_cannot_serve_cannot_be_installed_and_the_text_says_who_updates(
         .unwrap()
         .installable()
         .unwrap_err();
-    assert!(e.to_string().contains("built for an older contract"), "{e}");
+    assert!(e.to_string().contains("no longer supported"), "{e}");
     // A package without a program for this computer.
     let toml = fixture::manifest_toml("2.0", "paddock-plugin-fixture", "").replace(
         paddock_plugin_package::manifest::host_target(),

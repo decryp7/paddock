@@ -78,6 +78,8 @@ pub enum DownloadError {
     Stalled { host: String, secs: u64 },
     /// The file is (or grew) larger than the limit.
     TooLarge { size: u64, limit: u64 },
+    /// The answer of a small GET ([`Fetch`](crate::Fetch)) is (or grew) larger than its limit.
+    ReplyTooLarge { size: u64, limit: u64 },
     /// The host reports another size than the pinned one, or sent more or fewer bytes than it announced.
     SizeMismatch { expected: u64, actual: u64 },
     /// The bytes do not have the pinned SHA-256.
@@ -151,6 +153,12 @@ impl fmt::Display for DownloadError {
                 write!(
                     f,
                     "no data arrived from {host} for {secs} s; run it again to resume"
+                )
+            }
+            DownloadError::ReplyTooLarge { size, limit } => {
+                write!(
+                    f,
+                    "the answer is {size} bytes, above the {limit}-byte limit of a small request"
                 )
             }
             DownloadError::TooLarge { size, limit } => {

@@ -12,11 +12,22 @@ export interface SuJobPhase {
   done: number;
 }
 
+/** A value with its unit (`paddock-limits`' `Quantity`). */
+export type SuQuantity = { kind: 'bytes' | 'count' | 'ratio' | 'millis' | 'percent'; n: number };
+
+/** The limit that stopped a job (`paddock-limits`' `LimitExceeded`, ADR 0019): the UI offers its remedy. */
+export type SuLimitExceeded = {
+  id: string;
+  limit: SuQuantity;
+  reached: SuQuantity | null;
+  scope: 'file' | 'source' | 'import' | 'plugin' | 'query' | 'process';
+};
+
 export type SuJobState =
   | { state: 'queued' }
   | { state: 'running'; phase?: SuJobPhase | null }
   | { state: 'done' }
-  | { state: 'failed'; message: string }
+  | { state: 'failed'; message: string; limit?: SuLimitExceeded }
   | { state: 'cancelled'; reason: 'user' | 'deadline' };
 
 export type SuJobSnapshot = {

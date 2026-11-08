@@ -1,6 +1,6 @@
-//! AI aliases (layer 2): a low-priority background job asks a local model, once per group and model version, for a
-//! human name and a few aliases or abbreviation expansions (`gfxbldr` is `graphic builder`, `svchost` is
-//! `Service Host`). Optional: without a model ([`AliasModel`] absent) or with the feature off the job does nothing.
+//! AI aliases (layer 2): a job the user starts (never a background job, rule 46) asks a local model, once per group and
+//! model version, for a human name and a few aliases or expansions (`svchost` is `Service Host`). Optional: without a
+//! model ([`AliasModel`] absent) or with the feature off the job does nothing.
 //!
 //! The model never sees more than the spellings of a name and its kind, is asked for strict JSON, and every answer is
 //! validated ([`parse_reply`]): length, characters, word count, no echo of the instructions, no duplicates, at most
@@ -37,7 +37,7 @@ pub trait AliasModel {
 /// How the job runs.
 #[derive(Debug, Clone)]
 pub struct AliasJobConfig {
-    /// The Settings switch.
+    /// Whether the job may run at all.
     pub enabled: bool,
     /// Groups with fewer events are not asked about.
     pub min_count: u64,

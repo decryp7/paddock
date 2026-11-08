@@ -27,6 +27,7 @@ ts-rs = { version = "11.1", optional = true }
 ts = ["dep:ts-rs"]
 
 [dev-dependencies]
+paddock-limits = { path = "../../../../crates/paddock-limits" }
 postcard.workspace = true
 ts-rs = "11.1"
 # `testing::sync_generated`, the stale-file check of the generated TypeScript.

@@ -2946,6 +2946,7 @@ dependencies = [
  "paddock-dialogs",
  "paddock-env",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-log",
  "paddock-settings",
  "paddock-workspace-hack",
@@ -2981,6 +2982,7 @@ dependencies = [
  "fs4",
  "httpdate",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "rustls",
  "serde",
@@ -3022,6 +3024,7 @@ dependencies = [
  "log",
  "paddock-commands",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-proc",
  "paddock-workspace-hack",
  "serde",
@@ -3036,12 +3039,23 @@ version = "0.2.0"
 dependencies = [
  "croner",
  "jiff",
+ "log",
  "paddock-commands",
  "paddock-env",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "sha2",
  "tauri",
+]
+
+[[package]]
+name = "paddock-limits"
+version = "0.1.0"
+dependencies = [
+ "log",
+ "paddock-workspace-hack",
+ "serde",
 ]
 
 [[package]]
@@ -3097,6 +3111,7 @@ version = "0.1.0"
 dependencies = [
  "paddock-download",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "rustls",
  "ureq",
@@ -3209,9 +3224,11 @@ dependencies = [
  "paddock-files",
  "paddock-health",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-log",
  "paddock-mcp",
  "paddock-menu",
+ "paddock-net",
  "paddock-packs",
  "paddock-pitwall",
  "paddock-service",
@@ -3306,6 +3323,7 @@ dependencies = [
  "paddock-env",
  "paddock-files",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "serde",
  "serde_json",
@@ -3317,6 +3335,7 @@ name = "paddock-testkit"
 version = "0.1.0"
 dependencies = [
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "socket2",
  "tempfile",
@@ -3334,6 +3353,7 @@ dependencies = [
  "paddock-download",
  "paddock-files",
  "paddock-jobs",
+ "paddock-limits",
  "paddock-workspace-hack",
  "semver",
  "serde",

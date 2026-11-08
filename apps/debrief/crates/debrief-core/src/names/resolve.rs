@@ -3,11 +3,12 @@
 //!
 //! The ways a group matches ([`How`]), best first: the user's own alias (they said so), the same letters as a
 //! spelling in the logs (exact), the same words written differently (segmented: `graphic builder` is
-//! `graphicbuilder.exe`), the words as parts of the name, words that start the name's words, an AI alias, and a typo.
+//! `graphicbuilder.exe`), the words as parts of the name, words that start the name's words, an AI alias, the letters of the name's words (an abbreviation), and a typo.
 //! The score is the way's base, a little for how frequent the group is, more for the context ([`super::context`]) and
 //! for closeness to the user's anchors. Two different groups matching the same way with scores closer than
 //! [`TIE_GAP`] are a true tie: [`Resolution::clarify`] holds the question.
 
+use super::abbreviation::is_abbreviation;
 use super::book::{NameBook, Prepared};
 use super::context::{relevance, Cooccurrence, SearchContext, MAX_ANCHORS};
 use super::group::{NameGroup, Spelling};
@@ -52,6 +53,8 @@ pub enum How {
     Prefix,
     /// An alias a local model suggested.
     Alias,
+    /// Letters of the name's words, in order (`gfxbldr` for `graphic builder`).
+    Abbreviation,
     /// Close in spelling.
     Typo,
 }
@@ -65,6 +68,7 @@ impl How {
             How::Parts => 0.85,
             How::Alias => 0.8,
             How::Prefix => 0.7,
+            How::Abbreviation => 0.6,
             How::Typo => 0.55,
         }
     }
@@ -78,6 +82,7 @@ impl How {
             How::Parts => "parts",
             How::Prefix => "prefix",
             How::Alias => "alias",
+            How::Abbreviation => "abbreviation",
             How::Typo => "typo",
         }
     }
@@ -165,8 +170,7 @@ impl Resolver<'_> {
         let mut found: Vec<NameMatch> = Vec::new();
         let rejected = self.book.has_rejections();
         for (g, p) in self.book.groups().iter().zip(self.book.prepared()) {
-            let id = p.id.clone();
-            if rejected && self.book.is_rejected(&text, &id) {
+            if rejected && self.book.is_rejected(&text, &p.id) {
                 continue;
             }
             let Some((how, detail)) = self.how(g, p, &text, &q, &qtokens, &qjoined) else {
@@ -186,7 +190,7 @@ impl Resolver<'_> {
                 }
             }
             found.push(NameMatch {
-                id,
+                id: p.id.clone(),
                 scope: g.scope.clone(),
                 display: g.display.clone(),
                 canonical: g.canonical().to_string(),
@@ -248,10 +252,9 @@ impl Resolver<'_> {
             };
             return Some((How::Segmented, phrase.into()));
         }
-        let ktokens: Vec<&str> = p.tokens.iter().map(String::as_str).collect();
         if !qtokens.is_empty()
-            && qtokens.len() < ktokens.len()
-            && ktokens.windows(qtokens.len()).any(|w| w.iter().zip(qtokens).all(|(a, b)| a == b))
+            && qtokens.len() < p.tokens.len()
+            && p.tokens.windows(qtokens.len()).any(|w| w.iter().zip(qtokens).all(|(a, b)| a == b))
         {
             return Some((How::Parts, "your words are parts of this name".into()));
         }
@@ -261,7 +264,7 @@ impl Resolver<'_> {
         if !qtokens.is_empty()
             && qtokens
                 .iter()
-                .all(|t| t.chars().count() >= 2 && ktokens.iter().any(|k| k.starts_with(t.as_str())))
+                .all(|t| t.chars().count() >= 2 && p.tokens.iter().any(|k| k.starts_with(t.as_str())))
         {
             return Some((How::Prefix, "your words start the words of this name".into()));
         }
@@ -278,13 +281,16 @@ impl Resolver<'_> {
                 }
             }
         }
+        if is_abbreviation(q, &p.tokens) {
+            return Some((How::Abbreviation, format!("abbreviation: letters of {}", p.tokens.join(" "))));
+        }
         // A typo has a word nobody knows; "grape builder" is two real words, so it is another thing.
         let misspelt = qtokens.iter().any(|t| !self.vocab.knows(t));
-        let d = if qtokens.len() == ktokens.len() && ktokens.len() > 1 {
+        let d = if qtokens.len() == p.tokens.len() && p.tokens.len() > 1 {
             // Word by word: each word may be a letter or two off, but a different word is another thing.
             qtokens
                 .iter()
-                .zip(&ktokens)
+                .zip(&p.tokens)
                 .map(|(a, b)| edit_distance_capped(a, b, (b.chars().count() / 3).max(1)))
                 .sum::<Option<usize>>()
         } else {
@@ -610,9 +616,22 @@ mod tests {
     #[test]
     fn typos_only_when_nothing_matches_better() {
         let b = book();
-        let r = quick(&b, "trayagnt");
+        let r = quick(&b, "trayagnet");
         assert_eq!(r.matches.len(), 1);
         assert_eq!(r.matches[0].how, How::Typo);
+    }
+
+    #[test]
+    fn the_letters_of_the_words_are_an_abbreviation_with_the_reason() {
+        let b = book();
+        let r = quick(&b, "trayagnt");
+        assert_eq!(r.matches.len(), 1);
+        assert_eq!(r.matches[0].how, How::Abbreviation);
+        assert!(r.matches[0].why.contains("letters of tray agent"), "{}", r.matches[0].why);
+        assert!(
+            r.matches[0].score < 0.8 && r.matches[0].score > How::Typo.base(),
+            "below prefix and alias, above a typo"
+        );
     }
 
     #[test]
@@ -638,11 +657,13 @@ mod tests {
             How::Parts,
             How::Prefix,
             How::Alias,
+            How::Abbreviation,
             How::Typo,
         ]
         .iter()
         .map(|h| h.id())
         .collect();
-        assert_eq!(ids.len(), 7);
+        assert_eq!(ids.len(), 8);
+        assert!(ids.contains(&"abbreviation"));
     }
 }

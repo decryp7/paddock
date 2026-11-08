@@ -40,6 +40,8 @@ pub(crate) struct VideoState {
     /// Scratch folders of passes and self-tests (emptied at start).
     pub(crate) scratch: PathBuf,
     edit: Mutex<()>,
+    /// Where this machine's describe-rate history is kept.
+    rate_file: PathBuf,
 }
 
 impl VideoState {
@@ -51,6 +53,26 @@ impl VideoState {
             catalog: FfmpegCatalog::embedded(),
             scratch,
             edit: Mutex::new(()),
+            rate_file: root.join("describe-rate.json"),
+        }
+    }
+
+    /// This machine's recent describe runs (empty when none was kept or the file is damaged).
+    pub(crate) fn describe_rate(&self) -> debrief_video::describe::RateHistory {
+        std::fs::read_to_string(&self.rate_file)
+            .map(|t| debrief_video::describe::RateHistory::parse(&t))
+            .unwrap_or_default()
+    }
+
+    /// Notes a finished describe run (`frames` in `secs` seconds); a failed save is logged, never an error.
+    pub(crate) fn record_describe(&self, frames: usize, secs: f32) {
+        let mut h = self.describe_rate();
+        h.record(frames, secs);
+        let saved = serde_json::to_string(&h)
+            .map_err(|e| e.to_string())
+            .and_then(|t| std::fs::write(&self.rate_file, t).map_err(|e| e.to_string()));
+        if let Err(e) = saved {
+            log::warn!("video: could not keep the describe rate: {e}");
         }
     }
 

@@ -1388,6 +1388,13 @@ precondition (the menu bar exists, the helper runs, at least one step ran), give
 a thing known to be there), and compare with a known-good peer. Otherwise the result is `not measured` or `check broken`
 and the release does not pass (rule 71, ER-33).
 
+## First-parent lint on main needs a pre-landing branch lint (2026-11-08, Debrief 1.2 batch 1)
+A push to main lints only the commits main itself gets (`--first-parent`), so a branch's own subjects and trailers (two `wip:`
+commits, five first lines over 100 characters) were never checked once the branch landed without a pull request.
+**Lesson (class: a check that skips what it cannot see):** lint the branch before landing it (`commit-lint --range
+origin/main..<branch>`, rule 50(g)); C23 in the conformance run is the backstop. Waivers for commits are exact per commit
+(`commit <10 or 40 hex>`, no patterns) and expire.
+
 ## A delayed service looked like a broken one (2026-11-04, Dyno helper after a Windows restart)
 
 After a restart the Dyno helper card said "installed but did not answer, Repair" until the person ran Repair (UAC), though nothing was damaged. By the code, four things added up: the service was `delayed-auto` (it starts a minute or two after the boot), the agent turned "program present, pipe absent" straight into Silent and Repair, nothing started a stopped service although its security descriptor already lets interactive users start it, and the card read the state once and never again. A start that is merely late, or a service that is merely stopped, is not damage. **Lesson (class: a state that fixes itself is not a fault):** a status that can be transient is polled with a backoff and says "starting", an unelevated start is tried before an elevated repair is offered, and Repair is for a service that stopped with an error, with the service's exit code and reason in the detail. `paddock_service::start::revive` is the one implementation; a refusal at the service's start leaves its reason in the Event Log and in its service-specific exit code (ER-27), because a service that stops silently can only be repaired by guessing.
@@ -1476,3 +1483,19 @@ Symptom: after replacing Dyno.app, an agent started on 5 Nov kept running and th
 Fix: the discovery file carries a build id (SHA-256 prefix of the agent file), the app compares it with the id of the agent file it would start, and the agent exits (code 0, logged) when its own file was replaced or removed on two looks 30 s apart; signals others send are `StoppedFromOutside`, no crash and no stability points. Logs: the connect line now carries the agent's version and build and the app's key. Class: identity by a label that releases share; compare content.
 
 - A test fake built from the real agent carries its self-healing (the discovery guard writes `agent.json` again at the 30 s watch): tests that tamper with a live agent's files must hold only the lock and start the agent when told (`SlowHolder`; CI run 7672, Dyno link test connected at 94 of 100 looks).
+
+## A brief without a named scratch folder let an agent clobber the shared scratchpad (2026-11-08)
+
+Symptom: an agent told to "clean up" its scratch files removed the shared scratchpad, including other agents' files (the same shape as the 2026-10-31 reviewer incident). Root cause: the brief named no folder, so the agent chose the root. Fix: every brief names the agent's own subfolder of the scratch area and tells it to touch nothing else; an agent never globs the root. Class: a cleanup without a named path deletes more than it made.
+
+## Agents ran git in the main checkout after a failed cd (2026-11-08)
+
+Twice, a `cd` into a worktree failed and the next git command ran in the main checkout: once a sparse checkout and a merge, once a fast-forward of local main. Root cause: the shell stays where it was when `cd` fails, and git does not care where it runs. Fix for now: check `git rev-parse --show-toplevel` before every git command and use absolute paths. A guard (a hook that refuses mutating git in the main checkout) is an ER-21 candidate, not built yet.
+
+## A shared redaction default changed for one app silently changed another app's outgoing text (2026-11-08)
+
+A redaction default in a shared crate was widened for one app's problem report. Another app's web-search text, which leaves the machine, then changed with it and nothing failed. Root cause: the shared default was the only switch. Fix: a shared behaviour change that alters what leaves the machine is opt-in per caller; the new behaviour is a parameter the one app sets, and each other caller keeps its test of what it sends.
+
+## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
+
+An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.

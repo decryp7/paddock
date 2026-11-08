@@ -141,6 +141,11 @@ fn analyses_stay_within_the_query_budget() {
     store
         .configure(debrief_store_duck::StoreOptions {
             memory_limit: format!("{duck_mb}MB"),
+            // Two threads: with DuckDB 2.0 four threads need more than this lowered limit leaves them on the Linux CI
+            // runner ("Out of Memory ... 59.7 MiB/61.0 MiB used" at 64 MB; on macOS the failure point moved from about
+            // 50 MB to about 40 MB with two threads). The shipped limit is 192 MB; this test measures memory held per
+            // event, which threads do not change.
+            duck_threads: 2,
             ..debrief_store_duck::StoreOptions::default()
         })
         .unwrap();

@@ -3,6 +3,8 @@
 use crate::reach::Reach;
 use std::time::Duration;
 
+/// Redirects a default policy follows.
+pub const DEFAULT_REDIRECTS: u32 = 5;
 /// Most redirects any policy may allow.
 pub const MAX_REDIRECTS: u32 = 10;
 /// Most entries of the allow-list.
@@ -66,7 +68,7 @@ impl Default for Policy {
     fn default() -> Self {
         Policy {
             reach: Reach::Public,
-            max_redirects: 5,
+            max_redirects: DEFAULT_REDIRECTS,
             max_body: 8 << 20,
             max_request_body: 1 << 20,
             connect_timeout: Duration::from_secs(10),
