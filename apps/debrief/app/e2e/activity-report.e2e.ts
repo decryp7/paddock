@@ -27,7 +27,9 @@ test('an error leads to a problem report the user reviews and saves', async ({ p
   for (const name of ['description.txt', 'steps-to-reproduce.txt', 'system-info.json', 'logs/activity.log', 'logs/debrief.log']) {
     await expect(contents).toContainText(name);
   }
-  // The snapshot of the error is part of the report.
+  // Screenshots are left out unless the user ticks the box (a screenshot can show log contents); with it, the error's snapshot is part of the report.
+  await expect(contents).not.toContainText(/snapshots\/.+\.png/);
+  await dialog.getByTestId('report-screenshots').getByRole('checkbox').check();
   await expect(contents).toContainText(/snapshots\/.+\.png/);
   await expect(dialog.getByRole('heading', { name: 'Steps to reproduce' })).toBeVisible();
   await expect(dialog.locator('[data-testid=report-steps]')).toContainText('Show error snapshots');
