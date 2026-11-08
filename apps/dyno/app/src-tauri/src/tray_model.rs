@@ -265,7 +265,7 @@ fn fit_units(text: &str, max: usize) -> String {
 }
 
 /// A picture in device pixels: straight RGBA bytes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Picture {
     /// Row-major RGBA bytes (`width * height * 4`).
     pub rgba: Vec<u8>,

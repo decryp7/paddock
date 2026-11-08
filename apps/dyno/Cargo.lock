@@ -1345,6 +1345,7 @@ dependencies = [
  "tauri-utils",
  "tempfile",
  "thiserror 2.0.21",
+ "tiny-skia",
  "toml 0.9.12+spec-1.1.0",
  "tray-icon",
  "windows-sys 0.61.2",

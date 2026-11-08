@@ -806,6 +806,45 @@ fixed: string | null,
  */
 note: string | null, };
 
+export type StyleDrawn = { 
+/**
+ * The style.
+ */
+kind: MenuBarKind, 
+/**
+ * The style whose picture it shares here; `None` when it has its own.
+ */
+drawnAs: MenuBarKind | null, 
+/**
+ * What the style picker shows: the style's title, and ", drawn as …" when it shares a picture.
+ */
+label: string, };
+
+export type FixedStyle = { 
+/**
+ * The metric.
+ */
+metric: Metric, 
+/**
+ * What its item draws, in words for the row ("Rate with arrows").
+ */
+drawn: string, };
+
+export type StyleSupport = { 
+/**
+ * Every style of the catalogue, in its order.
+ */
+styles: Array<StyleDrawn>, 
+/**
+ * The metrics whose picture does not follow the style.
+ */
+fixed: Array<FixedStyle>, 
+/**
+ * Said once after an item is added: where the new icon appears and how to keep it in view; `None` when it simply
+ * appears.
+ */
+addedNote: string | null, };
+
 export type ValueTone = "ok" | "warn" | "bad";
 
 export type CounterUnit = "percent" | "bytes" | "bytesPerSec" | "perSec" | "count" | "milliseconds" | "seconds" | "number";
@@ -1081,7 +1120,11 @@ menuBarMetrics: Array<MetricChoice>,
 /**
  * What this platform's tray draws of a number item (its formats, and whether the label fits in the icon).
  */
-number: NumberSupport, };
+number: NumberSupport, 
+/**
+ * What this platform's tray draws of each style, and what to say after an add.
+ */
+styles: StyleSupport, };
 
 export type MetricReading = { 
 /**

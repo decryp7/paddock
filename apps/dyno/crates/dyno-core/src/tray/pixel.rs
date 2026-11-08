@@ -541,6 +541,11 @@ pub enum Kind {
         /// Up to three capitals.
         label: String,
     },
+    /// One vertical column filled from the bottom, with a label above it from 22 px.
+    Bar {
+        /// Up to three capitals.
+        label: String,
+    },
     /// One column per core.
     Cores,
     /// An area graph, with a label from 22 px.
@@ -548,6 +553,8 @@ pub enum Kind {
         /// Up to three capitals.
         label: String,
     },
+    /// The number over a small area graph of the recent values (the label is in the tooltip).
+    GraphValue,
     /// A 270-degree gauge with the metric's letter.
     Ring {
         /// The letter.
@@ -601,6 +608,41 @@ fn meter_in(cv: &mut Canvas, l: &Layout, v: Option<f32>, track: Rgba, fill: Rgba
         cv.rect(x0, y, x0 + w, y + h, fill);
     }
     let _ = l;
+}
+
+/// An area graph of the newest values on whole pixels: a faint plate from `top` to above the baseline track at row `bot - 1`,
+/// one column per value (newest at the right), each value above 0.5 % at least one pixel above the track.
+#[allow(clippy::too_many_arguments)]
+fn area_graph(cv: &mut Canvas, history: &[f32], x0: i32, x1: i32, top: i32, bot: i32, t: Theme, fill: Option<Rgba>) {
+    cv.rect(x0, top, x1, bot - 1, {
+        let mut c = t.ink();
+        c[3] = 0x18;
+        c
+    });
+    cv.rect(x0, bot - 1, x1, bot, t.track());
+    let Some(fill) = fill else {
+        return;
+    };
+    let cols = (x1 - x0).max(0) as usize;
+    let recent: Vec<f32> = history.iter().rev().take(cols).rev().copied().collect();
+    let start = x1 - recent.len() as i32;
+    for (i, v) in recent.iter().enumerate() {
+        let h = ((bot - top) as f32 * v.clamp(0.0, 100.0) / 100.0).round() as i32;
+        // A sample above zero shows at least one pixel above the baseline track.
+        let h = if *v > 0.5 { h.max(2) } else { h };
+        cv.rect(start + i as i32, bot - h, start + i as i32 + 1, bot, fill);
+    }
+}
+
+/// The width of the single column of [`Kind::Bar`] at each size: about a third of the icon, even, so it centres on whole
+/// pixels.
+fn bar_width(size: i32) -> i32 {
+    match size {
+        ..=17 => 6,
+        18..=23 => 8,
+        24..=31 => 8,
+        _ => 12,
+    }
 }
 
 /// A rate as up to three figures and a unit letter at the small sizes.
@@ -749,24 +791,62 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             if l.label_rows > 0 {
                 label(&mut cv, lb, l.label_rows, right, l.label_y, ink);
             }
-            let (x0, x1, bot) = (1, right, s - 1);
-            cv.rect(x0, top, x1, bot - 1, {
-                let mut c = t.ink();
-                c[3] = 0x18;
-                c
-            });
-            cv.rect(x0, bot - 1, x1, bot, t.track());
-            if state != State::Unavailable {
-                let cols = (x1 - x0) as usize;
-                let recent: Vec<f32> = r.history.iter().rev().take(cols).rev().copied().collect();
-                let start = x1 - recent.len() as i32;
-                for (i, v) in recent.iter().enumerate() {
-                    let h = ((bot - top) as f32 * v.clamp(0.0, 100.0) / 100.0).round() as i32;
-                    // A sample above zero shows at least one pixel above the baseline track.
-                    let h = if *v > 0.5 { h.max(2) } else { h };
-                    cv.rect(start + i as i32, bot - h, start + i as i32 + 1, bot, t.accent());
-                }
+            let fill = (state != State::Unavailable).then(|| t.accent());
+            area_graph(&mut cv, &r.history, 1, right, top, s - 1, t, fill);
+        }
+        Kind::Bar { label: lb } => {
+            // One column, centred, with the label centred above it from 22 px: a level standing up, never a meter on its side.
+            let w = bar_width(s);
+            let x0 = (s - w) / 2;
+            let top = if l.label_rows > 0 {
+                let gs: Vec<Glyph> = lb.chars().map(|ch| cap(ch, l.label_rows)).collect();
+                let lw: i32 = gs.iter().map(|g| g.w).sum::<i32>() + gs.len() as i32 - 1;
+                label(&mut cv, lb, l.label_rows, (s + lw + 1) / 2, l.label_y, ink);
+                l.label_y + l.label_rows + 2
+            } else {
+                1
+            };
+            let bot = s - 1;
+            cv.rect(x0, top, x0 + w, bot, t.track());
+            if let Some(v) = value {
+                let h = ((bot - top) as f32 * v.clamp(0.0, 100.0) / 100.0).round() as i32;
+                let h = if v > 0.5 { h.max(1) } else { h };
+                let fill = if state == State::Alert { plate } else { t.accent() };
+                cv.rect(x0, bot - h, x0 + w, bot, fill);
             }
+            if state == State::Alert {
+                notch(&mut cv);
+            }
+        }
+        Kind::GraphValue => {
+            // The number at the top right (the newest value, above the graph's newest column), the graph under it. No label:
+            // the tooltip names the metric.
+            let lg = Layout {
+                digits_y: if s <= 16 { 0 } else { 1 },
+                ..l
+            };
+            let n = l.digits;
+            let text = value.map_or("-".to_string(), |v| format!("{}", v.clamp(0.0, 100.0).round() as u32));
+            if state == State::Alert && small_alert {
+                let f = fit(&text, &lg, right);
+                notch_k.set(f.k);
+                digits(&mut cv, &text, f.n, l.tracking, right, f.y, ink);
+            } else if state == State::Alert {
+                let w = text_width(&text, n, l.tracking) + 2;
+                cv.rounded(right - w - 1, lg.digits_y - 1, right + 1, lg.digits_y + n.h + 1, plate);
+                digits(&mut cv, &text, n, l.tracking, right, lg.digits_y, plate_ink);
+            } else {
+                digits(&mut cv, &text, n, l.tracking, right, lg.digits_y, ink);
+            }
+            // At 16 px the graph takes the bottom row too (there is no room for a margin); larger icons keep a 1 px margin.
+            let top = lg.digits_y + n.h + if s <= 16 { 1 } else { 2 };
+            let bot = if s <= 16 { s } else { s - 1 };
+            let fill = match state {
+                State::Unavailable => None,
+                State::Alert => Some(plate),
+                State::Normal => Some(t.accent()),
+            };
+            area_graph(&mut cv, &r.history, 1, right, top, bot, t, fill);
         }
         Kind::Ring { letter } => {
             let c = s as f32 / 2.0;

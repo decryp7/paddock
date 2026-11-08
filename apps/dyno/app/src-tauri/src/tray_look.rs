@@ -104,8 +104,10 @@ pub fn px_kind(spec: &ItemSpec) -> px::Kind {
     match spec.glyph {
         Glyph::CoreBars => px::Kind::Cores,
         Glyph::Number => px::Kind::Percent { label },
-        Glyph::Bars | Glyph::Meter => px::Kind::Meter { label },
-        Glyph::Graph | Glyph::GraphNumber => px::Kind::Graph { label },
+        Glyph::Bars => px::Kind::Bar { label },
+        Glyph::Meter => px::Kind::Meter { label },
+        Glyph::Graph => px::Kind::Graph { label },
+        Glyph::GraphNumber => px::Kind::GraphValue,
         Glyph::Ring => px::Kind::Ring {
             letter: label.chars().next().unwrap_or('?'),
         },
@@ -293,6 +295,8 @@ pub fn taskbar_px(dpi: u32) -> u32 {
 mod tests {
     use super::*;
     use dyno_core::tray::text::BoxText;
+    use dyno_core::widgets::{style_support, MenuBarCatalogue, MenuBarItem, MenuBarKind, NumberFormat, TrayPlatform};
+    use paddock_widgets::{assign_spans, Catalogue};
 
     fn spec(metric: Metric, glyph: Glyph) -> ItemSpec {
         ItemSpec::new("x-1", metric, glyph)
@@ -345,6 +349,111 @@ mod tests {
             px::Kind::Ring { letter: 'M' }
         ));
         assert!(matches!(px_kind(&spec(Metric::CpuTotal, Glyph::Number)), px::Kind::Percent { .. }));
+    }
+
+    /// The menu-bar item of `kind` for `metric`, through the app's own mapping (`items_from_settings`).
+    fn styled(kind: MenuBarKind, metric: Metric) -> ItemSpec {
+        let item = match kind {
+            MenuBarKind::LineGraph => MenuBarItem::LineGraph { metric },
+            MenuBarKind::VerticalBars => MenuBarItem::VerticalBars { metric },
+            MenuBarKind::HorizontalMeter => MenuBarItem::HorizontalMeter { metric },
+            MenuBarKind::Ring => MenuBarItem::Ring { metric },
+            MenuBarKind::Number => MenuBarItem::Number {
+                metric,
+                unit: String::new(),
+                label: String::new(),
+                format: NumberFormat::Stacked,
+            },
+            MenuBarKind::GraphAndNumber => MenuBarItem::GraphAndNumber { metric },
+        };
+        crate::tray_model::items_from_settings(&assign_spans([(1, item)])).remove(0)
+    }
+
+    fn varied() -> Sample {
+        Sample {
+            value: Some(37.0),
+            history: (0..64).map(|i| (30.0 + 25.0 * (i as f32 / 5.0).sin()).abs()).collect(),
+            cores: vec![62.0, 18.0, 41.0, 9.0, 77.0, 23.0, 12.0, 35.0],
+            up: 48_000.0,
+            down: 2_400_000.0,
+        }
+    }
+
+    fn hash(look: &Look) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        look.pictures.hash(&mut h);
+        h.finish()
+    }
+
+    fn kinds() -> Vec<MenuBarKind> {
+        MenuBarCatalogue::kinds().iter().map(|k| k.kind).collect()
+    }
+
+    /// The support table's claims are the renderers': two styles draw the same picture exactly when the table says one is drawn
+    /// as the other, at every Windows size (and Linux's 22), light and dark.
+    #[test]
+    fn windows_and_linux_styles_differ_exactly_where_the_support_table_says() {
+        for (platform, sizes) in [(TrayPlatform::Windows, vec![16u32, 20, 24, 32]), (TrayPlatform::Linux, vec![22])] {
+            let support = style_support(platform);
+            for size in sizes {
+                for dark in [true, false] {
+                    let hashes: Vec<(MenuBarKind, u64)> = kinds()
+                        .into_iter()
+                        .map(|k| {
+                            let look = render_px(&px_kind(&styled(k, Metric::CpuTotal)), &varied(), px::State::Normal, size, dark);
+                            (k, hash(&look))
+                        })
+                        .collect();
+                    for (a, ha) in &hashes {
+                        for (b, hb) in &hashes {
+                            let same = support.drawn_as(*a) == support.drawn_as(*b);
+                            assert_eq!(ha == hb, same, "{platform:?} {size} px dark={dark}: {a:?} vs {b:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The same on macOS: the ring is the meter there, and the table says so.
+    #[test]
+    fn mac_styles_differ_exactly_where_the_support_table_says() {
+        let support = style_support(TrayPlatform::Mac);
+        let hashes: Vec<(MenuBarKind, u64)> = kinds()
+            .into_iter()
+            .map(|k| {
+                let spec = styled(k, Metric::CpuTotal);
+                (k, hash(&render_mac(&mac_kind(&spec, 8), &varied(), mb::State::Normal, &BoxText)))
+            })
+            .collect();
+        for (a, ha) in &hashes {
+            for (b, hb) in &hashes {
+                assert_eq!(ha == hb, support.drawn_as(*a) == support.drawn_as(*b), "{a:?} vs {b:?}");
+            }
+        }
+        assert_eq!(support.drawn_as(MenuBarKind::Ring), MenuBarKind::HorizontalMeter);
+    }
+
+    /// A metric the table calls fixed draws one picture in every style, on every platform.
+    #[test]
+    fn fixed_metrics_draw_one_picture_whatever_the_style() {
+        for platform in [TrayPlatform::Mac, TrayPlatform::Windows] {
+            for f in style_support(platform).fixed {
+                let pictures: std::collections::HashSet<u64> = kinds()
+                    .into_iter()
+                    .map(|k| {
+                        let spec = styled(k, f.metric.clone());
+                        let look = match platform {
+                            TrayPlatform::Mac => render_mac(&mac_kind(&spec, 8), &varied(), mb::State::Normal, &BoxText),
+                            _ => render_px(&px_kind(&spec), &varied(), px::State::Normal, 24, true),
+                        };
+                        hash(&look)
+                    })
+                    .collect();
+                assert_eq!(pictures.len(), 1, "{platform:?} {:?}", f.metric);
+            }
+        }
     }
 
     #[test]

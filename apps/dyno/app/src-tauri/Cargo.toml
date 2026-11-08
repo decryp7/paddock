@@ -119,6 +119,8 @@ paddock-files = { path = "../../../../crates/paddock-files", features = ["tauri"
 # Tests start an in-process agent over the fake platform (never the real sensors).
 dyno-platform.workspace = true
 tempfile.workspace = true
+# Writes the PNGs of the tray style sheet (examples/tray_style_sheet.rs).
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "png-format"] }
 
 [lints]
 workspace = true

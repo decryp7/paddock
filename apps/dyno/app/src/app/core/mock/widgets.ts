@@ -753,7 +753,7 @@ export function mockNumberSupport(os: 'macos' | 'windows' | 'linux', px: number)
 }
 
 /** What the choosers offer (the engine's `widget_choices`, imitated). */
-export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = mockNumberSupport('macos', 18)): WidgetChoices {
+export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = mockNumberSupport('macos', 18), styles: WidgetChoices['styles'] = mockStyleSupport('macos')): WidgetChoices {
   const title = (m: Metric) => METRIC_TITLES.find(([x]) => x === m)?.[1] ?? String(m);
   const choice = (metric: Metric) => ({ metric, title: title(metric) });
   return {
@@ -769,6 +769,29 @@ export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = mockN
     }),
     menuBarMetrics: METRIC_TITLES.map(([m]) => choice(m)),
     number: numberSupport,
+    styles,
+  };
+}
+
+/** What the tray draws of each style (the engine's `style_support`, imitated: the Mac ring is the meter; Windows says where a new icon goes). */
+export function mockStyleSupport(os: 'macos' | 'windows' | 'linux'): WidgetChoices['styles'] {
+  const ring = os === 'macos';
+  return {
+    styles: MENU_KINDS.map((k) => ({
+      kind: k.kind as MenuBarKind,
+      drawnAs: ring && k.kind === 'ring' ? 'horizontalMeter' : null,
+      label: ring && k.kind === 'ring' ? 'Ring, drawn as meter' : k.title,
+    })),
+    fixed: [
+      { metric: 'networkUp', drawn: 'Rate with arrows' },
+      { metric: 'networkDown', drawn: 'Rate with arrows' },
+      { metric: 'networkBoth', drawn: 'Both rates with arrows' },
+      { metric: 'temperature', drawn: 'Degrees' },
+    ],
+    addedNote:
+      os === 'windows'
+        ? 'Windows puts a new icon in the overflow, behind the ^ next to the clock. To keep it on the taskbar, open Settings > Personalization > Taskbar > Other system tray icons and turn it on, or drag it from the overflow onto the taskbar.'
+        : null,
   };
 }
 
