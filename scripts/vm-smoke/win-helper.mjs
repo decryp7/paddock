@@ -453,7 +453,7 @@ export const helperStepTable = [
   ['discovery', async () => discoveryStep(windowsDiscoveryPrims({ ssh, sleep, now: () => Date.now() }))],
   // WP-VMH: one step per helper reading while the helper is on
   ...readingSteps('windows', async ({ browser }) => windowsDriver(mainPage(browser), { ssh })).map((fn, i) => [`reading-${i}`, fn]),
-  ['scoping', () => scopingStep()],
+  ['scoping', ({ browser }) => scopingStep({ browser })],
   ['served', () => servedCounts()],
   ['repair', ({ browser }) => helperRepair(browser)],
   ['helper-off', ({ browser }) => helperOff(browser)],

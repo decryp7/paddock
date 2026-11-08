@@ -18,7 +18,7 @@ export const hasOtherUsersTotal = (text) => /"other_?users"\s*:\s*\{|"others"\s*
 // A broken measurement (the task never ran, the positive control unseen) is check-broken, never a product FAIL (ER-33).
 const result = makeResult;
 
-export async function scopingStep() {
+export async function scopingStep({ browser = null } = {}) {
   const checks = [];
   const evidence = [];
   const pw = randomBytes(12).toString('hex').replace(/[a-f]*$/, '') + 'zq' + randomBytes(4).toString('hex'); // lowercase and digits, never stored
@@ -74,8 +74,39 @@ export async function scopingStep() {
   const other = hasOtherUsersTotal(both);
   // The CLI's views cannot carry the total: `dyno snapshot` is { system, processes } and `dyno top` lists app groups (dyno-cli lib.rs, render.rs); the "Other users" row (others.rs,
   // LiveUpdate.other_users) goes only to the app window. Not seeing it here is the probe's limit, never a product fail (ER-33); it is read where it exists, in a window of that account.
-  checks.push({ ok: other, ...(other ? {} : { kind: 'check' }), detail: other ? 'the views carry an "other users" total' : 'no "other users" total can be read here: the CLI views (snapshot, top) do not carry it, only the account\'s own app window does (not measured)' });
+  checks.push({ ok: other || Boolean(browser), ...(other || browser ? {} : { kind: 'check' }), info: !other && Boolean(browser), detail: other ? 'the views carry an "other users" total' : 'no "other users" total can be read here: the CLI views (snapshot, top) do not carry it, only the account\'s own app window does (read below from the Processes page when a browser is available)' });
   evidence.push(`traffic in the snapshot: ${/traffic|bytes/i.test(snap) ? 'present' : 'not carried by `dyno snapshot`; Network > By program as a second account needs its own window'}`);
+  // The "Other users" total from where it exists, the app's own Processes page of the standard owner (the CLI views cannot carry it, dyno-cli lib.rs): a second probe program runs
+  // in the SECOND account's session (a batch-logon task), the owner's page must show the owner's own probe, must not name the second account's probe, and must carry an "Other users" row.
+  let uiNote = 'no browser: the Processes page was not read';
+  if (browser) {
+    const probe2 = 'using System.Reflection; [assembly: AssemblyTitle("user2-secret-probe")] [assembly: AssemblyProduct("user2-secret-probe")] [assembly: AssemblyDescription("user2-secret-probe")] public static class P { public static void Main() { while (true) { System.Threading.Thread.Sleep(50); } } }';
+    ssh(`Add-Type -TypeDefinition '${probe2}' -OutputAssembly "${PUB}\\user2-secret-probe.exe" -OutputType ConsoleApplication -ErrorAction SilentlyContinue 2>&1 | Out-Null; icacls "${PUB}\\user2-secret-probe.exe" /grant "BUILTIN\\Users:(RX)" | Out-Null`, { admin: true });
+    ssh(`schtasks /create /tn Dyno2Probe /sc once /st 00:00 /ru paddock-user2 /rp ${pw} /tr "${PUB}\\user2-secret-probe.exe" /f | Out-Null; schtasks /run /tn Dyno2Probe | Out-Null`, { admin: true });
+    let owner2 = '';
+    for (let i = 0; i < 8 && !/paddock-user2/i.test(owner2); i++) { await sleep(3000); owner2 = ssh(`Get-CimInstance Win32_Process -Filter "Name='user2-secret-probe.exe'" | ForEach-Object { $o = Invoke-CimMethod -InputObject $_ -MethodName GetOwner; $o.Domain + '\\' + $o.User }`, { admin: true }); }
+    const running2 = /paddock-user2/i.test(owner2);
+    let text = '';
+    const mainPage = browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
+    if (running2 && mainPage) {
+      await mainPage.evaluate(() => { location.hash = '#/processes'; }); await sleep(2500);
+      await mainPage.getByRole('button', { name: /^All$/ }).first().click({ timeout: 5000 }).catch(() => {});
+      for (let i = 0; i < 8; i++) { await sleep(3000); text = await mainPage.evaluate(() => document.body.innerText.replace(/\s+/g, ' ')).catch(() => ''); if (/owner-secret-probe/i.test(text)) break; }
+    }
+    const ownSeen = /owner-secret-probe/i.test(text);
+    const names2 = /user2-secret-probe/i.test(text);
+    const total = /Other users/i.test(text);
+    evidence.push(`Processes page (owner's, helper on): second account's probe running as ${owner2.trim() || '(not running)'}; page ${text.length} chars; own probe listed ${ownSeen}; second account's probe named ${names2}; "Other users" row ${total}`, `page excerpt: ${(text.match(/.{0,80}Other users.{0,120}/i)?.[0] ?? text.slice(0, 200))}`);
+    checks.push({ ok: running2, kind: running2 ? undefined : 'check', detail: running2 ? `control: a probe program runs in the second account's session (${owner2.trim()})` : 'control: the second account\'s probe program did not start, so its absence from the owner\'s page shows nothing' });
+    if (running2) {
+      checks.push({ ok: ownSeen, kind: ownSeen ? undefined : 'check', detail: ownSeen ? 'control: the owner\'s Processes page lists the owner\'s own probe' : 'control: the owner\'s Processes page does not list the owner\'s own probe, so it was not read properly' });
+      checks.push({ ok: !names2, kind: ownSeen ? undefined : 'check', detail: names2 ? 'D6 VIOLATION: the owner\'s Processes page names the second account\'s program user2-secret-probe' : 'the owner\'s Processes page does not name the second account\'s program' });
+      checks.push({ ok: total, kind: ownSeen ? undefined : 'check', detail: total ? 'the owner\'s Processes page carries an "Other users" row for the second account\'s processes' : 'the owner\'s Processes page has no "Other users" row although another account has a process' });
+    }
+    uiNote = 'read';
+    ssh(`schtasks /delete /tn Dyno2Probe /f 2>$null | Out-Null; Get-Process user2-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force`, { admin: true });
+  }
+  void uiNote;
   // Clean up what this step made.
   ssh(`schtasks /delete /tn Dyno2 /f 2>$null | Out-Null; Get-Process owner-secret-probe -ErrorAction SilentlyContinue | Stop-Process -Force; schtasks /delete /tn VmOwnerProbe /f 2>$null | Out-Null; Remove-Item "C:\\Users\\paddock-test\\owner-secret-probe.exe","${PUB}\\dyno2*" -Recurse -Force -ErrorAction SilentlyContinue; net user paddock-user2 /delete 2>$null | Out-Null`, { admin: true });
   // Without the positive control (the owner sees its own probe) nothing the second account does not see proves anything: those checks are the measurement's.
