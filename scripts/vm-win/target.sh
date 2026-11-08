@@ -2,8 +2,10 @@
 # 2026-11-08). The user's own VMs (Fusion keeps them in the same app) must be impossible to target, whatever the environment.
 #
 # Allowed: the folder /Volumes/d7sst7/vms/paddock-win11-test (after resolving links), or, for the scripts' own tests only,
-# "fake mode": a FUSION_APP that is not the installed VMware Fusion AND a folder under $TMPDIR. Anything else is refused
-# before vmrun, ssh, scp or any file is touched.
+# "fake mode", which nothing in the environment can switch on by itself: the folder resolves under the per-user temp root
+# (`getconf DARWIN_USER_TEMP_DIR`, /tmp where there is none; never $TMPDIR), carries the marker file `.paddock-fake-vm`
+# the test created, is not under $HOME, and FUSION_APP's vmrun resolves outside the installed Fusion and is a script.
+# Anything else is refused before vmrun, ssh, scp or any file is touched. FAKE_VM=1 is set only in fake mode.
 WIN_VM_DIR=/Volumes/d7sst7/vms/paddock-win11-test
 WIN_VM_NAME=paddock-win11-test
 
@@ -15,11 +17,21 @@ resolve_path() {
   printf '%s/%s\n' "$parent" "$(basename "$1")"
 }
 
+# The temp root the tests use; not taken from the caller's $TMPDIR.
+temp_root() {
+  local r
+  r=$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null) && [ -n "$r" ] || r=/tmp
+  realpath "$r" 2>/dev/null || echo /nonexistent-temp-root
+}
+
 # check_target <vm folder> <fusion app>: exits with a message unless the folder is the test VM (or fake mode).
 check_target() {
-  local want="only drives $WIN_VM_DIR (or, in the scripts' tests, a fake Fusion with a folder under \$TMPDIR)"
-  local real fus realfus tmp vmx realvmx
+  local want="only drives $WIN_VM_DIR (or, in the scripts' own tests, a marked fake VM under the per-user temp root with a fake vmrun script)"
+  local real vmx realvmx tmp realhome vmrun realvmrun realfus
+  FAKE_VM=0
   real=$(resolve_path "$1") || { echo "vm-win: refusing $1: it does not resolve; this tool $want" >&2; exit 1; }
+  realhome=$(realpath "$HOME" 2>/dev/null) || realhome=$HOME
+  case "$real/" in "$realhome"/*) echo "vm-win: refusing $1: it resolves to $real, under \$HOME (ER-14); this tool $want" >&2; exit 1 ;; esac
   vmx="$1/vm/$WIN_VM_NAME.vmwarevm/$WIN_VM_NAME.vmx"
   if [ "$real" = "$WIN_VM_DIR" ]; then
     if [ -e "$vmx" ] || [ -L "$vmx" ]; then
@@ -28,14 +40,18 @@ check_target() {
     fi
     return 0
   fi
-  fus=$(resolve_path "$2") || fus=$2
-  realfus=$(resolve_path "/Applications/VMware Fusion.app") || realfus="/Applications/VMware Fusion.app"
-  tmp=$(realpath "${TMPDIR:-/tmp}" 2>/dev/null) || tmp=/nonexistent-tmp
-  local fake=false
-  [ "$fus" != "$realfus" ] && case "$real/" in "$tmp"/*) fake=true ;; esac
-  $fake || { echo "vm-win: refusing $1 (resolves to $real): this tool $want" >&2; exit 1; }
+  tmp=$(temp_root)
+  case "$real/" in "$tmp"/*) ;; *) echo "vm-win: refusing $1 (resolves to $real): this tool $want" >&2; exit 1 ;; esac
+  [ -f "$real/.paddock-fake-vm" ] || { echo "vm-win: refusing $1: no .paddock-fake-vm marker; this tool $want" >&2; exit 1; }
+  vmrun="$2/Contents/Library/vmrun"
+  realvmrun=$(realpath "$vmrun" 2>/dev/null) || { echo "vm-win: refusing fake mode: $vmrun does not resolve; this tool $want" >&2; exit 1; }
+  realfus=$(realpath "/Applications/VMware Fusion.app" 2>/dev/null) || realfus="/Applications/VMware Fusion.app"
+  case "$realvmrun" in "$realfus"/*) echo "vm-win: refusing fake mode: $vmrun resolves into the installed Fusion; this tool $want" >&2; exit 1 ;; esac
+  case "$realvmrun/" in "$tmp"/*) ;; *) echo "vm-win: refusing fake mode: $vmrun is not under the temp root; this tool $want" >&2; exit 1 ;; esac
+  [ "$(head -c 2 "$realvmrun" 2>/dev/null)" = "#!" ] || { echo "vm-win: refusing fake mode: $vmrun is not a script; this tool $want" >&2; exit 1; }
   if [ -e "$vmx" ] || [ -L "$vmx" ]; then
     realvmx=$(realpath "$vmx" 2>/dev/null) || { echo "vm-win: refusing $vmx: it does not resolve; this tool $want" >&2; exit 1; }
     case "$realvmx" in "$real"/*) ;; *) echo "vm-win: refusing $vmx: it links to $realvmx; this tool $want" >&2; exit 1 ;; esac
   fi
+  FAKE_VM=1
 }

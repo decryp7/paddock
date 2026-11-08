@@ -1,9 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { VM_WIN_IN_REPO, vmWinPath } from './vm-win-path.mjs';
+import { TEST_TEMP_ROOT, VM_WIN_IN_REPO, vmWinPath } from './vm-win-path.mjs';
 
 test('the default driver is the repo copy next to scripts/vm-smoke, and it exists', () => {
   assert.equal(basename(VM_WIN_IN_REPO), 'vm-win.sh');
@@ -13,7 +12,7 @@ test('the default driver is the repo copy next to scripts/vm-smoke, and it exist
 });
 
 test('PADDOCK_VM_WIN is for tests only: a fake driver under $TMPDIR; anything else is refused; an empty value is unset', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'vm-win-path-'));
+  const dir = mkdtempSync(join(TEST_TEMP_ROOT, 'vm-win-path-'));
   const fake = join(dir, 'fake-vm-win.sh');
   writeFileSync(fake, '#!/bin/sh\n');
   try {
@@ -22,6 +21,14 @@ test('PADDOCK_VM_WIN is for tests only: a fake driver under $TMPDIR; anything el
     assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: '/Volumes/d7sst7/dev-targets/scratch/dyno-vm-t/vm-win.sh' }), /PADDOCK_VM_WIN is for tests only/);
     assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: '/usr/bin/true' }), /PADDOCK_VM_WIN is for tests only/);
     assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: join(dir, 'missing.sh') }), /PADDOCK_VM_WIN is for tests only/);
+    // a caller-set TMPDIR does not move the trusted root
+    const elsewhere = mkdtempSync(join(VM_WIN_IN_REPO, '..', '.vm-win-path-'));
+    try {
+      writeFileSync(join(elsewhere, 'x.sh'), '#!/bin/sh\n');
+      assert.throws(() => vmWinPath({ PADDOCK_VM_WIN: join(elsewhere, 'x.sh'), TMPDIR: elsewhere }), /PADDOCK_VM_WIN is for tests only/);
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

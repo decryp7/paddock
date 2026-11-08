@@ -27,7 +27,7 @@ lib="$fusion/Contents/Library"
 name=paddock-win11-test
 vmx="$dir/vm/$name.vmwarevm/$name.vmx"
 mac=00:50:56:2a:d0:c7
-leases=${PADDOCK_VM_LEASES:-/var/db/vmware/vmnet-dhcpd-vmnet8.leases}
+leases=/var/db/vmware/vmnet-dhcpd-vmnet8.leases # PADDOCK_VM_LEASES only in fake mode (guard)
 max_load=${PADDOCK_VM_MAX_LOAD:-25}
 ssh_deadline=${PADDOCK_VM_SSH_DEADLINE:-300}
 install_deadline=${PADDOCK_VM_INSTALL_DEADLINE:-7200}
@@ -39,6 +39,7 @@ usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
 guard() {
   case "$dir/" in "$HOME"/*) die "PADDOCK_WIN_VM_DIR must not be under \$HOME (ER-14): $dir" ;; esac
   check_target "$dir" "$fusion"
+  [ "$FAKE_VM" = 1 ] && leases=${PADDOCK_VM_LEASES:-$leases}
   [ -f "$vmx" ] || die "no test VM at $vmx; run scripts/vm-win/prepare.sh first"
   [ -x "$lib/vmrun" ] || die "vmrun not found in $lib (set FUSION_APP)"
 }

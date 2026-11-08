@@ -12,7 +12,10 @@ import { efiBootImages, patchNoPrompt } from './vm-win/noprompt-iso.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (p) => readFileSync(join(here, p), 'utf8');
-const scratch = mkdtempSync(join(tmpdir(), 'vm-win-test-'));
+// Fakes live under the per-user temp root the scripts trust (getconf DARWIN_USER_TEMP_DIR on macOS, /tmp elsewhere), never $TMPDIR.
+const tempRoot = (() => { const r = spawnSync('getconf', ['DARWIN_USER_TEMP_DIR'], { encoding: 'utf8' }); return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : '/tmp'; })();
+const scratch = mkdtempSync(join(tempRoot, 'vm-win-test-'));
+const fakeVm = (dir) => { mkdirSync(dir, { recursive: true }); writeFileSync(join(dir, '.paddock-fake-vm'), 'test\n'); return dir; };
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const run = (script, args, env = {}) =>
@@ -87,9 +90,11 @@ describe('guard rails', () => {
   });
 
   test('prepare.sh --vm-only refuses to run without a setup disc and changes nothing else', () => {
-    const dir = join(scratch, 'vm-only');
+    const dir = fakeVm(join(scratch, 'vm-only'));
     const fusion = join(scratch, 'VmOnlyFusion.app');
     mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    writeFileSync(join(fusion, 'Contents/Library/vmrun'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
     const r = run('vm-win/prepare.sh', ['--vm-only'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: fusion, PADDOCK_VM_MAX_LOAD: '100000' });
     assert.match(r.stderr, /needs an existing setup disc/);
     assert.equal(r.stdout.includes('== SSH keys'), false);
@@ -104,7 +109,9 @@ describe('guard rails', () => {
   test('vm-win.sh says what to do when the VM is not prepared', () => {
     const fusion = join(scratch, 'NoneFusion.app');
     mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
-    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: join(scratch, 'none'), FUSION_APP: fusion });
+    writeFileSync(join(fusion, 'Contents/Library/vmrun'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
+    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: fakeVm(join(scratch, 'none')), FUSION_APP: fusion });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /run scripts\/vm-win\/prepare\.sh first/);
   });
@@ -144,7 +151,7 @@ describe('only paddock-win11-test can be the target', () => {
   });
 
   test('a fake folder under $TMPDIR is refused with the real Fusion (no fake mode without a fake Fusion)', () => {
-    const dir = join(scratch, 'real-fusion');
+    const dir = fakeVm(join(scratch, 'real-fusion'));
     mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
     writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\n');
     const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: '/Applications/VMware Fusion.app' });
@@ -164,13 +171,63 @@ describe('only paddock-win11-test can be the target', () => {
 
   test('a .vmx that links out of the fake folder is refused', () => {
     const f = fakeFusion('VmxLink');
-    const dir = join(scratch, 'vmx-link');
+    const dir = fakeVm(join(scratch, 'vmx-link'));
     mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
     symlinkSync('/etc/hosts', join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'));
     const r = run('vm-win.sh', ['snapshot', 'x'], { PADDOCK_WIN_VM_DIR: dir, FUSION_APP: f.fusion, PATH: f.path });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /only drives/);
     assert.equal(calls(f.log), '');
+  });
+
+  test('fake mode cannot be switched on from the environment: a caller-set TMPDIR plus a Fusion whose Contents links to the real one is refused', () => {
+    const fusion = join(scratch, 'LinkedFusion.app');
+    mkdirSync(fusion, { recursive: true });
+    symlinkSync('/Applications/VMware Fusion.app/Contents', join(fusion, 'Contents'));
+    const victim = join(scratch, 'victim-root', 'vms', 'someone-elses-vm');
+    mkdirSync(join(victim, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
+    writeFileSync(join(victim, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\n');
+    writeFileSync(join(victim, '.paddock-fake-vm'), 'planted\n');
+    for (const args of [['status'], ['snapshot', 'x']]) {
+      const r = run('vm-win.sh', args, { PADDOCK_WIN_VM_DIR: victim, FUSION_APP: fusion, TMPDIR: join(scratch, 'victim-root') });
+      assert.notEqual(r.status, 0, `${args[0]} was not refused`);
+      assert.match(r.stderr, /only drives/);
+    }
+  });
+
+  test('a fake vmrun that is not a script is refused', () => {
+    const fusion = join(scratch, 'BinFusion.app');
+    mkdirSync(join(fusion, 'Contents/Library'), { recursive: true });
+    writeFileSync(join(fusion, 'Contents/Library/vmrun'), 'not a script');
+    chmodSync(join(fusion, 'Contents/Library/vmrun'), 0o755);
+    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: fakeVm(join(scratch, 'bin-vm')), FUSION_APP: fusion });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /only drives/);
+  });
+
+  test('a fake folder without the marker is refused, and so is one that resolves into $HOME', () => {
+    const f = fakeFusion('Marker');
+    const bare = join(scratch, 'no-marker');
+    mkdirSync(bare, { recursive: true });
+    assert.match(run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: bare, FUSION_APP: f.fusion, PATH: f.path }).stderr, /only drives/);
+    const link = join(scratch, 'into-home');
+    symlinkSync(homedir(), link);
+    const r = run('vm-win.sh', ['status'], { PADDOCK_WIN_VM_DIR: link, FUSION_APP: f.fusion, PATH: f.path });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /\$HOME|only drives/);
+    assert.equal(calls(f.log), '');
+  });
+
+  test('prepare.sh with a caller-set TMPDIR and a linked Fusion creates nothing', () => {
+    const fusion = join(scratch, 'PrepLinkedFusion.app');
+    mkdirSync(fusion, { recursive: true });
+    symlinkSync('/Applications/VMware Fusion.app/Contents', join(fusion, 'Contents'));
+    const root = join(scratch, 'prep-root');
+    mkdirSync(root, { recursive: true });
+    const target = join(root, 'other-vm');
+    const r = run('vm-win/prepare.sh', ['--vm-only'], { PADDOCK_WIN_VM_DIR: target, FUSION_APP: fusion, TMPDIR: root, PADDOCK_VM_MAX_LOAD: '100000' });
+    assert.notEqual(r.status, 0);
+    assert.equal(existsSync(target), false);
   });
 
   test('prepare.sh refuses another VM folder before it creates anything', () => {
@@ -186,7 +243,7 @@ describe('only paddock-win11-test can be the target', () => {
 
 describe('vmrun password', () => {
   test('an unencrypted VM gets no -vp and never reads the keychain', () => {
-    const dir = join(scratch, 'plain');
+    const dir = fakeVm(join(scratch, 'plain'));
     const fusion = join(scratch, 'PlainFusion.app');
     const bin = join(scratch, 'plain-bin');
     const log = join(scratch, 'plain-vmrun.log');
@@ -207,7 +264,7 @@ describe('vmrun password', () => {
 });
 
 describe('ip', () => {
-  const dir = join(scratch, 'vm');
+  const dir = fakeVm(join(scratch, 'vm'));
   const fusion = join(scratch, 'Fusion.app');
   mkdirSync(join(dir, 'vm/paddock-win11-test.vmwarevm'), { recursive: true });
   writeFileSync(join(dir, 'vm/paddock-win11-test.vmwarevm/paddock-win11-test.vmx'), '.encoding = "UTF-8"\n');

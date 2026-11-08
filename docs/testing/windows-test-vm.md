@@ -4,9 +4,10 @@ A dedicated, throw-away Windows 11 on Arm VM in VMware Fusion on the Mac mini, f
 update, services, login items. **Local only, never CI** (decision 2026-10-28). It is not the user's own Fusion VM: that
 one is personal and encrypted and no script here ever starts, stops or changes it: `scripts/vm-win.sh`, `prepare.sh` and the
 `vm-smoke` harness act only on `/Volumes/d7sst7/vms/paddock-win11-test` (links resolved) and refuse any other folder before
-`vmrun`, `ssh` or any file write (`scripts/vm-win/target.sh`, `scripts/vm-smoke/win-vm-target.mjs`). `PADDOCK_WIN_VM_DIR` may
-name another folder only in the scripts' own tests: a fake `FUSION_APP` with a folder under `$TMPDIR`. `PADDOCK_VM_WIN` (a
-fake driver for the harness's tests) is honoured only under `$TMPDIR`.
+`vmrun`, `ssh` or any file write (`scripts/vm-win/target.sh`, `scripts/vm-smoke/win-vm-target.mjs`). `PADDOCK_WIN_VM_DIR` may name another folder only in the scripts' own tests (fake mode): the folder resolves under the
+per-user temp root (`getconf DARWIN_USER_TEMP_DIR`, never `$TMPDIR`), carries a `.paddock-fake-vm` marker, is not under
+`$HOME`, and `FUSION_APP`'s `vmrun` is a script outside the installed Fusion; `PADDOCK_VM_LEASES` counts only then.
+`PADDOCK_VM_WIN` (a fake driver for the harness's tests) is honoured only under the same temp root.
 
 Background and the hypervisor choice: the research note
 `/Volumes/d7sst7/dev-targets/research/2026-10-local-linux-windows-vms.md` (section 4).
