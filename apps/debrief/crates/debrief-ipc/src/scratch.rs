@@ -23,11 +23,10 @@ pub fn private_tempdir(prefix: &str) -> io::Result<TempDir> {
     b.tempdir()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
-    #[cfg(unix)]
     #[test]
     fn the_folder_is_owner_only_whatever_the_umask_and_goes_with_its_guard() {
         use std::os::unix::fs::PermissionsExt;
