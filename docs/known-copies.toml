@@ -965,7 +965,7 @@ adr = "0041"
     "crates/paddock-chromium/src/launch/tests.rs",
   ]
   owner = "paddock"
-  delete_by = "v0.4.0"
+  delete_by = "v0.5.0"
   note = "Test-only local wait_until/eventually helpers; each becomes a call to paddock_testkit::wait_until when its file is next touched or by a budgeted sweep (ADR 0041 WP-6)."
 
   [[mechanism.copy]]
@@ -983,48 +983,54 @@ adr = "0041"
     "apps/debrief/examples/plugins/collector-example/tests/plugin.rs",
   ]
   owner = "debrief"
-  delete_by = "debrief-v1.2.0"
+  delete_by = "debrief-v1.3.0"
   note = "Test-only local wait helpers; moved onto paddock_testkit::wait with the Debrief 1.2 timing sweep (ADR 0041 WP-6)."
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src-tauri/src/commands.rs"]
   symbols = ["item:wait_until"]
   owner = "pitwall"
-  delete_by = "pitwall-v1.2.0"
+  delete_by = "pitwall-v1.3.0"
   note = "A test-only async wait helper inside the commands module's tests."
 
 [[mechanism]]
 id = "ts-test-settle"
 title = "Settling a component fixture in a spec on a fake clock, not on real time"
-canonical = "apps/dyno/app/src/testing/settle.ts"
-paths = ["apps/dyno/app/src/testing/settle.ts"]
-status = "built"
+canonical = "@decryp7/paddock-ui/testing"
+paths = ["ui/projects/paddock-ui/testing/**"]
+status = "planned"
 adr = "0041"
+
+  [[mechanism.copy]]
+  paths = ["apps/dyno/app/src/testing/settle.ts"]
+  owner = "dyno"
+  delete_by = "dyno-v1.3.0"
+  note = "The fake-clock settle (settle, useSettleClock, untilResolved); it moves to @decryp7/paddock-ui/testing (ADR 0041 WP-3) and the apps then call it."
 
   [[mechanism.copy]]
   paths = ["apps/pitcrew/app/src/testing/test-helpers.ts"]
   symbols = ["item:settle"]
   owner = "pitcrew"
-  delete_by = "pitcrew-v1.1.0"
+  delete_by = "pitcrew-v1.2.0"
   note = "The app's own settle (flush promises and render). One shared settle goes to @decryp7/paddock-ui/testing (ADR 0041 WP-3); Dyno's fake-clock file moves there too, and the copies then call it."
 
   [[mechanism.copy]]
   paths = ["apps/pitwall/app/src/testing/render.ts"]
   symbols = ["item:settle"]
   owner = "pitwall"
-  delete_by = "pitwall-v1.2.0"
+  delete_by = "pitwall-v1.3.0"
   note = "As Pitcrew's."
 
   [[mechanism.copy]]
   paths = ["apps/spotter/app/src/testing/test-helpers.ts"]
   symbols = ["item:settle"]
   owner = "spotter"
-  delete_by = "spotter-v1.1.0"
+  delete_by = "spotter-v1.2.0"
   note = "As Pitcrew's."
 
   [[mechanism.copy]]
   paths = ["apps/debrief/app/src/testing/helpers.ts"]
   symbols = ["item:settle"]
   owner = "debrief"
-  delete_by = "debrief-v1.2.0"
+  delete_by = "debrief-v1.3.0"
   note = "As Pitcrew's."

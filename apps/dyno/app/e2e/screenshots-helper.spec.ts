@@ -40,7 +40,7 @@ test.describe('Administrator readings card screenshots', () => {
         mkdirSync(OUT, { recursive: true });
         await page.emulateMedia({ reducedMotion: 'reduce' });
         await page.setViewportSize({ width: 880, height: 760 });
-        await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: '?latency=400&helper=off&jobsteps=8' }));
+        await page.goto(dialogWindowUrl('pd.settings', {}, { title: 'Settings', query: '?latency=400&helper=off&jobsteps=16' }));
         await page.locator('html[data-dialog-ready]').waitFor({ timeout: 15_000 });
         await page.getByText('Dyno', { exact: true }).first().click();
         const card = page.getByRole('region', { name: 'Administrator readings' });
