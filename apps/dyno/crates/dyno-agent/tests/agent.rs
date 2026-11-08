@@ -1526,14 +1526,11 @@ fn asking_for_the_tool_offer_reads_the_disks_again_at_once_and_not_more_than_eve
 
 /// Waits (a condition, with the family hang guard) until `agent.json` reads as `want`.
 fn wait_for_discovery(dirs: &Dirs, want: &dyno_agent::discovery::Discovery) {
-    let end = std::time::Instant::now() + Duration::from_secs(40);
-    while std::time::Instant::now() < end {
-        if dyno_agent::discovery::Discovery::read(&dirs.discovery()).as_ref() == Some(want) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    panic!(
+    let held = paddock_testkit::holds_within(Duration::from_secs(40), || {
+        dyno_agent::discovery::Discovery::read(&dirs.discovery()).as_ref() == Some(want)
+    });
+    assert!(
+        held,
         "agent.json was never written again: {:?}",
         dyno_agent::discovery::Discovery::read(&dirs.discovery())
     );
@@ -1552,14 +1549,11 @@ fn a_deleted_discovery_file_is_written_again_by_the_agent_that_holds_the_lock() 
     let peer = h.client();
     assert!(ask(&peer, Request::Settings).is_ok());
     // The line follows the write: wait for it as a condition.
-    let end = std::time::Instant::now() + Duration::from_secs(40);
-    while !captured()
-        .iter()
-        .any(|l| l.contains("Discovery file written again") && l.contains("missing"))
-    {
-        assert!(std::time::Instant::now() < end, "the rewrite was not logged with its reason");
-        std::thread::sleep(Duration::from_millis(5));
-    }
+    paddock_testkit::wait_until("the rewrite to be logged with its reason", || {
+        captured()
+            .iter()
+            .any(|l| l.contains("Discovery file written again") && l.contains("missing"))
+    });
 }
 
 #[test]

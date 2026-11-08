@@ -161,14 +161,15 @@ impl Rig {
 
     /// The network snapshot once `done` holds (the first sample carries the process list the names come from).
     fn network_when(&self, done: impl Fn(&dyno_core::network::NetworkSnapshot) -> bool) -> dyno_core::network::NetworkSnapshot {
-        let until = std::time::Instant::now() + SLOW;
-        loop {
+        // The last snapshot is returned when the condition never holds, so the caller's assertion shows what it saw.
+        let mut last = None;
+        paddock_testkit::holds_within(SLOW, || {
             let n = self.network();
-            if done(&n) || std::time::Instant::now() > until {
-                return n;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
+            let ok = done(&n);
+            last = Some(n);
+            ok
+        });
+        last.expect("polled at least once")
     }
 
     #[cfg(unix)]
@@ -556,14 +557,14 @@ fn the_cached_inventory_reads_the_memory_slots_again_when_the_helper_comes_up() 
     assert!(matches!(before.memory_via, ReadVia::NeedsHelper { .. }), "{:?}", before.memory_via);
     rig.up.store(true, Ordering::SeqCst);
     // The readiness answer is kept a few seconds: wait on the condition, not on a fixed time.
-    let until = std::time::Instant::now() + SLOW;
-    let after = loop {
+    let mut latest = None;
+    paddock_testkit::holds_within(SLOW, || {
         let inv = rig.inventory();
-        if inv.memory_via == ReadVia::Helper || std::time::Instant::now() > until {
-            break inv;
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
+        let ready = inv.memory_via == ReadVia::Helper;
+        latest = Some(inv);
+        ready
+    });
+    let after = latest.expect("polled at least once");
     assert_eq!(after.memory_via, ReadVia::Helper);
     assert!(
         matches!(&after.memory, MemoryLayout::Slots(a) if a.slots == 4),

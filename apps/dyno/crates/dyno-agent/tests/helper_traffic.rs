@@ -17,7 +17,7 @@ use dyno_core::network_traffic::TrafficCounter;
 use dyno_core::protocol::{Reply, Request};
 use dyno_core::read_via::ReadVia;
 use dyno_platform::fake::Fake;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[path = "common/helper_rig.rs"]
 mod helper_rig;
@@ -115,8 +115,8 @@ impl Rig {
 
     /// The network snapshot once the background traffic read has filled it (the first answer says it is still reading).
     fn network(&self) -> NetworkSnapshot {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
+        let mut last = None;
+        paddock_testkit::holds_within(Duration::from_secs(30), || {
             let peer = connect(&self.dirs).unwrap().0;
             let Reply::Network(n) = ask_within(
                 &peer,
@@ -129,11 +129,10 @@ impl Rig {
                 panic!("network")
             };
             let reading = n.traffic_note.as_deref().is_some_and(|t| t.starts_with("Reading traffic"));
-            if !reading || Instant::now() > deadline {
-                return *n;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
+            last = Some(*n);
+            !reading
+        });
+        last.expect("polled at least once")
     }
 }
 

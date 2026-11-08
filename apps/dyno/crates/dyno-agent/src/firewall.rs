@@ -497,14 +497,7 @@ mod tests {
             "a second request does not start a second read"
         );
         go.send(()).unwrap();
-        let mut got = None;
-        for _ in 0..200 {
-            if let Ok(v) = c.view() {
-                got = Some(v);
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let got = paddock_testkit::poll_for(Duration::from_secs(20), || c.view().ok());
         assert_eq!(
             got.expect("the finished read is served").sources[0].source,
             RuleSource::WindowsFirewall

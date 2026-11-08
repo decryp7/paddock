@@ -1279,6 +1279,7 @@ dependencies = [
  "paddock-secrets",
  "paddock-service",
  "paddock-startup",
+ "paddock-testkit",
  "paddock-widgets",
  "plist",
  "postcard",
@@ -4309,6 +4310,16 @@ dependencies = [
  "serde",
  "serde_json",
  "tauri",
+]
+
+[[package]]
+name = "paddock-testkit"
+version = "0.1.0"
+dependencies = [
+ "paddock-jobs",
+ "paddock-workspace-hack",
+ "socket2",
+ "tempfile",
 ]
 
 [[package]]
