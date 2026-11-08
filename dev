@@ -204,5 +204,14 @@ if [ ! -x "$cache/$name" ]; then
       rm -rf "${home:?}/bin/$old" "${home:?}/target-$old" || true
     fi
   done
+  # A build folder whose tool was never published (the build or the hash check failed) goes when an hour old: a build in
+  # progress has no tool yet either, and cargo does not touch the folder itself while it runs.
+  for t in "$home"/target-*; do
+    [ -d "$t" ] || continue
+    [ -d "$home/bin/${t##*/target-}" ] && continue
+    if [ -n "$(find "$t" -maxdepth 0 -mmin +60 2>/dev/null)" ]; then rm -rf "$t" || true; fi
+  done
 fi
+# A hit counts as use: the prune keeps the newest-used tools, so main's hash outlives a stream of branch hashes.
+touch "$cache" 2>/dev/null || true
 exec "$cache/$name" "$@"

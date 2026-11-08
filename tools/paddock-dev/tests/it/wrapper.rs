@@ -520,57 +520,157 @@ fn on_a_ci_runner_with_a_kept_mount_the_tool_is_cached_there_and_an_explicit_hom
     assert!(own.join("bin").join(&hash).exists());
 }
 
+/// A stand-in `cargo` that writes its binary, announces itself with a file of its own in `$BARRIER`, and returns only once the test
+/// has created `$BARRIER/go`: the test decides when the builds overlap, no sleep does.
 #[cfg(unix)]
-#[test]
-fn two_wrappers_with_different_hashes_on_one_kept_mount_each_cache_their_own_binary() {
+fn barrier_cargo() -> String {
+    format!(
+        r#"{}; touch "$BARRIER/built-$PADDOCK_DEV_HASH-$$"; n=0; while [ ! -e "$BARRIER/go" ] && [ $n -lt 300 ]; do sleep 0.1; n=$((n+1)); done"#,
+        shim_cargo(0)
+    )
+}
+
+/// Starts one wrapper per compiler against one kept mount; returns once `expected` builds are inside `cargo`, then lets them all go.
+#[cfg(unix)]
+fn run_overlapping(rustcs: &[&str], expected: usize) -> (tempfile::TempDir, Vec<std::process::Output>, Fixture) {
     let f = Fixture::new();
     let scratch = tempfile::tempdir().unwrap();
     let mount = scratch.path().join("mount");
+    let barrier = scratch.path().join("barrier");
     std::fs::create_dir_all(&mount).unwrap();
-    let rustc_a = fake_rustc(scratch.path(), "rustc-a", "1.90.0", "aaaa", "test-host");
-    let rustc_b = fake_rustc(scratch.path(), "rustc-b", "1.91.0", "bbbb", "test-host");
-    let (hash_a, _) = f.both(&[("RUSTC", rustc_a.clone())]);
-    let (hash_b, _) = f.both(&[("RUSTC", rustc_b.clone())]);
-    assert_ne!(hash_a, hash_b);
-    write_script(&f.cargo_home.path().join("shims/cargo"), &shim_cargo(2));
+    std::fs::create_dir_all(&barrier).unwrap();
+    write_script(&f.cargo_home.path().join("shims/cargo"), &barrier_cargo());
     let path = format!("{}:{}", f.cargo_home.path().join("shims").display(), std::env::var("PATH").unwrap());
-    let spawn = |rustc: &str| {
-        Command::new("sh")
-            .arg(f.root().join("dev"))
-            .arg("hello")
-            .current_dir(f.root())
-            .env_clear()
-            .env("PATH", &path)
-            .env("HOME", scratch.path().join("home"))
-            .env("CARGO_HOME", f.cargo_home.path())
-            .env("RUSTC", rustc)
-            .env("GITHUB_ACTIONS", "true")
-            .env("PADDOCK_CI_MOUNT", &mount)
-            .output_child()
-    };
-    // B starts while A's build is still "running": B's build replaces the binary A's build left.
-    let a = spawn(&rustc_a);
-    std::thread::sleep(std::time::Duration::from_millis(700));
-    let b = spawn(&rustc_b);
-    for (name, child) in [("a", a), ("b", b)] {
-        let out = child.wait_with_output().unwrap();
-        assert_eq!(out.status.code(), Some(0), "{name}: {}", String::from_utf8_lossy(&out.stderr));
+    let children: Vec<_> = rustcs
+        .iter()
+        .map(|rustc| {
+            Command::new("sh")
+                .arg(f.root().join("dev"))
+                .arg("hello")
+                .current_dir(f.root())
+                .env_clear()
+                .env("PATH", &path)
+                .env("HOME", scratch.path().join("home"))
+                .env("CARGO_HOME", f.cargo_home.path())
+                .env("RUSTC", rustc)
+                .env("GITHUB_ACTIONS", "true")
+                .env("PADDOCK_CI_MOUNT", &mount)
+                .env("BARRIER", &barrier)
+                .output_child()
+        })
+        .collect();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while std::fs::read_dir(&barrier).unwrap().count() < expected {
+        assert!(std::time::Instant::now() < deadline, "the builds never overlapped");
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    for hash in [&hash_a, &hash_b] {
-        let cached = mount.join("paddock-dev/bin").join(hash).join("paddock-dev-test-host");
-        let out = Command::new(&cached).args(["self", "hash"]).output().unwrap();
-        assert_eq!(
-            String::from_utf8_lossy(&out.stdout).trim(),
-            format!("embedded {hash}"),
-            "the binary cached under {hash} was built for another hash"
-        );
-    }
-    let leftovers: Vec<_> = std::fs::read_dir(mount.join("paddock-dev/bin").join(&hash_a))
+    std::fs::write(barrier.join("go"), "").unwrap();
+    let outs = children.into_iter().map(|c| c.wait_with_output().unwrap()).collect();
+    (scratch, outs, f)
+}
+
+#[cfg(unix)]
+fn rustcs(dir: &Path) -> (String, String) {
+    (
+        fake_rustc(dir, "rustc-a", "1.90.0", "aaaa", "test-host"),
+        fake_rustc(dir, "rustc-b", "1.91.0", "bbbb", "test-host"),
+    )
+}
+
+#[cfg(unix)]
+fn assert_cached(mount: &Path, hash: &str) {
+    let bin = mount.join("paddock-dev/bin").join(hash);
+    let out = Command::new(bin.join("paddock-dev-test-host"))
+        .args(["self", "hash"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        format!("embedded {hash}"),
+        "the binary cached under {hash} was built for another hash"
+    );
+    let names: Vec<_> = std::fs::read_dir(&bin)
         .unwrap()
         .flatten()
         .map(|e| e.file_name().to_string_lossy().to_string())
         .collect();
-    assert_eq!(leftovers, ["paddock-dev-test-host"], "no temporary copy is left behind");
+    assert_eq!(names, ["paddock-dev-test-host"], "no temporary copy is left behind");
+}
+
+#[cfg(unix)]
+#[test]
+fn two_wrappers_with_different_hashes_on_one_kept_mount_each_cache_their_own_binary() {
+    let probe = Fixture::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let (a, b) = rustcs(tmp.path());
+    let (hash_a, _) = probe.both(&[("RUSTC", a.clone())]);
+    let (hash_b, _) = probe.both(&[("RUSTC", b.clone())]);
+    assert_ne!(hash_a, hash_b);
+    // Both builds are inside cargo at once, so a shared build folder would hold the later binary when the earlier one is copied.
+    let (scratch, outs, _f) = run_overlapping(&[&a, &b], 2);
+    for o in &outs {
+        assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+    }
+    for hash in [&hash_a, &hash_b] {
+        assert_cached(&scratch.path().join("mount"), hash);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn two_wrappers_with_the_same_hash_on_one_kept_mount_both_succeed_and_leave_one_verified_binary() {
+    let probe = Fixture::new();
+    let tmp = tempfile::tempdir().unwrap();
+    let (a, _) = rustcs(tmp.path());
+    let (hash, _) = probe.both(&[("RUSTC", a.clone())]);
+    let (scratch, outs, _f) = run_overlapping(&[&a, &a], 2);
+    for o in &outs {
+        assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stderr));
+        assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "built-by-shim");
+    }
+    assert_cached(&scratch.path().join("mount"), &hash);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_cache_hit_counts_as_use_and_a_build_folder_without_a_published_tool_goes_when_old() {
+    let f = Fixture::new();
+    let scratch = tempfile::tempdir().unwrap();
+    let home = scratch.path().join("home");
+    let hours = |h: u64| std::time::SystemTime::now() - std::time::Duration::from_secs(h * 3600);
+    let set = |p: &Path, t| std::fs::File::open(p).unwrap().set_modified(t).unwrap();
+    let rustc = fake_rustc(scratch.path(), "rustc", "1.90.0", "aaaa", "test-host");
+    let (hash, _) = f.both(&[("RUSTC", rustc.clone())]);
+    // The tool of this hash, published long ago and used just now: a hit must refresh it.
+    write_script(
+        &home.join("bin").join(&hash).join("paddock-dev-test-host"),
+        "if [ \"$1\" = \"--version\" ]; then echo 0; fi",
+    );
+    set(&home.join("bin").join(&hash), hours(3));
+    // Five newer tools push it past the keep count; build folders: one orphaned and old, one orphaned and fresh, one with a tool.
+    for i in 0..5 {
+        write_script(&home.join(format!("bin/newer-{i}/paddock-dev-test-host")), "exit 0");
+        set(&home.join(format!("bin/newer-{i}")), hours(2));
+    }
+    let kept_target = format!("target-{hash}");
+    for (name, age) in [("target-orphan-old", 3), ("target-orphan-new", 0), (kept_target.as_str(), 3)] {
+        std::fs::create_dir_all(home.join(name)).unwrap();
+        set(&home.join(name), hours(age));
+    }
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", rustc.clone())]);
+    assert_eq!(code, 0, "{err}");
+    assert!(home.join("bin").join(&hash).exists(), "a hit refreshed it, so it is not the oldest");
+    // A second run that misses (another compiler) prunes with the hit's refreshed time in place.
+    let other = fake_rustc(scratch.path(), "rustc2", "1.91.0", "bbbb", "test-host");
+    let (code, _, err) = run_wrapper(&f, &home, &[("RUSTC", other)]);
+    assert_eq!(code, 0, "{err}");
+    assert!(home.join("bin").join(&hash).exists(), "the tool in use is kept over older ones");
+    assert!(
+        !home.join("target-orphan-old").exists(),
+        "an old build folder with no tool is removed"
+    );
+    assert!(home.join("target-orphan-new").exists(), "a fresh one may be a build in progress");
+    assert!(home.join(&kept_target).exists(), "a build folder with a tool is the tool's");
 }
 
 #[cfg(unix)]
