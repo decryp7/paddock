@@ -47,3 +47,8 @@ test('parseArgs --audio-probe-pkg needs its sha256 and the power suite', () => {
   assert.throws(() => parseArgs([...base, '--audio-probe-pkg', '/b.pkg', '--audio-probe-sha256', 'zz']), /64 hex/);
   assert.throws(() => parseArgs(['--app', 'dyno', '--installer', '/x.dmg', '--audio-probe-pkg', '/b.pkg', '--audio-probe-sha256', sha]), /needs --suite power/);
 });
+
+test('--only takes the smoke rows of a final candidate: helper, 5a, jobs recovery and the swap', () => {
+  const ids = onlyRequired(parseOnly('helper-on,login-jobs,jobs-restart,upgrade-swap')).map((r) => r.id);
+  for (const id of ['helper-on', 'helper-off', 'login-jobs', 'jobs-restart', 'upgrade-swap', 'quit']) assert.ok(ids.includes(id), id);
+});

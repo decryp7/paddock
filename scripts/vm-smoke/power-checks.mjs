@@ -263,7 +263,7 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
   // A failed start judgement (for example a parent rule) does not stop the checks: each step fails by itself if the app is not there.
   {
     const power = makePower();
-    if (gui && !only) { const h = push(await gui.helperOn()); power.helperOn = h.status === 'pass'; }
+    if (gui && (!only || only.includes('helper-on'))) { const h = push(await gui.helperOn()); power.helperOn = h.status === 'pass'; }
     if (helperOnly && tour) push(await tour.menuBar()); // the tray: Dyno's menu-bar items
     if (!helperOnly && !only) {
       push(await power.keepAwake());
@@ -273,7 +273,7 @@ export async function runPowerSuite(check, makePower, { stagedDmg, manual = POWE
     }
     // Extension point: one function per wired helper reading (each `async (ctx) => step`), run while the helper is on.
     for (const fn of extra) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // a function may return several steps
-    if (gui && !only) push(await gui.helperOff());
+    if (gui && (!only || only.includes('helper-on'))) push(await gui.helperOff());
     for (const fn of only ? [] : post) for (const s of [].concat(await fn({ power, gui, check }))) push(s); // after Turn off: steps that read what the helper left behind
     if (idle && !helperOnly && (!only || only.includes('idle-action'))) { push(await idle.run()); if (idle.audioStep) push(idle.audioStep); }
   }

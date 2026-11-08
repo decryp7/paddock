@@ -3,7 +3,7 @@
 import { requiredSteps } from './manifest.mjs';
 
 /** The rows `--only` can pick on macOS (the power suite's release rows driven by `macRows`). */
-export const MAC_ONLY_ROWS = ['mac-reopen', 'mac-lifecycle-log', 'hung-page', 'idle-action'];
+export const MAC_ONLY_ROWS = ['mac-reopen', 'mac-lifecycle-log', 'hung-page', 'idle-action', 'helper-on', 'login-jobs', 'jobs-restart', 'upgrade-swap'];
 /** The steps every `--only` run keeps: nothing is installed or started without them. */
 export const MAC_ONLY_BASE = ['install', 'build-binding', 'cold-start', 'quit'];
 
@@ -18,7 +18,7 @@ export function parseOnly(value) {
 /** Required steps of an `--only` run: the base steps and the picked rows, taken from the power manifest. */
 export function onlyRequired(ids) {
   const all = requiredSteps({ os: 'macos', suite: 'power', release: true });
-  const want = new Set([...MAC_ONLY_BASE, ...ids]);
+  const want = new Set([...MAC_ONLY_BASE, ...ids, ...(ids.includes('helper-on') ? ['helper-off'] : [])]); // Turn on is always paired with Turn off
   const picked = all.filter((r) => want.has(r.id));
   const missing = [...want].filter((id) => !picked.some((r) => r.id === id));
   if (missing.length) throw new Error(`the manifest has no row ${missing.join(', ')}`);

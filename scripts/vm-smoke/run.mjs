@@ -30,6 +30,7 @@ import { NOT_DRIVEN, ROW_TITLES, btmState, keychainOtherBuildStep, judgeLifecycl
 import { hungPageStep } from './hung-page.mjs';
 import { quitStopStep } from './mcp-judges.mjs';
 import { loginSwitchStep, parseBtm } from './login-start-rows.mjs';
+import { jobsRestartStep } from './jobs-restart-row.mjs';
 import { onlyRequired, parseOnly, rowWanted } from './only.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -416,7 +417,19 @@ async function main(argv) {
           return loginSwitchStep({ sleep: sleepMs, readSwitch: () => d.readSwitch(), pressSwitch: () => d.pressSwitch(), apply: () => d.apply(), readEntry,
             witness: async () => (await exec('cat "$HOME/Library/Logs/Dyno"/dyno.*.log 2>/dev/null | grep -i -E "login item|start at login|SMAppService" | tail -n 12')).stdout.split('\n') });
         };
-        const rowFns = o.only ? [macRows] : o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
+        // Release row: the agent is killed (by pid, as the MCP row does), the app relaunched, and the Jobs panel must not keep "could not be read" once the agent is back.
+        const macJobsRestart = async () => {
+          const ld = macLoginJobsDriver(gui);
+          return jobsRestartStep({
+            openJobs: () => ld.openJobs(), jobsText: () => ld.jobsText(),
+            killAgent: async () => (await exec('p=$(pgrep -x dyno-agent | head -1); [ -n "$p" ] && echo "$p" > /tmp/dyno-killed-jobs.pid && kill -9 $p')).code === 0,
+            relaunchApp: async () => { await exec(`osascript -e 'quit app "Dyno"'; pkill -x dyno-app; true`); await sleepMs(4000); await exec(`open -a ${bundle}`); await sleepMs(8000); },
+            // a NEW live agent: running, and not the pid that was killed
+            agentUp: async () => (await exec('p=$(cat /tmp/dyno-killed-jobs.pid); n=$(pgrep -x dyno-agent | head -1); [ -n "$n" ] && [ "$n" != "$p" ] && "' + bundle + '/Contents/MacOS/dyno-agent" status >/dev/null 2>&1')).code === 0,
+          }, { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) });
+        };
+        const rowFns = o.only ? [...(rowWanted(o.only, 'mac-reopen') || rowWanted(o.only, 'hung-page') || rowWanted(o.only, 'mac-lifecycle-log') ? [macRows] : []), ...(o.only.includes('login-jobs') ? [async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) })] : []), ...(o.only.includes('jobs-restart') ? [macJobsRestart] : [])] : o.suite === 'power' ? [macRows, macLoginSwitch, async () => loginJobsRow(macLoginJobsDriver(gui), { now: () => guest.now(), sleep: (ms) => guest.sleep(ms) }),
+          macJobsRestart,
           async () => diskSpaceStep({ exec: (c) => guest.exec(c, { timeoutMs: 300_000 }), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), adapter: unixAdapter({ os: 'macos', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }) }),
           async () => discoveryStep(unixDiscoveryPrims({ exec: (c) => guest.exec(c), sleep: (ms) => guest.sleep(ms), now: () => guest.now(), file: '$HOME/Library/Application Support/Dyno/agent.json', dyno: `/Applications/${config.bundle}/Contents/MacOS/dyno` }))] : [];
         const suite = await runPowerSuite(check, () => power, { stagedDmg: staged, gui, idle, tour, extra: [...readings, ...rowFns], post: [() => macHelperLogStep(guest)], helperOnly: o.suite === 'helper', only: o.only, manual: o.suite === 'helper' ? [] : undefined });
@@ -431,7 +444,7 @@ async function main(argv) {
           suite.steps.push(km);
         }
         // Release row: the new build installed over a RUNNING older one (needs the older .dmg as --installer-before). Last: it replaces the installed app.
-        if (o.suite === 'power' && !o.only) {
+        if (o.suite === 'power' && (!o.only || o.only.includes('upgrade-swap'))) {
           const sw = o.installerBefore
             ? await upgradeSwapStep(macSwapPrimitives({ guest, gui, check, share: SHARE, bundle: `/Applications/${config.bundle}` })).catch((e) => swapNotDriven(String(e.message ?? e)))
             : swapNotDriven('no older build was given (--installer-before <older .dmg>: the 1.0.0 .dmg or an older RC), so there is nothing to install over');
