@@ -182,6 +182,11 @@ mod tests {
         type Reply = Answer;
     }
 
+    #[test]
+    fn a_request_is_known_from_minor_zero_unless_the_contract_says_otherwise() {
+        assert_eq!(Calc::introduced_in(&Ask::Add(1, 2)), 0);
+    }
+
     fn entries() -> Vec<Registered> {
         vec![Registered::new::<Calc>(
             |ctx: &ExtCtx, Ask::Add(a, b): Ask| {

@@ -376,6 +376,60 @@ fn limits_are_enforced_while_writing() {
 }
 
 #[test]
+fn a_limit_is_reached_exactly_and_only_a_value_over_it_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let opts = |l: Limits| Options {
+        limits: l,
+        ..Options::default()
+    };
+    let five: Vec<E> = ["f0", "f1", "f2", "f3", "f4"]
+        .iter()
+        .map(|n| E::File(n, b"x"))
+        .collect();
+    let payload = vec![1u8; 1000];
+    let one = [E::File("abcde", &payload)];
+    let nested = [E::File("a/b", b"x")];
+    let cases: [(&[E], Limits); 4] = [
+        (
+            &five,
+            Limits {
+                max_entries: 5,
+                ..Limits::default()
+            },
+        ),
+        (
+            &one,
+            Limits {
+                max_file_bytes: 1000,
+                ..Limits::default()
+            },
+        ),
+        (
+            &one,
+            Limits {
+                max_path_len: 5,
+                ..Limits::default()
+            },
+        ),
+        (
+            &nested,
+            Limits {
+                max_depth: 2,
+                ..Limits::default()
+            },
+        ),
+    ];
+    for (i, (entries, limits)) in cases.iter().enumerate() {
+        for (name, bytes) in all_formats(entries) {
+            let a = write(d.path(), name, &bytes);
+            let out = d.path().join(format!("o{i}-{name}"));
+            run(&a, &out, &opts(limits.clone()))
+                .unwrap_or_else(|e| panic!("case {i} {name}: at the limit is allowed: {e:?}"));
+        }
+    }
+}
+
+#[test]
 fn an_expansion_bomb_is_stopped_by_the_ratio_in_every_format() {
     let d = tempfile::tempdir().unwrap();
     let zeros = vec![0u8; 4 << 20];

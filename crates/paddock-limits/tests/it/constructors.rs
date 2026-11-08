@@ -423,6 +423,51 @@ fn an_index_with_a_leading_zero_is_not_a_field_path() {
     assert!(FieldPath::parse("groups[30]").is_ok());
 }
 
+/// The grammar of a field path, at its edges: `name`, `.`-separated parts, one optional `[index]` per part, an index of at most
+/// `u32::MAX` without a leading zero, and `result` never as the first part.
+#[test]
+fn a_field_path_is_names_dots_and_bounded_indexes() {
+    for ok in [
+        "",
+        "a",
+        "a.b",
+        "ab1.c2",
+        "a[0]",
+        "a[7].b",
+        "a[1].b[22].c",
+        "a[4294967295]",
+        "results",
+        "resulted.x",
+    ] {
+        assert!(FieldPath::parse(ok).is_ok(), "{ok:?} is a field path");
+    }
+    for bad in [
+        "A",
+        "1a",
+        "a.",
+        ".a",
+        "a..b",
+        "a[",
+        "a[0",
+        "a[]",
+        "a[x]",
+        "a[1",
+        "a[1]b",
+        "a[03]",
+        "a[4294967296]",
+        "a[99999999999999999999]",
+        "result",
+        "result.x",
+        "result[0]",
+        "a b",
+    ] {
+        assert!(
+            FieldPath::parse(bad).is_err(),
+            "{bad:?} is not a field path"
+        );
+    }
+}
+
 #[test]
 fn every_cut_has_a_key_for_the_words_of_the_ui() {
     let first = Bounded::first(0..99, &F5, ROWS);

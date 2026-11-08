@@ -65,6 +65,8 @@ fn registered_ids_resolve_to_their_static_text() {
     LimitId::register(&paddock_limits::Registry::new(&ROWS));
     LimitId::register(&paddock_limits::Registry::new(&ROWS));
     assert_eq!(LimitId::parse("registered.one").unwrap(), ROWS[0].id);
+    // Registering is what makes the id known (parsing alone only interns it).
+    assert!(LimitId::is_registered("registered.one"));
     assert_eq!(
         LimitId::parse("bounded.cuts").unwrap(),
         paddock_limits::BOUNDED_CUTS.id

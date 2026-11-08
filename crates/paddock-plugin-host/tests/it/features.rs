@@ -228,6 +228,8 @@ fn a_request_newer_than_the_plugins_minor_is_refused_before_sending() {
         fn introduced_in(request: &FixtureRequest) -> u16 {
             match request {
                 FixtureRequest::Twice(_) => 2,
+                // Exactly the minor the plugin declared (1): allowed.
+                FixtureRequest::Add(..) => 1,
                 _ => 0,
             }
         }

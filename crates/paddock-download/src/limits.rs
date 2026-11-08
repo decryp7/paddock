@@ -90,6 +90,12 @@ mod tests {
     }
 
     #[test]
+    fn the_default_sizes_are_64_gib_and_16_mib() {
+        assert_eq!(DEFAULT_MAX_BYTES, 64 << 30);
+        assert_eq!(DEFAULT_FETCH_BYTES, 16 << 20);
+    }
+
+    #[test]
     fn the_registry_is_well_formed() {
         REGISTRY.check().unwrap();
     }

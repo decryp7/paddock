@@ -66,6 +66,20 @@ pub fn depth(limit: usize) -> LimitExceeded {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_duration_in_milliseconds_saturates_at_the_largest_count() {
+        use std::time::Duration;
+        assert_eq!(
+            millis_of(Duration::from_millis(1500)),
+            Quantity::Millis(1500)
+        );
+        // More milliseconds than a `u64` holds (Duration::MAX truncates to u64::MAX by chance, so it would not tell).
+        assert_eq!(
+            millis_of(Duration::from_secs(u64::MAX / 500)),
+            Quantity::Millis(u64::MAX)
+        );
+    }
     use paddock_testkit::limit_cases;
 
     limit_cases! { REGISTRY;
