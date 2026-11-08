@@ -149,16 +149,27 @@ pub fn budget_gb_up(bytes: u64) -> u64 {
 
 /// The free space a drive needs before a run: the file plus the larger of 10 % of the volume and [`MIN_FREE_MARGIN`].
 pub fn free_space_required(file_bytes: u64, capacity: Option<u64>) -> u64 {
-    file_bytes.saturating_add((capacity.unwrap_or(0) / 10).max(MIN_FREE_MARGIN))
+    free_space_required_with(file_bytes, capacity, None)
+}
+
+/// [`free_space_required`] with an explicit margin in bytes instead of the default one (`None`: the default). Only a caller that
+/// states the margin on purpose passes `Some`, such as a test that must not depend on the size of the machine's drive.
+pub fn free_space_required_with(file_bytes: u64, capacity: Option<u64>, margin: Option<u64>) -> u64 {
+    file_bytes.saturating_add(margin.unwrap_or_else(|| (capacity.unwrap_or(0) / 10).max(MIN_FREE_MARGIN)))
 }
 
 /// Refuses a run when the volume has too little free space, with the numbers and what to do. `free` unknown is a refusal too:
 /// the test never writes blind.
 pub fn check_free(name: &str, file_bytes: u64, capacity: Option<u64>, free: Option<u64>) -> Result<(), String> {
+    check_free_with(name, file_bytes, capacity, free, None)
+}
+
+/// [`check_free`] with an explicit margin in bytes (see [`free_space_required_with`]).
+pub fn check_free_with(name: &str, file_bytes: u64, capacity: Option<u64>, free: Option<u64>, margin: Option<u64>) -> Result<(), String> {
     let Some(free) = free else {
         return Err(format!("Dyno cannot tell how much space {name} has free, so it does not test it."));
     };
-    let need = free_space_required(file_bytes, capacity);
+    let need = free_space_required_with(file_bytes, capacity, margin);
     if free >= need {
         Ok(())
     } else {
@@ -314,6 +325,11 @@ mod tests {
         let e = check_free("X", GIB, Some(100 * GIB), Some(5 * GIB)).unwrap_err();
         assert!(e.contains("5 GB free") && e.contains("needs"), "{e}");
         assert!(check_free("X", GIB, Some(100 * GIB), None).unwrap_err().contains("cannot tell"));
+        // An explicit margin replaces the 10 % one, so a huge volume with little free space still passes when asked to.
+        assert_eq!(free_space_required_with(GIB, Some(4000 * GIB), Some(64 * MIB)), GIB + 64 * MIB);
+        assert!(check_free_with("X", 0, Some(4000 * GIB), Some(GIB), Some(64 * MIB)).is_ok());
+        assert!(check_free_with("X", 0, Some(4000 * GIB), Some(GIB), None).is_err());
+        assert!(check_free_with("X", 0, Some(4000 * GIB), Some(MIB), Some(64 * MIB)).is_err());
     }
 
     #[test]
