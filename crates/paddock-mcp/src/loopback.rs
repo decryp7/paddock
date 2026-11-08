@@ -327,6 +327,13 @@ fn serve_connection(
     }
 }
 
+/// Starts a named thread; a test passes one that fails, as the OS does when it has no thread to give.
+type Spawn = fn(String, Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>>;
+
+fn spawn_named(name: String, work: Box<dyn FnOnce() + Send>) -> io::Result<JoinHandle<()>> {
+    std::thread::Builder::new().name(name).spawn(work)
+}
+
 /// How the reading of a refused client's unread bytes ended (logged: ER-27).
 #[derive(Debug, PartialEq, Eq)]
 enum DrainEnd {
@@ -361,28 +368,33 @@ impl DrainEnd {
 /// unread data resets it, and the key line is normally queued already, so this usually costs no thread. Returns the bytes
 /// read and why it stopped.
 fn drain_queued(stream: &TcpStream) -> (usize, DrainEnd) {
-    if let Err(e) = stream.set_nonblocking(true) {
-        return (0, DrainEnd::Failed(e.kind()));
-    }
+    let read = stream.set_nonblocking(true).map_or_else(
+        |e| (0, DrainEnd::Failed(e.kind())),
+        |()| read_queued(&mut &*stream),
+    );
+    // The flag belongs to the open file, which every handle shares: the serving side reads with timeouts, blocking.
+    let _ = stream.set_nonblocking(false);
+    read
+}
+
+/// Reads from a non-blocking source until nothing more is queued, it ends, fails or [`DRAIN_MAX_BYTES`] were read.
+fn read_queued(source: &mut impl Read) -> (usize, DrainEnd) {
     let mut total = 0;
     let mut buf = [0u8; 512];
-    let end = loop {
-        match (&*stream).read(&mut buf) {
-            Ok(0) => break DrainEnd::ClientClosed,
+    loop {
+        match source.read(&mut buf) {
+            Ok(0) => return (total, DrainEnd::ClientClosed),
             Ok(n) => {
                 total += n;
                 if total >= DRAIN_MAX_BYTES {
-                    break DrainEnd::ByteCap;
+                    return (total, DrainEnd::ByteCap);
                 }
             }
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => break DrainEnd::StillOpen,
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => return (total, DrainEnd::StillOpen),
             Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => break DrainEnd::Failed(e.kind()),
+            Err(e) => return (total, DrainEnd::Failed(e.kind())),
         }
-    };
-    // The flag belongs to the open file, which every handle shares: the serving side reads with timeouts, blocking.
-    let _ = stream.set_nonblocking(false);
-    (total, end)
+    }
 }
 
 /// Reads a refused client's bytes until it closes its side (it does so on seeing the refusal and the end), bounded by
@@ -435,7 +447,14 @@ pub fn serve_loopback(
     listener: TcpListener,
     max_connections: usize,
 ) -> io::Result<Serving> {
-    serve_loopback_with(server, keys, listener, max_connections, MAX_DRAINING)
+    serve_loopback_with(
+        server,
+        keys,
+        listener,
+        max_connections,
+        MAX_DRAINING,
+        spawn_named,
+    )
 }
 
 /// [`serve_loopback`] with the number of refused clients that may be drained at once (a test makes it small).
@@ -445,6 +464,7 @@ fn serve_loopback_with(
     listener: TcpListener,
     max_connections: usize,
     max_draining: usize,
+    spawn: Spawn,
 ) -> io::Result<Serving> {
     let addr = listener.local_addr()?;
     check_loopback(&addr)?;
@@ -505,9 +525,9 @@ fn serve_loopback_with(
                     })
                     .and_then(|draining| {
                         let (held, stop) = (stream.clone(), stop2.clone());
-                        std::thread::Builder::new()
-                            .name("mcp-drain".into())
-                            .spawn(move || {
+                        spawn(
+                            "mcp-drain".into(),
+                            Box::new(move || {
                                 let began = Instant::now();
                                 let (bytes, end) = drain_until_closed(&held, stop, queued, HANDSHAKE_TIMEOUT);
                                 log::info!(
@@ -517,8 +537,9 @@ fn serve_loopback_with(
                                 );
                                 drop(draining);
                                 drop(held);
-                            })
-                            .map_err(|e| format!("no thread to drain with: {e}"))
+                            }),
+                        )
+                        .map_err(|e| format!("no thread to drain with: {e}"))
                     });
                 match started {
                     Ok(handle) => list.push((Arc::downgrade(&stream), handle)),
@@ -532,15 +553,16 @@ fn serve_loopback_with(
             let stream = Arc::new(stream);
             let kept = Arc::downgrade(&stream);
             let (server, keys, stop) = (server.clone(), keys.clone(), stop2.clone());
-            let spawned = std::thread::Builder::new()
-                .name(format!("mcp-conn-{id}"))
-                .spawn(move || {
+            let spawned = spawn(
+                format!("mcp-conn-{id}"),
+                Box::new(move || {
                     serve_connection(id, &server, &stream, keys.as_ref(), stop);
                     // Give the place back before the client can see the end of its connection, then close the last
                     // handle (the read half is already closed), which ends it.
                     drop(place);
                     drop(stream);
-                });
+                }),
+            );
             match spawned {
                 Ok(handle) => list.push((kept, handle)),
                 // The closure, with the socket and the place, is dropped: the client sees its connection end.
@@ -1020,6 +1042,10 @@ mod tests {
 
     /// A listener with the one place taken by a holder that has been answered.
     fn full_listener(max_draining: usize) -> (Serving, TcpStream, String) {
+        full_listener_spawning(max_draining, spawn_named)
+    }
+
+    fn full_listener_spawning(max_draining: usize, spawn: Spawn) -> (Serving, TcpStream, String) {
         capture_logs();
         let keys = Arc::new(crate::keys::KeyStore::new());
         let (_, key) = keys.issue("holder", 1).unwrap();
@@ -1029,6 +1055,7 @@ mod tests {
             TcpListener::bind("127.0.0.1:0").unwrap(),
             1,
             max_draining,
+            spawn,
         )
         .unwrap();
         let hello = format!("{}\n", json!({"key": key}));
@@ -1125,6 +1152,97 @@ mod tests {
         let go = Arc::new(AtomicBool::new(false));
         let (_, end) = drain_until_closed(&server_end, go, 0, HANDSHAKE_TIMEOUT);
         assert!(matches!(end, DrainEnd::Failed(_)), "{end:?}");
+    }
+
+    fn no_thread_to_drain_with(
+        name: String,
+        work: Box<dyn FnOnce() + Send>,
+    ) -> io::Result<JoinHandle<()>> {
+        if name == "mcp-drain" {
+            Err(io::Error::other("no threads left"))
+        } else {
+            spawn_named(name, work)
+        }
+    }
+
+    fn no_thread_to_serve_with(
+        _: String,
+        _: Box<dyn FnOnce() + Send>,
+    ) -> io::Result<JoinHandle<()>> {
+        Err(io::Error::other("no threads left"))
+    }
+
+    /// The OS has no thread for a drain: the refused client is read inline, the socket closed, the cause logged; no panic.
+    #[test]
+    fn a_refused_client_is_still_read_when_no_drain_thread_can_start() {
+        let (serving, holder, hello) =
+            full_listener_spawning(MAX_DRAINING, no_thread_to_drain_with);
+        let mut extra = TcpStream::connect(serving.addr()).unwrap();
+        extra.write_all(hello.as_bytes()).unwrap();
+        let lines: Vec<String> =
+            std::io::BufRead::lines(BufReader::new(extra.try_clone().unwrap()))
+                .map_while(Result::ok)
+                .collect();
+        assert_eq!(lines.len(), 1, "the refusal, then the end: {lines:?}");
+        drop(serving);
+        drop(holder);
+        let line =
+            logged_for(&extra, "closed after an inline drain").expect("no inline-drain line");
+        assert!(
+            line.contains("no thread to drain with: no threads left"),
+            "{line}"
+        );
+    }
+
+    /// The OS has no thread to serve a connection: it is closed with a logged cause, its place comes back, the listener lives.
+    #[test]
+    fn a_connection_that_cannot_get_a_thread_is_closed_and_logged() {
+        capture_logs();
+        let keys = Arc::new(crate::keys::KeyStore::new());
+        let serving = serve_loopback_with(
+            test_server(),
+            keys,
+            TcpListener::bind("127.0.0.1:0").unwrap(),
+            1,
+            MAX_DRAINING,
+            no_thread_to_serve_with,
+        )
+        .unwrap();
+        for _ in 0..2 {
+            let mut c = TcpStream::connect(serving.addr()).unwrap();
+            let mut rest = String::new();
+            // The connection ends without a reply; the second client proves the place was given back.
+            let _ = c.read_to_string(&mut rest);
+            assert!(rest.is_empty(), "{rest}");
+        }
+        drop(serving);
+        let found = LOGGED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|l| l.contains("closed: no thread to serve it with: no threads left"))
+            .count();
+        assert!(found >= 2, "{found}");
+    }
+
+    /// Reads that fail: an interrupted one is read again, any other error ends the drain as failed.
+    #[test]
+    fn a_queued_read_that_fails_ends_as_failed() {
+        struct Script(Vec<io::Result<usize>>);
+        impl Read for Script {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                self.0.remove(0)
+            }
+        }
+        let script = vec![
+            Err(io::ErrorKind::Interrupted.into()),
+            Ok(3),
+            Err(io::ErrorKind::ConnectionReset.into()),
+        ];
+        assert_eq!(
+            read_queued(&mut Script(script)),
+            (3, DrainEnd::Failed(io::ErrorKind::ConnectionReset))
+        );
     }
 
     #[test]
