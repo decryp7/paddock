@@ -20,6 +20,9 @@ function idsOfModule(text) {
 
 export default {
   id: 'C33',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'ui',
   title: 'Every window is checked with axe; keyboard flows and the accent are tested',
   rule: 40,
   run(ctx) {

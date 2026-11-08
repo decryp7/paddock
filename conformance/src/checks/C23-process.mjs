@@ -29,6 +29,9 @@ export function blockFindings(ctx) {
 
 const check = {
   id: 'C23',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'all',
   title: 'Commit messages: Conventional Commits, no co-author or AI attribution',
   rule: 8,
   run(ctx) {

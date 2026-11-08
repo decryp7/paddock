@@ -167,6 +167,8 @@ export function freedPorts(text) {
 
 export default {
   id: 'C39',
+  scope: 'both',
+  mode: 'gate',
   title: 'Tests never free a port they probe',
   rule: 40,
   run(ctx) {

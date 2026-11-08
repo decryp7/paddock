@@ -19,6 +19,8 @@ export function trackedSymlinks(lsFilesStage, allowed = ALLOWED_SYMLINKS) {
 
 export default {
   id: 'C57',
+  scope: 'root',
+  mode: 'gate',
   title: 'No tracked file is a symlink',
   rule: 40,
   run(ctx) {

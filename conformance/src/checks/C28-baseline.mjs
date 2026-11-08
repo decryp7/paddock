@@ -7,6 +7,9 @@ import { planBaseline } from '../sync/plan.mjs';
 
 export default {
   id: 'C28',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'all',
   title: 'The repo baseline files equal the Paddock templates',
   rule: 42,
   run(ctx) {

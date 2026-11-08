@@ -13,6 +13,8 @@ export function isTestOrScript(f) {
 
 export default {
   id: 'C15',
+  scope: 'both',
+  mode: 'gate',
   title: 'No installed Chrome in tests; the pinned test browser is required in CI',
   rule: 7,
   run(ctx) {

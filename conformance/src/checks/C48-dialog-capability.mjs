@@ -53,6 +53,8 @@ export function capabilityProblems(texts, { workbench }) {
 
 export default {
   id: 'C48',
+  scope: 'both',
+  mode: 'gate',
   title: 'Apps on the shared shell grant their dialog windows paddock-shell:dialog',
   rule: 40,
   run(ctx) {

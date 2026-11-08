@@ -67,6 +67,8 @@ export function startProblems({ tests, sources }) {
 
 export default {
   id: 'C50',
+  scope: 'both',
+  mode: 'gate',
   title: 'Every app on the shell lets the shell open its start, and tests it',
   rule: 43,
   run(ctx) {

@@ -95,6 +95,9 @@ export const defaultGit = (cwd) => (args) => execFileSync('git', args, { cwd, en
 
 export default {
   id: 'C07',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'rust',
   title: 'Release consistency and tag preflight',
   rule: 25,
   async run(ctx) {

@@ -30,6 +30,9 @@ export function crateDirOf(ctx, name) {
 
 export default {
   id: 'C34',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'rust',
   title: 'Sidecars implement --self-test and CI starts them from the bundle',
   rule: 23,
   run(ctx) {

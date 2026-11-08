@@ -42,6 +42,8 @@ export function buildInfoProblems(source, names = buildEnvNames()) {
 
 export default {
   id: 'C56',
+  scope: 'both',
+  mode: 'gate',
   title: 'Every app reads the build commit and date under the names build-env sets',
   rule: 43,
   run(ctx) {

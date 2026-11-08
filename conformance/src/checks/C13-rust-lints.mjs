@@ -36,6 +36,9 @@ export function disallowedPaths(text) {
 
 export default {
   id: 'C13',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'rust',
   title: 'Rust lint preset: workspace lints, member opt-in and disallowed methods',
   rule: 40,
   run(ctx) {

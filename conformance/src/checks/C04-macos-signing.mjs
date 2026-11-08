@@ -44,6 +44,9 @@ export function verifyBundle(ctx, bundle) {
 
 export default {
   id: 'C04',
+  scope: 'apps',
+  mode: 'gate',
+  needs: 'rust',
   title: 'macOS bundle is sealed ad hoc, verified in CI, sidecars start',
   rule: 23,
   run(ctx) {

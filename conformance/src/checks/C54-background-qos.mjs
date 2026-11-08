@@ -573,6 +573,8 @@ const HINT = new RegExp(
 
 export default {
   id: 'C54',
+  scope: 'both',
+  mode: 'gate',
   title: 'Work a person waits for never runs at an OS starvable background level',
   rule: 52,
   run(ctx) {

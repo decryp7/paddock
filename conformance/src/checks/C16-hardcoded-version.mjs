@@ -7,6 +7,8 @@ const isMock = (f) => /(^|\/)[^/]*mock[^/]*(?:\/|\.[mc]?[jt]s$)/.test(f) && /\.[
 
 export default {
   id: 'C16',
+  scope: 'both',
+  mode: 'gate',
   title: 'No test or mock hard-codes the current app version',
   rule: 6,
   run(ctx) {

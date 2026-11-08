@@ -24,6 +24,8 @@ export function parseReviewed(text) {
 
 export default {
   id: 'C24',
+  scope: 'both',
+  mode: 'gate',
   title: 'Documentation images are reviewed, and the review matches the current image',
   rule: 22,
   run(ctx) {

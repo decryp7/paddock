@@ -70,6 +70,8 @@ export function startWaits(source) {
 
 export default {
   id: 'C51',
+  scope: 'both',
+  mode: 'report-only',
   title: 'Starts are judged on run state, not on a fixed wait (report-only)',
   rule: 40,
   run(ctx) {

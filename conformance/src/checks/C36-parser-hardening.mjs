@@ -18,6 +18,8 @@ const identOf = (crate) => crate.replaceAll('-', '_');
 
 export default {
   id: 'C36',
+  scope: 'both',
+  mode: 'report-only',
   title: 'Parser crates have a fuzz target or a never-panics test',
   rule: 40,
   run(ctx) {

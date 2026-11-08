@@ -71,6 +71,8 @@ export function pidKills(text) {
 
 export default {
   id: 'C53',
+  scope: 'both',
+  mode: 'gate',
   title: 'Nothing is ended by a bare pid',
   rule: 53,
   run(ctx) {

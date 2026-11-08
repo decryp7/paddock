@@ -6,6 +6,8 @@ const TEST = /\b(?:cargo\s+(?:test|nextest)|ng\s+test|npm\s+(?:run\s+)?test|npx\
 
 export default {
   id: 'C14',
+  scope: 'both',
+  mode: 'report-only',
   title: 'Tests run with HOME and TMPDIR in a scratch folder',
   rule: 7,
   run(ctx) {

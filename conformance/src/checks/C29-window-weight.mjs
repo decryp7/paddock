@@ -7,6 +7,8 @@ import { budgetKb, measure } from '../window-weight/measure.mjs';
 
 export default {
   id: 'C29',
+  scope: 'both',
+  mode: 'gate',
   title: 'Each window stays within its initial JS budget',
   rule: 35,
   run(ctx) {
