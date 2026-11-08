@@ -260,8 +260,9 @@ impl Assistant {
     }
 
     /// How full the model's context is for the conversation `id` (none, or one that does not exist: a new chat) with the
-    /// `pending` attachments of the next question, for the composer's meter (ADR 0023 WP-4b). After a turn of this session it
-    /// is the engine's count of the last model call (prompt plus answer); otherwise an estimate over the system prompt, every
+    /// `pending` attachments of the next question, for the composer's meter (ADR 0023 WP-4b). After a turn of this session, when
+    /// the whole conversation is sent (`history_chars == usize::MAX`), it is the engine's count of the last model call (prompt
+    /// plus answer); otherwise an estimate over the system prompt, every
     /// tool offered (an action's definition is sent once the user may allow it), the history the model would read and its
     /// attachments ([`AssistantConfig::attachment_tokens`]). Pending attachments are added either way. The room is the model's
     /// window less the answer's reserve ([`Budgets::max_answer_tokens`]).
@@ -274,7 +275,13 @@ impl Assistant {
                 .fold(0u64, u64::saturating_add)
         };
         let waiting = files(pending);
-        if let Some(used) = id.and_then(|id| lock(&self.measured).get(id).copied()) {
+        // The last call's count is what the next one carries only when the whole conversation is sent; a bounded history
+        // reads less than that, so it is estimated over what the model would read.
+        let whole = self.cfg.history_chars == usize::MAX;
+        if let Some(used) = id
+            .filter(|_| whole)
+            .and_then(|id| lock(&self.measured).get(id).copied())
+        {
             return ContextUse::new(used.saturating_add(waiting), window, reserve, true);
         }
         let tools: usize = self
