@@ -475,6 +475,11 @@ the pipe). The period is a constant, not yet a Setting with an "Auto" default (t
   the `cargo fetch` and `prepare` state, build folder not shared with the tests), the scan 46.0 s to build and 0.46 s to run.
 - **Local cold, macOS cross-check for Windows (`cargo xwin check`, 2 jobs, 2026-11-08):** the same four packages in 6 min 24 s cold; the
   test targets of four packages another 2 min 44 s.
-- **Not measured:** the Windows and macOS legs (`hostRustChecks`). In run 7767 every host job (`app dyno (windows-latest)`, `app dyno
-  (macos-latest)`) stayed queued for the 2 h the wait allowed: no host runner was free. D10 asks for the per-leg cost, cold and warm, before the
-  user is asked again; it is still to be measured on the first run that gets a host runner.
+- **Host legs, `hostRustChecks` (run 7774, commit `b6f2983d4`, base `b51c72509`, 2026-11-09; one sample each, from the job logs' `Finished` lines):**
+  macOS (`macos-latest`) **46 s**, Windows (`windows-latest`) **2 min 10 s**, each after the leg's clippy and nextest in the same job and the same kept
+  build folder, so these are the warm-folder numbers, not cold. The leg's whole `app-gates` step took 414 s (macOS, which failed on an unrelated test, below)
+  and 415 s (Windows), so the added check is about 11 % (macOS) and 31 % (Windows) of the Rust step on a leg that already has most of the graph built. A cold
+  build folder was not measured on a host leg (the local cold `cargo xwin check` figure above, 6 min 24 s, is the only cold number). Not large against D10's
+  question, so nothing goes back to the user on cost alone; re-measure cold the next time a runner's build folder is cleared.
+- **The no-fake tests ran green on both hosts in that run:** `windows::tests::the_windows_platform_wires_no_fake` (Windows leg, 0.68 s) and
+  `macos::tests::the_macos_platform_wires_no_fake` (macOS leg, 0.56 s).
