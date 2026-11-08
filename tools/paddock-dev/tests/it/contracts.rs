@@ -103,6 +103,15 @@ fn a_legs_nextest_config_names_only_packages_of_its_cargo_workspace_and_its_rele
     }
 }
 
+/// The process-pattern checks run `conformance/ci/job-isolation.sh` with the paths of a Unix host; the Linux leg runs them. On a
+/// Windows host leg Git Bash gives that script other paths, so there the test says so and stops (visible with nextest's output).
+fn skip_on_windows(what: &str) -> bool {
+    if cfg!(windows) {
+        println!("::notice::{what} was skipped on this Windows host; the Linux leg runs it.");
+    }
+    cfg!(windows)
+}
+
 const JOB_TMP: &str = "/Users/x/gitea-runner/work/0123456789abcdef/tmp";
 const OTHER_TMP: &str = "/Users/x/gitea-runner/work/fedcba9876543210/tmp";
 
@@ -149,6 +158,9 @@ fn patterns_of(app: &Value) -> Vec<&str> {
 
 #[test]
 fn an_apps_host_cleanup_patterns_match_its_own_paths_and_never_the_real_runner_or_another_job() {
+    if skip_on_windows("the process-pattern contract") {
+        return;
+    }
     let real = [
         "gitea-runner daemon",
         "/usr/local/bin/gitea-runner daemon",
@@ -255,6 +267,9 @@ fn an_apps_host_cleanup_patterns_match_its_own_paths_and_never_the_real_runner_o
 
 #[test]
 fn pitwalls_and_dynos_patterns_never_reach_an_installed_app_another_job_or_the_users_own_tools() {
+    if skip_on_windows("the process-pattern contract") {
+        return;
+    }
     let cfg = configs();
     let pitwall = patterns_of(&cfg.iter().find(|(a, _)| a == "pitwall").unwrap().1)
         .into_iter()
@@ -314,6 +329,9 @@ fn pitwalls_and_dynos_patterns_never_reach_an_installed_app_another_job_or_the_u
 
 #[test]
 fn job_isolation_refuses_a_process_pattern_that_names_no_folder_of_the_job() {
+    if skip_on_windows("the process-pattern contract") {
+        return;
+    }
     assert!(
         scoped(r"[/\\]pitcrew-it-[^/]+[/\\]gitea-runner", "pitcrew", "macOS").is_none(),
         "a temp prefix alone matches every job"
