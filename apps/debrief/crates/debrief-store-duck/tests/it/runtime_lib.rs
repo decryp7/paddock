@@ -6,8 +6,8 @@ mod build_runtime_lib;
 use std::path::PathBuf;
 
 /// A fresh folder of its own per test (the crate has no tempfile dependency).
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("debrief-store-duck-runtime-lib-{}-{name}", std::process::id()));
+fn scratch(_name: &str) -> PathBuf {
+    let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir

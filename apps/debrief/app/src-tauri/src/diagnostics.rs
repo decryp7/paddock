@@ -191,8 +191,8 @@ pub async fn set_diagnostics_settings(state: State<'_, AppState>, settings: Diag
 mod tests {
     use super::*;
 
-    fn dir(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-diag-{tag}-{}", std::process::id()));
+    fn dir(_tag: &str) -> std::path::PathBuf {
+        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

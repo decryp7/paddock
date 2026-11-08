@@ -393,8 +393,8 @@ mod tests {
     struct Dir(PathBuf);
 
     impl Dir {
-        fn new(tag: &str) -> Dir {
-            let d = std::env::temp_dir().join(format!("debrief-parser-lib-{tag}-{}", std::process::id()));
+        fn new(_tag: &str) -> Dir {
+            let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
             let _ = std::fs::remove_dir_all(&d);
             Dir(d)
         }

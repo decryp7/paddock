@@ -176,7 +176,8 @@ fn happy_path_streams_and_reports_status() {
 
 #[test]
 fn a_crash_fails_the_call_restarts_the_worker_and_reloads_the_model() {
-    let marker = tempfile::tempdir().unwrap().keep().join("crashed.marker");
+    let scratch = tempfile::tempdir().unwrap();
+    let marker = scratch.path().join("crashed.marker");
     let rt = runtime(&[&format!("--crash-once={}", marker.display())]);
     let loaded = rt.load(&model(GpuMode::Cpu).req).unwrap();
     let err = ask(loaded.provider.as_ref(), "first").unwrap_err();

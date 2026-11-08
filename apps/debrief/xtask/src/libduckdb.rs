@@ -389,7 +389,8 @@ mod tests {
 
     #[test]
     fn config_paths_are_workspace_relative_when_inside_it() {
-        let root = std::env::temp_dir().join("repo");
+        let _root_scratch = tempfile::tempdir().unwrap();
+        let root = _root_scratch.path().join("repo");
         let inside = root
             .join("target")
             .join("libduckdb")
@@ -399,7 +400,8 @@ mod tests {
             ConfigPath::new(&root, &inside),
             ConfigPath::Relative("target/libduckdb/2.0.0/duckdb-shared-libs-windows-amd64".into())
         );
-        let outside = std::env::temp_dir().join("elsewhere").join("libduckdb");
+        let _outside_scratch = tempfile::tempdir().unwrap();
+        let outside = _outside_scratch.path().join("elsewhere").join("libduckdb");
         assert!(
             matches!(ConfigPath::new(&root, &outside), ConfigPath::Absolute(p) if !p.contains('\\') && p.ends_with("elsewhere/libduckdb"))
         );

@@ -282,7 +282,8 @@ mod tests {
 
     #[test]
     fn the_probe_reads_this_computer() {
-        let e = probe(&std::env::temp_dir(), 3 << 20);
+        let scratch = tempfile::tempdir().unwrap();
+        let e = probe(scratch.path(), 3 << 20);
         assert!(e.total_memory_mb > 0 && e.cores >= 1);
         assert!(e.free_memory_mb <= e.total_memory_mb);
         assert_eq!(e.ai_model_mb, 3);

@@ -167,7 +167,7 @@ fn every_real_world_evtx_file_imports() {
         eprintln!("skipped: set DEBRIEF_EVTX_CORPUS=1 to download the EVTX-ATTACK-SAMPLES corpus and import it");
         return;
     }
-    let dir = TempDir(std::env::temp_dir().join(format!("debrief-evtx-corpus-{}", std::process::id())));
+    let dir = TempDir(tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep());
     let _ = std::fs::remove_dir_all(&dir.0);
     std::fs::create_dir_all(&dir.0).unwrap();
     let files = extract(&archive(), &dir.0);

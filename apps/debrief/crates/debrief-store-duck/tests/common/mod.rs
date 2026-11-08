@@ -51,10 +51,10 @@ pub fn sample_profile() -> Profile {
 pub struct TempDir(pub PathBuf);
 
 impl TempDir {
-    pub fn new(tag: &str) -> TempDir {
+    pub fn new(_tag: &str) -> TempDir {
         let mut b = [0u8; 8];
         getrandom::fill(&mut b).unwrap();
-        let p = std::env::temp_dir().join(format!("debrief-duck-{tag}-{}-{:x}", std::process::id(), u64::from_le_bytes(b)));
+        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }

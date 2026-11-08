@@ -171,8 +171,8 @@ mod tests {
         }
     }
 
-    fn tmp(tag: &str) -> Dir {
-        let d = std::env::temp_dir().join(format!("debrief-snapshot-{tag}-{}", std::process::id()));
+    fn tmp(_tag: &str) -> Dir {
+        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         Dir(d)

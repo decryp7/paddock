@@ -329,8 +329,8 @@ mod tests {
     use crate::profile::Profile;
 
     /// A workspace over one text log of `n` events.
-    fn workspace(tag: &str, n: usize) -> (Workspace, std::path::PathBuf) {
-        let dir = std::env::temp_dir().join(format!("debrief-insights-{tag}-{}", std::process::id()));
+    fn workspace(_tag: &str, n: usize) -> (Workspace, std::path::PathBuf) {
+        let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("app.log");

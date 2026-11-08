@@ -65,8 +65,8 @@ const SKEW_MS: i64 = 3_742;
 
 struct TempDir(PathBuf);
 impl TempDir {
-    fn new(tag: &str) -> TempDir {
-        let p = std::env::temp_dir().join(format!("debrief-samples-{tag}-{}", std::process::id()));
+    fn new(_tag: &str) -> TempDir {
+        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         TempDir(std::fs::canonicalize(p).unwrap())

@@ -149,7 +149,8 @@ mod tests {
 
     #[test]
     fn clef_file_sink_appends_and_rolls() {
-        let dir = std::env::temp_dir().join(format!("debrief-api-sink-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-api-sink-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         let sink = ClefFileSink::new(&dir, "monitor", 200, 3).unwrap();
         for _ in 0..6 {

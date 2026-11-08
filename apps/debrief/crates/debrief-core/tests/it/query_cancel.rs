@@ -6,7 +6,6 @@ use debrief_core::ql::{QlResult, QueryControl, QueryStage, RunError};
 use debrief_core::query::Query;
 use debrief_core::{LogStore, Profile, Workspace, DEFAULT_PROFILE_TOML};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
@@ -17,8 +16,7 @@ fn store() -> &'static (dyn LogStore + 'static) {
     static STORE: OnceLock<Box<dyn LogStore>> = OnceLock::new();
     STORE
         .get_or_init(|| {
-            static N: AtomicUsize = AtomicUsize::new(0);
-            let dir = std::env::temp_dir().join(format!("debrief-cancel-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+            let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
             std::fs::create_dir_all(&dir).unwrap();
             let mut text = String::with_capacity(RECORDS * 120);
             for i in 0..RECORDS {

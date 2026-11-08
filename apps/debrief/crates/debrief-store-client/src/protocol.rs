@@ -502,10 +502,11 @@ mod tests {
     #[test]
     fn the_tuning_goes_to_the_worker_as_one_bounded_argument() {
         assert!(StoreTuning::default().args().is_empty(), "nothing set: no argument");
+        let spill = tempfile::tempdir().unwrap();
         let t = StoreTuning {
             parse_threads: Some(6),
             memory_limit_mb: Some(256),
-            spill_dir: Some(std::env::temp_dir().join("spill")),
+            spill_dir: Some(spill.path().join("spill")),
             allocator_background_threads: Some(false),
             ..StoreTuning::default()
         };

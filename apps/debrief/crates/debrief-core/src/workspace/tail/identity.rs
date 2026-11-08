@@ -265,7 +265,8 @@ mod tests {
 
     #[test]
     fn identity_follows_renames() {
-        let dir = std::env::temp_dir().join(format!("debrief-identity-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-identity-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let a = dir.join("a.log");
         std::fs::write(&a, "x").unwrap();

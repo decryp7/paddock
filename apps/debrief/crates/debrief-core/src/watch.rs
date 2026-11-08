@@ -574,7 +574,8 @@ mod tests {
 
     #[test]
     fn scanning_filters_skips_links_and_stops_at_the_limits() {
-        let dir = std::env::temp_dir().join(format!("debrief-watch-scan-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-watch-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("a.log"), "x").unwrap();
@@ -598,7 +599,8 @@ mod tests {
 
     #[test]
     fn a_scan_stops_at_the_entry_limit_and_says_so() {
-        let root = std::env::temp_dir().join(format!("debrief-scan-limit-{}", std::process::id()));
+        let _root_scratch = tempfile::tempdir().unwrap();
+        let root = _root_scratch.path().join(format!("debrief-scan-limit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         for i in 0..=MAX_SCAN_ENTRIES {

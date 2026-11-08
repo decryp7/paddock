@@ -597,7 +597,8 @@ mod tests {
 
     #[test]
     fn notify_factory_creates_both_kinds() {
-        let dir = std::env::temp_dir();
+        let scratch = tempfile::tempdir().unwrap();
+        let dir = scratch.path().to_path_buf();
         let sink: WatchSink = Arc::new(|_| {});
         for mode in [WatchMode::Events, WatchMode::Polling] {
             let mut w = NotifyFactory.create(mode, Duration::from_millis(100), sink.clone()).unwrap();

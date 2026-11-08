@@ -96,8 +96,8 @@ mod tests {
     use super::*;
     use crate::playbook::templates;
 
-    fn dir(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-playbooks-{tag}-{}", std::process::id()));
+    fn dir(_tag: &str) -> PathBuf {
+        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&d);
         d
     }

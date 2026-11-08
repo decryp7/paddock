@@ -891,7 +891,8 @@ value = "t"
         r.fields.insert("Raw".into(), r#"{"a": 1}"#.into());
         r.fields.insert("Kv".into(), r#"user=ann elapsed=532 note="two words" bad"#.into());
         r.fields.insert("MachineName".into(), "WEB01".into());
-        let file = std::env::temp_dir().join(format!("debrief-lookup-{}.csv", std::process::id()));
+        let _file_scratch = tempfile::tempdir().unwrap();
+        let file = _file_scratch.path().join(format!("debrief-lookup-{}.csv", std::process::id()));
         std::fs::write(&file, "Machine,Owner,Empty\nWEB02,team-b,\n").unwrap();
         let p = pipeline(&format!(
             r#"
@@ -959,7 +960,8 @@ when = [{{ field = "MachineName", op = "eq", value = "nobody" }}]
         ] {
             assert!(pipeline(&format!("[[pipeline]]\n{bad}")).is_err(), "{bad}");
         }
-        let file = std::env::temp_dir().join(format!("debrief-lookup-bad-{}.csv", std::process::id()));
+        let _file_scratch = tempfile::tempdir().unwrap();
+        let file = _file_scratch.path().join(format!("debrief-lookup-bad-{}.csv", std::process::id()));
         std::fs::write(&file, "A,B\nx,1\n").unwrap();
         assert!(pipeline(&format!(
             "[[pipeline]]\nstep='lookup'\nfield='a'\nfile='{}'\nkey='Nope'",

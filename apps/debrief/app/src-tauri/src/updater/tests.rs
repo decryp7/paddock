@@ -806,7 +806,8 @@ fn corrupt_or_newer_records_are_ignored() {
     assert_eq!(record::load(Some(&dir.0)), record::Record::default());
     assert_eq!(record::load(None), record::Record::default());
     record::save(None, &record::Record::default());
-    let r = rig_in(dir, std::env::temp_dir().join("debrief-updater-missing").join("x"), true);
+    let missing = dir.0.join("updater-missing").join("x");
+    let r = rig_in(dir, missing, true);
     assert_eq!(r.updates.status().phase, UpdatePhase::Idle);
 }
 

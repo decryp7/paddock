@@ -719,7 +719,8 @@ mod tests {
 
     #[test]
     fn a_bad_address_that_got_in_marks_the_modules_instead_of_downloading() {
-        let symbols = Symbols::new(Some(tempfile::tempdir().unwrap().keep()));
+        let scratch = tempfile::tempdir().unwrap();
+        let symbols = Symbols::new(Some(scratch.path().to_path_buf()));
         symbols.set(SymbolSettings {
             servers: ServersConfig {
                 enabled: true,

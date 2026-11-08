@@ -8,15 +8,13 @@ use debrief_core::query::{FieldFilter, Query};
 use debrief_core::workspace::{ChartRequest, ExtractPreviewRequest, FacetRequest, PageRequest, TimelineRequest};
 use debrief_core::{LogStore, Profile, Workspace, DEFAULT_PROFILE_TOML};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A temporary folder removed on drop.
 struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let p = std::env::temp_dir().join(format!("debrief-test-{}-{}", std::process::id(), N.fetch_add(1, Ordering::SeqCst)));
+        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&p).unwrap();
         TempDir(p)
     }

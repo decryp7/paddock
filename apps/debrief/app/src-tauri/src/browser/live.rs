@@ -271,9 +271,12 @@ fn live_search_every_engine_gives_results_or_a_recognised_hand_off() {
         eprintln!("set DEBRIEF_LIVE_SEARCH=1 to run the live search test");
         return;
     }
-    let out = std::env::var_os(OUT_VAR)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("debrief-live-search"));
+    let out = std::env::var_os(OUT_VAR).map(PathBuf::from).unwrap_or_else(|| {
+        // A fresh private folder that is kept so the screenshots can be looked at; its path is printed.
+        let kept = tempfile::Builder::new().prefix("debrief-live-search-").tempdir().unwrap().keep();
+        eprintln!("results are written to {} (set {OUT_VAR} to choose the folder)", kept.display());
+        kept
+    });
     assert!(out.is_absolute(), "{OUT_VAR} must be an absolute folder");
     std::fs::create_dir_all(&out).unwrap();
     let query = query_from(std::env::var(QUERY_VAR).ok()).unwrap();

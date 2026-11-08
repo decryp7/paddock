@@ -276,8 +276,8 @@ mod tests {
         }
     }
 
-    fn root(tag: &str) -> Root {
-        let root = std::env::temp_dir().join(format!("debrief-parsers-{tag}-{}", std::process::id()));
+    fn root(_tag: &str) -> Root {
+        let root = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("logs")).unwrap();
         Root(root)

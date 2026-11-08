@@ -176,8 +176,8 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    pub(crate) fn temp(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-performance-{tag}-{}", std::process::id()));
+    pub(crate) fn temp(_tag: &str) -> std::path::PathBuf {
+        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

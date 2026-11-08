@@ -100,7 +100,8 @@ mod tests {
     #[test]
     fn an_override_root_holds_every_folder() {
         let app = crate::test_support::test_app_with_commands(None);
-        let root = std::env::temp_dir().join("debrief-app-dirs-test");
+        let _root_scratch = tempfile::tempdir().unwrap();
+        let root = _root_scratch.path().join("debrief-app-dirs-test");
         for (dir, sub) in [(AppDir::Data, "data"), (AppDir::Config, "config"), (AppDir::Log, "logs")] {
             assert_eq!(resolve_with(&app, dir, Some(&root)).unwrap(), root.join(sub));
         }

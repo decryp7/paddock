@@ -155,7 +155,8 @@ mod tests {
     #[test]
     fn a_source_is_excluded_by_its_importer_and_file_kind() {
         let mut ws = crate::Workspace::new(crate::Profile::default_profile()).unwrap();
-        let dir = std::env::temp_dir().join(format!("debrief-copy-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-copy-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.log"), "2026-10-14 09:00:00.000 +00:00 [INF] hello\n").unwrap();
         ws.open(std::slice::from_ref(&dir)).unwrap();

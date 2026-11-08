@@ -457,9 +457,8 @@ Counters:             \\Process(*)\\Private Bytes
     fn finds_output_files_newest_first() {
         // Nested one level down: on Unix the backslashes of the Windows-style output location do not separate folders,
         // so its "folder" is the parent of the root, which must hold nothing but this test's files (not the shared /tmp).
-        let root = std::env::temp_dir()
-            .join(format!("debrief-perfmon-test-{}", std::process::id()))
-            .join("root");
+        let scratch = tempfile::tempdir().unwrap();
+        let root = scratch.path().join("root");
         let sub = root.join("20261014-000001");
         std::fs::create_dir_all(&sub).unwrap();
         let old = sub.join("a.csv");

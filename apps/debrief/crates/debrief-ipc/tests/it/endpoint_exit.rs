@@ -38,6 +38,10 @@ fn an_endpoint_a_host_leaves_on_exit_lands_only_in_the_confined_folder_and_goes_
     // Letters only, so the leak check's endpoint pattern (`debrief-<letters>-<12 hex>`) would catch a leak of it.
     let name = "debrief-exit-test";
     let dir = confined_tmp();
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "this test checks that nothing is left in the shared temp folder"
+    )]
     let shared = std::env::temp_dir().canonicalize().unwrap();
     #[allow(clippy::disallowed_methods)] // a test-only child that ends at once
     let out = Command::new(env!("CARGO_BIN_EXE_debrief-ipc-fake-child"))

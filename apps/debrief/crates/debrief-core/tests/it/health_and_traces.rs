@@ -5,20 +5,13 @@ use debrief_core::api::{Finding, FindingAction, MomentRequest, QueryRequest, Sev
 use debrief_core::query::Query;
 use debrief_core::{LogStore, Profile, Workspace};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A temporary folder removed on drop.
 struct TempDir(PathBuf);
 
 impl TempDir {
     fn new() -> TempDir {
-        static N: AtomicUsize = AtomicUsize::new(0);
-        let p = std::env::temp_dir().join(format!(
-            "debrief-health-{}-{}",
-            std::process::id(),
-            N.fetch_add(1, Ordering::SeqCst)
-        ));
-        std::fs::create_dir_all(&p).unwrap();
+        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         // Opened paths are canonical (e.g. /private/var on macOS).
         TempDir(p.canonicalize().unwrap())
     }

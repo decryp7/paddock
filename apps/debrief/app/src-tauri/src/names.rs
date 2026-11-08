@@ -273,8 +273,8 @@ mod tests {
     use super::*;
     use debrief_core::names::group::NameGroup;
 
-    fn temp(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-it-names-{name}-{}", std::process::id()));
+    fn temp(_name: &str) -> PathBuf {
+        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&d);
         d
     }

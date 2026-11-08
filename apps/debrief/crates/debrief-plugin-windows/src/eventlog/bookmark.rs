@@ -116,8 +116,8 @@ fn escape_attr(s: &str) -> String {
 mod tests {
     use super::*;
 
-    fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-evtbm-{tag}-{}", std::process::id()));
+    fn temp(_tag: &str) -> PathBuf {
+        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&d);
         d
     }

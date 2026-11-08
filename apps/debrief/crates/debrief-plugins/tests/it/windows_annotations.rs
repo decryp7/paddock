@@ -32,7 +32,7 @@ fn ms(t: &str) -> i64 {
 
 #[test]
 fn reboots_and_services_become_spans_and_follow_appends() {
-    let dir = Dir(std::env::temp_dir().join(format!("debrief-win-annot-{}", std::process::id())));
+    let dir = Dir(tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep());
     let _ = std::fs::remove_dir_all(&dir.0);
     std::fs::create_dir_all(&dir.0).unwrap();
     let file = dir.0.join("system.clef");

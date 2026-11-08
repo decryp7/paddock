@@ -638,8 +638,8 @@ pub(crate) mod tests {
     use crate::test_support::Now as _;
     use std::collections::BTreeMap;
 
-    pub(crate) fn temp(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("debrief-report-{tag}-{}", std::process::id()));
+    pub(crate) fn temp(_tag: &str) -> PathBuf {
+        let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -969,7 +969,8 @@ pub(crate) mod tests {
         let p = tauri::async_runtime::block_on(problem_report_preview(handle.clone(), Some("d".into()))).unwrap();
         assert!(p.steps.iter().any(|s| s.contains("report.test")), "{:?}", p.steps);
         assert!(!p.system_info["plugins"].as_array().unwrap().is_empty());
-        let out = std::env::temp_dir().join(format!("debrief-report-cmd-{}.zip", std::process::id()));
+        let _out_scratch = tempfile::tempdir().unwrap();
+        let out = _out_scratch.path().join(format!("debrief-report-cmd-{}.zip", std::process::id()));
         let _ = std::fs::remove_file(&out);
         let grants = || crate::paths::WindowGrants::of(&handle, "main");
         let refused = save_problem_report(handle.clone(), grants(), out.to_string_lossy().into(), None, None).now();

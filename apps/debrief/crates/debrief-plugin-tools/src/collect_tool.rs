@@ -108,7 +108,8 @@ mod tests {
 
     #[test]
     fn collects_a_bundle_with_fake_tools_and_reports_progress() {
-        let root = std::env::temp_dir().join(format!("debrief-tools-collect-{}", std::process::id()));
+        let _root_scratch = tempfile::tempdir().unwrap();
+        let root = _root_scratch.path().join(format!("debrief-tools-collect-{}", std::process::id()));
         let logs = root.join("logs");
         std::fs::create_dir_all(&logs).unwrap();
         std::fs::write(logs.join("app.log"), "2026-10-14 10:00:00 [INF] mail me at a@b.example\n").unwrap();
@@ -135,7 +136,10 @@ mod tests {
     #[test]
     fn an_existing_bundle_is_replaced_only_when_confirmed() {
         use debrief_core::overwrite::FILE_EXISTS_SUFFIX;
-        let root = std::env::temp_dir().join(format!("debrief-tools-collect-ow-{}", std::process::id()));
+        let _root_scratch = tempfile::tempdir().unwrap();
+        let root = _root_scratch
+            .path()
+            .join(format!("debrief-tools-collect-ow-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let fake = Arc::new(FakeRunner::new(|p, _| Err(CommandError::NotFound(p.into()))));
         let tool = DiagnosticsTool::new(fake);
@@ -173,7 +177,10 @@ mod tests {
         let e = tool.invoke("collect", json!({ "plan": "{}", "outDir": " " }), &ctx).unwrap_err();
         assert_eq!(e.to_string(), "choose an output folder");
         // A collection that fails still ends its background task.
-        let file = std::env::temp_dir().join(format!("debrief-tools-collect-file-{}", std::process::id()));
+        let _file_scratch = tempfile::tempdir().unwrap();
+        let file = _file_scratch
+            .path()
+            .join(format!("debrief-tools-collect-file-{}", std::process::id()));
         std::fs::write(&file, "not a folder").unwrap();
         assert!(tool
             .invoke("collect", json!({ "plan": "{}", "outDir": file.join("sub") }), &ctx)

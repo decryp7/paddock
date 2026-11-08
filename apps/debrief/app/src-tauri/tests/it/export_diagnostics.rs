@@ -3,8 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
-fn temp(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("debrief-export-cli-{tag}-{}", std::process::id()));
+fn temp(_tag: &str) -> PathBuf {
+    let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d

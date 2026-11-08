@@ -48,7 +48,8 @@ mod tests {
 
     #[test]
     fn equal_content_has_equal_fingerprints_and_an_edit_at_either_end_changes_it() {
-        let d = std::env::temp_dir().join(format!("debrief-fp-{}", std::process::id()));
+        let _d_scratch = tempfile::tempdir().unwrap();
+        let d = _d_scratch.path().join(format!("debrief-fp-{}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         let big: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
         let (a, b, c, e, s) = (d.join("a"), d.join("b"), d.join("c"), d.join("e"), d.join("s"));

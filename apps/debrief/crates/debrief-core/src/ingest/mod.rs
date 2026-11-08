@@ -140,7 +140,8 @@ mod tests {
 
     #[test]
     fn lists_files_with_names_relative_to_their_folder() {
-        let dir = std::env::temp_dir().join(format!("debrief-ingest-list-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-ingest-list-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("sub")).unwrap();
         std::fs::write(dir.join("a.log"), "x").unwrap();
         std::fs::write(dir.join("sub/b.log"), "x").unwrap();
@@ -167,7 +168,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn links_and_files_the_profile_does_not_include_are_not_listed() {
-        let dir = std::env::temp_dir().join(format!("debrief-ingest-links-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-ingest-links-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.log"), "x").unwrap();

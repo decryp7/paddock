@@ -124,8 +124,8 @@ fn tool() -> (EventLogTool, Arc<FakeLog>) {
     (EventLogTool::with_limits(Arc::new(Shared(log.clone())), limits), log)
 }
 
-fn temp(tag: &str) -> PathBuf {
-    let d = std::env::temp_dir().join(format!("debrief-tools-eventlog-{tag}-{}", std::process::id()));
+fn temp(_tag: &str) -> PathBuf {
+    let d = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
     let _ = std::fs::remove_dir_all(&d);
     d
 }

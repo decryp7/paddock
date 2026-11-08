@@ -641,7 +641,7 @@ mod tests {
     fn store() -> (PathBuf, Connection) {
         let mut b = [0u8; 8];
         getrandom::fill(&mut b).unwrap();
-        let dir = std::env::temp_dir().join(format!("debrief-writer-{}-{:x}", std::process::id(), u64::from_le_bytes(b)));
+        let dir = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         std::fs::create_dir_all(&dir).unwrap();
         let c = Connection::open(dir.join("data.duckdb")).unwrap();
         c.execute_batch(&crate::schema::ddl(&EventSchema::plain())).unwrap();

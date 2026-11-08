@@ -1579,7 +1579,8 @@ mod tests {
 
     #[test]
     fn the_database_gives_freed_memory_back_and_keeps_its_limit() {
-        let dir = std::env::temp_dir().join(format!("debrief-open-db-{}", std::process::id()));
+        let _dir_scratch = tempfile::tempdir().unwrap();
+        let dir = _dir_scratch.path().join(format!("debrief-open-db-{}", std::process::id()));
         let conn = open_db(&dir, &StoreOptions::default()).unwrap();
         let setting = |name: &str| -> String {
             conn.query_row(&format!("SELECT CAST(current_setting('{name}') AS VARCHAR)"), [], |r| r.get(0))
@@ -1595,7 +1596,8 @@ mod tests {
 
     #[test]
     fn the_database_takes_the_chosen_spill_folder_and_allocator_settings() {
-        let root = std::env::temp_dir().join(format!("debrief-open-db-opts-{}", std::process::id()));
+        let _root_scratch = tempfile::tempdir().unwrap();
+        let root = _root_scratch.path().join(format!("debrief-open-db-opts-{}", std::process::id()));
         let (dir, spill) = (root.join("store"), root.join("spill"));
         std::fs::create_dir_all(&dir).unwrap();
         let opts = StoreOptions {

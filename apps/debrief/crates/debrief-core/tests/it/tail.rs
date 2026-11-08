@@ -23,8 +23,8 @@ use std::time::{Duration, Instant};
 struct Dir(PathBuf);
 
 impl Dir {
-    fn new(tag: &str) -> Dir {
-        let p = std::env::temp_dir().join(format!("debrief-tail-{tag}-{}", std::process::id()));
+    fn new(_tag: &str) -> Dir {
+        let p = tempfile::Builder::new().prefix("debrief-test-").tempdir().unwrap().keep();
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         Dir(std::fs::canonicalize(p).unwrap())
@@ -1213,8 +1213,9 @@ fn ticks_flush_partial_lines() {
     let factory = Arc::new(FakeFactory::default());
     let ticks = Arc::new(AtomicUsize::new(0));
     let t = ticks.clone();
+    let scratch = tempfile::tempdir().unwrap();
     let live = LiveTail::start(
-        &[std::env::temp_dir()],
+        &[scratch.path().to_path_buf()],
         WatchSettings {
             tick_ms: 20,
             ..WatchSettings::default()
