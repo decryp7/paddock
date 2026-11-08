@@ -688,7 +688,11 @@ mod tests {
         // the project wiki is linted by tools/wiki on every wiki change (ER-30), as is its settings file
         for f in ["docs/wiki/index.md", "wiki-lint.json"] {
             let p = plan(&[f]);
-            assert_eq!((&p["tools"], &p["docs"], &p["crates"], &p["all"]), (&json!(true), &json!(false), &json!(false), &json!(false)), "{f}");
+            assert_eq!(
+                (&p["tools"], &p["docs"], &p["crates"], &p["all"]),
+                (&json!(true), &json!(false), &json!(false), &json!(false)),
+                "{f}"
+            );
         }
         assert_eq!(plan(&["apps/dyno/CHANGELOG.md"])["apps"], json!(["dyno"]));
         assert_eq!(plan(&["apps/dyno/REVIEWED.md"])["apps"], json!(["dyno"]));
