@@ -59,6 +59,7 @@ pub struct Personal {
     user_names: Vec<String>,
     home_dirs: Vec<String>,
     machine_names: Vec<String>,
+    keep_local: bool,
 }
 
 fn is_word(c: char) -> bool {
@@ -285,18 +286,18 @@ fn replace_emails(text: &str) -> (String, u32) {
     (out, count)
 }
 
-/// Loopback, unspecified and private (RFC 1918) IPv4 addresses: diagnostic, not personal, so they stay in a report.
-fn is_diagnostic_v4(ip: std::net::Ipv4Addr) -> bool {
+/// Loopback, unspecified and private (RFC 1918) IPv4 addresses: they say how a machine is set up, not who owns it.
+fn is_local_v4(ip: std::net::Ipv4Addr) -> bool {
     ip.is_loopback() || ip.is_unspecified() || ip.is_private()
 }
 
-/// Loopback, unspecified and unique-local (`fc00::/7`) IPv6 addresses. Link-local ones stay redacted: their last 64 bits are
-/// often derived from the MAC address.
-fn is_diagnostic_v6(ip: std::net::Ipv6Addr) -> bool {
-    ip.is_loopback() || ip.is_unspecified() || (ip.segments()[0] & 0xfe00) == 0xfc00
+/// Loopback and unspecified IPv6 addresses. Unique-local ones (`fc00::/7`, which include Tailscale's `fd7a:115c:a1e0::/48`)
+/// name a network the owner belongs to and are always redacted.
+fn is_local_v6(ip: std::net::Ipv6Addr) -> bool {
+    ip.is_loopback() || ip.is_unspecified()
 }
 
-fn replace_ipv4(text: &str) -> (String, u32) {
+fn replace_ipv4(text: &str, keep_local: bool) -> (String, u32) {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
     let (mut i, mut count) = (0, 0);
@@ -333,15 +334,12 @@ fn replace_ipv4(text: &str) -> (String, u32) {
                     || (chars[j] == '.' && chars.get(j + 1).is_some_and(|c| c.is_ascii_digit())));
             if ok && groups == 4 && after_ok {
                 let text: String = chars[i..j].iter().collect();
-                // Loopback, unspecified and private addresses say how the machine is set up, not who owns it.
-                if text
-                    .parse::<std::net::Ipv4Addr>()
-                    .is_ok_and(|ip| !is_diagnostic_v4(ip))
-                {
+                let keep = keep_local && text.parse::<std::net::Ipv4Addr>().is_ok_and(is_local_v4);
+                if keep {
+                    out.push_str(&text);
+                } else {
                     out.push_str("<ip>");
                     count += 1;
-                } else {
-                    out.push_str(&text);
                 }
                 i = j;
                 continue;
@@ -355,7 +353,7 @@ fn replace_ipv4(text: &str) -> (String, u32) {
 
 /// Replaces every IPv6 address (a run of hex digits, colons and dots that parses as one) with `<ip>`. Times
 /// (`12:30:45`) and MAC addresses do not parse as IPv6 and are left alone.
-fn replace_ipv6(text: &str) -> (String, u32) {
+fn replace_ipv6(text: &str, keep_local: bool) -> (String, u32) {
     let is_part = |c: char| c.is_ascii_hexdigit() || c == ':' || c == '.';
     let mut out = String::with_capacity(text.len());
     let (mut count, mut rest) = (0, text);
@@ -381,7 +379,7 @@ fn replace_ipv6(text: &str) -> (String, u32) {
             None
         };
         if let Some(ip) = parsed {
-            if is_diagnostic_v6(ip) {
+            if keep_local && is_local_v6(ip) {
                 out.push_str(body);
             } else {
                 out.push_str("<ip>");
@@ -414,7 +412,22 @@ impl Personal {
             user_names: clean(user_names, 2),
             home_dirs: clean(home_dirs, 3),
             machine_names: clean(machine_names, 2),
+            keep_local: false,
         }
+    }
+
+    /// Keeps loopback, unspecified and private (RFC 1918) IPv4 addresses and the IPv6 loopback and unspecified addresses
+    /// instead of replacing them. For a report the user reads and saves on this machine: such addresses show how it is set
+    /// up and say nothing about its owner. Everything else, including CGNAT (`100.64.0.0/10`) and unique-local IPv6 (Tailscale),
+    /// is still replaced. Anything that leaves the machine (a web search) must not use it.
+    pub fn keep_local_addresses(mut self) -> Personal {
+        self.keep_local = true;
+        self
+    }
+
+    /// Whether local addresses are kept ([`Personal::keep_local_addresses`]).
+    pub fn keeps_local_addresses(&self) -> bool {
+        self.keep_local
     }
 
     /// Redacts `text` and reports what was removed.
@@ -445,10 +458,10 @@ impl Personal {
         let (t, n) = replace_macs(&s);
         s = t;
         c.ip_addresses += n;
-        let (t, n) = replace_ipv4(&s);
+        let (t, n) = replace_ipv4(&s, self.keep_local);
         s = t;
         c.ip_addresses += n;
-        let (t, n) = replace_ipv6(&s);
+        let (t, n) = replace_ipv6(&s, self.keep_local);
         s = t;
         c.ip_addresses += n;
         (s, c)
@@ -489,7 +502,7 @@ mod tests {
     #[test]
     fn unknown_profiles_emails_and_addresses_are_removed() {
         let r = Personal::default();
-        let (s, c) = r.apply("C:\\Users\\bob\\x /home/carol/y /Users/Shared/z mail bob@example.com, host 198.51.100.20:8080 and 1.2.3 and 999.1.1.1 v1.2.3.4x");
+        let (s, c) = r.apply("C:\\Users\\bob\\x /home/carol/y /Users/Shared/z mail bob@example.com, host 192.168.1.20:8080 and 1.2.3 and 999.1.1.1 v1.2.3.4x");
         assert_eq!(c.profile_paths, 2);
         assert!(
             s.contains("C:\\Users\\<user>\\x")
@@ -551,31 +564,43 @@ mod tests {
     fn ipv6_addresses_are_redacted_but_times_and_mac_addresses_are_not() {
         let (t, n) = replace_ipv6(
             "peer 2a00:1450:4001:82b::200e and [::1]:443, fe80::1ff:fe23:4567:890a. at 12:30:45 mac aa:bb:cc:dd:ee:ff",
+            false,
         );
-        assert_eq!(n, 2);
+        assert_eq!(n, 3);
         assert_eq!(
             t,
-            "peer <ip> and [::1]:443, <ip>. at 12:30:45 mac aa:bb:cc:dd:ee:ff"
+            "peer <ip> and [<ip>]:443, <ip>. at 12:30:45 mac aa:bb:cc:dd:ee:ff"
         );
-        let (t, n) = replace_ipv6("nothing here: 1:2");
+        let (t, n) = replace_ipv6("nothing here: 1:2", false);
         assert_eq!((t.as_str(), n), ("nothing here: 1:2", 0));
         let r = Personal::new(&[], &[], &[]);
-        let (t, c) = r.apply("a 198.51.100.3 b 2001:db8::5");
+        let (t, c) = r.apply("a 10.1.2.3 b 2001:db8::5");
         assert_eq!(t, "a <ip> b <ip>");
         assert_eq!(c.ip_addresses, 2);
     }
 
     #[test]
-    fn loopback_unspecified_and_private_addresses_are_diagnostic_and_stay() {
-        let r = Personal::default();
-        let kept = "bind 127.0.0.1:8080, 0.0.0.0, 10.1.2.3, 172.16.0.9, 172.31.255.1, 192.168.1.5, ::1, [::1]:443, fd00::5 and fc00::1";
+    fn by_default_every_address_is_replaced_local_ones_too() {
+        let (s, c) = Personal::default().apply(
+            "127.0.0.1 0.0.0.0 10.1.2.3 172.16.0.9 192.168.1.5 ::1 fd00::5 fd7a:115c:a1e0::1 100.64.1.2",
+        );
+        assert_eq!(s, "<ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip>");
+        assert_eq!(c.ip_addresses, 9);
+    }
+
+    #[test]
+    fn opted_in_loopback_unspecified_and_rfc1918_addresses_stay() {
+        let r = Personal::default().keep_local_addresses();
+        let kept = "bind 127.0.0.1:8080, 0.0.0.0, 10.1.2.3, 172.16.0.9, 172.31.255.1, 192.168.1.5, ::1, [::1]:443 and ::";
         let (s, c) = r.apply(kept);
         assert_eq!(s, kept);
         assert_eq!(c.ip_addresses, 0);
-        // Public, link-local (the IPv6 one carries the MAC) and the edges of the private ranges go.
-        let (s, c) = r.apply("203.0.113.7 8.8.8.8 172.15.0.1 172.32.0.1 169.254.1.2 fe80::1ff:fe23:4567:890a 2001:db8::5");
-        assert_eq!(s, "<ip> <ip> <ip> <ip> <ip> <ip> <ip>");
-        assert_eq!(c.ip_addresses, 7);
+        // Public, CGNAT, link-local, unique-local (Tailscale's fd7a:115c:a1e0::/48 too) and the edges of the private ranges go.
+        let (s, c) = r.apply(
+            "203.0.113.7 8.8.8.8 172.15.0.1 172.32.0.1 169.254.1.2 100.64.1.2 fe80::1ff:fe23:4567:890a 2001:db8::5 fd00::5 fc00::1 fd7a:115c:a1e0::1",
+        );
+        assert_eq!(s, "<ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip> <ip>");
+        assert_eq!(c.ip_addresses, 11);
     }
 
     #[test]

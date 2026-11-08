@@ -107,12 +107,7 @@ const HOSTILE: &[(&str, &str, &str, Verdict)] = &[
         "S4EVNF0M123456A",
         Left(OTHER),
     ),
-    (
-        "IPv4 with port",
-        "peer 203.0.113.9:8080",
-        "203.0.113.9",
-        Removed,
-    ),
+    ("IPv4 with port", "peer 10.1.2.3:8080", "10.1.2.3", Removed),
     ("IPv6 with zone", "peer fe80::1%en0", "fe80::1", Removed),
     ("e-mail", "from alex.doe@example.com", "alex.doe", Removed),
     (
@@ -340,8 +335,8 @@ fn the_list_of_what_is_left_is_the_list_the_dialog_shows() {
 }
 
 #[test]
-fn loopback_and_private_addresses_are_diagnostic_and_stay_in_every_form() {
-    let r = redactor();
+fn opted_in_loopback_and_rfc1918_addresses_stay_in_every_form_and_the_rest_go() {
+    let r = redactor().keep_local_addresses();
     for text in [
         "bind 10.1.2.3:8080",
         "bind 127.0.0.1:8080",
@@ -354,5 +349,16 @@ fn loopback_and_private_addresses_are_diagnostic_and_stay_in_every_form() {
         assert_eq!(c.ip_addresses, 0, "{text}: {out}");
         assert!(out.contains(text), "{text} was changed: {out}");
         assert_eq!(r.text(text).0, text);
+    }
+    for (text, needle) in [
+        ("tailnet fd7a:115c:a1e0::1", "fd7a:115c:a1e0"),
+        ("unique-local fd00::5", "fd00::5"),
+        ("carrier-grade 100.64.1.2", "100.64.1.2"),
+        ("public 203.0.113.9", "203.0.113.9"),
+    ] {
+        let line = json!({"@m": text, "Peers": [{"Addr": text}]}).to_string();
+        let (out, _) = r.log_line(&line);
+        assert!(!out.contains(needle), "{text} survived: {out}");
+        assert!(!r.text(text).0.contains(needle));
     }
 }

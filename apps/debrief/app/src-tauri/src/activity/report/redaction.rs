@@ -1,6 +1,6 @@
 //! Removes secrets and personal data from everything in a report but the user's own description, with the shared redactor
 //! (`paddock_diag`): secrets (tokens, passwords, keys, URL credentials, card numbers), user names, home folders, the machine's
-//! name, e-mail and public IP addresses (loopback and private ones are diagnostic and stay).
+//! name, e-mail and IP addresses (loopback and private network addresses are kept: they show how the machine is set up).
 //! Debrief adds MAC addresses, which the shared layers leave alone.
 //!
 //! Every log line and every JSON value passes here before the report counts, previews or writes it (a CLEF line is parsed and
@@ -9,7 +9,6 @@
 
 use paddock_diag::{RedactionCounts, Redactor};
 use serde::Serialize;
-use serde_json::Value;
 
 /// What replaces a MAC address.
 pub const MAC: &str = "<mac>";
@@ -18,9 +17,11 @@ pub const MAC: &str = "<mac>";
 /// back-references, so there is one pattern per separator.
 const MAC_PATTERNS: [&str; 2] = [r"(?i)\b[0-9a-f]{2}(?::[0-9a-f]{2}){5}\b", r"(?i)\b[0-9a-f]{2}(?:-[0-9a-f]{2}){5}\b"];
 
-/// The redactor for the given user names, home folders and machine names (tests pass fixed ones).
+/// The redactor for the given user names, home folders and machine names (tests pass fixed ones). The report is read and saved
+/// on this machine, so loopback and private network addresses stay in it (they show how the machine is set up); public
+/// ones, CGNAT and unique-local IPv6 (Tailscale) go.
 pub fn redactor_for(users: &[String], homes: &[String], machines: &[String]) -> Redactor {
-    let mut r = Redactor::new().with_personal(users, homes, machines);
+    let mut r = Redactor::new().with_personal(users, homes, machines).keep_local_addresses();
     for pattern in MAC_PATTERNS {
         // Constant patterns well inside the shared limits: a refusal is a bug caught by every test of this module.
         r = r.with_pattern(pattern, MAC).expect("the MAC patterns are valid");
@@ -65,47 +66,28 @@ pub fn redact_log(redactor: &Redactor, bytes: &[u8]) -> (Vec<u8>, RedactionCount
     (out.into_bytes(), counts)
 }
 
-/// A JSON value with the redactor's text rules applied to every string at every depth, keys included (a path or a name
-/// can be a key). Numbers, booleans and nulls are not text and stay.
-pub fn redact_value(redactor: &Redactor, value: &Value) -> (Value, RedactionCounts) {
-    let mut counts = RedactionCounts::default();
-    let out = walk(redactor, value, &mut counts);
-    (out, counts)
-}
-
-fn walk(redactor: &Redactor, value: &Value, counts: &mut RedactionCounts) -> Value {
-    match value {
-        Value::String(s) => Value::String(text(redactor, s, counts)),
-        Value::Array(items) => Value::Array(items.iter().map(|v| walk(redactor, v, counts)).collect()),
-        Value::Object(map) => Value::Object(
-            map.iter()
-                .map(|(k, v)| (text(redactor, k, counts), walk(redactor, v, counts)))
-                .collect(),
-        ),
-        other => other.clone(),
-    }
-}
-
-fn text(redactor: &Redactor, s: &str, counts: &mut RedactionCounts) -> String {
-    let (t, c) = redactor.text(s);
-    counts.add(&c);
-    t
-}
-
 /// What a JSON file of a report holds: `value` (any serialisable data) redacted as a [`Value`], then pretty-printed. The
 /// text is never redacted after printing, where a JSON-escaped path (`C:\\Users\\x`) would read differently.
 pub fn redacted_json(redactor: &Redactor, value: &impl Serialize) -> (Vec<u8>, RedactionCounts) {
     let Ok(value) = serde_json::to_value(value) else {
         return (Vec::new(), RedactionCounts::default());
     };
-    let (value, counts) = redact_value(redactor, &value);
+    // Values only: the keys of these files are fixed names, and redacting a key could merge two into one.
+    let (value, counts) = redactor.text_in_json(&value);
     (serde_json::to_vec_pretty(&value).unwrap_or_default(), counts)
 }
 
 /// The steps to reproduce with each step redacted.
 pub fn redact_steps(redactor: &Redactor, steps: &[String]) -> (Vec<String>, RedactionCounts) {
     let mut counts = RedactionCounts::default();
-    let out = steps.iter().map(|s| text(redactor, s, &mut counts)).collect();
+    let out = steps
+        .iter()
+        .map(|s| {
+            let (t, c) = redactor.text(s);
+            counts.add(&c);
+            t
+        })
+        .collect();
     (out, counts)
 }
 

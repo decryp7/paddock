@@ -53,13 +53,14 @@ pub struct Setup {
 }
 
 impl Setup {
-    /// A setup with the built-in sections ([`builtin::all`]) and the default redactor for this machine.
+    /// A setup with the built-in sections ([`builtin::all`]) and the default redactor for this machine. The report is read and
+    /// saved on this machine, so loopback and private network addresses stay in it ([`Redactor::keep_local_addresses`]).
     pub fn new(app: AppInfo, dirs: AppDirs) -> Setup {
         Setup {
             app,
             dirs,
             sections: builtin::all(),
-            redactor: Redactor::for_machine(&paddock_env::ProcessVars),
+            redactor: Redactor::for_machine(&paddock_env::ProcessVars).keep_local_addresses(),
             log: None,
             picker: None,
             clock: Arc::new(SystemClock),

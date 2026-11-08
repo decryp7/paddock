@@ -10457,7 +10457,7 @@
         </context-group>
       </trans-unit>
       <trans-unit id="diagnostics.reportDialog.descriptionHint" datatype="html">
-        <source>Optional. Do not paste passwords or keys.</source>
+        <source>Optional. It goes into the report as you write it, so do not paste passwords or keys.</source>
         <context-group purpose="location">
           <context context-type="sourcefile">src/app/diagnostics/report-problem-dialog.ts</context>
           <context context-type="linenumber">38,41</context>

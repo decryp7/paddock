@@ -400,12 +400,13 @@ fn report_files(inputs: &ReportInputs, description: &str) -> Vec<ReportFile> {
         redacted: counts,
     });
     let recovery = recovery::session_recovery(inputs.data_dir.as_deref(), inputs.previous_crash);
+    let (data, counts) = redaction::redacted_json(&inputs.redactor, &recovery);
     files.push(ReportFile {
         name: "session-recovery.json".into(),
         kind: FileKind::SessionRecovery,
-        summary: recovery::summary(&recovery),
-        data: serde_json::to_vec_pretty(&recovery).unwrap_or_default(),
-        redacted: RedactionCounts::default(),
+        summary: format!("{}{}", recovery::summary(&recovery), redaction::removed_note(&counts)),
+        data,
+        redacted: counts,
     });
     // Redacted first: the activity file below is cut from the redacted lines.
     let mut logs: Vec<(String, Vec<u8>)> = Vec::new();
@@ -522,7 +523,7 @@ pub fn preview(inputs: &ReportInputs, description: &str) -> ProblemReportPreview
             .collect(),
         // What the dialog shows is what the zip holds: the same redaction.
         steps: redaction::redact_steps(&inputs.redactor, &super::steps(&inputs.breadcrumbs, None)).0,
-        system_info: redaction::redact_value(&inputs.redactor, &system_info(inputs)).0,
+        system_info: inputs.redactor.text_in_json(&system_info(inputs)).0,
     }
 }
 
@@ -903,6 +904,8 @@ pub(crate) mod tests {
         ("peer [2001:db8:85a3::8a2e:370:7334]:443", "db8:85a3"),
         ("nic aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"),
         ("nic AA-BB-CC-DD-EE-01", "AA-BB-CC-DD-EE-01"),
+        ("tailnet fd7a:115c:a1e0::1", "fd7a:115c:a1e0"),
+        ("carrier-grade 100.64.1.2", "100.64.1.2"),
         ("mail dana.smith@example.org", "dana.smith"),
         ("Authorization: Bearer abcdef0123456789abcdef", "abcdef0123456789abcdef"),
         ("password=hunter2hunter2", "hunter2hunter2"),
@@ -1067,10 +1070,45 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_snapshot_sidecar_is_redacted_as_a_value_not_as_pretty_printed_text() {
-        let d = temp("redact-sidecar");
-        let mut inputs = hostile_inputs(&d);
-        inputs.include_screenshots = false;
+    fn quoted_and_multi_line_error_text_in_a_sidecar_is_redacted_inside_the_string() {
+        // What a panel reports can hold quotes, line breaks and a Windows path with a space: in the pretty-printed sidecar they
+        // are escapes (`\"`, `\n`, `\\`), so only the string itself reads right.
+        const AWKWARD: &[(&str, &str)] = &[
+            ("config {\"password\":\"hunter2hunter2\"} rejected", "hunter2hunter2"),
+            ("password=\"hunter2hunter2\"", "hunter2hunter2"),
+            (
+                "first line\nAuthorization: Bearer abcdef0123456789abcdef\nlast",
+                "abcdef0123456789abcdef",
+            ),
+            ("opened \"C:\\Users\\Dana Lee\\Documents\\a.evtx\" twice", "Dana Lee"),
+            ("url \"https://svc:s3cr3tpw@internal.example/x\"", "s3cr3tpw"),
+        ];
+        let d = temp("sidecar-awkward");
+        let mut inputs = inputs_in(&d);
+        inputs.redactor = alex();
+        let store = inputs.snapshots.take().unwrap();
+        let env = Environment {
+            app_version: "1".into(),
+            os: "x".into(),
+            arch: "y".into(),
+        };
+        for (i, (text, _)) in AWKWARD.iter().enumerate() {
+            let ctx = SnapshotContext {
+                reason: "panel-failed".into(),
+                message: (*text).into(),
+                stack: Some(format!("{text}\n  at frame")),
+                ..Default::default()
+            };
+            store
+                .save(
+                    ImageFormat::Png,
+                    &[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, i as u8],
+                    &ctx,
+                    &env,
+                )
+                .unwrap();
+        }
+        inputs.snapshots = Some(store);
         let out = d.join("r.zip");
         write(&inputs, "", &out).unwrap();
         let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
@@ -1080,19 +1118,22 @@ pub(crate) mod tests {
             .filter(|n| n.starts_with("snapshots/") && n.ends_with(".json"))
             .map(String::from)
             .collect();
-        let mut seen = 0;
+        let mut checked = 0;
         for name in sidecars {
             let v: Value = serde_json::from_str(&zip_text(&mut zip, &name)).unwrap();
-            let message = v["message"].as_str().unwrap_or_default();
-            if message.contains("C:") {
-                // The Windows path row: its JSON text has `C:\\Users\\bob\\...`, which a line-by-line pass cannot read.
-                assert_eq!(message, "failed to open C:\\Users\\<user>\\AppData\\Local\\x.log");
-                assert_eq!(v["stack"], "at C:\\Users\\<user>\\AppData\\Local\\x.log");
-                assert_eq!(v["breadcrumbs"][0]["params"]["Path"], "C:\\Users\\<user>\\AppData\\Local\\x.log");
-                seen += 1;
+            let strings = format!(
+                "{} {}",
+                v["message"].as_str().unwrap_or_default(),
+                v["stack"].as_str().unwrap_or_default()
+            );
+            for (text, secret) in AWKWARD {
+                if v["message"].as_str().is_some_and(|m| m.starts_with(&text[..5.min(text.len())])) {
+                    assert!(!strings.contains(secret), "{name} still has {secret}: {strings}");
+                    checked += 1;
+                }
             }
         }
-        assert_eq!(seen, 1);
+        assert!(checked >= AWKWARD.len(), "checked {checked}");
         std::fs::remove_dir_all(d).unwrap();
     }
 
@@ -1111,6 +1152,57 @@ pub(crate) mod tests {
             .iter()
             .any(|e| e.name == "steps-to-reproduce.txt" && e.summary.contains("removed")));
         std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn loopback_and_private_network_addresses_stay_in_the_report() {
+        let d = temp("local-addresses");
+        let mut inputs = inputs_in(&d);
+        inputs.redactor = alex();
+        inputs.snapshots = None;
+        let line = "{\"@t\":\"2026-10-17T08:00:00Z\",\"@m\":\"engine on 127.0.0.1:52731, lan 192.168.1.5, from 203.0.113.9\",\"SourceContext\":\"Debrief.Activity\",\"Operation\":\"file.open\"}\n";
+        std::fs::write(inputs.log_dir.as_ref().unwrap().join("debrief.log"), line).unwrap();
+        inputs.breadcrumbs = vec![{
+            let mut b = crumb("file.open");
+            b.params.insert("Path".into(), "10.0.0.7 and 203.0.113.9".into());
+            b
+        }];
+        let out = d.join("r.zip");
+        write(&inputs, "", &out).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let log = zip_text(&mut zip, "logs/debrief.log");
+        assert!(log.contains("127.0.0.1:52731") && log.contains("192.168.1.5"), "{log}");
+        assert!(!log.contains("203.0.113.9"), "{log}");
+        let crumbs = zip_text(&mut zip, "breadcrumbs.json");
+        assert!(crumbs.contains("10.0.0.7 and <ip>"), "{crumbs}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn session_recovery_json_is_redacted_too() {
+        let d = temp("recovery-redact");
+        let mut inputs = inputs_in(&d);
+        inputs.redactor = alex();
+        inputs.snapshots = None;
+        let data = d.join("data");
+        let session = data.join("recovered").join("alex");
+        std::fs::create_dir_all(&session).unwrap();
+        std::fs::write(session.join("last-session.debriefproj"), "{}").unwrap();
+        std::fs::write(data.join("recovered").join("manifest.json"), r#"{"version":2,"windows":["alex"]}"#).unwrap();
+        inputs.data_dir = Some(data);
+        let out = d.join("r.zip");
+        write(&inputs, "", &out).unwrap();
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let text = zip_text(&mut zip, "session-recovery.json");
+        assert!(text.contains("<user>") && !text.contains("alex"), "{text}");
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn redacting_a_file_keeps_its_keys_so_two_keys_never_merge() {
+        let (out, _) = redaction::redacted_json(&alex(), &json!({ "/Users/alex/a": "x", "/Users/alex/b": "y" }));
+        let v: Value = serde_json::from_slice(&out).unwrap();
+        assert_eq!(v.as_object().map(|m| m.len()), Some(2), "{v}");
     }
 
     #[test]

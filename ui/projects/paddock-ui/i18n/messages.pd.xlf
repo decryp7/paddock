@@ -555,7 +555,7 @@
         <source>The contents of your documents and files.</source>
       </trans-unit>
       <trans-unit id="pd.diag.not-in-personal" datatype="html">
-        <source>Your user name, home folder, machine name, e-mail addresses and public IP addresses (they are replaced). Local and private network addresses are kept for diagnosis.</source>
+        <source>Your user name, home folder, machine name, e-mail addresses and IP addresses (they are replaced), except this computer's own address (127.0.0.1) and private network addresses (10.x.x.x, 172.16-31.x.x, 192.168.x.x), which are kept for diagnosis.</source>
       </trans-unit>
       <trans-unit id="pd.diag.not-in-secrets" datatype="html">
         <source>Passwords, tokens and keys (they are replaced where the app can recognise them).</source>

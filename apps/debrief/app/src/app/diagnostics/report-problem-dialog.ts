@@ -35,7 +35,7 @@ export const MAX_DESCRIPTION = 10 * 1024;
         aria-describedby="report-description-hint"
         data-testid="report-description"
       ></textarea>
-      <small id="report-description-hint" i18n="@@diagnostics.reportDialog.descriptionHint">Optional. Do not paste passwords or keys.</small>
+      <small id="report-description-hint" i18n="@@diagnostics.reportDialog.descriptionHint">Optional. It goes into the report as you write it, so do not paste passwords or keys.</small>
     </label>
     <div class="screens">
       <mat-checkbox [checked]="includeScreenshots()" (change)="setIncludeScreenshots($event.checked)" aria-describedby="report-screenshots-hint" data-testid="report-screenshots" i18n="@@diagnostics.reportDialog.screenshots">Include screenshots of the Debrief window</mat-checkbox>

@@ -1371,7 +1371,7 @@
     "diagnostics.reportDialog.collectFailed": "⟦Çööûûļð ñööţ çöļļééçţ ţĥéé ŕééþöŕţ: {$error}⟧",
     "diagnostics.reportDialog.collecting": "⟦Çööļļééçţîîñĝ…⟧",
     "diagnostics.reportDialog.contents": "⟦Çööñţééñţš ({$INTERPOLATION} ƒîîļééš, {$INTERPOLATION_1})⟧",
-    "diagnostics.reportDialog.descriptionHint": "⟦ÖÖþţîîööñáļ. Ðöö ñööţ þáášţé þááššŵööŕðš ööŕ ķéýš.⟧",
+    "diagnostics.reportDialog.descriptionHint": "⟦ÖÖþţîîööñáļ. ÎÎţ ĝööééš îñţöö ţĥéé ŕééþöŕţ ááš ýööûû ŵŕîţéé îîţ, šöö ðö ñööţ þáášţéé þáššŵööŕðš ööŕ ķééýš.⟧",
     "diagnostics.reportDialog.lead": "⟦Ðééƀŕîîééƒ þûţš ŵĥááţ îîš ñéééðééð ţöö ðîîáĝñööšéé ţĥéé þŕöƀļééɱ îîñţöö öñéé žîîþ ƒîîļé ţĥááţ ýööûû šáṽéé ááñð ááţţáçĥ ţöö ýööûûŕ ŕéþööŕţ. Ñööţĥîîñĝ îš šééñţ ááñýŵĥééŕé.⟧",
     "diagnostics.reportDialog.noActivity": "⟦Ñöö ŕééçééñţ áçţîîṽîîţý ŵááš ŕéçööŕðééð.⟧",
     "diagnostics.reportDialog.noDescription": "⟦Ñöö ðééšçŕîîþţîööñ⟧",

@@ -50,7 +50,7 @@ fn machine() -> (tempfile::TempDir, AppDirs) {
     let lines = [
         json!({"@t":"2026-10-24T09:00:00Z","@l":"Information","@m":"started for alex on ALEX-PC"}),
         json!({"@t":"2026-10-24T09:00:01Z","@l":"Error","@m":"open /Users/alex/Documents/a.log failed","Token":"abc","Window":"main"}),
-        json!({"@t":"2026-10-24T09:00:02Z","@l":"Warning","@m":"retry with token=hunter2hunter2 to 203.0.113.9"}),
+        json!({"@t":"2026-10-24T09:00:02Z","@l":"Warning","@m":"retry with token=hunter2hunter2 to 10.1.2.3"}),
     ];
     let text: String = lines.iter().map(|l| format!("{l}\n")).collect();
     std::fs::write(d.logs().join("demo.2026-10-24.log"), text).unwrap();
@@ -147,7 +147,7 @@ fn nothing_private_survives_in_any_file() {
             "ALEX-PC",
             "hunter2hunter2",
             "sk-secret-value",
-            "203.0.113.9",
+            "10.1.2.3",
             "\"abc\"",
         ] {
             assert!(!text.contains(secret), "{name} still has {secret}: {text}");
@@ -760,4 +760,13 @@ fn the_system_info_names_the_build_commit() {
         .expect("system-info.json");
     let v: serde_json::Value = serde_json::from_slice(&info.data).unwrap();
     assert_eq!(v["app"]["commit"], "abc1234", "{v}");
+}
+
+#[test]
+fn an_app_can_add_up_the_counts_of_its_own_files() {
+    let (_, a) = Redactor::new().text("token=abc 203.0.113.1");
+    let mut sum = paddock_diag::RedactionCounts::default();
+    sum.add(&a);
+    sum.add(&a);
+    assert_eq!((sum.secrets, sum.ip_addresses, sum.total()), (2, 2, 4));
 }
