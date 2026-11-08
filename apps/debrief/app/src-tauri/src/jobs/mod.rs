@@ -57,6 +57,8 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
     jobs.set_retry(JobKind::Import, move |job| crate::workspace_commands::retry_import(&h, job));
     let h = app.clone();
     jobs.set_retry(JobKind::Research, move |job| crate::browser::research::retry(&h, job));
+    let h = app.clone();
+    jobs.set_retry(JobKind::Maintenance, move |job| crate::store_pane::retry_maintenance(&h, job));
     let mirrored = Mutex::new(HashSet::<String>::new());
     let sent = Mutex::new(Sent::default());
     jobs.subscribe(move |event| match event {
@@ -64,7 +66,10 @@ pub fn wire<R: Runtime>(app: &AppHandle<R>, jobs: &Jobs) {
             emit_all(&handle, &service, &sent);
             mirror(&handle, &service, &mirrored);
         }
-        JobsEvent::Finished(f) => finished(&handle, f),
+        JobsEvent::Finished(f) => {
+            crate::store_pane::ordering_job_finished(&handle, &f.job);
+            finished(&handle, f)
+        }
         JobsEvent::Paused { kind, reason } => paused(&handle, *kind, reason),
     });
 }
@@ -553,6 +558,20 @@ where
     E: JobFailure + Send + 'static,
 {
     let jobs = app.try_state::<Jobs>().ok_or("Debrief is not ready yet")?;
+    // After every window job: a store worker that restarted meanwhile reopened the store, and an ordering it was
+    // running is gone, so the window checks its time order (at most one ordering job runs).
+    let (handle, window) = (app.clone(), spec.source.window.clone());
+    let f = move |ctx: &JobCtx| {
+        let out = f(ctx);
+        if let Some(label) = &window {
+            if let Ok(win) = crate::windows::CurrentWindow::of(&handle, label) {
+                if win.engine.worker_restarted() {
+                    crate::store_pane::order_events_if_incomplete(&handle, &win);
+                }
+            }
+        }
+        out
+    };
     jobs.submit(spec, controls, f).map(|h| h.id).map_err(|r| r.to_string())
 }
 

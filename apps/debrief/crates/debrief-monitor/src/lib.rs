@@ -90,7 +90,43 @@ pub(crate) struct Probes {
     pub dotnet: Option<Result<dotnet::Opened>>,
 }
 
-/// The sampling loop, with every dependency injected.
+/// Message template of the event that ends every run.
+pub const STOPPED_TEMPLATE: &str =
+    "Monitoring stopped after {ElapsedMs} ms ({StopReason}) with {Samples} samples and {StatsEvents} stats events";
+
+/// What one run did, for the event that ends it.
+#[derive(Default)]
+struct Tally {
+    samples: u64,
+    stats: u64,
+}
+
+/// The event that ends a run: how long it ran, why it stopped and how many samples and stats events it wrote, so a
+/// short or empty log says whether the run ended early, failed, or the samples never came.
+fn stopped_record(host: &str, now: i64, elapsed_ms: i64, reason: &str, tally: &Tally) -> Record {
+    let ms = elapsed_ms.max(0);
+    let mut r = stamp(Record::new(0), now);
+    r.level = if reason.starts_with("error") {
+        Level::Error
+    } else {
+        Level::Information
+    };
+    r.message = format!(
+        "Monitoring stopped after {ms} ms ({reason}) with {} samples and {} stats events",
+        tally.samples, tally.stats
+    );
+    r.template = Some(STOPPED_TEMPLATE.into());
+    r.fields = base_fields(host);
+    r.fields.insert("ElapsedMs".into(), ms.into());
+    r.fields.insert("StopReason".into(), reason.into());
+    r.fields.insert("Samples".into(), tally.samples.into());
+    r.fields.insert("StatsEvents".into(), tally.stats.into());
+    r
+}
+
+/// The sampling loop, with every dependency injected. Every run ends with the [`STOPPED_TEMPLATE`] event, also when
+/// it fails (its `StopReason` is then `error: ...`; the original error is returned even if that event cannot be
+/// written).
 pub(crate) fn run_loop(
     cfg: &Config,
     source: &mut dyn ProcessSource,
@@ -101,6 +137,37 @@ pub(crate) fn run_loop(
     clock: &dyn Fn() -> i64,
 ) -> Result<()> {
     let host = source.host_name();
+    let started = clock();
+    let mut tally = Tally::default();
+    let result = sample_until_stopped(cfg, source, &host, probes, interval, sink, stop, clock, &mut tally);
+    let reason = match &result {
+        Ok(()) => "stop requested".to_string(),
+        Err(e) => format!("error: {e:#}"),
+    };
+    let now = clock();
+    let end = stopped_record(&host, now, now - started, &reason, &tally);
+    match result {
+        Ok(()) => sink.write(&[end]),
+        Err(e) => {
+            let _ = sink.write(&[end]);
+            Err(e)
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_until_stopped(
+    cfg: &Config,
+    source: &mut dyn ProcessSource,
+    host: &str,
+    probes: Probes,
+    interval: Duration,
+    sink: &dyn EventSink,
+    stop: &AtomicBool,
+    clock: &dyn Fn() -> i64,
+    tally: &mut Tally,
+) -> Result<()> {
+    let host = host.to_string();
     let mut tracker = Tracker::new(cfg.cpu, source.cpu_count(), &host);
     let mut counter_source = match probes.counters {
         Some(Ok(c)) => Some(c),
@@ -159,8 +226,13 @@ pub(crate) fn run_loop(
                 }
             }
         }
+        tally.samples += 1;
         if !batch.is_empty() {
             sink.write(&batch)?;
+            tally.stats += batch
+                .iter()
+                .filter(|r| r.template.as_deref() == Some(tracker::STATS_TEMPLATE))
+                .count() as u64;
         }
         sleep_unless_stopped(interval, stop);
     }

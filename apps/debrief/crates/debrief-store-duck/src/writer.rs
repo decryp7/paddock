@@ -1,9 +1,16 @@
 //! The import writer (ADR 0014 R2b notes): every parse thread writes its own Parquet segment (no single
 //! writer to wait for), and one catalog connection records sources, diagnostics and finished segments.
 //!
-//! - Ids: a segment reserves a block of [`SEGMENT_ROWS`] ids when it opens; the next free id is kept in
-//!   `meta` with every listing (and as soon as a block is reserved when batches are observed, since the
-//!   observer sees ids before they are listed), so listed ids are never reused, even after a crash.
+//! - Ids: a segment reserves a block of ids (its segment size, [`SEGMENT_ROWS`] by default) when it opens. The
+//!   next free id is persisted in `meta` ahead of use: the sink persists a reserve of [`RESERVE_BLOCKS`] blocks
+//!   when it starts and with every listing, and a segment that would open beyond the persisted mark persists a
+//!   new mark first, so no id handed out (to a segment, or to `observe` before it is listed) is ever handed out
+//!   again, even after a crash. The last listing persists the exact next id.
+//! - Locks are taken in one order: a parse thread's slot, then `catalog`, then `ids` (`write` holds its slot
+//!   while `register` tries `catalog` and `open_segment` takes `ids`; `finish` empties the slots before it
+//!   lists). `sources`, `pending`, `shifts`, `keep` and `fingerprints` are leaves: nothing is taken while one
+//!   is held. No lock is held across an `observe` call: `write` releases its slot before it calls it (ADR 0062
+//!   section 3). The 16-thread test checks the lock order, through both ways a segment opens.
 //! - Visibility: a source becomes ready (visible through the `events` view) when it is finished and every
 //!   segment holding its rows has been listed. A segment is closed when it is full, when it has been open
 //!   for [`SEGMENT_AGE`](crate::segments::SEGMENT_AGE), or at the end of the import; closed segments are
@@ -29,6 +36,28 @@ use std::time::{Duration, Instant};
 
 /// Closed segments are listed (and the view rebound) at most this often while importing.
 pub const LIST_EVERY: Duration = Duration::from_secs(1);
+
+/// Id blocks persisted ahead of use (see the module docs): a segment opens without touching the catalog while
+/// its block lies below the persisted mark.
+pub const RESERVE_BLOCKS: u64 = 64;
+
+/// The sink's sizes (tests make segments tiny and the reserve short, to open many segments and reach every path).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SinkOptions {
+    /// Rows (ids) of a segment.
+    pub segment_rows: u64,
+    /// Id blocks persisted ahead of use.
+    pub reserve_blocks: u64,
+}
+
+impl Default for SinkOptions {
+    fn default() -> Self {
+        SinkOptions {
+            segment_rows: SEGMENT_ROWS,
+            reserve_blocks: RESERVE_BLOCKS,
+        }
+    }
+}
 
 pub(crate) fn meta_u64(conn: &Connection, key: &str) -> u64 {
     conn.query_row("SELECT value FROM meta WHERE key = ?", params![key], |r| r.get::<_, String>(0))
@@ -108,15 +137,37 @@ pub(crate) fn insert_segments(conn: &Connection, segs: &[Segment], state: impl F
     Ok(())
 }
 
-/// Unlists a segment and its catalog rows (inside the caller's transaction).
+/// Unlists a segment and its catalog rows, its id blocks included (inside the caller's transaction; a rewrite
+/// first moves the blocks to the new file with [`move_blocks`]).
 pub(crate) fn delete_segment(conn: &Connection, file: &str) -> Result<()> {
     for sql in [
         "DELETE FROM segments WHERE file = ?",
         "DELETE FROM segment_fields WHERE file = ?",
         "DELETE FROM histogram WHERE file = ?",
+        "DELETE FROM segment_blocks WHERE file = ?",
     ] {
         conn.execute(sql, params![file])?;
     }
+    Ok(())
+}
+
+/// Records the id block of each new segment (`first_id .. end_id`; inside the caller's transaction).
+fn insert_blocks(conn: &Connection, segs: &[Segment]) -> Result<()> {
+    if segs.is_empty() {
+        return Ok(());
+    }
+    let mut app = conn.appender("segment_blocks")?;
+    for seg in segs {
+        app.append_row(params![seg.file, seg.first_id, seg.end_id])?;
+    }
+    app.flush()?;
+    Ok(())
+}
+
+/// Moves the id blocks of a replaced segment file to the file that now holds its rows (compaction and the clock-skew
+/// rewrite; inside the caller's transaction, before the old file is unlisted).
+pub(crate) fn move_blocks(conn: &Connection, from: &str, to: &str) -> Result<()> {
+    conn.execute("UPDATE segment_blocks SET file = ? WHERE file = ?", params![to, from])?;
     Ok(())
 }
 
@@ -195,6 +246,8 @@ struct SourceState {
 struct Ids {
     event: u64,
     source: u32,
+    /// The next event id persisted in `meta`: blocks below it are handed out without touching the catalog.
+    persisted: u64,
 }
 
 /// Receives each batch once it has its ids (the full-text indexer).
@@ -216,6 +269,10 @@ pub struct SegmentSink {
     list_every: Duration,
     /// [`SEGMENT_AGE`](crate::segments::SEGMENT_AGE) (tests change it: a wall-clock age makes row counts depend on load).
     segment_age: Duration,
+    /// Segment size and reserve.
+    sizes: SinkOptions,
+    /// Segments that opened beyond the persisted mark, through `catalog` (tests check the reserve with it).
+    slow_opens: AtomicU64,
     generation: Arc<AtomicU64>,
     /// Distinguishes the files of rewritten segments.
     file_generation: u64,
@@ -240,6 +297,19 @@ impl SegmentSink {
         generation: Arc<AtomicU64>,
         observe: Option<Observe>,
     ) -> Result<SegmentSink> {
+        Self::new_with(conn, dir, schema, threads, generation, observe, SinkOptions::default())
+    }
+
+    /// [`SegmentSink::new`] with other sizes; the reserve persisted at the start is `sizes`' too.
+    pub fn new_with(
+        conn: Connection,
+        dir: &Path,
+        schema: Arc<EventSchema>,
+        threads: usize,
+        generation: Arc<AtomicU64>,
+        observe: Option<Observe>,
+        sizes: SinkOptions,
+    ) -> Result<SegmentSink> {
         let seg_dir = dir.join(SEGMENTS_DIR);
         std::fs::create_dir_all(&seg_dir)?;
         let (max_end, max_source) = conn.query_row(
@@ -247,9 +317,13 @@ impl SegmentSink {
             [],
             |r| Ok((r.get::<_, u64>(0)?, r.get::<_, u32>(1)?)),
         )?;
+        let event = meta_u64(&conn, "next_id").max(max_end);
+        let persisted = event.saturating_add(sizes.reserve_blocks.saturating_mul(sizes.segment_rows));
+        set_meta(&conn, "next_id", persisted)?;
         let ids = Ids {
-            event: meta_u64(&conn, "next_id").max(max_end),
+            event,
             source: u32::try_from(meta_u64(&conn, "next_source")).unwrap_or(u32::MAX).max(max_source),
+            persisted,
         };
         let file_generation = meta_u64(&conn, "file_generation") + 1;
         set_meta(&conn, "file_generation", file_generation)?;
@@ -265,6 +339,8 @@ impl SegmentSink {
             pending: Mutex::new((Vec::new(), None)),
             list_every: LIST_EVERY,
             segment_age: SEGMENT_AGE,
+            sizes,
+            slow_opens: AtomicU64::new(0),
             generation,
             file_generation,
             observe,
@@ -303,16 +379,43 @@ impl SegmentSink {
         &self.slots[i]
     }
 
-    /// A new segment with a fresh id block of at least `rows` ids.
+    /// Ids persisted ahead of use (see the module docs).
+    fn reserve(&self) -> u64 {
+        self.sizes.reserve_blocks.saturating_mul(self.sizes.segment_rows)
+    }
+
+    /// A new segment with a fresh id block of at least `rows` ids. Takes only `ids` while the block lies below the
+    /// persisted mark; beyond it, `catalog` then `ids` (the lock order), to persist a new mark first.
     fn open_segment(&self, rows: u64) -> Result<SegmentWriter> {
-        let mut ids = lock(&self.ids);
-        let first = ids.event;
-        let end = first + SEGMENT_ROWS.max(rows);
-        if self.observe.is_some() {
-            set_meta(&lock(&self.catalog), "next_id", end)?;
-        }
-        ids.event = end;
-        drop(ids);
+        let size = self.sizes.segment_rows.max(rows);
+        let block = |ids: &Ids| -> Result<(u64, u64)> {
+            let first = ids.event;
+            Ok((first, first.checked_add(size).context("out of event ids")?))
+        };
+        let below_mark = {
+            let mut ids = lock(&self.ids);
+            let (first, end) = block(&ids)?;
+            (end <= ids.persisted).then(|| {
+                ids.event = end;
+                (first, end)
+            })
+        };
+        let (first, end) = match below_mark {
+            Some(b) => b,
+            None => {
+                let conn = lock(&self.catalog);
+                let mut ids = lock(&self.ids);
+                let (first, end) = block(&ids)?;
+                if end > ids.persisted {
+                    self.slow_opens.fetch_add(1, Ordering::Relaxed);
+                    let mark = end.saturating_add(self.reserve());
+                    set_meta(&conn, "next_id", mark)?;
+                    ids.persisted = mark;
+                }
+                ids.event = end;
+                (first, end)
+            }
+        };
         SegmentWriter::create(&self.seg_dir, &self.schema, first, end, self.file_generation)
     }
 
@@ -338,25 +441,40 @@ impl SegmentSink {
     }
 
     /// Lists closed segments and makes the sources they complete ready, in one catalog transaction (a
-    /// commit costs tens of milliseconds); `last` also persists the next source id.
+    /// commit costs tens of milliseconds), and persists the next event id with a new reserve; `last` persists the
+    /// exact next event id and the next source id. The caller holds `catalog`.
     fn list(&self, conn: &Connection, segs: Vec<Segment>, last: bool) -> Result<()> {
         let ready = completed(&mut lock(&self.sources), &segs);
+        let mut mark = 0;
         conn.execute_batch("BEGIN TRANSACTION")?;
         let done = (|| -> Result<()> {
             insert_segments(conn, &segs, |seg| (seg.rows, false))?;
+            insert_blocks(conn, &segs)?;
             write_ready(conn, &ready)?;
-            let (event, source) = {
+            let (event, source, persisted) = {
                 let ids = lock(&self.ids);
-                (ids.event, ids.source)
+                (ids.event, ids.source, ids.persisted)
             };
-            set_meta(conn, "next_id", event)?;
+            // Never below a mark already persisted while the sink runs; exact once it is done.
+            mark = if last {
+                event
+            } else {
+                event.saturating_add(self.reserve()).max(persisted)
+            };
+            set_meta(conn, "next_id", mark)?;
             if last {
                 set_meta(conn, "next_source", source as u64)?;
             }
             refresh_view(conn, &self.dir, &self.schema)
         })();
         match done {
-            Ok(()) => conn.execute_batch("COMMIT")?,
+            Ok(()) => {
+                conn.execute_batch("COMMIT")?;
+                if !last {
+                    let mut ids = lock(&self.ids);
+                    ids.persisted = ids.persisted.max(mark);
+                }
+            }
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK");
                 for seg in &segs {
@@ -580,18 +698,27 @@ mod tests {
     }
 
     fn sink(c: &Connection, dir: &Path, seen: Option<Arc<AtomicU64>>) -> SegmentSink {
+        sink_for(c, dir, seen, 2)
+    }
+
+    fn sink_for(c: &Connection, dir: &Path, seen: Option<Arc<AtomicU64>>, threads: usize) -> SegmentSink {
+        sink_sized(c, dir, seen, threads, SinkOptions::default())
+    }
+
+    fn sink_sized(c: &Connection, dir: &Path, seen: Option<Arc<AtomicU64>>, threads: usize, sizes: SinkOptions) -> SegmentSink {
         let observe: Option<Observe> = seen.map(|s| -> Observe {
             Box::new(move |b: &EventBatch| {
                 s.fetch_add(b.num_rows() as u64, Ordering::SeqCst);
             })
         });
-        SegmentSink::new(
+        SegmentSink::new_with(
             c.try_clone().unwrap(),
             dir,
             Arc::new(EventSchema::plain()),
-            2,
+            threads,
             Arc::new(AtomicU64::new(0)),
             observe,
+            sizes,
         )
         .unwrap()
     }
@@ -753,6 +880,183 @@ mod tests {
             count(&c, "SELECT count(*) FROM segments") <= 3,
             "one segment per thread (plus the outside slot)"
         );
+        drop(c);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// The sink takes its locks in one order (see the module docs): 16 parse threads writing tiny segments that are
+    /// closed and listed at once, with an observer set (which persisted the next id while holding `ids`, against the
+    /// listing's order), finish before a deadline instead of deadlocking (ADR 0062, defect 1).
+    #[test]
+    fn sixteen_threads_listing_tiny_segments_with_an_observer_never_deadlock() {
+        const THREADS: usize = 16;
+        const SOURCES_PER_THREAD: usize = 4;
+        const BATCHES: usize = 4;
+        const ROWS: usize = 3;
+        // Generous for a loaded debug build; a deadlock never ends, so the test fails here instead of hanging.
+        const DEADLINE: Duration = Duration::from_secs(120);
+        let (dir, c) = store();
+        let seen = Arc::new(AtomicU64::new(0));
+        // Tiny segments and a reserve of two blocks: blocks run past the persisted mark often, so segments open both
+        // ways (with `ids` only, and through `catalog` then `ids`).
+        let sizes = SinkOptions {
+            segment_rows: 8,
+            reserve_blocks: 2,
+        };
+        let mut w = sink_sized(&c, &dir, Some(seen.clone()), THREADS, sizes);
+        w.list_every = Duration::ZERO;
+        w.segment_age = Duration::ZERO;
+        let w = Arc::new(w);
+        let ids: Vec<SourceId> = (0..THREADS * SOURCES_PER_THREAD)
+            .map(|i| {
+                w.begin_source(
+                    &NewSource {
+                        path: format!("f{i}"),
+                        name: format!("f{i}"),
+                    },
+                    None,
+                )
+                .unwrap()
+            })
+            .collect();
+        let (done, finished) = std::sync::mpsc::channel();
+        let worker = {
+            let w = w.clone();
+            let ids = ids.clone();
+            std::thread::spawn(move || {
+                let pool = rayon::ThreadPoolBuilder::new().num_threads(THREADS).build().unwrap();
+                pool.install(|| {
+                    use rayon::prelude::*;
+                    ids.par_iter().for_each(|id| {
+                        for _ in 0..BATCHES {
+                            w.write(batch(*id, ROWS)).unwrap();
+                        }
+                        w.finish_source(&report(*id, BATCHES * ROWS)).unwrap();
+                    })
+                });
+                let _ = done.send(());
+            })
+        };
+        match finished.recv_timeout(DEADLINE) {
+            Ok(()) => worker.join().unwrap(),
+            // The worker panicked (an error, not a deadlock): its panic is the failure.
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => worker.join().unwrap(),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("the sink deadlocked: the writes did not end within {DEADLINE:?}"),
+        }
+        let w = Arc::try_unwrap(w).unwrap_or_else(|_| panic!("the writer is still shared"));
+        assert!(w.slow_opens.load(Ordering::Relaxed) > 0, "some segments opened through the catalog");
+        w.finish().unwrap();
+        let total = (THREADS * SOURCES_PER_THREAD * BATCHES * ROWS) as u64;
+        assert_eq!(seen.load(Ordering::SeqCst), total, "every batch was observed");
+        assert_eq!(count(&c, "SELECT count(*) FROM events"), total);
+        assert_eq!(count(&c, "SELECT count(DISTINCT id) FROM events"), total, "ids are unique");
+        assert_eq!(count(&c, "SELECT count(*) FROM sources WHERE ready"), ids.len() as u64);
+        assert!(
+            count(&c, "SELECT CAST(value AS UBIGINT) FROM meta WHERE key = 'next_id'") >= count(&c, "SELECT max(end_id) FROM segments"),
+            "no listed id can be handed out again"
+        );
+        drop(c);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// A sink dropped without `finish` (the import crashed) leaves `next_id` at or above every id it handed out, also ids
+    /// that only an observer saw, in segments never listed; and the reserve means a segment opens through the catalog
+    /// only about once per reserve, not every time.
+    #[test]
+    fn a_dropped_sink_never_lets_an_id_it_handed_out_be_used_again() {
+        const OPENS: u64 = 40;
+        const RESERVE: u64 = 4;
+        let (dir, c) = store();
+        let seen = Arc::new(AtomicU64::new(0));
+        let observe: Observe = {
+            let seen = seen.clone();
+            Box::new(move |b: &EventBatch| {
+                if let Some(last) = b.rows().map(|r| r.id().0).max() {
+                    seen.fetch_max(last + 1, Ordering::SeqCst);
+                }
+            })
+        };
+        let sizes = SinkOptions {
+            segment_rows: 8,
+            reserve_blocks: RESERVE,
+        };
+        let mut w = SegmentSink::new_with(
+            c.try_clone().unwrap(),
+            &dir,
+            Arc::new(EventSchema::plain()),
+            1,
+            Arc::new(AtomicU64::new(0)),
+            Some(observe),
+            sizes,
+        )
+        .unwrap();
+        // Listed once (the first closed segment), then never again: the marks come from the reserve alone.
+        w.list_every = Duration::from_secs(3600);
+        w.segment_age = Duration::MAX;
+        let a = w
+            .begin_source(
+                &NewSource {
+                    path: "a".into(),
+                    name: "a".into(),
+                },
+                None,
+            )
+            .unwrap();
+        for _ in 0..OPENS {
+            // Fills a segment: each write opens the next one.
+            w.write(batch(a, 8)).unwrap();
+        }
+        let slow = w.slow_opens.load(Ordering::Relaxed);
+        assert!(slow > 0, "segments beyond the reserve opened through the catalog");
+        assert!(slow <= OPENS / RESERVE + 1, "{slow} of {OPENS} opens went through the catalog");
+        drop(w);
+        let handed_out = seen.load(Ordering::SeqCst);
+        assert_eq!(handed_out, count(&c, "SELECT min(end_id) FROM segments") + (OPENS - 1) * 8);
+        let next_id = count(&c, "SELECT CAST(value AS UBIGINT) FROM meta WHERE key = 'next_id'");
+        assert!(
+            next_id >= handed_out,
+            "next_id {next_id} is below the ids handed out ({handed_out})"
+        );
+        drop(c);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Each listed segment's id block is recorded in `segment_blocks` with the listing (ADR 0062 section 1), also for
+    /// segments listed while the import runs, and a dropped writer's unlisted segments leave none.
+    #[test]
+    fn a_listing_records_each_segments_id_block() {
+        let (dir, c) = store();
+        let w = sink(&c, &dir, None);
+        let src = NewSource {
+            path: "a".into(),
+            name: "a".into(),
+        };
+        let a = w.begin_source(&src, None).unwrap();
+        let per = 8192;
+        let batches = (SEGMENT_ROWS as usize / per) + 2;
+        for _ in 0..batches {
+            w.write(batch(a, per)).unwrap();
+        }
+        assert_eq!(count(&c, "SELECT count(*) FROM segments"), 1, "listed while the import runs");
+        assert_eq!(count(&c, "SELECT count(*) FROM segment_blocks"), 1);
+        w.finish_source(&report(a, per * batches)).unwrap();
+        w.finish().unwrap();
+        let segments = count(&c, "SELECT count(*) FROM segments");
+        assert_eq!(segments, 2);
+        assert_eq!(count(&c, "SELECT count(*) FROM segment_blocks"), segments);
+        assert_eq!(
+            count(
+                &c,
+                "SELECT count(*) FROM segment_blocks b JOIN segments s USING (file) WHERE b.first_id = s.first_id AND b.end_id = s.end_id"
+            ),
+            segments,
+            "a new segment's block is its id range"
+        );
+        let w = sink(&c, &dir, None);
+        let b = w.begin_source(&src, None).unwrap();
+        w.write(batch(b, 3)).unwrap();
+        drop(w);
+        assert_eq!(count(&c, "SELECT count(*) FROM segment_blocks"), segments);
         drop(c);
         std::fs::remove_dir_all(dir).ok();
     }

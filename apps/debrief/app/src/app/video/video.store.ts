@@ -339,6 +339,8 @@ export const VideoStore = signalStore(
       /** The model describes `indices` (none: every frame without a description); `redo` describes again. */
       describe: (indices: number[], redo = false) =>
         withActive((v) => run('frame', 'describe', () => backend.generateDescriptions({ key: v.record.key, indices, redo }), upsert)),
+      /** What describing the frames without a description would cost, from the engine. */
+      describePlan: () => withActive((v) => backend.describePlan({ key: v.record.key, indices: [], redo: false })),
       /** "Explain with AI" / "Find related logs" on a frame: the image view shows the answer. */
       useWithAi: (use: FrameAiUse, index: number) => withActive((v) => run('frame', 'explain', () => ai.run(use, { key: v.record.key, index }))),
       explainFrames: (indices: number[]) => withActive((v) => run('frame', 'explain', () => backend.explainFrames({ key: v.record.key, indices }))),

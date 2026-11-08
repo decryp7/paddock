@@ -432,9 +432,27 @@ impl Inner {
                 ts: done.iter().filter(|a| a.events > 0).filter_map(|a| a.from).min(),
             });
             out.sources_changed.extend(done.iter().filter(|a| a.events > 0).map(|a| a.id));
-            if let Err(e) = pos::append(conn, first_new, before) {
-                log::warn!("time-order positions could not be extended: {e}");
+            if pos::is_stale(conn) {
+                // An ordering failed earlier: the ordering job repairs it (the app starts it on this notice). Reordering
+                // on every refresh would rebuild all positions twice per refresh and fail the same way; the new events
+                // are positioned after the others so the event list shows them meanwhile.
+                if let Err(e) = pos::append_at_end(conn, first_new) {
+                    log::warn!("the new events could not be positioned: {e}");
+                }
+                // The app's ordering state machine says so to the user once and starts the job once per episode.
+                out.order_incomplete = true;
+            } else {
+                // The new events follow the positioned ones (the usual case) or every event is put in order again.
+                let extended = pos::append(conn, first_new, before).unwrap_or_else(|e| {
+                    log::warn!("time-order positions could not be extended: {e}");
+                    false
+                });
+                if !extended {
+                    out.notices.extend(self.reorder(conn));
+                }
             }
+            // Compaction during a live refresh keeps every event's id and time, and the view hides sources that are not
+            // ready, so it never changes which events are visible or their order: no reordering after it.
             match compact::pending(conn) {
                 Ok(p) if !p.is_empty() => {
                     if let Err(e) = compact::compact(conn, &self.dir, &self.schema) {
@@ -560,7 +578,7 @@ impl DuckStore {
         if self.inner.importing.swap(true, Ordering::SeqCst) {
             return Err(StoreError::Busy("an import is running; wait for it or cancel it".into()));
         }
-        let guard = Importing(self.inner.clone());
+        let guard = Importing::bulk(self.inner.clone());
         let canonical = paths
             .iter()
             .map(|p| std::fs::canonicalize(p).map_err(|e| StoreError::Io(format!("{}: {e}", p.display()))))
@@ -666,7 +684,7 @@ impl Inner {
                 save_tracked(&conn, id, &t).map_err(engine)?;
             }
             crate::parsers::record(&conn, &parser_set).map_err(engine)?;
-            self.maintain(&conn, None);
+            report.notices.extend(self.maintain(&conn, None));
             self.bump_version(&conn)?;
         }
         if !rest.is_empty() {

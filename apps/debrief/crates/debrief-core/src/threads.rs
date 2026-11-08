@@ -16,8 +16,9 @@
 //! `UTILITY` (`pthread_set_qos_class_self_np`); Linux raises the thread's nice value to 10 (`setpriority` on the thread
 //! id); Windows sets `THREAD_PRIORITY_BELOW_NORMAL`. Where the call fails the thread simply keeps its priority.
 //!
-//! Lowered, never starved: callers wait for these threads (a report for its analyses, an import for the index's write
-//! lock), so a busy machine may slow them but must not stop them. macOS's `BACKGROUND` class would: it keeps the thread
+//! Lowered, never starved (Paddock rule 52: work a person waits for is never macOS `BACKGROUND`): callers wait for these
+//! threads (a report for its analyses, an import for the index's write lock), so a busy machine may slow them but must
+//! not stop them. macOS's `BACKGROUND` class would: it keeps the thread
 //! on the efficiency cores and behind every other thread, and a `debrief report` waited minutes for it on a loaded Mac.
 
 /// What limits a kind of work.
@@ -238,7 +239,7 @@ mod tests {
         assert_eq!(
             class as u32,
             libc::qos_class_t::QOS_CLASS_UTILITY as u32,
-            "lowered threads must not be in the starvable BACKGROUND class"
+            "rule 52: lowered threads must not be in the starvable BACKGROUND class"
         );
     }
 }

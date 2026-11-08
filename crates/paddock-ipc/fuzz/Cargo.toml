@@ -13,10 +13,19 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 paddock-ipc = { path = ".." }
+paddock-plugin-api = { path = "../../paddock-plugin-api" }
+serde = { version = "1", features = ["derive"] }
 
 [[bin]]
 name = "frame"
 path = "fuzz_targets/frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "plugin_request"
+path = "fuzz_targets/plugin_request.rs"
 test = false
 doc = false
 bench = false

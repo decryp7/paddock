@@ -59,7 +59,7 @@ fn sample() -> Value {
             "counting": ui(snapshot(3, WireState::Running(Some(walk)))),
             "bytes": ui(WireSnapshot { not_cancellable_reason: Some("A system log is being read; Cancel takes effect when it has been read.".into()), cancellable: false, eta_ms: Some(900), ..snapshot(4, WireState::Running(Some(hash))) }),
             "done": ui(snapshot(5, WireState::Done)),
-            "failed": ui(snapshot(6, WireState::Failed("Give the full path of the folder.".into()))),
+            "failed": ui(snapshot(6, WireState::Failed { message: "Give the full path of the folder.".into(), limit: None })),
             "cancelled": ui(snapshot(7, WireState::Cancelled(CancelReason::User))),
         },
         "requests": [
