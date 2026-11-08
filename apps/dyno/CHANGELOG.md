@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Menu-bar and tray items: each item has a Style select. Changing it changes the item in place, so a Windows icon you pinned to the taskbar stays pinned and in its place. Before, the only way was to add another item, which Windows put in the overflow. On a Mac a number's format is one of its styles there ("Number" or "Number, one line").
+- On Windows, adding an item says that Windows puts the new icon in the overflow and how to keep it on the taskbar (Settings > Personalization > Taskbar > Other system tray icons).
+- On Windows and Linux, Bars draws a vertical column (it drew the meter) and Graph and number draws the number over a small graph (it drew the graph), at every icon size.
+- Where a style is drawn as another, the Style select says so ("Ring, drawn as meter" on a Mac). Network and temperature items say what they draw instead of offering a style.
+
 ## [1.1.0] - 2026-11-06
 
 **On Windows, uninstall Dyno 1.0.0 first (keep your data), then install 1.1.0; 1.0.0 may offer this update but cannot install it.**

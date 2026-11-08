@@ -124,13 +124,13 @@ describe('dy-menu-bar-items', () => {
     });
     const layouts = TestBed.inject(WidgetLayouts);
     const first = layouts.menuBar()!.layout.placements[0]!;
-    const page = f.componentInstance as unknown as { setFormat(p: typeof first, v: string): void };
-    page.setFormat(first, 'line');
+    const page = f.componentInstance as unknown as { setStyle(p: typeof first, v: string): void };
+    page.setStyle(first, 'number:line');
     await vi.waitFor(() => {
       const now = layouts.menuBar()!.layout.placements[0]!.widget as { number: { format: string } };
       expect(now.number.format).toBe('line');
     });
-    page.setFormat(layouts.menuBar()!.layout.placements[0]!, 'stacked');
+    page.setStyle(layouts.menuBar()!.layout.placements[0]!, 'number');
     await vi.waitFor(() => {
       const now = layouts.menuBar()!.layout.placements[0]!.widget as { number: { format: string } };
       expect(now.number.format).toBe('stacked');
@@ -219,8 +219,12 @@ describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
       f.detectChanges();
       expect(rows(el)).toHaveLength(4);
     });
-    const trigger = el.querySelector<HTMLElement>('mat-select[aria-label^="Format of"]')!;
+    // A number's two formats are two of its styles in the row's style select.
+    const trigger = el.querySelector<HTMLElement>('mat-select[aria-label^="Style of"]')!;
     expect(trigger.getAttribute('aria-disabled')).not.toBe('true');
+    expect(trigger.textContent).toContain('Number');
+    const page = f.componentInstance as unknown as { styleOptions(): { value: string; label: string }[] };
+    expect(page.styleOptions().filter((o) => o.value.startsWith('number')).map((o) => o.label)).toEqual(['Number', 'Number, one line']);
     expect(el.querySelector('[role="note"]')).toBeNull();
   });
 
@@ -256,6 +260,9 @@ describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
     expect(el.querySelector('mat-select[aria-label^="Format of"]')).toBeNull();
     expect(el.querySelectorAll('.fixed')).toHaveLength(0);
     expect(el.querySelector('[role="note"]')?.textContent).toContain('one number layout');
+    // The number is one style here.
+    const page = f.componentInstance as unknown as { styleOptions(): { value: string; label: string }[] };
+    expect(page.styleOptions().filter((o) => o.value.startsWith('number')).map((o) => o.label)).toEqual(['Number']);
   });
 
   it('reads the choices again when Settings opens', async () => {
@@ -268,5 +275,82 @@ describe('dy-menu-bar-items: what the tray draws, and the limit', () => {
     const before = spy.mock.calls.length;
     await TestBed.inject(WidgetChoicesStore).reload();
     expect(spy.mock.calls.length).toBe(before + 1);
+  });
+});
+
+describe('dy-menu-bar-items: styles', () => {
+  const ready = async (f: { detectChanges(): void }, el: HTMLElement) =>
+    vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(4);
+    });
+
+  it('has a style select on every row and changes the style in place, keeping the id', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await ready(f, el);
+    // The defaults' network and temperature items draw one picture: they say what instead of offering a style.
+    expect(el.querySelectorAll('mat-select[aria-label^="Style of"]')).toHaveLength(2);
+    expect([...el.querySelectorAll('[data-testid="style-fixed"]')].map((e) => e.textContent?.trim())).toEqual(['Rate with arrows', 'Degrees']);
+    const layouts = TestBed.inject(WidgetLayouts);
+    const first = layouts.menuBar()!.layout.placements[0]!;
+    const page = f.componentInstance as unknown as { setStyle(p: typeof first, kind: string): void };
+    page.setStyle(first, 'verticalBars');
+    await vi.waitFor(() => {
+      const now = layouts.menuBar()!.layout.placements[0]!;
+      expect(now.widget).toEqual({ verticalBars: { metric: 'cpuTotal' } });
+      expect(now.id).toBe(first.id);
+    });
+    expect(layouts.menuBar()!.layout.placements).toHaveLength(4);
+  });
+
+  it('labels a style the tray draws as another, from the engine (the Mac ring is the meter)', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await ready(f, el);
+    const page = f.componentInstance as unknown as { styleOptions(): { value: string; label: string }[] };
+    expect(page.styleOptions().find((o) => o.value === 'ring')?.label).toBe('Ring, drawn as meter');
+    expect(page.styleOptions().find((o) => o.value === 'verticalBars')?.label).toBe('Bars');
+  });
+
+  it('says what a network item draws instead of offering a style', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await ready(f, el);
+    const layouts = TestBed.inject(WidgetLayouts);
+    const first = layouts.menuBar()!.layout.placements[0]!;
+    const page = f.componentInstance as unknown as { setMetric(p: typeof first, title: string): void };
+    page.setMetric(first, 'Network down');
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(el.querySelectorAll('[data-testid="style-fixed"]')).toHaveLength(3);
+    });
+    expect(el.querySelector('[data-testid="style-fixed"]')?.textContent?.trim()).toBe('Rate with arrows');
+    expect(el.querySelectorAll('mat-select[aria-label^="Style of"]')).toHaveLength(1);
+  });
+
+  it('on Windows, says after an add that the new icon is in the overflow and how to pin it', async () => {
+    const mock = new MockBackend({ latencyMs: 0, now: () => NOW, os: 'windows', trayPx: 16 });
+    TestBed.configureTestingModule({ providers: [provideIcons(), { provide: BACKEND, useValue: mock }] });
+    const f = TestBed.createComponent(MenuBarItems);
+    f.detectChanges();
+    const el = f.nativeElement as HTMLElement;
+    await ready(f, el);
+    expect(el.querySelector('[data-testid="added-note"]')).toBeNull();
+    el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(5);
+      expect(el.querySelector('[data-testid="added-note"]')?.textContent).toContain('Settings > Personalization > Taskbar > Other system tray icons');
+    });
+    expect(el.querySelector('[data-testid="added-note"]')?.textContent).toContain('overflow');
+  });
+
+  it('on a Mac, an add says nothing about an overflow', async () => {
+    const { f, el } = setup(MenuBarItems);
+    await ready(f, el);
+    el.querySelector<HTMLButtonElement>('button[aria-label="Add another Number"], button[aria-label="Add Number"]')!.click();
+    await vi.waitFor(() => {
+      f.detectChanges();
+      expect(rows(el)).toHaveLength(5);
+    });
+    expect(el.querySelector('[data-testid="added-note"]')).toBeNull();
   });
 });

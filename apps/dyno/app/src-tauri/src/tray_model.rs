@@ -721,6 +721,44 @@ mod tests {
     }
 
     #[test]
+    fn a_style_change_keeps_the_id_remakes_that_icon_and_its_picture_differs() {
+        use paddock_widgets::{apply, Edit, Layout, PlacementId};
+        let before = Layout::defaults::<MenuBarCatalogue>();
+        let id = before.placements[0].id.clone();
+        let after = apply::<MenuBarCatalogue>(
+            &before,
+            Edit::ChangeKind {
+                id: id.clone(),
+                widget: MenuBarItem::VerticalBars { metric: Metric::CpuTotal },
+            },
+        )
+        .expect("the engine changes the style in place");
+        assert_eq!(after.placements[0].id, id, "the id, and so the tray icon's identity, stays");
+        let (old, new) = (items_from_settings(&before.placements), items_from_settings(&after.placements));
+        let current: std::collections::HashMap<String, ItemSpec> = old.iter().map(|s| (s.id.clone(), s.clone())).collect();
+        let plan = plan_sync(&current, &new);
+        assert_eq!(plan.remove, [id.to_string()], "only the changed item goes");
+        assert_eq!(
+            plan.create.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            [id.as_str()],
+            "and comes back with the same id"
+        );
+        assert_eq!(PlacementId::new(&plan.create[0].id).expect("an id"), id);
+        for env in [win_env(16), win_env(24), mac_env()] {
+            let picture = |specs: &[ItemSpec]| {
+                let mut t = TrayItems::new(specs.to_vec(), env.clone());
+                t.frames(&update(37.0), true)
+                    .into_iter()
+                    .find(|(i, _)| i == id.as_str())
+                    .expect("drawn")
+                    .1
+                    .look
+            };
+            assert_ne!(picture(&old), picture(&new), "{:?} {}", env.platform, env.px);
+        }
+    }
+
+    #[test]
     fn the_throttle_lets_one_event_through_per_interval() {
         let mut t = Throttle::new(Duration::from_millis(500));
         let t0 = Instant::now();
