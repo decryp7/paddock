@@ -1476,3 +1476,17 @@ Symptom: after replacing Dyno.app, an agent started on 5 Nov kept running and th
 Fix: the discovery file carries a build id (SHA-256 prefix of the agent file), the app compares it with the id of the agent file it would start, and the agent exits (code 0, logged) when its own file was replaced or removed on two looks 30 s apart; signals others send are `StoppedFromOutside`, no crash and no stability points. Logs: the connect line now carries the agent's version and build and the app's key. Class: identity by a label that releases share; compare content.
 
 - A test fake built from the real agent carries its self-healing (the discovery guard writes `agent.json` again at the 30 s watch): tests that tamper with a live agent's files must hold only the lock and start the agent when told (`SlowHolder`; CI run 7672, Dyno link test connected at 94 of 100 looks).
+
+## One failed first read left "could not be read" up for good in 14 shell stores (2026-11-08, Dyno 1.1.0, ADR 0058)
+
+Dyno's Jobs panel kept "The jobs could not be read" after the app started while its agent restarted, even while later
+events listed live jobs. The 1.1.0 fix gave `JobsStore` its own retry; the search for the pattern then found eight more
+shell stores whose event path never touches `requestStatus`, and six whose snapshot events clear it but which never read
+again by themselves, so an engine that comes back unchanged leaves the error up.
+
+- A status is state too: every path that brings data (an event, a command's reply) must say what it means for the status,
+  or the store keeps an error that is no longer true.
+- "An event clears it" is not enough: the engine that comes back may have nothing to announce. A read of engine state
+  retries itself (bounded backoff on an injected clock), keeping the error up (no loading flash) until a read succeeds.
+- Make the declaration part of the API (a required `ReadPolicy`) and check it with one spec that enumerates every call
+  site from the sources, so a new store cannot opt out silently.
