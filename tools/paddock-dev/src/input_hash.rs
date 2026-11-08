@@ -513,7 +513,9 @@ mod tests {
 
     #[test]
     fn the_real_runner_reports_missing_programs_and_failures() {
-        let here = Path::new(env!("CARGO_MANIFEST_DIR"));
+        // A folder of its own: the checkout may be a worktree whose .git file names a path this machine (a container) lacks.
+        let dir = tempfile::tempdir().unwrap();
+        let here = dir.path();
         assert!(
             Real.run("paddock-no-such-program", &["x"], here, None)
                 .unwrap_err()

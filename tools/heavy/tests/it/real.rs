@@ -206,11 +206,17 @@ fn a_live_owner_whose_record_is_right_is_not_broken_whatever_tz_and_locale() {
     }
 }
 
+/// Epoch second pid 1 started, from the same source heavy reads: the record must be written after its writer started,
+/// whatever the age of the machine or container (a fixed "100 s ago" is older than a container started a second ago).
+fn init_start_epoch() -> u64 {
+    ProcessId::of(1).expect("pid 1 is visible").started().as_micros() / 1_000_000
+}
+
 #[test]
 fn pid_one_is_alive_even_though_we_may_not_signal_it() {
     let w = World::new();
     fs::create_dir(w.lock_dir()).unwrap();
-    fs::write(w.lock_dir().join("owner"), format!("1\nx\ninit\n{}\n", now_secs() - 100)).unwrap();
+    fs::write(w.lock_dir().join("owner"), format!("1\nx\ninit\n{}\n", init_start_epoch() + 1)).unwrap();
     let mut g = heavy(&w, &echo_args("W", w.path("out").to_str().unwrap()));
     wait_until("waiting for init", || {
         w.read(w.root().join("pitcrew-lock-activity.log")).contains("held by init")
