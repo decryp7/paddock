@@ -28,10 +28,10 @@ pub use error::{EnvError, Result};
 pub use folder::{
     FolderFacts, Links, Refusal, Tightened, check_data_folder, check_folder, check_folder_with,
     check_own_folder, create_private_dir_all, current_uid, decide, may_remove_group_write,
-    read_folder,
+    others_among, read_folder,
 };
 #[cfg(unix)]
-pub use folder::{group_has_other_members, tighten_group_write};
+pub use folder::{group_has_other_members, tighten_group_write, tighten_group_write_with};
 pub use private::{check_temp_parent, private_fallback_dir, private_fallback_dir_as};
 pub use versioned::{
     DEFAULT_KEEP_CORRUPT, DEFAULT_MAX_BYTES, FIRST_VERSION, Loaded, Migration, Problem,

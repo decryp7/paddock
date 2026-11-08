@@ -211,13 +211,10 @@ fn note_result(what: &str, r: &Result<(), Refusal>) {
     if before == now {
         return;
     }
-    match (at, now) {
-        (Some(i), Some(reason)) => seen[i].1 = reason,
-        (Some(i), None) => {
-            seen.remove(i);
-        }
-        (None, Some(reason)) => seen.push((what.to_owned(), reason)),
-        (None, None) => {}
+    match (now, at) {
+        (Some(reason), Some(i)) => seen[i].1 = reason,
+        (Some(reason), None) => seen.push((what.to_owned(), reason)),
+        (None, _) => seen.retain(|(w, _)| w != what),
     }
     match now {
         Some(reason) => {
@@ -279,6 +276,36 @@ pub fn tighten_group_write(
     folder: &Path,
     group_has_others: impl FnOnce(u32) -> bool,
 ) -> Result<Tightened, Refusal> {
+    tighten_group_write_with(folder, group_has_others, fchmod)
+}
+
+/// `fchmod` on an open handle: the change goes to the folder the handle names, not to a path looked up again.
+#[cfg(unix)]
+fn fchmod(handle: &std::fs::File, mode: u32) -> std::io::Result<()> {
+    // SAFETY: the descriptor is open for the call.
+    let rc = unsafe {
+        libc::fchmod(
+            std::os::fd::AsRawFd::as_raw_fd(handle),
+            mode as libc::mode_t,
+        )
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// [`tighten_group_write`] with the group lookup and the mode change passed in (tests make the change fail).
+///
+/// # Errors
+/// See [`tighten_group_write`]; a mode change that fails is [`Refusal::Unreadable`] ("remove group write").
+#[cfg(unix)]
+pub fn tighten_group_write_with(
+    folder: &Path,
+    group_has_others: impl FnOnce(u32) -> bool,
+    chmod: impl FnOnce(&std::fs::File, u32) -> std::io::Result<()>,
+) -> Result<Tightened, Refusal> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
     let unreadable = |what, e: std::io::Error| Refusal::Unreadable {
         what,
@@ -308,76 +335,77 @@ pub fn tighten_group_write(
         return Err(refusal);
     }
     let mode = meta.mode() & 0o7777 & !0o020;
-    // SAFETY: the descriptor is open for the call; fchmod changes the folder this handle names, not a path looked up again.
-    let rc = unsafe {
-        libc::fchmod(
-            std::os::fd::AsRawFd::as_raw_fd(&handle),
-            mode as libc::mode_t,
-        )
-    };
-    if rc != 0 {
-        return Err(unreadable(
-            "remove group write",
-            std::io::Error::last_os_error(),
-        ));
-    }
+    chmod(&handle, mode).map_err(|e| unreadable("remove group write", e))?;
     log::info!(
         "Removed group write from the data folder (it belongs to this account's private group)"
     );
     Ok(Tightened::GroupWriteRemoved)
 }
 
-/// Whether the group `gid` has a member other than the account `uid` (`getgrgid_r` and `getpwuid_r`); an unreadable group counts as
-/// shared, so nothing is tightened on a doubt.
+/// The pure scan: whether `members` (group member names) holds anyone other than `own` (the account's user name).
+pub fn others_among(own: Option<&[u8]>, members: &[Vec<u8>]) -> bool {
+    members.iter().any(|m| Some(m.as_slice()) != own)
+}
+
+/// The account's user name (`getpwuid_r`).
 #[cfg(unix)]
-pub fn group_has_other_members(gid: u32, uid: u32) -> bool {
-    use std::ffi::CStr;
-    // u64 elements: the group lookup stores pointers in the buffer, which must be aligned.
+fn user_name(uid: u32) -> Option<Vec<u8>> {
+    // u64 elements: the lookups store pointers in the buffer, which must be aligned.
     let mut buf = vec![0u64; 2 * 1024];
-    // SAFETY: zeroed passwd/group are plain-old-data out parameters that the calls fill; the buffers outlive the reads below.
+    // SAFETY: a zeroed passwd is a plain-old-data out parameter the call fills; the buffer outlives the read of the name.
     unsafe {
         let mut pw: libc::passwd = std::mem::zeroed();
-        let mut pw_out: *mut libc::passwd = std::ptr::null_mut();
-        let own = if libc::getpwuid_r(
+        let mut out: *mut libc::passwd = std::ptr::null_mut();
+        let rc = libc::getpwuid_r(
             uid,
             &mut pw,
             buf.as_mut_ptr().cast(),
             buf.len() * 8,
-            &mut pw_out,
-        ) == 0
-            && !pw_out.is_null()
-        {
-            Some(CStr::from_ptr(pw.pw_name).to_owned())
-        } else {
-            None
-        };
+            &mut out,
+        );
+        (rc == 0 && !out.is_null())
+            .then(|| std::ffi::CStr::from_ptr(pw.pw_name).to_bytes().to_vec())
+    }
+}
+
+/// The names of the members of group `gid` (`getgrgid_r`); `None` when the group cannot be read.
+#[cfg(unix)]
+fn group_members(gid: u32) -> Option<Vec<Vec<u8>>> {
+    let mut buf = vec![0u64; 2 * 1024];
+    // SAFETY: a zeroed group is a plain-old-data out parameter the call fills; the buffer outlives the reads below.
+    unsafe {
         let mut gr: libc::group = std::mem::zeroed();
-        let mut gr_out: *mut libc::group = std::ptr::null_mut();
-        if libc::getgrgid_r(
+        let mut out: *mut libc::group = std::ptr::null_mut();
+        let rc = libc::getgrgid_r(
             gid,
             &mut gr,
             buf.as_mut_ptr().cast(),
             buf.len() * 8,
-            &mut gr_out,
-        ) != 0
-            || gr_out.is_null()
-        {
-            return true;
+            &mut out,
+        );
+        if rc != 0 || out.is_null() {
+            return None;
         }
         // The member list may sit unaligned in the buffer on some systems: read each pointer unaligned.
+        let mut names = Vec::new();
         let mut at = gr.gr_mem;
         while !at.is_null() {
             let member = std::ptr::read_unaligned(at);
             if member.is_null() {
                 break;
             }
-            if own.as_deref() != Some(CStr::from_ptr(member)) {
-                return true;
-            }
+            names.push(std::ffi::CStr::from_ptr(member).to_bytes().to_vec());
             at = at.add(1);
         }
-        false
+        Some(names)
     }
+}
+
+/// Whether the group `gid` has a member other than the account `uid`; an unreadable group counts as shared, so nothing is
+/// tightened on a doubt.
+#[cfg(unix)]
+pub fn group_has_other_members(gid: u32, uid: u32) -> bool {
+    group_members(gid).is_none_or(|members| others_among(user_name(uid).as_deref(), &members))
 }
 
 /// The user id this process runs as (0 where the OS has none).
@@ -520,16 +548,66 @@ mod tests {
                 0o777,
                 "a world-writable folder is never tightened"
             );
-            if current_uid() != 0 {
-                assert_eq!(
-                    tighten_group_write(Path::new("/"), |_| false),
-                    Err(Refusal::OtherOwner { uid: 0 })
-                );
-            }
+            let root = tighten_group_write(Path::new("/"), |_| false);
+            assert!(
+                current_uid() == 0 || root == Err(Refusal::OtherOwner { uid: 0 }),
+                "{root:?}"
+            );
             assert!(matches!(
                 tighten_group_write(&t.path().join("none"), |_| false),
                 Err(Refusal::Unreadable { .. })
             ));
+        }
+
+        #[test]
+        fn a_mode_change_the_os_refuses_is_an_error_and_an_unknown_group_counts_as_shared() {
+            // /dev/null belongs to root: fchmod on its handle is refused unless this is root.
+            let null = std::fs::File::open("/dev/null").unwrap();
+            assert!(current_uid() == 0 || fchmod(&null, 0o600).is_err());
+            let unknown = 3_999_999_999;
+            assert!(
+                group_members(unknown).is_some() || group_has_other_members(unknown, current_uid())
+            );
+        }
+
+        #[test]
+        fn the_member_scan_finds_anyone_but_the_account() {
+            let m = |names: &[&str]| {
+                names
+                    .iter()
+                    .map(|n| n.as_bytes().to_vec())
+                    .collect::<Vec<_>>()
+            };
+            assert!(!others_among(Some(b"me"), &m(&[])), "no members");
+            assert!(!others_among(Some(b"me"), &m(&["me"])), "only the account");
+            assert!(
+                others_among(Some(b"me"), &m(&["me", "you"])),
+                "another member"
+            );
+            assert!(others_among(Some(b"me"), &m(&["you"])));
+            assert!(
+                others_among(None, &m(&["me"])),
+                "an unknown account name counts every member as another"
+            );
+            assert!(!others_among(None, &m(&[])));
+        }
+
+        #[test]
+        fn a_failed_mode_change_is_refused_and_changes_nothing_else() {
+            let t = tempfile::tempdir().unwrap();
+            std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
+            let failing = |_: &std::fs::File, _| Err(std::io::Error::other("EPERM"));
+            let r = tighten_group_write_with(t.path(), |_| false, failing);
+            assert!(
+                matches!(&r, Err(Refusal::Unreadable { what: "remove group write", cause }) if cause.contains("EPERM")),
+                "{r:?}"
+            );
+            assert_eq!(mode(t.path()), 0o775, "nothing changed");
+            assert_eq!(
+                tighten_group_write(t.path(), |_| false),
+                Ok(Tightened::GroupWriteRemoved),
+                "the real change works"
+            );
         }
 
         #[test]
