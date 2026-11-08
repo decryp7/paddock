@@ -19,15 +19,22 @@ left out by one long `--ignore-filename-regex` in `ci.yml`, with the reasons onl
 
 ## Decision
 
-1. **Every crate in `crates/` must reach 99 % of its lines**, measured from the same lcov file, per crate.
+1. **Every crate in `crates/` must reach 99 % of its Linux-compiled lines**, measured from the same lcov file, per crate. The
+   figures are those of the lines the Linux build compiles, as root in the CI image; `#[cfg(target_os)]` arms of other OSes are
+   not in them. `check` warns and `suggest` refuses on another OS; reproduce CI's figures in the image under docker as root
+   (`crates/README.md`, "Reproducing the coverage figures").
 2. **A crate may sit lower only through the register `crates/coverage.toml`**: a `reason` and a `review` date. Its `minimum`
    is the measured figure (cut to two decimals) and the register is a ratchet, enforced by the gate and not by trust:
    - a figure under the minimum fails, exactly, even when it is still above 90 %;
-   - a figure above the minimum by more than max(0.05 %, 2 lines) fails too ("raise the minimum to X"), so minimums equal
-     the measured figures and only go up. A crate whose figure differs between two CI runs of the same tree is
+   - a figure above the minimum by more than max(0.05 %, 2 lines) is an **error on main and a warning on a branch** ("raise
+     the minimum to X"), so minimums equal the measured figures and only go up without a neighbouring change turning a branch red. A crate whose figure differs between two CI runs of the same tree is
      nondeterministic: fix the test or document why in its reason.
    - `ratchet --base <rev>` runs in its own job, `coverage-ratchet` (a tree-only clone with full history, `filter: blob:none`, so a failing ratchet never skips another job), and reads the register at the base. **A lowered
-     minimum of an existing entry always fails; no trailer allows it.** A new `[[crate]]` entry and a new `[[exclude]]`
+     minimum of an existing entry fails, unless the user decided it (2026-11-08):** a commit of the change has the trailer
+     `Coverage-lowered: <crate> <old>→<new>: <reason>; approved: user` with exactly the base's figure and the new one, or a commit of
+     the change is a **re-baseline**: it changes only `rust-toolchain` (or `rust-toolchain.toml`) or a `Cargo.lock`, besides the
+     register, which moves every figure (a new compiler or dependency set); such a commit may change minimums freely. A commit that
+     changes source as well is an ordinary one. A new `[[crate]]` entry and a new `[[exclude]]`
      entry fail unless a commit of the change (`<rev>..HEAD`) has the trailer `Coverage-lowered: <crate|path> <reason>
      approved: user` in its trailer block (`git interpret-trailers --parse`, key matched case-sensitively). The trailer is an
      honour-system marker that review must check, until the user decides on server-side approval.
@@ -61,8 +68,11 @@ the same register and tests.
 
 - A short crate is named in the log and in the summary; a failure in one crate no longer needs the aggregate to be read.
 - The register is the one place that says why a crate or file is below the line, and when to look again.
-- The register is seeded from CI (two runs, identical `suggest` output); after that a lowered minimum is impossible and a
-  new entry needs the trailer.
+- The register is seeded from CI (two runs, identical `suggest` output); after that a lowered minimum needs the user's trailer
+  or a re-baseline commit, and a new entry needs the trailer. **The register in the tree is provisional** (measured before
+  origin/main's later changes): it must be re-seeded from two CI runs of the landing tree, with the run ids in the landing commit;
+  it is never seeded locally.
+- A workspace member with no lines in the lcov is an error (it would pass unseen); `paddock-workspace-hack` has no code and is not asked for.
 - A crate that improves must raise its minimum in the same change (the gate fails otherwise), so it can never drop back unnoticed.
 
 ## Rejected

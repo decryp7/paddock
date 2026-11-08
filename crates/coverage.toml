@@ -3,14 +3,19 @@
 # [[crate]]: a crate that may sit under the default 99 % of lines. `minimum` is the recorded figure (cut to two decimals) and
 #   only goes up: a change that lowers it fails, even above 90 %. `reason` says why the lines cannot be covered; `review` is
 #   the date to look again (a passed date warns). No entry allows less than 90 %. Remove the entry when the crate reaches 99 %.
-#   The ratchet: a figure above the minimum by more than 0.05 fails (raise the minimum), and against the base register a lowered
-#   minimum, a new [[crate]] and a new [[exclude]] fail unless a commit has `Coverage-lowered: <crate|path> <reason> approved: user`.
+#   The ratchet: a figure above the minimum by more than max(0.05 %, 2 lines) is an error on main and a warning on a branch (raise
+#   the minimum); against the base register a lowered minimum fails unless a commit has `Coverage-lowered: <crate> <old>→<new>:
+#   <reason>; approved: user` (the figures must match) or is a re-baseline (only rust-toolchain or Cargo.lock changed, besides this
+#   file); a new [[crate]] and a new [[exclude]] fail unless a commit has `Coverage-lowered: <crate|path> <reason> approved: user`.
 # [[exclude]]: a whole file that cannot run in unit tests, `path` relative to crates/, with a `reason` and, if one runs it,
 #   the `job` that covers it. The `--ignore-filename-regex` of the coverage step is generated from these entries
 #   (`node ../scripts/coverage-gate.mjs regex coverage.toml`).
 #
-# Provisional figures: measured on Linux with CI's command (paddock-gate-arm, 2026-11-04). The landed file is the `suggest` output
-# of two CI runs of the landing tree (identical), with the run ids in the landing commit message.
+# Provisional figures: measured on Linux with CI's command (paddock-gate-arm, 2026-11-04) on a tree before origin/main's later
+# changes. They are NOT the landed figures: the register must be re-seeded from the `suggest` output of two CI runs of the landing
+# tree (identical), with the run ids in the landing commit message; never seed it from a local run (ADR 0050).
+# A lower minimum needs `Coverage-lowered: <crate> <old>→<new>: <reason>; approved: user` in a commit of the change, or a commit
+# that changes only rust-toolchain or Cargo.lock (and this file) to re-baseline.
 
 [[crate]]
 name = "paddock-dialogs"

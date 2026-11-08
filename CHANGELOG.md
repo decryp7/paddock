@@ -7,6 +7,7 @@ Conventional Commits; one semver tag for the whole repo.
 ### CI: the crates coverage gate is per crate (ADR 0050)
 
 - Every crate must reach 99 % of its lines; `crates/coverage.toml` registers the exceptions (a reason, a review date, a minimum that is the recorded figure and only goes up, never under 90 %) and the whole files left out (each with a reason). The `--ignore-filename-regex` is generated from it. `cargo deny check` is its own step and runs after a coverage failure; the job summary has the per-crate table and each step's result.
+- A lower minimum needs `Coverage-lowered: <crate> <old>→<new>: <reason>; approved: user` in a commit of the change, or a commit that changes only `rust-toolchain` or `Cargo.lock` (and the register) to re-baseline. Figures are of the Linux-compiled lines: `check` warns and `suggest` refuses on another OS. "Raise the minimum" is a warning on a branch and an error on main; a workspace member with no lines in the lcov is an error.
 
 ### `paddock-service`: the app's own login item per OS, the first run and the old launch agent are shared (from Dyno)
 - New `login::AppItem` (an app's login item described once: name, XDG file stem, `Run` value, arguments) with `for_this_os` (`MainAppItem` on macOS, `UserRunEntry` on Windows, `XdgAutostart` elsewhere; the app passes its executable, its environment and the `System`), `xdg` and `windows_run`; `login::xdg_config_dir` (an absolute `$XDG_CONFIG_HOME`, else `~/.config`); `login::UnavailableItem` (refuses every change with its reason).

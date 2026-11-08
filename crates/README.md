@@ -9,7 +9,7 @@ Rules for a crate here:
 
 - Pure logic and thin adapters, no dependency on any app crate. Edition and licence come from `[workspace.package]`.
 - Library errors are typed, no `unwrap`/`expect` on user data or I/O, `cargo clippy -- -D warnings` clean,
-  >= 99% line coverage per crate (ADR 0050; a lower figure only through `crates/coverage.toml`, never under 90 %).
+  >= 99% coverage of the Linux-compiled lines per crate (ADR 0050; a lower figure only through `crates/coverage.toml`, never under 90 %).
 - Native glue (code only a real desktop runs, that tests cannot reach by rule 7 or because Tauri does not let them build
   the value: a real tray icon, window effects, `RunEvent::ExitRequested`) lives in one small file per crate named
   `native.rs` under the adapter and is left out of the coverage job (one `[[exclude]]` entry with its reason in
@@ -29,6 +29,22 @@ Rules for a crate here:
   `vX.Y.Z` releases everything; each crate bumps its own `version` only when it changes, and a version the registry
   already has is skipped. `node scripts/publish.mjs` is the local dry run (lists every crate and npm package with what a
   tag would publish).
+
+### Reproducing the coverage figures
+
+The register's figures are those of the lines Linux compiles (`#[cfg(target_os)]` arms differ per OS), measured as root in the CI
+image (some tests, such as a read-only folder, behave differently as a normal user). `node scripts/coverage-gate.mjs check`
+warns on another OS and `suggest` refuses there (`--any-platform` prints it for reading only). To get CI's figures on a Mac:
+
+```sh
+docker run --rm --user 0 -v "$PWD":/work -w /work/crates dev.decryptology.net/decryp7/paddock-ci:v2 bash -c '
+  IGNORE="$(node ../scripts/coverage-gate.mjs regex coverage.toml)"
+  cargo llvm-cov nextest --profile ci --workspace --all-features --ignore-filename-regex "$IGNORE" --lcov --output-path lcov.info &&
+  node ../scripts/coverage-gate.mjs check lcov.info coverage.toml --root .'
+```
+
+`PADDOCK_REQUIRE_TEST_BROWSER=1` is set in CI; the image has the browser. Do not seed or change the register's figures from a
+run that is not Linux as root in the image.
 
 ## Consuming the crates
 

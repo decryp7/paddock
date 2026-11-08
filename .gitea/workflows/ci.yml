@@ -424,8 +424,9 @@ jobs:
       # The gate (scripts/coverage-gate.mjs) judges the lcov file per crate and leaves out the `#[tauri::command]` attribute lines:
       # llvm-cov charges every region of the macro's generated wrapper to that line, which no test can all reach. It prints one
       # ::error:: per failing crate and the per-crate table in the job summary.
-      # `suggest` prints the whole register the measured figures give. The ratchet against the base register runs in the plan
-      # job, which has the history.
+      # `suggest` prints the whole register the measured figures give. The ratchet against the base register runs in its own job,
+      # `coverage-ratchet`, which has the history. "Raise the minimum" is an error on main and a warning on a branch; a workspace
+      # member with no lines in the lcov is an error.
       - name: Coverage gate (per crate, crates/coverage.toml)
         id: gate
         if: ${{ !cancelled() && steps.cov.outcome == 'success' }}
