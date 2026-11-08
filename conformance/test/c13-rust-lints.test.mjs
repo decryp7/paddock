@@ -42,6 +42,19 @@ test('C13 bad: a missing lint, a weaker level, a crate that does not opt in, a d
   assert.match(m, /lacks reqwest::Client::new/);
 });
 
+test('C13 bad: an app that drops a Keychain method or type from its clippy.toml (ADR 0057, C99 layer 5)', async () => {
+  const noTypes = good();
+  noTypes['clippy.toml'] = preset('clippy.toml').split('\ndisallowed-types')[0].replace(/\n# ADR 0057 \(rule 72, C99\): the Keychain types[^\n]*(\n#[^\n]*)*$/, '\n');
+  const m = messages(await run(noTypes));
+  assert.match(m, /disallowed-types lacks keyring::Entry/);
+  assert.match(m, /disallowed-types lacks security_framework::os::macos::keychain::SecKeychain/);
+  assert.doesNotMatch(m, /disallowed-methods lacks/);
+  const noMethod = good();
+  noMethod['clippy.toml'] = noMethod['clippy.toml'].replace(/^.*"security_framework::passwords::get_generic_password".*\n/m, '');
+  assert.match(messages(await run(noMethod)), /disallowed-methods lacks security_framework::passwords::get_generic_password/);
+  assert.match(preset('clippy.toml'), /SecItemAdd/, 'the preset carries the objc2-security entries');
+});
+
 test('C13 bad: no clippy.toml, no workspace manifest, no lints table at all', async () => {
   const noClippy = good();
   delete noClippy['clippy.toml'];
@@ -61,4 +74,5 @@ test('parsers: lint levels and disallowed paths', () => {
   assert.deepEqual(lintLevels(['a = "warn"', 'b = { level = "deny", priority = -1 }', '# c = "x"', 'd = true']), { a: 'warn', b: 'deny' });
   assert.deepEqual(disallowedPaths('# c\ndisallowed-methods = [\n  { path = "a::b", reason = "r" },\n  { path = "c::d" },\n]\nother = 1\n'), ['a::b', 'c::d']);
   assert.deepEqual(disallowedPaths('x = 1'), []);
+  assert.deepEqual(disallowedPaths('disallowed-methods = [\n  { path = "m::a" },\n]\n# { path = "x::y" }\ndisallowed-types = [\n  { path = "t::A", reason = "r" },\n]\n', 'disallowed-types'), ['t::A']);
 });
