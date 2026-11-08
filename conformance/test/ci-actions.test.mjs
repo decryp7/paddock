@@ -1834,3 +1834,23 @@ test('every workflow step that runs the ui Playwright config provides every port
   }
   assert.ok(checked >= 2, 'the check found the release workflows\' ui Playwright steps');
 });
+
+test('the plan job guard keeps CI green under the documented C100 rollback (--warn) and fails when the line is gone', () => {
+  const ci = read(join(WORKFLOWS, 'ci.yml'));
+  const at = ci.indexOf('- name: C100 stays wired');
+  assert.ok(at > 0, 'the guard step exists');
+  const block = /run: \|\n((?: {10}.*\n|\n)+)/.exec(ci.slice(at))[1].replace(/^ {10}/gm, '');
+  const run = (line) => {
+    const dir = mkdtempSync(join(tmpdir(), 'guard-'));
+    mkdirSync(join(dir, '.gitea', 'workflows'), { recursive: true });
+    for (const f of ['ci.yml', 'nightly.yml']) writeFileSync(join(dir, '.gitea', 'workflows', f), `jobs:\n  x:\n    steps:\n${line}\n`);
+    const r = spawnSync('bash', ['-c', block], { cwd: dir, encoding: 'utf8' });
+    rmSync(dir, { recursive: true, force: true });
+    return r;
+  };
+  assert.equal(run('        run: ./dev gates check').status, 0);
+  assert.equal(run('        run: ./dev gates check --warn').status, 0, 'the rollback of ADR 0060');
+  const gone = run('        run: echo nothing');
+  assert.equal(gone.status, 1);
+  assert.match(gone.stdout, /::error file=.*C100 is not wired/);
+});
