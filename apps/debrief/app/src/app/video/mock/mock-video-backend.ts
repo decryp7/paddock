@@ -11,6 +11,7 @@ import {
   FrameImage,
   FrameRecord,
   FrameRef,
+  DescribePlan,
   FramesRequest,
   IncludeRequest,
   InstalledRelease,
@@ -375,6 +376,17 @@ export class MockVideoBackend extends VideoBackend {
       if (request.redo || !f.description) f.description = DESCRIPTIONS[i % DESCRIPTIONS.length] ?? null;
     }
     return this.view(r);
+  }
+
+  /** Seconds per frame of earlier describe runs; `null` = none measured yet (no estimate). Tests set it. */
+  describeSeconds: number | null = null;
+
+  /** Mimics the engine: the count of frames that would be described and, once measured, a time. */
+  async describePlan(request: FramesRequest): Promise<DescribePlan> {
+    const r = this.get(request.key);
+    const wanted = request.indices.length ? request.indices : r.frames.map((_, i) => i);
+    const frames = wanted.filter((i) => request.redo || request.indices.length > 0 || !r.frames[i]?.description).length;
+    return { frames, estimateSeconds: this.describeSeconds === null ? null : frames * this.describeSeconds };
   }
 
   async explainFrames(request: ExplainRangeRequest): Promise<FrameExplanation> {

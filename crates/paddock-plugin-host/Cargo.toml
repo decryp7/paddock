@@ -12,6 +12,7 @@ paddock-env = { workspace = true }
 paddock-guard = { workspace = true }
 paddock-ipc = { workspace = true }
 paddock-jobs = { workspace = true }
+paddock-limits = { workspace = true }
 paddock-plugin-api = { workspace = true }
 paddock-plugin-package = { workspace = true }
 paddock-settings = { workspace = true }
@@ -22,5 +23,6 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
 
 [dev-dependencies]
+paddock-testkit = { workspace = true }
 paddock-plugin-test = { workspace = true }
 tempfile = "3"

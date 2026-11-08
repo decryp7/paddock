@@ -6,7 +6,6 @@
 //! window cancels the older one at its next step (it answers `null`), so typing never queues up searches.
 
 use crate::error::{CmdError, ErrorCode};
-use crate::names::Freshness;
 use crate::windows::{CurrentWindow, WindowState};
 use crate::CmdResult;
 use debrief_core::batch::EventId;
@@ -146,10 +145,10 @@ pub(crate) async fn search_with<R: Runtime>(
 
 /// The values and entities the logs hold that the search box's words refer to (`CompanyA.Graphic.Builder.exe` for
 /// "graphic builder"), best first, each with how and why it matched, its spellings and evidence, and a clarifying
-/// question when two things match equally. Rebuilds the window's name table when its catalogue is ready and starts
-/// the background alias job; nothing else changes.
+/// question when two things match equally. Rebuilds the window's name table when its catalogue is ready; nothing else
+/// changes.
 #[tauri::command]
-pub async fn find_values<R: Runtime>(app: AppHandle<R>, state: CurrentWindow, request: FindValuesRequest) -> CmdResult<Resolved> {
+pub async fn find_values<R: Runtime>(_app: AppHandle<R>, state: CurrentWindow, request: FindValuesRequest) -> CmdResult<Resolved> {
     if request.text.chars().count() > search_all::MAX_TEXT_CHARS {
         return Err(CmdError::new(
             ErrorCode::Invalid,
@@ -158,15 +157,10 @@ pub async fn find_values<R: Runtime>(app: AppHandle<R>, state: CurrentWindow, re
     }
     let store = state.engine.store()?;
     let win = state.arc().clone();
-    let aliases = crate::ai::commands::core(&app).map(|c| c.settings().name_aliases).unwrap_or(false);
-    let (found, fresh) = crate::sync::blocking("find values", move || {
-        win.names.apply_settings(aliases);
+    let (found, _) = crate::sync::blocking("find values", move || {
         win.names.search(store.as_ref(), &request.text, request.limit)
     })
     .await?;
-    if fresh == Freshness::Rebuilt {
-        crate::names::schedule_alias_job(&app, state.label(), &state.names);
-    }
     Ok(found)
 }
 

@@ -158,6 +158,9 @@ impl<S: Positions> Positions for Delegating<'_, S> {
     fn positioned(&self) -> StoreResult<u64> {
         self.inner.positioned()
     }
+    fn order_complete(&self) -> StoreResult<bool> {
+        self.inner.order_complete()
+    }
 }
 
 impl<S: Analysis> Analysis for Delegating<'_, S> {

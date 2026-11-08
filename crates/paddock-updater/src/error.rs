@@ -243,7 +243,9 @@ impl UpdateError {
         let detail = e.to_string();
         match e {
             DownloadError::Network { detail: d, .. } if looks_offline(d) => UpdateError::Offline,
-            DownloadError::TooLarge { limit, .. } => UpdateError::TooLarge { limit: *limit },
+            DownloadError::TooLarge { limit, .. } | DownloadError::ReplyTooLarge { limit, .. } => {
+                UpdateError::TooLarge { limit: *limit }
+            }
             DownloadError::DiskFull | DownloadError::NotEnoughSpace { .. } => {
                 UpdateError::DiskFull { detail }
             }
