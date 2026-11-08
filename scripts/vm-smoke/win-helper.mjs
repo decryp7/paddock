@@ -11,6 +11,7 @@ import { makeResult } from './verdict.mjs';
 import { makeMcpGuest } from './mcp-guest.mjs';
 import { mcpStep } from './mcp-judges.mjs';
 import { NOT_DRIVEN, ROW_TITLES, notDriven } from './release-rows.mjs';
+import { VMWIN } from './vm-win-path.mjs';
 import { judgeJobsRestart, parseConsent, judgeConsentAfterAnswer, installEvents, installOutcomeSince, attemptProbe, judgeControl, judgeExploitPrecondition, judgeInstallOutcome, judgeRefusal, judgeServed, judgeTrayCount, judgeWear } from './win-judges.mjs';
 
 const HELPER = 'C:\\ProgramData\\Dyno\\Helper';
@@ -270,7 +271,6 @@ import { discoveryStep, windowsDiscoveryPrims } from './discovery-row.mjs';
 import { loginSwitchStep } from './login-start-rows.mjs';
 import { readingSteps, windowsDriver } from './helper-readings.mjs';
 import { scopingStep } from './win-scoping.mjs';
-import { VMWIN } from './vm-win-path.mjs';
 const mainPage = (browser) => browser.contexts().flatMap((c) => c.pages()).find((p) => !p.url().includes('dialog?id='));
 
 
