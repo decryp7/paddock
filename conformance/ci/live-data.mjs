@@ -158,5 +158,5 @@ async function main(argv, env = process.env) {
 }
 
 if (isMain(import.meta.url)) {
-  main(process.argv.slice(2)).then((c) => process.exit(c));
+  main(process.argv.slice(2)).then((c) => { process.exitCode = c; });
 }

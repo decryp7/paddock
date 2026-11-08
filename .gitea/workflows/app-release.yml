@@ -184,11 +184,6 @@ jobs:
           workspace: ${{ env.PADDOCK_WORKSPACE || github.workspace }}/${{ inputs.cargo-dir }}
           name: ${{ inputs.app-id }}-bundle
 
-      # ADR 0062 WP-1e: a cargo home kept between Linux container jobs (a slot of the runner's /sccache mount), so the crates are not
-      # downloaded again in every release run.
-      - uses: ./.paddock/.gitea/actions/cargo-home-slot
-        if: runner.os == 'Linux'
-
       - uses: ./.paddock/.gitea/actions/setup-rust
 
       - uses: ./.paddock/.gitea/actions/setup-node

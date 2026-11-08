@@ -109,9 +109,6 @@ jobs:
       # CARGO_BUILD_JOBS: this runner's share of the host's cores (before job-isolation, which builds paddock-dev).
       - uses: ./.gitea/actions/build-jobs
 
-      - uses: ./.gitea/actions/cargo-home-slot
-        if: runner.os == 'Linux'
-
       # A slot of the host (job isolation; after Git bash on Windows); on Windows the build folder is the slot's kept one.
       - uses: ./.gitea/actions/job-isolation
 

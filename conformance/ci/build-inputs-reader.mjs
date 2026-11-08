@@ -259,10 +259,10 @@ async function main(argv) {
 
 if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).then(
-    (c) => process.exit(c),
+    (c) => { process.exitCode = c; },
     (err) => {
       console.error(String(err.message ?? err).startsWith('::error') ? err.message : `::error title=build inputs::${err.message ?? err}`);
-      process.exit(1);
+      process.exitCode = 1;
     },
   );
 }

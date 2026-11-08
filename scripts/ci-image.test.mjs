@@ -127,9 +127,9 @@ describe('the workflow and ci.yml', () => {
     assert.ok(wf.includes('platforms: linux/amd64'));
   });
 
-  test('the setup-rust action skips the toolchain install inside the image', () => {
+  test('the setup-rust action skips the toolchain install when the toolchain, components and targets are there (ADR 0062 D2)', () => {
     const action = read('.gitea/actions/setup-rust/action.yml');
-    assert.ok(action.includes('/etc/paddock-ci-release'));
+    assert.ok(action.includes('rustup toolchain list') && action.includes('no download'));
   });
 });
 
