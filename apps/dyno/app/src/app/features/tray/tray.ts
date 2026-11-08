@@ -16,6 +16,9 @@ import { HealthStore } from '../../state/health.store';
 import { LiveStore } from '../../state/live.store';
 import { QUIT_STOP, QuitStore } from '../../state/quit.store';
 
+/** The ids of the footer's more-actions menu. */
+type TrayMenuId = 'customizeWidgets' | 'openSettings' | 'quit' | 'quitAndStop';
+
 /**
  * The tray dropdown (360 wide, frameless): the health pill and agent state, the person's widgets on `pd-widget-area`
  * (family ADR 0035: the layout and every value come from the engine), and the shared footer of `pd-tray-popover` with Open Dyno and the ⋯ menu. The
@@ -79,7 +82,7 @@ export class Tray implements OnInit {
   private readonly settingsKey = shortcutLabel(this.platform, 'settings');
   private readonly quitKey = shortcutLabel(this.platform, 'quit');
   /** The footer's more-actions menu: Customize widgets, Settings, then the two ways to quit (their words come from the engine). */
-  protected readonly menu = computed<readonly SuTrayMenuEntry[]>(() => [
+  protected readonly menu = computed<readonly SuTrayMenuEntry<TrayMenuId>[]>(() => [
     { kind: 'item', id: 'customizeWidgets', label: 'Customize widgets…', icon: 'dy:sliders' },
     { kind: 'item', id: 'openSettings', label: 'Settings…', icon: 'dy:settings', keyHint: this.settingsKey },
     { kind: 'separator' },
@@ -122,11 +125,17 @@ export class Tray implements OnInit {
     void this.backend.showMainWindow().catch(() => undefined);
   }
 
-  /** What a footer menu item does. */
-  protected choose(id: string): void {
-    if (id === 'quit') this.quit();
-    else if (id === 'quitAndStop') this.quitAndStop();
-    else if (id === 'customizeWidgets' || id === 'openSettings') this.run(id);
+  /** What each footer menu item does: one entry per id, so a new id does not compile until it has its action. */
+  private readonly menuActions: Record<TrayMenuId, () => void> = {
+    customizeWidgets: () => this.run('customizeWidgets'),
+    openSettings: () => this.run('openSettings'),
+    quit: () => this.quit(),
+    quitAndStop: () => this.quitAndStop(),
+  };
+
+  /** Runs a footer menu item. */
+  protected choose(id: TrayMenuId): void {
+    this.menuActions[id]();
   }
 
   private quit(): void {

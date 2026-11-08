@@ -103,6 +103,13 @@ describe('dy-tray', () => {
     expect(panel.querySelector('hr.pd-tray-sep')!.nextElementSibling?.textContent?.trim()).toBe('Quit Dyno');
   });
 
+  it('handles exactly the menu ids it draws (an unknown id does not compile)', async () => {
+    const { f } = await make();
+    const tray = f.componentInstance;
+    // @ts-expect-error: 'reboot' is not one of the tray menu's ids.
+    expect(() => tray['choose']('reboot')).toThrow();
+  });
+
   it('has a footer menu with Customize widgets, Settings and Quit, and shows no shortcuts the popover does not bind', async () => {
     const { f, mock, el } = await make();
     const more = el.querySelector<HTMLButtonElement>('button[aria-label="More actions"]')!;

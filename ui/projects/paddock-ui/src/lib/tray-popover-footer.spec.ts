@@ -5,7 +5,9 @@ import { DomSanitizer } from '@angular/platform-browser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { SuTrayPopover, type SuTrayMenuEntry } from './tray-popover';
 
-const MENU: readonly SuTrayMenuEntry[] = [
+type Id = 'customize' | 'release' | 'settings' | 'quit';
+
+const MENU: readonly SuTrayMenuEntry<Id>[] = [
   { kind: 'separator' },
   { kind: 'item', id: 'customize', label: 'Customize widgets…', icon: 't:sliders' },
   { kind: 'item', id: 'release', label: 'Release memory', disabled: true },
@@ -30,11 +32,11 @@ const MENU: readonly SuTrayMenuEntry[] = [
 })
 class Host {
   readonly primary = signal<string | null>('Open Dyno');
-  readonly menu = signal<readonly SuTrayMenuEntry[]>(MENU);
+  readonly menu = signal<readonly SuTrayMenuEntry<Id>[]>(MENU);
   readonly menuLabel = signal('More actions');
   readonly extra = signal(false);
   opened = 0;
-  readonly actions: string[] = [];
+  readonly actions: Id[] = [];
 }
 
 describe('pd-tray-popover footer', () => {
@@ -114,6 +116,48 @@ describe('pd-tray-popover footer', () => {
     f.componentInstance.menu.set([]);
     await f.whenStable();
     expect(footer(f).children).toHaveLength(0);
+  });
+
+  it('keeps the icon gutter on an item without an icon when another item has one, so the labels align', async () => {
+    const f = await setup();
+    const panel = await openMenu(f);
+    const items = [...panel.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    // "Release memory" has no icon: a blank, hidden gutter of the icon's size stands in its place.
+    const blank = items[1]!.querySelector('.pd-tray-icon--blank');
+    expect(blank?.getAttribute('aria-hidden')).toBe('true');
+    expect(blank?.classList).toContain('pd-tray-icon');
+    expect(items.filter((i) => i.querySelector('.pd-tray-icon')).length).toBe(4);
+  });
+
+  it('draws no gutter when no item has an icon', async () => {
+    const f = await setup((h) => h.menu.set([{ kind: 'item', id: 'settings', label: 'Settings…' }, { kind: 'item', id: 'quit', label: 'Quit' }]));
+    const panel = await openMenu(f);
+    expect(panel.querySelector('.pd-tray-icon')).toBeNull();
+  });
+
+  it('opens from the keyboard with the first item focused, and Escape gives the focus back to the trigger', async () => {
+    const f = await setup();
+    const trigger = more(f)!;
+    trigger.focus();
+    // A browser turns Enter on a button into a click; the trigger notes the keyboard first, so it focuses the first item.
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+    trigger.click();
+    await f.whenStable();
+    await new Promise((r) => setTimeout(r, 0));
+    const panel = document.querySelector<HTMLElement>('.mat-mdc-menu-panel')!;
+    expect(document.activeElement).toBe(panel.querySelector('[role="menuitem"]'));
+    panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true }));
+    await f.whenStable();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.classList).not.toContain('pd-tray-more--open');
+  });
+
+  it('types the chosen id by the menu model (a wrong id does not compile)', () => {
+    const entry: SuTrayMenuEntry<Id> = { kind: 'item', id: 'quit', label: 'Quit' };
+    // @ts-expect-error: 'reboot' is not one of the model's ids.
+    const wrong: SuTrayMenuEntry<Id> = { kind: 'item', id: 'reboot', label: 'Reboot' };
+    expect([entry.kind, wrong.kind]).toEqual(['item', 'item']);
   });
 
   it('draws the menu alone when there is no primary action', async () => {

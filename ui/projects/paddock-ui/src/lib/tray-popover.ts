@@ -7,11 +7,11 @@ import { PdGlyph } from '@decryp7/paddock-ui/icons';
 
 export type SuTrayPlatform = 'macos' | 'windows' | 'linux';
 
-/** One action of the tray footer's more-actions menu. */
-export interface SuTrayMenuItem {
+/** One action of the tray footer's more-actions menu; `Id` is the app's union of action ids, so its handler can be exhaustive. */
+export interface SuTrayMenuItem<Id extends string = string> {
   readonly kind: 'item';
   /** What `menuAction` emits when the item is chosen. */
-  readonly id: string;
+  readonly id: Id;
   /** Sentence case, with "…" when the action asks for more (Settings…). */
   readonly label: string;
   /** A registered `MatIconRegistry` name (`dy:power`, `pd:settings`); decorative. */
@@ -27,11 +27,11 @@ export interface SuTrayMenuSeparator {
 }
 
 /** The menu model: items and separators in order. */
-export type SuTrayMenuEntry = SuTrayMenuItem | SuTrayMenuSeparator;
+export type SuTrayMenuEntry<Id extends string = string> = SuTrayMenuItem<Id> | SuTrayMenuSeparator;
 
 /** The entries as drawn: no separator at either end and never two in a row (an item hidden by its app leaves none behind). */
-function tidy(entries: readonly SuTrayMenuEntry[]): readonly SuTrayMenuEntry[] {
-  const out: SuTrayMenuEntry[] = [];
+function tidy<Id extends string>(entries: readonly SuTrayMenuEntry<Id>[]): readonly SuTrayMenuEntry<Id>[] {
+  const out: SuTrayMenuEntry<Id>[] = [];
   for (const e of entries) {
     if (e.kind === 'separator' && (out.length === 0 || out[out.length - 1]!.kind === 'separator')) continue;
     out.push(e);
@@ -105,6 +105,8 @@ function tidy(entries: readonly SuTrayMenuEntry[]): readonly SuTrayMenuEntry[] {
                 <button mat-menu-item type="button" [disabled]="!!e.disabled" (click)="menuAction.emit(e.id)">
                   @if (e.icon) {
                     <mat-icon class="pd-tray-icon" [svgIcon]="e.icon" aria-hidden="true" />
+                  } @else if (iconGutter()) {
+                    <span matMenuItemIcon class="pd-tray-icon pd-tray-icon--blank" aria-hidden="true"></span>
                   }
                   <span class="pd-tray-row"><span class="pd-tray-label">{{ e.label }}</span>@if (e.keyHint) {<kbd aria-hidden="true">{{ e.keyHint }}</kbd>}</span>
                 </button>
@@ -154,6 +156,7 @@ function tidy(entries: readonly SuTrayMenuEntry[]): readonly SuTrayMenuEntry[] {
     .pd-tray-more--open { background: var(--pd-hover); box-shadow: inset 0 0 0 var(--pd-focus-width) var(--pd-focus-ring); }
     /* The menu's rows (drawn in the overlay, still styled here): 16 px icons, the label, a key hint at the end. */
     .mat-mdc-menu-item .pd-tray-icon { flex: none; width: 16px; height: 16px; margin: 0 var(--pd-space-3) 0 0; }
+    .pd-tray-icon--blank { display: inline-block; }
     .pd-tray-row { display: flex; align-items: center; gap: var(--pd-space-4); width: 100%; }
     .pd-tray-label { flex: 1; min-width: 0; }
     .pd-tray-sep { border: 0; border-top: 1px solid var(--pd-hairline); margin: var(--pd-space-1) 0; }
@@ -162,7 +165,7 @@ function tidy(entries: readonly SuTrayMenuEntry[]): readonly SuTrayMenuEntry[] {
     @media (prefers-reduced-motion: reduce) { :host { animation: none; } }
   `,
 })
-export class SuTrayPopover {
+export class SuTrayPopover<Id extends string = string> {
   private readonly content = viewChild.required<ElementRef<HTMLElement>>('content');
   /** True while the content scrolls (past 520 px): the region is then focusable and named, so a keyboard can scroll it (WCAG 2.1.1). */
   protected readonly scrolls = signal(false);
@@ -178,14 +181,16 @@ export class SuTrayPopover {
   /** The footer's primary action ("Open Dyno"); none without it. */
   readonly primaryLabel = input<string | null>(null);
   /** The more-actions menu; no ⋯ button while it has no item. */
-  readonly menu = input<readonly SuTrayMenuEntry[]>([]);
+  readonly menu = input<readonly SuTrayMenuEntry<Id>[]>([]);
   /** The ⋯ button's accessible name and tooltip. */
   readonly menuLabel = input<string>($localize`:@@pd.trayPopover.more:More actions`);
   /** The primary action was pressed. */
   readonly primary = output<void>();
   /** The id of the menu item chosen. */
-  readonly menuAction = output<string>();
+  readonly menuAction = output<Id>();
   protected readonly items = computed(() => tidy(this.menu()));
+  /** Some item has an icon: an item without one keeps a blank gutter of the icon's size, so the labels align. */
+  protected readonly iconGutter = computed(() => this.items().some((e) => e.kind === 'item' && !!e.icon));
   /** True while the more-actions menu is open (the trigger is marked). */
   protected readonly menuOpen = signal(false);
 

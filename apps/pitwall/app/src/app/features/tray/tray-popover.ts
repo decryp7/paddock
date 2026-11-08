@@ -13,6 +13,9 @@ import { StatusPill } from './status-pill';
 import { TrayWidgetsStore } from './tray-widgets.store';
 import { WidgetSet } from './widget-set';
 
+/** The ids of the footer's more-actions menu. */
+type TrayMenuId = 'customize' | 'pause' | 'resume' | 'release' | 'settings' | 'quit';
+
 /** The platform the popover is drawn for (the shell fits the window; the frame's corners and shadow follow the OS). */
 function platformOf(userAgent: string): SuTrayPlatform {
   return /Windows/i.test(userAgent) ? 'windows' : /Linux|X11/i.test(userAgent) && !/Mac/i.test(userAgent) ? 'linux' : 'macos';
@@ -150,7 +153,7 @@ export class TrayPopover {
     return t === 'pause' || t === 'resume' ? t : null;
   });
   /** The footer's more-actions menu (the shared footer): what the engine allows now, Settings, then Quit after a separator. */
-  protected readonly menu = computed<readonly SuTrayMenuEntry[]>(() => {
+  protected readonly menu = computed<readonly SuTrayMenuEntry<TrayMenuId>[]>(() => {
     const serving = this.serving();
     return [
       { kind: 'item', id: 'customize', label: 'Customize widgets…', icon: 'pw:sliders' },
@@ -188,21 +191,19 @@ export class TrayPopover {
     this.open(SETTINGS_TRAY_POPUP_ROUTE);
   }
 
-  /** What a footer menu item does. */
-  protected choose(id: string): void {
-    switch (id) {
-      case 'customize':
-        return this.customize();
-      case 'pause':
-      case 'resume':
-        return this.attempt(this.backend.setServing(id === 'pause'));
-      case 'release':
-        return this.attempt(this.backend.releaseMemory());
-      case 'settings':
-        return this.open(SETTINGS_GENERAL_ROUTE);
-      case 'quit':
-        return this.attempt(this.windows.quit());
-    }
+  /** What each footer menu item does: one entry per id, so a new id does not compile until it has its action. */
+  private readonly menuActions: Record<TrayMenuId, () => void> = {
+    customize: () => this.customize(),
+    pause: () => this.attempt(this.backend.setServing(true)),
+    resume: () => this.attempt(this.backend.setServing(false)),
+    release: () => this.attempt(this.backend.releaseMemory()),
+    settings: () => this.open(SETTINGS_GENERAL_ROUTE),
+    quit: () => this.attempt(this.windows.quit()),
+  };
+
+  /** Runs a footer menu item. */
+  protected choose(id: TrayMenuId): void {
+    this.menuActions[id]();
   }
 
   /** Runs what a widget asked for through the command that does it; the app decides the rest. */

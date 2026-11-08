@@ -172,6 +172,12 @@ describe('the tray popup', () => {
       expect(m.quit).toHaveBeenCalledTimes(1);
     });
 
+    it('handles exactly the menu ids it draws (an unknown id does not compile)', async () => {
+      const { fixture } = await mount();
+      // @ts-expect-error: 'reboot' is not one of the tray menu's ids.
+      expect(() => fixture.componentInstance['choose']('reboot')).toThrow();
+    });
+
     it('Pause serving and Release memory go through the backend', async () => {
       const backend = new MockBackend();
       const pause = vi.spyOn(backend, 'setServing');
