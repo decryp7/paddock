@@ -25,6 +25,10 @@ use std::time::{Duration, Instant};
 const HANDSHAKE_MAX: usize = 512;
 /// A client that does not send its key within this is dropped.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Refused clients drained at once. Not tied to `max_connections`: a drain ends only after the refused client's key line is
+/// read, which is after the client has seen the refusal and the end, so with one drain place a client that refused again at
+/// once found the place still taken, its connection was closed with the key line unread and it was reset (macOS, 2026-11-09).
+const MAX_DRAINING: usize = 64;
 /// How long one blocking read waits before the connection looks at the stop flag again. Shutting a socket down wakes a
 /// blocked read on Linux and macOS, but not on Windows, where only the system's own connection timeout (about two minutes)
 /// would end it; so reads are cut into slices and [`Serving::stop`] is noticed within one.
@@ -388,10 +392,10 @@ pub fn serve_loopback(
                 );
                 // The client sees the refusal and then the end at once, but the socket is closed only once the client's
                 // key line is read: a socket closed with unread data is reset, and the reset can reach the client before
-                // the refusal (2026-11-07). The drain has its own thread, at most `max_connections` at a time, each ended
+                // the refusal (2026-11-07). The drain has its own thread, at most [`MAX_DRAINING`] at a time, each ended
                 // by the key line, the client's end, the handshake timeout or a stop.
                 let _ = stream.shutdown(Shutdown::Write);
-                if let Some(draining) = Place::take(&drains, max_connections) {
+                if let Some(draining) = Place::take(&drains, MAX_DRAINING) {
                     let stream = Arc::new(stream);
                     let kept = Arc::downgrade(&stream);
                     let stop = stop2.clone();
@@ -401,6 +405,10 @@ pub fn serve_loopback(
                         drop(stream);
                     });
                     list.push((kept, handle));
+                } else {
+                    log::warn!(
+                        "paddock_mcp: connection #{id} from port {peer} closed without draining: {MAX_DRAINING} refused clients are already being drained; it may see a reset instead of the refusal"
+                    );
                 }
                 continue;
             };

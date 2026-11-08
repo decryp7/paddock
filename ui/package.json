@@ -18,7 +18,7 @@
     "shell-demo:build": "npm run build:css && ng build shell-demo",
     "workbench-demo": "npm run build:css && ng serve workbench-demo --port 4302",
     "workbench-demo:build": "npm run build:css && ng build workbench-demo",
-    "test:scripts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test ../scripts/*.test.mjs scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs projects/paddock-e2e/src/*.test.ts",
+    "test:scripts": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test ../scripts/*.test.mjs scripts/*.test.mjs projects/paddock-ui/bin/*.test.mjs projects/paddock-ui/shell/notify/src/*.test.mjs projects/paddock-e2e/src/*.test.ts",
     "i18n": "node projects/paddock-ui/bin/paddock-i18n.mjs build",
     "i18n:check": "node projects/paddock-ui/bin/paddock-i18n.mjs build --check",
     "release": "node ../scripts/publish.mjs",

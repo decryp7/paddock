@@ -1499,3 +1499,22 @@ A redaction default in a shared crate was widened for one app's problem report. 
 ## Gitea tokens cannot mint narrower tokens, and agents must not create bot users (2026-11-08)
 
 An agent looking for a narrower CI token found that a Gitea token cannot create a token with fewer rights, and the only other route was creating a bot user. Agents must not create users. The user creates scoped CI tokens (one per purpose, least privilege) and the agent is given the one it needs; if none exists, the agent stops and asks.
+
+## Two flakes fixed by their cause, not by waiting: refused-client reset and a disk scan in the unit slice (2026-11-09)
+
+(1) paddock-mcp `a_client_turned_down_for_lack_of_places_reads_the_refusal_not_a_reset` failed about 2 in 25 on macOS with
+`ConnectionReset` on the second read (the one that expects the end of the connection). Causes listed, each with what rules it
+out: the refusal write racing the close (ruled out: the refusal was read, only the end was reset); the client's write after the
+server closed (ruled out: failure is on the read, line 339); a refused connection closed with its key line unread, which
+sends RST that can overtake the FIN (open to confirm); the drain place unavailable because the drain cap equalled
+`max_connections` (1) and the previous refused client's drain thread had not yet ended, since it ends only after the client has
+already seen the end. Confirmed: with the test raised to 3000 attempts it failed 4 of 4 runs on the old code within 0.2 s; with the
+drain cap decoupled (`MAX_DRAINING` = 64) it passed 12 of 12 runs of 3000 attempts under load 24 to 45. The ordinary 1000-attempt
+test is the regression test. Rule: a limit on a resource that is released only after a peer's next action must not share the
+limit of the thing it protects. (2) The paddock-ui shell slice timed out in 3 of 6 Node and 2 of 6 Deno runs under load, always in
+`cause-codes.spec.ts` "the Rust sources and the chip table agree": a walk and read of about 2k Rust files judged against the
+5 s unit-test limit. It now runs as a `node --test` check (`npm run test:scripts`, 0.7 s warm) and the unit spec keeps only pure
+logic on fixtures. A unit slice holds no whole-repo disk scans. The Deno-only failure of `overrides.spec.ts` (`__proto__` key
+kept by `JSON.parse` handling) is a runtime difference, not load. The `shell-demo-theme` reduced-motion e2e test passed 15 of 15
+under load 30 and never reproduced; its one weak step (asserting "no data-motion" on a page that had not started) now waits for
+the app first: unconfirmed hardening, not a confirmed cause.

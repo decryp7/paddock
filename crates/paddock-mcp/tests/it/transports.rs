@@ -317,7 +317,7 @@ fn a_client_turned_down_for_lack_of_places_reads_the_refusal_not_a_reset() {
     let mut holder = Conn::open(serving.addr());
     holder.send(&hello);
     assert_eq!(holder.next().unwrap()["ok"], true);
-    for attempt in 0..50 {
+    for attempt in 0..1000 {
         let mut s = TcpStream::connect(serving.addr()).unwrap();
         s.set_read_timeout(Some(HANG_GUARD)).unwrap();
         s.write_all(format!("{hello}\n").as_bytes()).unwrap();

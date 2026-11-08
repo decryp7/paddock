@@ -129,6 +129,8 @@ test('reduced motion: the menu toggle and the OS setting shorten every duration 
   await expect.poll(() => token(page, '--pd-duration-large')).not.toBe('100ms');
   await page.evaluate(() => (localStorage.removeItem('paddock.appearance'), localStorage.removeItem('sd.settings')));
   await page.reload();
+  // Wait for the app first: "no data-motion attribute" is true of a page that has not started yet, so it proved nothing.
+  await expect(page.getByTestId('app-context')).toContainText('loaded');
   await expect(html(page)).not.toHaveAttribute('data-motion');
   await expect.poll(() => token(page, '--pd-duration-large')).toBe('100ms');
 });
