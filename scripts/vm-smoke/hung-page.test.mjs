@@ -35,3 +35,14 @@ test('the step runs against a fake guest on a fake clock; a process that cannot 
   assert.equal(r.status, 'pass', r.summary);
   assert.equal((await hungPageStep({ ...g, suspend: async () => { throw new Error('no such process'); } }, 'x')).status, 'check-broken');
 });
+test('lines the polls never returned are taken from the log by their own time', async () => {
+  let t = 1000; let resumed = false;
+  const at = (s) => new Date((1000 + s) * 1000).toISOString();
+  const lines = [`{"@m":"Window main stopped responding; the user is asked if it stays silent for a long time","@t":"${at(12)}"}`, `{"@m":"Window main has not answered for a long time; asking the user","@t":"${at(62)}"}`, `{"@m":"Window main responds again","@t":"${at(400)}"}`];
+  const g = { clockOffsetMs: 0, now: () => t, sleep: async (ms) => { t += ms / 1000; }, suspend: async () => {}, resume: async () => { resumed = true; },
+    logLines: async () => [lines[0]], finalLines: async () => lines, questions: async () => (resumed ? 0 : 1), keepWaiting: async () => false };
+  const r = await hungPageStep(g, 'x');
+  const bad = r.checks.filter((c) => !c.ok && c.kind !== 'check');
+  assert.deepEqual(bad.map((c) => c.detail), [], 'no product verdict from a poll that missed lines');
+  assert.ok(r.checks.some((c) => /first question came 6\d/.test(c.detail)));
+});

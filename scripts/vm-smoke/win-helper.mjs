@@ -3,7 +3,7 @@
 // smartctl into a user-owned tree), disk health install, Turn off. Each step returns { title, status, summary, checks, evidence }. They are `extra`
 // steps of win-ui.mjs's runUiPhase and need run-win.mjs --vnc (the VM's VNC) and --ui (the DevTools port).
 import { APP_LOG_PS, TRAY_ICONS_CMD, dynoTrayIcons, metricsFromLog, trayLogLines } from './win-tray-icons.mjs';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { Vnc } from './win-vnc.mjs';
 import { evidenceFile } from './evidence.mjs';
@@ -403,7 +403,14 @@ export async function jobsAfterAgentRestart(browser) {
   await p.evaluate(() => { window.__jobsSeen = false; const f = () => { if (/jobs could not be read/i.test(document.body.innerText)) window.__jobsSeen = true; }; window.__jobsObs?.disconnect(); window.__jobsObs = new MutationObserver(f); window.__jobsObs.observe(document.body, { subtree: true, childList: true, characterData: true }); f(); });
   const shownBefore = (await probe()) === true;
   const oldPid = ssh('(Get-Process dyno-agent -ErrorAction SilentlyContinue | Select-Object -First 1).Id', { admin: true }).trim().split('\n').at(-1);
-  const killed = ssh('Get-Process dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; "killed"', { admin: true });
+  // The gap is held open: the agent is ended again every 300 ms for 15 s (the app respawns it within seconds, a single kill leaves a gap too short for the panel to ask in), while
+  // the panel is closed and opened every 2 s so that it asks for the jobs with no agent there. The page's observer notes whether the message showed.
+  const loop = spawn('bash', [VMWIN, 'ssh', '--admin', 'for ($i = 0; $i -lt 50; $i++) { Get-Process dyno-agent -ErrorAction SilentlyContinue | Stop-Process -Force; Start-Sleep -Milliseconds 300 }; "killed"'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let killed = ''; loop.stdout.on('data', (b) => { killed += b; });
+  const loopDone = new Promise((r) => loop.on('close', r));
+  let gapTicks = 0;
+  for (let t = 0; t < 40 && loop.exitCode === null; t++) { await sleep(500); if (t % 4 === 3) { await p.keyboard.press('Escape').catch(() => {}); await d.openJobs().catch(() => {}); gapTicks++; } }
+  await loopDone;
   let agentBack = false;
   for (let i = 0; i < 45 && !agentBack; i++) { await sleep(2000); const pid = ssh('(Get-Process dyno-agent -ErrorAction SilentlyContinue | Select-Object -First 1).Id', { admin: true }).trim().split('\n').at(-1); agentBack = /^\d+$/.test(pid) && pid !== oldPid && /^\s*\S/.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" status 2>&1 | Select-Object -First 1')) && /Cpu|CPU|Memory/i.test(ssh('& "$env:ProgramFiles\\Dyno\\dyno.exe" status 2>&1 | Out-String')); }
   const backAt = Date.now();
@@ -411,7 +418,7 @@ export async function jobsAfterAgentRestart(browser) {
   await d.openJobs();
   let shownAfterBack = null; let secondsToClear = null;
   for (let i = 0; i < 30; i++) { shownAfterBack = await probe(); if (shownAfterBack === false) { secondsToClear = Math.round((Date.now() - backAt) / 1000); break; } await sleep(2000); }
-  const r = result(title, judgeJobsRestart({ panelOpen, shownBefore, agentBack, everShown, shownAfterBack, secondsToClear }), [`old agent pid ${oldPid || '?'}; ${killed.trim() || 'kill gave no answer'}`, `message ever shown during the gap: ${everShown}; shown now: ${shownAfterBack}`], 'the message showed while the agent was gone and cleared once it was back');
+  const r = result(title, judgeJobsRestart({ panelOpen, shownBefore, agentBack, everShown, shownAfterBack, secondsToClear }), [`old agent pid ${oldPid || '?'}; ${killed.replace(/\*\*[^\n]*\n?/g, '').trim() || 'kill loop gave no answer'}`, `message ever shown during the gap: ${everShown} (${gapTicks} panel reopenings while the agent was held down); shown now: ${shownAfterBack}`], 'the message showed while the agent was gone and cleared once it was back');
   await p.evaluate(() => window.__jobsObs?.disconnect()).catch(() => {});
   return r;
 }

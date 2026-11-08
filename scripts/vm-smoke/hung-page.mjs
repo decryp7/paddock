@@ -89,7 +89,16 @@ export async function hungPageStep(g, title) {
   }
   let resumedAt = null, questionsAfterResume = null;
   try { await g.resume(); resumedAt = g.now(); for (let i = 0; i < 10 && !events.some((e) => e.kind === 'recovered' && e.t >= resumedAt); i++) { await g.sleep(3000); await poll(); } await g.sleep(2000); questionsAfterResume = await g.questions('resumed'); } catch { /* reported by the judge */ }
-  const lateAsk = (g.finalLines ? await g.finalLines() : []).filter((l) => eventOf(l) === 'asked');
+  // Lines the polls did not return but the log holds are added here, dated by their own @t on the host clock, so a poll that misses lines cannot turn into a verdict about the app.
+  const all = g.finalLines ? await g.finalLines() : [];
+  if (g.clockOffsetMs !== undefined) for (const l of all) {
+    const m = /"@t":"([^"]+)"/.exec(l); const k = eventOf(l);
+    if (!k || !m) continue;
+    const t = (Date.parse(m[1]) + g.clockOffsetMs) / 1000;
+    if (t >= suspendedAt && !events.some((e) => e.kind === k && Math.abs(e.t - t) < 15)) events.push({ t, kind: k });
+  }
+  events.sort((a, b) => a.t - b.t);
+  const lateAsk = all.filter((l) => eventOf(l) === 'asked');
   const diag = [`polls: ${polls}; last poll returned ${lastLines.length} line(s)`, ...(lateAsk.length && !events.some((e) => e.kind === 'asked') ? [`the log DOES hold an asking line the polls did not return: ${lateAsk[0].slice(0, 160)}`] : [])];
   return makeResult(title, judgeHung({ suspendedAt, resumedAt, events, questionsWhileOpen, questionsAfterResume, keepWaitingAt, secondAskAt }), [...(shot ? [`screenshot: ${shot}`] : []), ...diag], 'one question about 60 s after the stop, Keep Waiting doubled the wait, it cleared on resume');
 }
