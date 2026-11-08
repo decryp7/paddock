@@ -204,10 +204,12 @@ fn profile_marker(rest: &str) -> Option<usize> {
     (tail > 0).then_some(lead + word + tail)
 }
 
-/// The owner segment after a marker: up to the next separator or quote (spaces included: `Alex Doe`), at most four words; with
-/// no separator or quote after it (the end of a sentence) the first word only, so a sentence is not swallowed.
+/// The owner segment after a marker: up to the next separator or quote (spaces included: `Alex Doe`), at most four words. With
+/// no separator or quote after it, the rest of the line when that is at most four words (a name last in the text:
+/// `C:\Users\Dana Lee`), else the first word only, so a sentence is not swallowed.
 fn profile_segment(after: &str) -> usize {
     let stop = |c: char| is_sep(c) || matches!(c, '"' | '\'' | '\n' | '\r');
+    let words = |s: &str| s.split(' ').filter(|w| !w.is_empty()).count();
     match after.find(stop) {
         Some(i) if after[i..].starts_with(is_sep) || after[i..].starts_with(['"', '\'']) => {
             if after[..i].split(' ').count() <= 4 {
@@ -216,7 +218,14 @@ fn profile_segment(after: &str) -> usize {
                 after.find(' ').unwrap_or(i)
             }
         }
-        _ => after.find([' ', '\n', '\r']).unwrap_or(after.len()),
+        found => {
+            let line = &after[..found.unwrap_or(after.len())];
+            if words(line) <= 4 {
+                line.trim_end().len()
+            } else {
+                after.find([' ', '\n', '\r']).unwrap_or(after.len())
+            }
+        }
     }
 }
 
@@ -618,5 +627,32 @@ mod tests {
         // The home folder must still end at a path boundary when doubled.
         let (s, _) = r.apply(r"C:\\Users\\alexandra\\f");
         assert_eq!(s, r"C:\\Users\\<user>\\f");
+    }
+
+    #[test]
+    fn a_profile_folder_with_a_space_is_removed_whole_even_at_the_end_of_the_text() {
+        let r = Personal::default();
+        for (text, want) in [
+            (r"crash in C:\Users\Dana Lee", r"crash in C:\Users\<user>"),
+            (r"C:\\Users\\Dana Lee", r"C:\\Users\\<user>"),
+            ("see /Users/Dana Lee", "see /Users/<user>"),
+            (
+                "see /home/dana lee\nnext line",
+                "see /home/<user>\nnext line",
+            ),
+            (
+                r"opened C:\Users\Dana Lee\x twice",
+                r"opened C:\Users\<user>\x twice",
+            ),
+            // A long tail is a sentence, not a name: only the first word goes.
+            (
+                "see /home/carol for the details of the crash",
+                "see /home/<user> for the details of the crash",
+            ),
+        ] {
+            let (s, c) = r.apply(text);
+            assert_eq!(s, want, "{text}");
+            assert_eq!(c.profile_paths, 1, "{text}");
+        }
     }
 }

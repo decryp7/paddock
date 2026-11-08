@@ -109,6 +109,30 @@ const HOSTILE: &[(&str, &str, &str, Verdict)] = &[
     ),
     ("IPv4 with port", "peer 10.1.2.3:8080", "10.1.2.3", Removed),
     ("IPv6 with zone", "peer fe80::1%en0", "fe80::1", Removed),
+    (
+        "Windows profile folder with a space, last in the text",
+        "crash in C:\\Users\\Dana Lee",
+        "Lee",
+        Removed,
+    ),
+    (
+        "macOS profile folder with a space, last in the text",
+        "crash in /Users/Dana Lee",
+        "Lee",
+        Removed,
+    ),
+    (
+        "Linux home folder with a space, last in the text",
+        "crash in /home/dana lee",
+        "lee",
+        Removed,
+    ),
+    (
+        "Windows profile folder with a space, JSON-escaped",
+        "{\"path\":\"C:\\\\Users\\\\Dana Lee\"}",
+        "Lee",
+        Removed,
+    ),
     ("e-mail", "from alex.doe@example.com", "alex.doe", Removed),
     (
         "keyed API key",

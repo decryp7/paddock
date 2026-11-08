@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Report a problem: the report now keeps private network addresses and this computer's own address, because they show how the network is set up and say nothing about who you are. Public addresses are still replaced.
+
+### Fixed
+
+- Report a problem: a user folder name that contains a space, such as a first and last name, is now removed completely, also when it comes last in a line.
+
 ## [1.1.0] - 2026-11-06
 
 **On Windows, uninstall Dyno 1.0.0 first (keep your data), then install 1.1.0; 1.0.0 may offer this update but cannot install it.**
