@@ -89,10 +89,12 @@ fn target_dir() -> tempfile::TempDir {
 
 #[test]
 fn disk_measures_the_mechanics_and_leaves_nothing_behind() {
-    // Mechanics, not speed: the smallest file, one repetition; no assertion about how fast the drive is.
+    // Mechanics, not speed: the smallest file, one repetition; no assertion about how fast the drive is. The free-space margin is
+    // stated (64 MiB), so the result does not depend on the size or the free space of the machine's drive (the default margin is
+    // 10 % of the volume, which a large, well-filled CI drive does not have).
     let dir = target_dir();
     let out = bin()
-        .args(["disk", "--disk-mib", "16", "--reps", "1", "--dir"])
+        .args(["disk", "--disk-mib", "16", "--free-margin-mib", "64", "--reps", "1", "--dir"])
         .arg(dir.path())
         .output()
         .unwrap();

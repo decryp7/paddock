@@ -13,7 +13,7 @@ pub mod sys;
 use crate::emit::{kind_phase, Progress};
 use crate::Outcome;
 use driver::{run_phase, BlockIo, PhaseEnd, PhaseResult, PhaseSpec, WriteBudget};
-use dyno_core::bench::disk::{check_free, disk_write_budget_with, limits, metric_id, Pattern, MIB, PATTERNS};
+use dyno_core::bench::disk::{check_free_with, disk_write_budget_with, limits, metric_id, Pattern, MIB, PATTERNS};
 use dyno_core::bench::BenchMetric;
 use paddock_bench::Clock;
 use std::io;
@@ -40,6 +40,9 @@ pub struct DiskRun {
     pub rotational: bool,
     /// The sustained write, MiB written past the drive's cache after the patterns (zero: none; the person confirmed the amount).
     pub sustained_mib: u32,
+    /// The free space to keep beyond the file, MiB, instead of the default (10 % of the volume, at least 2 GiB). Set only on
+    /// purpose, by a test whose result must not depend on the size of the machine's drive.
+    pub free_margin_mib: Option<u32>,
 }
 
 /// The words for an I/O error: a full drive and a refused write are named, the rest carry the OS's text.
@@ -106,7 +109,14 @@ pub fn run(drive: &dyn Drive, cfg: DiskRun, clock: &(dyn Clock + Sync), progress
                 if write {
                     if let Some((cap, free)) = drive.space() {
                         // The file exists already; what must stay free is the margin.
-                        check_free("the drive", 0, Some(cap), Some(free)).map_err(Outcome::Failed)?;
+                        check_free_with(
+                            "the drive",
+                            0,
+                            Some(cap),
+                            Some(free),
+                            cfg.free_margin_mib.map(|m| u64::from(m) * MIB),
+                        )
+                        .map_err(Outcome::Failed)?;
                     }
                 }
                 let what = if write { "write" } else { "read" };
@@ -363,6 +373,7 @@ mod tests {
             reps,
             rotational: false,
             sustained_mib: 0,
+            free_margin_mib: None,
         }
     }
 
@@ -439,6 +450,20 @@ mod tests {
         d.space = Some((100 * MIB * 1024, MIB));
         let e = run(&d, cfg(16, 1), &clock, &NoProgress).unwrap_err();
         assert!(matches!(&e, Outcome::Failed(r) if r.contains("free")), "{e:?}");
+    }
+
+    #[test]
+    fn an_explicit_margin_replaces_the_default_one_on_a_huge_nearly_full_drive() {
+        let clock = AtomicClock::default();
+        let mut d = fake(&clock, Duration::from_micros(50));
+        // A 4 TiB volume with 1 GiB free: the default margin (10 %) refuses, a stated 64 MiB margin does not.
+        d.space = Some((4096 * 1024 * MIB, 1024 * MIB));
+        assert!(run(&d, cfg(16, 1), &clock, &NoProgress).is_err());
+        let stated = DiskRun {
+            free_margin_mib: Some(64),
+            ..cfg(16, 1)
+        };
+        assert!(run(&d, stated, &clock, &NoProgress).is_ok());
     }
 
     #[test]

@@ -35,6 +35,8 @@ pub struct Settings<'a> {
     pub sustained_write_mib: u32,
     /// Run the CPU kind as a sustained run of this many seconds instead of the short test.
     pub sustained_secs: Option<u32>,
+    /// The free space to keep on the drive beyond the test file, MiB (`None`: the default margin).
+    pub free_margin_mib: Option<u32>,
 }
 
 /// Why a benchmark didn't produce numbers.
@@ -97,6 +99,7 @@ pub fn run(kind: BenchKind, s: &Settings<'_>, progress: &dyn Progress) -> Result
                 reps: s.repeats.reps,
                 rotational: s.rotational,
                 sustained_mib: s.sustained_write_mib,
+                free_margin_mib: s.free_margin_mib,
             };
             disk::run(&file, run, &SystemClock::new(), progress)
         }
