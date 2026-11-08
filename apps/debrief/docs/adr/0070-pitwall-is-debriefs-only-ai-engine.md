@@ -324,6 +324,8 @@ moved, not deleted (D5). The compiler decides, and the implementer records each 
   `ai-chat`, `ai-vision`, `browser`, `browser-scripts`, `dock-full-height`, `jobs`, `main-layout` and `activity-report`,
   which name the worker or its states. Their screenshots change, so the changed screenshots get an independent review
   (rule 22) before AI-1 and AI-3 land.
+- AI-3's screenshot sheet includes the welcome page's AI offer with no Pitwall at all (`mockPitwall=absent`), in both themes
+  at a narrow width.
 - `app/src-tauri/tests/it/export_diagnostics.rs` loses the worker's bundle section.
 
 **Registers**

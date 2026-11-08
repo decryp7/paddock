@@ -5,8 +5,8 @@
 //!   (`rustls-platform-verifier`), so a corporate TLS-inspecting proxy (Zscaler, Netskope, ...) whose root
 //!   certificate IT installed in Windows works like in the browser. ureq's default would be the built-in
 //!   Mozilla list, which such proxies always fail. Certificate checking is never switched off.
-//! * A proxy is used only when the user configured one (never read from the environment here), never from the
-//!   environment.
+//! * A proxy comes from the environment (`HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`) or the operating system, read
+//!   through `paddock_download::ProxyRules` (see [`system_proxy_for`]); the FFmpeg runtime download uses it.
 //! * [`classify`] turns a transport error into an [`AiError::Connection`] with a [`NetKind`]: a certificate
 //!   problem, a proxy that wants a sign-in, an unreachable proxy, no network, a timeout or an HTTP status.
 

@@ -33,7 +33,7 @@ pub enum JobKind {
     Import,
     /// Reports, bundles, CSV, visuals, diagnostics archives.
     Export,
-    /// Downloads (the FFmpeg runtime).
+    /// Downloads (the FFmpeg runtime, the research browser's files).
     Download,
     /// Diagnostics collections started by tools.
     Collection,

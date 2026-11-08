@@ -150,7 +150,8 @@ pub struct Notice {
     pub read: bool,
     pub primary: Option<NoticeAction>,
     pub secondary: Option<NoticeAction>,
-    /// A third button (e.g. "Skip this version" next to "Update" and "Later").
+    /// A third button (e.g. "Skip this version" next to "Update" and "Later"). Kept because the shared
+    /// `paddock-health` notice carries it on the same wire; Debrief sets it only in tests today.
     #[serde(default)]
     pub tertiary: Option<NoticeAction>,
     #[serde(default)]

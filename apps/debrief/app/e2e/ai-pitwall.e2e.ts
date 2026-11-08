@@ -63,7 +63,7 @@ test('Settings → AI offers to connect to a running Pitwall', async ({ page }, 
   await expect(settings.getByTestId('ai-engine-status')).toContainText('Engine: Pitwall 1.0.4', { timeout: 10_000 });
 });
 
-test('with no Pitwall at all, every AI entry point leads to Connect to Pitwall and none is a dead button', async ({ page }) => {
+test('with no Pitwall at all, every AI entry point lands on Settings ▸ AI and none is a dead button', async ({ page }) => {
   await openAppWith(page, '?mockPitwall=absent&mockAi=setup&mockAiStepMs=5');
   // The activity bar offers the connect step, not the chat.
   await expect(page.locator('debrief-activity-bar [data-activity-id="ai-setup"]')).toBeVisible();
