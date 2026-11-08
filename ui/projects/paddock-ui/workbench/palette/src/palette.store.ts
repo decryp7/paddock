@@ -78,7 +78,7 @@ interface CommandEntry extends Rankable {
 export const PaletteStore = signalStore(
   { protectedState: true },
   withState(initialState),
-  withRequestStatus({ retry: false, why: 'the status is one search for one query: the next keystroke asks again' }),
+  withRequestStatus({ retry: false, kind: 'permanent', why: 'the status is one search for one query: the next keystroke asks again' }),
   withProps(() => ({
     _registry: inject(WorkbenchRegistry),
     _commands: inject(CommandService),

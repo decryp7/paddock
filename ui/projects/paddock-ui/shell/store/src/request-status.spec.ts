@@ -5,7 +5,7 @@ import { errorMessage, setError, setLoaded, setLoading, withRequestStatus } from
 
 const Probe = signalStore(
   { protectedState: true },
-  withRequestStatus({ retry: false, why: 'a probe of the union' }),
+  withRequestStatus({ retry: false, kind: 'permanent', why: 'a probe of the union' }),
   withMethods((store) => ({
     start: () => patchState(store, setLoading()),
     done: () => patchState(store, setLoaded()),

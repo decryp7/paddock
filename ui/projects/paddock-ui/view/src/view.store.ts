@@ -23,7 +23,7 @@ interface ViewState {
  */
 export const ViewStore = signalStore(
   withState<ViewState>({ doc: null, failure: null }),
-  withRequestStatus({ retry: false, why: 'the status is the validation of a document the app hands in, not a read of engine state' }),
+  withRequestStatus({ retry: false, kind: 'permanent', why: 'the status is the validation of a document the app hands in, not a read of engine state' }),
   withComputed(({ failure }) => ({
     /** The refusal is a stale patch: the engine's view moved on, so reload rather than retry the same patch. */
     isStale: computed(() => {

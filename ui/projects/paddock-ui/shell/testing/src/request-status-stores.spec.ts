@@ -82,9 +82,10 @@ interface RetryCase {
   readonly event?: EventCase;
 }
 
-/** A store whose status is not a read of engine state (`retry: false`): the reason is in its source. */
+/** A store whose status is not a read of engine state (`retry: false`): the reason (and a temporary one's date) is in its source. */
 interface PlainCase {
   readonly retry: false;
+  readonly kind: 'permanent' | 'temporary';
 }
 
 const cases: Readonly<Record<string, RetryCase | PlainCase>> = {
@@ -212,11 +213,11 @@ const cases: Readonly<Record<string, RetryCase | PlainCase>> = {
     read: 'status',
     event: { listen: 'listen', carries: 'snapshot', payload: async (b) => ({ status: await call(b, 'status'), error: null }) },
   },
-  'shell/startup/src/recovery.store.ts': { retry: false },
-  'workbench/assistant/src/assistant.store.ts': { retry: false },
-  'workbench/palette/src/palette.store.ts': { retry: false },
-  'live/src/live-feed.store.ts': { retry: false },
-  'view/src/view.store.ts': { retry: false },
+  'shell/startup/src/recovery.store.ts': { retry: false, kind: 'permanent' },
+  'workbench/assistant/src/assistant.store.ts': { retry: false, kind: 'temporary' },
+  'workbench/palette/src/palette.store.ts': { retry: false, kind: 'permanent' },
+  'live/src/live-feed.store.ts': { retry: false, kind: 'temporary' },
+  'view/src/view.store.ts': { retry: false, kind: 'permanent' },
 };
 
 /** The store of `c` over its memory backend, whose read fails once; the clock, the ports and the event handler. */
@@ -265,35 +266,43 @@ describe('every store with a request status (ADR 0058)', () => {
     }
   });
 
-  it('keeps a retrying store off setLoading and setLoaded: its read changes the status only through the declared handle', async () => {
+  it('keeps a retrying store off the status: no setLoading or setLoaded, no requestStatus patch, no namespace import', async () => {
     const fs = await nodeFs();
     for (const [file, c] of Object.entries(cases)) {
       if (!c.retry) continue;
-      const imports = [...fs.readFileSync(`${ROOT}/${file}`, 'utf8').matchAll(/import\s*\{([^}]*)\}\s*from\s*'@decryp7\/paddock-ui\/shell\/store'/g)].map((m) => m[1] ?? '').join(',');
-      const used = imports.split(',').map((s) => s.trim()).filter((s) => s === 'setLoading' || s === 'setLoaded');
-      expect(`${file}: ${used.join(', ') || 'none'}`).toBe(`${file}: none`);
-    }
-  });
-
-  it('gives a temporary opt-out ("not adopted yet") a removal date that has not passed', async () => {
-    const fs = await nodeFs();
-    const today = new Date().toISOString().slice(0, 10);
-    for (const [file, c] of Object.entries(cases)) {
-      if (c.retry) continue;
       const text = fs.readFileSync(`${ROOT}/${file}`, 'utf8');
-      if (!/why:\s*(['`])not adopted yet/.test(text)) continue;
-      const until = /until:\s*'(\d{4}-\d{2}-\d{2})'/.exec(text)?.[1];
-      const verdict = until === undefined ? 'no until date' : until < today ? `until ${until} has passed: adopt the retry or move the date with a reason` : 'dated';
-      expect(`${file}: ${verdict}`).toBe(`${file}: dated`);
+      const problems: string[] = [];
+      for (const m of text.matchAll(/import\s+(type\s+)?([^;]*?)\s+from\s*'@decryp7\/paddock-ui\/shell\/store'/g)) {
+        const clause = m[2] ?? '';
+        if (!clause.startsWith('{')) problems.push(`import ${clause}`);
+        // `setLoaded as done` counts as setLoaded.
+        for (const name of clause.replace(/[{}]/g, '').split(',').map((n) => n.trim().split(/\s+as\s+/)[0]?.replace(/^type\s+/, ''))) {
+          if (name === 'setLoading' || name === 'setLoaded') problems.push(name);
+        }
+      }
+      if (/\brequestStatus\s*:/.test(text)) problems.push('a requestStatus patch');
+      expect(`${file}: ${problems.join(', ') || 'none'}`).toBe(`${file}: none`);
     }
   });
 
-  it('gives every opt-out a reason', async () => {
+  /** The text of each `withRequestStatus({ ... })` call of a file, up to its closing `})`. */
+  const callsOf = (text: string): string[] => text.split('withRequestStatus(').slice(1).map((rest) => rest.slice(0, rest.indexOf('})') + 2));
+
+  it('gives every opt-out its kind and a reason, and a temporary one a removal date (C98 checks that it has not passed)', async () => {
     const fs = await nodeFs();
     for (const [file, c] of Object.entries(cases)) {
       if (c.retry) continue;
-      const why = /withRequestStatus\(\{\s*retry:\s*false,\s*why:\s*(['`])(.*?)\1/s.exec(fs.readFileSync(`${ROOT}/${file}`, 'utf8'))?.[2] ?? '';
-      expect(`${file}: ${why.length >= 20 ? 'has a reason' : `reason too short: "${why}"`}`).toBe(`${file}: has a reason`);
+      for (const call of callsOf(fs.readFileSync(`${ROOT}/${file}`, 'utf8'))) {
+        const kind = /kind:\s*'(permanent|temporary)'/.exec(call)?.[1];
+        const why = /why:\s*(['`])(.*?)\1/s.exec(call)?.[2] ?? '';
+        const until = /until:\s*'(\d{4}-\d{2}-\d{2})'/.exec(call)?.[1];
+        const verdict = [
+          kind === c.kind ? '' : `kind ${kind} (row: ${c.kind})`,
+          why.length >= 20 ? '' : `reason too short: "${why}"`,
+          kind === 'temporary' && until === undefined ? 'no until date' : '',
+        ].filter(Boolean);
+        expect(`${file}: ${verdict.join('; ') || 'declared'}`).toBe(`${file}: declared`);
+      }
     }
   });
 

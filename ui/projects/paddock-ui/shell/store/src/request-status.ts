@@ -22,7 +22,7 @@ export interface RequestStatusState {
  * its read through the private `_reads` prop (`store._reads.define({ read, apply, message })` in its `withMethods`), which
  * retries a failed read on its own with backoff and ends an error when an event shows the engine answers again; then
  * `requestStatus` is changed only through that handle and `setError` is for failures that are not the read. `{ retry:
- * false, why }`: nothing retries; `why` says why the status is not a read of engine state. `request-status-stores.spec.ts`
+ * false, kind, why }`: nothing retries; `why` says why (`kind: 'temporary'` adds `until`, the adoption date C98 holds). `request-status-stores.spec.ts`
  * checks every declaration against the store's behaviour.
  */
 export function withRequestStatus(policy: ReadPolicy) {

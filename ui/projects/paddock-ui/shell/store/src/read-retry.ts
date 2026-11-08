@@ -51,11 +51,15 @@ export type ReadPolicy =
    */
   | { readonly retry: true; readonly clock?: ProviderToken<ReadRetryClock> }
   /**
-   * The status is not a read of engine state (a search, a validation, an action), or the store recovers in its own way:
-   * `why` says which. A temporary opt-out (`why` starting "not adopted yet") names `until`, the date (YYYY-MM-DD) by which
-   * the store adopts the retry; the spec fails once it has passed.
+   * `permanent`: the status is not a read of engine state (a search, a validation, an action), or the store recovers in
+   * its own way; `why` says which.
    */
-  | { readonly retry: false; readonly why: string; readonly until?: string };
+  | { readonly retry: false; readonly kind: 'permanent'; readonly why: string }
+  /**
+   * `temporary`: the store reads engine state but has not adopted the retry yet; `until` (YYYY-MM-DD) is the date by which
+   * it does. Conformance check C98 fails once that date has passed (the unit suite does not read the calendar).
+   */
+  | { readonly retry: false; readonly kind: 'temporary'; readonly why: string; readonly until: string };
 
 /** A store's one read of engine state, declared once in its `withMethods`. */
 export interface ReadSpec<T> {

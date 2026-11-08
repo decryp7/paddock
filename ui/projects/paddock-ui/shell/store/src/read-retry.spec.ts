@@ -55,7 +55,7 @@ const Probe = signalStore(
 
 /** Declares `retry: false`: nothing retries and events start nothing. */
 const Plain = signalStore(
-  withRequestStatus({ retry: false, why: 'a probe of the opt-out' }),
+  withRequestStatus({ retry: false, kind: 'permanent', why: 'a probe of the opt-out' }),
   withMethods((store, backend = inject(Backend)) => {
     const reads = store._reads.define({ read: () => backend.read(), apply: () => undefined, message: (e) => errorMessage(e, 'no') });
     return { load: reads.load, change: () => reads.event() };

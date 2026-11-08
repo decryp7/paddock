@@ -32,6 +32,7 @@ export const RecoveryStore = signalStore(
   withState<RecoveryState>({ report: null, acting: null }),
   withRequestStatus({
     retry: false,
+    kind: 'permanent',
     why: 'asked once at start, and a failed question shows nothing (a window that cannot be asked is not in a crash); the status also carries the notice actions',
   }),
   withComputed((store) => ({

@@ -45,6 +45,7 @@ export function withLiveFeed<S extends object, D>(config: LiveFeedConfig<S, D>) 
     withState<LiveFeedState<S>>({ live: start.state, liveSeq: start.seq, liveLink: start.link }),
     withRequestStatus({
       retry: false,
+      kind: 'temporary',
       why: 'not adopted yet (ADR 0058 rollout step 3): a gap or Retry resyncs, and liveLink shows the link state',
       until: '2026-12-31',
     }),
