@@ -92,13 +92,26 @@ Var DynoDirOk
   ; the service, the protected copy in Program Files and the helper's data. The bundled copy does it, not the installed one:
   ; Windows cannot delete a program that is running. This uninstaller is elevated already, so there is no second prompt. Only
   ; on a real uninstall: a manual upgrade (an in-place uninstall treated as an update) keeps the helper, its owner and its data.
+  ; With paddock-setup.exe missing from a folder the include trusts, no program of the folder is run (check-dir cannot be asked), so
+  ; the service is removed with sc.exe from System32 and the user is told what is left (the helper's folder and data stay).
   ${If} $UpdateMode <> 1
-  ${AndIf} $DynoDirOk == 1
     ReadRegStr $0 HKLM "SYSTEM\CurrentControlSet\Services\DynoHelper" "ImagePath"
     ${If} $0 != ""
-      nsExec::ExecToLog '"$INSTDIR\dyno-helper.exe" uninstall'
-      Pop $0
-      DetailPrint "dyno-helper uninstall: exit code $0"
+      ${If} $DynoDirOk == 1
+        nsExec::ExecToLog '"$INSTDIR\dyno-helper.exe" uninstall'
+        Pop $0
+        DetailPrint "dyno-helper uninstall: exit code $0"
+      ${ElseIf} $PaddockTrusted == 1
+      ${AndIf} $PaddockHaveSetup == 0
+        nsExec::ExecToLog '"$SYSDIR\sc.exe" stop DynoHelper'
+        Pop $0
+        nsExec::ExecToLog '"$SYSDIR\sc.exe" delete DynoHelper'
+        Pop $0
+        DetailPrint "NOTE paddock-setup.exe is missing: the DynoHelper service was removed with sc.exe (delete: exit code $0)"
+        ${IfNot} ${Silent}
+          MessageBox MB_ICONINFORMATION|MB_OK "The Dyno helper service was removed without the installer's checking tool (it was missing). Its folder, Dyno Helper in Program Files, and its data were not removed; delete them by hand if you do not need them."
+        ${EndIf}
+      ${EndIf}
     ${EndIf}
   ${EndIf}
   !insertmacro PADDOCK_CLEAN_RUN_VALUES

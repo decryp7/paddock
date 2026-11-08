@@ -46,5 +46,16 @@ mod tests {
             "the installer's PREINSTALL has passed PADDOCK_CHECK_DIR: {installer}"
         );
         assert!(!pre.contains("dyno-agent.exe"), "no direct run of the agent in PREUNINSTALL: {pre}");
+        // Trusted folder, tool missing: the helper's service goes with sc.exe, only on a real uninstall, and the user is told.
+        let (_, fallback) = pre
+            .split_once("${ElseIf} $PaddockTrusted == 1")
+            .expect("a fallback for a missing tool");
+        assert!(fallback.contains("$PaddockHaveSetup == 0"), "{fallback}");
+        assert!(
+            fallback.contains("sc.exe\" stop DynoHelper") && fallback.contains("sc.exe\" delete DynoHelper"),
+            "{fallback}"
+        );
+        assert!(fallback.contains("MessageBox") && fallback.contains("${Silent}"), "{fallback}");
+        assert!(pre.contains("${If} $UpdateMode <> 1"), "an update keeps the helper: {pre}");
     }
 }
