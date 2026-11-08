@@ -65,20 +65,14 @@ impl UserActivity for NotReadHere {
     }
 }
 
-/// The real OS name and, for every other fact, the reason it is not read (never "Not checked yet": that says it will be).
+/// The real OS name and, for every other fact, the reason it is not read (never "Not checked yet": that says it will be). The
+/// adapter stands in for a reader that does not exist yet, so every fact is declared not read yet, not by design.
 pub fn facts_not_read(os: String, why: &str) -> SystemFacts {
-    SystemFacts {
-        os,
-        disks: Reading::unavailable(why),
-        restart_pending: Reading::unavailable(why),
-        pending_updates: Reading::unavailable(why),
-        power_plan: Reading::unavailable(why),
-        visual_effects_full: Reading::unavailable(why),
-        background_apps: Reading::unavailable(why),
-        dev_folders: Vec::new(),
-        last_boot_secs: Reading::unavailable(why),
-        not_read_here: dyno_core::facts::FactKind::ALL.to_vec(),
+    let mut facts = SystemFacts::unknown(os);
+    for kind in dyno_core::facts::FactKind::ALL {
+        facts.declare_not_read_yet(kind, why);
     }
+    facts
 }
 
 #[cfg(test)]
@@ -102,6 +96,12 @@ mod tests {
         assert_eq!(f.disks, Reading::Unavailable("Not read here.".into()));
         assert_eq!(f.last_boot_secs, Reading::Unavailable("Not read here.".into()));
         assert!(f.dev_folders.is_empty());
+        assert_eq!(
+            f.not_read_yet,
+            dyno_core::facts::FactKind::ALL,
+            "an interim adapter reads nothing yet"
+        );
+        assert!(f.not_read_here.is_empty(), "and claims nothing by design");
     }
 
     #[test]

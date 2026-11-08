@@ -56,7 +56,7 @@ pub struct DevFolder {
     pub av_excluded: Option<bool>,
 }
 
-/// A fact in [`SystemFacts`] that a source may declare it never reads on its OS.
+/// A fact in [`SystemFacts`] that a source may declare it does not read on its OS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum FactKind {
@@ -77,7 +77,7 @@ pub enum FactKind {
 }
 
 impl FactKind {
-    /// Every fact, for a source that reads none of them.
+    /// Every fact, for an adapter that reads none of them.
     pub const ALL: [FactKind; 7] = [
         FactKind::Disks,
         FactKind::RestartPending,
@@ -111,8 +111,11 @@ pub struct SystemFacts {
     pub dev_folders: Vec<DevFolder>,
     /// Seconds the last boot took (from firmware hand-off to the desktop), when the OS reports it.
     pub last_boot_secs: Reading<f32>,
-    /// Facts this OS's source never reads, by design (as opposed to one that failed this time). Health tells the two apart.
+    /// Facts this OS's source never reads, by design (as opposed to one that failed this time). Health tells the cases apart.
     pub not_read_here: Vec<FactKind>,
+    /// Facts an interim adapter does not read yet, because the reader for this OS does not exist yet. Set with
+    /// [`SystemFacts::declare_not_read_yet`].
+    pub not_read_yet: Vec<FactKind>,
 }
 
 impl SystemFacts {
@@ -132,7 +135,52 @@ impl SystemFacts {
             dev_folders: Vec::new(),
             last_boot_secs: r(),
             not_read_here: Vec::new(),
+            not_read_yet: Vec::new(),
         }
+    }
+
+    /// Sets the fact `kind` to unavailable with `why` and declares that this OS never reads it, by design. The reading and its
+    /// declaration are set together, so they cannot disagree.
+    pub fn declare_not_read_here(&mut self, kind: FactKind, why: impl Into<String>) {
+        self.set_unavailable(kind, why.into());
+        if !self.not_read_here.contains(&kind) {
+            self.not_read_here.push(kind);
+        }
+    }
+
+    /// Like [`SystemFacts::declare_not_read_here`], for a reader that does not exist yet on this OS.
+    pub fn declare_not_read_yet(&mut self, kind: FactKind, why: impl Into<String>) {
+        self.set_unavailable(kind, why.into());
+        if !self.not_read_yet.contains(&kind) {
+            self.not_read_yet.push(kind);
+        }
+    }
+
+    fn set_unavailable(&mut self, kind: FactKind, why: String) {
+        match kind {
+            FactKind::Disks => self.disks = Reading::Unavailable(why),
+            FactKind::RestartPending => self.restart_pending = Reading::Unavailable(why),
+            FactKind::PendingUpdates => self.pending_updates = Reading::Unavailable(why),
+            FactKind::PowerPlan => self.power_plan = Reading::Unavailable(why),
+            FactKind::VisualEffects => self.visual_effects_full = Reading::Unavailable(why),
+            FactKind::BackgroundApps => self.background_apps = Reading::Unavailable(why),
+            FactKind::LastBoot => self.last_boot_secs = Reading::Unavailable(why),
+        }
+    }
+}
+
+/// Test helpers shared with other modules' tests.
+#[cfg(test)]
+pub(crate) mod fixtures {
+    use super::*;
+
+    /// Facts of an interim adapter that reads nothing yet.
+    pub fn all_not_read_yet(why: &str) -> SystemFacts {
+        let mut f = SystemFacts::unknown("w");
+        for k in FactKind::ALL {
+            f.declare_not_read_yet(k, why);
+        }
+        f
     }
 }
 

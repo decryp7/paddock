@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-//! The positional postcard bytes of the job snapshot inside `Message::Job` (protocol 8, unchanged since 7). A change to these bytes is a new
+//! The positional postcard bytes of the job snapshot inside `Message::Job` (protocol 7, unchanged in 8; the health report is pinned in `health_wire.rs`). A change to these bytes is a new
 //! `PROTOCOL_VERSION`: the protocol is postcard, so an older peer reads a changed layout wrongly. Update the expected bytes
 //! only together with the version bump and its entry in the doc list at the top of `protocol.rs`.
 

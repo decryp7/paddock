@@ -16,7 +16,7 @@ import { MatTooltip } from '@angular/material/tooltip';
   template: `
     @if (store.report(); as r) {
       <div class="score">
-        <dy-ring [value]="r.score" [tone]="tone()" [label]="'Health score ' + score(r.score) + ' of 100, ' + grade()" style="--ring-size: 104px">
+        <dy-ring [value]="r.score" [tone]="tone()" [label]="'Health score ' + score(r.score) + ' of 100, ' + grade() + ringGap()" style="--ring-size: 104px">
           <span class="num">{{ score(r.score) }}</span>
           <small>of 100</small>
         </dy-ring>
@@ -30,8 +30,8 @@ import { MatTooltip } from '@angular/material/tooltip';
       <div class="reasons">
         <span class="eyebrow">What holds it back</span>
         @if (top().length === 0) {
-          @if (couldNotRead().length > 0) {
-            <p class="clear"><dy-icon name="check" /> Nothing found in what Dyno could check.</p>
+          @if (gaps().length > 0) {
+            <p class="clear qualified"><dy-icon name="info" /> Nothing found in what Dyno could check.</p>
           } @else {
             <p class="clear"><dy-icon name="check" /> Nothing needs your attention.</p>
           }
@@ -53,8 +53,18 @@ import { MatTooltip } from '@angular/material/tooltip';
             </li>
           }
         </ul>
-        @if (couldNotRead().length > 0) {
-          <p class="gap">Not checked: {{ notCheckedText() }}</p>
+        @if (gaps().length > 0) {
+          <div class="gap">
+            <span class="eyebrow">Not checked</span>
+            <ul aria-label="Not checked">
+              @for (g of gaps(); track g.why) {
+                <li>
+                  <span class="t">{{ list(g.what, true) }}</span>
+                  <span class="d">{{ g.why }}</span>
+                </li>
+              }
+            </ul>
+          </div>
         }
         @if (notReadHere().length > 0) {
           <p class="cover">Dyno does not check {{ coverageText() }} on this OS.</p>
@@ -81,8 +91,10 @@ import { MatTooltip } from '@angular/material/tooltip';
     .t .badge { margin-right: 4px; vertical-align: 1px; }
     .d { color: var(--text-3); font-size: var(--fs-xs); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .imp { color: var(--text-3); font-size: var(--fs-sm); min-width: 28px; text-align: right; }
-    .gap { color: var(--warn); font-size: var(--fs-sm); }
+    .gap { display: grid; gap: var(--sp-1); }
+    .gap li { display: grid; }
     .cover { color: var(--text-3); font-size: var(--fs-xs); }
+    .clear.qualified { color: var(--text-2); }
     .clear { display: flex; align-items: center; gap: var(--sp-2); color: var(--ok); }
   `,
 })
@@ -105,10 +117,19 @@ export class HealthHero {
     const all = this.store.report()?.reasons ?? [];
     return [...all.filter((x) => x.since !== null), ...all.filter((x) => x.since === null).sort((a, b) => b.impact - a.impact).slice(0, this.reasons())];
   });
-  protected readonly couldNotRead = computed(() => (this.store.report()?.notChecked ?? []).filter((n) => n.kind === 'couldNotRead'));
+  /** Facts the check missed, as a gap in the check: could not read now, or no reader yet. */
+  protected readonly gaps = computed(() => (this.store.report()?.notChecked ?? []).filter((n) => n.kind !== 'notReadHere'));
   protected readonly notReadHere = computed(() => (this.store.report()?.notChecked ?? []).filter((n) => n.kind === 'notReadHere'));
-  protected readonly notCheckedText = computed(() => this.couldNotRead().map((n) => `${n.what.toLowerCase()} (${n.why})`).join('; '));
-  protected readonly coverageText = computed(() => this.notReadHere().map((n) => n.what.toLowerCase()).join(', '));
+  protected readonly coverageText = computed(() => this.list(this.notReadHere().flatMap((n) => n.what.map((w) => w.toLowerCase()))));
+  /** For the ring's screen-reader label: the gap, so a quiet 100 is not heard as all-clear. */
+  protected readonly ringGap = computed(() => {
+    const n = this.gaps().reduce((a, g) => a + g.what.length, 0);
+    return n === 0 ? '' : `, ${n} ${n === 1 ? 'fact' : 'facts'} not checked`;
+  });
+  protected readonly list = (items: string[], capitalise = false) => {
+    const text = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(capitalise ? items.map((x, i) => (i === 0 ? x : x.toLowerCase())) : items);
+    return text;
+  };
   protected readonly trend = computed(() => {
     const w = this.store.weekly();
     const r = this.store.report();

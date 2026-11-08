@@ -711,12 +711,15 @@ export interface HealthReason {
   since: Timestamp | null;
 }
 
-/** Why a scored fact is missing: the read failed this time, or Dyno does not read it on this OS by design. The engine decides. */
-export type NotCheckedKind = 'couldNotRead' | 'notReadHere';
+/**
+ * Why a scored fact is missing: the read failed this time (`couldNotRead`), Dyno does not read it on this OS by design
+ * (`notReadHere`), or its reader does not exist yet (`notReadYet`, treated like `couldNotRead`). The engine decides.
+ */
+export type NotCheckedKind = 'couldNotRead' | 'notReadHere' | 'notReadYet';
 
 export interface NotChecked {
-  /** Short noun phrase, e.g. "Pending updates". */
-  what: string;
+  /** Short noun phrases, e.g. ["Pending updates"]; facts with the same kind and reason share one entry. */
+  what: string[];
   /** The reading's own sentence. */
   why: string;
   kind: NotCheckedKind;

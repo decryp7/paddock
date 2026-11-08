@@ -74,8 +74,11 @@ impl FactsSource for MacFacts {
             }]),
             None => Reading::unavailable("macOS did not report a SMART status for the startup disk"),
         };
-        f.restart_pending = Reading::unavailable("macOS does not say when a restart is pending");
-        f.pending_updates = Reading::unavailable("Dyno does not check for macOS updates (it is slow and contacts Apple)");
+        f.declare_not_read_here(FactKind::RestartPending, "macOS does not say when a restart is pending");
+        f.declare_not_read_here(
+            FactKind::PendingUpdates,
+            "Dyno does not check for macOS updates (it is slow and contacts Apple)",
+        );
         f.power_plan = match (self.run)("/usr/bin/pmset", &["-g"]).and_then(|t| parse_pmset_low_power(&t)) {
             Some(low) => Reading::Available(PowerPlan {
                 id: if low { "low-power" } else { "automatic" }.into(),
@@ -85,12 +88,11 @@ impl FactsSource for MacFacts {
             None => Reading::unavailable("This Mac has no Low Power Mode setting"),
         };
         f.visual_effects_full = Reading::unavailable("Reduce Motion and Transparency are not read yet");
-        f.background_apps = Reading::unavailable("macOS has no per-app background permission to count");
+        f.declare_not_read_here(FactKind::BackgroundApps, "macOS has no per-app background permission to count");
         if let Some(h) = &self.home {
             f.dev_folders = scan(h, ScanLimits::default());
         }
         f.last_boot_secs = Reading::unavailable("Boot time is not measured yet");
-        f.not_read_here = vec![FactKind::RestartPending, FactKind::PendingUpdates, FactKind::BackgroundApps];
         f
     }
 }
@@ -126,6 +128,12 @@ mod tests {
         let disks = f.disks.value().unwrap();
         assert_eq!(disks[0].status, DiskHealthStatus::Healthy);
         assert!(f.restart_pending.value().is_none());
+        assert_eq!(
+            f.not_read_here,
+            [FactKind::RestartPending, FactKind::PendingUpdates, FactKind::BackgroundApps],
+            "what macOS never reads, by design; disk health is read, so a failure there is a failed read"
+        );
+        assert!(f.not_read_yet.is_empty());
     }
 
     #[test]

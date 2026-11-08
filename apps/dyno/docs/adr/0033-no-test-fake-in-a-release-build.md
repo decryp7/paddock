@@ -476,6 +476,13 @@ on the most visible card, and on macOS too, where pending updates are never read
   - The mock backend's Health answer gains a `notChecked` row.
 - **WP-1.** After WP-1 and WP-H alone, Windows shows "Dyno does not check disk health, restart needed or pending updates
   on this system yet" as coverage, from `NotReadHere`, until WP-3 lands.
+  - **Amendment 2026-11-09 (approved: coordinator), after the independent review of WP-H.** That coverage-only reading kept
+    "100, Good, Nothing needs your attention" on Windows, the symptom this section removes. A reader that is missing is not
+    a design choice, so a third kind `NotReadYet` is added: the interim adapter (`facts_not_read`) declares every fact in
+    `SystemFacts::not_read_yet`, and `assess` reports it as `NotReadYet`. The hero treats `NotReadYet` like `CouldNotRead`:
+    the qualified headline and the "Not checked" list. Entries with the same kind and reason are merged into one (`what`
+    is a list). Startup items that cannot be listed are a `not_checked` entry too (`NotReadYet` for an unsupported
+    read, otherwise `CouldNotRead`), not a silent absence. `NotReadHere` stays for what Dyno never reads by design.
 
 ### 5. Tests (failing first, ER-11)
 

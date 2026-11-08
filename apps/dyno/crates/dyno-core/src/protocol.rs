@@ -71,8 +71,9 @@ use serde::{Deserialize, Serialize};
 /// `tests/protocol_golden.rs`.
 ///
 /// Version 8 (Health says what it could not check, ADR 0033 section 4.5; positional postcard): `HealthReport` gained `not_checked`
-/// (`NotChecked { what, why, kind }`) and `SystemFacts` gained `not_read_here`. Neither is persisted: the report exists only in
-/// `Reply::Health`, and the app, agent and command line ship in one installer.
+/// (`NotChecked { what, why, kind }`). It is not persisted: the report exists only in `Reply::Health`, and the app, agent and
+/// command line ship in one installer. (`SystemFacts` gained `not_read_here` and `not_read_yet` too, but it never crosses the wire.)
+/// The bytes are pinned by `tests/health_wire.rs`.
 pub const PROTOCOL_VERSION: u32 = 8;
 
 /// The major version the IPC handshake carries between the app (or the command line) and the agent: [`PROTOCOL_VERSION`], so a

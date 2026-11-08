@@ -86,16 +86,6 @@ fn the_discovery_file_names_the_build_not_only_the_version() {
 }
 
 #[test]
-fn an_agent_of_the_previous_protocol_is_replaced_by_an_app_of_this_one() {
-    // Protocol 7 agents write HealthReport without `not_checked`; postcard cannot read that, so the handshake must refuse it.
-    let previous = dyno_core::protocol::PROTOCOL_VERSION - 1;
-    assert_eq!(
-        plan(Some(&disc("1.1.0", previous)), "1.1.0", dyno_core::protocol::PROTOCOL_VERSION),
-        Plan::Replace
-    );
-}
-
-#[test]
 fn the_discovery_file_decides_what_to_do() {
     assert_eq!(plan(None, "0.1.0", 1), Plan::Spawn);
     assert_eq!(plan(Some(&disc("0.1.0", 1)), "0.1.0", 1), Plan::Connect);

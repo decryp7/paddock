@@ -192,8 +192,8 @@ describe('HealthHero', () => {
     vi.spyOn(mock, 'health').mockResolvedValue({
       ...report([]),
       notChecked: [
-        { what: 'Disk health', why: 'Needs administrator rights', kind: 'couldNotRead' },
-        { what: 'Pending updates', why: 'Dyno does not check for updates', kind: 'notReadHere' },
+        { what: ['Disk health'], why: 'Needs administrator rights', kind: 'couldNotRead' },
+        { what: ['Pending updates'], why: 'Dyno does not check for updates', kind: 'notReadHere' },
       ],
     });
     const f = TestBed.createComponent(HealthHero);
@@ -202,15 +202,42 @@ describe('HealthHero', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('.clear')?.textContent).toContain('Nothing found in what Dyno could check');
     expect(el.querySelector('.clear')?.textContent).not.toContain('needs your attention');
-    expect(el.querySelector('.gap')?.textContent).toBe('Not checked: disk health (Needs administrator rights)');
+    expect(el.querySelector('.clear dy-icon')?.getAttribute('name')).toBe('info');
+    expect([...el.querySelectorAll('ul[aria-label="Not checked"] li')].map((l) => [...l.children].map((c) => c.textContent).join(' | '))).toEqual([
+      'Disk health | Needs administrator rights',
+    ]);
     expect(el.querySelector('.cover')?.textContent).toBe('Dyno does not check pending updates on this OS.');
+    expect(el.querySelector('dy-ring')?.getAttribute('aria-label')).toBe('Health score 100 of 100, Good, 1 fact not checked');
+  });
+
+  it('is qualified, not an all-clear, when every scored fact is not read yet (the interim Windows case)', async () => {
+    const { mock } = env();
+    vi.spyOn(mock, 'health').mockResolvedValue({
+      ...report([]),
+      notChecked: [
+        { what: ['Disk health', 'Pending restart', 'Pending updates'], why: 'Dyno does not check this on Windows yet.', kind: 'notReadYet' },
+        { what: ['Startup items'], why: 'Dyno does not read Windows startup items yet.', kind: 'notReadYet' },
+      ],
+    });
+    const f = TestBed.createComponent(HealthHero);
+    await TestBed.inject(HealthStore).loadReport();
+    await settle(f);
+    const el = f.nativeElement as HTMLElement;
+    expect(el.querySelector('.clear')?.textContent).toContain('Nothing found in what Dyno could check');
+    const rows = [...el.querySelectorAll('ul[aria-label="Not checked"] li')].map((l) => [...l.children].map((c) => c.textContent).join(' | '));
+    expect(rows).toEqual([
+      'Disk health, pending restart, and pending updates | Dyno does not check this on Windows yet.',
+      'Startup items | Dyno does not read Windows startup items yet.',
+    ]);
+    expect(el.querySelector('.cover')).toBeNull();
+    expect(el.querySelector('dy-ring')?.getAttribute('aria-label')).toContain('4 facts not checked');
   });
 
   it('keeps the all-clear when only facts Dyno never reads here are missing, with the coverage line under it', async () => {
     const { mock } = env();
     vi.spyOn(mock, 'health').mockResolvedValue({
       ...report([]),
-      notChecked: [{ what: 'Pending updates', why: 'Dyno does not check for updates', kind: 'notReadHere' }],
+      notChecked: [{ what: ['Pending updates', 'Pending restart'], why: 'Dyno does not check for updates', kind: 'notReadHere' }],
     });
     const f = TestBed.createComponent(HealthHero);
     await TestBed.inject(HealthStore).loadReport();
@@ -218,6 +245,7 @@ describe('HealthHero', () => {
     const el = f.nativeElement as HTMLElement;
     expect(el.querySelector('.clear')?.textContent).toContain('Nothing needs your attention');
     expect(el.querySelector('.gap')).toBeNull();
-    expect(el.querySelector('.cover')?.textContent).toContain('pending updates');
+    expect(el.querySelector('.cover')?.textContent).toBe('Dyno does not check pending updates and pending restart on this OS.');
+    expect(el.querySelector('dy-ring')?.getAttribute('aria-label')).toBe('Health score 100 of 100, Good');
   });
 });

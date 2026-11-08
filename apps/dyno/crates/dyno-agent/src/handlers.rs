@@ -630,7 +630,11 @@ pub(crate) fn facts(shared: &Shared) -> SystemFacts {
 
 fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError> {
     let facts = facts(shared);
-    let startup = lock(&shared.ports.startup).list().unwrap_or_default();
+    let startup_read = lock(&shared.ports.startup).list();
+    let (startup, startup_unread) = match startup_read {
+        Ok(list) => (list, None),
+        Err(e) => (Vec::new(), Some(e)),
+    };
     let anomalies = anomalies(shared);
     let core = lock(&shared.core);
     let sample = core.recent.back().cloned().ok_or_else(|| {
@@ -673,17 +677,21 @@ fn health(shared: &Shared) -> Result<dyno_core::health::HealthReport, AgentError
             .unwrap_or(0),
         lifespans: &lifespans,
         alarms: &alarms,
+        startup_unread: startup_unread.as_ref(),
     });
     // Bookkeeping for the weekly report's trend (one row per hour; a failed write loses one point, nothing else).
     let _ = core.store.put_score(t, report.score);
-    use dyno_core::health::NotCheckedKind;
-    let count = |k: NotCheckedKind| report.not_checked.iter().filter(|n| n.kind == k).count();
+    // Which facts were missing and why (names only: no user content), so a bundle shows what a clear Health did not cover.
+    let missing: Vec<String> = report
+        .not_checked
+        .iter()
+        .map(|n| format!("{}={:?}", n.what.join(" + "), n.kind))
+        .collect();
     log::info!(
-        "dyno-agent: health scored {} with {} reasons; not checked: {} could not be read now, {} not read here by design",
+        "dyno-agent: health scored {} with {} reasons; not checked: [{}]",
         report.score,
         report.reasons.len(),
-        count(NotCheckedKind::CouldNotRead),
-        count(NotCheckedKind::NotReadHere)
+        missing.join(", ")
     );
     Ok(report)
 }

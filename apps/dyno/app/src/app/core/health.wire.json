@@ -1,0 +1,32 @@
+{
+  "at": 1,
+  "cappedBy": null,
+  "grade": "good",
+  "notChecked": [
+    {
+      "kind": "couldNotRead",
+      "what": [
+        "Disk health"
+      ],
+      "why": "Needs administrator rights"
+    },
+    {
+      "kind": "notReadHere",
+      "what": [
+        "Pending updates"
+      ],
+      "why": "Dyno does not check for updates"
+    },
+    {
+      "kind": "notReadYet",
+      "what": [
+        "Pending restart",
+        "Startup items"
+      ],
+      "why": "Dyno does not check this yet"
+    }
+  ],
+  "performanceScore": 100,
+  "reasons": [],
+  "score": 100
+}
