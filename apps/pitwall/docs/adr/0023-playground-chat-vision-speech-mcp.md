@@ -479,6 +479,13 @@ From building WP-2a and WP-4a (`pitwall/1.1-wp2a` `9dc147e24`, `pitwall/1.1-wp4a
   switches exist.
 - Decided 2026-11-08 (user): the chat is sent whole up to the model's window less the answer's reserve; nothing is trimmed
   silently, the meter shows the level and a turn that cannot fit is refused in words (WP-4b, `pitwall/1.1-wp4b` `0ef631f7f`).
+- The window is one slot's context, never more than the model was trained for: `min(context_max, context per slot)`, the
+  per-slot context being the one the model is loaded with, else the one it will load with (`local_models` `contextPerSlot`).
+  llama-server runs with `--no-context-shift` (b11669 has it), so an over-long request is refused, never trimmed (WP-4b,
+  `pitwall/1.1-wp4b` `a2830c0c8`).
+- Known gap: the fit is checked once, before the turn is sent (`Assistant::send`). Tool results that grow the context during the
+  turn are not re-checked before the later model calls of that turn (`run.rs` `run_turn`); the engine then refuses the call
+  that overflows.
 
 ## Consequences
 
