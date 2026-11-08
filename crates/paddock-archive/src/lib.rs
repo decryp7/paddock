@@ -19,6 +19,7 @@
 mod control;
 mod error;
 mod job;
+pub mod limits;
 mod name;
 mod options;
 mod readers;
@@ -28,7 +29,10 @@ mod writer;
 pub use control::{Control, NoControl};
 pub use error::{ArchiveError, Result};
 pub use job::extract_job;
-pub use options::{Filter, Layout, Limits, Links, Modes, Options};
+pub use options::{
+    DEFAULT_MAX_DEPTH, DEFAULT_MAX_ENTRIES, DEFAULT_MAX_FILE_BYTES, DEFAULT_MAX_PATH_LEN,
+    DEFAULT_MAX_RATIO, DEFAULT_MAX_TOTAL_BYTES, Filter, Layout, Limits, Links, Modes, Options,
+};
 pub use readers::Format;
 pub use stage::{extract, sweep_stale};
 pub use writer::Report;

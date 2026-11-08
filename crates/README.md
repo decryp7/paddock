@@ -96,7 +96,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-pitwall` | Pitwall client: discovery, pairing, keychain keys, typed requests, optional-AI state (ADR 0004) | yes (Debrief, Pacenotes, Sighter; Spotter, Dyno later); built (plan section 15, with the loopback HTTP clients of X16) |
 | `paddock-assistant` | the assistant (plan W6): `LlmProvider` port, prompted tool protocol, `AssistantTool` with budgets and an approval step for writes, the bounded cancellable tool loop on an injected clock, versioned bounded conversations, the Pitwall adapter, Tauri commands and the `paddock://assistant` event | yes (Pacenotes, Sighter; Debrief's chat moves onto it); built |
 | `paddock-guard` | crash containment (ADR 0001, plan X51): `catch`, `Quarantine` (3 failures in 10 minutes, shared `Clock`, persisted through paddock-env), `Guard::call` (time budget, hang abandoned, typed refusal) | yes (Debrief, Pacenotes, Dyno plugin hosts); built |
-| `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build) | yes (Debrief, Dyno, Pitcrew); built |
+| `paddock-ipc` | the one IPC (ADR 0001 step 1, plan X13): frames, private endpoint, token + pid handshake, peer (calls, streams with credits, cancel, pushes), launcher and child loop, and the companion `link` (discovery file, reconnect back-off, replace another build); the write queue is bounded and a reply over the limit is `IpcError::ReplyTooLarge` (the other side's fault) | linked on `main` by Dyno only (by path); Debrief's `debrief-ipc` and Pitcrew's own IPC move to it in 1.2; built |
 | `paddock-plugin-package` | the `.paddockplugin` archive, the plugin manifest model (permissions, contributions, namespaces), Ed25519 signing, keys, trust levels and store, installed-binary verification (ADR 0001, plan X51) | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-view` | the declarative view model plugins return (ADR 0002, plan X51): `ViewDoc`, nodes, actions, patches, JSON + postcard, the limits validator, generated TypeScript | yes (Debrief, Pacenotes, Dyno tier 3); built |
 | `paddock-plugin-api` | what an out-of-process plugin links (ADR 0001, plan X51): platform protocol 2.0 (`PlatformRequest`, `HostCall`), `Plugin` and `Contributions` (tools with checked schemas, settings, views, MCP tools), the `Extension` mechanism for an app's own contract, version rules with refusal texts that say who must update, host files, output files, `serve` | yes (Debrief, Pacenotes, Dyno tier 3); built |
@@ -120,6 +120,7 @@ Crates, built and planned, with their designs in [`docs/adr/`](../docs/adr/READM
 | `paddock-testkit` | Rust test kit (dev-dependency): `Scratch` (work, home and tmp folders; tmp must be empty at the end), `env_lock()` + `EnvLock::hermetic`, golden files (`PADDOCK_UPDATE_GOLDEN=1`), `FakeRunner` for OS-command seams, `corpus`/`never_panics`, re-exported `FakeClock` (plan X40) | yes (all apps); built |
 | `paddock-packs` | knowledge packs (rule 21): TOML packs, built-in plus the user's `packs/` folder, parsed once with limits, unknown keys reported, a bad pack refused whole without touching the rest, debounced hot reload with a swap, `user_regex` with caps (plan X15, D11) | yes (Spotter, Pitwall, Dyno, Debrief); built |
 | `paddock-watch` | folder watching: `Debouncer` on the shared `Clock` (quiet time plus longest wait), the `ChangeSource` port with a `notify` adapter and a watcher thread, Debrief's settle rule (`Settle`, `Batcher`, `scan_folder`) for files that are still being written (plan X23) | yes (Debrief, Spotter, Dyno, `paddock-packs`); built |
+| `paddock-limits` | limits that explain themselves and replies that report what they left out: `LimitId`, `Quantity` with units, `Scope`, `SettingPath`, the registry type (`LimitRow`, `Registry::check`), `LimitExceeded` with its message generated from the type, `Bounded<T>`/`Cut`/`Total`/`Selection`/`FieldPath`/`CutRow<S>` with checked constructors and wire, `Limit`/`Page`/`Buckets`; `limit_case!` is in `paddock-testkit` (ADR 0019, Debrief ADR 0065, plan 1.4 and B1) | Debrief 1.2 (adoption by the plugin, IPC, archive and jobs crates follows); built |
 | `paddock-log` | the app and service log: CLEF JSON lines, one file per process per day in the OS log folder with a size budget and old days removed, level at run time, `log` + `tracing` in one stream, redaction hooks (never file contents by default), error de-duplication with breadcrumbs, panic hook with crash marker, child-output capture (plan X1, D1/D2) | yes (all apps and services); built |
 | `paddock-diag` | report a problem: a diagnostics zip of the logs, system facts and settings that the user previews file by file and saves where they choose; one `Redactor` for secrets, personal data and file contents; app sections; the Logging settings section; nothing is ever sent (plan X2, D9) | yes (all apps); built |
 | `paddock-service` | background services and login items: one `ServiceSpec` rendered as the launchd plist (bundled or file), systemd unit, Windows `Run` value or service and NSIS hooks; registration and repair behind ports (rule 24), registered version, exe-changed restart, launch at login, health entry (plan X4, D4) | yes (Pitwall, Pitcrew, Dyno, Debrief agent); built |
@@ -189,6 +190,21 @@ match b.failed(clock.monotonic()) { Retry::After(d) => clock.wait(d, &token)?, R
 - `Deadline::after(clock, limit)`: `passed()`, `remaining()`; a limit too large to represent never passes.
 - `Backoff` is a pure state machine over monotonic readings (`healthy(now)`, `failed(now) -> Retry`, `reset()`);
   `BackoffPolicy::retry_forever` for a reconnecting client.
+
+## `paddock-limits` (ADR 0019, Debrief ADR 0065; plan 1.4 and B1)
+
+A leaf crate (serde; ts-rs behind the `ts` feature). API design: `docs/plans/debrief-1-2-api.md` section 4.6.
+
+- A limit stops work: `LimitExceeded { id, limit, reached, scope }`, message from `message(&Registry)`
+  ("The plugin stopped: it reached 1,210 MiB; the limit (plugin.memory) is 1 GiB. Raise it in Settings -> ...").
+  Error enums of other crates keep this type in a variant, never a `String`.
+- A limit cuts a reply: `Bounded<T> { result, cuts }`. `Bounded::first` (reads one item more, never counts further),
+  `page`, `ranked`, `counted`, `last`, `sampled`, `complete`, `.and(cut)`; `Cut::maybe` for an unknown total. Constructors take a
+  `CutRow<S>` made in a `const` from a registry row, so a stop row or a row without that selection fails the build.
+  More than 32 cuts become 31 plus one `bounded.cuts` aggregate (`BUILTIN` registry row).
+- Each app or crate declares its rows (`LimitRow`) in one `Registry` and checks it in a test with `Registry::check()`.
+- Tests: `paddock_testkit::limit_case!` (stop and cut forms) and `assert_all_exercised`.
+- `--features ts` derives the TypeScript declarations (counts are `number`); the apps generate their own `limits.ts`.
 
 ## `paddock-commands` (plan S1)
 
@@ -1121,8 +1137,8 @@ let client = LinkClient::start(ClientConfig::new(dirs.runtime().join("agent.json
 ```
 
 - `frame`: 4-byte length + postcard `Frame` (Debrief's frame version 2 plus `Push` at the end), `FrameLimit` 1 KiB to 64 MiB
-  (16 MiB default). A frame over the limit is skipped without being allocated and fails only its call (`IpcError::TooLarge`,
-  or a `tooLarge` failure to the other side); a length beyond 64 MiB or garbage ends the connection. `ProtocolVersion`
+  (16 MiB default). A frame over the limit is skipped without being allocated and fails only its call (`IpcError::TooLarge` for
+  our request, `IpcError::ReplyTooLarge` for the other side's answer, or a `tooLarge` failure to the other side); a length beyond 64 MiB or garbage ends the connection. `ProtocolVersion`
   (same major, known minor) refuses with a message that says which side to update.
 - `endpoint`: a Unix socket in a 0700 folder (`Listener::bind_in(AppDirs::runtime())`, temporary folder as fallback) or a
   named pipe with an `Access` list: `owner_only()` (D:P(A;;GA;;;OW), 0600) or `service_for_interactive_users()` (Pitcrew's

@@ -12,11 +12,14 @@ pub use paddock_ipc::frame::ProtocolVersion;
 use paddock_settings::SettingsSection;
 use serde::{Deserialize, Serialize};
 
-/// The protocol this crate speaks. Protocol 1 was Debrief's own plugin protocol (ADR 0003 phase 3): a host refuses it
-/// with [`crate::error::Refusal::Legacy`]; the shim that serves such plugins is the app's.
+/// The protocol this crate speaks. Protocol 1 was Debrief's own plugin protocol; it is no longer supported (ADR 0003, no
+/// shim): a host refuses it with [`crate::compat::Refusal::Legacy`], whose text says to update the plugin.
 ///
-/// - **minor**: a request, call, reply or description field was added at the end (older plugins keep working);
-/// - **major**: anything else (a plugin built for another major version must be rebuilt).
+/// - **minor** (ADR 0001, "Versioning and compatibility"): only a variant appended at the end of an enum, and only while
+///   nobody sends it to a reader of an older minor (the host checks a request against the peer's minor,
+///   [`crate::extension::Contract::introduced_in`]). A new `Option` field of a type that crosses as `Json` is minor too;
+/// - **major**: anything else, including a field appended to a struct (postcard carries no field names or count), so a
+///   plugin built for another major version must be rebuilt.
 pub const PLATFORM_PROTOCOL: ProtocolVersion = ProtocolVersion::new(2, 0);
 
 /// Largest piece of a host file one [`HostCall::ReadFile`] returns (1 MiB).

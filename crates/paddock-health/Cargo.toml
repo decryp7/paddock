@@ -19,6 +19,8 @@ serde_json = "1"
 log = { version = "0.4", features = ["kv"] }
 # The family's clock port (`paddock_jobs::time`).
 paddock-jobs = { workspace = true }
+# `Cause::from_limit`: a limit that stopped a service keeps its type up to the cause the UI shows (ADR 0019).
+paddock-limits = { workspace = true }
 # Local time of day for quiet hours (`notify::os::SystemLocalTime`).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tauri = { workspace = true, optional = true }

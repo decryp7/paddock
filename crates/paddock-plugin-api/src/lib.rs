@@ -49,7 +49,7 @@ mod testing;
 pub use compat::{HostInfo, NamespaceSupport, Refusal};
 pub use entry::serve;
 pub use extension::{Contract, ExtCtx, ExtensionHandler};
-pub use paddock_ipc::{IpcError, Json, RemoteError};
+pub use paddock_ipc::{IpcError, Json, RemoteError, codes};
 pub use plugin::{Contributions, McpTool, Plugin, RegisterError, View, ViewCtx};
 pub use protocol::{
     Described, Fail, HostCall, PLATFORM_PROTOCOL, PlatformRequest, ProtocolVersion,

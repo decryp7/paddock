@@ -355,6 +355,7 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
     failed.start();
     failed.finish(JobState::Failed {
         message: "The folder is not readable".into(),
+        limit: None,
     });
     let user = reporter(7, "scan", "Scanning", None);
     user.finish(JobState::Cancelled {
@@ -365,6 +366,20 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
     deadline.finish(JobState::Cancelled {
         reason: CancelReason::Deadline,
     });
+    let limited = reporter(9, "extract", "Unpacking", Some("logs.zip"));
+    limited.start();
+    limited.finish(JobState::Failed {
+        message: "The archive is refused".into(),
+        limit: Some(
+            paddock_limits::LimitExceeded::new(
+                paddock_limits::LimitId::new("archive.entries"),
+                paddock_limits::Quantity::Count(10_000),
+                paddock_limits::Scope::File,
+            )
+            .reaching(paddock_limits::Quantity::Count(12_345))
+            .unwrap(),
+        ),
+    });
     let all = vec![
         queued.snapshot(),
         finding.snapshot(),
@@ -374,6 +389,7 @@ fn fixture_snapshots() -> Vec<JobSnapshot> {
         failed.snapshot(),
         user.snapshot(),
         deadline.snapshot(),
+        limited.snapshot(),
     ];
     drop(guard);
     all
@@ -386,7 +402,7 @@ fn generated_typescript_is_current() {
     let fixtures = format!(
         "// Generated from paddock-jobs' wire model by its tests (Rust round trip). Do not edit: {REGENERATE}.\n\n\
          /** One `paddock://jobs` snapshot of every shape, as Rust serialises them: queued, discovering, determinate bytes,\n \
-         * not cancellable, done, failed, cancelled by the user and by a deadline. */\n\
+         * not cancellable, done, failed, failed by a limit, cancelled by the user and by a deadline. */\n\
          export const JOB_SNAPSHOT_FIXTURES: readonly unknown[] = {fixtures};\n"
     );
     let mode = WriteMode::from_env();
@@ -396,4 +412,43 @@ fn generated_typescript_is_current() {
         .map(|e| e.to_string())
         .collect();
     assert!(stale.is_empty(), "{}", stale.join("\n"));
+}
+
+/// The UI shape of a limit (`SuQuantity`, `SuLimitExceeded` in `job-view.ts`) is written by hand in `@decryp7/paddock-ui`, which cannot
+/// import `paddock-limits`' generated types; this checks its unions against the generated golden file, so a new unit or scope in Rust
+/// fails here until the UI follows.
+#[test]
+fn the_ui_shape_of_a_limit_has_the_units_and_scopes_of_the_generated_types() {
+    fn union(text: &str, after: &str, quote: char) -> Vec<String> {
+        let start = text
+            .find(after)
+            .unwrap_or_else(|| panic!("`{after}` not found"))
+            + after.len();
+        let rest = &text[start..];
+        let end = rest.find([';', '\n', '}']).unwrap();
+        rest[..end]
+            .split('|')
+            .map(|s| s.trim().trim_matches(quote).to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+    let golden = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../paddock-limits/tests/golden/limits.ts"),
+    )
+    .unwrap();
+    let ui = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../ui/projects/paddock-ui/src/lib/job-view.ts"),
+    )
+    .unwrap();
+    assert_eq!(
+        union(&ui, "kind: ", '\''),
+        union(&golden, "type Unit = ", '"'),
+        "SuQuantity.kind differs from paddock-limits' Unit"
+    );
+    assert_eq!(
+        union(&ui, "scope: ", '\''),
+        union(&golden, "type Scope = ", '"'),
+        "SuLimitExceeded.scope differs from paddock-limits' Scope"
+    );
 }

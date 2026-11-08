@@ -20,6 +20,7 @@ doc = false
 [dependencies]
 paddock-env = { workspace = true }
 paddock-jobs = { workspace = true }
+paddock-limits = { workspace = true }
 paddock-proc = { workspace = true }
 getrandom = "0.3"
 postcard = { version = "1", default-features = false, features = ["use-std"] }
@@ -45,5 +46,6 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+paddock-testkit = { workspace = true }
 proptest = "1"
 tempfile = "3"

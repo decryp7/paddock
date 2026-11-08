@@ -175,6 +175,17 @@ export type FramesRequest = { key: string, indices: Array<number>,
  */
 redo: boolean, };
 
+export type DescribePlan = { 
+/**
+ * How many frames the model would describe.
+ */
+frames: number, 
+/**
+ * A rough time for all of them, in seconds, from this machine's recent describe runs; `None` until one was
+ * measured (an estimate, not a promise).
+ */
+estimateSeconds: number | null, };
+
 export type ExplainRangeRequest = { key: string, 
 /**
  * Up to four frames, in time order.

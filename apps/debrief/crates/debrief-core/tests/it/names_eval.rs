@@ -655,8 +655,14 @@ fn evaluation() {
         let s = score(&qs, layered(&plain, no_ai, false), &k);
         assert!(Score::pct(s.top1, s.n) >= 95.0, "layer 1 {kind}: {s:?}");
     }
-    // Abbreviations and synonyms need layer 2; without it they find nothing, never a wrong entity.
-    let k = ["abbreviation", "synonym"];
+    // Abbreviations are layer 1 (the letters-of-the-words rule, ADR 0053 amendment): 23 of 24 on this set without any
+    // model, and never a wrong entity. Synonyms need an AI alias (or the user): without it they find nothing.
+    let abbreviations = score(&qs, layered(&plain, no_ai, false), &["abbreviation"]);
+    assert_eq!(abbreviations.false_suggestions, 0, "{abbreviations:?}");
+    // The generic rule (no list of conventions): `gfxbldr` and `lickchk` are the two it cannot find.
+    assert!(abbreviations.top1 >= 22, "{abbreviations:?}");
+    assert!(Score::pct(abbreviations.top1, abbreviations.n) >= 90.0, "{abbreviations:?}");
+    let k = ["synonym"];
     let without = score(&qs, layered(&plain, no_ai, false), &k);
     let with = score(&qs, layered(&with_ai, ai, false), &k);
     assert_eq!(without.false_suggestions, 0, "{without:?}");
@@ -690,4 +696,76 @@ fn evaluation() {
     }
     let no_ctx = score(&qs, layered(&learned, full, false), &["context"]);
     assert_eq!(no_ctx.top1, 0, "without context these are ties: {no_ctx:?}");
+}
+
+/// Distractor names built from common words, deterministic: `n` distinct two-word names that are none of the entities.
+fn distractors(n: usize) -> Vec<Candidate> {
+    const W: &[&str] = &[
+        "alpha", "amber", "anchor", "apple", "arrow", "atlas", "badge", "basin", "beacon", "birch", "bishop", "blade", "bloom", "bridge",
+        "brook", "cable", "canal", "carbon", "castle", "cedar", "chain", "cinder", "cipher", "cloud", "cobalt", "comet", "copper", "coral",
+        "crane", "crest", "delta", "dune", "eagle", "ember", "falcon", "fern", "flint", "forge", "frost", "garnet", "glacier", "harbor",
+        "hazel", "heron", "iris", "island", "ivory", "jasper", "kettle", "lantern", "laurel", "lotus", "maple", "marble", "meadow",
+        "mirror", "nectar", "oak", "onyx", "orbit", "otter", "pebble", "pine", "plume", "quartz", "raven", "ridge", "river", "saddle",
+        "sierra", "silver", "slate", "spruce", "summit", "thistle", "timber", "tundra", "velvet", "violet", "walnut", "willow", "zephyr",
+    ];
+    let mut out = Vec::new();
+    let mut seed = 0x2545_f491_4f6c_dd1du64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let mut seen = HashSet::new();
+    while out.len() < n {
+        let (a, b) = (W[(next() % W.len() as u64) as usize], W[(next() % W.len() as u64) as usize]);
+        if a != b && seen.insert((a, b)) {
+            out.push(cand(&format!("{a}{b}.exe"), 5 + next() % 40));
+        }
+    }
+    out
+}
+
+/// The abbreviation rule keeps its precision in a big catalogue: with 2,000 unrelated names in the book, every
+/// abbreviation of the set still finds its entity first (22 of 24, the misses being `gfxbldr` and `lickchk`), without a question, and
+/// the negatives still find nothing.
+#[test]
+fn abbreviations_survive_two_thousand_distractors() {
+    let mut cands = all_cands();
+    cands.extend(distractors(2_000));
+    let vocab = vocabulary_from(&cands);
+    let mut b = NameBook::default();
+    b.rebuild(group(&cands, &vocab));
+    assert!(b.groups().len() >= 2_000 + ENTS.len());
+    let ctx = SearchContext::default();
+    let settings = NameSettings {
+        ai_aliases: false,
+        context: false,
+    };
+    let r = Resolver {
+        book: &b,
+        vocab: &vocab,
+        ctx: &ctx,
+        settings,
+    };
+    let (mut right, mut wrong) = (0, Vec::new());
+    for e in ENTS.iter().filter(|e| !e.abbrev.is_empty()) {
+        let res = r.resolve(e.abbrev, 5, None);
+        let first = res.matches.first().map(|m| entity_of(&m.id));
+        if first.as_deref() == Some(e.words) && res.clarify.is_none() {
+            right += 1;
+        } else {
+            wrong.push((e.abbrev, first.clone(), res.clarify.is_some()));
+        }
+        // Never a different entity with confidence.
+        assert!(
+            first.as_deref() == Some(e.words) || res.matches.is_empty() || res.clarify.is_some(),
+            "{} -> {first:?}",
+            e.abbrev
+        );
+    }
+    assert!(right >= 22, "{right} of 24; misses {wrong:?}");
+    for n in NEGATIVES {
+        assert!(r.resolve(n, 5, None).matches.is_empty(), "negative {n}");
+    }
 }

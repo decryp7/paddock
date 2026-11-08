@@ -135,6 +135,25 @@ fn the_catalogue_follows_imports_removals_and_clear() {
     drop(first);
 }
 
+/// The catalogue's rows are checkpointed once it is built, like every other change to the store: with the store's 1 GB
+/// `checkpoint_threshold` they otherwise stayed in DuckDB's memory and the write-ahead log, and a worker that had
+/// catalogued 20 copies of the samples idled at about 440 MB against a 300 MB budget (docs/performance.md).
+#[test]
+fn a_built_catalogue_is_saved_into_the_database_file() {
+    let (logs, dir, store) = setup("saved");
+    let rows: Vec<String> = (0..200).map(|i| format!("ran tool{i}.exe on host{i}.example.com")).collect();
+    lines(&logs.0.join("a.log"), &rows.iter().map(String::as_str).collect::<Vec<_>>());
+    store.open(std::slice::from_ref(&logs.0)).unwrap().wait().unwrap();
+    built(&store);
+    assert!(!lookup(&store, "tool7").is_empty(), "the names are catalogued");
+    let wal = dir.0.join(format!("{}.wal", debrief_store_duck::DB_FILE));
+    let left = std::fs::metadata(&wal).map_or(0, |m| m.len());
+    assert_eq!(
+        left, 0,
+        "the built catalogue left {left} bytes in the write-ahead log (not checkpointed)"
+    );
+}
+
 #[test]
 fn field_values_are_catalogued_and_numbers_and_ids_are_not() {
     let (logs, _dir, store) = setup("fields");

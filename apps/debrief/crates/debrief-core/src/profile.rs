@@ -389,11 +389,7 @@ pub(crate) fn merge(base: &mut toml::Table, over: toml::Table) {
     }
 }
 
-pub struct TextFormat {
-    pub regex: Regex,
-    /// True when the timestamp carries no date (console-style templates).
-    pub time_only: bool,
-}
+pub use crate::text_format::{FormatCaptures, TextFormat};
 
 pub struct Extractor {
     pub name: String,
@@ -477,14 +473,11 @@ impl CompiledProfile {
             let regex = crate::user_regex::compile(&pattern, false).with_context(|| format!("format.output_templates: {t}"))?;
             patterns.push(pattern);
             let time_only = !t.contains("{Timestamp:yyyy") && !t.contains("{Timestamp}") && t.contains("{Timestamp:");
-            text_formats.push(TextFormat {
-                regex,
-                time_only: time_only && !has_date_specifier(t),
-            });
+            text_formats.push(TextFormat::new(regex, time_only && !has_date_specifier(t)));
         }
         for r in &format.regexes {
             let regex = crate::user_regex::compile(r, false).with_context(|| format!("format.regexes: {r}"))?;
-            text_formats.push(TextFormat { regex, time_only: false });
+            text_formats.push(TextFormat::new(regex, false));
             patterns.push(r.clone());
         }
         let text_format_set = crate::user_regex::compile_set(&patterns).ok();

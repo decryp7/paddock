@@ -227,6 +227,25 @@ fn get_json_failures_are_typed_and_never_quote_the_body() {
 }
 
 #[test]
+fn get_bytes_accepts_a_body_of_exactly_the_limit_with_and_without_a_length() {
+    let d = downloader();
+    let exact = Server::start(|_, _| Resp::new(200, blob(1000)));
+    assert_eq!(
+        d.get_bytes(&exact.url("/"), &Fetch::new().max_bytes(1000))
+            .unwrap()
+            .len(),
+        1000
+    );
+    let chunked = Server::start(|_, _| Resp::new(200, blob(1000)).no_length());
+    assert_eq!(
+        d.get_bytes(&chunked.url("/"), &Fetch::new().max_bytes(1000))
+            .unwrap()
+            .len(),
+        1000
+    );
+}
+
+#[test]
 fn get_bytes_is_bounded_and_retries_throttling_and_server_errors() {
     let d = downloader();
     let big = Server::start(|_, _| Resp::new(200, blob(10_000)));
@@ -234,7 +253,13 @@ fn get_bytes_is_bounded_and_retries_throttling_and_server_errors() {
         .get_bytes(&big.url("/"), &Fetch::new().max_bytes(1000))
         .unwrap_err();
     assert!(
-        matches!(e, DownloadError::TooLarge { limit: 1000, .. }),
+        matches!(e, DownloadError::ReplyTooLarge { limit: 1000, .. }),
+        "{e:?}"
+    );
+    // The limit of a small GET is its own row (16 MiB by default), not the download size row (review of 1.4b).
+    assert_eq!(
+        e.limit().unwrap().id.as_str(),
+        "download.fetch_size",
         "{e:?}"
     );
     // Without Content-Length the limit is enforced while reading.
@@ -243,7 +268,7 @@ fn get_bytes_is_bounded_and_retries_throttling_and_server_errors() {
         .get_bytes(&chunked.url("/"), &Fetch::new().max_bytes(1000))
         .unwrap_err();
     assert!(
-        matches!(e, DownloadError::TooLarge { limit: 1000, .. }),
+        matches!(e, DownloadError::ReplyTooLarge { limit: 1000, .. }),
         "{e:?}"
     );
     // 503 with Retry-After, then 500, then the answer.

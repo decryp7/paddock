@@ -394,7 +394,7 @@ fn a_wake_is_refused_for_an_unknown_computer_and_when_the_feature_is_off() {
         let s = jobs.recv_timeout(HANG_GUARD).expect("the job ends");
         if s.id == j.id && s.is_terminal() {
             assert!(
-                matches!(s.state, paddock_jobs::wire::WireState::Failed(ref m) if m.contains("turned off")),
+                matches!(s.state, paddock_jobs::wire::WireState::Failed { message: ref m, .. } if m.contains("turned off")),
                 "{:?}",
                 s.state
             );

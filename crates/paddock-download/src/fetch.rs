@@ -12,11 +12,14 @@ use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// The most body bytes a small GET reads unless [`Fetch::max_bytes`] says otherwise (16 MiB).
+pub const DEFAULT_FETCH_BYTES: u64 = 16 * 1024 * 1024;
+
 /// How one small GET runs.
 #[derive(Debug, Clone)]
 pub struct Fetch {
     headers: Vec<Header>,
-    max_bytes: u64,
+    pub(crate) max_bytes: u64,
     timeout: Duration,
     cancel: Option<CancelToken>,
 }
@@ -25,7 +28,7 @@ impl Default for Fetch {
     fn default() -> Self {
         Fetch {
             headers: Vec::new(),
-            max_bytes: 16 * 1024 * 1024,
+            max_bytes: DEFAULT_FETCH_BYTES,
             timeout: Duration::from_secs(60),
             cancel: None,
         }
@@ -48,7 +51,7 @@ impl Fetch {
         Ok(self)
     }
 
-    /// The most body bytes read (default 16 MiB); a longer answer is [`DownloadError::TooLarge`].
+    /// The most body bytes read (default 16 MiB); a longer answer is [`DownloadError::ReplyTooLarge`].
     pub fn max_bytes(mut self, bytes: u64) -> Self {
         self.max_bytes = bytes;
         self
@@ -192,7 +195,10 @@ fn read_body(mut resp: Response, limit: u64, cancel: &Cancels) -> Result<Vec<u8>
         .and_then(parse_length)
         && size > limit
     {
-        return Err(BodyError::Failed(DownloadError::TooLarge { size, limit }));
+        return Err(BodyError::Failed(DownloadError::ReplyTooLarge {
+            size,
+            limit,
+        }));
     }
     let mut body = Vec::new();
     let mut buf = [0u8; 16 * 1024];
@@ -207,7 +213,10 @@ fn read_body(mut resp: Response, limit: u64, cancel: &Cancels) -> Result<Vec<u8>
         }
         let size = body.len() as u64 + n as u64;
         if size > limit {
-            return Err(BodyError::Failed(DownloadError::TooLarge { size, limit }));
+            return Err(BodyError::Failed(DownloadError::ReplyTooLarge {
+                size,
+                limit,
+            }));
         }
         body.extend_from_slice(&buf[..n]);
     }
