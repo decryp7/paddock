@@ -1000,8 +1000,10 @@ fn a_served_calls_stalled_reply_closes_the_connection_and_releases_the_caller() 
         Ok(vec![7u8; 1 << 20])
     });
     let (p, mut io) = raw(big, opts, FrameLimit::default());
-    // Calls whose 1 MiB replies the test never reads: the socket buffer fills, the writer blocks, the one-frame queue fills,
-    // and the next reply stalls on its call thread.
+    // 40 calls whose 1 MiB replies the test never reads. The end state is stable and exact: the writer holds reply 1 (blocked on
+    // the full socket), the one-frame queue holds reply 2, and replies 3..=40 wait for room on the clock. Waiting for the first
+    // waiter is not enough: while the writer is still taking reply 1, a waiter appears and is released again by that pop, and an
+    // advance at that moment makes every later reply start its 30 s from the advanced clock, so none ever expires.
     for id in 1..=40u64 {
         write_frame_raw(
             &mut io,
@@ -1011,11 +1013,11 @@ fn a_served_calls_stalled_reply_closes_the_connection_and_releases_the_caller() 
                 body: Vec::new(),
             },
         );
-        if clock.waiters() >= 1 {
-            break;
-        }
     }
-    assert!(clock.wait_for_waiters(1, GUARD), "no reply ever stalled");
+    assert!(
+        clock.wait_for_waiters(38, GUARD),
+        "the replies never all waited for room"
+    );
     clock.advance(Duration::from_secs(30));
     assert!(
         p.wait_closed(Some(GUARD)),
