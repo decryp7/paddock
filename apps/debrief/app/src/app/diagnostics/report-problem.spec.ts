@@ -2,7 +2,7 @@ import { Component } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MemoryLogger } from '../../testing/helpers';
 import { Breadcrumb } from '../core/activity/types';
-import { FILE_EXISTS_SUFFIX } from '../core/api.types';
+import { FILE_EXISTS_SUFFIX, ProblemReportPreview } from '../core/api.types';
 import { Logger } from '../core/logger';
 import { CommandRegistry } from '../extensions/command-registry';
 import { CommandContext } from '../extensions/tokens';
@@ -144,6 +144,32 @@ describe('ReportProblemDialog', () => {
     await f.componentInstance.load();
     await flush(f);
     expect(el.querySelector('[role=alert]')!.textContent).toContain('Could not collect the report: no logs');
+  });
+
+  it('ignores a preview that answers after a newer request (ticking the box twice quickly)', async () => {
+    const { backend } = setup();
+    const f = TestBed.createComponent(ReportProblemDialog);
+    await flush(f);
+    const answers: Array<(p: ProblemReportPreview) => void> = [];
+    backend.reportPreview = () => new Promise<ProblemReportPreview>((resolve) => answers.push(resolve));
+    const dialog = f.componentInstance;
+    dialog.setIncludeScreenshots(true);
+    dialog.setIncludeScreenshots(false);
+    const preview = (name: string): ProblemReportPreview => ({ entries: [{ name, bytes: 1, summary: '' }], steps: [], systemInfo: {} });
+    // The newer request answers first, then the older one: the older answer must not replace it.
+    at(answers, 1)(preview('newer.txt'));
+    await flush(f);
+    expect(dialog.loading()).toBe(false);
+    at(answers, 0)(preview('older.txt'));
+    await flush(f);
+    expect(dialog.preview()?.entries[0]?.name).toBe('newer.txt');
+    // A stale failure is ignored as well.
+    backend.reportPreview = vi.fn().mockRejectedValueOnce(new Error('old failure')).mockResolvedValue(preview('latest.txt'));
+    void dialog.load();
+    await dialog.load();
+    await flush(f);
+    expect(dialog.error()).toBeNull();
+    expect(dialog.preview()?.entries[0]?.name).toBe('latest.txt');
   });
 
   it('a declined overwrite saves nothing and says nothing', async () => {

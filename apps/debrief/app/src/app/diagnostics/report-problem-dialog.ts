@@ -127,15 +127,22 @@ export class ReportProblemDialog implements OnInit {
     void this.load();
   }
 
+  /** The newest preview request; an answer to an older one is dropped, so the list never shows a stale choice. */
+  private latest = 0;
+
   async load(): Promise<void> {
+    const request = ++this.latest;
     this.loading.set(true);
     this.error.set(null);
     try {
-      this.preview.set(await this.backend.reportPreview(this.description(), this.includeScreenshots()));
+      const preview = await this.backend.reportPreview(this.description(), this.includeScreenshots());
+      if (request === this.latest) this.preview.set(preview);
     } catch (e) {
-      this.error.set($localize`:@@diagnostics.reportDialog.collectFailed:Could not collect the report: ${describeError(e)}:error:`);
+      if (request === this.latest) {
+        this.error.set($localize`:@@diagnostics.reportDialog.collectFailed:Could not collect the report: ${describeError(e)}:error:`);
+      }
     }
-    this.loading.set(false);
+    if (request === this.latest) this.loading.set(false);
   }
 
   setIncludeScreenshots(on: boolean): void {

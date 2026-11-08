@@ -1404,6 +1404,7 @@
     "diagnostics.reportView.noBreadcrumbs": "⟦Ñöö ƀŕééááðçŕûɱƀš ŵééŕéé ŕééçöŕðééð.⟧",
     "diagnostics.reportView.noPreview": "⟦Ñöö þŕééṽîîéŵ⟧",
     "diagnostics.reportView.noProcesses": "⟦Ñöö çĥîîļð þŕööçéššééš ŵééŕéé ŕéçööŕðééð.⟧",
+    "diagnostics.reportView.noScreenshot": "⟦Šçŕééééñšĥööţ ñöţ îîñçļûûðééð. Ţĥîš ŕééþööŕţ ŵááš šáṽééð ŵîîţĥööûţ šçŕééééñšĥööţš.⟧",
     "diagnostics.reportView.noSnapshots": "⟦Ţĥéé ŕééþööŕţ ĥáš ñöö ééŕŕööŕ šñáþšĥööţš.⟧",
     "diagnostics.reportView.noSteps": "⟦Ñöö ááçţîîṽîţý ŵááš ŕééçööŕðéð.⟧",
     "diagnostics.reportView.openOne": "⟦ÖÖþééñ šñááþšĥöţ {$snapshot}⟧",

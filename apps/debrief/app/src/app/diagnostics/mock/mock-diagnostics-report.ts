@@ -81,6 +81,7 @@ export function sampleReport(name: string): DiagnosticsReportView {
         view: 'AI chat',
         mime: 'image/png',
         bytes: 68,
+        hasImage: true,
         steps: ['1. Opened <dir#1a2b3c4d>/samples (3 files) from the menu', "2. Clicked 'Ask the assistant' from the toolbar"],
         breadcrumbs: [],
       },

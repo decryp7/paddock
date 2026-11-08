@@ -74,6 +74,10 @@ pub struct ReportSnapshot {
     pub mime: String,
     #[serde(default)]
     pub bytes: u64,
+    /// Whether the zip holds this snapshot's screenshot (a report leaves them out unless the user ticked the box); set from the
+    /// manifest when the report is read.
+    #[serde(default, skip_deserializing)]
+    pub has_image: bool,
     #[serde(default)]
     pub steps: Vec<String>,
     #[serde(default)]
@@ -321,6 +325,7 @@ pub fn read_view(zip_path: &Path, m: &Manifest) -> DiagnosticsReportView {
                 s.view = s.view.map(|v| cut(v, MAX_FIELD));
                 s.steps.truncate(MAX_STEPS);
                 s.breadcrumbs.truncate(MAX_BREADCRUMBS);
+                s.has_image = snapshot_image(m, &s.id).is_some();
                 snapshots.push(s);
             }
             Ok(_) => unreadable.push(format!("{} has an invalid id", f.name)),
@@ -347,15 +352,18 @@ pub fn read_view(zip_path: &Path, m: &Manifest) -> DiagnosticsReportView {
     }
 }
 
+/// The manifest entry of a snapshot's screenshot, when the zip holds one.
+fn snapshot_image<'a>(m: &'a Manifest, id: &str) -> Option<&'a ManifestFile> {
+    m.of_kind(FileKind::Snapshot)
+        .find(|f| f.name == format!("snapshots/{id}.png") || f.name == format!("snapshots/{id}.jpg"))
+}
+
 /// One snapshot image of the report as a `data:` URL (PNG or JPEG only, at most the snapshot size limit).
 pub fn read_image(zip_path: &Path, m: &Manifest, id: &str) -> Result<String, String> {
     if !crate::snapshots::is_valid_id(id) {
         return Err("invalid snapshot id".into());
     }
-    let f = m
-        .of_kind(FileKind::Snapshot)
-        .find(|f| f.name == format!("snapshots/{id}.png") || f.name == format!("snapshots/{id}.jpg"))
-        .ok_or("this report has no such snapshot")?;
+    let f = snapshot_image(m, id).ok_or("this report has no screenshot for that snapshot")?;
     let bytes = read_entry(&mut open_zip(zip_path)?, &f.name, crate::snapshots::MAX_IMAGE_BYTES as u64)?;
     let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
         "image/png"
@@ -611,6 +619,7 @@ mod tests {
         assert_eq!(v.steps, ["1. Opened files from the menu", "2. Applied query from the menu"]);
         assert_eq!(v.breadcrumbs.len(), 2);
         assert_eq!(v.snapshots.len(), 1);
+        assert!(v.snapshots[0].has_image, "the zip holds the screenshot");
         assert_eq!(v.system_info["plugins"][0]["id"], "net.decryptology.web");
         assert!(v.unreadable.is_empty(), "{:?}", v.unreadable);
         assert_eq!(v.manifest.files.len(), m.files.len());
@@ -622,6 +631,25 @@ mod tests {
         let again = recover(&[o.logs.join("debrief.log").to_string_lossy().into_owned()]).unwrap();
         assert_eq!(again.view, o.view);
         assert!(recover(&[d.join("x.log").to_string_lossy().into_owned()]).is_none());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
+    fn a_report_saved_without_screenshots_says_so_instead_of_failing_to_load_one() {
+        let d = temp("open-no-image");
+        let inputs = inputs_in(&d);
+        assert!(!inputs.include_screenshots, "off by default");
+        let zip = d.join("debrief-diagnostics-no-image.zip");
+        crate::activity::report::write(&inputs, "", &zip).unwrap();
+        let Detected::Report(m) = detect(&zip) else {
+            panic!("not detected")
+        };
+        let v = read_view(&zip, &m);
+        assert_eq!(v.snapshots.len(), 1);
+        assert!(!v.snapshots[0].has_image);
+        assert!(read_image(&zip, &m, &v.snapshots[0].id).unwrap_err().contains("no screenshot"));
+        let json = serde_json::to_value(&v.snapshots[0]).unwrap();
+        assert_eq!(json["hasImage"], false);
         std::fs::remove_dir_all(d).unwrap();
     }
 

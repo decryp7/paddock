@@ -74,6 +74,8 @@ export interface ReportSnapshot {
   view: string | null;
   mime: string;
   bytes: number;
+  /** Whether the zip holds the screenshot (a report leaves it out unless the user asked for it). */
+  hasImage: boolean;
   steps: string[];
   breadcrumbs: SnapshotBreadcrumb[];
 }
