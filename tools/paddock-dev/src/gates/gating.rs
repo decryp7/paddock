@@ -956,6 +956,27 @@ mod tests {
     }
 
     #[test]
+    fn a_typescript_skip_on_process_env_needs_that_variable_set() {
+        let files = [("ui/package.json", "{}"), ("ui/e2e/contact-sheet.spec.ts", "")];
+        let mut c = check(Kind::EnvGatedTest, "ui/e2e/contact-sheet.spec.ts::sheet");
+        c.detail = Some("SHOTS_DIR".into());
+        let plain = "on:\n  pull_request:\njobs:\n  j:\n    runs-on: ubuntu-latest\n    steps:\n      - run: npx playwright test\n        working-directory: ui\n";
+        // bad: a Playwright line in the package that does not set the variable
+        assert!(ask(&world(&[(".gitea/workflows/ci.yml", plain)], &[], &files), &c).gated.is_empty());
+        // bad: a skip whose variable could not be named is never satisfied
+        let mut unnamed = c.clone();
+        unnamed.detail = None;
+        assert!(
+            ask(&world(&[(".gitea/workflows/ci.yml", plain)], &[], &files), &unnamed)
+                .gated
+                .is_empty()
+        );
+        // good: the variable set on the step
+        let with = plain.replace("      - run: npx", "      - env:\n          SHOTS_DIR: out\n        run: npx");
+        assert!(!ask(&world(&[(".gitea/workflows/ci.yml", &with)], &[], &files), &c).gated.is_empty());
+    }
+
+    #[test]
     fn an_unresolvable_line_that_mentions_the_check_is_reported() {
         let wf = "on:\n  pull_request:\njobs:\n  a:\n    runs-on: ubuntu-latest\n    steps:\n      - working-directory: ${{ steps.s.outputs.dir }}\n        run: node conformance/bin/paddock-conformance.mjs --app paddock --root . --only C13\n";
         let w = world(&[(".gitea/workflows/ci.yml", wf)], &[], &[]);

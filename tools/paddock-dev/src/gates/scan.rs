@@ -189,20 +189,30 @@ pub fn env_gated_rust(path: &str, text: &str) -> Vec<TestSite> {
     out
 }
 
-static TS_CONST: LazyLock<Regex> = LazyLock::new(|| re(r"^(?:export\s+)?const\s+([A-Za-z0-9_]+)\s*=.*process\.env"));
+static TS_CONST: LazyLock<Regex> = LazyLock::new(|| re(r"^(?:export\s+)?const\s+([A-Za-z0-9_]+)\s*=(.*process\.env.*)$"));
+static TS_ENV_READ: LazyLock<Regex> = LazyLock::new(|| re(r#"process\.env(?:\.([A-Za-z0-9_]+)|\[\s*['"]([A-Za-z0-9_]+)['"]\s*\])"#));
 static TS_SKIP: LazyLock<Regex> = LazyLock::new(|| re(r"\b(?:test|it)(?:\.describe)?\.skip\(|\bdescribe\.skip\("));
 static TS_TITLE: LazyLock<Regex> =
     LazyLock::new(|| re(r#"\b(?:test|it|describe|test\.describe)(?:\.\w+)?\(\s*(?:'([^']*)'|"([^"]*)"|`([^`]*)`)"#));
 
-/// TypeScript skips whose condition reads `process.env`, directly or through a module-level constant (one level).
+/// The environment variable a `process.env['X']` / `process.env.X` read names, if the text has one.
+fn env_var(text: &str) -> Option<String> {
+    TS_ENV_READ
+        .captures(text)
+        .and_then(|c| c.get(1).or(c.get(2)).map(|m| m.as_str().to_string()))
+}
+
+/// TypeScript skips whose condition reads `process.env`, directly or through a module-level constant (one level). The
+/// condition is the variable's real name; a read the scanner cannot name has no condition and is never counted as satisfied.
 pub fn env_gated_ts(path: &str, text: &str) -> Vec<TestSite> {
     if !text.contains("process.env") || !text.contains("skip") {
         return Vec::new();
     }
     let lines: Vec<&str> = text.lines().collect();
-    let consts: Vec<String> = lines
+    // (constant, variable it reads)
+    let consts: Vec<(String, Option<String>)> = lines
         .iter()
-        .filter_map(|l| TS_CONST.captures(l).map(|c| c[1].to_string()))
+        .filter_map(|l| TS_CONST.captures(l).map(|c| (c[1].to_string(), env_var(&c[2]))))
         .collect();
     let mut out = Vec::new();
     for (i, l) in lines.iter().enumerate() {
@@ -210,12 +220,13 @@ pub fn env_gated_ts(path: &str, text: &str) -> Vec<TestSite> {
         let args = &l[m.end()..];
         let cond = args.split(',').next().unwrap_or(args);
         let direct = cond.contains("process.env");
-        let var = consts
+        let via = consts
             .iter()
-            .find(|c| Regex::new(&format!(r"\b{}\b", regex::escape(c))).is_ok_and(|r| r.is_match(cond)));
-        if !direct && var.is_none() {
+            .find(|(c, _)| Regex::new(&format!(r"\b{}\b", regex::escape(c))).is_ok_and(|r| r.is_match(cond)));
+        if !direct && via.is_none() {
             continue;
         }
+        let var = if direct { env_var(cond) } else { via.and_then(|(_, v)| v.clone()) };
         let title = (0..=i)
             .rev()
             .find_map(|k| {
@@ -228,7 +239,7 @@ pub fn env_gated_ts(path: &str, text: &str) -> Vec<TestSite> {
             path: path.to_string(),
             name: title,
             line: i + 1,
-            condition: var.cloned().or_else(|| Some("process.env".into())),
+            condition: var,
         });
     }
     out
@@ -284,9 +295,15 @@ mod tests {
         // apps/dyno/app/e2e/screenshots-power.spec.ts
         let src = "const OUT = process.env['POWER_SHOTS_DIR'] ?? '';\ntest.describe('power screenshots', () => {\n  test('a window', async () => {\n    test.skip(!OUT, 'set POWER_SHOTS_DIR');\n  });\n});\n";
         let v = env_gated_ts("s.spec.ts", src);
-        assert_eq!(names(&v), vec![("a window", Some("OUT"))]);
+        assert_eq!(names(&v), vec![("a window", Some("POWER_SHOTS_DIR"))]);
         // good: a skip on the browser, with an unrelated env const in the file
         let good = "const OUT = process.env['X'] ?? '';\ntest('b', async ({ browserName }) => {\n  test.skip(browserName === 'webkit', 'no');\n  use(OUT);\n});\n";
         assert!(env_gated_ts("s.spec.ts", good).is_empty());
+        // a direct read names its variable (contact sheets, dashboard grid), in both spellings
+        let direct = "test('grid', async () => {\n  test.skip(!process.env['SHOTS_DIR'], 'x');\n});\ntest('dot', async () => {\n  test.skip(!process.env.OTHER_DIR, 'x');\n});\n";
+        assert_eq!(
+            names(&env_gated_ts("s.spec.ts", direct)),
+            vec![("grid", Some("SHOTS_DIR")), ("dot", Some("OTHER_DIR"))]
+        );
     }
 }
