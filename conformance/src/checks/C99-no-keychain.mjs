@@ -25,6 +25,11 @@
 //    its own path (`<dir>/Cargo.lock#<key>`) so a waiver names exactly that finding. A failed fetch, an unreadable graph or a
 //    missing Cargo.lock is "check broken" or "not measured": an error no waiver covers (ER-33).
 // 5. The Clippy entries (lint/clippy.toml, compared by C13) ban the Keychain API paths and types in the app's own code.
+//    Recorded deviation (ADR 0057 §3.5): the two demos (apps/shell-demo, apps/workbench-demo) have no clippy.toml and keep
+//    none, so Clippy on macOS is NOT MEASURED for them; this check says so (a warning at `Cargo.lock#clippy-not-measured`)
+//    for every probed workspace without one. Their manifests, graphs and sources are still covered by layers 1 to 4.
+//    A binary that ships in a dependency and is not reviewed (REVIEWED_BINARIES) is an error, and the scan of the real
+//    security-framework source is run on every probe as a positive control.
 import { join, posix } from 'node:path';
 import { error, unwaivable, warn } from '../finding.mjs';
 import { tomlTables } from '../sync/baseline.mjs';
@@ -213,6 +218,15 @@ function workspaces(ctx, files) {
   return [...dirs.values()];
 }
 
+/** Whether `dir` or a folder above it holds a clippy.toml (Clippy reads the nearest one). */
+function hasClippyConfig(files, dir) {
+  for (let d = dir; ; d = posix.dirname(d)) {
+    const prefix = d === '.' ? '' : `${d}/`;
+    if (files.includes(`${prefix}clippy.toml`) || files.includes(`${prefix}.clippy.toml`)) return true;
+    if (d === '.' || d === '/') return false;
+  }
+}
+
 /** Layers 3 and 4 over the macOS graph of every declared workspace, on both Apple triples. */
 function graphLayers(ctx, files) {
   if (ctx.options.graph === 'off') return [];
@@ -262,7 +276,19 @@ function graphLayers(ctx, files) {
       out.push(error('C99', 72, `${lock}#${f.key}`, 1, `${dir}: dependency ${f.what}: a shipped process must not reach the macOS Keychain`, 'Remove or replace the dependency (or its feature) that calls the Keychain; a binding that only evaluates TLS trust never uses SecItem or SecKeychain symbols.'));
     }
     for (const b of scan.binaries) {
-      out.push(warn('C99', 72, `${lock}#bin:${b.slice(0, b.indexOf(':'))}`, 1, `${dir}: binary, not scanned: ${b}`, 'A prebuilt binary cannot be read for Keychain calls: check the crate by hand, or build it from source.'));
+      out.push(error('C99', 72, `${lock}#${b.key}`, 1, `${dir}: binary, not scanned: ${b.what}`, 'A prebuilt binary cannot be read for Keychain calls: read what it is, then add the crate and series to REVIEWED_BINARIES (conformance/src/util/keychain-graph.mjs), or waive this exact path with a reason.'));
+    }
+    // Positive control (ER-33), on the real sources of every probe: the scan must see a Keychain call in security-framework
+    // (it binds SecKeychainSetUserInteractionAllowed), or it cannot be trusted to see one elsewhere.
+    const sf = [...merged.values()].find((p) => p.name === 'security-framework');
+    if (sf) {
+      const control = sourceScan({ crates: [sf] }, { ...ctx.options, scanBindings: true });
+      if (!control.findings.some((f) => f.key.endsWith(':SecKeychainSetUserInteractionAllowed'))) {
+        out.push(broken(lock, dir, `the source scan did not find SecKeychainSetUserInteractionAllowed in ${sf.name}@${sf.version}, so it cannot be trusted to see a Keychain call`));
+      }
+    }
+    if (!hasClippyConfig(files, dir)) {
+      out.push(warn('C99', 72, `${lock}#clippy-not-measured`, 1, `${dir}: Clippy on macOS: not measured (no clippy.toml at ${dir} or above it), so the Keychain API bans (layer 5) do not apply to its own code`, 'Add a clippy.toml with the Keychain entries of lint/clippy.toml, or leave this recorded deviation (the demos, ADR 0057 §3.5).'));
     }
   }
   return out;

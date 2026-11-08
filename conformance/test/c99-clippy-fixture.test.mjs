@@ -62,3 +62,32 @@ test('C99 Clippy preset: without allow-invalid a right path bites and a mistyped
   assert.match(typo.stderr, /get_generic_passwrd/);
   assert.match(typo.stderr, /(not refer to a reachable|could not resolve|unresolved)/i);
 });
+
+// The preset's paths against the REAL crates (not stand-ins), allow-invalid stripped from every entry: a mistyped or renamed
+// path would be reported as unreachable, and the real types and a real function must be refused. Needs the Apple-only
+// crates to compile, so it runs on macOS only and is reported as skipped everywhere else (ER-33: it is not silently green).
+const onMac = process.platform === 'darwin';
+test('C99 Clippy preset: every entry resolves in the real security-framework, objc2-security, keyring and keyring-core', { skip: !onMac ? 'macOS only: security-framework and objc2-security build on Apple targets; not measured on this OS' : !hasClippy ? 'clippy is not installed here' : false }, () => {
+  const config = readFileSync(join(PADDOCK, 'lint', 'clippy.toml'), 'utf8').replaceAll('allow-invalid = true, ', '');
+  const root = makeApp({
+    'Cargo.toml': `${pkg('real')}security-framework = "=3.7.0"\nobjc2-security = { version = "=0.3.2", features = ["SecItem", "SecKeychain", "SecKeychainItem", "SecKeychainSearch", "SecImportExport", "SecIdentitySearch"] }\nkeyring = "=4.2.0"\nkeyring-core = "=1.0.1"\n`,
+    'src/lib.rs': [
+      'use objc2_security as _;',
+      'use security_framework as _;',
+      'pub fn a() -> Option<security_framework::os::macos::keychain::SecKeychain> { None }',
+      'pub fn b() -> Option<keyring::Entry> { None }',
+      'pub fn c() -> Option<keyring_core::Entry> { None }',
+      'pub fn d() -> Option<objc2_security::SecKeychain> { None }',
+      'pub fn e() { let _ = security_framework::passwords::get_generic_password("s", "a"); }',
+      '',
+    ].join('\n'),
+  });
+  roots.push(root);
+  writeFileSync(join(root, 'clippy.toml'), config);
+  const r = clippy(root);
+  assert.notEqual(r.status, 0, 'the real Keychain API is refused');
+  for (const what of ['type `security_framework::os::macos::keychain::SecKeychain`', 'type `objc2_security::SecKeychain`', 'type `keyring::Entry`', 'type `keyring_core::Entry`', 'method `security_framework::passwords::get_generic_password`']) {
+    assert.ok(r.stderr.includes(`use of a disallowed ${what}`), `${what} is refused:\n${r.stderr.slice(0, 1500)}`);
+  }
+  assert.doesNotMatch(r.stderr, /does not refer to a reachable|could not resolve/i, 'every preset path resolves in the real crates');
+});

@@ -30,6 +30,9 @@ export function parseWaivers(text) {
  * waived no finding is a W003 warning (the finding was fixed: delete the waiver). A finding with `unwaivable: true` (a check
  * that could not run, "check broken" or "not measured") is never waived.
  */
+/** Checks whose waivers must name one exact path (no `*`): a glob would cover findings nobody has read. */
+const EXACT_PATH_CHECKS = new Set(['C99']);
+
 export function applyWaivers({ findings, waivers, problems = [], now = new Date(), file = 'paddock.waivers.toml', pathMatches, checksRun = null }) {
   const today = now.toISOString().slice(0, 10);
   const extra = problems.map((p) => ({ check: 'W002', severity: 'error', rule: 5, file, line: 1, message: `waiver file: ${p}`, fix: 'Fix the line.' }));
@@ -38,6 +41,8 @@ export function applyWaivers({ findings, waivers, problems = [], now = new Date(
     const where = { file, line: w.line, rule: 5 };
     if (!w.check || !w.path || !w.reason?.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(w.expires ?? '')) {
       extra.push({ check: 'W002', severity: 'error', ...where, message: 'a waiver needs check, path, reason and expires (YYYY-MM-DD)', fix: 'Fill in all four keys, or delete the waiver.' });
+    } else if (EXACT_PATH_CHECKS.has(w.check) && w.path.includes('*')) {
+      extra.push({ check: 'W004', severity: 'error', ...where, message: `waiver for ${w.check} ${w.path} uses a glob; a ${w.check} waiver names one exact path`, fix: 'Name the exact path of each finding (for C99: Cargo.lock#<key> as the finding prints it).' });
     } else if (w.expires < today) {
       extra.push({
         check: 'W001', severity: 'error', ...where,
