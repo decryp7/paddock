@@ -82,6 +82,9 @@ const SAMPLES: &[&[&str]] = &[
     &["conformance/ci/build-folder.sh"],
     &["conformance/src/util/is-main.mjs"],
     &[".gitignore", "crates/paddock-cli/CHANGELOG.md"],
+    // An app's Cargo.toml and capabilities are read by conformance C48.
+    &["apps/dyno/app/src-tauri/capabilities/default.json"],
+    &["apps/dyno/app/src-tauri/Cargo.toml"],
 ];
 
 #[test]
