@@ -22,7 +22,7 @@ const row1 = [
 // Recce is planned (placeholder icon and page only): its card carries the Planned chip like Sighter's and Pacenotes'.
 const row3 = [
   { id: 'recce-placeholder', key: 'recce', name: 'Recce', accent: '#2E9E75', lines: ['One search box for the', 'whole PC, answers with', 'sources. Retrieval engine.'] },
-  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC and', 'explains why it is slow.'] },
+  { id: 'dyno', name: 'Dyno', accent: '#C2287C', lines: ['Watches your PC:', 'read-only monitor.'] },
   { id: 'spotter', name: 'Spotter', accent: '#0E8577', lines: ['Watches for new releases', 'anywhere, the moment', 'one appears.'] },
 ];
 const pitcrew = { id: 'pitcrew', name: 'Pitcrew', accent: '#D2420F', ci: 'Runs CI for all apps', lines: ['Keeps CI runners alive,', 'updated and clean.'] };
@@ -263,7 +263,7 @@ text{font-family:-apple-system,"SF Pro Display","SF Pro Text","Segoe UI Variable
 
 <text class="eyebrow" x="${W / 2}" y="76" text-anchor="middle">PADDOCK</text>
 <text class="h1" x="${W / 2}" y="136" text-anchor="middle">Eight local-first apps for people who keep systems running</text>
-<text class="sub" x="${W / 2}" y="176" text-anchor="middle">One private AI hub and one shared foundation. Each app is good alone and better together.</text>
+<text class="sub" x="${W / 2}" y="176" text-anchor="middle">One private AI hub, one shared foundation. Each app is good alone and better together.</text>
 
 ${stubs}
 ${mcps}

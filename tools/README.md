@@ -19,8 +19,6 @@ Parameters carry what differed between the copies: the product name, the launchd
 program, the data folder and socket name (defaults follow `paddock-env`), the launch-agent minimum macOS. What the verify
 scripts read (unit, launchd state, discovery file) is what `paddock-service` (X4) registers; pass its names.
 
-Dropped tool: [Scrutineer](scrutineer/README.md), code-signing certificates, was dropped on 2026-11-05; the apps stay unsigned. Its placeholder page is kept as a record.
-
 Tests: `node --test tools/test/*.test.mjs`. They run every script in a scratch folder with a PATH of shims
 (`PADDOCK_TOOLS_OS` pretends to be macOS or Linux), so no launchd, systemd, Docker or installed app is touched. The PowerShell
 script is not run on the Mac; it is a parameterised port of Debrief's, reviewed by reading, and runs on the Windows runner.

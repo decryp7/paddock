@@ -202,6 +202,8 @@ describe('the graph of this tree', () => {
     assert.ok(run('Makefile').all);
     const m = run('.gitignore', 'ui/.gitignore', '.editorconfig');
     assert.deepEqual([m.all, m.apps, m.ui, m.docs], [false, [], false, false]);
+    const t = run('.gitea/ISSUE_TEMPLATE/bug.yaml', '.gitea/ISSUE_TEMPLATE/config.yaml');
+    assert.deepEqual([t.all, t.apps, t.ui, t.docs], [false, [], false, false]);
   });
 
   test("an app's icons mark that app; the icon pipeline marks every app; conformance's scripts mark every app", () => {

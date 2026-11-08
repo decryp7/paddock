@@ -1,7 +1,7 @@
 # The Paddock ecosystem
 
 <picture>
-  <img src="images/paddock-ecosystem.svg?v=14fc4133" alt="Paddock: eight apps. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%">
+  <img src="images/paddock-ecosystem.svg?v=bbf5ff4b" alt="Paddock: eight apps. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps." width="100%">
 </picture>
 
 Eight desktop apps for people who keep systems running, built on one shared foundation. Each is useful alone and better with
@@ -11,12 +11,12 @@ only: no cloud, no account, no telemetry.
 The foundation has two layers (decided 2026-10-24, [ADR 0012](adr/0012-paddock-app-shell.md) and [ADR 0013](adr/0013-paddock-workbench.md)). The **App shell** is what every app gets: startup protection with crash recovery and
 safe mode, Report a problem, background services and login items, notifications and service health, dialogs as real windows,
 jobs and progress, Settings, About and updates, the Storage page, undo, and the theme (shell 0.3.0); Pitcrew, Pitwall,
-Spotter and Dyno are the shell with pages. The **Workbench** sits on top of it for the IDE-style apps, Debrief, Pacenotes and
+Spotter, Dyno and Recce (planned) are the shell with pages. The **Workbench** sits on top of it for the IDE-style apps, Debrief, Pacenotes and
 Sighter: docked panes with the layout planner, the activity bar, the Explorer, the command palette and the AI pane.
 
 Images are generated ([`images/src/ecosystem.mjs`](images/src/ecosystem.mjs),
 [`images/src/integrations.mjs`](images/src/integrations.mjs)). PNG exports for places that cannot render SVG:
-hero [light](images/paddock-ecosystem-light.png?v=d79c0ef6) and [dark](images/paddock-ecosystem-dark.png?v=46a96a3f), integrations
+hero [light](images/paddock-ecosystem-light.png?v=66869804) and [dark](images/paddock-ecosystem-dark.png?v=386413ff), integrations
 [light](images/paddock-integrations-light.png?v=b166f32d) and [dark](images/paddock-integrations-dark.png?v=cb959d02), hand-offs
 [light](images/paddock-handoffs-light.png?v=e754dcb5) and [dark](images/paddock-handoffs-dark.png?v=ce5abde7). PNGs are
 rendered with Playwright's pinned Chrome for Testing, never the installed Google Chrome ([`images/src/chrome.mjs`](images/src/chrome.mjs); set
@@ -83,13 +83,14 @@ Status: **v1.0.1 released**. Repo: <https://dev.decryptology.net/decryp7/paddock
 Status: **v1.0.3 released**. Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/pitwall>
 
 ### Dyno
-**Purpose.** Watches your PC: live and history, alarms, a disk map and benchmarks.
+**Purpose.** Watches your PC, read-only: live and history, alarms, a disk map and benchmarks.
 **For.** People who want to know what a machine is doing, now and over time.
 - A background agent keeps history while the window is closed.
 - Live and history views grouped by application, alarms, system facts, a disk map and benchmarks.
-- No tuning or cleanup; power actions (keep awake, Wake-on-LAN, scheduled wakes, and sleep, hibernate (Windows and Linux) or shut-down after idle or at a set time) run as the owner sets them up. An optional administrator helper, turned on in Settings, reads what needs administrator rights, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool on request (Windows), with an audit log.
-- Planned: validated declarative packs, no code.
-- An opt-in MCP server in the app (Settings > AI access; Dyno must be open) in 1.1.0: eight reading tools, two power readings and two opt-in actions (wake a saved computer, keep awake for up to 12 hours). Pitwall 1.1 is planned to call it.
+- Strictly read-only: no tuning, no actions and no advice. Dyno needs its small read-only helper, installed with it, to read what only an administrator may see.
+- Extensible with validated declarative packs, no code.
+- An opt-in MCP server (Settings > AI access) on the unreleased 1.1 line, not in 1.0.0; Pitwall 1.1 will call it; reading
+  tools come in 1.2.
 
 Status: v1.0.0 released, 1.1.0 in progress (the administrator helper's readings, per-machine Windows installs, OS lifecycle checks). Repo: <https://dev.decryptology.net/decryp7/paddock/src/branch/main/apps/dyno>
 
@@ -143,7 +144,7 @@ Status: **planned**, last in the order of 2026-11-04, after Dyno 1.1.0, Spotter 
 ## Integration architecture
 
 <picture>
-  <img src="images/paddock-integrations.svg?v=169abd9a" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter, Dyno and Recce reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app (Spotter, Dyno and Recce later); Pitwall runs llama.cpp as a child process and keeps keys in the OS credential store; its tool router, planned for Pitwall 1.1 as MCP client and host, calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno (opt-in, on Dyno's unreleased 1.1 line) and Recce, which other MCP clients can use too" width="100%">
+  <img src="images/paddock-integrations.svg?v=21b8a969" alt="Integration architecture: Pacenotes, Debrief, Sighter, Spotter, Dyno and Recce reach Pitwall's local HTTP API through the shared paddock-pitwall client with one key per app (Spotter, Dyno and Recce later); Pitwall runs llama.cpp as a child process and keeps keys in the OS credential store; its tool router, planned for Pitwall 1.1 as MCP client and host, calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno (opt-in, on Dyno's unreleased 1.1 line) and Recce, which other MCP clients can use too" width="100%">
 </picture>
 
 <picture>
@@ -155,8 +156,8 @@ The apps never depend on each other to do their own job. They meet in a few well
 | Contract | Between | How it works |
 |---|---|---|
 | **Pitwall local API** | every app to Pitwall | HTTP on loopback; OpenAI-, Anthropic- and Ollama-compatible, plus `/x/v1`. One key per app (held in the OS credential store), job priorities, prompt and response caching, usage and limits per app. |
-| **MCP** (planned for Pitwall 1.1) | Pitwall to Pacenotes, Debrief, Sighter, Dyno and Recce; any MCP client | Pitwall becomes MCP client and host (chat with text, audio, vision and MCP): local models call the apps' MCP tools. Dyno's server is on its unreleased 1.1 line, not in 1.0.0 (opt-in, Settings > AI access; eight reading tools, two power readings and two opt-in actions). Recce is the family's retrieval engine, so Pitwall builds no index of its own: a knowledge collection is a Recce scope read over MCP. The hero draws these as dash-dot lines labelled MCP. |
-| **MCP servers** (decided 2026-10-23, [ADR 0007](adr/0007-mcp-servers-across-the-family.md)) | Pacenotes, Sighter, Debrief, then Spotter, Pitcrew, Dyno; Recce | Each serves tools locally, mostly reading tools (Sighter acts, with allow-list, confirmation, budgets and a stop key; Dyno has two opt-in actions, wake a saved computer and keep awake); off by default, every call logged, results bounded; Pitwall serves none. Debrief first. |
+| **MCP** (planned for Pitwall 1.1) | Pitwall to Pacenotes, Debrief, Sighter, Dyno and Recce; any MCP client | Pitwall becomes MCP client and host (chat with text, audio, vision and MCP): local models call the apps' MCP tools. Dyno's server is on its unreleased 1.1 line, not in 1.0.0 (opt-in, Settings > AI access; reading tools in 1.2). Recce is the family's retrieval engine, so Pitwall builds no index of its own: a knowledge collection is a Recce scope read over MCP. The hero draws these as dash-dot lines labelled MCP. |
+| **MCP servers** (decided 2026-10-23, [ADR 0007](adr/0007-mcp-servers-across-the-family.md)) | Pacenotes, Sighter, Debrief, then Spotter, Pitcrew, Dyno; Recce | Each serves read-only tools locally (Sighter acts, with allow-list, confirmation, budgets and a stop key); off by default, every call logged, results bounded; Pitwall serves none. Debrief first. |
 | **Deep links** | Pitcrew and Dyno to Debrief; Dyno to Spotter and Pitcrew | "Job logs" and "Issues" open in Debrief; Dyno's installed software becomes Spotter's watch list; Dyno's machine health shows next to the runners in Pitcrew. The target app opens at the right place. |
 | **Debrief bridge** | Debrief and Pacenotes, both ways | Stack trace to code, and log-line checks against the code. |
 | **Run bundles** | Sighter to Debrief | A file with video, steps and results; Debrief opens it next to the app's logs. |
@@ -180,7 +181,7 @@ planned for Pitwall 1.1: Pitwall calls the MCP servers of Pacenotes, Debrief, Si
   Pitwall, release checks you configure in Spotter, updates of the apps themselves (signed, from `latest.json`).
 - Pitwall listens on loopback only and requires a key per app; keys live in the OS credential store.
 - Apps treat input as hostile: parsers never panic, limits are enforced, UIs never render untrusted text as HTML.
-- Dyno's optional administrator helper answers a closed list of requests: it reads every process and the privileged counters, sets Dyno's own scheduled wakes (macOS, Linux) and installs the pinned disk-health tool (Windows), with an audit log.
+- Dyno never changes the system. Its required privileged helper answers allow-listed read-only queries only, so it can see every process and the privileged counters.
 
 ## Pitwall is optional
 
@@ -200,7 +201,7 @@ Pitwall is the AI hub, never a dependency. Every app's core works without it:
 - **Icon set**: one icon per app, per platform, and the Paddock mark itself: pit garages on a slab striped in the seven app hues ([`icons/`](../icons/README.md)).
 - **Shared Rust crates** on the Gitea cargo registry: the app shell, jobs, logs, Report a problem, services, secrets, processes, folders, knowledge packs, IPC and `paddock-pitwall`, among others; the rest of the plugin platform, `paddock-mcp` and `paddock-testplan` are planned ([`crates/`](../crates/README.md)).
 - **Conformance checks**: `@decryp7/paddock-conformance`, the shared checks every app runs in CI ([`conformance/`](../conformance/)).
-- **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script. Apple notarization and Windows code signing are deferred until the releases settle (2026-10-23); every app's release notes carry a "First launch" note (macOS Open Anyway, Windows More info > Run anyway).
+- **Release practices**: tag-driven CI release, signed updater artefacts, `latest.json`, the release script. The apps are not signed or notarized: updates are protected by the family update key, and paid certificates would be needed to remove the OS warnings (decision 2026-11-05); every app's release notes carry a "First launch" note (macOS Open Anyway, Windows More info > Run anyway).
 - **Lessons**: what Debrief and Pitcrew taught about build, windows, services, native feel and tests ([lessons](lessons.md)).
 
 ## Glossary: why these names
@@ -213,7 +214,7 @@ Motorsport vocabulary, because the family is about keeping things running fast a
 | **Pitcrew** | The mechanics who service the car mid-race | Keeps CI runners running and serviced |
 | **Pitwall** | The gantry where engineers watch data and radio the cars | The hub every app talks to |
 | **Debrief** | The review after a session | Analysing what happened afterwards |
-| **Dyno** | The rig that measures a car's power | Watches your PC |
+| **Dyno** | The rig that measures a car's power | Watches your PC, read-only |
 | **Spotter** | Watches the track and calls what is coming | Calls out new releases |
 | **Sighter** | A sighting lap before the race | Looks at the UI before tests drive it |
 | **Pacenotes** | The co-driver's notes describing the road ahead | Describes the shape of a codebase to whoever is navigating it |

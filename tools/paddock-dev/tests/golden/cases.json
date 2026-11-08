@@ -85,6 +85,13 @@
   ]
  },
  {
+  "name": "issue-templates",
+  "files": [
+   ".gitea/ISSUE_TEMPLATE/bug.yaml",
+   ".gitea/ISSUE_TEMPLATE/config.yaml"
+  ]
+ },
+ {
   "name": "declared-doc-inputs",
   "files": [
    "docs/rules.md",

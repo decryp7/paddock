@@ -3,7 +3,7 @@
 <h1 align="center">Paddock</h1>
 
 <p align="center">
-  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=14fc4133" alt="Paddock: eight apps. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps" width="100%"></a>
+  <a href="docs/ecosystem.md"><img src="docs/images/paddock-ecosystem.svg?v=bbf5ff4b" alt="Paddock: eight apps. Pacenotes, Debrief and Sighter above Pitwall, the local AI hub; Recce, Dyno and Spotter below it; Pitcrew under Dyno. Dash-dot lines marked MCP show what is planned for Pitwall 1.1: it calls the MCP servers of Pacenotes, Debrief, Sighter, Dyno and Recce, the family's retrieval engine. All are built on the shared Paddock foundation: the app shell every app uses and the workbench for the IDE-style apps." width="100%"></a>
 </p>
 
 <p align="center"><a href="docs/ecosystem.md">The ecosystem</a> · <a href="docs/ecosystem.md#integration-architecture">Integrations</a> · <a href="ui/README.md">UI kit</a> · <a href="docs/design-guide.md">Design guide</a> · <a href="icons/README.md">Icons</a></p>
@@ -23,7 +23,7 @@ Seven of the eight apps live in this repository under [`apps/`](apps/); Recce, t
 | <img src="icons/debrief/small/debrief-48.svg?v=08378a3a" width="40" height="40" align="absmiddle" alt=""> **[Debrief](apps/debrief/README.md)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | **v1.1.1 released, 1.2.0 in progress** |
 | <img src="icons/pitcrew/small/pitcrew-48.svg?v=fc4676ab" width="40" height="40" align="absmiddle" alt=""> **[Pitcrew](apps/pitcrew/README.md)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.1 released** |
 | <img src="icons/pitwall/small/pitwall-48.svg?v=5b597766" width="40" height="40" align="absmiddle" alt=""> **[Pitwall](apps/pitwall/README.md)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | **v1.0.3 released** |
-| <img src="icons/dyno/small/dyno-48.svg?v=d7c3c328" width="40" height="40" align="absmiddle" alt=""> **[Dyno](apps/dyno/README.md)** | Watches your PC: live and history, alarms, a disk map and benchmarks. | **v1.0.0 released, 1.1.0 in progress** |
+| <img src="icons/dyno/small/dyno-48.svg?v=d7c3c328" width="40" height="40" align="absmiddle" alt=""> **[Dyno](apps/dyno/README.md)** | Watches your PC, read-only: live and history, alarms, a disk map and benchmarks. | **v1.0.0 released, 1.1.0 in progress** |
 | <img src="icons/spotter/small/spotter-48.svg?v=cc97d9e4" width="40" height="40" align="absmiddle" alt=""> **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development, no release yet |
 | <img src="icons/sighter/small/sighter-48.svg?v=232dd5be" width="40" height="40" align="absmiddle" alt=""> **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned |
 | <img src="icons/pacenotes/small/pacenotes-48.svg?v=38a41979" width="40" height="40" align="absmiddle" alt=""> **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned |
@@ -45,7 +45,7 @@ for a regression over the following days. Anything odd opens in Debrief with one
 
 **A slow build machine.** **Dyno** shows what the runner is doing, live and over time: an alarm fires, and the process list
 and the disk map show that a background process is taking the runner's disk and CPU. The runner's health shows next to it
-in **Pitcrew**; later Dyno can hand that evidence to **Pitwall** for an explanation.
+in **Pitcrew**; later Dyno can hand that evidence to **Pitwall** for an explanation. Dyno never changes anything.
 Pitcrew's job logs open in **Debrief** when a build fails.
 
 **No AI installed.** Nothing above stops working. Every app does its core job alone; AI features show "Needs local AI,

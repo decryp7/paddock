@@ -311,3 +311,15 @@ use only the new isometric frames and match each other in Chromium. P2s for the 
 - The ecosystem SVG has a transparent background: add a themed background rect.
 - Pacenotes' olive tile is the least saturated; Pitwall and Sighter are close at 16–32 px (next icon pass).
 - Right-hand connector labels sit about 5 px off the left-hand ones.
+
+## Hero after removing the Scrutineer tool (2026-11-05, independent Opus review)
+
+`paddock-ecosystem.svg`, `-light.png`, `-dark.png`: approve, no P1. The Tools band is gone and the foundation panel ends at the App
+shell layer without a gap. Non-blocking findings (P3):
+
+- Tight labels, measured as free space inside the chip in SVG units: Conformance checks 5.5, "Q&A, embeddings" 5, Command palette 6.5,
+  MCP 7, Theme 7.4; the other chips have 10 to 24. Wider fonts on Windows and Linux could touch the chip edge.
+- The Spotter status chip sits 3 to 4 units above its title.
+- The Dyno status chip breaks the top-right pattern the other cards follow.
+- One connector line crosses another at y about 540.
+- `docs/ecosystem.md`'s foundation paragraph did not list Recce (planned) among the apps on the App shell: fixed in the same change.

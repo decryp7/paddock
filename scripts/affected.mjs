@@ -249,7 +249,7 @@ export function appOfWorkflow(path, appNames) {
 export const E2E_GUARD_INPUTS = /^ui\/projects\/paddock-e2e\/src\/(env|build-guard)\.ts$/;
 
 /** Editor and VCS metadata: marks nothing. */
-export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/];
+export const META = [/(^|\/)\.gitignore$/, /^\.editorconfig$/, /(^|\/)\.DS_Store$/, /^lefthook\.yml$/, /^\.gitea\/ISSUE_TEMPLATE\//];
 
 /** Documentation: marks only the link check... */
 export const DOCS = [/\.md$/, /^docs\//, /^apps\/[^/]+\/docs\//, /^diagrams\//, /(^|\/)LICENSE[^/]*$/];

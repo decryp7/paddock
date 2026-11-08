@@ -1435,6 +1435,17 @@ belongs to the responsible process, not the parent):** keep the work folder and 
 each job's `TMPDIR` on the internal disk (`job-tmpdir.sh` now does so on macOS when `diskutil info -plist` says Internal=false),
 and a check that finds empty output from a launchd job prints `launchctl print` and the exit state before it guesses a cause.
 
+## A check that could not see the thing passed, and a wrong cause was called confirmed (2026-11-05, Dyno 1.1.0 VM checks)
+The tray diagnosis for Dyno 1.1.0 was confirmed in 12 of 12 runs and then retracted: the VM had no menu bar, so the probe
+could not have seen a tray icon either way, and a tray count had matched the app's own window buttons. The audit of the
+VM suites found the same shape elsewhere: the Windows autostart judge passed on the agent alone, Lifespan passed on
+"helper did not answer", a reading row passed on a dead helper, and `renderResult` printed PASS on zero steps. What exposed
+it was the user asking why iStat Menus, on the same Mac, did not have the problem: nobody had compared with a known-good
+peer. **Lesson (class: a check that cannot fail):** before calling a cause confirmed or a check green, verify the
+precondition (the menu bar exists, the helper runs, at least one step ran), give the probe a positive control (show it sees
+a thing known to be there), and compare with a known-good peer. Otherwise the result is `not measured` or `check broken`
+and the release does not pass (rule 71, ER-33).
+
 ## A delayed service looked like a broken one (2026-11-04, Dyno helper after a Windows restart)
 
 After a restart the Dyno helper card said "installed but did not answer, Repair" until the person ran Repair (UAC), though nothing was damaged. By the code, four things added up: the service was `delayed-auto` (it starts a minute or two after the boot), the agent turned "program present, pipe absent" straight into Silent and Repair, nothing started a stopped service although its security descriptor already lets interactive users start it, and the card read the state once and never again. A start that is merely late, or a service that is merely stopped, is not damage. **Lesson (class: a state that fixes itself is not a fault):** a status that can be transient is polled with a backoff and says "starting", an unelevated start is tried before an elevated repair is offered, and Repair is for a service that stopped with an error, with the service's exit code and reason in the detail. `paddock_service::start::revive` is the one implementation; a refusal at the service's start leaves its reason in the Event Log and in its service-specific exit code (ER-27), because a service that stops silently can only be repaired by guessing.

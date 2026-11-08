@@ -130,3 +130,5 @@ Pitwall is not code-signed yet, so your system may warn the first time you open 
 - **macOS:** if it says the app cannot be opened, choose Done, then System Settings > Privacy & Security > scroll to the message about Pitwall > **Open Anyway**.
 - **Windows:** if SmartScreen says "Windows protected your PC", choose **More info > Run anyway**.
 <!-- /paddock:block first-launch -->
+
+The apps are not signed or notarized: updates are protected by the family update key, and paid certificates would be needed to remove the OS warnings (decision 2026-11-05). The release workflow appends a "First launch" section to every release's notes (and so to `latest.json`) explaining **Open Anyway** (macOS) and **More info > Run anyway** (Windows SmartScreen).
