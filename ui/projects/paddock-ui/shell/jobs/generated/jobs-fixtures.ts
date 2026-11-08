@@ -1,7 +1,7 @@
 // Generated from paddock-jobs' wire model by its tests (Rust round trip). Do not edit: PADDOCK_WRITE_TS=1 cargo test -p paddock-jobs --features tauri --test it tauri::generated.
 
 /** One `paddock://jobs` snapshot of every shape, as Rust serialises them: queued, discovering, determinate bytes,
- * not cancellable, done, failed, cancelled by the user and by a deadline. */
+ * not cancellable, done, failed, failed by a limit, cancelled by the user and by a deadline. */
 export const JOB_SNAPSHOT_FIXTURES: readonly unknown[] = [
   {
     "id": 1,
@@ -117,6 +117,31 @@ export const JOB_SNAPSHOT_FIXTURES: readonly unknown[] = [
     "subject": null,
     "state": "cancelled",
     "reason": "deadline",
+    "seq": 3,
+    "elapsedMs": 0,
+    "etaMs": null,
+    "cancellable": false,
+    "notCancellableReason": null
+  },
+  {
+    "id": 9,
+    "kind": "extract",
+    "title": "Unpacking",
+    "subject": "logs.zip",
+    "state": "failed",
+    "message": "The archive is refused",
+    "limit": {
+      "id": "archive.entries",
+      "limit": {
+        "kind": "count",
+        "n": 10000
+      },
+      "reached": {
+        "kind": "count",
+        "n": 12345
+      },
+      "scope": "file"
+    },
     "seq": 3,
     "elapsedMs": 0,
     "etaMs": null,

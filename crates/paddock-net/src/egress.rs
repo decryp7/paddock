@@ -183,7 +183,7 @@ impl Egress {
                 });
             };
             if hop >= self.policy.max_redirects {
-                return Err(NetError::TooManyRedirects);
+                return Err(NetError::TooManyRedirects(self.policy.max_redirects));
             }
             drop(reply.body);
             let next = url

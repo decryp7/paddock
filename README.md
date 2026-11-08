@@ -23,7 +23,7 @@ Seven of the eight apps live in this repository under [`apps/`](apps/); Recce, t
 | <img src="icons/debrief/small/debrief-48.svg?v=08378a3a" width="40" height="40" align="absmiddle" alt=""> **[Debrief](apps/debrief/README.md)** | An IDE for analysing logs and diagnostic files: one merged timeline across processes and machines. | **v1.1.1 released, 1.2.0 in progress** |
 | <img src="icons/pitcrew/small/pitcrew-48.svg?v=fc4676ab" width="40" height="40" align="absmiddle" alt=""> **[Pitcrew](apps/pitcrew/README.md)** | Keeps self-hosted CI runners alive, updated and clean. | **v1.0.1 released** |
 | <img src="icons/pitwall/small/pitwall-48.svg?v=5b597766" width="40" height="40" align="absmiddle" alt=""> **[Pitwall](apps/pitwall/README.md)** | The private, local AI hub: OpenAI-, Anthropic- and Ollama-compatible APIs over models on your machine. | **v1.0.3 released** |
-| <img src="icons/dyno/small/dyno-48.svg?v=d7c3c328" width="40" height="40" align="absmiddle" alt=""> **[Dyno](apps/dyno/README.md)** | Watches your PC, read-only: live and history, alarms, a disk map and benchmarks. | **v1.0.0 released, 1.1.0 in progress** |
+| <img src="icons/dyno/small/dyno-48.svg?v=d7c3c328" width="40" height="40" align="absmiddle" alt=""> **[Dyno](apps/dyno/README.md)** | Watches your PC: live and history, alarms, a disk map and benchmarks. | **v1.1.0 released, 1.1.1 in progress** |
 | <img src="icons/spotter/small/spotter-48.svg?v=cc97d9e4" width="40" height="40" align="absmiddle" alt=""> **[Spotter](apps/spotter/README.md)** | Watches for new releases anywhere and tells you the moment one appears. | In development, no release yet |
 | <img src="icons/sighter/small/sighter-48.svg?v=232dd5be" width="40" height="40" align="absmiddle" alt=""> **[Sighter](apps/sighter/README.md)** | Finds any UI element by sight, so UI tests work even without an accessibility tree. | Planned |
 | <img src="icons/pacenotes/small/pacenotes-48.svg?v=38a41979" width="40" height="40" align="absmiddle" alt=""> **[Pacenotes](apps/pacenotes/README.md)** | Understands code in any language: dependency graph, code review with your own rules, local semantic search, and an MCP server. | Planned |
@@ -45,7 +45,7 @@ for a regression over the following days. Anything odd opens in Debrief with one
 
 **A slow build machine.** **Dyno** shows what the runner is doing, live and over time: an alarm fires, and the process list
 and the disk map show that a background process is taking the runner's disk and CPU. The runner's health shows next to it
-in **Pitcrew**; later Dyno can hand that evidence to **Pitwall** for an explanation. Dyno never changes anything.
+in **Pitcrew**; later Dyno can hand that evidence to **Pitwall** for an explanation. Dyno only watches; the power actions you set up are the one thing it changes.
 Pitcrew's job logs open in **Debrief** when a build fails.
 
 **No AI installed.** Nothing above stops working. Every app does its core job alone; AI features show "Needs local AI,
@@ -59,7 +59,7 @@ The wiring, protocols and diagram: [integration architecture](docs/ecosystem.md#
 - **Windows, macOS and Linux are all first-class**, with a native feel on each.
 - **Rust engines, Angular UI, Tauri 2 shell.** The engine is the source of truth; the UI renders what it returns.
 - **Pitwall is always optional.** Every app's core works without it; AI features appear when it is present.
-- **Observe before acting.** Apps that change things (Pitcrew's cleanup, Sighter's actions) do so only on a click or an enabled rule, with an undo; Dyno only observes.
+- **Observe before acting.** Apps that change things (Pitcrew's cleanup, Sighter's actions) do so only on a click or an enabled rule, with an undo; Dyno only observes, apart from the power actions you set up.
 - **Calm by default.** Neutral surfaces, colour for action and the one thing that needs attention.
 
 ## Repository layout
@@ -126,14 +126,15 @@ paddock-jobs = { version = "0.1", registry = "decryp7" }
 
 ## Status and roadmap
 
-Released: Debrief 1.1.1, Dyno 1.0.0, Pitwall 1.0.3 and Pitcrew 1.0.1. Spotter, Pacenotes and Sighter have no release yet.
-The order of work (2026-11-04):
+Released: Debrief 1.1.1, Dyno 1.1.0 (tag `dyno-v1.1.0`, 2026-11-08), Pitwall 1.0.3 and Pitcrew 1.0.1. Spotter, Pacenotes and Sighter have no release yet.
+Dyno 1.1.1 is in progress: real Windows startup items, facts and locks, Windows tray styles and problem-report privacy.
+The order of work (2026-11-08):
 
-1. Dyno 1.1.0, in progress: the administrator helper's readings, per-machine Windows installs and OS lifecycle checks.
-2. Spotter 1.0.
-3. Pitwall 1.1.
-4. Pitcrew 1.1.
-5. Debrief 1.2.
+1. A foundation of redesigns first: job identity across agent restarts, declarative installer steps, pinned build inputs mirrored on Gitea, a CI gates check, a VM test harness and a shared read retry.
+2. Pitwall 1.1, the next release.
+3. Debrief 1.2: it removes its built-in AI and uses Pitwall; streaming and opening a whole folder come first.
+4. Spotter 1.0.
+5. Pitcrew 1.1.
 6. Pacenotes and Sighter.
 7. Recce (planned; a placeholder page and a draft plan on `docs/pc-search-app-plan`).
 

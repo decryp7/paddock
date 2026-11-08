@@ -14,6 +14,8 @@ export {
   jobView,
   type SuJobPhase,
   type SuJobSnapshot,
+  type SuLimitExceeded,
+  type SuQuantity,
   type SuJobState,
   type SuJobTone,
   type SuJobUnit,

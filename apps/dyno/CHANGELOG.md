@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## Unreleased
+
+### Changed
+
+- A job that a limit stopped now says which limit it was. The app and the agent of this version talk a new protocol, so an older Dyno app or agent is replaced at the next start instead of being read wrongly.
 
 ### Fixed
 

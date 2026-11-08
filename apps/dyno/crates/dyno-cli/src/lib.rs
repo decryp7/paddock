@@ -288,7 +288,7 @@ fn wake(agent: &dyn Agent, target: &str, test: bool, json: bool) -> Result<Strin
         };
         match all.iter().find(|j| j.id == job.id) {
             Some(j) if j.is_terminal() => {
-                if let paddock_jobs::wire::WireState::Failed(m) = &j.state {
+                if let paddock_jobs::wire::WireState::Failed { message: m, .. } = &j.state {
                     return Err(Problem::Failed(m.clone()));
                 }
                 break;

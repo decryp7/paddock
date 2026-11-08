@@ -21,7 +21,23 @@ export function parseWaivers(text) {
     }
     cur[m[1]] = m[2].replace(/\\(["\\])/g, '$1');
   });
-  return { waivers, problems };
+  return { waivers: waivers.filter((w) => commitWaiverFixed(w, problems)), problems };
+}
+
+/**
+ * A C23 waiver for a commit is `path = "commit <sha>"`: exactly 10 hex digits (what the conformance run prints) or the full 40,
+ * in any case; the full sha is cut to 10 so the conformance run and `commit-lint` match the same way. Globs and other forms
+ * waive nothing (a problem is reported). Other C23 waivers (doc block paths) keep their patterns. True to keep the waiver.
+ */
+function commitWaiverFixed(w, problems) {
+  if (w.check !== 'C23' || !/^commit\b/i.test(w.path ?? '')) return true;
+  const m = /^commit ([0-9a-f]{10})(?:[0-9a-f]{30})?$/.exec(w.path.toLowerCase());
+  if (!m) {
+    problems.push(`line ${w.line}: a commit waiver needs path = "commit <10 or 40 hex digits>" (no pattern), not "${w.path}"; it waives nothing`);
+    return false;
+  }
+  w.path = `commit ${m[1]}`;
+  return true;
 }
 
 /**
