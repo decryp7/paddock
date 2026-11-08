@@ -27,8 +27,8 @@ pub use dirs::{AppDirs, MapVars, Os, PORTABLE_FLAG, ProcessVars, Source, Vars};
 pub use error::{EnvError, Result};
 pub use folder::{
     FolderFacts, Links, Refusal, Tightened, check_data_folder, check_folder, check_folder_with,
-    check_own_folder, create_private_dir_all, current_uid, decide, may_remove_group_write,
-    others_among, read_folder,
+    check_own_folder, create_private_dir_all, current_uid, decide, is_private_group,
+    may_remove_group_write, others_among, read_folder,
 };
 #[cfg(unix)]
 pub use folder::{group_has_other_members, tighten_group_write, tighten_group_write_with};

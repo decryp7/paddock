@@ -267,7 +267,7 @@ pub fn may_remove_group_write(
 /// made it with the umask, 0775 under umask 002) gets its group write bit removed, through the handle it opened, once. Anything
 /// else that fails the check is refused as it is, with the reason; the next step is `chmod go-w <data folder>`.
 ///
-/// `group_has_others(gid)` says whether the group has any member besides the account (inject it in tests).
+/// `group_has_others(gid)` says whether the group is not the account's private group (a different name, or another member); inject it in tests.
 ///
 /// # Errors
 /// The folder is not the account's, is open to the world, or its group is shared.
@@ -368,9 +368,9 @@ fn user_name(uid: u32) -> Option<Vec<u8>> {
     }
 }
 
-/// The names of the members of group `gid` (`getgrgid_r`); `None` when the group cannot be read.
+/// The name and the member names of group `gid` (`getgrgid_r`); `None` when the group cannot be read.
 #[cfg(unix)]
-fn group_members(gid: u32) -> Option<Vec<Vec<u8>>> {
+fn group_members(gid: u32) -> Option<(Vec<u8>, Vec<Vec<u8>>)> {
     let mut buf = vec![0u64; 2 * 1024];
     // SAFETY: a zeroed group is a plain-old-data out parameter the call fills; the buffer outlives the reads below.
     unsafe {
@@ -397,15 +397,26 @@ fn group_members(gid: u32) -> Option<Vec<Vec<u8>>> {
             names.push(std::ffi::CStr::from_ptr(member).to_bytes().to_vec());
             at = at.add(1);
         }
-        Some(names)
+        Some((
+            std::ffi::CStr::from_ptr(gr.gr_name).to_bytes().to_vec(),
+            names,
+        ))
     }
 }
 
-/// Whether the group `gid` has a member other than the account `uid`; an unreadable group counts as shared, so nothing is
-/// tightened on a doubt.
+/// The pure test for the account's private group: the group is named like the account (the user-private-group convention that
+/// `/etc/bashrc` and `pam_umask` test before they choose umask 002) and lists no member besides the account. Accounts whose
+/// primary group is a shared one (`users`, `staff`) are not listed in `gr_mem`, so the name is what tells them apart.
+pub fn is_private_group(own: Option<&[u8]>, group_name: &[u8], members: &[Vec<u8>]) -> bool {
+    own == Some(group_name) && !others_among(own, members)
+}
+
+/// Whether the group `gid` is NOT the private group of the account `uid` (named like it, no other member). An unreadable group
+/// counts as shared, so nothing is tightened on a doubt.
 #[cfg(unix)]
 pub fn group_has_other_members(gid: u32, uid: u32) -> bool {
-    group_members(gid).is_none_or(|members| others_among(user_name(uid).as_deref(), &members))
+    group_members(gid)
+        .is_none_or(|(name, members)| !is_private_group(user_name(uid).as_deref(), &name, &members))
 }
 
 /// The user id this process runs as (0 where the OS has none).
@@ -590,6 +601,44 @@ mod tests {
                 "an unknown account name counts every member as another"
             );
             assert!(!others_among(None, &m(&[])));
+        }
+
+        #[test]
+        fn only_a_group_named_like_the_account_with_no_other_member_is_private() {
+            let m = |names: &[&str]| {
+                names
+                    .iter()
+                    .map(|n| n.as_bytes().to_vec())
+                    .collect::<Vec<_>>()
+            };
+            assert!(is_private_group(Some(b"me"), b"me", &m(&[])));
+            assert!(is_private_group(Some(b"me"), b"me", &m(&["me"])));
+            assert!(
+                !is_private_group(Some(b"me"), b"users", &m(&[])),
+                "a shared primary group lists no members but is not private"
+            );
+            assert!(!is_private_group(Some(b"me"), b"staff", &m(&["me"])));
+            assert!(!is_private_group(Some(b"me"), b"me", &m(&["you"])));
+            assert!(
+                !is_private_group(None, b"me", &m(&[])),
+                "an unknown account name is never private"
+            );
+        }
+
+        #[test]
+        fn a_group_named_differently_from_the_user_is_refused_with_the_chmod_next_step_not_tightened()
+         {
+            // The real lookup: the account's own primary group, whatever it is called on this machine, is private only when it
+            // carries the account's name; a folder in any other group must be refused, so the answer must agree with the names.
+            let t = tempfile::tempdir().unwrap();
+            std::fs::set_permissions(t.path(), std::fs::Permissions::from_mode(0o775)).unwrap();
+            // SAFETY: getegid has no arguments and cannot fail.
+            let gid = unsafe { libc::getegid() };
+            let shared = group_has_other_members(gid, current_uid());
+            let r = tighten_group_write(t.path(), |g| group_has_other_members(g, current_uid()));
+            // Tightened exactly when the group is the account's private one; refused (and left at 0775) otherwise.
+            assert_eq!(r.is_ok(), !shared, "{r:?}");
+            assert_eq!(mode(t.path()), if shared { 0o775 } else { 0o755 });
         }
 
         #[test]
