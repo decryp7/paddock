@@ -1,3 +1,4 @@
+import { STYLE_SUPPORT_GOLDEN } from '../core/generated/style-support-golden';
 import { MockWidgets } from '../core/mock/widgets';
 import { WIDGET_ICONS } from './widget-icons';
 
@@ -18,5 +19,9 @@ describe('widget icons', () => {
       const view = Object.values(w.view(surface))[0] as { catalogue: { kinds: { icon: string }[] } };
       for (const k of view.catalogue.kinds) expect(WIDGET_ICONS[k.icon], k.icon).toBeDefined();
     }
+  });
+
+  it("has a glyph for every icon the engine gives a menu-bar row of one picture (the engine's own values)", () => {
+    for (const os of ['macos', 'windows', 'linux'] as const) for (const f of STYLE_SUPPORT_GOLDEN[os].fixed) expect(WIDGET_ICONS[f.icon], f.icon).toBeDefined();
   });
 });

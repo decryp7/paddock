@@ -96,6 +96,8 @@ for (const platform of PLATFORMS) {
       await expect(page.locator('[data-testid="style-fixed"]')).toHaveCount(2);
       await expect(page.locator('mat-select[aria-label^="Style of"]').first().locator('.mat-mdc-select-value-text')).toHaveText('Number');
       if (platform.note) await expect(page.locator('p.info[role="note"]')).toContainText(platform.note);
+      // The keyboard hint names this OS's modifier (the shell's data-platform; the mock sets it for its OS).
+      await expect(page.locator('dy-menu-bar-items .pd-wc-hint')).toContainText(platform.name === 'mac' ? 'hold Option' : 'hold Alt');
       await expect(rows.first().locator('.fixed'), 'the note says it once; no per-row text').toHaveCount(0);
       const found = await rows.evaluateAll((lis) =>
         lis.map((li) => {

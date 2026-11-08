@@ -918,8 +918,10 @@ pub fn render(kind: &Kind, r: &Reading, state: State, size: i32, t: Theme) -> Ic
             }
             if state == State::Unavailable {
                 // In the gauge's open quarter at the bottom, under the letter.
-                let w = if s <= 20 { 6 } else { (s / 2) & !1 };
-                dash(&mut cv, (s - w) / 2, (s + w) / 2, s - 1 - dash_h(s) / 2 - 1, dash_h(s), ink);
+                // Below 22 px, 6 px wide; from 22 px a third of the icon less 2 px at each end, 3 rows high, so it floats in the
+                // gap and never touches the arc's ends (which would close the gauge into a cup).
+                let (w, h) = if s <= 20 { (6, dash_h(s)) } else { (((s / 2) & !1) - 4, 3) };
+                dash(&mut cv, (s - w) / 2, (s + w) / 2, s - 1 - h / 2 - 1, h, ink);
             }
         }
         Kind::Network(dir) => {
@@ -1466,6 +1468,39 @@ mod tests {
                         "{kind:?} {size} px dark={dark}: unavailable differs in {:.1} % of the icon",
                         share * 100.0
                     );
+                }
+            }
+        }
+    }
+
+    /// The gauge's unavailable dash floats in its open quarter: from 22 px no dash pixel touches (also diagonally) a pixel of the
+    /// arc's track.
+    #[test]
+    fn the_ring_dash_stays_clear_of_the_arc() {
+        for size in [22, 24, 32] {
+            for dark in [true, false] {
+                let t = Theme { dark };
+                let away = render(&Kind::Ring { letter: 'C' }, &Reading::default(), State::Unavailable, size, t);
+                let s = size as u32;
+                let ink = t.ink();
+                let at = |x: i64, y: i64| -> Option<[u8; 4]> {
+                    (x >= 0 && y >= 0 && x < i64::from(s) && y < i64::from(s)).then(|| px(&away, x as u32, y as u32))
+                };
+                // Dash pixels: the bottom rows' ink-coloured pixels (the letter sits in the middle).
+                let dash: Vec<(i64, i64)> = (i64::from(s) * 3 / 4..i64::from(s))
+                    .flat_map(|y| (0..i64::from(s)).map(move |x| (x, y)))
+                    .filter(|(x, y)| at(*x, *y).is_some_and(|p| p[..3] == ink[..3] && p[3] >= 100))
+                    .collect();
+                assert!(!dash.is_empty(), "{size} px: a dash is drawn");
+                for (x, y) in &dash {
+                    for (dx, dy) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                        let n = at(x + dx, y + dy);
+                        let is_dash = dash.contains(&(x + dx, y + dy));
+                        assert!(
+                            is_dash || n.is_none_or(|p| p[3] == 0),
+                            "{size} px dark={dark}: the dash at ({x}, {y}) touches the arc"
+                        );
+                    }
                 }
             }
         }

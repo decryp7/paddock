@@ -116,9 +116,9 @@ export class MenuBarItems implements OnInit {
     (this.choices.choices()?.styles.styles ?? []).map((s) => ({ value: s.format === 'line' ? `${s.kind}:line` : s.kind, label: s.label })),
   );
   /** The engine's name for a row whose metric draws one picture ("Upload"); the kind's name otherwise. */
-  protected readonly describe = (p: Placement<MenuBarItem>): { title: string; summary: string } | null => {
+  protected readonly describe = (p: Placement<MenuBarItem>): { title: string; summary: string; icon: string } | null => {
     const f = this.fixedOf(p);
-    return f ? { title: f.title, summary: f.summary } : null;
+    return f ? { title: f.title, summary: f.summary, icon: f.icon } : null;
   };
   /** What the engine says after an add (Windows: the new icon is in the overflow, and how to pin it), until hidden or the next edit. */
   protected readonly added = signal<string | null>(null);

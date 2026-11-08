@@ -34,6 +34,8 @@ pub struct FixedStyle {
     pub title: String,
     /// The row's summary, in place of the style's.
     pub summary: String,
+    /// The row's icon, in place of the style's (a widget icon name: "network", "temperature").
+    pub icon: String,
     /// What its item draws, in words for the row's style field ("Rate with an arrow").
     pub drawn: String,
 }
@@ -95,19 +97,20 @@ pub fn style_support(platform: TrayPlatform) -> StyleSupport {
             }
         })
         .collect();
-    let fixed = |metric: Metric, title: &str, drawn: &str| FixedStyle {
+    let fixed = |metric: Metric, title: &str, icon: &str, drawn: &str| FixedStyle {
         metric,
         title: title.into(),
         summary: FIXED_SUMMARY.into(),
+        icon: icon.into(),
         drawn: drawn.into(),
     };
     StyleSupport {
         styles,
         fixed: vec![
-            fixed(Metric::NetworkUp, "Upload", "Rate with an arrow"),
-            fixed(Metric::NetworkDown, "Download", "Rate with an arrow"),
-            fixed(Metric::NetworkBoth, "Network", "Both rates with arrows"),
-            fixed(Metric::Temperature, "Temperature", "Degrees"),
+            fixed(Metric::NetworkUp, "Upload", "network", "Rate with an arrow"),
+            fixed(Metric::NetworkDown, "Download", "network", "Rate with an arrow"),
+            fixed(Metric::NetworkBoth, "Network", "network", "Both rates with arrows"),
+            fixed(Metric::Temperature, "Temperature", "temperature", "Degrees"),
         ],
         added_note: (platform == TrayPlatform::Windows).then(|| WINDOWS_ADDED_NOTE.to_string()),
     }
@@ -157,7 +160,7 @@ mod tests {
             let s = style_support(platform);
             for m in [Metric::NetworkUp, Metric::NetworkDown, Metric::NetworkBoth, Metric::Temperature] {
                 let f = s.fixed_for(&m).unwrap_or_else(|| panic!("{platform:?} {m:?}"));
-                assert!(!f.title.is_empty() && !f.summary.is_empty() && !f.drawn.is_empty());
+                assert!(!f.title.is_empty() && !f.summary.is_empty() && !f.drawn.is_empty() && !f.icon.is_empty());
             }
             assert!(s.fixed_for(&Metric::CpuTotal).is_none());
             assert_eq!(s.fixed_for(&Metric::NetworkUp).unwrap().title, "Upload");

@@ -781,7 +781,7 @@ export function mockWidgetChoices(numberSupport: WidgetChoices['number'] = mockN
 
 /** What the tray offers and draws of the styles (the engine's `style_support`, imitated; `style-support-golden.spec.ts` checks it): a number's two formats are two styles on a Mac; network and temperature rows are named by their metric; Windows says where a new icon goes. */
 export function mockStyleSupport(os: 'macos' | 'windows' | 'linux'): WidgetChoices['styles'] {
-  const fixed = (metric: Metric, title: string, drawn: string) => ({ metric, title, summary: 'One picture in every style', drawn });
+  const fixed = (metric: Metric, title: string, icon: string, drawn: string) => ({ metric, title, summary: 'One picture in every style', icon, drawn });
   return {
     styles: MENU_KINDS.flatMap((k): WidgetChoices['styles']['styles'] =>
       k.kind === 'number' && os === 'macos'
@@ -792,10 +792,10 @@ export function mockStyleSupport(os: 'macos' | 'windows' | 'linux'): WidgetChoic
         : [{ kind: k.kind as MenuBarKind, format: null, label: k.title }],
     ),
     fixed: [
-      fixed('networkUp', 'Upload', 'Rate with an arrow'),
-      fixed('networkDown', 'Download', 'Rate with an arrow'),
-      fixed('networkBoth', 'Network', 'Both rates with arrows'),
-      fixed('temperature', 'Temperature', 'Degrees'),
+      fixed('networkUp', 'Upload', 'network', 'Rate with an arrow'),
+      fixed('networkDown', 'Download', 'network', 'Rate with an arrow'),
+      fixed('networkBoth', 'Network', 'network', 'Both rates with arrows'),
+      fixed('temperature', 'Temperature', 'temperature', 'Degrees'),
     ],
     addedNote:
       os === 'windows'

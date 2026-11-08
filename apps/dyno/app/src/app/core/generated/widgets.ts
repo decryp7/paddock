@@ -834,6 +834,10 @@ title: string,
  */
 summary: string, 
 /**
+ * The row's icon, in place of the style's (a widget icon name: "network", "temperature").
+ */
+icon: string, 
+/**
  * What its item draws, in words for the row's style field ("Rate with an arrow").
  */
 drawn: string, };
