@@ -35,6 +35,8 @@ dev\.cmd @decryp7
 \.gitea/.* @decryp7
 ci-image/.* @decryp7
 scripts/.* @decryp7
+# The vm-smoke harness (ADR 0042 amendment 2026-11-08): home branch tools/vm-smoke, register docs/harnesses.toml (lease holder).
+(scripts/vm-smoke/.*|scripts/vm-win\.sh|scripts/vm-win/.*|apps/[^/]+/vm-smoke\.json) @decryp7
 tools/.* @decryp7
 spikes/.* @decryp7
 renovate/.* @decryp7
