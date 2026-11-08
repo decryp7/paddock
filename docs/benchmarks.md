@@ -375,3 +375,22 @@ Question: what does a cache miss of the `./dev` wrapper cost a plan job? `cargo 
 
 A real Linux CI host was not available, so the CI number is still open: measure the first cold plan job once the prebuilt
 binary per hash (R0b) or the kept mount is in use. CI stays on `scripts/affected.mjs` until then.
+
+## `./dev` prebuilt download (ADR 0022 R0b, 2026-11-08)
+
+Question: what does a cache miss cost with the prebuilt binary compared with building the tool? Cold = `cargo build --release
+--locked` of `tools/paddock-dev`, fresh target folder, `RUSTC_WRAPPER` unset, `CARGO_BUILD_JOBS=2`. Download = `./dev --version`
+with an empty cache and `PADDOCK_DEV_DOWNLOAD=1`, which includes the wrapper's own work (git, `rustc -vV`, hashing).
+
+| Where | Cold build | Download path |
+|---|---|---|
+| Mac mini (arm64), load about 33 | 194 s wall (101 s user), 4.2 MB binary | 0.6 to 1.0 s for the whole `./dev` call, 3 runs, from a local HTTP server on loopback (so no network cost; the 4.2 MB file is not a model of the real link) |
+| CI, `paddock-ci:v2` container on a Linux runner (run 7721, `dev-tool.yml`) | 16 s for the build step (a warm sccache was not ruled out; the job did not say), 5.4 MB binary | not measured: nothing could be uploaded (see below) |
+| CI, Windows host runner (run 7723) | `dev: built paddock-dev ... in 9 s` with the host's kept cache | not measured: the download got HTTP 401 (no read token reached the wrapper); fixed in this branch |
+
+Not measured: a download from the real package store (the publish step is refused with HTTP 401 `reqPackageAccess` for the job
+token, so no file exists to fetch; it needs the `DEV_TOOL_PUBLISH_TOKEN` secret), a cold build on a CI-like Linux host with an
+empty compile cache, and the `paddock-ci:v2` image under emulation on the Mac (the earlier note here: it did not finish in 25
+minutes; this time its test run, including the tool's cold test build, finished in under 8 minutes at `--cpus` default).
+The cold numbers differ by 12x between this Mac under load and the CI step, so the saving per job is somewhere between 10 s and
+3 minutes depending on the compile cache; the CI figure needs a second measurement once the package is populated.
