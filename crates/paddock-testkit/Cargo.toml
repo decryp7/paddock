@@ -9,6 +9,7 @@ publish = ["decryp7"]
 
 [dependencies]
 paddock-jobs = { workspace = true }
+paddock-limits = { workspace = true }
 tempfile = "3"
 # `net::HeldPort::reset`: SO_LINGER 0 on an accepted connection.
 socket2 = "0.6"

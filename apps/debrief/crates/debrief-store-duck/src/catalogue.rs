@@ -13,6 +13,7 @@
 //!   remove and refresh. A source built with another [`VERSION`] is built again.
 //! - Bounds: see [`debrief_core::catalogue`]; one thread, one source in memory at a time.
 
+use crate::turns::{wait_after, Turn};
 use crate::{engine, lock};
 use anyhow::Result;
 use debrief_core::catalogue::*;
@@ -56,12 +57,16 @@ fn pending(conn: &Connection) -> Result<Vec<u32>> {
 }
 
 /// Reads one source into a tally: entities of the text of its events, then the values of its low-cardinality fields.
-fn build(conn: &Connection, source: u32) -> Result<(Vec<Entry>, u64, u64)> {
+fn build(conn: &Connection, source: u32, heavy: &Mutex<()>) -> Result<(Vec<Entry>, u64, u64)> {
     let mut tally = Tally::default();
     {
         let mut stmt = conn.prepare("SELECT id, ts, message, exception FROM events WHERE source = ? LIMIT ?")?;
         let mut rows = stmt.query(params![source, MAX_EVENTS_SCANNED as u64])?;
         while let Some(r) = rows.next()? {
+            // The process is exiting: stop reading (the source is catalogued again next time).
+            if crate::shutdown::down() {
+                anyhow::bail!("the process is exiting");
+            }
             let (id, ts): (u64, Option<i64>) = (r.get(0)?, r.get(1)?);
             let message: String = r.get(2)?;
             let exception: Option<String> = r.get(3)?;
@@ -81,6 +86,9 @@ r AS (SELECT g.k, g.v, g.n, row_number() OVER (PARTITION BY g.k ORDER BY g.n DES
 SELECT k, v, n FROM r WHERE rk <= {MAX_VALUES_PER_FIELD} ORDER BY k, rk",
         debrief_core::entities::MAX_NAME_CHARS
     );
+    // The aggregate holds a hash table of the source's fields: never beside an import's ordering (the store's `heavy`
+    // lock), so the catalogue cannot starve it of the memory limit.
+    let _heavy = lock(heavy);
     let mut stmt = conn.prepare(&sql)?;
     let mut rows = stmt.query(params![source])?;
     while let Some(r) = rows.next()? {
@@ -151,6 +159,10 @@ struct Shared {
     pending: AtomicU64,
     /// Sources whose build failed (not retried until the store is reopened).
     failed: Mutex<HashSet<u32>>,
+    /// Rows committed since the last checkpoint (see [`settle`]); the catalogue counts as built only once they are saved.
+    unsaved: AtomicBool,
+    /// The store's lock of heavy DuckDB work (`Inner::heavy`).
+    heavy: Arc<Mutex<()>>,
 }
 
 /// The catalogue thread of a store; stopped and joined on drop.
@@ -160,13 +172,16 @@ pub(crate) struct CatalogueService {
 }
 
 impl CatalogueService {
-    pub(crate) fn start(conn: Connection, write_lock: Arc<Mutex<()>>) -> Result<CatalogueService> {
+    pub(crate) fn start(conn: Connection, write_lock: Arc<Mutex<()>>, heavy: Arc<Mutex<()>>) -> Result<CatalogueService> {
         let shared = Arc::new(Shared {
             stop: AtomicBool::new(false),
             wake: (Mutex::new(true), Condvar::new()),
             pending: AtomicU64::new(0),
             failed: Mutex::new(HashSet::new()),
+            unsaved: AtomicBool::new(false),
+            heavy,
         });
+        crate::shutdown::interrupt_on_exit(&conn);
         let s = shared.clone();
         let handle = std::thread::Builder::new()
             .name("debrief-catalogue".into())
@@ -175,6 +190,11 @@ impl CatalogueService {
             shared,
             handle: Some(handle),
         })
+    }
+
+    /// Whether rows committed by the last builds still wait for their checkpoint.
+    pub(crate) fn saving(&self) -> bool {
+        self.shared.unsaved.load(Ordering::SeqCst)
     }
 
     pub(crate) fn wake(&self) {
@@ -193,10 +213,16 @@ impl Drop for CatalogueService {
     }
 }
 
-/// One turn: tidy, then build the next source. True when a source was built (go on at once).
-fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
+/// One turn: tidy, then build the next source.
+fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<Turn> {
+    // Counted by the exit handler like a borrowed connection (see `fts::step`).
+    let Some(_running) = crate::shutdown::Active::enter() else {
+        return Ok(Turn::Idle);
+    };
     let todo = {
-        let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+        let Ok(_writing) = write_lock.try_lock() else {
+            return Ok(Turn::Blocked);
+        };
         conn.execute_batch(
             "DELETE FROM catalogue WHERE source NOT IN (SELECT id FROM sources);
              DELETE FROM catalogue_trigrams WHERE source NOT IN (SELECT id FROM sources);
@@ -207,8 +233,8 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     let failed = lock(&s.failed).clone();
     let todo: Vec<u32> = todo.into_iter().filter(|id| !failed.contains(id)).collect();
     s.pending.store(todo.len() as u64, Ordering::SeqCst);
-    let Some(&source) = todo.first() else { return Ok(false) };
-    let built = match build(conn, source) {
+    let Some(&source) = todo.first() else { return Ok(Turn::Idle) };
+    let built = match build(conn, source, &s.heavy) {
         Ok(b) => b,
         Err(e) => {
             // A source whose events cannot be read now (compaction swapped its files) is tried again later.
@@ -218,30 +244,51 @@ fn step(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) -> Result<bool> {
     };
     let (entries, dropped, guids) = built;
     // The write lock is taken without waiting for an import: the next turn tries again.
-    let Ok(_writing) = write_lock.try_lock() else { return Ok(false) };
+    let Ok(_writing) = write_lock.try_lock() else {
+        return Ok(Turn::Blocked);
+    };
+    s.unsaved.store(true, Ordering::SeqCst);
+    if crate::shutdown::down() {
+        return Ok(Turn::Idle);
+    }
     commit(conn, source, &entries, dropped, guids)?;
     s.pending.store(todo.len() as u64 - 1, Ordering::SeqCst);
-    Ok(true)
+    Ok(Turn::Worked)
 }
 
 fn run(s: &Shared, conn: &Connection, write_lock: &Mutex<()>) {
     while !s.stop.load(Ordering::SeqCst) {
-        match step(s, conn, write_lock) {
-            Ok(true) => continue,
-            Ok(false) => {}
-            Err(e) => log::warn!("catalogue: {e:#}"),
+        let turn = match step(s, conn, write_lock) {
+            Ok(t) => t,
+            Err(e) => {
+                log::warn!("catalogue: {e:#}");
+                Turn::Blocked
+            }
+        };
+        let Some(wait) = wait_after(turn) else { continue };
+        if s.unsaved.load(Ordering::SeqCst) && settle(conn, write_lock) {
+            s.unsaved.store(false, Ordering::SeqCst);
         }
         let mut woken = lock(&s.wake.0);
         if !*woken {
-            woken = s
-                .wake
-                .1
-                .wait_timeout(woken, Duration::from_millis(500))
-                .map(|r| r.0)
-                .unwrap_or_else(|p| p.into_inner().0);
+            woken = s.wake.1.wait_timeout(woken, wait).map(|r| r.0).unwrap_or_else(|p| p.into_inner().0);
         }
         *woken = false;
     }
+}
+
+/// Ends a run of builds like every other change to the store (see `open_db`): a checkpoint writes the new rows into
+/// the database file, then the run's freed pages go back to the OS. Without it a worker that had catalogued 20 copies
+/// of the samples idled at about 440 MB (130 MB once reopened), DuckDB holding 145 MB of the uncheckpointed rows
+/// (docs/performance.md, 2026-10-31).
+/// False when an import holds the write lock (it checkpoints when it ends; the next idle turn tries again).
+fn settle(conn: &Connection, write_lock: &Mutex<()>) -> bool {
+    let Ok(_writing) = write_lock.try_lock() else { return false };
+    if let Err(e) = conn.execute_batch("CHECKPOINT") {
+        log::warn!("catalogue: checkpoint failed: {e}");
+    }
+    debrief_alloc::release();
+    true
 }
 
 impl crate::Inner {
@@ -253,7 +300,7 @@ impl crate::Inner {
         let keys = search_keys(&text);
         let squashed = squash(&text);
         let mut reply = CatalogueReply {
-            built: pending == 0,
+            built: pending == 0 && !self.catalogue.as_ref().is_some_and(|c| c.saving()),
             pending,
             candidates: Vec::new(),
         };

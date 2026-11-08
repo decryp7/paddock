@@ -83,6 +83,52 @@ Machines: "Mac mini" is the M4 Pro, 14 cores, 64 GB, shared with other agents' b
 Read the numbers as indications and compare only within one run's A/B. Results recorded before the template existed miss
 some fields; "n/s" means the source does not state them.
 
+### 2026-10-31, store worker memory at 20 copies: the names catalogue (branch `fix/debrief-bench-query-rss`)
+
+- **Commit:** main 09293bcde; change on `fix/debrief-bench-query-rss`
+- **Why:** the nightly `store-bench` job (`debrief-bench.yml`, `worker::` with `DEBRIEF_BENCH_COPIES=20`, release) failed
+  `imports_and_queries_within_the_budgets` on every scheduled run since it moved into Paddock; the push runs skip that job,
+  so it had never passed. Querying 382–402 MB (PSS) against 320 MB:
+
+| Run (date, commit) | Measure | Idle MB | Querying MB | Result |
+|---|---|---|---|---|
+| debrief 5976 (10-22, f826f4f4) | RSS | 196 | 303 | fail (budget 300) |
+| debrief 6161 (10-23, eba53424) | RSS | 199 | 300 | pass |
+| debrief 6233 (10-24, 9e4369c2, 1.0.2 head) | RSS | 214 | 322 | fail |
+| debrief 6344 (10-25, e42bb85e, 1.1.1) | RSS | 321 | 430 | fail (idle) |
+| debrief 6396 (10-26, e42bb85e) | RSS | 298 | 444 | fail (import 778) |
+| debrief 6412 (10-27, e42bb85e) | RSS | 281 | 424 | fail |
+| paddock 6451 (10-27, 2d3476a1, dispatch) | PSS | 264 | 400 | fail |
+| paddock 6954 (10-29, 283e5067) | PSS | 294 | 382 | fail |
+| paddock 7172 (10-30, dfc9cdc9) | PSS | 284 | 402 | fail |
+| paddock 7260 (10-31, 09293bcd) | PSS | 245 | 399 | fail |
+
+  The step to about +110 MB came with 1.1 (the names catalogue) and stayed; the switch from RSS to PSS (9d802de4c,
+  10-27) took about 25 MB off. Not noise and not a regression since the move: the same failure each night.
+- **Machine:** Mac mini, Linux amd64 container (`paddock-ci:v2` under Rosetta, 4 CPUs); 1-minute load 30–50 from other
+  agents (the brief's load < 10 never came); every comparison interleaved in one container session.
+- **Build:** release, libduckdb 1.5.6; temporary per-step tracing (`/proc/<pid>/smaps_rollup`, the catalogue's pending
+  sources, `duckdb_memory()`) in `worker.rs`, not committed.
+- **Corpus:** `/samples` × 20 (585,800 events), as the job.
+- **Findings:**
+  - The test measured "idle" and "querying" while the catalogue was still being built in the background: 600–760 of
+    its sources pending at "idle"; it takes 85–120 s more for 20 copies. Idle and the query peak were a snapshot of
+    how far it had got: idle 245–288 MB, query peak 351–407 MB, as on CI.
+  - Waiting for the catalogue first: idle 397–458 MB, query peak 528–562 MB. A worker reopened on that store: idle
+    132 MB, query peak 246–265 MB. So the queries themselves cost about 115–130 MB over idle; the rest is what the
+    catalogue build leaves behind: DuckDB held 145 MB of committed catalogue rows (`duckdb_memory()`), never
+    checkpointed because the store's `checkpoint_threshold` is 1 GB and only imports checkpoint.
+  - `debrief_alloc::release()` on the catalogue thread alone changed nothing (idle 397 vs 442 MB, within noise).
+  - By copies (worker after import, catalogue still running; reopened worker): 1 copy idle 205 / 120 MB, query peak
+    263 / 186 MB; 5 copies 238 / 123, 346 / 216; 10 copies 274 / 136, 378 / 261; 20 copies 245–247 / 132,
+    372–375 / 246–265.
+- **Fix:** the catalogue checkpoints and releases freed pages when a run of builds ends, and reports itself built only
+  after that; the worker test waits for the catalogue before it measures idle (a condition, bounded at 600 s).
+- **After the fix:** not measured yet (Debrief paused for the Dyno, Spotter and Pitwall tags). The regression test
+  `a_built_catalogue_is_saved_into_the_database_file` and the A/B at 20 copies (and copies=1) are still to
+  run before this branch merges.
+- **Budget:** unchanged (Linux 320 MB, macOS 630 MB).
+
 ### 2026-10-30, `debrief report` under CPU contention: QoS background against utility (branch `fix/debrief-cli-report-hang`)
 
 - **Commit:** A/B: base dfc9cdc94 (mining and full-text pools in QoS `BACKGROUND`) → change 1c2567566 (`UTILITY`)
@@ -391,6 +437,281 @@ then the UI's once the workspace loaded), was 3–4 times.
 The 1.4 s the user's 1.0.2 log showed between the window and the AI line was not reproduced with an empty data
 folder (30 ms here); it depends on that Mac's state (stored settings with plugin sections, an AI model loading). The
 `Steps` field of the next start's line names the step.
+
+## Query and import performance, DuckDB 1.5.6 against 2.0 (2026-10-28 and 29)
+
+Every block says what it measured: machine (Apple M4 Pro, 14 cores, macOS), the load average when it ran (load over 10 is marked and
+was not used for conclusions), the corpus (invented, same shape as the samples; never user logs), the command, and the build (release).
+Reproduce with `/Volumes/d7sst7/dev-targets/duck2-bench` (`ab.sh`, `imem.sh`, `reads.sh`, `fmt/suite.py`); the decisions are in
+ADR 0014's DuckDB 2.0 amendment.
+
+### Real import pipeline, 1.5.6 against 2.0 (`ab.sh`)
+
+Release CLI plus store worker, 16,847,461 events (2.42 GB: CLEF, log4net text, compressed), three interleaved pairs, load 33 to 65
+(over 10: the speeds are lower bounds). Events per second 1.5.6 / 2.0: 707k / 685k, 687k / 738k, 855k / 991k. Worker CPU 91 to 94 s
+against 79 to 81 s. Peak physical footprint 932 to 979 MB against 905 to 945 MB (both above the 768 MB budget; not new). End-of-import
+footprint 319 to 344 MB against 452 to 536 MB (explained next).
+
+### Memory after an import, and a bigger limit during it (`imem.sh`)
+
+In-process import of 3,000,000 CLEF events (release, corpus cached, load 3 to 7), then 30 s idle, three runs per variant.
+
+| Variant | Import | Peak footprint | DuckDB's own use right after | 30 s later | RSS 30 s later |
+|---|---|---|---|---|---|
+| A: shipped 192 MB limit | 4.2 to 5.3 s (570k to 717k events/s) | 756 to 816 MB | 10 to 12 MB | 172 to 176 MB | 1,092 to 1,133 MB |
+| B: 512 MB during the import, 192 MB after | 4.2 to 4.3 s | 783 to 815 MB | 14 to 15 MB | 171 to 175 MB | 1,115 to 1,150 MB |
+| C: 512 MB throughout | 4.1 to 4.3 s | 785 to 829 MB | 14 to 15 MB | 205 to 211 MB | 1,126 to 1,183 MB |
+| D: 64 MB set after the import | 4.2 to 4.4 s | not sampled | 11 MB | 56 to 59 MB | 1,078 to 1,132 MB |
+| E: 32 MB set after the import | 4.2 to 4.3 s | not sampled | 11 to 12 MB | 25 to 30 MB | 1,057 to 1,096 MB |
+
+Explanation of the extra memory after an import: it is DuckDB's buffer pool. The import itself uses 10 to 15 MB of DuckDB memory (events go
+to Parquet through arrow-rs, not through DuckDB); the background full-text index and catalogue builds then read the segments through DuckDB
+and fill its pool up to `memory_limit` within 30 s (172 MB at the 192 MB limit, 205 to 211 MB at 512 MB). It is a cache bounded by the
+limit, not a leak. A higher limit during the import gains nothing (A against B and C: same time, same peak). Setting a lower limit after
+the import caps it (D, E): 115 to 145 MB less DuckDB memory; RSS moves little in this process because it also holds the allocator's
+pages (RSS is not the right gauge; rule 26). Recommendation: do not raise the limit for imports; lower it to about 64 MB while the store
+is idle after an import and restore 192 MB on the first query, if the idle budget needs the memory.
+
+### Write stage against the number of writers (`layout_bakeoff`, 60 copies of the samples, 1.68M events, load 2.6 to 3.6)
+
+| Writers | Events/s | Against one writer | Peak over baseline |
+|---|---|---|---|
+| 1 | 1.15M | 1.0x | 0 to 6 MB |
+| 2 | 2.28M to 2.29M | 2.0x | 0 to 4 MB |
+| 4 | 4.39M to 4.45M | 3.8x | 2 to 3 MB |
+| 8 | 7.8M to 8.2M | 7.0x | 12 to 51 MB |
+| 12 | 10.5M to 10.7M | 9.2x | 52 to 61 MB |
+| Arrow appender into one native table | 737k to 745k | 0.64x | +175 to +470 MB |
+
+Verdict: the write stage scales linearly with writers up to the core count (14 cores; the pipeline's real ceiling is parsing, 0.7 to
+1.0M events/s in the pair table above, so writers beyond about the parse rate buy nothing). A single appender is one writer and tops out
+at 0.74M events/s, below one Parquet writer. Appender with two writers was not measured (a native table has one appender per connection;
+the test has no such variant).
+
+### Query formats on the same 3M events (`fmt/suite.py`, load 3 to 5, 2 rounds of 7 repetitions, 192 MB limit, 4 threads)
+
+p50 / p95 over the 14 repetitions of each query. File sizes: Parquet segments 165 MB; native table 1,681 MB (storage v2.0.0, 2.8 s to
+create from the view) and 1,675 MB (v1.5.0, 4.0 s); Vortex 388 MB (13.4 s; `extra`, a MAP, is not supported and was written as JSON text).
+
+| Query | Parquet + view | native v2.0.0 | native v1.5.0 | Vortex |
+|---|---|---|---|---|
+| count | 5 / 8 ms | 0 / 0 | 0 / 0 | 0 / 1 |
+| level facet | 8 / 8 | 2 / 2 | 2 / 2 | 2 / 2 |
+| minute x level | 18 / 19 | 7 / 9 | 7 / 7 | 7 / 8 |
+| first page | 23 / 24 | 4 / 4 | 3 / 4 | 5 / 5 |
+| extra facet | 119 / 120 | 59 / 64 | 57 / 62 | 87 / 98 |
+| ILIKE | 40 / 41 | 45 / 46 | 43 / 44 | 23 / 23 |
+| regex | 44 / 45 | 33 / 33 | 33 / 34 | 34 / 34 |
+| by id | 2 / 3 | 0 / 1 | 0 / 1 | 1 / 1 |
+| deep page | 77 / 80 | 57 / 58 | 56 / 57 | 57 / 58 |
+| peak RSS | 125 to 132 MB | 294 to 326 MB | 302 to 304 MB | 898 to 930 MB |
+
+The corpus is 20 shifted copies of the samples, which zstd compresses far better than DuckDB's native encodings would compress real logs,
+so the 10x size gap is exaggerated; the direction is not. All runs are warm for the operating system's cache; "cold" here is only the
+first run of a fresh process and is not separated. Native storage v2.0.0 (DICT_FSST) and v1.5.0 are the same in speed and size on this
+data. Verdict on formats: a native table answers the scans 1.5 to 5x faster and uses 10x the disk and 2.3x the memory; at 3M events
+every query is far under 0.5 s in all formats, so the Parquet default does not need to change on speed.
+
+### Appender against the Parquet fan-out (answer to "is the fan-out needed?", from the write-stage and format blocks)
+
+1. **Fan-out** (today): parse threads write segments in parallel; the write stage is never the limit (1.15M events/s per writer, 7 to 10M
+   with 8 to 12); 165 MB per 3M events; catalogue of segments, compaction, deletion list and `union_by_name` are the code it costs.
+2. **One Appender** into a native table: 0.74M events/s, so with 8 parse threads producing about 1M events/s it would be the bottleneck and
+   needs a queue in front of it; peak +175 to +470 MB; 975 MB to 1.7 GB on disk for 1.7M to 3M events. It would delete the segment catalogue,
+   compaction and `union_by_name`, but not the need for a deletion path or for the Tantivy index.
+3. **Hybrid** (fan-out, then `INSERT INTO native SELECT * FROM view`): 2.8 s (v2.0.0) or 4.0 s (v1.5.0) for 3M events, about 1M events/s,
+   doubling the disk and holding 1.2 GB of RSS while it runs.
+
+Not measured, honestly: the real pipeline with the sink swapped (the importer's sink interface would need an Appender implementation; the
+write-stage numbers above bound it), end-to-end time until search is ready for each, the compacted-Parquet, DuckLake, Quack, VARIANT and
+scaling-with-size cells, and the cold-cache runs (they need a cache purge this account cannot run). They are listed in the ADR as open.
+
+### Results blocks recorded after the fact (rule 48)
+
+**Writer bench, first run (the 387k / 725k / 5.1M figures quoted in the ADR and reports).** Harness
+`crates/debrief-store-duck/tests/it/layout_bakeoff.rs`; command
+`DEBRIEF_BENCH_COPIES=20 DEBRIEF_THREADS=8 cargo test --release -p debrief-store-duck --test it layout_bakeoff:: -- --ignored --nocapture`;
+corpus: 20 copies of the invented samples (about 0.56M events, 28k per copy); build: branch `debrief/duckdb-2` at 7b5653fdd plus the
+progress relay later committed as 08cf9f036, DuckDB 2.0.0; machine: M4 Pro, 14 cores; load: not recorded (the machine was shared; the
+later runs below were taken at load 2 to 4). Results: native table with one Arrow appender 387,515 events/s (peak +526 MB, 324.5 MB on
+disk); one Parquet writer 725,432 events/s (peak +2 MB, 38.1 MB, 48 segments); eight writers 5,087,660 events/s (115 ms, peak +9 MB).
+These are lower than the quiet runs of the writer table above for the appender (737k to 745k at load 2.6 to 3.6) and the one-writer
+case (1.15M); the first run was taken under load, so treat the quiet figures as the reference.
+
+**Quiet real import, 1.3 to 1.55 million events/s.** Not measured by this branch: it is the research note's figure
+(`docs/research/2026-10-duckdb-2-and-large-data.md`, branch `docs/research-duckdb-2` c755e717d, measured at 355fd94ae with DuckDB 1.5.6):
+56,152,132 events in 8.07 GB, the release CLI plus store worker (`debrief import`), 36 to 56 s, parse pool `min(cores - 1, 8)`, corpus from
+`gen_large.py` scale 1.0 (invented), machine M4 Pro; load: not recorded beyond "quiet". This branch's own pair runs (load 33 to 65) reached
+0.69M to 0.99M events/s on a 2.42 GB corpus and must not be read as the pipeline's speed. Re-measure on a quiet machine with
+`ab.sh LABEL 156|200 large03` (scale 0.3) before quoting a number.
+
+**More than one Appender (`DEBRIEF_APPENDERS=1,2,4`, 20 copies, load 2.1 to 2.8, three runs).** n appenders on n connections of one
+database, each appending its share of the batches in its own transaction, one checkpoint at the end:
+
+| Appenders | Events/s | Against one | Peak over baseline | On disk |
+|---|---|---|---|---|
+| 1 | 738k to 744k | 1.00x | +477 to +479 MB | 324.5 MB |
+| 2 | 925k to 937k | 1.25x | +217 to +316 MB | 327.4 MB |
+| 4 | 774k to 793k | 1.06x | +157 to +180 MB | 504 to 506 MB |
+
+This settles the open conflict between "a second appender adds nothing" and "four in-process appenders gain 1.8x": in this harness a
+second appender adds 25%, a fourth falls back to 1.06x and writes a 55% larger file (more, smaller row groups). Neither 1.0x nor 1.8x
+holds as a rule; the gain is small, peaks at two writers and stays below one Parquet writer (1.15M events/s) on every count. The Quack
+harness's 355k against 200k was not reproduced here (a different harness and corpus).
+
+## Import of an 8 GB folder until search is ready (2026-10-29)
+
+The question: how long from "import folder" until search works, for the typical case of a folder of 7+ GB of logs, and where
+does the time go? Every block below gives the date, build, machine, load, corpus, command and numbers (rule 48).
+
+- Machine: Apple M4 Pro, 14 cores, 64 GB, macOS; corpus on a Samsung T7 Shield (USB SSD, about 1 GB/s at best).
+- Corpus: `large10`, 56,152,132 events in 8.07 GB, 618 files: 8 log4net text files of 587 MB, 6 CLEF files of 409 MB, 4 gzip
+  files, 600 small Serilog text files. It comes from `gen_large.py` scale 1.0 (invented data, never user logs).
+- Build: release. The harness `crates/debrief-store-duck/tests/import_ready.rs` is on branch `wip/debrief-duckdb2-prototypes`;
+  the code measured is `debrief/duckdb-2` at 9e3bb4a7f. The harness runs the shipped `StoreOptions` in-process with the store
+  worker's allocator and times, from the start: the import, the full-text index covering every segment, and the catalogue built.
+- Command: `DEBRIEF_READY_CORPUS=…/large10 DEBRIEF_READY_STORE=<new folder> cargo test --release --test import_ready -- --nocapture`,
+  through `/Volumes/d7sst7/dev-targets/duck2-bench/ready.sh`. Load is the 1-minute load at the start of each run; the run itself
+  adds about 9.
+- "Warm" means the corpus was read once just before (`cat > /dev/null`, 9.4 s for 7.2 GB from cold).
+
+Blocks from 2026-10-31 on are newest first, above the 2026-10-29 baseline.
+
+### 2026-10-31, ordering without the second sort (plan SR4, branch `debrief/1.2-wp3`)
+
+- **Commit:** base 3310fa25b (window ordered by the key, then `ORDER BY pos`) → change: the SR4 commit (the ids sorted
+  once in a subquery, numbered by `row_number() OVER ()`, `pos::insert_sql`).
+- **Machine:** Mac mini M4 Pro, 14 cores, 64 GB, macOS 27.2; shared with other agents.
+- **Load:** 1-minute load at the start of each run 4.8 to 9.5 (each run waited for < 10); the 5-minute load was 9 to 15.
+- **Build:** the DuckDB 2.0.0 CLI (`v2.0.0 d54cbbe3df`, the version the store links), 4 threads like the store, the
+  store's import memory (768 MB, `IMPORT_MEMORY_LIMIT`, which `Inner::reorder` gives the ordering), spilling to a
+  temporary folder.
+- **Corpus:** the catalog of a `large10` store (`gen_large.py` scale 1.0, invented; 56,152,132 events, 443 segments,
+  2.81 GB) imported by `import_ready` with the base commit; each run works on a fresh copy of its `data.duckdb`.
+- **Command:** `/Volumes/d7sst7/dev-targets/wp3-bench/pos.sh <store> 1 "A B C"` (`CHECK=1` adds the key-order check
+  at 8 GB); A is the shipped statement, B the window without the second sort, C the change.
+- **Runs:** one round of A, B and C, and one more of C with the check; rounds 2 and 3 were stopped by a pause for
+  machine load (pending). Single runs, so differences under about 20% would be noise; this one is about 4x.
+- **Numbers:**
+
+  | Measure | A, base | B, window only | C, change | Budget | Verdict |
+  |---|---|---|---|---|---|
+  | Ordering, 56M events | 57.0 s | 49.9 s | 11.9 s; 17.7 s | at least 30% faster than A | pass (69 to 79% less) |
+  | Rows with `pos <> rowid` | 0 | 0 | 0 | 0 | pass |
+  | Positions out of key order (`lag` check) | not run (the check ran out of 768 MB) | not run | 0 | 0 | pass |
+
+- **Memory measure:** none taken; DuckDB was held to 768 MB in every variant (the check alone ran at 8 GB).
+- **Notes:** dropping only the second sort (B) saves about 12%; the window sort over one 56M-row partition is the
+  cost, and one ordinary sort followed by a streaming row number avoids it. DuckDB documents that a window with an
+  empty `OVER` clause keeps the order of its input (<https://duckdb.org/docs/2.0/sql/dialect/order_preservation.html>);
+  the unit test `the_ordering_stores_positions_in_time_order_and_in_position_order` checks both orders on 1.5M
+  shuffled rows at 4 threads and 64 MB (it fails when the subquery's order is wrong). In the same base import the
+  store logged `import: pos 40.7 s` (load 9.9 to 13 during the run, the import itself 154.9 s); the in-import time
+  with the change is pending, like rounds 2 and 3. Raw output: `/Volumes/d7sst7/dev-targets/wp3-bench/pos-runs.txt`.
+
+### Baseline
+
+| Run | Load at start | Import | Events/s | Index ready | Catalogue ready | Peak RSS (import / after) |
+|---|---|---|---|---|---|---|
+| cold | 9.7 | 47.6 s | 1.18M | 222.7 s | 444.6 s | 1,918 / 2,463 MB |
+| cold, sampled with sample(1) | 9.7 | 54.6 s | 1.03M | 237.8 s | 433.1 s | 1,880 / 2,511 MB |
+| warm | 5.2 | 39.7 s | 1.41M | 208.3 s | 376.4 s | 1,902 / 2,564 MB |
+| warm | 9.96 | 46.1 s | 1.22M | 218.7 s | 386.3 s | 1,949 / 2,589 MB |
+
+Store: 4.95 GB (segments 2.82 GB, Tantivy index 1.52 GB, `data.duckdb` 222 MB). Search is ready 5 to 10 times later than the import
+ends, so the background builds are the long pole, not the import.
+
+### Where the time goes (sample(1) call trees, self time; `sampcat.py`, `sampwho.py`)
+
+Three windows of the sampled cold run: the import (1 to 47 s), index and catalogue (60 to 200 s), catalogue alone (240 to 420 s).
+
+1. **Import, parse threads** (about 7.5 of 8 busy):
+   - Regex 38%. 88% of that is `Regex::captures_at` in `LineParser::line`; the bounded backtracker resolves the groups.
+   - Threads blocked in `read()` 19% (cold only).
+   - memcpy 10%, other parsing 8%, zstd 6%, Parquet encoding 4%, Arrow batch building about 1%.
+
+   Large files are already split into 64 MB chunks parsed with rayon work stealing, largest file first. Warm, the threads stay
+   busy to the end. Cold, a 6 s near-idle stretch (16 to 22 s) is disk waits during the sequential newline pre-scans of the large
+   files: each large file is read twice, the second time from the page cache.
+2. **End of the import**: about 8 s at 3.5 cores is `pos::rebuild`, 20% of the warm import. Its plan is a window sort and then a
+   second full `ORDER BY pos` sort. The sort keys, about 1.3 GB at 56M rows, exceed the 192 MB limit and spill.
+3. **Index**: bound by Tantivy's 2 indexing threads (`WRITER_THREADS`, 64 MB heap), busy about 90%. The segment reader and the
+   docs pool mostly wait. About 330k docs/s.
+4. **Catalogue**: one thread, one source at a time.
+   - Entity extraction 34%, DuckDB row fetch 26%, allocation 14%.
+   - DuckDB also opens the segment files for every per-source query.
+   - About 1 core for 3 to 6 minutes.
+5. **No overlap**: the import holds the store's write lock for its whole length (`lib.rs`, `import_keeping`), so the index and
+   the catalogue start only when it ends.
+
+### Parse speed: capturing without a rest-of-line tail (microbenchmark)
+
+`LineParser::line` spends 38% of the parse threads' time in `Regex::captures_at` (above). Almost every text format ends in a greedy
+rest-of-line group, `(?P<message>.*)$`: the log4net-pattern regex and every output template. The `regex` crate resolves capture
+groups with a bounded backtracker over the whole match, so that tail costs as much as the rest of the line.
+
+For one line (no `\n`, no `\r`) the tail matches whatever its prefix matched. So the prefix alone decides every other group, in the
+same leftmost-first order, and the tail group is the rest of the line. `debrief_core::text_format` detects the tail on the parsed
+pattern and captures with the prefix; any other line, or pattern, uses the whole regex.
+
+- Date and build: 2026-10-29, release, on `debrief/duckdb-2` at 092f59495.
+- Machine: M4 Pro, single thread, at load 27 (a relative comparison inside one process; the absolute times are high).
+- Corpus: the first 1,000,000 lines of `large10/web/WEB01/orders-web01.log` (invented, `gen_large.py`).
+- Command: `rx-bench <file> 1000000` (`duck2-bench/rx`, on `wip/debrief-duckdb2-prototypes`).
+
+| Capture | ns per line | MB/s | Lines matched |
+|---|---|---|---|
+| whole pattern, `captures` (shipped) | 915 to 925 | 123 to 124 | 909,102 |
+| whole pattern, `is_match` only | 119 to 130 | 876 to 952 | 909,102 |
+| prefix captures, tail = rest of line | 470 | 242 | 909,102 |
+
+The split captures equal the whole pattern's on all 1M lines, the message lengths included. A one-pass DFA, which would be faster
+still, does not build for this pattern ("not one-pass: conflicting transition"). Expected effect on a real import: about half of the
+regex share, so roughly 15 to 20% less parse CPU on text logs. The end-to-end import has not been measured yet: the machine had no
+quiet window.
+
+### Index writer threads and heap: one round on a busy machine (2026-10-30)
+
+- Build: release, `wip/debrief-duckdb2-prototypes` at 5bac7512c (`ready-w3`). That is index settings, words without counts,
+  one UPDATE per step, the ordering fix and lowered threads at QoS utility, the same index code as `debrief/duckdb-2` at
+  98afb89ee.
+- Corpus: `large10`, warm.
+- Command: `exp.sh e4` (`import_ready` with `DEBRIEF_READY_WAIT=index DEBRIEF_READY_INDEX=threads,total_heap_mb`).
+- Load: the 1-minute and 5-minute load at the start, and the 1-minute load at the end. Runs that ended above 15 were run
+  again; this is round 1 of 3, and rounds 2 and 3 were not run (the machine was busy).
+- Index ready is counted from the start of the import; searches are p50 of 20, run right after the index was ready.
+- Peak RSS is the resident set size of the harness process (`import_ready`, which runs the store in-process), sampled by
+  the harness; it is not the physical footprint (rule 26) and not the store worker's.
+- Every variant indexes words without counts; words with counts against without were not compared like-for-like, so
+  no size difference is claimed.
+
+| Threads x heap | Load start / end | Import | Index ready | Docs/s after import | Index | Segments | "timeout" p50 (3.7M hits) | Peak RSS (harness) |
+|---|---|---|---|---|---|---|---|---|
+| 2 x 32 MB (old default) | 9.9, 14.8 / 11.6 | 39.7 s | 225 s | 303k | 1,435 MB | 24 | 374 ms | 2,926 MB |
+| 4 x 64 MB | 9.5, 12.0 / 11.2 | 42.1 s | 227 s | 304k | 1,440 MB | 27 | 204 ms | 2,694 MB |
+| 4 x 128 MB | 9.8, 11.6 / 13.8 | 58.3 s | 237 s | 314k | 1,441 MB | 23 | 191 ms | 2,793 MB |
+| 4 x 256 MB | 7.4, 7.3 / 6.7 | 54.4 s | 281 s | 248k | 1,422 MB | 19 | 198 ms | 2,871 MB |
+| 6 x 64 MB | 9.9, 14.7 / 12.0 | 45.4 s | 252 s | 272k | 1,446 MB | 30 | 198 ms | 2,689 MB |
+| 6 x 128 MB | 9.7, 10.7 / 13.8 | 51.9 s | 255 s | 276k | 1,439 MB | 36 | 188 ms | 2,710 MB |
+| 6 x 256 MB | 9.1, 14.9 / 8.7 | 77.2 s | 327 s | 225k | 1,439 MB | 37 | 146 ms | 2,730 MB |
+| 13 x 64 MB | 8.4, 14.7 / 11.4 | 42.3 s | 363 s | 175k | 1,466 MB | 54 | 132 ms | 2,729 MB |
+| 13 x 128 MB | 9.3, 14.5 / 9.5 | 64.4 s | 535 s | 119k | 1,471 MB | 53 | 149 ms | 2,741 MB |
+| 13 x 256 MB | 8.2, 11.3 / 9.2 | 58.4 s | 549 s | 115k | 1,456 MB | 52 | 137 ms | 2,811 MB |
+
+What the round shows, single runs on a busy machine (the import times scatter from 40 to 77 s), so differences under
+about 20% are noise:
+- No variant indexes faster than about 315k documents/s (4 x 128 MB); 2 and 4 threads are equal within the noise.
+- More threads are slower past 4: 13 threads take 1.6 to 2.4 times as long as 2 or 4.
+- More threads also leave more index segments (52 to 54 with 13, 19 to 27 with 2 and 4), and common-word searches ran
+  faster with more threads (13 threads 132 to 149 ms, 4 threads 191 to 204 ms, 2 threads 374 ms); why is not
+  established.
+
+So the writer threads are no longer the limit. The suspects, not profiled yet, are the pipeline in front of them: one
+Parquet reader, a 4-thread docs pool, an in-order feeder, and a commit every 4 segments. Auto is capped at 4 until that is fixed (plan package SR1). An earlier
+round with the writer at QoS `BACKGROUND` (efficiency cores only) was void and is not shown.
+
+Pending, on a quiet machine: rounds 2 and 3 of this sweep, and the store worker's physical footprint (rule 26) for each
+variant. Until then, these numbers support the Auto cap of 4 and nothing finer.
 
 ## Analysis memory on Linux, 2026-10-29
 

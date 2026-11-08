@@ -11,6 +11,7 @@ import {
   FrameExplanation,
   FrameImage,
   FrameRef,
+  DescribePlan,
   FramesRequest,
   IncludeRequest,
   NoteRequest,
@@ -57,6 +58,8 @@ export abstract class VideoBackend {
   abstract setNote(request: NoteRequest): Promise<VideoView>;
   /** The model describes frames (a job); no indices means every frame without a description. */
   abstract generateDescriptions(request: FramesRequest): Promise<VideoView>;
+  /** What describing these frames would cost: their count and a rough time (the engine's answer; no job). */
+  abstract describePlan(request: FramesRequest): Promise<DescribePlan>;
   /** Up to four frames explained in one request. */
   abstract explainFrames(request: ExplainRangeRequest): Promise<FrameExplanation>;
   /** The clean frame as an image of this window's image cache, with its aligned time as evidence. */
@@ -133,6 +136,9 @@ export class TauriVideoBackend extends VideoBackend {
   async generateDescriptions(request: FramesRequest) {
     const job = await this.invoke<number>('video_describe', { request });
     return jobValue<VideoView>(this.invoke, job);
+  }
+  describePlan(request: FramesRequest) {
+    return this.invoke<DescribePlan>('video_describe_plan', { request });
   }
   /** The command starts a job and returns its id; the result is the job's value. */
   async explainFrames(request: ExplainRangeRequest) {

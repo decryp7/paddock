@@ -16,6 +16,7 @@ tauri = ["dep:tauri", "paddock-commands/tauri", "paddock-jobs/tauri", "paddock-d
 install = ["tauri", "dep:tauri-plugin-updater", "dep:windows-sys"]
 
 [dependencies]
+paddock-limits = { workspace = true }
 paddock-commands = { workspace = true }
 # The dialog contracts of this crate (`dialogs!`, ADR 0026 §3).
 paddock-dialogs = { workspace = true }

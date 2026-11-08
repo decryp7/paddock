@@ -29,7 +29,8 @@ mod wire;
 pub use egress::{DownloadTransport, Egress, Streaming};
 pub use error::NetError;
 pub use fake::{FakeWire, Reply, Seen, StaticLookup};
-pub use policy::{HostPattern, MAX_PATTERNS, MAX_REDIRECTS, Policy};
+pub use policy::{DEFAULT_REDIRECTS, HostPattern, MAX_PATTERNS, MAX_REDIRECTS, Policy};
+pub mod limits;
 pub use reach::{
     Class, LanAccess, PublicAccess, Reach, Refusal, classify, host_is_loopback, host_may_be_lan,
     vet,

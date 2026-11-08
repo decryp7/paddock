@@ -2,6 +2,7 @@
 
 use crate::control::Control;
 use crate::error::{ArchiveError, Result, io};
+use crate::limits;
 use crate::name;
 use crate::options::{Links, Modes, Options};
 use std::collections::{BTreeMap, HashSet};
@@ -80,13 +81,10 @@ impl Cap {
     }
 
     pub(crate) fn error(&self) -> ArchiveError {
-        ArchiveError::Limit {
-            what: if self.by_ratio {
-                "expansion ratio"
-            } else {
-                "total size"
-            },
-            limit: self.limit,
+        if self.by_ratio {
+            limits::ratio(self.limit)
+        } else {
+            limits::total_bytes(self.limit)
         }
     }
 }
@@ -131,10 +129,7 @@ impl<'a> Writer<'a> {
     ) -> Result<()> {
         self.entries += 1;
         if self.entries > self.opts.limits.max_entries {
-            return Err(ArchiveError::Limit {
-                what: "entries",
-                limit: self.opts.limits.max_entries as u64,
-            });
+            return Err(limits::entries(self.opts.limits.max_entries as u64));
         }
         self.ctl.check()?;
         if kind == Kind::Other {
@@ -190,10 +185,7 @@ impl<'a> Writer<'a> {
     ) -> Result<()> {
         let limits = &self.opts.limits;
         if size > limits.max_file_bytes {
-            return Err(ArchiveError::Limit {
-                what: "file size",
-                limit: limits.max_file_bytes,
-            });
+            return Err(limits::file_bytes(limits.max_file_bytes));
         }
         self.claim(&rel_text)?;
         let path = join(self.root, rel);
@@ -218,10 +210,7 @@ impl<'a> Writer<'a> {
             }
             n += got as u64;
             if n > limits.max_file_bytes {
-                return Err(ArchiveError::Limit {
-                    what: "file size",
-                    limit: limits.max_file_bytes,
-                });
+                return Err(limits::file_bytes(limits.max_file_bytes));
             }
             if self.bytes + n > self.cap.bytes {
                 return Err(self.cap.error());
@@ -382,11 +371,9 @@ mod tests {
             .unwrap_err();
         assert!(
             matches!(
-                e,
-                ArchiveError::Limit {
-                    what: "file size",
-                    limit: 100_000
-                }
+                &e,
+                ArchiveError::Limit(l) if l.id.as_str() == "archive.file_bytes"
+                    && l.limit == paddock_limits::Quantity::Bytes(100_000)
             ),
             "{e:?}"
         );

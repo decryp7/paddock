@@ -1,0 +1,26 @@
+[package]
+name = "paddock-limits"
+version = "0.1.0"
+description = "Limits that explain themselves (ADR 0019) and bounded replies that report what they left out (Debrief ADR 0065): LimitId, Quantity with units, the registry type, LimitExceeded with its generated message, Bounded and Cut, and the request-side Limit, Page and Buckets."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = ["decryp7"]
+
+[features]
+# The wire types' TypeScript declarations (ts-rs), for the generators of the apps and the test that checks them.
+ts = ["dep:ts-rs"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+log = "0.4"
+ts-rs = { version = "11.1", optional = true }
+paddock-workspace-hack = { version = "0.1", path = "../paddock-workspace-hack" }
+
+[dev-dependencies]
+proptest = "1"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+# ADR 0063 may carry the command wire as MessagePack: the quantity must read back from the compact formats.
+rmp-serde = "1"
+bincode = "1"
+serde_json = "1"

@@ -252,8 +252,8 @@ pub fn check_described(manifest: &Manifest, d: &Described) -> Result<(), Refusal
 /// `Refused(reason)` with this text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Refusal {
-    /// Built for protocol 1 (Debrief's own, before the platform): the app's compatibility shim may serve it
-    /// (ADR 0003 phase 3), otherwise it is refused with this text.
+    /// Built for protocol 1 (Debrief's own, before the platform): no longer supported, there is no shim (ADR 0003); the
+    /// plugin is refused with this text.
     Legacy {
         /// The plugin's id.
         plugin: String,
@@ -305,7 +305,7 @@ impl fmt::Display for Refusal {
                 host,
             } => write!(
                 f,
-                "plugin {plugin} was built for an older contract (protocol {built_for}; this {app} speaks {host}); update it"
+                "plugin {plugin} was built for protocol {built_for}, which is no longer supported (this {app} speaks {host}); update it"
             ),
             Refusal::PluginTooOld {
                 plugin,
@@ -396,7 +396,7 @@ mod tests {
         assert!(matches!(legacy, Refusal::Legacy { .. }));
         assert_eq!(
             legacy.to_string(),
-            "plugin p was built for an older contract (protocol 1.1; this Debrief speaks 2.1); update it"
+            "plugin p was built for protocol 1.1, which is no longer supported (this Debrief speaks 2.1); update it"
         );
         let mut h3 = host();
         h3.protocol = ProtocolVersion::new(3, 0);

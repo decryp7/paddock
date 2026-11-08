@@ -199,7 +199,7 @@ fn pairing_is_refused_when_pitwall_is_not_running() {
 fn a_chat_streams_through_the_shared_preparation_with_provenance_and_priority() {
     let (fake, pw, _d) = setup(paired_state(), Some("pw_ok"));
     assert!(pw.probe().usable);
-    let p = pw.provider(Priority::Background).unwrap();
+    let p = pw.provider(Priority::Interactive).unwrap();
     assert_eq!((p.id(), p.context_length(), p.vision()), ("pitwall", 8192, false));
     assert!(p.display_name().contains("qwen3-8b-q4km"));
     let (r, streamed) = ask(&p, &hello());
@@ -211,7 +211,7 @@ fn a_chat_streams_through_the_shared_preparation_with_provenance_and_priority() 
     let (_, headers, body) = fake.requests_to("/v1/chat/completions").remove(0);
     let h = |n: &str| headers.iter().find(|(k, _)| k == n).map(|(_, v)| v.clone());
     assert_eq!(h("authorization").as_deref(), Some("Bearer pw_ok"));
-    assert_eq!(h("x-pitwall-priority").as_deref(), Some("background"));
+    assert_eq!(h("x-pitwall-priority").as_deref(), Some("interactive"));
     let body: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(body["model"], "auto:chat,8k");
     assert_eq!(body["messages"][0]["content"], "be brief");

@@ -4,6 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { commitLintMain, lint } from '../src/commit-lint.mjs';
+import { runChecks } from '../src/runner.mjs';
 import { findingsOf, makeApp, messages } from './helpers.mjs';
 
 test('lint good: Conventional Commits, scope, breaking mark, merge commits', () => {
@@ -74,4 +75,82 @@ test('C23 bad: a history with a Co-Authored-By commit and a free-form subject', 
 test('C23 warns instead of passing silently when there is no history', async () => {
   const f = await findingsOf('C23', makeApp({ 'a.txt': 'x' }));
   assert.equal(f[0].severity, 'warn');
+});
+
+// commit-lint honours the C23 waivers of paddock.waivers.toml (the file and format the conformance run uses).
+function waiverRepo(waiver) {
+  const dir = repo(['feat: one', 'wip: not conventional', 'fix: three']);
+  const sha = execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: dir, encoding: 'utf8' }).trim();
+  if (waiver) writeFileSync(join(dir, 'paddock.waivers.toml'), waiver(sha));
+  return { dir, sha };
+}
+const W = (path, expires = '2999-01-01') => `[[waiver]]\ncheck = "C23"\npath = "${path}"\nreason = "unshared branch"\nexpires = "${expires}"\n`;
+const run = (dir, range = 'HEAD') => {
+  const log = [];
+  return { code: commitLintMain(['--range', range], dir, (l) => log.push(l), new Date('2027-01-01T00:00:00Z')), out: log.join('\n') };
+};
+
+test('commit-lint: an unwaived bad commit fails, a waived one passes and is printed', () => {
+  const none = waiverRepo(null);
+  assert.equal(run(none.dir).code, 1);
+  const short = waiverRepo((sha) => W(`commit ${sha.slice(0, 10)}`));
+  const r = run(short.dir);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, new RegExp(`waived: ${short.sha.slice(0, 10)} wip: not conventional \\(unshared branch\\)`));
+  const full = waiverRepo((sha) => W(`commit ${sha}`));
+  assert.equal(run(full.dir).code, 0, 'a full sha is accepted too');
+  const other = waiverRepo(() => W('commit 0123456789'));
+  assert.equal(run(other.dir).code, 1, 'a waiver for another commit waives nothing');
+});
+
+test('commit-lint: an expired waiver does not apply and warns; an unused one does not fail', () => {
+  const expired = waiverRepo((sha) => W(`commit ${sha.slice(0, 10)}`, '2026-01-01'));
+  const r = run(expired.dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /expired/);
+  const unused = waiverRepo((sha) => W(`commit ${sha.slice(0, 10)}`));
+  assert.equal(run(unused.dir, 'HEAD~1..HEAD').code, 0, 'the waived commit is outside the range: no failure');
+  assert.doesNotMatch(run(unused.dir, 'HEAD~1..HEAD').out, /waives nothing|W003/);
+});
+
+test('commit-lint: waivers of other checks are ignored, and the conformance run still honours the C23 one', async () => {
+  const other = waiverRepo((sha) => `${W(`commit ${sha.slice(0, 10)}`).replace('C23', 'C15')}`);
+  assert.equal(run(other.dir).code, 1);
+  const w = waiverRepo((sha) => W(`commit ${sha.slice(0, 10)}`));
+  const res = await runChecks({ root: w.dir, app: 'demo', only: ['C23'] });
+  assert.equal(res.errors, 0, JSON.stringify(res.findings));
+  assert.equal(res.waived.length, 1);
+});
+
+test('C23 commit waivers match exactly: 10 or 40 hex characters, any case; a glob or other form warns and waives nothing', async () => {
+  for (const form of [(sha) => sha, (sha) => sha.toUpperCase()]) {
+    const w = waiverRepo((sha) => W(`commit ${form(sha)}`));
+    assert.equal(run(w.dir).code, 0, 'commit-lint: a full sha, in any case');
+    const res = await runChecks({ root: w.dir, app: 'demo', only: ['C23'] });
+    assert.equal(res.errors, 0, JSON.stringify(res.findings));
+    assert.equal(res.waived.length, 1, 'the conformance run agrees');
+  }
+  for (const bad of ['commit *', 'commit 5*', 'commit abc', 'commit 0123456789abcdef']) {
+    const w = waiverRepo(() => W(bad));
+    const r = run(w.dir);
+    assert.equal(r.code, 1, bad);
+    assert.match(r.out, /commit waiver/, bad);
+  }
+  const star = waiverRepo((sha) => W(`commit ${sha.slice(0, 5)}*`));
+  assert.equal((await runChecks({ root: star.dir, app: 'demo', only: ['C23'] })).errors > 0, true, 'a glob waives nothing in the conformance run either');
+});
+
+test('commit-lint --first-parent also lints the merge commit itself (its Merge header is exempt, its attribution is not)', () => {
+  const dir = repo(['feat: one']);
+  const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', '-c', 'commit.gpgsign=false', ...a], { cwd: dir, stdio: 'pipe', encoding: 'utf8' });
+  const base = git('rev-parse', 'HEAD').trim();
+  git('checkout', '-q', '-b', 'f');
+  git('commit', '-q', '--allow-empty', '-m', 'wip: branch work');
+  git('checkout', '-q', '-');
+  git('merge', '-q', '--no-ff', '-m', 'Merge f\n\nClaude-Session: https://claude.ai/code/session_x', 'f');
+  const log = [];
+  assert.equal(commitLintMain(['--first-parent', '--range', `${base}..HEAD`], dir, (l) => log.push(l)), 1);
+  assert.match(log.join('\n'), /Claude-Session/);
+  assert.doesNotMatch(log.join('\n'), /wip: branch work/);
+  assert.equal(commitLintMain(['--range', `${base}..HEAD`], dir, () => {}), 1, 'without the flag the wip commit and the merge fail');
 });

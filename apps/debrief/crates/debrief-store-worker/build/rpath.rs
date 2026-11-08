@@ -18,7 +18,7 @@ pub const PRODUCT_NAME: &str = "Debrief";
 ///   `usr/` tree), as Tauri's `resource_dir` resolves them.
 ///
 /// `libduckdb.dylib` is installed as `@rpath/libduckdb.dylib` and `libduckdb.so` has the SONAME `libduckdb.so`
-/// (official 1.5.6 release), so both are found through these paths with no `install_name_tool`/`patchelf` step.
+/// (official 2.0.0 release), so both are found through these paths with no `install_name_tool`/`patchelf` step.
 pub fn rpaths(target_os: &str) -> Vec<String> {
     match target_os {
         "macos" => vec!["@executable_path".into(), "@executable_path/../Resources/lib".into()],

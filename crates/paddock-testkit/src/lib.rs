@@ -11,6 +11,7 @@
 //! - [`never_panics`] and [`corpus`]: run a parser over deterministic hostile inputs and fail on any panic.
 //! - [`net::HeldPort`]: a loopback port held for the test where every connection is closed or reset, instead of a
 //!   port read off a listener that was then dropped (ADR 0023).
+//! - [`limits`]: `limit_cases!`, one test per limit (ADR 0019), stop and cut forms, and the check that cases and rows match.
 //! - [`FakeClock`]: the deterministic clock of `paddock_jobs::time`, re-exported so a test needs one dependency.
 //! - [`wait`]: `wait_until` / `wait_for` / `poll_for` / `poll_until_within` / `retry_within`, a bounded poll on a condition instead of a sleep.
 //!
@@ -19,6 +20,7 @@
 pub mod env;
 pub mod golden;
 pub mod hostile;
+pub mod limits;
 pub mod net;
 pub mod runner;
 pub mod scratch;
