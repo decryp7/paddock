@@ -532,9 +532,9 @@ pub struct WindowsBattery;
 
 #[cfg(windows)]
 impl BatteryCapacitySource for WindowsBattery {
-    #[expect(
+    #[allow(
         clippy::disallowed_methods,
-        reason = "the Windows battery report is written to a scratch folder and read back"
+        reason = "KNOWN DEFECT, not a justification: a shared, predictable folder under the OS temp dir that another local user can create first (Dyno security fix, tracked in docs/gates.toml)"
     )]
     fn read(&mut self) -> Reading<BatteryCapacity> {
         let windir = std::env::var_os("WINDIR").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
