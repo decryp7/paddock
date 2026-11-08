@@ -4,6 +4,7 @@
 //! of this build.
 
 use super::apps::{AppsError, ConnectedApp, ConnectedApps, Opened};
+use super::chats::{ChatStorage, ChatStores, ChatsError};
 use super::models::{chat_models, ChatModels, Facts};
 use super::{ChatLog, PitwallPolicy, ToolNames};
 use crate::chat_provider::ServerChatProvider;
@@ -31,6 +32,8 @@ pub struct ChatState {
     provider: Arc<ServerChatProvider>,
     /// Settings > Connected apps.
     pub apps: Arc<ConnectedApps>,
+    /// The chats, saved or not (Settings > Chats).
+    pub chats: Arc<ChatStores>,
     client: SharedClient,
 }
 
@@ -48,8 +51,8 @@ fn secrets(data_dir: &Path) -> Arc<dyn paddock_secrets::Secrets> {
     }
 }
 
-/// Builds the chat: conversations for this session only (WP-3b saves them), no wall limits (ER-19), Pitwall's policy, the
-/// family apps' discovery files from their `paddock-env` folders.
+/// Builds the chat: its conversations saved in `<data>/chats` unless the user says "Don't save this chat" (ADR 0023
+/// Decision 3), no wall limits (ER-19), Pitwall's policy, the family apps' discovery files from their `paddock-env` folders.
 pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::Handle) -> std::io::Result<ChatState> {
     let names = ToolNames::default();
     let now = || {
@@ -65,10 +68,11 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
     cfg.budgets.max_rounds = 8;
     cfg.budgets.max_tool_calls = 16;
     cfg.policy = policy.clone();
-    let assistant = Assistant::new(
+    let chats = Arc::new(ChatStores::new(data_dir, Arc::new(paddock_health::SystemClock)));
+    let assistant = Assistant::with_conversations(
         provider.clone(),
         Tools::none(),
-        chat_store(),
+        chats.clone(),
         Arc::new(paddock_health::SystemClock),
         cfg,
     );
@@ -84,16 +88,9 @@ pub fn compose(client: SharedClient, data_dir: &Path, runtime: tokio::runtime::H
         assistant,
         provider,
         apps,
+        chats,
         client,
     })
-}
-
-/// The chat's conversations: in memory only until the saved store (ADR 0023 WP-3b, Decision 3); a chat then marked "Don't
-/// save" keeps using one like this (D3 note): no file, so nothing is left behind even when the app is killed.
-pub fn chat_store() -> Arc<paddock_assistant::ConversationStore> {
-    Arc::new(paddock_assistant::ConversationStore::in_memory(Arc::new(
-        paddock_health::SystemClock,
-    )))
 }
 
 /// Puts the chat in the app: the assistant's commands and events (each turn's sink logs one line per call), and the saved
@@ -222,4 +219,64 @@ pub async fn chat_models_list<R: Runtime>(app: AppHandle<R>) -> Result<ChatModel
 pub async fn set_chat_model<R: Runtime>(app: AppHandle<R>, model_id: String) -> Result<ChatModels, CommandError> {
     let chat = chat_of(&app)?;
     models_for(&chat, Some(model_id)).await
+}
+
+fn chats_error(e: ChatsError) -> CommandError {
+    match e {
+        ChatsError::NotFound => CommandError::new(ErrorCode::NotFound, e.to_string()),
+        ChatsError::Save(_) => CommandError::new(ErrorCode::Internal, e.to_string()),
+    }
+}
+
+async fn on_chats<R: Runtime, T: Send + 'static>(
+    app: &AppHandle<R>,
+    work: impl FnOnce(&ChatState) -> Result<T, ChatsError> + Send + 'static,
+) -> Result<T, CommandError> {
+    let chat = chat_of(app)?;
+    // Reading the chats' folder (first use) and moving a chat write files: off the command threads.
+    tauri::async_runtime::spawn_blocking(move || work(&chat))
+        .await
+        .map_err(|e| CommandError::new(ErrorCode::Internal, format!("the chats stopped unexpectedly: {e}")))?
+        .map_err(chats_error)
+}
+
+/// Settings > Chats: the default for new chats and what the saved ones take.
+#[tauri::command]
+pub async fn chat_storage<R: Runtime>(app: AppHandle<R>) -> Result<ChatStorage, CommandError> {
+    on_chats(&app, |c| Ok(c.chats.storage())).await
+}
+
+/// "Save new chats" on or off.
+#[tauri::command]
+pub async fn set_chat_save_new<R: Runtime>(app: AppHandle<R>, save: bool) -> Result<ChatStorage, CommandError> {
+    on_chats(&app, move |c| {
+        c.chats.set_save_new(save)?;
+        Ok(c.chats.storage())
+    })
+    .await
+}
+
+/// Whether a chat is saved (the Chat bar's "Don't save this chat").
+#[tauri::command]
+pub async fn chat_saved<R: Runtime>(app: AppHandle<R>, conversation_id: String) -> Result<bool, CommandError> {
+    on_chats(&app, move |c| c.chats.is_saved(&conversation_id).ok_or(ChatsError::NotFound)).await
+}
+
+/// Saves a chat, or keeps it until Pitwall closes and deletes its saved copy (the UI asks first). Returns its new state.
+#[tauri::command]
+pub async fn set_chat_saved<R: Runtime>(app: AppHandle<R>, conversation_id: String, save: bool) -> Result<bool, CommandError> {
+    on_chats(&app, move |c| c.chats.set_saved(&conversation_id, save)).await
+}
+
+/// Deletes every chat and attachment (Settings > Chats, after the user confirmed); a chat that is answering is stopped first.
+#[tauri::command]
+pub async fn delete_all_chats<R: Runtime>(app: AppHandle<R>) -> Result<ChatStorage, CommandError> {
+    on_chats(&app, |c| {
+        for s in c.assistant.conversations() {
+            c.assistant.stop(&s.id);
+        }
+        c.chats.delete_all()?;
+        Ok(c.chats.storage())
+    })
+    .await
 }

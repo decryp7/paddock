@@ -217,17 +217,48 @@ describe('SettingsPage', () => {
   });
 
   it('saves a typed number after the pause, with no Enter and no leaving the field', async () => {
-    const { fixture, el, backend } = await setup(new MockBackend(), 30);
-    await type(fixture, el, 'prv-ret', '1');
-    await type(fixture, el, 'prv-ret', '14');
-    expect((await backend.settings()).privacy.metricsRetentionDays).toBe(30);
-    await vi.waitFor(async () => expect((await backend.settings()).privacy.metricsRetentionDays).toBe(14));
+    // The pause is the test's to end (rule 49, ER-12): timers of the page's pause length are held, every other timer runs.
+    const PAUSE = 30_000;
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    const held = new Map<number, () => void>();
+    let next = 1;
+    const setSpy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      if (ms !== PAUSE) return realSet(fn, ms);
+      const id = -next++;
+      held.set(id, fn);
+      return id;
+    }) as typeof setTimeout);
+    const clearSpy = vi.spyOn(globalThis, 'clearTimeout').mockImplementation(((id?: number) => {
+      if (typeof id === 'number' && held.delete(id)) return;
+      realClear(id);
+    }) as typeof clearTimeout);
+    try {
+      const { fixture, el, backend } = await setup(new MockBackend(), PAUSE);
+      await type(fixture, el, 'prv-ret', '1');
+      await type(fixture, el, 'prv-ret', '14');
+      expect(held.size, 'each keystroke restarts the one pause').toBe(1);
+      expect((await backend.settings()).privacy.metricsRetentionDays).toBe(30);
+      // The pause ends.
+      for (const [id, fn] of [...held]) {
+        held.delete(id);
+        fn();
+      }
+      await vi.waitFor(async () => expect((await backend.settings()).privacy.metricsRetentionDays).toBe(14));
+      await outOfRangeWaitsThenSays(fixture, el);
+    } finally {
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
+    }
+  });
+
+  async function outOfRangeWaitsThenSays(fixture: Parameters<typeof settle>[0], el: HTMLElement): Promise<void> {
     // A value out of range while typing waits quietly; leaving the field says what to fix.
     await type(fixture, el, 'prv-ret', '999');
     expect(el.querySelector('#set-privacy')!.textContent).not.toContain('Enter a number');
     await change(fixture, el, 'prv-ret', '999');
     expect(el.querySelector('#set-privacy')!.textContent).toContain('Enter a number from 1 to 365.');
-  });
+  }
 
   it('a typed number is saved at close when that comes before the pause: the close waits for it', async () => {
     // A long pause, so only the close can have saved it.

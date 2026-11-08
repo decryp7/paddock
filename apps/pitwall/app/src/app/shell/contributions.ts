@@ -50,6 +50,14 @@ export const SETTINGS_PAGES = [
     order: 15,
     load: () => import('../features/connected-apps/connected-apps-page').then((m) => m.ConnectedAppsPage),
   }),
+  // Whether new chats are saved and Delete all chats (ADR 0023 Decision 3); only in a build with the chat.
+  defineSettingsPage({
+    id: 'pw.chats',
+    group: 'application',
+    title: msg('pw.settings.chats', 'Chats'),
+    order: 16,
+    load: () => import('../features/settings/chats-page').then((m) => m.ChatsPage),
+  }),
   defineSettingsPage({
     id: 'pw.tray',
     group: 'application',

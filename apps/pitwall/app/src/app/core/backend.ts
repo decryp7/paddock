@@ -1,6 +1,7 @@
 import { InjectionToken } from '@angular/core';
 import type {
   ChatModels,
+  ChatStorage,
   OpenedApp,
   ConnectedApp,
   AppInfo,
@@ -220,6 +221,16 @@ export interface PitwallBackend {
   chatModels(): Promise<ChatModels>;
   /** Chooses the chat's model (one without tools is never chosen). */
   setChatModel(modelId: string): Promise<ChatModels>;
+  /** Settings > Chats: the default for new chats and what the saved ones take. */
+  chatStorage(): Promise<ChatStorage>;
+  /** "Save new chats" on or off. */
+  setChatSaveNew(save: boolean): Promise<ChatStorage>;
+  /** Whether a chat is saved (the Chat bar's "Don't save this chat"). */
+  chatSaved(conversationId: string): Promise<boolean>;
+  /** Saves a chat, or keeps it until Pitwall closes and deletes its saved copy (ask first). Returns its new state. */
+  setChatSaved(conversationId: string, save: boolean): Promise<boolean>;
+  /** Deletes every chat and attachment (ask first). */
+  deleteAllChats(): Promise<ChatStorage>;
   /** The app asks the open window to show the "When you quit" dialog. */
   onQuitAsk(handler: () => void): Unsubscribe;
   autostart(): Promise<boolean>;

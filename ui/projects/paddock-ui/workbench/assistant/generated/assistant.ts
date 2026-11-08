@@ -270,7 +270,13 @@ allowWrite: boolean,
 /**
  * What the question carries besides its text, by reference (ADR 0023 WP-2b; at most [`MAX_ATTACHMENTS`]).
  */
-attachments?: Array<Attachment>, };
+attachments?: Array<Attachment>, 
+/**
+ * Whether the conversation this question starts is saved (ADR 0023 D3: "Don't save this chat" sends `false`); a
+ * follow-up keeps its conversation's choice. Left out: `true`. A store that keeps every conversation one way ignores it
+ * ([`Conversations::create_saved`]).
+ */
+save?: boolean, };
 
 export type SendAck = { 
 /**

@@ -52,10 +52,22 @@ pub struct ConnectedApp {
     pub key_refused: bool,
     /// The connection was lost and Pitwall is trying again on its back-off (the chat answers without its tools meanwhile).
     pub reconnecting: bool,
+    /// What only the user can do before the app connects (install it, update it); `None` otherwise.
+    pub needs: Option<AppNeed>,
     /// Its tools, when connected.
     pub tools: Vec<AppTool>,
     /// How many of its tools are always allowed.
     pub remembered: usize,
+}
+
+/// What only the user can do before an app connects; Pitwall does not retry meanwhile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AppNeed {
+    /// It is not installed on this computer.
+    Install,
+    /// It is too old for Pitwall.
+    Update,
 }
 
 /// Why a command about a connected app was refused.
@@ -109,10 +121,34 @@ pub struct ConnectedApps {
     policy: Arc<PitwallPolicy>,
     names: ToolNames,
     live: Mutex<BTreeMap<String, Live>>,
-    problems: Mutex<BTreeMap<String, (String, bool)>>,
+    problems: Mutex<BTreeMap<String, Problem>>,
     changed: Mutex<Option<OnChange>>,
     retry: Mutex<BTreeMap<String, Retrying>>,
     opener: Mutex<Option<Opener>>,
+}
+
+/// Why an app is not connected, in words, and whether Pitwall can help by trying again.
+#[derive(Debug, Clone)]
+struct Problem {
+    words: String,
+    stuck: Stuck,
+}
+
+/// What a failed connect leaves to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stuck {
+    /// Nothing for the user: Pitwall tries again on its back-off (the app is closed or busy).
+    No,
+    /// The app refused the saved key: only a new key helps.
+    KeyRefused,
+    /// Only the user can help: install or update the app. Not retried.
+    Needs(AppNeed),
+}
+
+impl Problem {
+    fn retry(words: String) -> Problem {
+        Problem { words, stuck: Stuck::No }
+    }
 }
 
 /// An app whose connection was lost: when to try again, on the family's back-off (1 s doubling to 60 s, never giving up:
@@ -126,14 +162,31 @@ fn reconnect_policy() -> BackoffPolicy {
     BackoffPolicy::retry_forever(Duration::from_secs(1), Duration::from_secs(60), Duration::from_secs(300))
 }
 
-/// What opening an app came to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "kind", content = "message", rename_all = "camelCase")]
+/// What opening an app came to. On the wire a need is a problem like any other (`{kind: "problem", message}`); the row's
+/// `needs` says which.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Opened {
     /// It is starting (or was running and came to the front).
     Started,
-    /// It could not be opened: not installed, too old; the words say what to do.
+    /// It could not be opened; the words say what to do.
     Problem(String),
+    /// It could not be opened until the user installs or updates it; the words say so.
+    Needs(AppNeed, String),
+}
+
+impl Serialize for Opened {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut out = s.serialize_struct("Opened", 2)?;
+        match self {
+            Opened::Started => out.serialize_field("kind", "started")?,
+            Opened::Problem(words) | Opened::Needs(_, words) => {
+                out.serialize_field("kind", "problem")?;
+                out.serialize_field("message", words)?;
+            }
+        }
+        out.end()
+    }
 }
 
 /// What the family's hand-off answered, in Pitwall's words for Connected apps (paddock-siblings speaks of files; here the
@@ -141,13 +194,15 @@ pub enum Opened {
 pub fn open_words(outcome: Result<paddock_siblings::Outcome, paddock_siblings::SiblingError>, title: &str) -> Opened {
     match outcome {
         Ok(paddock_siblings::Outcome::Opened { .. }) => Opened::Started,
-        Ok(paddock_siblings::Outcome::NotInstalled { .. }) => Opened::Problem(format!(
-            "{title} isn't installed on this computer. Install {title}, then choose Open {title}."
-        )),
+        Ok(paddock_siblings::Outcome::NotInstalled { .. }) => Opened::Needs(
+            AppNeed::Install,
+            format!("{title} isn't installed on this computer. Install {title}, then choose Open {title}."),
+        ),
         // A program found under the app's name before the family's rename: an old copy.
-        Ok(paddock_siblings::Outcome::NeedsUpdate { .. }) => Opened::Problem(format!(
-            "This copy of {title} is too old to open from Pitwall. Update {title}, then choose Open {title}."
-        )),
+        Ok(paddock_siblings::Outcome::NeedsUpdate { .. }) => Opened::Needs(
+            AppNeed::Update,
+            format!("This copy of {title} is too old to open from Pitwall. Update {title}, then choose Open {title}."),
+        ),
         Err(e) => Opened::Problem(format!("{title} could not be opened: {e}.")),
     }
 }
@@ -236,9 +291,19 @@ impl ConnectedApps {
             }
             // Its words replace the row's problem (not stacked under the reconnect line), and nothing is retried until the
             // user acts.
-            Opened::Problem(words) => {
+            Opened::Problem(words) | Opened::Needs(_, words) => {
+                let stuck = match &outcome {
+                    Opened::Needs(need, _) => Stuck::Needs(*need),
+                    _ => Stuck::No,
+                };
                 lock(&self.retry).remove(id);
-                lock(&self.problems).insert(id.to_string(), (words.clone(), false));
+                lock(&self.problems).insert(
+                    id.to_string(),
+                    Problem {
+                        words: words.clone(),
+                        stuck,
+                    },
+                );
                 self.publish();
             }
         }
@@ -259,10 +324,7 @@ impl ConnectedApps {
             log::warn!(target: "pitwall_chat", "connected apps: {id} connection ended ({why}); retrying with back-off");
             lock(&self.problems).insert(
                 id.clone(),
-                (
-                    format!("{title} closed the connection ({why}). Trying again when {title} is back."),
-                    false,
-                ),
+                Problem::retry(format!("{title} closed the connection ({why}). Trying again when {title} is back.")),
             );
             self.schedule(id, now);
         }
@@ -276,15 +338,20 @@ impl ConnectedApps {
             .collect();
         for id in due {
             let v = self.attempt(&id);
-            // Connected, or only the user can help now (a refused or removed key): stop retrying.
-            if v.connected || v.key_refused || !v.key_saved {
+            let stuck = lock(&self.problems).get(&id).map_or(Stuck::No, |p| p.stuck);
+            // Connected, or only the user can help now (a refused or removed key, an app too old): stop retrying.
+            if v.connected || stuck != Stuck::No || !v.key_saved {
                 lock(&self.retry).remove(&id);
+                if !v.connected {
+                    log::info!(target: "pitwall_chat", "connected apps: {id} not retried until the user acts ({stuck:?})");
+                    self.publish();
+                }
             } else {
                 self.schedule(&id, now);
                 // Keep the words that say it is retrying.
                 if let Some(p) = lock(&self.problems).get_mut(&id) {
-                    if !p.0.contains("Trying again") {
-                        p.0.push_str(" Trying again.");
+                    if !p.words.contains("Trying again") {
+                        p.words.push_str(" Trying again.");
                     }
                 }
             }
@@ -345,9 +412,13 @@ impl ConnectedApps {
             title: title_of(id).unwrap_or(id).into(),
             key_saved: key_name(id).ok().and_then(|n| self.secrets.get(&n).ok().flatten()).is_some(),
             connected: live.contains_key(id),
-            key_refused: problem.as_ref().is_some_and(|p| p.1),
+            key_refused: problem.as_ref().is_some_and(|p| p.stuck == Stuck::KeyRefused),
             reconnecting: !live.contains_key(id) && lock(&self.retry).contains_key(id),
-            problem: problem.map(|p| p.0),
+            needs: match problem.as_ref().map(|p| p.stuck) {
+                Some(Stuck::Needs(n)) => Some(n),
+                _ => None,
+            },
+            problem: problem.map(|p| p.words),
             tools,
             remembered: self.policy.remembered().iter().filter(|r| r.server == id).count(),
         }
@@ -377,8 +448,8 @@ impl ConnectedApps {
         let title = title_of(id).unwrap_or("The app");
         lock(&self.live).remove(id);
         // The failure in words, and whether the app refused the key (then only a new key helps).
-        let outcome = (|| -> Result<Live, (String, bool)> {
-            let plain = |e: String| (e, false);
+        let outcome = (|| -> Result<Live, Problem> {
+            let plain = Problem::retry;
             let key = self
                 .secrets
                 .get(&key_name(id).map_err(|e| plain(e.to_string()))?)
@@ -391,11 +462,22 @@ impl ConnectedApps {
             let file = (self.discovery)(id).ok_or_else(|| plain(format!("Pitwall cannot find {title}'s folders.")))?;
             let link = connect_loopback(&file, key.expose()).map_err(|e| {
                 let refused = matches!(e, paddock_mcp::client::ConnectError::KeyRefused { .. });
-                (e.to_string(), refused)
+                Problem {
+                    words: e.to_string(),
+                    stuck: if refused { Stuck::KeyRefused } else { Stuck::No },
+                }
             })?;
             let conn = Arc::new(link.into_connection(ConnectionConfig::default()));
-            conn.initialize("Pitwall", env!("CARGO_PKG_VERSION"))
-                .map_err(|e| plain(init_problem(&e, title)))?;
+            conn.initialize("Pitwall", env!("CARGO_PKG_VERSION")).map_err(|e| {
+                let stuck = match e {
+                    paddock_mcp::client::ClientError::UnsupportedVersion { .. } => Stuck::Needs(AppNeed::Update),
+                    _ => Stuck::No,
+                };
+                Problem {
+                    words: init_problem(&e, title),
+                    stuck,
+                }
+            })?;
             let defs = conn.list_tools().map_err(|e| plain(e.to_string()))?;
             let tools = tools_of(id, title, &defs, true, &conn, &self.names);
             Ok(Live { conn, tools })
@@ -406,9 +488,9 @@ impl ConnectedApps {
                 lock(&self.problems).remove(id);
                 lock(&self.live).insert(id.into(), live);
             }
-            Err((why, refused)) => {
-                log::warn!(target: "pitwall_chat", "connected apps: {id} not connected, cause: {why}");
-                lock(&self.problems).insert(id.into(), (why, refused));
+            Err(problem) => {
+                log::warn!(target: "pitwall_chat", "connected apps: {id} not connected, cause: {}", problem.words);
+                lock(&self.problems).insert(id.into(), problem);
             }
         }
         self.publish();

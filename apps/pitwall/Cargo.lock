@@ -3843,6 +3843,7 @@ dependencies = [
  "pitwall-loopback",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "socket2",
  "tauri",
  "tauri-plugin-autostart",

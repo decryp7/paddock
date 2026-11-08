@@ -1090,6 +1090,9 @@ export interface AppTool {
   remembered: boolean;
 }
 
+/** What only the user can do before an app connects (`chat_host::apps::AppNeed`). */
+export type AppNeed = 'install' | 'update';
+
 /** A family app the chat can use, in Settings > Connected apps (`chat_host::apps::ConnectedApp`, ADR 0023 Decision 7). */
 export interface ConnectedApp {
   id: string;
@@ -1102,9 +1105,25 @@ export interface ConnectedApp {
   keyRefused: boolean;
   /** The connection was lost; Pitwall is trying again (the chat answers without the app's tools meanwhile). */
   reconnecting: boolean;
+  /** What only the user can do before it connects (install it, update it); null otherwise. Pitwall does not retry meanwhile. */
+  needs: AppNeed | null;
   tools: AppTool[];
   /** Tools always allowed. */
   remembered: number;
+}
+
+/** Settings > Chats (`chat_host::chats::ChatStorage`, ADR 0023 Decision 3). */
+export interface ChatStorage {
+  /** New chats are saved unless the user says "Don't save this chat". */
+  saveNew: boolean;
+  /** Saved chats. */
+  chats: number;
+  /** Their files, in bytes. */
+  bytes: number;
+  /** Their attachments, in bytes. */
+  attachmentBytes: number;
+  /** Chats kept until Pitwall closes ("Don't save"). */
+  unsaved: number;
 }
 
 /** One model of the Chat tab's picker (`chat_host::models::ChatModel`). */

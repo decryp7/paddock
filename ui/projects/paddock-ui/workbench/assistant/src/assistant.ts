@@ -1,5 +1,5 @@
 import { NgComponentOutlet } from '@angular/common';
-import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, viewChild } from '@angular/core';
+import { afterNextRender, ChangeDetectionStrategy, Component, ElementRef, effect, Injector, inject, input, linkedSignal, output, signal, untracked, viewChild } from '@angular/core';
 import { PD_ICON_PATHS, PdGlyph, PdStatusGlyph } from '@decryp7/paddock-ui/icons';
 import { PdNeedsAi, PitwallStore, type NextStep } from '@decryp7/paddock-ui/shell/pitwall';
 import { AssistantStore, type ActionsGate } from './assistant.store';
@@ -346,6 +346,8 @@ export class PdAssistant {
   readonly openSettings = output<void>();
   /** A citation was activated and the app has no handler registered. */
   readonly citation = output<CitationOpened>();
+  /** The conversation now open (null: a new one, not sent yet), so a host can keep per-chat state beside the pane. */
+  readonly activeChange = output<string | null>();
 
   protected readonly t = {
     conversations: $localize`:@@pd.wb.assistant.conversations:Conversations`,
@@ -412,6 +414,11 @@ export class PdAssistant {
   constructor() {
     // The host's gate reaches the store, which sends it with each question (an input, not derived state of the store).
     effect(() => this.store.setActionsGate(this.actionsGate()));
+    // Tells the host which conversation is open (an output: outside the signal graph).
+    effect(() => {
+      const id = this.store.activeId();
+      untracked(() => this.activeChange.emit(id));
+    });
     // Keeps the newest text in view while an answer streams in, but only for a user who is at the bottom (DOM only).
     // effect-state: `unseen` records the scroll decision of this effect; the user's position is not a signal, so it cannot be derived.
     effect(() => {
