@@ -27,6 +27,11 @@ on:
   schedule:
     - cron: '35 2 * * *'
   workflow_dispatch:
+    inputs:
+      macos:
+        description: "Also publish for the macOS host runner (false: Linux and Windows only, when the macOS runner is busy)"
+        type: boolean
+        default: true
 
 concurrency:
   group: dev-tool-${{ github.ref }}
@@ -35,6 +40,7 @@ concurrency:
 jobs:
   publish:
     name: publish (${{ matrix.os }})
+    if: ${{ matrix.os != 'macos-latest' || github.event.inputs.macos != 'false' }}
     strategy:
       fail-fast: false
       matrix:
