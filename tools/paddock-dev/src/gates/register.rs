@@ -358,7 +358,12 @@ pub fn parse(src: &str) -> (Register, Vec<String>) {
         }
     }
     for (i, e) in tables(&table, "ratchet").into_iter().enumerate() {
-        let ctx = format!("[[ratchet]] #{} ({})", i + 1, text(e, "id").unwrap_or_default());
+        let ctx = format!(
+            "[[ratchet]] #{} ({} {})",
+            i + 1,
+            text(e, "id").unwrap_or_default(),
+            text(e, "app").unwrap_or_default()
+        );
         if text(e, "approved").as_deref() != Some("user") {
             errors.push(format!("{ctx} needs approved = \"user\""));
             continue;
@@ -878,6 +883,16 @@ approved = "user"
             .replace("not_yet = [\"xtask\", \"crates/a\"]", "not_yet = []")
             .replace("clippy_not_yet = [\"std::env::temp_dir\"]", "clippy_not_yet = []");
         assert!(release_refusals(Some(&empty), Some(RATCHET), "debrief-v1.2.0").is_empty());
+    }
+
+    #[test]
+    fn a_broken_ratchet_is_named_with_its_app() {
+        let broken = RATCHET.replace("target = \"debrief-v1.2.0\"\n", "");
+        let r = release_refusals(Some(&broken), Some(RATCHET), "debrief-v1.1.5");
+        assert!(
+            r[0].contains("[[ratchet]] #1 (C13 debrief)") && r[0].contains("does not parse"),
+            "{r:?}"
+        );
     }
 
     #[test]
